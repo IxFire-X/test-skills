@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/tc-to-autotest-output.schema.json",
+  "title": "TC-to-Autotest Output (Генерация автотестов)",
+  "description": "Формальный контракт для выхода скилла 'Автоматизированные кейсы на основе тест-кейсов' (tc-to-autotest). Определяет структуру automation_analysis + automation_matrix + trace_map + сгенерированные файлы.",
+  "type": "object",
+  "required": ["meta", "automation_analysis", "automation_matrix", "trace_map", "generated_files"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "description": "Метаданные генерации",
+      "required": ["source", "source_test_cases", "language", "test_framework", "generation_date", "generator"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["test_cases", "corrected_test_cases"],
+          "description": "Источник ТК: test_cases или corrected_test_cases"
+        },
+        "source_test_cases": {
+          "type": "string",
+          "description": "Ссылка на исходный файл тест-кейсов"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["java", "python", "go", "typescript", "kotlin"],
+          "description": "Целевой язык автотестов"
+        },
+        "test_framework": {
+          "type": "string",
+          "description": "Тестовый фреймворк (junit5, pytest, testing, jest)"
+        },
+        "generation_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Дата генерации (YYYY-MM-DD)"
+        },
+        "generator": {
+          "type": "string",
+          "description": "Идентификатор скилла-генератора (tc-to-autotest)"
+        },
+        "template_used": {
+          "type": "string",
+          "description": "Использованный шаблон кодогенерации (например, 'templates/java-junit5.md')"
+        }
+      }
+    },
+    "automation_analysis": {
+      "type": "object",
+      "description": "Анализ перед генерацией (включая проверку на конфликты с аналитикой)",
+      "required": ["tc_list", "classification", "parameterized_groups", "todos"],
+      "properties": {
+        "tc_list": {
+          "type": "array",
+          "description": "Полный список ТК-N из входа",
+          "items": { "type": "string", "pattern": "^ТК-\\d+$" },
+          "minItems": 1
+        },
+        "analytics_check": {
+          "type": "string",
+          "enum": ["PASS", "CONFLICTS_FOUND", "NOT_APPLICABLE"],
+          "description": "Результат проверки на соответствие аналитике"
+        },
+        "conflicts_with_analytics": {
+          "type": "array",
+          "description": "Список обнаруженных конфликтов между ТК и аналитикой",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tc_id": { "type": "string", "pattern": "^ТК-\\d+$" },
+              "field": { "type": "string", "description": "Поле с расхождением (например, 'expected_status_code')" },
+              "tc_value": { "type": "string", "description": "Значение в ТК" },
+              "analytics_value": { "type": "string", "description": "Значение в аналитике (принято как источник правды)" }
+            }
+          }
+        },
+        "classification": {
+          "type": "object",
+          "description": "Классификация ТК по типам",
+          "properties": {
+            "positive": { "type": "array", "items": { "type": "string" } },
+            "negative": { "type": "array", "items": { "type": "string" } },
+            "boundary": { "type": "array", "items": { "type": "string" } },
+            "security": { "type": "array", "items": { "type": "string" } },
+            "observability": { "type": "array", "items": { "type": "string" } },
+            "concurrency": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "parameterized_groups": {
+          "type": "array",
+          "description": "Группы параметризации",
+          "items": {
+            "type": "object",
+            "required": ["field", "tc_ids"],
+            "properties": {
+              "field": { "type": "string", "description": "Валидируемое поле" },
+              "tc_ids": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^ТК-\\d+$" },
+                "minItems": 2
+              }
+            }
+          }
+        },
+        "todos": {
+          "type": "array",
+          "description": "TODO-маркеры из ⚠ и неразрешённых вопросов",
+          "items": {
+            "type": "object",
+            "required": ["tc_id", "reason"],
+            "properties": {
+              "tc_id": { "type": "string", "pattern": "^ТК-\\d+$" },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "automation_matrix": {
+      "type": "object",
+      "description": "Маппинг ТК-N → методы тестов (текстовый формат, сохранённый для обратной совместимости)",
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tc_id", "method", "class"],
+            "properties": {
+              "tc_id": { "type": "string", "pattern": "^ТК-\\d+$" },
+              "method": { "type": "string" },
+              "class": { "type": "string" },
+              "test_type": { "type": "string", "enum": ["positive", "negative", "boundary", "security", "observability", "concurrency"] },
+              "parametrized": { "type": "boolean", "description": "Участвует ли в @ParameterizedTest" }
+            }
+          }
+        },
+        "conflict_resolution": {
+          "type": "object",
+          "description": "Результаты разрешения конфликтов (если передан automation_matrix на вход)",
+          "properties": {
+            "removed": { "type": "array", "items": { "type": "string" }, "description": "ТК-N, удалённые из кода" },
+            "added": { "type": "array", "items": { "type": "string" }, "description": "Новые ТК-N, добавленные в код" },
+            "renamed": { "type": "array", "items": { "type": "string" }, "description": "Переименованные ТК-N" },
+            "merged": { "type": "array", "items": { "type": "string" }, "description": "Объединённые ТК-N в @ParameterizedTest" }
+          }
+        }
+      }
+    },
+    "trace_map": {
+      "$ref": "shared/trace-mapper.md#/trace_map_format",
+      "description": "Структурированный маппинг ТК-N → код для autotest-reviewer (см. shared/trace-mapper.md)"
+    },
+    "generated_files": {
+      "type": "array",
+      "description": "Список сгенерированных файлов",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "type", "content"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Относительный путь к файлу (например, 'src/test/java/.../FeatureTest.java')"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["test_class", "dto_request", "dto_response", "config", "base_class", "pom_xml", "build_gradle"],
+            "description": "Тип файла"
+          },
+          "language": {
+            "type": "string",
+            "description": "Язык файла (java, kotlin, python, go, typescript)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Полное содержимое файла"
+          },
+          "covered_tc_ids": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^ТК-\\d+$" },
+            "description": "ТК-N, покрываемые этим файлом (для traceability)"
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Предупреждения генератора (не блокирующие)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "affected_tc_id": { "type": "string" }
+        }
+      }
+    }
+  }
+}

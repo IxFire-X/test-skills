@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/autotest-reviewer-output.schema.json",
+  "title": "Autotest Reviewer Output (Валидация автотестов)",
+  "description": "Формальный контракт для выхода скилла 'Валидация автотестов' (autotest-reviewer). Определяет структуру review_report после валидации сгенерированных автотестов.",
+  "type": "object",
+  "required": ["verdict", "review_date", "reviewer", "statistics", "categories"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
+      "description": "Итоговый вердикт валидации (канон: CONTRACTS.md §3.2). ПРИНЯТО — все проверки пройдены. AUTO_FIX_APPLIED — дефекты исправлены автофиксом. ТРЕБУЕТ ДОРАБОТКИ — есть FAIL без автофикса."
+    },
+    "review_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Дата проведения валидации (YYYY-MM-DD)"
+    },
+    "reviewer": {
+      "type": "string",
+      "description": "Идентификатор скилла-валидатора (autotest-reviewer)"
+    },
+    "source_test_cases": {
+      "type": "string",
+      "description": "Ссылка на исходный файл ручных тест-кейсов"
+    },
+    "source_generated_tests": {
+      "type": "array",
+      "description": "Список проверенных файлов автотестов",
+      "items": { "type": "string" }
+    },
+    "statistics": {
+      "type": "object",
+      "required": ["pass", "warn", "fail", "critical_fail"],
+      "properties": {
+        "pass": { "type": "integer", "minimum": 0, "description": "Количество проверок с вердиктом PASS" },
+        "warn": { "type": "integer", "minimum": 0, "description": "Количество проверок с вердиктом WARN" },
+        "fail": { "type": "integer", "minimum": 0, "description": "Количество не-критических FAIL" },
+        "critical_fail": { "type": "integer", "minimum": 0, "description": "Количество критических FAIL (>0 → verdict=FAIL)" }
+      }
+    },
+    "categories": {
+      "type": "object",
+      "description": "Результаты по 6 категориям проверки (5 базовых + 1 расширенная DRY)",
+      "required": ["traceability", "antipatterns", "todo_correctness", "wiremock_coverage", "tool_stack"],
+      "properties": {
+        "traceability": { "$ref": "#/$defs/category_result" },
+        "antipatterns": { "$ref": "#/$defs/category_result" },
+        "todo_correctness": { "$ref": "#/$defs/category_result" },
+        "wiremock_coverage": { "$ref": "#/$defs/category_result" },
+        "tool_stack": { "$ref": "#/$defs/category_result" },
+        "dry_violation": { "$ref": "#/$defs/category_result" }
+      }
+    },
+    "trace_map_results": {
+      "type": "object",
+      "description": "Результаты проверки trace_map от tc-to-autotest (если передан)",
+      "required": ["status", "details"],
+      "properties": {
+        "status": { "type": "string", "enum": ["PASS", "INCOMPLETE", "MISMATCH", "NOT_PROVIDED"] },
+        "details": { "type": "string" },
+        "coverage_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Процент покрытия ТК-N автотестами (tc_ids в generated_files / всего ТК)"
+        }
+      }
+    },
+    "critical_errors": {
+      "type": "array",
+      "description": "Критические ошибки (блокируют при verdict=ТРЕБУЕТ ДОРАБОТКИ)",
+      "items": { "$ref": "#/$defs/review_error" }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Предупреждения (не блокируют CI/CD)",
+      "items": { "$ref": "#/$defs/review_error" }
+    },
+    "auto_return_note": {
+      "type": "string",
+      "description": "Инструкция для Оркестратора: вернуть на доработку при verdict=ТРЕБУЕТ ДОРАБОТКИ (название целевого скилла — tc-to-autotest)"
+    }
+  },
+  "$defs": {
+    "category_result": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["PASS", "WARN", "FAIL"],
+          "description": "Вердикт для категории"
+        },
+        "details": {
+          "type": "string",
+          "description": "Детализация результата"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rule": { "type": "string", "description": "Нарушенное правило (например, 'no Thread.sleep', 'TK-N prefix')" },
+              "tc_id": { "type": "string" },
+              "file": { "type": "string" },
+              "line": { "type": "integer" },
+              "suggestion": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "review_error": {
+      "type": "object",
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Код ошибки (например, 'TRACE-001', 'ANTIPAT-002', 'TODO-003')"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["CRITICAL", "WARN", "INFO"],
+          "description": "Серьёзность"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["traceability", "antipatterns", "todo_correctness", "wiremock_coverage", "tool_stack", "dry_violation"],
+          "description": "Категория проверки"
+        },
+        "message": {
+          "type": "string",
+          "description": "Текст ошибки/предупреждения"
+        },
+        "location": {
+          "type": "object",
+          "description": "Местоположение проблемы",
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer" },
+            "method": { "type": "string" }
+          }
+        },
+        "tc_id": {
+          "type": "string",
+          "pattern": "^ТК-\\d+$",
+          "description": "Затронутый ТК-N"
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Рекомендация по исправлению"
+        }
+      }
+    }
+  }
+}
