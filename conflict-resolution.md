@@ -60,7 +60,7 @@ def merge_config(explicit_context, skillsrc, defaults):
 
 ### 3. Неизвестные ключи
 
-**Проблема:** в `.skillsrc` есть ключ, не описанный в `schemas/README.md` (JSON Schema для `.skillsrc`).
+**Проблема:** в `.skillsrc` есть ключ, не описанный в `schemas/skillsrc.schema.json` (JSON Schema для `.skillsrc`).
 
 **Стратегия:** сохранить, передать в `<project_context>` как есть, не валидировать жёстко.
 
@@ -98,4 +98,4 @@ def merge_config(explicit_context, skillsrc, defaults):
 
 ---
 
-*Связанные файлы: `.skillsrc` (манифест), `tag-registry.md` (реестр тегов), `CONTRACTS.md` (канон контрактов), `schemas/README.md` (инструкция по валидации JSON Schema).*
+*Связанные файлы: `.skillsrc` (манифест), `tag-registry.md` (реестр тегов), `CONTRACTS.md` (канон контрактов), [`schemas/skillsrc.schema.json`](schemas/skillsrc.schema.json) (формальная схема манифеста), `schemas/README.md` (инструкция по валидации JSON Schema).*

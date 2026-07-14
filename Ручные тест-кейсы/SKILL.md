@@ -303,13 +303,13 @@ language: ru
 4. Чеклист тест-дизайна: [Happy Path, Валидация, Ролевая модель, Негатив, Наблюдаемость]
 </analysis>
 
-<generated_test_cases version="2.3">
+<generated_test_cases version="2.4">
 <![CDATA[
 # Тест-кейсы метода [HTTP METHOD] [ПУТЬ]
 
 **Документация:** [ссылка или название задачи]
 **Project:** [имя проекта/модуля]
-**Автор:** tc-generator v2.3
+**Автор:** tc-generator v2.4
 **Дата:** [YYYY-MM-DD]
 
 ---

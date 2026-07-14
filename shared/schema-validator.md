@@ -55,12 +55,13 @@ schemas/
   "$id": "schemas/tc-reviewer-output.schema.json",
   "title": "TC Reviewer Output",
   "type": "object",
-  "required": ["verdict", "test_cases_count", "review_date", "reviewer"],
+  "required": ["verdict", "confidence", "test_cases_count", "review_date", "reviewer"],
   "properties": {
     "verdict": {
       "type": "string",
       "enum": ["ПРИНЯТО", "ТРЕБУЕТ ДОРАБОТКИ", "AUTO_FIX_APPLIED"]
     },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "test_cases_count": { "type": "integer", "minimum": 1 },
     "review_date": { "type": "string", "format": "date" },
     "reviewer": { "type": "string" },

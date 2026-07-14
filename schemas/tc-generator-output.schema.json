@@ -72,8 +72,8 @@
         },
         "title": {
           "type": "string",
-          "maxLength": 120,
-          "description": "Название тест-кейса (заголовок после 'ТК-N:')"
+          "maxLength": 150,
+          "description": "Название тест-кейса (заголовок после 'ТК-N:'). Лимит синхронизирован с SKILL.md (150 симв.)"
         },
         "purpose": {
           "type": "string",

@@ -4,18 +4,25 @@
   "title": "TC Reviewer Output (Валидация тест-кейсов)",
   "description": "Формальный контракт для выхода скилла 'Валидация тест-кейсов' (tc-reviewer). Определяет структуру validation_report после проверки ручных тест-кейсов.",
   "type": "object",
-  "required": ["verdict", "test_cases_count", "review_date", "reviewer", "statistics", "categories"],
+  "required": ["verdict", "confidence", "test_cases_count", "review_date", "reviewer", "statistics", "categories"],
   "properties": {
     "verdict": {
       "type": "string",
       "enum": ["ПРИНЯТО", "ТРЕБУЕТ ДОРАБОТКИ", "AUTO_FIX_APPLIED"],
       "description": "Итоговый вердикт валидации"
     },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Уверенность reviewer в вердикте (0.0–1.0). Согласно SKILL.md: 0.9–1.0 высокая, 0.7–0.89 средняя, 0.5–0.69 низкая, <0.5 недопустимо (вердикт должен быть ТРЕБУЕТ ДОРАБОТКИ с ручной эскалацией)"
+    },
     "test_cases_count": {
       "type": "integer",
       "minimum": 1,
       "description": "Количество проверенных тест-кейсов"
     },
+
     "review_date": {
       "type": "string",
       "format": "date",

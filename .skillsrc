@@ -9,8 +9,13 @@
 # стека (Zero-Config Mode) и предлагает создать .skillsrc.
 # ============================================================
 
+# Версия формата самого манифеста (.skillsrc), НЕ версия проекта.
+# Используется Оркестратором для проверки совместимости при чтении файла.
+version: "2.0"
+
 project:
   name: "subscription-renewal-service"
+
   language: "java"               # java | python | go | typescript | kotlin
   framework: "spring-boot"       # spring-boot | fastapi | gin | express | nextjs | django
   build_tool: "maven"            # maven | gradle | pip | poetry | go-mod | npm | yarn
@@ -75,6 +80,29 @@ skills_registry:
     path: "Оркестратор"
     description: "Координирует цепочки скиллов (Sub-Agent диспетчеризация), Deep Scan проекта, контроль итераций, изоляция контекста и обработка ошибок. Принимает <goal> и строит план выполнения."
     tags: ["@orchestration", "@pipeline", "@deep-scan", "@quickstart"]
+    triggers:
+      - "создай тест-кейсы и автотесты"
+      - "запусти тестовый пайплайн"
+      - "полный цикл тестирования"
+      - "проверь качество"
+      - "сделай все проверки"
+      - "прогони пайплайн"
+    input_contract: "xml:goal_description"
+    output_contract: "xml:orchestration_result"
+
+  orchestrator-lite:
+    name: "Оркестратор Lite"
+    path: "Оркестратор"
+    skill_file: "SKILL-LITE.md"
+    description: "Облегчённая версия оркестратора (~260 строк) для моделей 7B-13B (Qwen, DeepSeek, Llama). Только диспетчеризация: выбор пайплайна, управление итерациями, изоляция контекста, обработка ошибок. Deep Scan и Zero-Config — в полной версии (SKILL.md)."
+    tags: ["@orchestration", "@pipeline", "@lite", "@small-models"]
+    triggers:
+      - "создай тест-кейсы и автотесты"
+      - "запусти тестовый пайплайн"
+      - "полный цикл тестирования"
+      - "проверь качество"
+      - "сделай все проверки"
+      - "прогони пайплайн"
     input_contract: "xml:goal_description"
     output_contract: "xml:orchestration_result"
 
@@ -83,6 +111,13 @@ skills_registry:
     path: "Ручные тест-кейсы"
     description: "Генерирует структурированные тест-кейсы (ТК-N) из аналитики концепций. Покрывает позитивные, негативные, граничные, security и observability сценарии."
     tags: ["@positive", "@negative", "@boundary", "@security", "@observability", "@test-cases"]
+    triggers:
+      - "сгенерируй тест-кейсы"
+      - "напиши ручные тест-кейсы"
+      - "создай ТК"
+      - "покрой тестами"
+      - "нужны тест-кейсы для"
+      - "составь тест-кейсы"
     input_contract: "markdown:concept_analysis"
     output_contract: "markdown:generated_test_cases"
 
@@ -91,6 +126,13 @@ skills_registry:
     path: "Валидация тест-кейсов"
     description: "Валидирует тест-кейсы по 6 категориям: структура, лимиты, детерминированность, техническая точность, покрытие, согласованность. Возвращает вердикт: ПРИНЯТО / AUTO_FIX_APPLIED / ТРЕБУЕТ ДОРАБОТКИ."
     tags: ["@review", "@validation", "@test-cases", "@quality-gate"]
+    triggers:
+      - "проверь тест-кейсы"
+      - "отревьюй ТК"
+      - "валидируй тест-кейсы"
+      - "прогони ревью тест-кейсов"
+      - "проверь качество ТК"
+      - "сделай ревью тест-кейсов"
     input_contract: "markdown:generated_test_cases"
     output_contract: "xml:validation_report"
 
@@ -99,6 +141,13 @@ skills_registry:
     path: "Автоматизированные кейсы на основе тест-кейсов"
     description: "Генерирует автоматизированные тесты (Java JUnit5, Python Pytest, Go Testing, TypeScript Jest) из валидированных тест-кейсов. Требует вердикт ПРИНЯТО/AUTO_FIX_APPLIED от tc-reviewer."
     tags: ["@automation", "@code-generation", "@junit5", "@pytest", "@jest"]
+    triggers:
+      - "сгенерируй автотесты"
+      - "напиши автоматизированные тесты"
+      - "преврати ТК в код"
+      - "создай java тесты"
+      - "напиши код тестов"
+      - "автоматизируй тест-кейсы"
     input_contract: "markdown:validated_test_cases"
     output_contract: "source_code:autotest_files"
 
@@ -107,5 +156,26 @@ skills_registry:
     path: "Валидация автотестов"
     description: "Валидирует автотесты по 5 категориям: traceability (ТК-N → @DisplayName), анти-паттерны, TODO-корректность, WireMock-покрытие, стек инструментов. Возвращает вердикт: ПРИНЯТО / AUTO_FIX_APPLIED / ТРЕБУЕТ ДОРАБОТКИ."
     tags: ["@review", "@validation", "@autotest", "@traceability", "@quality-gate"]
+    triggers:
+      - "проверь автотесты"
+      - "отревьюй код тестов"
+      - "валидируй автотесты"
+      - "прогони ревью автотестов"
+      - "проверь качество автотестов"
+      - "сделай ревью кода тестов"
     input_contract: "source_code:autotest_files"
     output_contract: "xml:autotest_review"
+
+  context-marker:
+    name: "Разметка контекста"
+    path: "Разметка контекста"
+    description: "Препроцессор: принимает сырой .md-файл или текст и оборачивает в XML-теги согласно CONTRACTS.md. Поддерживает автоопределение типа контента по ключевым словам и batch-режим для массовой разметки директории."
+    tags: ["@preprocessor", "@markup", "@context", "@xml"]
+    triggers:
+      - "разметь контекст"
+      - "оберни аналитику в теги"
+      - "подготовь контекст для пайплайна"
+      - "сгенерируй xml теги для"
+      - "batch mark"
+    input_contract: "xml:raw_content"
+    output_contract: "xml:tagged_content"

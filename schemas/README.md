@@ -15,6 +15,9 @@
 | `tc-reviewer-output.schema.json` | `tc-reviewer` → `<validation_report_json>` | 1.0 |
 | `tc-to-autotest-output.schema.json` | `tc-to-autotest` → `<automation_matrix_json>` | 1.0 |
 | `autotest-reviewer-output.schema.json` | `autotest-reviewer` → `<autotest_review_json>` | 1.0 |
+| `context-marker-output.schema.json` | `context-marker` → `<batch_marking_result>` (batch-режим) | 1.0 |
+| `orchestrator-output.schema.json` | `orchestrate` → `<orchestration_result>` | 1.0 |
+| `skillsrc.schema.json` | Манифест проекта `.skillsrc` (см. `conflict-resolution.md`) | 1.0 |
 
 ---
 

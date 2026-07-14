@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/orchestrator-output.schema.json",
+  "title": "Orchestrator Output (Оркестратор)",
+  "description": "Формальный контракт для выхода скилла 'Оркестратор' (orchestrate). Определяет структуру <orchestration_result> — итогового отчёта о выполнении пайплайна (CONTRACTS.md §2 п.10).",
+  "type": "object",
+  "required": ["status", "pipeline_name", "iterations", "steps"],
+  "properties": {
+    "execution_id": {
+      "type": "string",
+      "description": "Уникальный идентификатор запуска (UUID)"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed", "retry"],
+      "description": "Итоговый статус пайплайна (канон CONTRACTS.md §3.3)"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Причина статуса failed (например, 'contract_mismatch')"
+    },
+    "detail": {
+      "type": "string",
+      "description": "Подробности ошибки (при status=failed)"
+    },
+    "pipeline_name": {
+      "type": "string",
+      "description": "Имя запущенного пайплайна (например, 'test-pipeline')"
+    },
+    "iterations": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Количество выполненных итераций пайплайна"
+    },
+    "steps": {
+      "type": "array",
+      "description": "Список выполненных шагов пайплайна",
+      "items": {
+        "type": "object",
+        "required": ["name", "skill", "status"],
+        "properties": {
+          "name": { "type": "string", "description": "Человекочитаемое название шага" },
+          "skill": { "type": "string", "description": "Идентификатор скилла (например, 'tc-generator')" },
+          "status": {
+            "type": "string",
+            "enum": ["success", "skipped", "failed", "pending"]
+          },
+          "output": { "type": "string", "description": "Путь/ссылка на артефакт шага" },
+          "verdict": {
+            "type": "string",
+            "enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
+            "description": "Вердикт ревьюера для этого шага (если применимо)"
+          }
+        }
+      }
+    },
+    "final_result": {
+      "type": "string",
+      "description": "Путь к финальному артефакту пайплайна"
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Список предупреждений, накопленных во время выполнения",
+      "items": { "type": "string" }
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Рекомендации пользователю (при status=partial/retry/failed)",
+      "items": { "type": "string" }
+    },
+    "contract_check": {
+      "type": "object",
+      "description": "Результат исполнимого Contract Check (CONTRACTS.md §5) перед стартом пайплайна",
+      "properties": {
+        "result": { "type": "string", "enum": ["PASS", "FAILED"] },
+        "checked_pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from_skill": { "type": "string" },
+              "to_skill": { "type": "string" },
+              "status": { "type": "string", "enum": ["PASS", "FAILED"] },
+              "error": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

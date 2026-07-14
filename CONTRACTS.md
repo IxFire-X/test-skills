@@ -79,6 +79,9 @@
 - `<doc_path>`, `<document_path>`, `<correction_plan>`, `<correction_plan_path>`
 - `<autotest_code>`, `<autocode>`
 - `<goal>`, `<pipeline>`, `<max_iterations>`, `<strict_mode>`, `<context>`
+- `<raw_content>` — сырой текст/содержимое `.md`-файла без XML-разметки (вход скилла `context-marker`)
+- `<content_type>` — тип контента: `analytics`, `source_code`, `test_cases`, `requirements`, `concept`, `auto`, `batch` (вход скилла `context-marker`)
+- `<file_path>` — путь к файлу или директории для batch-режима (вход скилла `context-marker`, опционально)
 
 ---
 

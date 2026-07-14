@@ -4,7 +4,8 @@ version: 2.0
 description: >
   Координирует цепочки скиллов с контролем итераций, изоляцией контекста и обработкой ошибок.
   Единственный пайплайн:
-  - test: tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
+  - test: context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
+  context-marker вызывается автоматически при обнаружении сырых .md-файлов (SDD-проекты).
 triggers:
   - "создай тест-кейсы"
   - "сгенерируй автотесты"
@@ -16,18 +17,6 @@ triggers:
 ---
 
 # Скилл: Оркестратор (orchestrate v2.0)
-
-> **v2.0 changelog:** удалены documentation-pipeline скиллы (concept-analysis, docs-review, doc-fix). Оставлен единственный test-pipeline: tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer. Упрощены триггер-фразы, зависимости, Fallback-стратегии, таблицы решений.
->
-> **v1.5 changelog:** Observability (execution_id UUIDv4, `<metrics>` с duration_ms/retry_count/success_rate), формализованный протокол диспетчеризации, алгоритм блокировки CONTRACT_MISMATCH.
->
-> **v1.4 changelog:** Progressive Disclosure (L1-метаданные в `.skillsrc` → L2-загрузка SKILL.md), двухфазная диспетчеризация.
->
-> **v1.3 changelog:** Deep Scan — полное сканирование проекта (код + документация + методология), автоопределение SDD/TDD/BDD.
->
-> **v1.2 changelog:** Zero-Config Mode (автообнаружение стека), Quickstart-режим.
->
-> **v1.1 changelog:** таблица выходных тегов приведена к канону `CONTRACTS.md`; SemVer для тегов заменён на исполнимый чеклист.
 
 ## Назначение
 
@@ -57,9 +46,15 @@ triggers:
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-│ tc-generator  │───▶│  tc-reviewer  │───▶│ tc-to-auto-   │
-│               │    │               │    │    test       │
+│context-marker │───▶│ tc-generator  │───▶│  tc-reviewer  │
+│   (опц.)      │    │               │    │               │
 └───────────────┘    └───────────────┘    └───────────────┘
+                              │
+                              ▼
+                       ┌───────────────┐
+                       │ tc-to-auto-   │
+                       │    test       │
+                       └───────────────┘
                               │
                               ▼
                        ┌───────────────┐
@@ -110,11 +105,13 @@ triggers:
 
 ## Пайплайн: `test-pipeline`
 
-**Цель:** Сгенерировать тест-кейсы, провалидировать, создать автотесты и проверить их.
+**Цель:** Разметить сырую аналитику, сгенерировать тест-кейсы, провалидировать, создать автотесты и проверить их.
 
 ```
-tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
+context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
 ```
+
+> **Примечание:** `context-marker` (Разметка контекста) — опциональный препроцессор. Вызывается автоматически при обнаружении сырых `.md`-файлов без XML-разметки (SDD-проекты). Если аналитика уже в XML-тегах — этап пропускается.
 
 **Триггеры:**
 - "создай тест-кейсы"
@@ -123,6 +120,7 @@ tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
 - "создай тесты"
 
 **Логика:**
+0. `context-marker` (опционально) — разметить сырые `.md`-файлы аналитики в XML-теги. Выход: `<analytics_documentation>` + `<source_code_and_diff>`. Выполняется только при обнаружении нетегированной аналитики.
 1. `tc-generator` — сгенерировать ручные тест-кейсы на основе `<analytics_documentation>`. Выход: `<generated_test_cases>`.
 2. `tc-reviewer` — провалидировать ТК. Выход: `<validation_report>` + (при `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ`) `<corrected_test_cases>`.
    - Если `VERDICT = ПРИНЯТО` → продолжить с `<generated_test_cases>` как `<test_cases>`.
@@ -400,13 +398,14 @@ methodology: sdd
 | `@review`, `@validation`, `@test-cases` | `tc-reviewer` | Валидирует тест-кейсы по 6 категориям |
 | `@automation`, `@code-generation` | `tc-to-autotest` | Генерирует автотесты (Java/Python/Go/TS) |
 | `@review`, `@autotest`, `@traceability` | `autotest-reviewer` | Валидирует автотесты по 5 категориям |
+| `@context`, `@markup`, `@preprocessing` | `context-marker` | Размечает сырые `.md`-файлы в XML-теги |
 | `@orchestration`, `@pipeline` | `orchestrator` | Координирует цепочки скиллов |
 
 ### Пример: пайплайн «полный цикл тестирования»
 
 ```
 1. L1: <goal> = "запусти test-pipeline"
-2. Определяю цепочку по PIPELINE.md: tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
+2. Определяю цепочку по PIPELINE.md: context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
 3. Для КАЖДОГО шага:
    a. L1: проверяю description в skills_registry (быстрый взгляд)
    b. L2: загружаю полный SKILL.md только для текущего шага
@@ -551,6 +550,7 @@ iterations: X
 # Отчёт оркестратора
 
 ## Contract Check
+- context-marker → tc-generator: PASS (ожидается <analytics_documentation> + <source_code_and_diff>, опциональный шаг)
 - tc-generator → tc-reviewer: PASS (ожидается <generated_test_cases>)
 - tc-reviewer → tc-to-autotest: PASS (ожидается <corrected_test_cases>/<test_cases>, статус ПРИНЯТО/AUTO_FIX_APPLIED/ТРЕБУЕТ ДОРАБОТКИ)
 - tc-to-autotest → autotest-reviewer: PASS (ожидается <automation_matrix> + файлы)
@@ -560,7 +560,7 @@ iterations: X
 <описание цели>
 
 ## Пайплайн
-test-pipeline (tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer)
+test-pipeline (context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer)
 
 ## Выполнение
 
@@ -768,6 +768,9 @@ test-pipeline (tc-generator → tc-reviewer → tc-to-autotest → autotest-revi
 Contract Check: PASS
 
 Итерация 1:
+  Шаг 0 (опционально): context-marker
+    → <analytics_documentation>: аналитика размечена (пропущен — данные уже в XML)
+
   Шаг 1: tc-generator
     → <generated_test_cases>: 12 ТК (8 positive, 3 negative, 1 boundary)
 
@@ -835,6 +838,7 @@ Contract Check: PASS
 ## Зависимости
 
 Оркестратор зависит от следующих скиллов:
+- `context-marker` — для разметки сырых `.md`-файлов аналитики в XML-теги (вызывается автоматически при обнаружении SDD-проекта с сырой аналитикой)
 - `tc-generator` — для генерации тест-кейсов
 - `tc-reviewer` — для валидации тест-кейсов
 - `tc-to-autotest` — для генерации автотестов
@@ -895,6 +899,7 @@ Contract Check: PASS
 
 | Пара | Ожидаемый корневой блок от N | Принимается скиллом N+1 как | Возможные статусы |
 |---|---|---|---|
+| `context-marker` → `tc-generator` | `<analytics_documentation>` + `<source_code_and_diff>` | `<analytics_documentation>` + `<source_code_and_diff>` | (отсутствует status) |
 | `tc-generator` → `tc-reviewer` | `<generated_test_cases>` | `<generated_test_cases>` | (отсутствует status) |
 | `tc-reviewer` → `tc-to-autotest` | `<validation_report>` + `<corrected_test_cases>` | `<corrected_test_cases>` / `<test_cases>` | `ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ` |
 | `tc-to-autotest` → `autotest-reviewer` | `<automation_analysis>` + `<automation_matrix>` + файлы | `<automation_matrix>` + файлы | (отсутствует status) |
@@ -905,6 +910,12 @@ Contract Check: PASS
 - **major** версия SKILL.md Оркестратора меняется при изменении **структуры** контрактов (новые обязательные теги, изменение семантики).
 - **minor** версия — при добавлении опциональных возможностей (новые пайплайны, новые fallback-стратегии).
 - Изменения, не затрагивающие контракты, фиксируются только в `CHANGELOG.md` скилла.
+
+---
+
+## Дополнительные ресурсы
+
+- JSON-схема контракта `<orchestration_result>`: [`../schemas/orchestrator-output.schema.json`](../schemas/orchestrator-output.schema.json)
 
 ---
 

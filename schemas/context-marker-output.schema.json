@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/context-marker-output.schema.json",
+  "title": "Context Marker Output (Разметка контекста)",
+  "description": "Формальный контракт для выхода скилла 'Разметка контекста' (context-marker). Описывает структуру batch_marking_result (batch-режим). Для прямого/auto-режима выход — это один из корневых тегов CONTRACTS.md §2.2 (analytics_documentation / source_code_and_diff / test_cases / concept_name), содержимое которых не формализуется JSON Schema (это Markdown-текст в XML-обёртке).",
+  "type": "object",
+  "required": ["summary", "items"],
+  "properties": {
+    "summary": {
+      "type": "object",
+      "required": ["total_files", "marked", "skipped", "errors"],
+      "properties": {
+        "total_files": { "type": "integer", "minimum": 0 },
+        "marked": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Список обработанных файлов (batch-режим)",
+      "items": {
+        "type": "object",
+        "required": ["path", "detected_type", "output_tag"],
+        "properties": {
+          "path": { "type": "string", "description": "Путь к исходному .md-файлу" },
+          "detected_type": {
+            "type": "string",
+            "enum": ["analytics", "source_code", "test_cases", "requirements", "concept"],
+            "description": "Определённый (или заданный) тип контента"
+          },
+          "output_tag": {
+            "type": "string",
+            "enum": ["analytics_documentation", "source_code_and_diff", "test_cases", "concept_name"],
+            "description": "Имя выходного XML-тега (канон CONTRACTS.md §2.2)"
+          },
+          "auto_detected": {
+            "type": "boolean",
+            "description": "true — тип определён автоматически (режим auto), false — задан явно через <content_type>"
+          },
+          "assumed_default": {
+            "type": "boolean",
+            "description": "true — тип не удалось определить, применён fallback 'assumed analytics'"
+          }
+        }
+      }
+    }
+  }
+}

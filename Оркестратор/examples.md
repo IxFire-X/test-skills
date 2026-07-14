@@ -1,153 +1,169 @@
-# Примеры: Оркестратор
+# Примеры: Оркестратор (test-pipeline)
 
-## Пример 1: Полный цикл документации (documentation-pipeline)
+## Пример 1: Полный цикл тестирования (успех с первой итерации)
 
 ### Вход
 
 ```
-Создай документацию для FeatureFlag и проверь её
-```
-
-### Определение пайплайна
-
-```
-Анализ цели: "создай документацию" → documentation-pipeline
+Создай тест-кейсы и автотесты для TransferService
 ```
 
 ### Выполнение
 
-**Итерация 1:**
+```
+Contract Check: PASS
 
-| Шаг | Скилл | Статус | Выход |
-|-----|-------|--------|-------|
-| 1. Анализ концепции | concept-analysis | ✅ production-ready | docs/to_do/FEATURE-FLAG.md |
-| 2. Ревью документации | docs-review | ⚠️ not-ready (2 critical) | docs/to_do/doc-review-FEATURE-FLAG.md |
-| 3. Фикс документации | doc-fix | ✅ fixed | docs/to_do/FEATURE-FLAG.md |
-| 4. Верификация | docs-review | ✅ production-ready | docs/to_do/doc-review-FEATURE-FLAG-v2.md |
+Итерация 1:
+  Шаг 0 (опционально): context-marker
+    → пропущен — аналитика уже в <analytics_documentation>
+
+  Шаг 1: tc-generator
+    → <generated_test_cases>: 12 ТК (8 positive, 3 negative, 1 boundary)
+
+  Шаг 2: tc-reviewer
+    → <review_verdict>: ПРИНЯТО
+    → <generated_test_cases> переименован в <test_cases>
+
+  Шаг 3: tc-to-autotest
+    → <automation_analysis>: 12 ТК → 8 тестовых методов, 2 DTO
+    → <automation_matrix>: ТК-1 → shouldCreateTransfer_ValidRequest()...
+    → Java-файлы: TransferRequestDto.java, TransferResponseDto.java, TransferApiTest.java
+
+  Шаг 4: autotest-reviewer
+    → <review_verdict>: ПРИНЯТО
+    → <autotest_review>: Traceability 100%, анти-паттернов нет, WireMock покрытие 100%
+
+Результат: completed
+```
 
 ### Выход
 
 ```xml
-<orchestration_result>
+<orchestration_result version="2.0">
+  <execution_id>a1b2c3d4-...</execution_id>
   <status>completed</status>
-  <pipeline_name>documentation-pipeline</pipeline_name>
+  <pipeline_name>test-pipeline</pipeline_name>
   <iterations>1</iterations>
   <steps>
     <step>
-      <name>Анализ концепции</name>
-      <skill>concept-analysis</skill>
+      <name>Генерация тест-кейсов</name>
+      <skill>tc-generator</skill>
       <status>success</status>
-      <output>docs/to_do/FEATURE-FLAG.md</output>
+      <output>docs/to_do/test-cases-TransferService.md</output>
     </step>
     <step>
-      <name>Ревью документации</name>
-      <skill>docs-review</skill>
+      <name>Валидация тест-кейсов</name>
+      <skill>tc-reviewer</skill>
       <status>success</status>
-      <output>docs/to_do/doc-review-FEATURE-FLAG.md</output>
+      <output>docs/to_do/test-cases-review-TransferService.md</output>
     </step>
     <step>
-      <name>Фикс документации</name>
-      <skill>doc-fix</skill>
+      <name>Генерация автотестов</name>
+      <skill>tc-to-autotest</skill>
       <status>success</status>
-      <output>docs/to_do/FEATURE-FLAG.md</output>
+      <output>src/test/java/.../TransferApiTest.java</output>
     </step>
     <step>
-      <name>Верификация</name>
-      <skill>docs-review</skill>
+      <name>Валидация автотестов</name>
+      <skill>autotest-reviewer</skill>
       <status>success</status>
-      <output>docs/to_do/doc-review-FEATURE-FLAG-v2.md</output>
+      <output>docs/to_do/autotest-review-TransferService.md</output>
     </step>
   </steps>
-  <final_result>docs/to_do/FEATURE-FLAG.md</final_result>
+  <final_result>src/test/java/.../TransferApiTest.java</final_result>
   <warnings>[]</warnings>
 </orchestration_result>
 ```
 
 ---
 
-## Пример 2: С итерациями (повторный фикс)
+## Пример 2: С автофиксом на этапе валидации тест-кейсов
 
 ### Вход
 
 ```
-Проанализируй LegacyAuth и исправь все ошибки
+Сгенерируй тест-кейсы и автотесты для RenewalService, аналитика в docs/requirements/renewal.md
 ```
 
 ### Выполнение
 
-**Итерация 1:**
+```
+Contract Check: PASS
 
-| Шаг | Скилл | Статус | Выход |
-|-----|-------|--------|-------|
-| 1. Анализ концепции | concept-analysis | ⚠️ partial (45%) | docs/to_do/LEGACY-AUTH.md |
-| 2. Ревью документации | docs-review | ❌ not-ready (3 critical) | docs/to_do/doc-review-LEGACY-AUTH.md |
-| 3. Фикс документации | doc-fix | ⚠️ partial-fixed (2/3) | docs/to_do/LEGACY-AUTH.md |
-| 4. Верификация | docs-review | ❌ not-ready (1 critical) | — |
+Итерация 1:
+  Шаг 0: context-marker
+    → обнаружен сырой .md без XML-разметки → разметка выполнена
+    → <analytics_documentation>: docs/requirements/renewal.md обёрнут в тег
 
-**Решение:** Запустить итерацию 2
+  Шаг 1: tc-generator
+    → <generated_test_cases>: 15 ТК
 
-**Итерация 2:**
+  Шаг 2: tc-reviewer
+    → <review_verdict>: AUTO_FIX_APPLIED
+    → <corrected_test_cases>: 15 ТК (исправлены лимиты шагов в ТК-4, ТК-9)
 
-| Шаг | Скилл | Статус | Выход |
-|-----|-------|--------|-------|
-| 1. Фикс документации | doc-fix | ✅ fixed | docs/to_do/LEGACY-AUTH.md |
-| 2. Верификация | docs-review | ✅ production-ready | docs/to_do/doc-review-LEGACY-AUTH-v2.md |
+  Шаг 3: tc-to-autotest
+    → <automation_matrix>: 15 ТК → 10 тестовых методов
+    → Java-файлы: RenewalRequestDto.java, RenewalApiTest.java
+
+  Шаг 4: autotest-reviewer
+    → <review_verdict>: ПРИНЯТО
+```
 
 ### Выход
 
 ```xml
-<orchestration_result>
+<orchestration_result version="2.0">
   <status>completed</status>
-  <pipeline_name>documentation-pipeline</pipeline_name>
-  <iterations>2</iterations>
-  <final_result>docs/to_do/LEGACY-AUTH.md</final_result>
+  <pipeline_name>test-pipeline</pipeline_name>
+  <iterations>1</iterations>
+  <final_result>src/test/java/.../RenewalApiTest.java</final_result>
   <warnings>
-    <warning>Потребовалось 2 итерации для достижения production-ready</warning>
+    <warning>tc-reviewer: применён AUTO_FIX (2 дефекта исправлены автоматически)</warning>
   </warnings>
 </orchestration_result>
 ```
 
 ---
 
-## Пример 3: Только ревью (review-pipeline)
+## Пример 3: Эскалация — ТРЕБУЕТ ДОРАБОТКИ
 
 ### Вход
 
 ```
-Проверь документацию API.md
-```
-
-### Определение пайплайна
-
-```
-Анализ цели: "проверь документацию" → review-pipeline
+Запусти тестовый пайплайн для LegacyAuthService
 ```
 
 ### Выполнение
 
-**Итерация 1:**
+```
+Contract Check: PASS
 
-| Шаг | Скилл | Статус | Выход |
-|-----|-------|--------|-------|
-| 1. Ревью документации | docs-review | ✅ production-ready | docs/to_do/doc-review-API.md |
+Итерация 1:
+  Шаг 1: tc-generator
+    → <generated_test_cases>: 9 ТК
+
+  Шаг 2: tc-reviewer
+    → <review_verdict>: ТРЕБУЕТ ДОРАБОТКИ (2 критических дефекта без автофикса)
+    → <review_comments>: ТК-3 — недетерминированный шаг ("ИЛИ"); ТК-7 — отсутствует техническая точность (код ошибки не из кодовой базы)
+
+Пайплайн приостановлен: требуется ручная доработка или подтверждение пользователя.
+```
 
 ### Выход
 
 ```xml
-<orchestration_result>
-  <status>completed</status>
-  <pipeline_name>review-pipeline</pipeline_name>
+<orchestration_result version="2.0">
+  <status>partial</status>
+  <pipeline_name>test-pipeline</pipeline_name>
   <iterations>1</iterations>
-  <steps>
-    <step>
-      <name>Ревью документации</name>
-      <skill>docs-review</skill>
-      <status>success</status>
-      <output>docs/to_do/doc-review-API.md</output>
-    </step>
-  </steps>
-  <final_result>docs/API.md</final_result>
-  <warnings>[]</warnings>
+  <warnings>
+    <warning>tc-reviewer: ТРЕБУЕТ ДОРАБОТКИ — пайплайн приостановлен на шаге 2</warning>
+  </warnings>
+  <recommendations>
+    <recommendation>Исправить ТК-3 и ТК-7 вручную по <review_comments></recommendation>
+    <recommendation>Подтвердить продолжение пайплайна после правки</recommendation>
+  </recommendations>
 </orchestration_result>
 ```
 
@@ -158,36 +174,35 @@
 ### Вход
 
 ```
-Создай документацию для ComplexModule
+Создай тест-кейсы и автотесты для ComplexPaymentModule
 ```
 
 ### Выполнение
 
-**Итерация 1:**
-- concept-analysis → partial (30%)
-- docs-review → not-ready (5 critical)
-- doc-fix → partial-fixed (2/5)
-- Верификация → not-ready
+```
+Итерация 1:
+  tc-generator → 20 ТК
+  tc-reviewer → ТРЕБУЕТ ДОРАБОТКИ (5 критических)
+  Пользователь подтвердил правку → повторный запуск
 
-**Итерация 2:**
-- doc-fix → partial-fixed (3/5)
-- Верификация → not-ready
+Итерация 2:
+  tc-reviewer (повторно) → ТРЕБУЕТ ДОРАБОТКИ (2 критических)
+  Пользователь подтвердил правку → повторный запуск
 
-**Итерация 3 (max_iterations = 3):**
-- doc-fix → partial-fixed (4/5)
-- Верификация → not-ready
+Итерация 3 (max_iterations = 3):
+  tc-reviewer (повторно) → ТРЕБУЕТ ДОРАБОТКИ (1 критический)
+```
 
 ### Выход
 
 ```xml
-<orchestration_result>
+<orchestration_result version="2.0">
   <status>retry</status>
-  <pipeline_name>documentation-pipeline</pipeline_name>
+  <pipeline_name>test-pipeline</pipeline_name>
   <iterations>3</iterations>
-  <final_result>docs/to_do/COMPLEX-MODULE.md</final_result>
   <warnings>
     <warning>Достигнут лимит итераций (3/3)</warning>
-    <warning>Осталась 1 критическая проблема</warning>
+    <warning>Осталась 1 критическая проблема в tc-reviewer</warning>
   </warnings>
   <recommendations>
     <recommendation>Увеличить max_iterations до 5</recommendation>
@@ -198,36 +213,37 @@
 
 ---
 
-## Пример 5: Ошибка скилла
+## Пример 5: Ошибка Contract Check (contract_mismatch)
 
 ### Вход
 
 ```
-Создай документацию для NonExistentClass
+Запусти тестовый пайплайн для NewFeatureModule
 ```
 
 ### Выполнение
 
-**Итерация 1:**
+```
+Contract Check: FAILED
+  Пара: tc-reviewer → tc-to-autotest
+  Ожидаемый тег (CONTRACTS.md §2): <corrected_test_cases> / <test_cases>
+  Фактический тег в SKILL.md tc-to-autotest: <validated_cases> (устаревшее имя)
 
-| Шаг | Скилл | Статус | Выход |
-|-----|-------|--------|-------|
-| 1. Анализ концепции | concept-analysis | ❌ failed | — |
-
-**Ошибка:** Класс `NonExistentClass` не найден в кодовой базе.
+Пайплайн заблокирован до исправления контракта.
+```
 
 ### Выход
 
 ```xml
-<orchestration_result>
+<orchestration_result version="2.0">
   <status>failed</status>
-  <pipeline_name>documentation-pipeline</pipeline_name>
-  <iterations>1</iterations>
-  <errors>
-    <error>
-      <step>Анализ концепции</step>
-      <message>Класс NonExistentClass не найден</message>
-      <resolution>Проверьте правильность имени класса</resolution>
-    </error>
-  </errors>
+  <reason>contract_mismatch</reason>
+  <detail>skill=tc-reviewer → tc-to-autotest: missing <test_cases>, найден устаревший тег <validated_cases></detail>
+  <pipeline_name>test-pipeline</pipeline_name>
+  <iterations>0</iterations>
 </orchestration_result>
+```
+
+---
+
+*См. также: [SKILL.md](SKILL.md) — полная спецификация Оркестратора, [`../PIPELINE.md`](../PIPELINE.md) — схема пайплайна, [`../CONTRACTS.md`](../CONTRACTS.md) — канон тегов и статус-маркеров.*

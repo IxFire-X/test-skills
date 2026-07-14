@@ -161,9 +161,6 @@
 
 | Блок | Судьба | Причина |
 |------|--------|--------|
-| `<analysis_result>` | ✅ Сохранить | Контракт `concept-analysis` |
-| `<review_result>` | ✅ Сохранить | Контракт `docs-review` |
-| `<fix_result>` | ✅ Сохранить | Контракт `doc-fix` |
 | `<generated_test_cases>` | ✅ Сохранить | Контракт `tc-generator` |
 | `<validation_report>` | ❌ Discard | Промежуточный артефакт ревьюера; не нужен downstream |
 | `<corrected_test_cases>` | ✅ Сохранить | Контракт `tc-reviewer` (при `AUTO_FIX_APPLIED`) |

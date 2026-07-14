@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/skillsrc.schema.json",
+  "title": ".skillsrc Manifest Schema",
+  "description": "Формальный контракт для манифеста проекта .skillsrc. Используется для валидации ключевых полей перед слиянием с Deep Scan (см. conflict-resolution.md).",
+  "type": "object",
+  "required": ["project"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Версия формата самого манифеста .skillsrc (не версия проекта)"
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "language"],
+      "properties": {
+        "name": { "type": "string" },
+        "language": {
+          "type": "string",
+          "enum": ["java", "python", "go", "typescript", "kotlin"]
+        },
+        "framework": { "type": "string" },
+        "build_tool": {
+          "type": "string",
+          "enum": ["maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn"]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["platform-billing", "sdk-library", "microservice", "web-app", "cli-tool"],
+          "description": "Тип проекта (см. conflict-resolution.md §Правила валидации .skillsrc)"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "tests": { "type": "string" },
+        "resources": { "type": "string" },
+        "docs": { "type": "string" }
+      }
+    },
+    "test": {
+      "type": "object",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing"]
+        },
+        "api_client": { "type": "string" },
+        "database": { "type": "string" }
+      }
+    },
+    "methodology": {
+      "type": "string",
+      "enum": ["sdd", "tdd", "bdd", "mixed"]
+    },
+    "sdd": {
+      "type": "object",
+      "properties": {
+        "openapi": { "type": "string" },
+        "asyncapi": { "type": "string" },
+        "domain": { "type": "string" },
+        "requirements": { "type": "string" },
+        "architecture": { "type": "string" }
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "properties": {
+        "analytics_vs_code": {
+          "type": "string",
+          "enum": ["analytics_wins", "code_wins", "ask_user", "strict"]
+        },
+        "status_conflict": {
+          "type": "string",
+          "enum": ["ask_user", "auto_promote", "auto_demote"]
+        },
+        "skillsrc_vs_scan": {
+          "type": "string",
+          "enum": ["skillsrc_wins", "scan_wins", "ask_user", "merge"]
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "properties": {
+        "status_markers_version": { "type": "string" }
+      }
+    },
+    "skills_registry": {
+      "type": "object",
+      "description": "Progressive Disclosure L1-реестр скиллов. Ключ — id скилла, значение — метаданные.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "path", "description"],
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "skill_file": { "type": "string", "description": "Имя файла скилла, если отличается от SKILL.md" },
+          "description": { "type": "string" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^@[a-z-]+$" }
+          },
+          "triggers": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "input_contract": { "type": "string" },
+          "output_contract": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

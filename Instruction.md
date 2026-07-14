@@ -1,15 +1,16 @@
 # Инструкция по настройке и использованию скиллов
 
-> **Версия:** v0.5.0 (2026-07-03) — удалены documentation-pipeline скиллы (concept-analysis, docs-review, doc-fix); осталось 5 скиллов (4 тестовых + Оркестратор). Упрощены пайплайны до test-pipeline.
+> **Версия:** v0.6.0 (2026-07-07) — добавлен скилл `context-marker` (разметка сырых `.md`-файлов аналитики в XML-теги). Теперь осталось 6 скиллов (4 тестовых + Оркестратор + context-marker).
 > **Аудитория:** инженер / аналитик / QA-лид, который впервые разворачивает скиллы у себя в проекте.
 
 > **Канон контрактов и статус-маркеров:** см. `CONTRACTS.md` (этот документ — **единственный источник истины**). Все скиллы обязаны ссылаться на `CONTRACTS.md` для уточнения имён тегов и статусов.
+> **Руководство по эксплуатации (промпты / сценарии / cheat sheet):** см. `USER-GUIDE.md` — быстрый старт без чтения SKILL.md.
 
 ---
 
 ## Что это за скиллы
 
-Набор из **5 специализированных AI-скиллов**, которые работают вместе как **1 предопределённый пайплайн** + 1 скилл-координатор.
+Набор из **6 специализированных AI-скиллов**, которые работают вместе как **1 предопределённый пайплайн** + 1 скилл-координатор + 1 скилл разметки контекста.
 
 ### Пайплайн
 
@@ -37,6 +38,12 @@
 | **tc-reviewer** (`Валидация тест-кейсов/SKILL.md`) | Проверяет ТК на полноту/корректность, может править автофиксом | `<generated_test_cases>` → `<validation_report>` + (опц.) `<corrected_test_cases>` |
 | **tc-to-autotest** (`Автоматизированные кейсы на основе тест-кейсов/SKILL.md`) | Превращает ТК в автотесты; идемпотентен (поддерживает `<automation_matrix>` для diff'а) | `<test_cases>` + (опц.) `<automation_matrix>` + (опц.) `<existing_project_context>` → файлы автотестов + `<automation_matrix>` + `<automation_analysis>` + `<conflict_resolution>` (опц.) |
 | **autotest-reviewer** (`Валидация автотестов/SKILL.md`) | Проверяет качество автотестов | `<test_cases>` + `<automation_matrix>` + `<autotest_code>` → `<autotest_review>` + `<review_verdict>` (`ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ`) + (опц.) `<review_comments>` + (опц.) `<corrected_autotest_code>` |
+
+### Препроцессор контекста
+
+| Скилл | Что делает | Вход → Выход (канон) |
+|---|---|---|
+| **context-marker** (`Разметка контекста/SKILL.md`) | Размечает сырые `.md`-файлы аналитики/кода/ТК в XML-теги для пайплайна. Автоопределяет тип контента (analytics / source_code / test_cases). Поддерживает batch-разметку директорий. | `<raw_content>` + `<content_type>` (опц.) + `<file_path>` (опц.) → `<analytics_documentation>` / `<source_code_and_diff>` / `<test_cases>` |
 
 ### Координатор
 
@@ -95,6 +102,10 @@
 │   ├── SKILL.md
 │   └── examples.md
 ├── Валидация автотестов/                           ← autotest-reviewer
+│   ├── README.md
+│   ├── SKILL.md
+│   └── examples.md
+├── Разметка контекста/                             ← context-marker
 │   ├── README.md
 │   ├── SKILL.md
 │   └── examples.md
@@ -162,13 +173,14 @@ public class TransferRequest {
 ```
 
 **Поток:**
-1. `orchestrate` выбирает `test-pipeline`.
-2. **Contract Check** (см. `Оркестратор/SKILL.md` § «Контрактное версионирование»): проверяет имена тегов и статусов по `CONTRACTS.md`.
-3. `tc-generator` → генерирует ручные тест-кейсы → `<generated_test_cases>`.
-4. `tc-reviewer` → валидирует ТК → `<validation_report>` + (опц.) `<corrected_test_cases>`.
-5. `tc-to-autotest` → генерирует автотесты → `<automation_matrix>` + `<automation_analysis>` + файлы.
-6. `autotest-reviewer` → проверяет автотесты → `<autotest_review>` + `<review_verdict>`.
-7. `orchestrate` пишет `docs/to_do/orchestration-report-<TIMESTAMP>.md`.
+1. `orchestrate` выполняет **Deep Scan** (структурный анализ проекта) и определяет методологию.
+2. **Если проект SDD и аналитика в сыром `.md`** → `orchestrate` диспетчеризует `context-marker` для разметки (оборачивает `.md` в `<analytics_documentation>`).
+3. **Contract Check** (см. `Оркестратор/SKILL.md` § «Контрактное версионирование»): проверяет имена тегов и статусов по `CONTRACTS.md`.
+4. `tc-generator` → генерирует ручные тест-кейсы → `<generated_test_cases>`.
+5. `tc-reviewer` → валидирует ТК → `<validation_report>` + (опц.) `<corrected_test_cases>`.
+6. `tc-to-autotest` → генерирует автотесты → `<automation_matrix>` + `<automation_analysis>` + файлы.
+7. `autotest-reviewer` → проверяет автотесты → `<autotest_review>` + `<review_verdict>`.
+8. `orchestrate` пишет `docs/to_do/orchestration-report-<TIMESTAMP>.md`.
 
 **Выход:**
 ```xml
@@ -255,6 +267,9 @@ public class TransferRequest {
 | `<automation_matrix>` (вход) | `tc-to-autotest` | Матрица `ТК-N → java-метод` от предыдущего запуска |
 | `<autotest_code>` | `autotest-reviewer` | Код автотестов (или Markdown-блоки) |
 | `<existing_project_context>` | `tc-to-autotest` | Архитектурный шаблон существующего проекта |
+| `<raw_content>` | `context-marker` | Сырой контент для разметки (`.md`-файл без XML-тегов) |
+| `<content_type>` | `context-marker` | Явное указание типа контента (опц.): `analytics`, `source_code`, `test_cases` |
+| `<file_path>` | `context-marker` | Путь к исходному файлу (опц., для логирования) |
 | `<goal>` | `orchestrate` | Цель в свободной форме (например, «создай тест-кейсы для X») |
 | `<pipeline>` | `orchestrate` | Имя пайплайна (опц., по умолчанию — `test-pipeline`) |
 | `<max_iterations>` | `orchestrate` | Лимит итераций (по умолчанию `3`) |
@@ -325,6 +340,9 @@ public class TransferRequest {
 
 **Что если у меня нет аналитики, только код?**
 Скилл перейдёт в ручной режим и задаст уточняющие вопросы. Результат будет, но процесс займёт больше времени.
+
+**Что если у меня есть аналитика, но она в сыром `.md` без XML-тегов?**
+Используйте скилл `context-marker`: скажите «Разметь контекст для пайплайна» и передайте `.md`-файл. Скилл автоопределит тип (analytics / source_code / test_cases) и обернёт в правильный XML-тег. Или просто запустите пайплайн через Оркестратор — он сам вызовет `context-marker` для SDD-проектов.
 
 **Что если у меня нет кода, только аналитика?**
 Аналогично — скилл соберёт контекст через вопросы. Но техническая точность может пострадать (имена таблиц, коды ошибок будут примерными).
@@ -484,6 +502,7 @@ esac
 
 ## Changelog самой инструкции
 
+- **v0.6.0 (2026-07-07):** добавлен скилл `context-marker` (разметка сырых `.md`-файлов аналитики в XML-теги). Добавлены входные теги `<raw_content>`, `<content_type>`, `<file_path>`. Обновлён поток в Сценарии 1 (Оркестратор теперь диспетчеризует `context-marker` для SDD-проектов).
 - **v0.5.0 (2026-07-03):** удалены documentation-pipeline скиллы (concept-analysis, docs-review, doc-fix). Оставлены 5 скиллов: tc-generator, tc-reviewer, tc-to-autotest, autotest-reviewer, orchestrate. Упрощены пайплайны до единственного test-pipeline. Удалены соответствующие входные/выходные теги из словарей.
 - **v0.4.0 (2026-07-03):** унификация с `CONTRACTS.md` v1.0 (новый канон по результатам аудита). Удалён маркер `partial-ready` (заменён на `partial`). Обновлён словарь XML-тегов — все выходные блоки приведены к `CONTRACTS.md` §2. Упомянут `audit-report.md`. Унифицирована структура каталогов.
 - **v0.3.0 (июль 2026):** переписана под актуальные контракты: добавлены `<automation_matrix>` (вход/выход), `<conflict_resolution>`, `<analysis_result>` / `<review_result>` / `<fix_result>`, статусы `partial` / `partial-ready` / `partial-fixed`, упоминание `CHANGELOG.md` в корне скиллов, раздел «Словарь XML-тегов», ссылка на `FALLBACK-СТРАТЕГИИ` в Оркестраторе.
