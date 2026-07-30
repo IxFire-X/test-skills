@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/run-tests-output.schema.json",
+  "title": "Run Tests Output (Оракул исполнения)",
+  "description": "Формальный контракт выхода детерминированного раннера tools/run_tests.py — единственного источника правды о том, запустились ли автотесты. Фундаментальная Опора 1 (BACKLOG.md). В отличие от LLM-вердиктов, этот выход не интерпретируется моделью: PASS означает реальный запуск и успех, NOT_RUNNABLE — честное отсутствие окружения (а не фейковый PASS).",
+  "type": "object",
+  "required": ["verdict", "target", "environment", "ran_at"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "NOT_RUNNABLE"],
+      "description": "Детерминированный вердикт по факту запуска. PASS — тесты реально запустились и прошли. FAIL — запустились, но есть падения. NOT_RUNNABLE — окружение недоступно (нет интерпретатора/фреймворка/проекта); никогда не подменяется на PASS."
+    },
+    "target": {
+      "type": "object",
+      "description": "Что именно запускалось",
+      "required": ["language", "framework", "runner"],
+      "properties": {
+        "language": {
+          "type": "string",
+          "enum": ["java", "python", "go", "typescript", "kotlin", "unknown"],
+          "description": "Язык тестов, определённый из .skillsrc / манифестов проекта"
+        },
+        "framework": {
+          "type": "string",
+          "description": "Тестовый фреймворк (junit5, pytest, jest, go-testing и т.д.)"
+        },
+        "runner": {
+          "type": "string",
+          "enum": ["pytest", "invoke", "maven", "gradle", "npm", "yarn", "go", "not_applicable"],
+          "description": "Нативный раннер, которым запускались тесты. not_applicable — при NOT_RUNNABLE, когда запуск невозможен"
+        },
+        "command": {
+          "type": "string",
+          "description": "Фактически исполненная команда (для воспроизведения и аудита)"
+        }
+      }
+      },
+      "environment": {
+        "type": "object",
+        "description": "Состояние окружения на момент запуска",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ready", "missing", "partial"],
+            "description": "ready — окружение найдено и валидно. missing — ничего нет. partial — часть доступна, часть отсутствует."
+          },
+          "interpreter": {
+            "type": "string",
+            "description": "Найденный интерпретатор и версия (например, 'python 3.11.4', 'openjdk 17.0.8'). Отсутствует при missing."
+          },
+          "working_dir": {
+            "type": "string",
+            "description": "Корневая директория проекта, в которой запускался раннер"
+          },
+          "missing": {
+            "type": "array",
+            "description": "При NOT_RUNNABLE/partial — чего именно не хватает (например, ['python', 'pytest', 'inventree package'])",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "stats": {
+        "type": "object",
+        "description": "Сводка по результатам запуска. Присутствует только при verdict PASS/FAIL.",
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "integer", "minimum": 0 },
+          "failed": { "type": "integer", "minimum": 0 },
+          "errors": { "type": "integer", "minimum": 0, "description": "Ошибки сбора/настройки (collection errors), не сами ассерты" },
+          "skipped": { "type": "integer", "minimum": 0 },
+          "duration_sec": { "type": "number", "minimum": 0 }
+        }
+      },
+      "failed_methods": {
+        "type": "array",
+        "description": "Список упавших тестовых методов (node id). Присутствует при FAIL. Кормит trace_map и отчёт причины.",
+        "items": {
+          "type": "object",
+          "required": ["nodeid"],
+          "properties": {
+            "nodeid": {
+              "type": "string",
+              "description": "Идентификатор теста в формате раннера (например, 'tests/test_part.py::test_tk_01_should_return_200')"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["assertion_failed", "error", "collection_error", "timeout", "unknown"],
+              "description": "Тип падения: assertion_failed — нарушен assert; error — исключение в тесте; collection_error — тест не собран; timeout — превышен лимит времени"
+            },
+            "message": {
+              "type": "string",
+              "description": "Краткое сообщение об ошибке (первая строка AssertionError/traceback)"
+            }
+          }
+        }
+      },
+      "root_cause": {
+        "type": "array",
+        "description": "Машинно-извлечённые классы причин падений (НЕ LLM-гипотезы). Группируют failed_methods по общей причине: например, 'ImportError: cannot import InvenTree', 'AssertionError: status_code 500 != 200'. Этим питается дорогая модель (Kimi K3) при диагностике FAIL — но сам вердикт от неё не зависит.",
+        "items": { "type": "string" }
+      },
+      "raw_output_excerpt": {
+        "type": "string",
+        "description": "Сжатый вывод раннера (последние N строк или ключевые строки traceback). Для воспроизводимости и отладки; не для принятия решений — вердикт в поле verdict."
+      },
+      "ran_at": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO-8601 timestamp запуска"
+      },
+      "exit_code": {
+        "type": "integer",
+        "description": "Exit code процесса раннера (0=PASS, !=0=FAIL). Null при NOT_RUNNABLE."
+      }
+    },
+    "additionalProperties": false
+  }

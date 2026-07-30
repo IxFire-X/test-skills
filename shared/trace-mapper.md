@@ -106,7 +106,7 @@
 При передаче контекста между `tc-to-autotest` → `autotest-reviewer`:
 
 ```
-1. СОХРАНИТЬ <trace_map> в pipeline-notes.md (секция context.trace_map)
+1. СОХРАНИТЬ <trace_map> в отчёте выполнения (orchestration-report, секция context.trace_map)
 2. ПЕРЕДАТЬ как входной тег autotest-reviewer:
    <trace_map>...</trace_map>
 ```

@@ -176,11 +176,11 @@
 ```
 test-orchestration-skills/
 ├── PIPELINE.md                    # Этот файл
-├── Instruction.md                 # Общая инструкция
+├── Instruction.md                 # Настройка + CI/CD
+├── USER-GUIDE.md                  # Руководство по эксплуатации
 ├── CONTRACTS.md                   # Канон тегов и статус-маркеров
+├── BACKLOG.md                     # Единый план развития
 ├── .skillsrc                      # Манифест проекта
-├── tag-registry.md                # Реестр тегов
-├── conflict-resolution.md         # Стратегии разрешения конфликтов
 │
 ├── Разметка контекста/            # context-marker v1.0 (опциональный препроцессор)
 │   ├── README.md
@@ -215,6 +215,7 @@ test-orchestration-skills/
 │
 ├── schemas/                       # JSON Schema для выходных тегов
 ├── shared/                        # Общие утилиты (sub-agent compaction, stub-helper и др.)
+├── tools/                         # Детерминированные инструменты (run_tests.py — оракул исполнения)
 └── Автоматизированные кейсы.../templates/  # Шаблоны тестов для разных языков
 ```
 
@@ -226,7 +227,7 @@ test-orchestration-skills/
 |---|---|---|
 | tc-generator | 2.4 | 2026-07-03 — переименован SKILL_tc_generator_v2.3.md → SKILL.md, версия SKILL.md повышена до 2.4 |
 | tc-reviewer | 2.2 | 2026-07-03 — унифицирована структура каталогов |
-| tc-to-autotest | 3.1 | 2026-07-03 — унифицирована структура каталогов, создан DIFF_v2_to_v3.md |
+| tc-to-autotest | 3.1 | 2026-07-03 — унифицирована структура каталогов |
 | autotest-reviewer | 1.3 | 2026-07-03 — унификация с CONTRACTS.md |
 | context-marker | 1.0 | 2026-07-07 — новый скилл: разметка сырых .md-файлов аналитики в XML-теги |
 | orchestrate | 2.0 | 2026-07-03 — удалены doc-скиллы, оставлен только test-pipeline |

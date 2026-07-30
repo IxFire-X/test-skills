@@ -147,8 +147,29 @@
       }
     },
     "trace_map": {
-      "$ref": "shared/trace-mapper.md#/trace_map_format",
-      "description": "Структурированный маппинг ТК-N → код для autotest-reviewer (см. shared/trace-mapper.md)"
+      "type": "object",
+      "description": "Структурированный маппинг ТК-N → код для autotest-reviewer. Формат инлайнен из shared/trace-mapper.md, чтобы схема была самодостаточной и валидируемой (раньше здесь был невалидный $ref на .md).",
+      "required": ["version", "source", "entries"],
+      "properties": {
+        "version": { "type": "string", "description": "Версия формата trace_map (например, '1.0')" },
+        "source": { "type": "string", "description": "Источник маппинга (обычно 'tc-to-autotest')" },
+        "entries": {
+          "type": "array",
+          "description": "Записи маппинга — по одной на каждый ТК-N",
+          "items": {
+            "type": "object",
+            "required": ["tc_id", "class", "method", "test_type", "status"],
+            "properties": {
+              "tc_id": { "type": "string", "pattern": "^ТК-\\d+$", "description": "Идентификатор тест-кейса (ТК-N)" },
+              "class": { "type": "string", "description": "Полное имя тестового класса (без package)" },
+              "method": { "type": "string", "description": "Имя метода в camelCase" },
+              "test_type": { "type": "string", "enum": ["positive", "negative", "boundary", "security", "observability", "concurrency"], "description": "Тип теста" },
+              "status": { "type": "string", "enum": ["generated", "updated", "removed", "todo"], "description": "Статус генерации: generated|updated|removed|todo" },
+              "notes": { "type": "string", "description": "Доп. информация (TODO-причины, особенности)" }
+            }
+          }
+        }
+      }
     },
     "generated_files": {
       "type": "array",

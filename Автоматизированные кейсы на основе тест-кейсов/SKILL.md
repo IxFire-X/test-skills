@@ -480,7 +480,6 @@ assertThat(count).as("Запись аудита — ТК-N").isEqualTo(1);
 ## Дополнительные ресурсы
 
 - Полный пример ТК → Java: [examples.md](examples.md)
-- Diff v2.0 → v3.0: [DIFF_v2_to_v3.md](DIFF_v2_to_v3.md)
 - **Утилита WireMock-мокирования:** [`../shared/stub-helper.md`](../shared/stub-helper.md) — инструкция по созданию WireMock-стабов для смежных сервисов. Используй при генерации тестов с внешними зависимостями.
 - **Спецификация traceability (ТК-N → метод):** [`../shared/trace-mapper.md`](../shared/trace-mapper.md) — единый формат `<trace_map>` для маппинга ТК-N на java-методы. ОБЯЗАН генерировать `<trace_map>` в дополнение к `<automation_matrix>`.
 

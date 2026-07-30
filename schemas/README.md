@@ -17,7 +17,8 @@
 | `autotest-reviewer-output.schema.json` | `autotest-reviewer` → `<autotest_review_json>` | 1.0 |
 | `context-marker-output.schema.json` | `context-marker` → `<batch_marking_result>` (batch-режим) | 1.0 |
 | `orchestrator-output.schema.json` | `orchestrate` → `<orchestration_result>` | 1.0 |
-| `skillsrc.schema.json` | Манифест проекта `.skillsrc` (см. `conflict-resolution.md`) | 1.0 |
+| `skillsrc.schema.json` | Манифест проекта `.skillsrc` | 1.0 |
+| `run-tests-output.schema.json` | `tools/run_tests.py` → JSON-вердикт оракула исполнения (Опора 1) | 1.0 |
 
 ---
 
@@ -137,10 +138,39 @@ exit $FAILURES
 2. ПРОВЕРИТЬ выход JSON на соответствие JSON Schema:
    - ЕСЛИ PASS → передать выход скиллу N+1
    - ЕСЛИ FAIL → зафиксировать ошибки, вернуть скиллу N, НЕ передавать дальше
-3. ЗАФИКСИРОВАТЬ результат в pipeline-notes.md
+   3. ЗАФИКСИРОВАТЬ результат в отчёте выполнения (orchestration-report)
 ```
 
 См. также: [`../shared/schema-validator.md`](../shared/schema-validator.md) — концептуальное описание контрактной валидации.
+
+---
+
+## 🚪 Жёсткий гейт Оракула исполнения (Опора 1)
+
+> **Назначение:** `tools/run_tests.py` — единственный детерминированный источник правды о том, запустились ли автотесты. Его вердикт **не интерпретируется LLM**: `PASS` означает реальный запуск и успех. Это закрывает корневую причину провала InvenTree (0/25), где `autotest-reviewer` выдавал `AUTO_FIX_APPLIED` на код, который физически ни разу не запускался.
+
+**Контракт выхода:** [`run-tests-output.schema.json`](run-tests-output.schema.json) — три вердикта:
+
+| `verdict` | Что значит | Реакция Оркестратора |
+|---|---|---|
+| `PASS` | Тесты РЕАЛЬНО запустились и прошли | Разрешить `autotest-reviewer` выдать `ПРИНЯТО` |
+| `FAIL` | Запустились, но есть падения; `failed_methods[]` + `root_cause[]` заполнены | `ТРЕБУЕТ ДОРАБОТКИ`; `root_cause[]` передать дорогой модели (Kimi K3) для диагностики причины |
+| `NOT_RUNNABLE` | Окружение недоступно (нет интерпретатора/фреймворка/проекта) | Честный ответ «не могу проверить» — **НЕ ПРИНЯТО** и **НЕ фейковый PASS** |
+
+**Жёсткое правило (BACKLOG, Опора 1, п.4):**
+```
+autotest-reviewer НЕ выдаёт ПРИНЯТО, пока run_tests.py не вернул PASS.
+NOT_RUNNABLE — это ЧЕСТНЫЙ «не могу проверить», а не основание доверять коду.
+```
+
+**Использование:**
+```bash
+# из корня целевого проекта
+python ../test-orchestration-skills/tools/run_tests.py --skillsrc .skillsrc
+python ../test-orchestration-skills/tools/run_tests.py --project . --language python --pytest-target tests/test_part_api.py
+```
+
+**Exit codes для CI:** `0` — PASS или NOT_RUNNABLE (честный недоступ), `1` — FAIL (тесты упали), `2` — внутренняя ошибка раннера.
 
 ---
 

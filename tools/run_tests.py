@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+"""
+run_tests.py — детерминированный оракул исполнения (Опора 1, BACKLOG.md).
+
+Единственный источник правды о том, запустились ли автотесты.
+В отличие от LLM-вердиктов (которые могут лгать AUTO_FIX_APPLIED), этот
+вердикт ставится по факту запуска процесса раннера и парсинга его вывода.
+
+Принципы:
+  - PASS = тесты РЕАЛЬНО запустились и прошли.
+  - FAIL = запустились, но есть падения (ассерты / ошибки).
+  - NOT_RUNNABLE = окружение недоступно. НИКОГДА не подменяется на PASS.
+    Именно это ловит ложный AUTO_FIX_APPLIED на коде, который физически не запускался.
+  - Зависимости: только стандартная библиотека Python. Ничего ставить не нужно.
+  - Вывод: JSON по контракту schemas/run-tests-output.schema.json в stdout.
+
+Использование:
+    python tools/run_tests.py --project /path/to/inventree --language python
+    python tools/run_tests.py --project . --language python --pytest-target tests/test_part_api.py
+    python tools/run_tests.py --skillsrc .skillsrc           # стек из манифеста
+
+Жёсткий gate в Оркестраторе (BACKLOG Опора 1, п.4):
+    autotest-reviewer НЕ выдаёт ПРИНЯТО, пока run_tests.py не вернул PASS.
+    NOT_RUNNABLE — это ЧЕСТНЫЙ ответ «не могу проверить», а не ПРИНЯТО.
+
+Выходные exit codes (для встраивания в CI):
+    0 — PASS (тесты прошли) ИЛИ NOT_RUNNABLE (окружения нет, но отчёт честный)
+    1 — FAIL (тесты упали)
+    2 — ошибка самого раннера (некорректный вызов)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Конфигурация стека
+# ---------------------------------------------------------------------------
+
+# language → (test framework, нативный раннер, способ проверки наличия)
+PYTHON_STACK = {
+    "framework": "pytest",
+    "runner": "pytest",
+    "interpreters": ["python3", "python"],
+}
+
+JAVA_STACK = {
+    "framework": "junit5",
+    "runner_maven": "maven",
+    "runner_gradle": "gradle",
+}
+
+JS_STACK = {
+    "framework": "jest",
+    "runners": ["npm", "yarn"],
+}
+
+GO_STACK = {
+    "framework": "go-testing",
+    "runner": "go",
+}
+
+MAX_OUTPUT_EXCERPT = 60  # строк сырого вывода в raw_output_excerpt
+COMMAND_TIMEOUT = 600     # секунд на весь запуск раннера
+
+
+def detect_language_from_skillsrc(skillsrc_path: str) -> Optional[dict]:
+    """
+    Простейший парсер .skillsrc (YAML-подобный, без внешних зависимостей).
+    Извлекает project.language / project.framework / test.framework / build_tool.
+    Возвращает dict с ключами language, framework, runner или None.
+    """
+    if not os.path.isfile(skillsrc_path):
+        return None
+
+    data = {"language": None, "framework": None, "test_framework": None, "build_tool": None}
+    current_section = None
+
+    try:
+        with open(skillsrc_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.rstrip("\n")
+                stripped = line.strip()
+                # комментарии и пустые строки
+                if not stripped or stripped.startswith("#"):
+                    continue
+                # секция верхнего уровня (без отступа, заканчивается двоеточием)
+                if not line.startswith((" ", "\t")) and stripped.endswith(":"):
+                    current_section = stripped[:-1]
+                    continue
+                # ключ: значение внутри секции
+                m = re.match(r'^\s*([A-Za-z_]+):\s*"?(.*?)"?\s*(?:#.*)?$', stripped)
+                if not m:
+                    continue
+                key, value = m.group(1).lower(), m.group(2).strip().strip('"').strip("'")
+                if current_section == "project" and key == "language":
+                    data["language"] = value
+                elif current_section == "project" and key == "framework":
+                    data["framework"] = value
+                elif current_section == "project" and key == "build_tool":
+                    data["build_tool"] = value
+                elif current_section == "test" and key == "framework":
+                    data["test_framework"] = value
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    if not data["language"]:
+        return None
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Проверка окружения
+# ---------------------------------------------------------------------------
+
+def check_python_env(project_dir: str) -> dict:
+    """
+    Проверяет доступность python + pytest для проекта.
+    Возвращает environment-блок контракта.
+    """
+    missing = []
+    interpreter = None
+    interpreter_bin = None
+
+    # Сначала ищем интерпретатор на PATH...
+    for cand in PYTHON_STACK["interpreters"]:
+        path = shutil.which(cand)
+        if path:
+            interpreter_bin = path
+            try:
+                ver = subprocess.run(
+                    [path, "--version"], capture_output=True, text=True, timeout=10
+                )
+                interpreter = (ver.stdout or ver.stderr).strip() or cand
+            except (subprocess.SubprocessError, OSError):
+                interpreter = cand
+            break
+
+    # ...но если PATH пустой для python — используем тот интерпретатор, которым
+    # запущен сам раннер (sys.executable). Это НОРМАЛЬНО: раннер на Python,
+    # и текущий интерпретатор гарантированно доступен. Позволяет работать без PATH.
+    if not interpreter_bin and sys.executable and sys.executable.lower().endswith((".exe",)):
+        interpreter_bin = sys.executable
+        try:
+            ver = subprocess.run(
+                [interpreter_bin, "--version"], capture_output=True, text=True, timeout=10
+            )
+            interpreter = (ver.stdout or ver.stderr).strip() or "python"
+        except (subprocess.SubprocessError, OSError):
+            interpreter = "python"
+
+    if not interpreter_bin:
+        missing.append("python")
+
+    # pytest: проверяем через -c "import pytest"
+    pytest_available = False
+    if interpreter_bin:
+        try:
+            r = subprocess.run(
+                [interpreter_bin, "-c", "import pytest; print(pytest.__version__)"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if r.returncode == 0:
+                pytest_available = True
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+    if not pytest_available:
+        missing.append("pytest")
+
+    # проект директория существует?
+    if not os.path.isdir(project_dir):
+        missing.append("project_dir")
+
+    if missing:
+        status = "missing" if len(missing) >= 2 and "python" in missing else "partial"
+        if not interpreter_bin:
+            status = "missing"
+    else:
+        status = "ready"
+
+    return {
+        "status": status,
+        "interpreter": interpreter,
+        "working_dir": os.path.abspath(project_dir),
+        "missing": missing or None,
+        "_interpreter_bin": interpreter_bin,  # внутреннее, убирается перед выводом
+    }
+
+
+def check_java_env(project_dir: str) -> dict:
+    missing = []
+    interpreter = None
+
+    # java
+    java_bin = shutil.which("java")
+    if java_bin:
+        try:
+            ver = subprocess.run([java_bin, "-version"], capture_output=True, text=True, timeout=10)
+            interpreter = (ver.stderr or ver.stdout).strip().splitlines()[0] if (ver.stderr or ver.stdout) else "java"
+        except (subprocess.SubprocessError, OSError):
+            interpreter = "java"
+    else:
+        missing.append("java")
+
+    # maven или gradle
+    runner = None
+    if shutil.which("mvn"):
+        runner = "maven"
+    elif shutil.which("gradle"):
+        runner = "gradle"
+    else:
+        # обёртки проекта
+        if os.path.isfile(os.path.join(project_dir, "mvnw")):
+            runner = "maven"
+        elif os.path.isfile(os.path.join(project_dir, "gradlew")):
+            runner = "gradle"
+        else:
+            missing.append("maven/gradle")
+
+    if not os.path.isdir(project_dir):
+        missing.append("project_dir")
+
+    status = "ready" if not missing else ("missing" if not java_bin else "partial")
+    return {
+        "status": status,
+        "interpreter": interpreter,
+        "working_dir": os.path.abspath(project_dir),
+        "missing": missing or None,
+        "_runner": runner,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Запуск раннеров и парсинг вывода
+# ---------------------------------------------------------------------------
+
+def run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
+    """Запускает процесс, возвращает (exit_code, stdout, stderr)."""
+    try:
+        proc = subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True,
+            timeout=COMMAND_TIMEOUT,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", "TIMEOUT: превышен лимит выполнения " + str(COMMAND_TIMEOUT) + "с"
+    except FileNotFoundError:
+        return 127, "", "Команда не найдена: " + cmd[0]
+    except subprocess.SubprocessError as e:
+        return 1, "", str(e)
+
+
+def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    """
+    Парсит вывод pytest. Извлекает failed_methods[] и root_cause[].
+    pytest exit codes: 0 = PASS, 1 = tests failed, 2+ = collection/usage errors.
+    """
+    combined = stdout + "\n" + stderr
+    lines = combined.splitlines()
+    failed_methods = []
+
+    # Формат строки падения pytest (секция "short test summary info"):
+    #   FAILED tests/test_part.py::test_tk_01_should_return_200 - AssertionError: ...
+    #   ERROR tests/test_x.py::test_y - ImportError: ...
+    # pytest сам режет message в summary (до "..."), поэтому ДОПОЛНИТЕЛЬНО достаём
+    # полное сообщение из traceback: строки вида "E   assert 3.0 == 999".
+    fail_re = re.compile(r"^(FAILED|ERROR)\s+(\S+?)(?:\s+-\s+(.+))?$")
+
+    # Карта nodeid -> осмысленное сообщение из traceback (E-строки)
+    tb_messages = {}  # nodeid -> message
+    # Карта nodeid заголовка из "___ test_name ___" -> ближайшие E-строки
+    header_re = re.compile(r"^_+\s+(.+?)\s+_+$")
+    cur_nodeid = None
+    cur_emsg = []
+    for line in lines:
+        s = line.strip()
+        hm = header_re.match(s)
+        if hm:
+            # сохраним предыдущий
+            if cur_nodeid and cur_emsg:
+                tb_messages[cur_nodeid] = " ".join(cur_emsg)[:300]
+            cur_nodeid = hm.group(1).split("/")[-1]  # имя функции как nodeid-ключ
+            cur_emsg = []
+            continue
+        em = re.match(r"^E\s+(.+)$", s)
+        if em and cur_nodeid is not None:
+            cur_emsg.append(em.group(1))
+    if cur_nodeid and cur_emsg:
+        tb_messages[cur_nodeid] = " ".join(cur_emsg)[:300]
+
+    for line in lines:
+        m = fail_re.match(line.strip())
+        if m:
+            kind_raw, nodeid, message = m.group(1), m.group(2), (m.group(3) or "")
+            kind = "assertion_failed" if kind_raw == "FAILED" else "error"
+            # предпочтём полное сообщение из traceback, если оно есть и не обрезано
+            func_name = nodeid.split("::")[-1] if "::" in nodeid else nodeid
+            full_msg = tb_messages.get(func_name) or message
+            if not full_msg:
+                full_msg = message
+            failed_methods.append({
+                "nodeid": nodeid,
+                "kind": kind,
+                "message": full_msg[:300],
+            })
+
+    # Сводка: парсим по отдельным якорям, чтобы не зависеть от порядка и warnings.
+    # Ищем итоговую строку вида "=== N passed, M failed, ... in X.Xs ==="
+    stats = {"total": None, "passed": 0, "failed": 0, "errors": 0, "skipped": 0, "duration_sec": None}
+    summary_line = None
+    for line in lines:
+        # итоговая строка всегда содержит "in X.Xs" И (passed|failed|error|no tests)
+        if " in " in line and ("passed" in line or "failed" in line or "error" in line or "no tests ran" in line) and line.strip().startswith("="):
+            summary_line = line
+            break
+    if summary_line:
+        for key, label in [("passed", r"(\d+)\s+passed"),
+                           ("failed", r"(\d+)\s+failed"),
+                           ("errors", r"(\d+)\s+errors?"),
+                           ("skipped", r"(\d+)\s+skipped")]:
+            mm = re.search(label, summary_line)
+            if mm:
+                stats[key] = int(mm.group(1))
+        dm = re.search(r"in\s+([\d.]+)s\b", summary_line)
+        if dm:
+            stats["duration_sec"] = float(dm.group(1))
+
+    if stats["passed"] or stats["failed"] or stats["errors"] or stats["skipped"]:
+        stats["total"] = (stats["passed"] + stats["failed"] + stats["errors"] + stats["skipped"])
+
+    # root_cause: группируем failed_methods по типу ошибки (без LLM)
+    root_cause = []
+    cause_re = re.compile(r"^(AssertionError|ImportError|ModuleNotFoundError|"
+                          r"AttributeError|KeyError|TypeError|ValueError|"
+                          r"FileNotFoundError|ConnectionError|TimeoutError|"
+                          r"Exception|Error)[:\s]")
+    # также ловим assert-строки вида "assert 3.0 == 999" как осмысленную причину
+    assert_re = re.compile(r"^assert\b")
+    seen_causes = set()
+    for fm in failed_methods:
+        msg = fm["message"]
+        cm = cause_re.search(msg)
+        if cm:
+            cause_key = msg[:120]
+        elif assert_re.match(msg):
+            cause_key = "AssertionError: " + msg[:100]
+        elif msg:
+            cause_key = msg[:120]
+        else:
+            cause_key = "unknown"
+        if cause_key not in seen_causes:
+            seen_causes.add(cause_key)
+            root_cause.append(cause_key)
+
+    # collection errors (exit 2) — часто отдельный блок "ERROR collecting ..."
+    if exit_code == 2 and not failed_methods:
+        coll_re = re.compile(r"^ERROR collecting\s+(\S+)\s+(.+)")
+        for line in combined.splitlines():
+            m = coll_re.match(line.strip())
+            if m:
+                failed_methods.append({
+                    "nodeid": m.group(1),
+                    "kind": "collection_error",
+                    "message": m.group(2)[:300],
+                })
+        if failed_methods:
+            root_cause.append("collection_error: " + failed_methods[0]["message"][:120])
+
+    return {
+        "failed_methods": failed_methods,
+        "root_cause": root_cause,
+        "stats": stats,
+    }
+
+
+def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[str],
+                      extra_args: Optional[list]) -> dict:
+    """Запускает pytest, возвращает блок результата."""
+    cmd = [env_bin, "-m", "pytest", "-v", "--tb=short", "-rA"]
+    if pytest_target:
+        cmd.append(pytest_target)
+    if extra_args:
+        cmd.extend(extra_args)
+
+    exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
+    parsed = parse_pytest_output(stdout, stderr, exit_code)
+
+    if exit_code == 0:
+        verdict = "PASS"
+    elif exit_code == 1:
+        verdict = "FAIL"
+    else:
+        # exit 2 (collection error) и прочие — это FAIL, тесты не прошли
+        verdict = "FAIL"
+
+    return {
+        "verdict": verdict,
+        "target": {
+            "language": "python",
+            "framework": "pytest",
+            "runner": "pytest",
+            "command": " ".join(cmd),
+        },
+        "exit_code": exit_code,
+        "stats": parsed["stats"],
+        "failed_methods": parsed["failed_methods"],
+        "root_cause": parsed["root_cause"],
+        "raw_output_excerpt": _excerpt(stdout + "\n" + stderr),
+    }
+
+
+def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
+    """Запускает Maven/Gradle test."""
+    if runner == "maven":
+        cmd = ["mvn", "test"] + (extra_args or [])
+    elif runner == "gradle":
+        cmd = ["gradle", "test"] + (extra_args or [])
+    else:
+        cmd = ["mvn", "test"]
+
+    exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
+    combined = stdout + "\n" + stderr
+
+    # Maven Surefire: "Tests run: 3, Failures: 1, Errors: 0, Skipped: 0"
+    stats = {"total": None, "passed": 0, "failed": 0, "errors": 0, "skipped": 0, "duration_sec": None}
+    m = re.search(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)", combined)
+    if m:
+        total = int(m.group(1))
+        stats.update({
+            "total": total,
+            "failed": int(m.group(2)),
+            "errors": int(m.group(3)),
+            "skipped": int(m.group(4)),
+            "passed": total - int(m.group(2)) - int(m.group(3)) - int(m.group(4)),
+        })
+
+    failed_methods = []
+    fail_re = re.compile(r"(Test\s+[\w.]+|<<<\s*(FAILURE|ERROR)!)")
+    for line in combined.splitlines():
+        if "FAILURE!" in line or "ERROR!" in line:
+            failed_methods.append({
+                "nodeid": line.strip()[:300],
+                "kind": "error",
+                "message": line.strip()[:300],
+            })
+
+    verdict = "PASS" if exit_code == 0 else "FAIL"
+    root_cause = list({fm["message"][:80] for fm in failed_methods})[:10] if failed_methods else []
+
+    return {
+        "verdict": verdict,
+        "target": {
+            "language": "java",
+            "framework": "junit5",
+            "runner": runner,
+            "command": " ".join(cmd),
+        },
+        "exit_code": exit_code,
+        "stats": stats,
+        "failed_methods": failed_methods,
+        "root_cause": root_cause,
+        "raw_output_excerpt": _excerpt(combined),
+    }
+
+
+def _excerpt(text: str) -> str:
+    """Сжимает вывод до MAX_OUTPUT_EXCERPT строк, сохраняя хвост (там traceback)."""
+    lines = text.splitlines()
+    if len(lines) <= MAX_OUTPUT_EXCERPT:
+        return text.strip()
+    head = "\n".join(lines[:5])
+    tail = "\n".join(lines[-MAX_OUTPUT_EXCERPT + 5:])
+    return head + "\n...\n[усечено {} строк]\n...\n".format(len(lines) - MAX_OUTPUT_EXCERPT) + tail
+
+
+# ---------------------------------------------------------------------------
+# Сборка финального отчёта по контракту
+# ---------------------------------------------------------------------------
+
+def build_report(verdict: str, target: dict, environment: dict,
+                 stats: Optional[dict], failed_methods: list, root_cause: list,
+                 raw_output_excerpt: Optional[str], exit_code: Optional[int]) -> dict:
+    """Собирает отчёт строго по schemas/run-tests-output.schema.json."""
+    # убираем внутреннее поле
+    env_out = {k: v for k, v in environment.items() if not k.startswith("_")}
+    return {
+        "verdict": verdict,
+        "target": target,
+        "environment": env_out,
+        "stats": stats,
+        "failed_methods": failed_methods or None,
+        "root_cause": root_cause or None,
+        "raw_output_excerpt": raw_output_excerpt,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "exit_code": exit_code,
+    }
+
+
+def build_not_runnable(environment: dict, language: str, reason: str) -> dict:
+    """Собирает честный NOT_RUNNABLE-отчёт."""
+    return build_report(
+        verdict="NOT_RUNNABLE",
+        target={
+            "language": language,
+            "framework": environment.get("_framework") or "unknown",
+            "runner": "not_applicable",
+            "command": None,
+        },
+        environment=environment,
+        stats=None,
+        failed_methods=None,
+        root_cause=[reason] if reason else None,
+        raw_output_excerpt=None,
+        exit_code=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Точка входа
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Детерминированный оракул исполнения автотестов (Опора 1). "
+                    "Выводит JSON-вердикт PASS|FAIL|NOT_RUNNABLE по схеме schemas/run-tests-output.schema.json."
+    )
+    parser.add_argument("--project", help="Путь к корню целевого проекта (с исходниками/тестами)")
+    parser.add_argument("--skillsrc", help="Путь к .skillsrc — стек определяется из манифеста")
+    parser.add_argument("--language", choices=["python", "java", "go", "typescript", "kotlin"],
+                        help="Язык тестов (если не указан — берётся из .skillsrc)")
+    parser.add_argument("--pytest-target", help="Python: конкретный файл/директория pytest "
+                                                 "(по умолчанию — автообнаружение pytest'ом)")
+    parser.add_argument("--pytest-args", help="Дополнительные аргументы pytest (через запятую)")
+    args = parser.parse_args()
+
+    # --- Определяем язык/проект ---
+    project_dir = args.project or os.getcwd()
+    skillsrc_path = args.skillsrc or os.path.join(project_dir, ".skillsrc")
+    language = args.language
+
+    if not language:
+        detected = detect_language_from_skillsrc(skillsrc_path)
+        if detected and detected.get("language"):
+            language = detected["language"]
+        else:
+            # не смогли определить — честный NOT_RUNNABLE
+            env = {
+                "status": "missing",
+                "interpreter": None,
+                "working_dir": os.path.abspath(project_dir),
+                "missing": ["language_detection"],
+            }
+            report = build_not_runnable(
+                env, "unknown",
+                "Не удалось определить язык проекта: .skillsrc не найден или без project.language. "
+                "Укажите --language явно или положите .skillsrc.",
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0  # NOT_RUNNABLE — это честный ответ, не ошибка раннера
+
+    # --- Проверяем окружение под язык ---
+    if language == "python":
+        env = check_python_env(project_dir)
+        env["_framework"] = "pytest"
+        if env["status"] == "missing" or not env.get("_interpreter_bin"):
+            report = build_not_runnable(
+                env, "python",
+                "Окружение python недоступно: " + ", ".join(env["missing"] or ["unknown"]),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        if env["status"] == "partial":
+            # pytest есть, но, например, проекта нет — всё равно NOT_RUNNABLE
+            report = build_not_runnable(
+                env, "python",
+                "Окружение python частично доступно, не хватает: " + ", ".join(env["missing"]),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        # --- Запуск pytest ---
+        extra = args.pytest_args.split(",") if args.pytest_args else None
+        result = run_python_pytest(project_dir, env["_interpreter_bin"], args.pytest_target, extra)
+        report = build_report(
+            verdict=result["verdict"],
+            target=result["target"],
+            environment=env,
+            stats=result["stats"],
+            failed_methods=result["failed_methods"],
+            root_cause=result["root_cause"],
+            raw_output_excerpt=result["raw_output_excerpt"],
+            exit_code=result["exit_code"],
+        )
+
+    elif language == "java":
+        env = check_java_env(project_dir)
+        env["_framework"] = "junit5"
+        if env["status"] != "ready":
+            report = build_not_runnable(
+                env, "java",
+                "Окружение java недоступно: " + ", ".join(env["missing"] or ["unknown"]),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        result = run_java(project_dir, env.get("_runner") or "maven", None)
+        report = build_report(
+            verdict=result["verdict"],
+            target=result["target"],
+            environment=env,
+            stats=result["stats"],
+            failed_methods=result["failed_methods"],
+            root_cause=result["root_cause"],
+            raw_output_excerpt=result["raw_output_excerpt"],
+            exit_code=result["exit_code"],
+        )
+
+    else:
+        # go / typescript / kotlin — заглушка: честный NOT_RUNNABLE, пока не реализован раннер
+        env = {
+            "status": "missing",
+            "interpreter": None,
+            "working_dir": os.path.abspath(project_dir),
+            "missing": ["runner_not_implemented:" + language],
+            "_framework": "unknown",
+        }
+        report = build_not_runnable(
+            env, language,
+            "Раннер для {} ещё не реализован в tools/run_tests.py. "
+            "Это честный NOT_RUNNABLE — не ПРИНЯТО.".format(language),
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+    # exit codes для CI: 0=PASS/NOT_RUNNABLE, 1=FAIL
+    if report["verdict"] == "FAIL":
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:  # noqa: BLE001 — раннер не должен падать молча
+        # Ошибка самого раннера — отдаём структурированный отчёт, а не трейс
+        error_report = {
+            "verdict": "NOT_RUNNABLE",
+            "target": {"language": "unknown", "framework": "unknown", "runner": "not_applicable"},
+            "environment": {
+                "status": "missing",
+                "interpreter": None,
+                "working_dir": os.getcwd(),
+                "missing": ["runner_internal_error"],
+            },
+            "stats": None,
+            "failed_methods": None,
+            "root_cause": ["runner_internal_error: " + str(e)[:200]],
+            "raw_output_excerpt": None,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+            "exit_code": None,
+        }
+        print(json.dumps(error_report, ensure_ascii=False, indent=2))
+        sys.exit(2)
