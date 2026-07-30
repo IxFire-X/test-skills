@@ -131,32 +131,48 @@ def check_python_env(project_dir: str) -> dict:
     interpreter = None
     interpreter_bin = None
 
-    # Сначала ищем интерпретатор на PATH...
-    for cand in PYTHON_STACK["interpreters"]:
-        path = shutil.which(cand)
-        if path:
-            interpreter_bin = path
-            try:
-                ver = subprocess.run(
-                    [path, "--version"], capture_output=True, text=True, timeout=10
-                )
-                interpreter = (ver.stdout or ver.stderr).strip() or cand
-            except (subprocess.SubprocessError, OSError):
-                interpreter = cand
-            break
+    def _probe(binary: str) -> Optional[str]:
+        """Возвращает версию интерпретатора, если binary реально запускается.
 
-    # ...но если PATH пустой для python — используем тот интерпретатор, которым
-    # запущен сам раннер (sys.executable). Это НОРМАЛЬНО: раннер на Python,
-    # и текущий интерпретатор гарантированно доступен. Позволяет работать без PATH.
-    if not interpreter_bin and sys.executable and sys.executable.lower().endswith((".exe",)):
-        interpreter_bin = sys.executable
+        Store-заглушка Windows (WindowsApps\\python3.exe) возвращает rc=9009 и
+        текст 'Python' — отсеиваем её: считаем интерпретатор рабочим только при
+        rc==0 и наличии цифры версии в выводе.
+        """
         try:
             ver = subprocess.run(
-                [interpreter_bin, "--version"], capture_output=True, text=True, timeout=10
+                [binary, "--version"], capture_output=True, text=True, timeout=10
             )
-            interpreter = (ver.stdout or ver.stderr).strip() or "python"
         except (subprocess.SubprocessError, OSError):
-            interpreter = "python"
+            return None
+        if ver.returncode != 0:
+            return None
+        out = (ver.stdout or ver.stderr or "").strip()
+        # настоящий интерпретатор печатает 'Python X.Y.Z' (с цифрой версии)
+        if not re.search(r"\d+\.\d+", out):
+            return None
+        return out or binary
+
+    # 1) Приоритет — интерпретатор, которым запущен сам раннер (sys.executable).
+    #    Он гарантированно рабочий и не является Store-заглушкой. Это спасает от
+    #    ситуации, когда на PATH первой стоит мёртвая WindowsApps\\python3.exe.
+    # 2) Затем — интерпретаторы с PATH, но каждый ВАЛИДИРУЕМ реальным запуском.
+    candidates = [sys.executable] + [
+        p for p in (shutil.which(c) for c in PYTHON_STACK["interpreters"]) if p
+    ]
+    seen = set()
+    for binary in candidates:
+        if not binary:
+            continue
+        norm = os.path.normcase(os.path.abspath(binary))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        version = _probe(binary)
+        if version:
+            interpreter_bin = binary
+            interpreter = version
+            break
+
 
     if not interpreter_bin:
         missing.append("python")
@@ -335,8 +351,17 @@ def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
         if dm:
             stats["duration_sec"] = float(dm.group(1))
 
-    if stats["passed"] or stats["failed"] or stats["errors"] or stats["skipped"]:
+    # При collection error pytest сообщает число найденных items отдельно:
+    # "collected 12 items / 1 error". В summary обычно остаётся только
+    # "1 error", поэтому total иначе был бы занижен до 1.
+    collected_match = re.search(r"collected\s+(\d+)\s+items?", combined)
+    if collected_match:
+        stats["total"] = int(collected_match.group(1))
+    elif stats["passed"] or stats["failed"] or stats["errors"] or stats["skipped"]:
         stats["total"] = (stats["passed"] + stats["failed"] + stats["errors"] + stats["skipped"])
+    elif exit_code == 5:
+        # pytest exit 5: коллекция прошла, но не найдено ни одного теста.
+        stats["total"] = 0
 
     # root_cause: группируем failed_methods по типу ошибки (без LLM)
     root_cause = []
@@ -362,19 +387,43 @@ def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
             seen_causes.add(cause_key)
             root_cause.append(cause_key)
 
-    # collection errors (exit 2) — часто отдельный блок "ERROR collecting ..."
-    if exit_code == 2 and not failed_methods:
-        coll_re = re.compile(r"^ERROR collecting\s+(\S+)\s+(.+)")
-        for line in combined.splitlines():
-            m = coll_re.match(line.strip())
-            if m:
-                failed_methods.append({
-                    "nodeid": m.group(1),
-                    "kind": "collection_error",
-                    "message": m.group(2)[:300],
-                })
+    # Collection errors (pytest exit 2) часто попадают в summary как
+    # "ERROR test_file.py" без текста. Дополняем их реальной E-строкой из
+    # traceback, а не оставляем бесполезную причину "unknown".
+    if exit_code == 2:
+        traceback_errors = [
+            line.strip()[2:].strip() for line in lines
+            if re.match(r"^E\s+\S", line.strip())
+        ]
+        for index, failed in enumerate(failed_methods):
+            if failed["kind"] == "error" and not failed["message"]:
+                failed["kind"] = "collection_error"
+                failed["message"] = (
+                    traceback_errors[min(index, len(traceback_errors) - 1)][:300]
+                    if traceback_errors else "collection_error"
+                )
+
+        if not failed_methods:
+            coll_re = re.compile(r"^ERROR collecting\s+(\S+)(?:\s+(.+))?$")
+            for line in lines:
+                m = coll_re.match(line.strip())
+                if m:
+                    failed_methods.append({
+                        "nodeid": m.group(1),
+                        "kind": "collection_error",
+                        "message": (m.group(2) or "collection_error")[:300],
+                    })
+
         if failed_methods:
-            root_cause.append("collection_error: " + failed_methods[0]["message"][:120])
+            collection_causes = []
+            for failed in failed_methods:
+                if failed["kind"] == "collection_error":
+                    cause = "collection_error: " + failed["message"][:120]
+                    if cause not in collection_causes:
+                        collection_causes.append(cause)
+            if collection_causes:
+                root_cause = [cause for cause in root_cause if cause != "unknown"]
+                root_cause.extend(cause for cause in collection_causes if cause not in root_cause)
 
     return {
         "failed_methods": failed_methods,
@@ -397,8 +446,16 @@ def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[st
 
     if exit_code == 0:
         verdict = "PASS"
-    elif exit_code == 1:
+    elif exit_code == 5:
+        # pytest exit 5 = "no tests collected". Это НЕ то же, что упавшие тесты:
+        # тестов физически нет, поэтому подтверждать их прохождение нечем.
+        # Честный FAIL с явной причиной — не PASS, но и не «тесты упали».
         verdict = "FAIL"
+        if not parsed["root_cause"]:
+            parsed["root_cause"] = [
+                "no_tests_collected: pytest не нашёл ни одного теста "
+                "(проверьте pytest-target / именование test_*.py)"
+            ]
     else:
         # exit 2 (collection error) и прочие — это FAIL, тесты не прошли
         verdict = "FAIL"
