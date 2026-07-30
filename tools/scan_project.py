@@ -1,0 +1,814 @@
+#!/usr/bin/env python3
+"""
+scan_project.py — детерминированный сканер стека проекта (Опора 2, ROADMAP Шаг 4).
+
+Единственный источник правды о том, КАКОЙ стек у проекта и КАКОЙ код релевантен
+для генерации автотестов. В отличие от LLM-угадывания стека (которое может
+галлюцинировать «spring-boot» для python-проекта), этот скрипт определяет стек
+по ФАКТИЧЕСКИМ манифестам сборки и читает только релевантные файлы.
+
+Принципы (наследуются от run_tests.py):
+  - Стек определяется по манифестам, не по расширениям файлов и не по LLM.
+  - НЕ читается весь проект. Только: target-файл + models/serializers/urls/
+    conftest того же модуля.
+  - Зависимости: только стандартная библиотека Python. Ничего ставить не нужно.
+  - Честность > удобства. Если манифестов нет — status:error, а не молчаливый
+    успех с пустым стеком. Именно это не даёт остальным инструментам строить
+    тесты на фантазиях.
+  - Вывод: JSON по контракту schemas/scan-project-output.schema.json в stdout.
+
+Что делает (по порядку):
+  1. Парсер аргументов (--project, --target, --output).
+  2. Определение стека по манифестам сборки.
+  3. Извлечение релевантного кода (target + сопутствующие модули).
+  4. Генерация <source_code_and_diff>.
+  5. Генерация заготовки <analytics_documentation>.
+  6. Создание/обновление .skillsrc внутри --project.
+  7. JSON-отчёт.
+
+Использование:
+    python tools/scan_project.py --project InvenTree-master \
+        --target src/backend/InvenTree/part/api.py
+    python tools/scan_project.py --project /path/to/java-project \
+        --target src/main/java/com/example/Foo.java \
+        --output docs/to_do/analytics-foo.md
+
+Exit codes (для встраивания в CI):
+    0 — success ИЛИ partial (отчёт честный)
+    1 — error (манифестов нет / target не существует)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Конфигурация распознавания манифестов
+# ---------------------------------------------------------------------------
+
+# Имена файлов-манифестов сборки (ищутся рекурсивно относительно --project).
+# Порядок важен: для одного проекта может быть несколько манифестов; выбираем
+# «ближайший» к target либо первый найденный.
+PYTHON_MANIFESTS = [
+    "pyproject.toml",          # современный стандарт (PEP 621)
+    "requirements.txt",        # классика pip
+    "requirements-dev.txt",    # dev-зависимости (часто тут pytest)
+    "setup.py",                # legacy
+    "Pipfile",                 # pipenv
+]
+JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
+JS_MANIFESTS = ["package.json"]
+GO_MANIFESTS = ["go.mod"]
+
+# Маркеры фреймворка приложения в манифестах зависимостей.
+# (подстрока в нижнем регистре → framework). Порядок = приоритет.
+PYTHON_FRAMEWORK_MARKERS = [
+    ("django", "django"),                    # Django + DRF (djangorestframework)
+    ("rest_framework", "django"),            # DRF alias
+    ("djangorestframework", "django"),
+    ("fastapi", "fastapi"),
+    ("flask", "flask"),
+    ("aiohttp", "aiohttp"),
+    ("tornado", "tornado"),
+]
+JAVA_FRAMEWORK_MARKERS = [
+    ("spring-boot-starter", "spring-boot"),
+    ("org.springframework.boot", "spring-boot"),
+    ("quarkus", "quarkus"),
+    ("micronaut", "micronaut"),
+]
+JS_FRAMEWORK_MARKERS = [
+    ("\"express\"", "express"),
+    ("\"next\"", "nextjs"),
+    ("\"nuxt\"", "nuxt"),
+    ("\"@nestjs/core\"", "nestjs"),
+    ("\"fastify\"", "fastify"),
+]
+GO_FRAMEWORK_MARKERS = [
+    ("github.com/gin-gonic/gin", "gin"),
+    ("github.com/labstack/echo", "echo"),
+    ("github.com/gofiber/fiber", "fiber"),
+    ("github.com/gorilla/mux", "gorilla-mux"),
+]
+
+# Маркеры тестового фреймворка (в dev-зависимостях).
+PYTHON_TEST_MARKERS = [
+    ("pytest", "pytest"),
+    ("nose", "nose"),
+]
+JAVA_TEST_MARKERS = [
+    ("junit-jupiter", "junit5"),
+    ("junit:junit", "junit4"),
+    ("org.testng", "testng"),
+]
+JS_TEST_MARKERS = [
+    ("\"jest\"", "jest"),
+    ("\"mocha\"", "mocha"),
+    ("\"vitest\"", "vitest"),
+]
+GO_TEST_MARKERS = []  # стандартный testing + go test — один вариант "go-testing"
+
+# Допустимые значения build_tool по skillsrc.schema.json (для записи в .skillsrc).
+# uv/conda и пр. маппятся в ближайшее валидное.
+BUILD_TOOL_NORMALIZE = {
+    "uv": "pip",
+    "conda": "pip",
+    "pipenv": "pip",
+    "setuptools": "pip",
+    "kotlin": "gradle",
+}
+
+
+# ---------------------------------------------------------------------------
+# 1. Парсер аргументов
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=("Детерминированный сканер стека проекта (Опора 2). "
+                     "Определяет стек по манифестам сборки, извлекает релевантный код, "
+                     "генерирует <source_code_and_diff> + <analytics_documentation> и "
+                     "обновляет .skillsrc. Выводит JSON по контракту "
+                     "schemas/scan-project-output.schema.json."),
+    )
+    parser.add_argument("--project", required=True,
+                        help="Путь к корню целевого проекта (с манифестами сборки)")
+    parser.add_argument("--target", required=True,
+                        help="Целевой модуль/файл (например, part/api.py)")
+    parser.add_argument("--output",
+                        help="Куда записать результат (по умолчанию — stdout)")
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# 2. Определение стека по манифестам
+# ---------------------------------------------------------------------------
+
+def _find_manifests(project_dir: str, names: list[str]) -> list[str]:
+    """Рекурсивно ищет файлы с заданными именами, возвращает относительные пути."""
+    found = []
+    for root, _dirs, files in os.walk(project_dir):
+        # пропускаем тяжёлые/нерелевантные деревья
+        parts = os.path.relpath(root, project_dir).split(os.sep)
+        if any(p in {".git", "__pycache__", "node_modules", ".venv", "venv",
+                     "target", "build", "dist", ".idea", ".tools"}
+               for p in parts):
+            continue
+        for fn in files:
+            if fn in names:
+                rel = os.path.relpath(os.path.join(root, fn), project_dir)
+                found.append(rel)
+    return found
+
+
+def _read_text(path: str) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _extract_dep_names(text: str) -> set[str]:
+    """
+    Извлекает множество имён пакетов из requirements-файла/setup.py.
+    Формат: 'Django>=4.2' → 'django', 'djangorestframework==3.14' → 'djangorestframework'.
+    """
+    names: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        # обрезаем git-ссылки, -e, markers
+        line = re.split(r"[;@\s]", line, 1)[0]
+        m = re.match(r"^([A-Za-z0-9_.-]+)", line)
+        if m:
+            names.add(m.group(1).lower())
+    return names
+
+
+def _match_markers(names_or_text: str, markers: list[tuple[str, str]]) -> Optional[str]:
+    """Возвращает framework по первому совпавшему маркеру (по подстроке)."""
+    low = names_or_text.lower()
+    for needle, framework in markers:
+        if needle in low:
+            return framework
+    return None
+
+
+def detect_stack(project_dir: str, target_rel: str) -> dict:
+    """
+    Определяет стек по манифестам сборки.
+
+    Возвращает dict: {status, stack, errors, warnings}.
+    stack = {language, framework, test_framework, build_tool, detection}.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # --- Python -----------------------------------------------------------
+    py_manifests = _find_manifests(project_dir, PYTHON_MANIFESTS)
+    if py_manifests:
+        # выбираем «ближайший» к target манифест runtime-зависимостей
+        runtime_candidates = [m for m in py_manifests
+                              if os.path.basename(m) in {"requirements.txt", "pyproject.toml", "setup.py", "Pipfile"}]
+        dev_candidates = [m for m in py_manifests
+                          if "dev" in os.path.basename(m).lower()]
+        runtime_manifest = _pick_nearest(runtime_candidates, target_rel) or (runtime_candidates[0] if runtime_candidates else None)
+        dev_manifest = _pick_nearest(dev_candidates, target_rel) or (dev_candidates[0] if dev_candidates else None)
+
+        framework = None
+        test_framework = None
+        evidence = []
+
+        if runtime_manifest:
+            text = _read_text(os.path.join(project_dir, runtime_manifest)) or ""
+            names = _extract_dep_names(text)
+            joined = " ".join(sorted(names))
+            framework = _match_markers(joined, PYTHON_FRAMEWORK_MARKERS)
+            evidence.append(f"runtime deps из {runtime_manifest.replace(os.sep, '/')} ({len(names)} пакетов)")
+
+        if dev_manifest:
+            text = _read_text(os.path.join(project_dir, dev_manifest)) or ""
+            names = _extract_dep_names(text)
+            joined = " ".join(sorted(names))
+            tf = _match_markers(joined, PYTHON_TEST_MARKERS)
+            if tf:
+                test_framework = tf
+                evidence.append(f"test deps из {dev_manifest.replace(os.sep, '/')}")
+            # фреймворк может жить в dev-зависимостях тоже
+            if not framework:
+                framework = _match_markers(joined, PYTHON_FRAMEWORK_MARKERS)
+
+        build_tool = _python_build_tool(runtime_manifest, py_manifests)
+
+        stack = {
+            "language": "python",
+            "framework": framework,
+            "test_framework": test_framework,
+            "build_tool": build_tool,
+            "detection": {
+                "manifest": runtime_manifest,
+                "evidence": evidence,
+            },
+        }
+        status = "success" if (framework and test_framework) else "partial"
+        if not framework:
+            warnings.append("Фреймворк приложения не определён по манифестам (python найден).")
+        if not test_framework:
+            warnings.append("Тестовый фреймворк не найден в dev-зависимостях.")
+        return {"status": status, "stack": stack, "errors": errors, "warnings": warnings}
+
+    # --- Java -------------------------------------------------------------
+    java_manifests = _find_manifests(project_dir, JAVA_MANIFESTS)
+    if java_manifests:
+        manifest = _pick_nearest(java_manifests, target_rel) or java_manifests[0]
+        text = _read_text(os.path.join(project_dir, manifest)) or ""
+        framework = _match_markers(text, JAVA_FRAMEWORK_MARKERS)
+        test_framework = _match_markers(text, JAVA_TEST_MARKERS) or "junit5"
+        build_tool = "maven" if manifest.endswith("pom.xml") else "gradle"
+        stack = {
+            "language": "java",
+            "framework": framework,
+            "test_framework": test_framework,
+            "build_tool": build_tool,
+            "detection": {
+                "manifest": manifest,
+                "evidence": [f"сборочный манифест {manifest}"],
+            },
+        }
+        status = "success" if framework else "partial"
+        if not framework:
+            warnings.append("Java-фреймворк не определён (spring-boot/quarkus/... не найден в манифесте).")
+        return {"status": status, "stack": stack, "errors": errors, "warnings": warnings}
+
+    # --- JavaScript / TypeScript -----------------------------------------
+    js_manifests = _find_manifests(project_dir, JS_MANIFESTS)
+    if js_manifests:
+        manifest = _pick_nearest(js_manifests, target_rel) or js_manifests[0]
+        text = _read_text(os.path.join(project_dir, manifest)) or ""
+        # package.json — JSON; определяем язык по наличию TS-маркеров
+        is_ts = ("typescript" in text.lower() or ".ts" in text.lower())
+        framework = _match_markers(text, JS_FRAMEWORK_MARKERS)
+        test_framework = _match_markers(text, JS_TEST_MARKERS) or "jest"
+        stack = {
+            "language": "typescript" if is_ts else "typescript",  # typescript как umbrella
+            "framework": framework,
+            "test_framework": test_framework,
+            "build_tool": "npm",
+            "detection": {
+                "manifest": manifest,
+                "evidence": [f"package.json: {manifest}"],
+            },
+        }
+        status = "success" if framework else "partial"
+        if not framework:
+            warnings.append("JS/TS-фреймворк не определён (express/next/nest/...).")
+        return {"status": status, "stack": stack, "errors": errors, "warnings": warnings}
+
+    # --- Go ---------------------------------------------------------------
+    go_manifests = _find_manifests(project_dir, GO_MANIFESTS)
+    if go_manifests:
+        manifest = _pick_nearest(go_manifests, target_rel) or go_manifests[0]
+        text = _read_text(os.path.join(project_dir, manifest)) or ""
+        framework = _match_markers(text, GO_FRAMEWORK_MARKERS)
+        stack = {
+            "language": "go",
+            "framework": framework,
+            "test_framework": "go-testing",
+            "build_tool": "go-mod",
+            "detection": {
+                "manifest": manifest,
+                "evidence": [f"go.mod: {manifest}"],
+            },
+        }
+        status = "success" if framework else "partial"
+        if not framework:
+            warnings.append("Go-фреймворк не определён (gin/echo/...); используется net/http.")
+        return {"status": status, "stack": stack, "errors": errors, "warnings": warnings}
+
+    # --- Ничего не найдено ------------------------------------------------
+    errors.append("Манифесты сборки не найдены (нет pyproject/requirements/pom.xml/package.json/go.mod).")
+    return {
+        "status": "error",
+        "stack": {"language": "unknown", "detection": {"manifest": None, "evidence": []}},
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def _pick_nearest(candidates: list[str], target_rel: str) -> Optional[str]:
+    """Выбирает манифест с наибольшим совпадением пути с target (общий родитель)."""
+    if not candidates:
+        return None
+    target_parts = target_rel.replace("\\", "/").split("/")
+    best, best_score = None, -1
+    for c in candidates:
+        cparts = c.replace("\\", "/").split("/")
+        # длина общего префикса директорий
+        score = 0
+        for a, b in zip(cparts[:-1], target_parts[:-1]):
+            if a == b:
+                score += 1
+            else:
+                break
+        if score > best_score:
+            best, best_score = c, score
+    return best
+
+
+def _python_build_tool(runtime_manifest: Optional[str], all_manifests: list[str]) -> str:
+    """Определяет build_tool для python с нормализацией под enum skillsrc."""
+    names = {os.path.basename(m) for m in all_manifests}
+    if "pyproject.toml" in names:
+        # poetry/pdm/uv объявляют себя в pyproject; без парсинга [tool.*] считаем pip
+        return "pip"
+    if "Pipfile" in names:
+        return "pip"
+    return "pip"
+
+
+# ---------------------------------------------------------------------------
+# 3. Извлечение релевантного кода
+# ---------------------------------------------------------------------------
+
+# Сопутствующие модули, которые тащим рядом с target (по языку).
+COMPANION_FILES = {
+    "python": ["models.py", "serializers.py", "urls.py", "conftest.py"],
+    "java": [],     # в java компаньоны определяются по пакету/импортам — отдельная задача
+    "typescript": [],
+    "go": [],
+}
+
+
+def resolve_target(project_dir: str, target_rel: str) -> tuple[Optional[str], list[str]]:
+    """
+    Разрешает target в реальный путь и возвращает (abs_path, warnings).
+    Ищет как по прямому пути, так и рекурсивно по имени, если прямой не найден.
+    """
+    warnings: list[str] = []
+    # прямой путь
+    direct = os.path.join(project_dir, target_rel)
+    if os.path.isfile(direct):
+        return direct, warnings
+    # рекурсивно по basename (target мог быть задан коротко, напр. 'part/api.py')
+    basename = os.path.basename(target_rel)
+    matches = _find_manifests(project_dir, [basename])  # переиспользуем поиск по имени
+    if matches:
+        warnings.append(f"target задан как '{target_rel}', найден по имени: {matches[0]}")
+        return os.path.join(project_dir, matches[0]), warnings
+    warnings.append(f"target '{target_rel}' не найден в проекте.")
+    return None, warnings
+
+
+def extract_companions(project_dir: str, target_abs: str, language: str) -> list[str]:
+    """
+    Находит сопутствующие модули того же пакета/директории.
+    Для python: models.py / serializers.py / urls.py / conftest.py рядом с target.
+    """
+    companions: list[str] = []
+    if language not in COMPANION_FILES or not COMPANION_FILES[language]:
+        return companions
+
+    target_dir = os.path.dirname(target_abs)
+    # Также поднимаемся на уровень пакета (target может лежать в подpkg)
+    candidate_dirs = [target_dir]
+    parent = os.path.dirname(target_dir)
+    if parent != target_dir:
+        candidate_dirs.append(parent)
+
+    seen = set()
+    for d in candidate_dirs:
+        for fn in COMPANION_FILES[language]:
+            cand = os.path.join(d, fn)
+            if os.path.isfile(cand):
+                rel = os.path.relpath(cand, project_dir).replace("\\", "/")
+                if rel not in seen:
+                    seen.add(rel)
+                    companions.append(rel)
+    return companions
+
+
+# ---------------------------------------------------------------------------
+# 4 & 5. Генерация XML-блоков
+# ---------------------------------------------------------------------------
+
+def _xml_escape(text: str) -> str:
+    return (text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;"))
+
+
+def render_source_block(project_dir: str, files_rel: list[str]) -> str:
+    """Генерирует <source_code_and_diff>...</source_code_and_diff>."""
+    lines = ["<source_code_and_diff>"]
+    for rel in files_rel:
+        abs_p = os.path.join(project_dir, rel)
+        content = _read_text(abs_p) or ""
+        lines.append(f'  <file path="{_xml_escape(rel)}">')
+        lines.append(_xml_escape(content))
+        lines.append("  </file>")
+    lines.append("</source_code_and_diff>")
+    return "\n".join(lines)
+
+
+def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Optional[str]) -> list[str]:
+    """
+    Грубая эвристика эндпоинтов для аналитики: ищет URL-паттерны и/или HTTP-методы
+    в urls.py / api.py / serializers. НЕ LLM — простые regex.
+    """
+    endpoints: list[str] = []
+    patterns = [
+        re.compile(r"""(?:path|url)\(\s*['"]([^'"]+)['"]"""),       # Django url conf
+        re.compile(r"""(?:GET|POST|PUT|PATCH|DELETE)\b.*?['"]([^'"]+)['"]""", re.I),
+        re.compile(r"""@(?:get|post|put|patch|delete|api_view)\s*\(\s*(?:.*?['"]([^'"]+)['"])?""", re.I),
+    ]
+    for rel in files_rel:
+        if os.path.basename(rel) not in {"urls.py", "api.py", "serializers.py", "urls.py"}:
+            continue
+        text = _read_text(os.path.join(project_dir, rel)) or ""
+        for pat in patterns:
+            for m in pat.finditer(text):
+                val = m.group(1)
+                if val and val not in endpoints:
+                    endpoints.append(val)
+        if len(endpoints) >= 40:
+            break
+    return endpoints[:40]
+
+
+def _extract_models(project_dir: str, files_rel: list[str], language: str) -> list[str]:
+    """Грубая эвристика моделей: class-имена из models.py (ORM)."""
+    models: list[str] = []
+    for rel in files_rel:
+        if os.path.basename(rel) != "models.py":
+            continue
+        text = _read_text(os.path.join(project_dir, rel)) or ""
+        if language == "python":
+            # class Foo(models.Model) / class Foo(models.ModelBase)
+            for m in re.finditer(r"^\s*class\s+(\w+)\s*\(\s*(?:[\w.]*Model[^,)]*)", text, re.M):
+                name = m.group(1)
+                if name not in models:
+                    models.append(name)
+        elif language == "java":
+            # @Entity class Foo
+            for m in re.finditer(r"(?:@Entity|@Table)[\s\S]{0,200}?class\s+(\w+)", text):
+                name = m.group(1)
+                if name not in models:
+                    models.append(name)
+        if len(models) >= 40:
+            break
+    return models[:40]
+
+
+def render_analytics_block(stack: dict, project_dir: str, files_rel: list[str],
+                           target_rel: str, warnings: list[str]) -> str:
+    """Генерирует <analytics_documentation>...</analytics_documentation>."""
+    module = _guess_module(target_rel)
+    endpoints = _extract_endpoints(project_dir, files_rel, stack.get("framework"))
+    models = _extract_models(project_dir, files_rel, stack.get("language", "unknown"))
+
+    lines = ["<analytics_documentation>"]
+    lines.append(f"  <module>{_xml_escape(module)}</module>")
+
+    lines.append("  <endpoints>")
+    for ep in endpoints:
+        lines.append(f"    <endpoint>{_xml_escape(ep)}</endpoint>")
+    if not endpoints:
+        lines.append("    <!-- эндпоинты не извлечены (urls.py/api.py отсутствуют или пусты) -->")
+    lines.append("  </endpoints>")
+
+    lines.append("  <models>")
+    for m in models:
+        lines.append(f"    <model>{_xml_escape(m)}</model>")
+    if not models:
+        lines.append("    <!-- модели не извлечены (models.py отсутствует или без ORM-классов) -->")
+    lines.append("  </models>")
+
+    lines.append("  <stack>")
+    lines.append(f"    <language>{_xml_escape(stack.get('language') or 'unknown')}</language>")
+    lines.append(f"    <framework>{_xml_escape(stack.get('framework') or 'unknown')}</framework>")
+    lines.append(f"    <test_framework>{_xml_escape(stack.get('test_framework') or 'unknown')}</test_framework>")
+    lines.append(f"    <build_tool>{_xml_escape(stack.get('build_tool') or 'unknown')}</build_tool>")
+    lines.append("  </stack>")
+
+    if warnings:
+        lines.append("  <warnings>")
+        for w in warnings:
+            lines.append(f"    <warning>{_xml_escape(w)}</warning>")
+        lines.append("  </warnings>")
+
+    lines.append("</analytics_documentation>")
+    return "\n".join(lines)
+
+
+def _guess_module(target_rel: str) -> str:
+    """part/api.py → 'part'; com/example/Foo.java → 'com.example'."""
+    norm = target_rel.replace("\\", "/")
+    parts = norm.split("/")
+    if len(parts) >= 2:
+        return parts[-2]
+    return os.path.splitext(parts[0])[0] if parts else "unknown"
+
+
+# ---------------------------------------------------------------------------
+# 6. Обновление .skillsrc внутри --project
+# ---------------------------------------------------------------------------
+
+# Минимальный шаблон при создании нового .skillsrc.
+_SKILLSRC_TEMPLATE = """\
+# ============================================================
+# .skillsrc — манифест проекта для мультиагентной системы
+# Версия: 2.0
+# Создан tools/scan_project.py (Опора 2). Заполняется по манифестам сборки.
+# ============================================================
+
+version: "2.0"
+
+project:
+  name: "{name}"
+  language: "{language}"
+  framework: "{framework}"
+  build_tool: "{build_tool}"
+
+paths:
+  source: "{source}"
+  tests: "{tests}"
+
+test:
+  framework: "{test_framework}"
+"""
+
+
+def update_skillsrc(project_dir: str, stack: dict) -> tuple[bool, str]:
+    """
+    Создаёт или обновляет .skillsrc ВНУТРИ --project.
+    Корневой .skillsrc скилл-пака (если --project = репозиторий скиллов) НЕ трогается:
+    оперируем только по пути os.path.join(project_dir, '.skillsrc').
+    Возвращает (updated, path).
+    """
+    skillsrc_path = os.path.join(project_dir, ".skillsrc")
+    language = stack.get("language") or "unknown"
+    framework = stack.get("framework") or "unknown"
+    build_tool = BUILD_TOOL_NORMALIZE.get(stack.get("build_tool"), stack.get("build_tool")) or "unknown"
+    test_framework = stack.get("test_framework") or "unknown"
+    project_name = os.path.basename(os.path.abspath(project_dir.rstrip("/\\")))
+    source_path, tests_path = _guess_paths(project_dir, language)
+
+    if os.path.isfile(skillsrc_path):
+        # Обновляем только стек-поля, остальное сохраняем.
+        text = _read_text(skillsrc_path) or ""
+        updated = _patch_skillsrc_fields(
+            text, language, framework, build_tool, test_framework
+        )
+        try:
+            with open(skillsrc_path, "w", encoding="utf-8") as f:
+                f.write(updated)
+            return True, skillsrc_path
+        except OSError:
+            return False, skillsrc_path
+
+    # Создаём минимальный .skillsrc
+    content = _SKILLSRC_TEMPLATE.format(
+        name=project_name, language=language, framework=framework,
+        build_tool=build_tool, source=source_path, tests=tests_path,
+        test_framework=test_framework,
+    )
+    try:
+        with open(skillsrc_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return True, skillsrc_path
+    except OSError:
+        return False, skillsrc_path
+
+
+def _guess_paths(project_dir: str, language: str) -> tuple[str, str]:
+    """Эвристика путей source/tests по языку и наличию типичных директорий."""
+    defaults = {
+        "python": ("src", "tests"),
+        "java": ("src/main/java", "src/test/java"),
+        "typescript": ("src", "test"),
+        "go": (".", "."),
+    }
+    base = defaults.get(language, ("src", "tests"))
+    # если в проекте есть src/backend (как у InvenTree) — учтём
+    if os.path.isdir(os.path.join(project_dir, "src", "backend")):
+        return ("src/backend", "src/backend/InvenTree/test")
+    return base
+
+
+def _patch_skillsrc_fields(text: str, language: str, framework: str,
+                           build_tool: str, test_framework: str) -> str:
+    """
+    Точечно обновляет стек-поля в существующем .skillsrc, не ломая остальное.
+    Секции: project.language, project.framework, project.build_tool, test.framework.
+    """
+    # (section, key, value) — паттерн заменяет значение строки «key: ...».
+    def _repl(section: str, key: str, value: str) -> str:
+        nonlocal text
+        # ищем секцию и строку ключа внутри неё
+        pattern = re.compile(
+            r"(^|\n)([ \t]*)" + re.escape(section) + r":[^\n]*\n"
+            r"((?:[ \t]+[^\n]*\n)*)",
+            re.MULTILINE,
+        )
+        m = pattern.search(text)
+        if not m:
+            return
+        block = m.group(3)
+        key_re = re.compile(r"^([ \t]*)" + re.escape(key) + r":.*$", re.MULTILINE)
+        new_block, n = key_re.subn(
+            lambda km: f"{km.group(1)}{key}: \"{value}\"  # обновлено scan_project.py",
+            block, count=1,
+        )
+        if n:
+            text = text[:m.start(3)] + new_block + text[m.end(3):]
+
+    _repl("project", "language", language)
+    _repl("project", "framework", framework)
+    _repl("project", "build_tool", build_tool)
+    _repl("test", "framework", test_framework)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# 7. Сборка отчёта
+# ---------------------------------------------------------------------------
+
+def _norm(path: Optional[str]) -> Optional[str]:
+    """Нормализует разделители путей в forward-slash для кроссплатформенного вывода."""
+    if not path:
+        return path
+    return path.replace("\\", "/")
+
+
+def build_report(status: str, stack: dict, files_extracted: list[str],
+                 output_file: Optional[str], skillsrc_updated: bool,
+                 skillsrc_path: Optional[str], warnings: list[str],
+                 errors: list[str]) -> dict:
+    # нормализуем пути в stack.detection (manifest может прийти с backslash)
+    if isinstance(stack.get("detection"), dict) and stack["detection"].get("manifest"):
+        stack["detection"]["manifest"] = _norm(stack["detection"]["manifest"])
+    report = {
+        "status": status,
+        "stack": stack,
+        "files_extracted": [_norm(p) for p in files_extracted],
+        "output_file": _norm(output_file),
+        "skillsrc_updated": skillsrc_updated,
+        "skillsrc_path": _norm(skillsrc_path),
+        "warnings": warnings or None,
+        "errors": errors or None,
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return report
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    project_dir = os.path.abspath(args.project)
+    if not os.path.isdir(project_dir):
+        report = build_report(
+            status="error",
+            stack={"language": "unknown"},
+            files_extracted=[],
+            output_file=None, skillsrc_updated=False, skillsrc_path=None,
+            warnings=[],
+            errors=[f"--project не существует: {project_dir}"],
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1
+
+    target_rel = args.target.replace("\\", "/").lstrip("./")
+
+    # 2. Определение стека
+    detection = detect_stack(project_dir, target_rel)
+    stack = detection["stack"]
+    warnings: list[str] = list(detection.get("warnings") or [])
+    errors: list[str] = list(detection.get("errors") or [])
+
+    # 3. Извлечение кода (даже при partial стеке — target всё равно пробуем)
+    target_abs, tgt_warnings = resolve_target(project_dir, target_rel)
+    warnings.extend(tgt_warnings)
+
+    files_extracted: list[str] = []
+    if target_abs:
+        target_rel_norm = os.path.relpath(target_abs, project_dir).replace("\\", "/")
+        files_extracted.append(target_rel_norm)
+        companions = extract_companions(project_dir, target_abs, stack.get("language", "unknown"))
+        # не дублируем сам target, если он совпал с компаньоном
+        for c in companions:
+            if c not in files_extracted:
+                files_extracted.append(c)
+
+    # статус: error, если стек не определён ИЛИ target не найден
+    status = detection["status"]
+    if not target_abs:
+        errors.append(f"target '{target_rel}' не существует в проекте.")
+        status = "error"
+    elif detection["status"] == "success" and files_extracted:
+        status = "success"
+    elif detection["status"] == "partial" and target_abs:
+        status = "partial"
+
+    # 4 & 5. Генерация блоков (только если есть что генерировать)
+    output_file = None
+    source_block = ""
+    analytics_block = ""
+    if files_extracted:
+        source_block = render_source_block(project_dir, files_extracted)
+        analytics_block = render_analytics_block(
+            stack, project_dir, files_extracted, target_rel, warnings
+        )
+        document = f"{source_block}\n\n{analytics_block}\n"
+        if args.output:
+            # --output интерпретируется ОТНОСИТЕЛЬНО ТЕКУЩЕГО каталога (CWD),
+            # как ожидает пользователь, а не относительно --project.
+            out_abs = os.path.abspath(args.output)
+            out_dir = os.path.dirname(out_abs)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            try:
+                with open(out_abs, "w", encoding="utf-8") as f:
+                    f.write(document)
+                output_file = out_abs
+            except OSError as e:
+                errors.append(f"Не удалось записать --output: {e}")
+                status = "error"
+        # без --output документ печатается отдельно ниже (после JSON)
+
+    # 6. .skillsrc (только если стек хотя бы частично определён)
+    skillsrc_updated = False
+    skillsrc_path = None
+    if stack.get("language") and stack.get("language") != "unknown":
+        skillsrc_updated, skillsrc_path = update_skillsrc(project_dir, stack)
+        if not skillsrc_updated:
+            warnings.append("Не удалось обновить .skillsrc (ошибка записи).")
+
+    # 7. JSON-отчёт
+    report = build_report(
+        status=status, stack=stack, files_extracted=files_extracted,
+        output_file=output_file, skillsrc_updated=skillsrc_updated,
+        skillsrc_path=skillsrc_path, warnings=warnings, errors=errors,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+    # без --output печатаем сгенерированный документ после JSON, разделитель
+    if files_extracted and not args.output and status != "error":
+        sys.stderr.write("\n--- <source_code_and_diff> + <analytics_documentation> ---\n")
+        sys.stderr.write(f"{source_block}\n\n{analytics_block}\n")
+        sys.stderr.write("--- конец документа ---\n")
+
+    return 0 if status != "error" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
