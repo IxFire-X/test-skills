@@ -29,6 +29,7 @@
 | # | Корневой блок | Внутри (обязательные поля) | Производитель | Потребитель |
 |---|---|---|---|---|
 | 1 | `<generated_test_cases>` | Zephyr Markdown в CDATA | `tc-generator` | `tc-reviewer` |
+| 1a | `<generated_test_cases_json>` | JSON по схеме `tc-generator-output.schema.json` (машиночитаемый дубль `<generated_test_cases>`, создаётся параллельно) | `tc-generator` | CI/CD / `tc-reviewer` / Оркестратор |
 | 2 | `<validation_report>` | `VERDICT`, проверки, AUTO_FIX-список, WARN | `tc-reviewer` | Оркестратор / лог |
 | 3 | `<corrected_test_cases>` | Zephyr Markdown в CDATA | `tc-reviewer` (только при `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ`) | `tc-to-autotest` |
 | 4 | `<automation_analysis>` | блок `1.–5.` + `<conflict_resolution>` (опц.) | `tc-to-autotest` | `autotest-reviewer` / лог |
@@ -38,6 +39,7 @@
 | 8 | `<review_comments>` | список дефектов по severity | `tc-reviewer`, `autotest-reviewer` | Оркестратор / пользователь |
 | 9 | `<corrected_autotest_code>` | исправленный Java-код (только при `AUTO_FIX_APPLIED`) | `autotest-reviewer` | CI/CD |
 | 10 | `<orchestration_result>` | `<status>`, `<pipeline_name>`, `<iterations>`, `<steps>`, `<final_result>`, `<warnings>` | `orchestrate` | пользователь |
+| 11 | `<run_tests_verdict>` | `PASS` / `FAIL` / `NOT_RUNNABLE` (детерминированный запуск тестов) | `tools/run_tests.py` (Execution Gate) | Оркестратор |
 
 ### 2.1 Внутренние теги внутри блоков
 
@@ -110,6 +112,16 @@
 | `AUTO_FIX_APPLIED` | `tc-reviewer`, `autotest-reviewer` | Дефекты исправлены автофиксом | **Использовать** `<corrected_*>` вместо исходного |
 | `ТРЕБУЕТ ДОРАБОТКИ` | `tc-reviewer`, `autotest-reviewer` | Есть FAIL без автофикса | **Приостановить**; вывести `<review_comments>`; повторный запуск — только после подтверждения пользователя |
 
+### 3.2.1 Execution Gate (вердикты детерминированного раннера)
+
+> **Жёсткое правило:** финальный `ПРИНЯТО` от `autotest-reviewer` невозможен без `<run_tests_verdict> = PASS`. LLM-вердикт недостаточен без факта исполнения.
+
+| Маркер | Источник | Означает | Реакция оркестратора |
+|---|---|---|---|
+| `PASS` | `tools/run_tests.py` | Тесты реально запустились и прошли | **Финальный `ПРИНЯТО`**; завершить пайплайн |
+| `FAIL` | `tools/run_tests.py` | Тесты запустились, но упали; `root_cause[]` — machine-readable причина | **Финальный `ТРЕБУЕТ ДОРАБОТКИ`**; вернуть в `tc-to-autotest` только после подтверждения пользователя |
+| `NOT_RUNNABLE` | `tools/run_tests.py` | Окружение недоступно, запуск невозможен | **Честный отказ**: НЕ `ПРИНЯТО`, НЕ фейковый `PASS`; зафиксировать в отчёте и запросить окружение у пользователя |
+
 ### 3.3 Общий статус пайплайна (Оркестратор)
 
 | Маркер | Означает |
@@ -149,10 +161,18 @@
 │  autotest-reviewer  │ ◀─────────────────────────────│ <automation_matrix>+<autotest_code> │
 └─────────────────────┘                              └──────────────────────────┘
         │
-        ├── VERDICT=ПРИНЯТО          → END
-        ├── VERDICT=AUTO_FIX_APPLIED → <corrected_autotest_code> → END
+        ├── VERDICT=ПРИНЯТО          → Execution Gate
+        ├── VERDICT=AUTO_FIX_APPLIED → <corrected_autotest_code> → Execution Gate
         └── VERDICT=ТРЕБУЕТ ДОРАБОТКИ→ <review_comments> (стоп)
-```
+
+┌─────────────────────┐
+│   Execution Gate    │ ◀── <autotest_code> / <corrected_autotest_code>
+│  tools/run_tests.py │
+└─────────────────────┘
+        │
+        ├── <run_tests_verdict>=PASS          → ФИНАЛЬНЫЙ VERDICT=ПРИНЯТО → END
+        ├── <run_tests_verdict>=FAIL          → ФИНАЛЬНЫЙ VERDICT=ТРЕБУЕТ ДОРАБОТКИ → tc-to-autotest (после подтверждения)
+        └── <run_tests_verdict>=NOT_RUNNABLE  → Запросить окружение у пользователя (стоп)
 
 ---
 

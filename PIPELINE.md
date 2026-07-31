@@ -8,19 +8,19 @@
 
 ---
 
-## Пайплайн: Тест-кейсы → Автотесты (5 этапов)
+## Пайплайн: Тест-кейсы → Автотесты (5 этапов + Execution Gate)
 
 ```
-┌──────────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────────┐
-│ context-marker   │ ───→ │ tc-generator │ ───→ │ tc-reviewer  │ ───→ │tc-to-autotest│ ───→ │autotest-reviewer │
-│   v1.0 (опц.)    │      │   v2.4       │      │   v2.2       │      │   v3.1       │      │   v1.3           │
-└──────────────────┘      └──────────────┘      └──────────────┘      └──────────────┘      └──────────────────┘
+┌──────────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
+│ context-marker   │ ───→ │ tc-generator │ ───→ │ tc-reviewer  │ ───→ │tc-to-autotest│ ───→ │autotest-reviewer │ ───→ │  Execution Gate  │
+│   v1.0 (опц.)    │      │   v2.4       │      │   v2.2       │      │   v3.1       │      │   v1.3           │      │tools/run_tests.py│
+└──────────────────┘      └──────────────┘      └──────────────┘      └──────────────┘      └──────────────────┘      └──────────────────┘
 
-      │                          │                      │                      │                       │
-      ▼                          ▼                      ▼                      ▼                       ▼
-<analytics_doc>         <generated_tc>     <validation_report>        <automation_        <autotest_review>
-+ <source_code>                                             +              matrix>        + <review_verdict>
-                                                <corrected_tc>     + <automation_        + <review_comments>
+      │                          │                      │                      │                       │                       │
+      ▼                          ▼                      ▼                      ▼                       ▼                       ▼
+<analytics_doc>         <generated_tc>     <validation_report>        <automation_        <autotest_review>       <run_tests_verdict>
++ <source_code>                                             +              matrix>        + <review_verdict>       PASS | FAIL |
+                                                <corrected_tc>     + <automation_        + <review_comments>      NOT_RUNNABLE
                                                                      analysis>           + <corrected_autotest_code>
 ```
 
@@ -94,6 +94,20 @@
 
 **Границы:** только смысловые проверки (traceability, анти-паттерны, TODO, стек). Компиляция, синтаксис, стиль — зона `javac` / Checkstyle.
 
+### Этап 5: Execution Gate (tools/run_tests.py)
+
+- **Инструмент:** [tools/run_tests.py](tools/run_tests.py)
+
+**Вход:** `<autotest_code>` / `<corrected_autotest_code>` + путь к проекту
+
+**Выход:** `<run_tests_verdict>` = `PASS` | `FAIL` | `NOT_RUNNABLE` (по схеме `schemas/run-tests-output.schema.json`)
+
+**Жёсткое правило:** финальный `ПРИНЯТО` от `autotest-reviewer` невозможен без `<run_tests_verdict> = PASS`. LLM-вердикт о качестве кода недостаточен без факта исполнения.
+
+- `PASS` → финальный вердикт `ПРИНЯТО`, завершить пайплайн.
+- `FAIL` → финальный вердикт `ТРЕБУЕТ ДОРАБОТКИ`; `root_cause[]` — machine-readable причина падения; повторный запуск `tc-to-autotest` — только после подтверждения пользователя.
+- `NOT_RUNNABLE` → **честный отказ**: НЕ `ПРИНЯТО`, НЕ фейковый `PASS`; зафиксировать в отчёте и запросить окружение у пользователя.
+
 ---
 
 ## Оркестратор (координация)
@@ -119,6 +133,7 @@
 - Contract Check (исполнимый чеклист по `CONTRACTS.md`)
 - Обработка ошибок и retry
 - Генерация отчёта о выполнении
+- **Execution Gate:** запуск `tools/run_tests.py` перед финальным `ПРИНЯТО` (вердикт `PASS`/`FAIL`/`NOT_RUNNABLE`)
 
 ### Lite-версия (orchestrate v2.0-lite)
 
@@ -146,7 +161,7 @@
 | Только генерация ТК | `tc-generator` (остановка после) |
 | Генерация + валидация ТК | `tc-generator` → `tc-reviewer` (остановка после) |
 | Генерация + автотесты (без валидации) | `tc-generator` → `tc-to-autotest` (остановка после) |
-| Полный пайплайн (5 этапов) | `context-marker` → `tc-generator` → `tc-reviewer` → `tc-to-autotest` → `autotest-reviewer` |
+| Полный пайплайн (5 этапов + Execution Gate) | `context-marker` → `tc-generator` → `tc-reviewer` → `tc-to-autotest` → `autotest-reviewer` → `run_tests.py` |
 | Только автотесты из готовых ТК | `tc-to-autotest` (передать `<test_cases>`) |
 | Только валидация автотестов | `autotest-reviewer` (передать `<test_cases>` + `<automation_matrix>` + код) |
 

@@ -262,6 +262,14 @@ def check_java_env(project_dir: str) -> dict:
 
 def run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
     """Запускает процесс, возвращает (exit_code, stdout, stderr)."""
+    # Windows: Python (CreateProcess) не умеет напрямую запускать .cmd/.bat —
+    # это ограничение WinAPI. Если первый элемент команды резолвится в .cmd/.bat,
+    # оборачиваем в `cmd /c`, тогда Maven/Gradle wrapper'ы работают.
+    if os.name == "nt" and cmd:
+        first = cmd[0]
+        resolved = shutil.which(first) if not os.path.isabs(first) else first
+        if resolved and resolved.lower().endswith((".cmd", ".bat")):
+            cmd = ["cmd", "/c"] + cmd
     try:
         proc = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,

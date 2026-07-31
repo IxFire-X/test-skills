@@ -380,30 +380,98 @@ def _python_build_tool(runtime_manifest: Optional[str], all_manifests: list[str]
 # ---------------------------------------------------------------------------
 
 # Сопутствующие модули, которые тащим рядом с target (по языку).
+# Для python — фиксированный набор имён в пакете.
+# Для java — файлы того же пакета с тем же «корнем» имени и ролевым суффиксом
+# (Service/Controller/Repository/Entity/DTO/...), см. _java_companions.
 COMPANION_FILES = {
     "python": ["models.py", "serializers.py", "urls.py", "conftest.py"],
-    "java": [],     # в java компаньоны определяются по пакету/импортам — отдельная задача
+    "java": ["_dynamic_"],  # маркер: вычисляется отдельно по пакету
     "typescript": [],
     "go": [],
 }
 
 
+def _java_companions(project_dir: str, target_abs: str) -> list[str]:
+    """
+    Находит java-компаньонов target: файлы того же пакета (директории) с тем же
+    «корнем» имени и ролевым суффиксом. TransferService.java → TransferController.java,
+    TransferRepository.java, TransferRequest.java, TransferResponse.java и т.п.
+    Тест-классы (*Test.java, *Tests.java) в контекст не тащим.
+    """
+    companions: list[str] = []
+    target_dir = os.path.dirname(target_abs)
+    base = os.path.basename(target_abs)
+    stem = re.sub(
+        r"(Service|Controller|Repository|Resource|Entity|Dto|DTO|Request|Response|"
+        r"Mapper|Facade|Manager|Helper|Util|Config|Properties|Command|Query)$",
+        "", os.path.splitext(base)[0],
+    )
+    role_re = re.compile(
+        r"(Service|Controller|Repository|Resource|Entity|Dto|DTO|Request|Response|"
+        r"Mapper|Facade|Manager|Helper|Config|Properties|Command|Query)$",
+    )
+    try:
+        names = sorted(os.listdir(target_dir))
+    except OSError:
+        return companions
+    for fn in names:
+        if not fn.endswith(".java") or fn == base:
+            continue
+        fstem = os.path.splitext(fn)[0]
+        if fstem.endswith(("Test", "Tests")) or fn.endswith("Test.java"):
+            continue
+        # «родственник»: общий корень имени + ролевой суффикс
+        if stem and fstem.startswith(stem) and role_re.search(fstem):
+            rel = os.path.relpath(os.path.join(target_dir, fn), project_dir)
+            companions.append(rel.replace("\\", "/"))
+    return companions
+
+
+def _find_files_by_suffix(project_dir: str, suffix: str) -> list[str]:
+    """Ищет файлы, чей относительный путь (forward-slash) заканчивается на suffix."""
+    suffix = suffix.replace("\\", "/").lstrip("./")
+    found: list[str] = []
+    for root, _dirs, files in os.walk(project_dir):
+        parts = os.path.relpath(root, project_dir).split(os.sep)
+        if any(p in {".git", "__pycache__", "node_modules", ".venv", "venv",
+                     "target", "build", "dist", ".idea", ".tools"}
+               for p in parts):
+            continue
+        for fn in files:
+            rel = os.path.relpath(os.path.join(root, fn), project_dir).replace("\\", "/")
+            if rel.endswith(suffix):
+                found.append(rel)
+    return found
+
+
 def resolve_target(project_dir: str, target_rel: str) -> tuple[Optional[str], list[str]]:
     """
     Разрешает target в реальный путь и возвращает (abs_path, warnings).
-    Ищет как по прямому пути, так и рекурсивно по имени, если прямой не найден.
+    Ищет по прямому пути, затем по путевому суффиксу (напр. target='part/api.py' →
+    src/backend/InvenTree/part/api.py), затем рекурсивно по имени файла (fallback).
     """
     warnings: list[str] = []
-    # прямой путь
+    target_rel = target_rel.replace("\\", "/").lstrip("./")
+
+    # 1. Прямой путь
     direct = os.path.join(project_dir, target_rel)
     if os.path.isfile(direct):
         return direct, warnings
-    # рекурсивно по basename (target мог быть задан коротко, напр. 'part/api.py')
+
+    # 2. Поиск по суффиксу пути (точнее, чем по имени файла — учитывает модуль)
+    suffix_matches = _find_files_by_suffix(project_dir, target_rel)
+    if suffix_matches:
+        best = min(suffix_matches, key=len)
+        warnings.append(f"target задан как '{target_rel}', найден по пути: {best}")
+        return os.path.join(project_dir, best), warnings
+
+    # 3. Fallback: по имени файла (target мог быть задан коротко, напр. 'api.py')
     basename = os.path.basename(target_rel)
     matches = _find_manifests(project_dir, [basename])  # переиспользуем поиск по имени
     if matches:
-        warnings.append(f"target задан как '{target_rel}', найден по имени: {matches[0]}")
+        warnings.append(f"target задан как '{target_rel}', найден по имени файла: {matches[0]}")
         return os.path.join(project_dir, matches[0]), warnings
+
     warnings.append(f"target '{target_rel}' не найден в проекте.")
     return None, warnings
 
@@ -414,6 +482,8 @@ def extract_companions(project_dir: str, target_abs: str, language: str) -> list
     Для python: models.py / serializers.py / urls.py / conftest.py рядом с target.
     """
     companions: list[str] = []
+    if language == "java":
+        return _java_companions(project_dir, target_abs)
     if language not in COMPANION_FILES or not COMPANION_FILES[language]:
         return companions
 
@@ -465,13 +535,25 @@ def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Option
     в urls.py / api.py / serializers. НЕ LLM — простые regex.
     """
     endpoints: list[str] = []
+    # [^'"'\n] — запрещаем переводы строк: иначе жадный класс захватывает
+    # многострочные куски кода как «эндпоинт» (мусор в аналитике).
     patterns = [
-        re.compile(r"""(?:path|url)\(\s*['"]([^'"]+)['"]"""),       # Django url conf
-        re.compile(r"""(?:GET|POST|PUT|PATCH|DELETE)\b.*?['"]([^'"]+)['"]""", re.I),
-        re.compile(r"""@(?:get|post|put|patch|delete|api_view)\s*\(\s*(?:.*?['"]([^'"]+)['"])?""", re.I),
+        # Django url conf
+        re.compile(r"""(?:path|url|re_path|include)\(\s*['"]([^'"'\n]{1,120})['"]"""),
+        # HTTP-методы рядом со строковым путём
+        re.compile(r"""(?:GET|POST|PUT|PATCH|DELETE)\b[^\n]{0,80}?['"]([^'"'\n]{1,120})['"]""", re.I),
+        # DRF @api_view / python-декораторы
+        re.compile(r"""@(?:get|post|put|patch|delete|api_view)\s*\(\s*(?:.*?['"]([^'"'\n]{1,120})['"])?""", re.I),
+        # Spring @*Mapping: @GetMapping("/..."), @RequestMapping(value = "/...")
+        re.compile(r"""@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"'\n]{1,120})['"]""", re.I),
+        # JAX-RS: @Path("/...")
+        re.compile(r"""@Path\s*\(\s*['"]([^'"'\n]{1,120})['"]""", re.I),
     ]
     for rel in files_rel:
-        if os.path.basename(rel) not in {"urls.py", "api.py", "serializers.py", "urls.py"}:
+        base = os.path.basename(rel)
+        is_python_urls = base in {"urls.py", "api.py", "serializers.py"}
+        is_java_source = base.endswith(".java")
+        if not (is_python_urls or is_java_source):
             continue
         text = _read_text(os.path.join(project_dir, rel)) or ""
         for pat in patterns:
@@ -488,21 +570,33 @@ def _extract_models(project_dir: str, files_rel: list[str], language: str) -> li
     """Грубая эвристика моделей: class-имена из models.py (ORM)."""
     models: list[str] = []
     for rel in files_rel:
-        if os.path.basename(rel) != "models.py":
-            continue
+        base = os.path.basename(rel)
         text = _read_text(os.path.join(project_dir, rel)) or ""
         if language == "python":
+            if base != "models.py":
+                continue
             # class Foo(models.Model) / class Foo(models.ModelBase)
             for m in re.finditer(r"^\s*class\s+(\w+)\s*\(\s*(?:[\w.]*Model[^,)]*)", text, re.M):
                 name = m.group(1)
                 if name not in models:
                     models.append(name)
         elif language == "java":
-            # @Entity class Foo
-            for m in re.finditer(r"(?:@Entity|@Table)[\s\S]{0,200}?class\s+(\w+)", text):
+            # java-модель: файл *Entity.java / *Model.java ИЛИ класс с @Entity/@Table/@Document
+            is_entity_file = base.endswith(("Entity.java", "Model.java"))
+            has_orm_anno = bool(re.search(r"@(?:Entity|Table|Document)\b", text))
+            if not (is_entity_file or has_orm_anno):
+                continue
+            # 1) имена классов/record с ORM-аннотацией
+            for m in re.finditer(r"@(?:Entity|Table|Document)\b[\s\S]{0,300}?(?:class|record)\s+(\w+)", text):
                 name = m.group(1)
                 if name not in models:
                     models.append(name)
+            # 2) entity-файл без аннотации над классом (lombok @Data и пр.) — берём все class/record
+            if is_entity_file:
+                for m in re.finditer(r"\b(?:class|record)\s+(\w+)", text):
+                    name = m.group(1)
+                    if name not in models:
+                        models.append(name)
         if len(models) >= 40:
             break
     return models[:40]

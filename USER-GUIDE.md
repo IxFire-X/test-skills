@@ -7,12 +7,13 @@
 ## 1. Система за 30 секунд
 
 ```
-context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
-(разметка .md)   (ручные ТК)    (валидация ТК)  (автотесты)      (валидация автотестов)
+context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer → Execution Gate
+(разметка .md)   (ручные ТК)    (валидация ТК)  (автотесты)      (валидация автотестов)  (run_tests.py)
 ```
 
 - Каждый скилл — отдельным промптом. **Оркестратор** — вся цепочка одним промптом.
 - **context-marker** — размечает сырой `.md` в XML (нужен, если аналитика без тегов).
+- **Execution Gate** (`tools/run_tests.py`) — детерминированный запуск автотестов; финальный `ПРИНЯТО` невозможен без `PASS`.
 - **Оркестратор Lite** (`SKILL-LITE.md`) — для моделей 7B–13B (<32K контекста).
 
 ## 2. Быстрый старт
@@ -21,7 +22,7 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
 ```
 Создай тест-кейсы и автотесты для <фича/сервис>
 ```
-Оркестратор: Deep Scan → (если SDD) context-marker → Contract Check → 4 скилла → отчёт `docs/to_do/orchestration-report-<TS>.md`.
+Оркестратор: Deep Scan → (если SDD) context-marker → Contract Check → 4 скилла → Execution Gate (`run_tests.py`) → отчёт `docs/to_do/orchestration-report-<TS>.md`.
 
 **Только ТК:** `Сгенерируй тест-кейсы для X` (+ `<analytics_documentation>` + `<source_code_and_diff>`).
 **Только автотесты:** `Сгенерируй автотесты` (+ `<test_cases>`).
@@ -71,6 +72,7 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
 ## 5. Как читать результаты
 
 **Вердикты ревьюеров:** `ПРИНЯТО` (продолжить) / `AUTO_FIX_APPLIED` (брать `<corrected_*>`) / `ТРЕБУЕТ ДОРАБОТКИ` (читать `<review_comments>`, вернуть в генератор).
+**Execution Gate (`<run_tests_verdict>`):** `PASS` (тесты реально прошли → финальный `ПРИНЯТО`) / `FAIL` (упали → `ТРЕБУЕТ ДОРАБОТКИ`, смотреть `root_cause[]`) / `NOT_RUNNABLE` (окружения нет → честный отказ, не фейковый `PASS`).
 **Статус оркестратора:** `completed` / `partial` / `failed` / `retry` (исчерпан max_iterations).
 
 ## 6. Обработка ошибок

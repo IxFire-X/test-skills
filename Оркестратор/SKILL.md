@@ -127,10 +127,13 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
    - Если `VERDICT = AUTO_FIX_APPLIED` → использовать `<corrected_test_cases>` как `<test_cases>`.
    - Если `VERDICT = ТРЕБУЕТ ДОРАБОТКИ` → приостановить пайплайн и эскалировать пользователю. Повторная передача только после ручной доработки или подтверждения пользователем.
 3. `tc-to-autotest` — сгенерировать автотесты. Выход: `<automation_analysis>` + `<automation_matrix>` + файлы автотестов.
-4. `autotest-reviewer` — проверить автотесты. Выход: `<autotest_review>` + `<review_verdict>` + (опц.) `<review_comments>` + (при `AUTO_FIX_APPLIED`) `<corrected_autotest_code>`.
-   - Если `VERDICT = ПРИНЯТО` → завершить
-   - Если `VERDICT = AUTO_FIX_APPLIED` → использовать `<corrected_autotest_code>`, завершить
-   - Если `VERDICT = ТРЕБУЕТ ДОРАБОТКИ` → приостановить пайплайн и эскалировать пользователю.
+4. `autotest-reviewer` — проверить автотесты. Выход: `<autotest_review>` + `<review_verdict>` (**предварительный**) + (опц.) `<review_comments>` + (при `AUTO_FIX_APPLIED`) `<corrected_autotest_code>`.
+   - Если предварительный `VERDICT = ТРЕБУЕТ ДОРАБОТКИ` → приостановить пайплайн и эскалировать пользователю. Execution Gate не запускается.
+   - Если предварительный `VERDICT = AUTO_FIX_APPLIED` или `ПРИНЯТО` → перейти к шагу 5.
+5. **Execution Gate** — ЗАПУСТИТЬ `tools/run_tests.py --project <путь> --skillsrc <путь>/.skillsrc`. Выход: `<run_tests_verdict>` = `PASS` | `FAIL` | `NOT_RUNNABLE` (см. секцию «Execution Gate (Оракул исполнения — Опора 1)»).
+   - `run_tests_verdict = PASS` → финальный вердикт `ПРИНЯТО`; завершить пайплайн.
+   - `run_tests_verdict = FAIL` → финальный вердикт `ТРЕБУЕТ ДОРАБОТКИ`; `root_cause[]` из выхода раннера — machine-readable причина падения; повторный запуск `tc-to-autotest` — только после подтверждения пользователя.
+   - `run_tests_verdict = NOT_RUNNABLE` → **НЕ `ПРИНЯТО`** и **НЕ фейковый `PASS`**; зафиксировать в отчёте и запросить окружение у пользователя.
 
 ## Deep Scan — полное сканирование проекта (v1.3)
 
@@ -807,8 +810,12 @@ Contract Check: PASS
     → Java-файлы: TransferRequestDto.java, TransferResponseDto.java, TransferApiTest.java
 
   Шаг 4: autotest-reviewer
-    → <review_verdict>: ПРИНЯТО
+    → <review_verdict> (предварительный): ПРИНЯТО
     → <autotest_review>: Traceability 100%, анти-паттернов нет, WireMock покрытие 100%
+
+  Шаг 5: Execution Gate (tools/run_tests.py)
+    → <run_tests_verdict>: PASS
+    → финальный <review_verdict>: ПРИНЯТО
 
 Результат: completed
 ```
@@ -844,6 +851,12 @@ Contract Check: PASS
       <status>success</status>
       <output>docs/to_do/autotest-review-TransferService.md</output>
     </step>
+    <step>
+      <name>Execution Gate</name>
+      <skill>tools/run_tests.py</skill>
+      <status>success (PASS)</status>
+      <output><run_tests_verdict>PASS</run_tests_verdict></output>
+    </step>
   </steps>
   <final_result>src/test/java/.../TransferApiTest.java</final_result>
   <warnings>[]</warnings>
@@ -873,6 +886,7 @@ Contract Check: PASS
 - [ ] Статусы соответствуют ожидаемым
 - [ ] Contract Check выполнен (в отчёте зафиксирован)
 - [ ] Отчёт сгенерирован
+- [ ] Execution Gate выполнен: `tools/run_tests.py` вернул `PASS` (иначе финальный вердикт не `ПРИНЯТО`)
 - [ ] Предупреждения зафиксированы
 - [ ] Финальный результат верифицирован
 - [ ] XML-выход валиден
@@ -927,6 +941,7 @@ Contract Check: PASS
 | `tc-reviewer` → `tc-to-autotest` | `<validation_report>` + `<corrected_test_cases>` | `<corrected_test_cases>` / `<test_cases>` | `ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ` |
 | `tc-to-autotest` → `autotest-reviewer` | `<automation_analysis>` + `<automation_matrix>` + файлы | `<automation_matrix>` + файлы | (отсутствует status) |
 | `autotest-reviewer` → (завершение) | `<autotest_review>` + `<review_verdict>` + (опц.) `<review_comments>` + (опц.) `<corrected_autotest_code>` | (завершение) | `ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ` |
+| `Execution Gate` → (завершение) | `<run_tests_verdict>` = `PASS` / `FAIL` / `NOT_RUNNABLE` (из `tools/run_tests.py`) | (завершение) | `PASS` → финальный `ПРИНЯТО`; `FAIL` → финальный `ТРЕБУЕТ ДОРАБОТКИ`; `NOT_RUNNABLE` → запросить окружение |
 
 ### Версионирование самого Оркестратора (отдельно от контрактов)
 

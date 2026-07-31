@@ -1,7 +1,7 @@
 # ROADMAP — Пошаговый план для GLM
 
 > **Единственный плановый документ.** Читай сверху вниз, выполняй по порядку.
-> **Текущая позиция:** Шаг 4 (Опора 2 — scan_project.py)
+> **Текущая позиция:** Шаг 5 (Точка доказательства)
 
 ---
 
@@ -41,9 +41,16 @@
 
 ---
 
-## Шаг 4: Опора 2 — scan_project.py ❌ ТЕКУЩАЯ ЗАДАЧА
+## Шаг 4: Опора 2 — scan_project.py ✅ ГОТОВО
 
-**Файл для создания:** `tools/scan_project.py`
+**Файл:** `tools/scan_project.py`
+
+**Что сделано:**
+- `tools/scan_project.py` — детерминированный сканер проекта: определение стека по манифестам (pyproject.toml, pom.xml, package.json, go.mod), извлечение релевантного кода (target + models/serializers/urls/conftest), генерация `<source_code_and_diff>` + `<analytics_documentation>`, обновление/создание `.skillsrc`
+- `schemas/scan-project-output.schema.json` — контракт выхода (status, stack, files_extracted, output_file, skillsrc_updated, warnings, errors)
+- Проверка на InvenTree (`--target part/api.py`): `status: success`, стек `python/django/pytest`, извлечены `api.py`, `models.py`, `serializers.py`, создан файл аналитики, `.skillsrc` обновлён
+
+**Проверка:** `python tools/scan_project.py --project InvenTree-master --target part/api.py --output docs/to_do/analytics-check.md` → JSON с `status: success` + файл с XML-блоками.
 
 **Что должен делать (по порядку):**
 
@@ -140,13 +147,13 @@ parser.add_argument("--output", help="Куда записать результа
 ```
 
 **Критерии готовности Шага 4:**
-- [ ] `tools/scan_project.py` создан и запускается
-- [ ] `python tools/scan_project.py --project InvenTree-master --target part/api.py` → создаёт файл с `<source_code_and_diff>` + `<analytics_documentation>`
-- [ ] `.skillsrc` в InvenTree-master обновлён (или создан) с `language: python`, `framework: django`
+- [x] `tools/scan_project.py` создан и запускается
+- [x] `python tools/scan_project.py --project InvenTree-master --target part/api.py` → создаёт файл с `<source_code_and_diff>` + `<analytics_documentation>`
+- [x] `.skillsrc` в InvenTree-master обновлён (или создан) с `language: python`, `framework: django`
 
 ---
 
-## Шаг 5: Точка доказательства ❌ ПОСЛЕ ШАГА 4
+## Шаг 5: Точка доказательства ❌ ТЕКУЩАЯ ЗАДАЧА
 
 **Цель:** Полный прогон на ЛЮБОМ проекте от сканирования до вердикта. InvenTree — это тестовый полигон, но система должна работать с любым стеком.
 

@@ -60,9 +60,10 @@ test-orchestration-skills/
 > Полный канон — `CONTRACTS.md` §2 (выходные), §3 (статусы). Здесь — только самое нужное для понимания входа/выхода.
 
 **Основные входные:** `<analytics_documentation>`, `<source_code_and_diff>`, `<test_cases>`, `<corrected_test_cases>`, `<generated_test_cases>`, `<automation_matrix>`, `<autotest_code>`, `<raw_content>`, `<goal>`.
-**Основные выходные:** `<generated_test_cases>`, `<validation_report>`, `<corrected_test_cases>`, `<automation_matrix>`, `<automation_analysis>`, `<autotest_review>`, `<review_verdict>`, `<orchestration_result>`.
+**Основные выходные:** `<generated_test_cases>`, `<validation_report>`, `<corrected_test_cases>`, `<automation_matrix>`, `<automation_analysis>`, `<autotest_review>`, `<review_verdict>`, `<orchestration_result>`, `<run_tests_verdict>`.
 
 **Статус-маркеры:** `ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ` (ревьюеры); `completed` / `partial` / `failed` / `retry` (оркестратор).
+**Execution Gate (`<run_tests_verdict>`):** `PASS` / `FAIL` / `NOT_RUNNABLE` — детерминированный вердикт `tools/run_tests.py`. Финальный `ПРИНЯТО` невозможен без `PASS`.
 
 **Правило переименования:** после `ПРИНЯТО` — `<generated_test_cases>` переименовывается в `<test_cases>` перед передачей в `tc-to-autotest` (см. `CONTRACTS.md` §2.3).
 
