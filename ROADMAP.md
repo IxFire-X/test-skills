@@ -1,7 +1,8 @@
 # ROADMAP — Пошаговый план для GLM
 
 > **Единственный плановый документ.** Читай сверху вниз, выполняй по порядку.
-> **Текущая позиция:** Шаг 5 (Точка доказательства)
+> **Текущая позиция:** Шаг 5 завершён частично: Java PASS; InvenTree доведён до Execution Gate и заблокирован окружением.
+> **Последняя проверка:** 2026-07-31. Полный Java pipeline подтверждён на JDK 24; Python/InvenTree pipeline дошёл до gate, но не стал выдавать ложный `PASS`.
 
 ---
 
@@ -153,9 +154,16 @@ parser.add_argument("--output", help="Куда записать результа
 
 ---
 
-## Шаг 5: Точка доказательства ❌ ТЕКУЩАЯ ЗАДАЧА
+## Шаг 5: Точка доказательства ⚠️ ЧАСТИЧНО ГОТОВО
 
 **Цель:** Полный прогон на ЛЮБОМ проекте от сканирования до вердикта. InvenTree — это тестовый полигон, но система должна работать с любым стеком.
+
+**Фактический результат проверки 2026-07-31:**
+- ✅ **Java/Spring Boot — полный PASS.** `step5-java-demo`, target `StudentController`, run2 выполнен на JDK 24: analytics → 10 ТК → review `ПРИНЯТО` → 10 автотестов с traceability 100% → autotest-review `ПРИНЯТО` → `run_tests.py PASS`; Maven подтвердил `24/24`, `0` failures/errors.
+- ℹ️ Отдельная повторная команда из текущей оболочки увидела JDK 8 и не является доказательным прогоном: проект был после этого успешно проверен в окружении с JDK 24, что зафиксировано в `run-report-student-controller.md` и `orchestration-report-student-controller.md`.
+- ⚠️ **Python/Django/InvenTree — pipeline до Execution Gate.** run3: 28 ТК, `tc-reviewer ПРИНЯТО (warn 3)`, автотест создан, но запуск заблокирован окружением: `0` тестов и 74 collection errors. Это корректный `FAIL/BLOCKED`, а не ложный `PASS`.
+- ✅ Снято замечание run2 по URL: актуальные URL сверены с `part/api.py`.
+- ⏳ Шаг 5 считается **не полностью закрытым**, пока InvenTree не даст исполняемый `PASS` в поддерживаемом окружении.
 
 ### Вариант A: Java-проект (твой основной сценарий)
 ```bash
@@ -169,6 +177,14 @@ python tools/run_tests.py --project /path/to/your-java-project --language java
 # {"language": "java", "framework": "spring-boot", "test_framework": "junit5", "build_tool": "maven"}
 ```
 
+**Подтверждено на `step5-java-demo` (run2):**
+- артефакты: `step5-java-demo/docs/to_do/run2/`;
+- 10 тест-кейсов ТК-01…ТК-10, ревью `ПРИНЯТО`;
+- 10 сгенерированных методов, traceability ТК-01…ТК-10 — 100%;
+- `mvn clean test`: 24/24 PASS на JDK 24, `run_tests.py`: `PASS`, exit code 0;
+- для повторения результата требуется выбрать JDK 17+ (в сегодняшнем доказательном прогоне использован JDK 24);
+- исправлен найденный дефект ТК-10: `@WebMvcTest` включил `HelloWorldController`.
+
 ### Вариант B: Python-проект (InvenTree — тестовый полигон)
 ```bash
 # 1. Сканирование
@@ -177,6 +193,13 @@ python tools/scan_project.py --project InvenTree-master --target part/api.py --o
 # 2. Запуск тестов (после генерации)
 python tools/run_tests.py --project InvenTree-master --language python --pytest-target src/backend/InvenTree/part/test_generated_api.py
 ```
+
+**Результат run3 (2026-07-31):**
+- аналитика, генерация ТК, review и генерация автотестов завершены;
+- создан `InvenTree-master/src/backend/InvenTree/part/test_generated_run3_api.py`;
+- 28 ТК доведены до Execution Gate;
+- запуск заблокирован: проект требует Python 3.12+, а также GTK3 runtime для WeasyPrint; в текущем окружении получены 74 collection errors и 0 запущенных тестов;
+- следующий прогон выполнять после устранения окружения: `pytest src/backend/InvenTree/part/test_generated_run3_api.py -v --tb=short -rA`.
 
 ### Вариант C: TypeScript-проект
 ```bash
@@ -203,11 +226,17 @@ python tools/run_tests.py --project /path/to/go-project --language go
 
 **Важно:** Шаблон выбирается автоматически по `project.language` из `.skillsrc`. Мультиязычность уже встроена в шаблоны (Опора 3) и run_tests.py (Опора 1) — scan_project.py должен лишь корректно определить стек.
 
+### Артефакты доказательства
+
+- Java: `step5-java-demo/docs/to_do/run2/orchestration-report-student-controller.md` и `run-report-student-controller.md` — полный `PASS`.
+- InvenTree: `InvenTree-master/docs/to_do/run3/orchestration-report-part-api.md` — `BLOCKED (окружение)`, без подмены результата.
+- Временные диагностические логи (`diag*.txt`, `*probe*`, `pytest_run3_out.txt`) не являются артефактами roadmap и не должны коммититься.
+
 ---
 
-## Шаг 6+: Фаза 2 (заморожено до Шага 5)
+## Шаг 6+: Фаза 2 (частично разблокирована; InvenTree PASS остаётся отдельным долгом)
 
-После точки доказательства — реализовать по порядку:
+После подтверждённого Java-прогона можно планировать реализацию по порядку, но до завершения InvenTree-прогона не считать общую точку доказательства полностью закрытой:
 1. `semantic-code-validator` — ловит галлюцинации полей ORM
 2. `orm-fixture-builder` — изоляция данных для Django
 3. `trace-map-enforcer` — обязательный trace_map
