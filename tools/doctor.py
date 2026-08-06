@@ -14,11 +14,12 @@ def inspect_environment(root: Path) -> dict[str, object]:
         name: {"required": True, "available": importlib.util.find_spec(name) is not None}
         for name in ("jsonschema", "yaml")
     }
-    ready = all(item["available"] for item in dependencies.values())
+    python_supported = sys.version_info >= (3, 10)
+    ready = python_supported and all(item["available"] for item in dependencies.values())
     return {
         "status": "PASS" if ready else "NOT_RUNNABLE",
         "python": {
-            "supported": sys.version_info >= (3, 10),
+            "supported": python_supported,
             "version": platform.python_version(),
         },
         "dependencies": dependencies,
@@ -38,8 +39,9 @@ def main() -> int:
     )
     parser.add_argument("--root", type=Path, required=True, help="Path to the skill pack")
     args = parser.parse_args()
-    print(json.dumps(inspect_environment(args.root), ensure_ascii=False, sort_keys=True))
-    return 0
+    report = inspect_environment(args.root)
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0 if report["status"] == "PASS" else 2
 
 
 if __name__ == "__main__":
