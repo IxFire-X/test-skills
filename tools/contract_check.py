@@ -55,6 +55,7 @@ REQUIRED_TRANSITIONS = [
     {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
     {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"},
     {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"},
+    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "FAIL"}, "transform": "stop_trace_failed"},
 ]
 
 
@@ -126,6 +127,9 @@ def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) ->
         for artifact_id in step.get("accepts", []):
             if artifact_id not in available:
                 errors.append(f"step {step_id} accepts artifact before it is connected: {artifact_id}")
+        for artifact_id in step.get("forwards", []):
+            if artifact_id not in step.get("accepts", []) and artifact_id not in step.get("produces", []):
+                errors.append(f"step {step_id} forwards artifact without provenance: {artifact_id}")
         available.update(step.get("forwards", []))
         available.update(step.get("produces", []))
 

@@ -31,14 +31,15 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `autotest-reviewer` | `AUTO_FIX_APPLIED` | `continue_with_corrected` |
 | `autotest-reviewer` | `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
 
-## Execution verdict branches
+## Execution and trace verdict branches
 
-| Verdict | Transform |
-|---|---|
-| `PASS` | `continue_trace_audit` |
-| `FAIL` | `stop_failed` |
-| `NOT_RUNNABLE` | `stop_not_runnable` |
-| `PASS` | `complete` |
+| Stage | Execution verdict | Trace verdict | Transform |
+|---|---|---|---|
+| `run-tests` | `PASS` |  | `continue_trace_audit` |
+| `run-tests` | `FAIL` |  | `stop_failed` |
+| `run-tests` | `NOT_RUNNABLE` |  | `stop_not_runnable` |
+| `trace-check` | `PASS` | `PASS` | `complete` |
+| `trace-check` | `PASS` | `FAIL` | `stop_trace_failed` |
 
 ## Language capabilities
 

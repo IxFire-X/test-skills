@@ -100,20 +100,70 @@ def test_generated_methods_connect_production_review_execution_and_trace(contrac
     assert {"generated_test_methods", "execution_evidence"} <= set(steps["trace-check"]["accepts"])
 
 
-def test_contract_enforces_exact_core_registry_and_policy(contract_check, contract, root):
-    """Catches core-skill, capability, and artifact-root near matches accepted as portable."""
+def test_rejects_noncanonical_core_registry(contract_check, contract, root):
+    """Catches a near-match core skill being accepted as portable identity."""
     expected_skills = ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]
     assert contract["core_skills"] == expected_skills
 
     invalid_contract = copy.deepcopy(contract)
     invalid_contract["core_skills"][-1] = "orchestrate-lite"
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("core skill registry" in error for error in report["errors"])
+
+
+def test_rejects_noncanonical_persistent_root(contract_check, contract, root):
+    """Catches a near-match persistent artifact root being accepted as confined."""
+    invalid_contract = copy.deepcopy(contract)
     invalid_contract["artifact_policy"]["persistent_root"] = "docs/to_do_backup"
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("persistent_root" in error for error in report["errors"])
+
+
+def test_rejects_nonbaseline_capability(contract_check, contract, root):
+    """Catches dropping required Python execution while retaining a portable success claim."""
+    invalid_contract = copy.deepcopy(contract)
     invalid_contract["capabilities"][1]["execution"] = False
 
     report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
 
     assert report["status"] == "failed"
-    assert any("core skill" in error or "persistent_root" in error or "capability" in error or "schema:" in error for error in report["errors"])
+    assert any("capability baseline" in error for error in report["errors"])
+
+
+def test_rejects_forwarded_artifact_without_stage_provenance(contract_check, contract, root):
+    """Catches forwarding an artifact that the stage neither accepted nor produced."""
+    invalid_contract = copy.deepcopy(contract)
+    context_marker = invalid_contract["steps"][0]
+    context_marker["produces"].remove("source_code_and_diff")
+    context_marker["forwards"].append("source_code_and_diff")
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("forwards artifact without provenance" in error for error in report["errors"])
+
+
+def test_trace_failure_branch_stops_trace_failure(contract_check, contract, root):
+    """Catches leaving a failed trace audit without a terminal branch."""
+    report = contract_check.validate_pipeline_contract(contract, root, check_drift=False)
+
+    assert report["status"] == "passed"
+    transition = next(
+        transition
+        for transition in contract["transitions"]
+        if transition["from"] == "trace-check" and transition["when"].get("trace_verdict") == "FAIL"
+    )
+    assert transition == {
+        "from": "trace-check",
+        "when": {"execution_verdict": "PASS", "trace_verdict": "FAIL"},
+        "transform": "stop_trace_failed",
+    }
 
 
 def test_rejects_windows_and_near_match_projection_paths(contract_check, contract, root):

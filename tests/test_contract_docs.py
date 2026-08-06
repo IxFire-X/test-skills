@@ -26,3 +26,13 @@ def test_renderer_rejects_outside_projection_without_creating_target(render_cont
 
     assert not outside_target.exists()
     assert exit_code == 2
+
+
+def test_rendered_contracts_distinguish_execution_and_trace_branches(render_contract_docs, contract):
+    """Catches generated docs that make run PASS look like trace-gated completion."""
+    rendered = render_contract_docs.render_contracts(contract)
+
+    assert "| Stage | Execution verdict | Trace verdict | Transform |" in rendered
+    assert "| `run-tests` | `PASS` |  | `continue_trace_audit` |" in rendered
+    assert "| `trace-check` | `PASS` | `PASS` | `complete` |" in rendered
+    assert "| `trace-check` | `PASS` | `FAIL` | `stop_trace_failed` |" in rendered

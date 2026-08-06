@@ -42,7 +42,8 @@
     {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "continue_trace_audit"},
     {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
     {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"},
-    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"}
+    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"},
+    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "FAIL"}, "transform": "stop_trace_failed"}
   ],
   "capabilities": [
     {"language": "java", "framework": "junit5", "generation": true, "review": true, "execution": true, "status": "supported"},

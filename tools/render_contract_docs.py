@@ -42,11 +42,13 @@ def render_contracts(contract: dict[str, Any]) -> str:
         verdict = transition.get("when", {}).get("review_verdict")
         if verdict:
             lines.append(f"| `{transition['from']}` | `{verdict}` | `{transition['transform']}` |")
-    lines.extend(["", "## Execution verdict branches", "", "| Verdict | Transform |", "|---|---|"])
+    lines.extend(["", "## Execution and trace verdict branches", "", "| Stage | Execution verdict | Trace verdict | Transform |", "|---|---|---|---|"])
     for transition in contract["transitions"]:
-        verdict = transition.get("when", {}).get("execution_verdict")
+        when = transition.get("when", {})
+        verdict = when.get("execution_verdict")
         if verdict:
-            lines.append(f"| `{verdict}` | `{transition['transform']}` |")
+            trace_verdict = when.get("trace_verdict", "")
+            lines.append(f"| `{transition['from']}` | `{verdict}` | {f'`{trace_verdict}`' if trace_verdict else ''} | `{transition['transform']}` |")
     lines.extend(["", "## Language capabilities", "", "| Language | Framework | Generation | Review | Execution | Status |", "|---|---|---|---|---|---|"])
     for capability in contract["capabilities"]:
         lines.append(
