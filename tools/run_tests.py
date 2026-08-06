@@ -242,7 +242,7 @@ def check_java_env(project_dir: str) -> dict:
 
     # maven или gradle
     runner = None
-    wrapper_candidates = (["mvnw.cmd", "mvnw", "gradlew.bat", "gradlew"]
+    wrapper_candidates = (["mvnw.cmd", "mvnw", "gradlew.cmd", "gradlew.bat", "gradlew"]
                           if os.name == "nt" else ["mvnw", "mvnw.cmd", "gradlew", "gradlew.bat"])
     for wrapper in wrapper_candidates:
         if os.path.isfile(os.path.join(project_dir, wrapper)):

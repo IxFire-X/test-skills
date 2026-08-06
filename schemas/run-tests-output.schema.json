@@ -74,7 +74,7 @@
           "failed": { "type": "integer", "minimum": 0 },
           "errors": { "type": "integer", "minimum": 0, "description": "Ошибки сбора/настройки (collection errors), не сами ассерты" },
           "skipped": { "type": "integer", "minimum": 0 },
-          "duration_sec": { "type": "number", "minimum": 0 }
+          "duration_sec": { "type": ["number", "null"], "minimum": 0 }
         }
       },
       "failed_methods": {

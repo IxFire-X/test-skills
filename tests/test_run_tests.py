@@ -314,6 +314,45 @@ def test_java_artifact_rejects_duplicate_fqn_in_executable_root(runner, tmp_path
     assert error
 
 
+@pytest.mark.skipif(os.name != "nt", reason="This fixture exercises the Windows gradlew.cmd execution path")
+def test_gradlew_cmd_cli_emits_fresh_authoritative_method_evidence(root, tmp_path):
+    """Catches Gradle being advertised but unable to produce current XML-backed evidence."""
+    source = tmp_path / "src" / "test" / "java" / "demo" / "GeneratedTest.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("package demo; class GeneratedTest { void test_one() {} }", encoding="utf-8")
+    (tmp_path / "settings.gradle").write_text("rootProject.name='demo'", encoding="utf-8")
+    (tmp_path / "build.gradle").write_text("plugins { id 'java' }", encoding="utf-8")
+    (tmp_path / "gradlew.cmd").write_text(
+        "@echo off\r\n"
+        "if not exist build\\test-results mkdir build\\test-results\r\n"
+        "> build\\test-results\\TEST-demo.xml echo ^<testsuite^>^<testcase classname=\"demo.GeneratedTest\" name=\"test_one\"/^>^</testsuite^>\r\n"
+        "echo 1 test completed\r\nexit /b 0\r\n",
+        encoding="utf-8",
+    )
+    digest = "sha256:" + sha256(source.read_bytes()).hexdigest()
+    artifact = {"schema_version": "2.1.0", "stage": "tc-to-autotest", "warnings": [], "artifacts": {
+        "automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}],
+        "generated_test_files": [{"id": "FILE-1", "path": "src/test/java/demo/GeneratedTest.java", "language": "java", "framework": "junit5", "content_digest": digest}],
+        "generated_test_methods": [{"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_one", "content_digest": "sha256:" + "1" * 64}],
+    }}
+    artifact_path = tmp_path / "automation.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    environment = os.environ.copy()
+    environment["JAVA_HOME"] = r"D:\AI-Projects\.tools\jdk-17"
+    completed = subprocess.run(
+        [sys.executable, str(root / "tools" / "run_tests.py"), "--project", str(tmp_path), "--language", "java", "--automation-artifact", str(artifact_path)],
+        capture_output=True, text=True, encoding="utf-8", env=environment, check=False,
+    )
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
+
+    assert completed.returncode == 0
+    assert report["verdict"] == "PASS"
+    assert report["target"]["runner"] == "gradle"
+    assert report["stats"]["total"] == report["stats"]["passed"] == 1
+    assert report["evidence_authoritative"] is True
+    assert report["execution_evidence"] == [{"run_id": report["run_id"], "method_id": "METHOD-1", "status": "passed"}]
+
+
 @pytest.mark.parametrize("run_id,evidence,authoritative", [
     (None, [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], True),
     ("RUN-1", [], True),
