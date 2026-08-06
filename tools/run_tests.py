@@ -42,6 +42,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 try:
     from json_cli import JsonArgumentParser
 except ModuleNotFoundError:  # imported as tools.run_tests by tests
@@ -300,9 +302,12 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
     """Load the existing tc-to-autotest artifact and confine every declared file."""
     try:
         artifact = json.loads(Path(path).read_text(encoding="utf-8"))
+        schema_path = Path(__file__).resolve().parents[1] / "schemas" / "tc-to-autotest-output.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema_errors = sorted(Draft202012Validator(schema).iter_errors(artifact), key=lambda item: item.json_path)
+        if schema_errors:
+            return None, f"automation artifact schema invalid: {schema_errors[0].json_path}: {schema_errors[0].message}"
         artifacts = artifact["artifacts"]
-        if artifact.get("schema_version") != "2.1.0" or artifact.get("stage") != "tc-to-autotest":
-            return None, "automation artifact is not a tc-to-autotest 2.1.0 artifact"
         files = artifacts["generated_test_files"]
         methods = artifacts["generated_test_methods"]
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
@@ -316,9 +321,12 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
             resolved.relative_to(root)
             if raw.is_absolute() or ".." in raw.parts or not resolved.is_file():
                 raise ValueError(item["path"])
+            actual_digest = "sha256:" + hashlib.sha256(resolved.read_bytes()).hexdigest()
+            if item["content_digest"].lower() != actual_digest:
+                raise ValueError(item["path"])
             file_map[item["id"]] = resolved
         except (KeyError, TypeError, ValueError):
-            return None, "automation artifact contains an invalid or unavailable generated test file"
+            return None, "automation artifact contains an invalid, unavailable, or digest-mismatched generated test file"
     method_map: dict[tuple[str, str], str] = {}
     for method in methods:
         try:
@@ -328,7 +336,21 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
             method_map[key] = method["id"]
         except (KeyError, TypeError, ValueError):
             return None, "automation artifact contains ambiguous generated method bindings"
-    return {"files": file_map, "methods": method_map}, None
+    matrix = artifacts["automation_matrix"]
+    method_details = {item["id"]: item for item in methods}
+    referenced_methods: set[str] = set()
+    for row in matrix:
+        for method_id in row["generated_method_ids"]:
+            method = method_details.get(method_id)
+            if not method or method["file_id"] not in row["generated_file_ids"] or row["test_case_id"] not in method["test_case_ids"]:
+                return None, "automation artifact matrix does not match declared generated files/methods"
+            referenced_methods.add(method_id)
+    if referenced_methods != set(method_details):
+        return None, "automation artifact matrix does not cover every generated method"
+    # Method content digests cannot be extracted portably across Python/Java AST
+    # variants without a parser. We validate their physical file digest and exact
+    # declared method name during runner evidence binding instead of claiming it.
+    return {"files": file_map, "methods": method_map, "method_digest_verified": False}, None
 
 
 def _run_id(project_dir: str, bindings: dict | None) -> str:
@@ -336,6 +358,37 @@ def _run_id(project_dir: str, bindings: dict | None) -> str:
     if bindings:
         material += "|" + "|".join(sorted(bindings["methods"].values()))
     return "RUN-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def validate_execution_evidence(run_id: str | None, evidence: list[dict], authoritative: bool) -> list[str]:
+    """Public deterministic guard used by pipeline consumers before trace assembly."""
+    if authoritative != bool(run_id and evidence):
+        return ["authoritative evidence requires a run_id and non-empty evidence"]
+    if not authoritative:
+        return [] if run_id is None and not evidence else ["non-authoritative evidence must be empty with null run_id"]
+    method_ids = [item.get("method_id") for item in evidence]
+    if len(method_ids) != len(set(method_ids)):
+        return ["execution evidence contains duplicate method_id"]
+    if any(item.get("run_id") != run_id for item in evidence):
+        return ["execution evidence run_id does not match top-level run_id"]
+    return []
+
+
+def validate_pytest_target_override(target: str | None, bindings: dict, project_dir: str) -> str | None:
+    """Reject targets that do not resolve to exactly one artifact-declared file."""
+    if not target:
+        return None
+    target_file = target.split("::", 1)[0]
+    candidate = Path(target_file)
+    if not candidate.is_absolute():
+        candidate = Path(project_dir) / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return "pytest target cannot be resolved"
+    if resolved not in set(bindings["files"].values()):
+        return "pytest target is not an exact automation-artifact generated file"
+    return None
 
 
 def bind_pytest_evidence(output: str, bindings: dict, run_id: str) -> tuple[list[dict], list[str]]:
@@ -376,7 +429,7 @@ def bind_pytest_evidence(output: str, bindings: dict, run_id: str) -> tuple[list
     return evidence, errors
 
 
-def parse_junit_xml_evidence(report_dirs: list[Path], bindings: dict, run_id: str) -> tuple[list[dict], list[str]]:
+def parse_junit_xml_evidence(report_dirs: list[Path], bindings: dict, run_id: str, fresh_reports: set[Path] | None = None) -> tuple[list[dict], list[str]]:
     """Bind Surefire/Gradle JUnit XML testcase records by physical file + method name."""
     observations: dict[tuple[str, str], str] = {}
     errors: list[str] = []
@@ -384,14 +437,29 @@ def parse_junit_xml_evidence(report_dirs: list[Path], bindings: dict, run_id: st
         if not report_dir.is_dir():
             continue
         for report in sorted(report_dir.rglob("*.xml")):
+            if fresh_reports is not None and report.resolve() not in fresh_reports:
+                continue
             try:
                 root = ET.parse(report).getroot()
             except ET.ParseError:
                 continue
             for case in root.iter("testcase"):
                 name = case.attrib.get("name", "").split("[", 1)[0]
+                classname = case.attrib.get("classname", "")
                 status = "failed" if case.find("failure") is not None else "error" if case.find("error") is not None else "skipped" if case.find("skipped") is not None else "passed"
-                matching = [key for key in bindings["methods"] if key[1] == name]
+                matching = []
+                for key in bindings["methods"]:
+                    path = bindings["files"][key[0]]
+                    expected = path.stem
+                    try:
+                        source = path.read_text(encoding="utf-8")
+                        package = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.MULTILINE)
+                        if package:
+                            expected = package.group(1) + "." + expected
+                    except OSError:
+                        continue
+                    if key[1] == name and classname == expected:
+                        matching.append(key)
                 if len(matching) == 1:
                     key = matching[0]
                     if key in observations and observations[key] != status:
@@ -404,6 +472,20 @@ def parse_junit_xml_evidence(report_dirs: list[Path], bindings: dict, run_id: st
         else:
             evidence.append({"run_id": run_id, "method_id": method_id, "status": observations[key]})
     return evidence, errors
+
+
+def _report_inventory(report_dir: Path) -> dict[Path, tuple[int, int, str]]:
+    """Fingerprint XML reports so a previous test run cannot supply evidence."""
+    if not report_dir.is_dir():
+        return {}
+    inventory = {}
+    for path in report_dir.rglob("*.xml"):
+        try:
+            stat = path.stat()
+            inventory[path.resolve()] = (stat.st_mtime_ns, stat.st_size, hashlib.sha256(path.read_bytes()).hexdigest())
+        except OSError:
+            continue
+    return inventory
 
 
 def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
@@ -622,7 +704,11 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
     else:
         cmd = ["mvn", "test"]
 
+    report_dir = Path(project_dir) / ("target/surefire-reports" if is_maven else "build/test-results")
+    before_reports = _report_inventory(report_dir)
     exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
+    after_reports = _report_inventory(report_dir)
+    fresh_reports = {path for path, fingerprint in after_reports.items() if before_reports.get(path) != fingerprint}
     combined = stdout + "\n" + stderr
 
     # Maven Surefire: "Tests run: 3, Failures: 1, Errors: 0, Skipped: 0"
@@ -639,6 +725,13 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
             "skipped": int(m.group(4)),
             "passed": total - int(m.group(2)) - int(m.group(3)) - int(m.group(4)),
         })
+    elif not is_maven:
+        gradle = re.search(r"(\d+) tests completed(?:, (\d+) failed)?(?:, (\d+) skipped)?", combined)
+        if gradle:
+            total = int(gradle.group(1))
+            failed = int(gradle.group(2) or 0)
+            skipped = int(gradle.group(3) or 0)
+            stats.update({"total": total, "failed": failed, "skipped": skipped, "passed": total - failed - skipped})
 
     failed_methods = []
     for line in combined.splitlines():
@@ -667,6 +760,8 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
         "failed_methods": failed_methods,
         "root_cause": root_cause,
         "raw_output_excerpt": _excerpt(combined),
+        "report_dir": report_dir,
+        "fresh_reports": fresh_reports,
     }
 
 
@@ -804,6 +899,16 @@ def main() -> int:
 
     # --- Проверяем окружение под язык ---
     if language == "python":
+        if bindings:
+            target_error = validate_pytest_target_override(args.pytest_target, bindings, project_dir)
+            if target_error:
+                report = build_not_runnable(
+                    {"status": "partial", "interpreter": None, "interpreter_path": None,
+                     "working_dir": os.path.abspath(project_dir), "missing": ["pytest_target"], "_framework": "pytest"},
+                    "python", target_error,
+                )
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 2
         env = check_python_env(project_dir, args.python_executable)
         env["_framework"] = "pytest"
         if env["status"] == "missing" or not env.get("_interpreter_bin"):
@@ -848,6 +953,14 @@ def main() -> int:
             execution_evidence=evidence,
             evidence_authoritative=bool(bindings and not binding_errors),
         )
+        semantic_errors = validate_execution_evidence(report["run_id"], report["execution_evidence"], report["evidence_authoritative"])
+        if semantic_errors:
+            report["verdict"] = "FAIL"
+            report["root_cause"] = (report["root_cause"] or []) + semantic_errors
+            report["exit_code"] = 1
+            report["run_id"] = None
+            report["execution_evidence"] = []
+            report["evidence_authoritative"] = False
 
     elif language == "java":
         env = check_java_env(project_dir)
@@ -862,8 +975,7 @@ def main() -> int:
         result = run_java(project_dir, env.get("_runner") or "mvn", None)
         run_id = _run_id(project_dir, bindings) if bindings else None
         evidence, binding_errors = parse_junit_xml_evidence(
-            [Path(project_dir) / "target" / "surefire-reports", Path(project_dir) / "build" / "test-results"],
-            bindings, run_id,
+            [result["report_dir"]], bindings, run_id, result["fresh_reports"],
         ) if bindings and run_id else ([], [])
         if binding_errors:
             result["verdict"] = "FAIL"

@@ -453,8 +453,10 @@ def _java_companions(project_dir: str, target_abs: str) -> list[str]:
             continue
         # «родственник»: общий корень имени + ролевой суффикс
         if stem and fstem.startswith(stem) and role_re.search(fstem):
-            rel = os.path.relpath(os.path.join(target_dir, fn), project_dir)
-            companions.append(rel.replace("\\", "/"))
+            candidate = _confined_path(project_dir, os.path.join(target_dir, fn))
+            if candidate and os.path.isfile(candidate):
+                rel = os.path.relpath(candidate, project_dir)
+                companions.append(rel.replace("\\", "/"))
     return companions
 
 
@@ -559,8 +561,8 @@ def extract_companions(project_dir: str, target_abs: str, language: str) -> list
     seen = set()
     for d in candidate_dirs:
         for fn in COMPANION_FILES[language]:
-            cand = os.path.join(d, fn)
-            if os.path.isfile(cand):
+            cand = _confined_path(project_dir, os.path.join(d, fn))
+            if cand and os.path.isfile(cand):
                 rel = os.path.relpath(cand, project_dir).replace("\\", "/")
                 if rel not in seen:
                     seen.add(rel)
@@ -582,7 +584,9 @@ def render_source_block(project_dir: str, files_rel: list[str]) -> str:
     """Emit a well-formed envelope while XML parsing round-trips source exactly."""
     lines = ["<source_code_and_diff>"]
     for rel in files_rel:
-        abs_p = os.path.join(project_dir, rel)
+        abs_p = _confined_path(project_dir, os.path.join(project_dir, rel))
+        if not abs_p:
+            continue
         content = _read_text(abs_p) or ""
         cdata = content.replace("]]>", "]]" + "]]><![CDATA[>")
         lines.append(f'  <file path="{_xml_escape(rel)}"><![CDATA[{cdata}]]></file>')

@@ -125,6 +125,7 @@
       },
       "execution_evidence": {
         "type": "array",
+        "uniqueItems": true,
         "description": "Deterministic method evidence directly compatible with trace-document execution.evidence.",
         "items": {
           "type": "object",
@@ -142,5 +143,12 @@
         "description": "True only when every selected generated method has one unambiguous physical runner outcome."
       }
     },
+    "allOf": [
+      {
+        "if": {"properties": {"evidence_authoritative": {"const": true}}, "required": ["evidence_authoritative"]},
+        "then": {"properties": {"run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}, "execution_evidence": {"minItems": 1}}},
+        "else": {"properties": {"run_id": {"type": "null"}, "execution_evidence": {"maxItems": 0}}}
+      }
+    ],
     "additionalProperties": false
   }

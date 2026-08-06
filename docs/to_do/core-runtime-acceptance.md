@@ -140,6 +140,25 @@ passed, one skipped, and one failed `METHOD-*` binding. The requested external
 Maven baseline was also re-run with JDK 17 and Maven: it returned `PASS`,
 `mvnw.cmd test`, and `total=24, passed=24`.
 
+## Fix Round 2 measurements
+
+Current HEAD adds schema/digest validation of `tc-to-autotest` input, exact
+physical Python/Java method identity, and fail-closed Java report freshness.
+Gradle aggregate/XML parsing has fixture-level coverage; no real Gradle E2E is
+claimed because this environment supplied Maven only. The exact current probes:
+
+```text
+python -m pytest tests -q
+314 passed, 1 skipped in 14.35s
+
+pytest tests/test_run_tests.py::test_python_artifact_binds_each_selected_method_to_real_pytest_outcome -q
+1 passed in 0.78s
+
+JAVA_HOME=D:\AI-Projects\.tools\jdk-17; Maven=D:\AI-Projects\.tools\maven\bin
+python tools/run_tests.py --project D:\AI-Projects\step5-java-demo --language java
+PASS; mvnw.cmd test; OpenJDK 17.0.10; total=24, passed=24
+```
+
 ## Known warnings and deferred items
 
 - The Java fixture emitted its application-level expected warning about a

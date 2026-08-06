@@ -38,6 +38,21 @@ def test_doctor_rejects_a_missing_pack_root(doctor, tmp_path):
     assert "root" in report["integrity"]["missing"]
 
 
+def test_doctor_rejects_placeholder_pack_layout(doctor, tmp_path):
+    """Catches files/directories with the right names but no real contract content."""
+    (tmp_path / "contracts").mkdir()
+    (tmp_path / "schemas").mkdir()
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "contracts" / "pipeline.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "tools" / "run_tests.py").write_text("", encoding="utf-8")
+    (tmp_path / "tools" / "scan_project.py").write_text("", encoding="utf-8")
+
+    report = doctor.inspect_environment(tmp_path)
+
+    assert report["status"] == "NOT_RUNNABLE"
+    assert report["integrity"]["valid"] is False
+
+
 def test_doctor_cli_returns_runtime_error_for_missing_dependency(
     doctor, monkeypatch, tmp_path, capsys
 ):

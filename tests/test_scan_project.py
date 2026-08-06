@@ -277,3 +277,32 @@ def test_scanner_keeps_generated_artifact_in_its_json_stdout(root, tmp_path):
     assert "<source_code_and_diff>" in report["artifact"]
     assert "<analytics_documentation>" in report["artifact"]
     assert completed.stderr == ""
+
+
+def test_confined_path_rejects_outside_and_companion_append_is_guarded(scanner, tmp_path):
+    """Catches companion candidates escaping root even when discovered separately from target."""
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "models.py"
+    outside.write_text("secret = 1\n", encoding="utf-8")
+    target = project / "api.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+
+    assert scanner._confined_path(str(project), str(outside)) is None
+    assert scanner.extract_companions(str(project), str(target), "python") == []
+
+
+def test_render_source_block_does_not_read_unconfined_paths(scanner, tmp_path, monkeypatch):
+    """Catches rendering an attacker-supplied relative path after discovery guards."""
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("secret = True\n", encoding="utf-8")
+    reads = []
+    original = scanner._read_text
+    monkeypatch.setattr(scanner, "_read_text", lambda path: reads.append(path) or original(path))
+
+    rendered = scanner.render_source_block(str(project), ["../outside.py"])
+
+    assert "outside.py" not in rendered
+    assert reads == []

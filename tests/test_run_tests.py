@@ -215,11 +215,13 @@ def test_junit_xml_binds_pass_skip_and_failure_to_generated_methods(runner, tmp_
     """Catches Java XML reports being reduced to aggregate stats without method identities."""
     report_dir = tmp_path / "target" / "surefire-reports"
     report_dir.mkdir(parents=True)
+    source = tmp_path / "DemoTest.java"
+    source.write_text("package demo; class DemoTest {}", encoding="utf-8")
     (report_dir / "TEST-demo.xml").write_text(
-        "<testsuite><testcase name='test_pass'/><testcase name='test_skip'><skipped/></testcase><testcase name='test_fail'><failure/></testcase></testsuite>",
+        "<testsuite><testcase classname='demo.DemoTest' name='test_pass'/><testcase classname='demo.DemoTest' name='test_skip'><skipped/></testcase><testcase classname='demo.DemoTest' name='test_fail'><failure/></testcase></testsuite>",
         encoding="utf-8",
     )
-    bindings = {"files": {"FILE-java": tmp_path / "DemoTest.java"}, "methods": {
+    bindings = {"files": {"FILE-java": source}, "methods": {
         ("FILE-java", "test_pass"): "METHOD-java-pass", ("FILE-java", "test_skip"): "METHOD-java-skip", ("FILE-java", "test_fail"): "METHOD-java-fail",
     }}
 
@@ -229,3 +231,72 @@ def test_junit_xml_binds_pass_skip_and_failure_to_generated_methods(runner, tmp_
     assert [(item["method_id"], item["status"]) for item in evidence] == [
         ("METHOD-java-fail", "failed"), ("METHOD-java-pass", "passed"), ("METHOD-java-skip", "skipped"),
     ]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda artifact: artifact.pop("stage"),
+    lambda artifact: artifact["artifacts"].pop("generated_test_files"),
+    lambda artifact: artifact["artifacts"]["generated_test_files"][0].update({"id": "bad"}),
+    lambda artifact: artifact["artifacts"]["generated_test_methods"][0].update({"file_id": "FILE-missing"}),
+    lambda artifact: artifact["artifacts"]["automation_matrix"][0].update({"generated_method_ids": ["METHOD-missing"]}),
+    lambda artifact: artifact["artifacts"]["generated_test_methods"][0].pop("requirement_ids"),
+    lambda artifact: artifact["artifacts"]["generated_test_files"][0].update({"unexpected": True}),
+])
+def test_automation_artifact_schema_violations_never_become_bindings(runner, tmp_path, mutate):
+    """Catches accepting malformed tc-to-autotest artifacts before any runner starts."""
+    test_file = tmp_path / "test_bound.py"
+    test_file.write_text("def test_bound(): assert True\n", encoding="utf-8")
+    method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_bound", "content_digest": "sha256:" + "1" * 64}
+    artifact = _automation_artifact(test_file, [method])
+    mutate(artifact)
+    path = tmp_path / "artifact.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    bindings, error = runner.load_automation_artifact(str(path), str(tmp_path))
+
+    assert bindings is None
+    assert error
+
+
+def test_automation_artifact_rejects_stale_generated_file_digest(runner, tmp_path):
+    """Catches a tampered generated source file being run under a stale artifact digest."""
+    test_file = tmp_path / "test_bound.py"
+    test_file.write_text("def test_bound(): assert True\n", encoding="utf-8")
+    method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_bound", "content_digest": "sha256:" + "1" * 64}
+    artifact = _automation_artifact(test_file, [method])
+    artifact["artifacts"]["generated_test_files"][0]["content_digest"] = "sha256:" + "0" * 64
+    path = tmp_path / "artifact.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    bindings, error = runner.load_automation_artifact(str(path), str(tmp_path))
+
+    assert bindings is None
+    assert "digest" in error
+
+
+def test_junit_binding_requires_generated_class_identity(runner, tmp_path):
+    """Catches OtherTest.test_same satisfying a generated test solely by method name."""
+    report_dir = tmp_path / "target" / "surefire-reports"
+    report_dir.mkdir(parents=True)
+    generated = tmp_path / "src" / "test" / "java" / "demo" / "GeneratedTest.java"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("package demo; class GeneratedTest {}", encoding="utf-8")
+    (report_dir / "TEST-other.xml").write_text("<testsuite><testcase classname='demo.OtherTest' name='test_same'/></testsuite>", encoding="utf-8")
+    bindings = {"files": {"FILE-java": generated}, "methods": {("FILE-java", "test_same"): "METHOD-1"}}
+
+    evidence, errors = runner.parse_junit_xml_evidence([report_dir], bindings, "RUN-1")
+
+    assert evidence == []
+    assert errors == ["missing junit outcome binding for METHOD-1"]
+
+
+@pytest.mark.parametrize("run_id,evidence,authoritative", [
+    (None, [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], True),
+    ("RUN-1", [], True),
+    ("RUN-1", [], False),
+    ("RUN-1", [{"run_id": "RUN-other", "method_id": "METHOD-1", "status": "passed"}], True),
+    ("RUN-1", [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}, {"run_id": "RUN-1", "method_id": "METHOD-1", "status": "failed"}], True),
+])
+def test_execution_evidence_semantic_invariants(runner, run_id, evidence, authoritative):
+    """Catches impossible authoritative/non-authoritative evidence combinations."""
+    assert runner.validate_execution_evidence(run_id, evidence, authoritative)
