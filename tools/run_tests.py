@@ -313,6 +313,8 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
         return None, f"automation artifact unreadable: {error}"
     root = Path(project_dir).resolve()
+    if len({item["id"] for item in files}) != len(files) or len({item["id"] for item in methods}) != len(methods):
+        return None, "automation artifact contains duplicate FILE or METHOD identities"
     file_map: dict[str, Path] = {}
     for item in files:
         try:
@@ -323,6 +325,8 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
                 raise ValueError(item["path"])
             actual_digest = "sha256:" + hashlib.sha256(resolved.read_bytes()).hexdigest()
             if item["content_digest"].lower() != actual_digest:
+                raise ValueError(item["path"])
+            if resolved in file_map.values():
                 raise ValueError(item["path"])
             file_map[item["id"]] = resolved
         except (KeyError, TypeError, ValueError):
@@ -338,8 +342,11 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
             return None, "automation artifact contains ambiguous generated method bindings"
     matrix = artifacts["automation_matrix"]
     method_details = {item["id"]: item for item in methods}
+    file_ids = set(file_map)
     referenced_methods: set[str] = set()
     for row in matrix:
+        if any(file_id not in file_ids for file_id in row["generated_file_ids"]):
+            return None, "automation artifact matrix references an unknown generated file"
         for method_id in row["generated_method_ids"]:
             method = method_details.get(method_id)
             if not method or method["file_id"] not in row["generated_file_ids"] or row["test_case_id"] not in method["test_case_ids"]:
@@ -350,7 +357,7 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
     # Method content digests cannot be extracted portably across Python/Java AST
     # variants without a parser. We validate their physical file digest and exact
     # declared method name during runner evidence binding instead of claiming it.
-    return {"files": file_map, "methods": method_map, "method_digest_verified": False}, None
+    return {"files": file_map, "methods": method_map, "project_root": root, "method_digest_verified": False}, None
 
 
 def _run_id(project_dir: str, bindings: dict | None) -> str:
@@ -404,18 +411,25 @@ def bind_pytest_evidence(output: str, bindings: dict, run_id: str) -> tuple[list
     status_map = {"PASSED": "passed", "FAILED": "failed", "SKIPPED": "skipped", "ERROR": "error"}
     line_re = re.compile(r"^(PASSED|FAILED|SKIPPED|ERROR)(?:\s+\[\d+\])?\s+([^\s]+)", re.MULTILINE)
     progress_re = re.compile(r"^(\S+::\S+)\s+(PASSED|FAILED|SKIPPED|ERROR)\b", re.MULTILINE)
-    files_by_name: dict[str, list[str]] = {}
-    for file_id, path in bindings["files"].items():
-        files_by_name.setdefault(path.name, []).append(file_id)
+    def file_id_for_node(node_path: str) -> str | None:
+        path = Path(node_path)
+        if not path.is_absolute():
+            path = bindings["project_root"] / path
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return None
+        matches = [file_id for file_id, declared in bindings["files"].items() if declared == resolved]
+        return matches[0] if len(matches) == 1 else None
     for raw_status, nodeid in line_re.findall(output):
         parts = nodeid.split("::")
         if len(parts) < 2:
             continue
-        candidate_ids = files_by_name.get(Path(parts[0]).name, [])
-        if len(candidate_ids) != 1:
+        file_id = file_id_for_node(parts[0])
+        if not file_id:
             continue
         name = parts[-1].split("[", 1)[0]
-        key = (candidate_ids[0], name)
+        key = (file_id, name)
         if key not in bindings["methods"]:
             continue
         if key in observed and observed[key] != status_map[raw_status]:
@@ -423,9 +437,9 @@ def bind_pytest_evidence(output: str, bindings: dict, run_id: str) -> tuple[list
         observed[key] = status_map[raw_status]
     for nodeid, raw_status in progress_re.findall(output):
         parts = nodeid.split("::")
-        candidate_ids = files_by_name.get(Path(parts[0]).name, [])
-        if len(candidate_ids) == 1 and (candidate_ids[0], parts[-1].split("[", 1)[0]) in bindings["methods"]:
-            observed[(candidate_ids[0], parts[-1].split("[", 1)[0])] = status_map[raw_status]
+        file_id = file_id_for_node(parts[0])
+        if file_id and (file_id, parts[-1].split("[", 1)[0]) in bindings["methods"]:
+            observed[(file_id, parts[-1].split("[", 1)[0])] = status_map[raw_status]
     evidence = []
     for key, method_id in sorted(bindings["methods"].items(), key=lambda item: item[1]):
         if key not in observed:
@@ -906,6 +920,14 @@ def main() -> int:
     # --- Проверяем окружение под язык ---
     if language == "python":
         if bindings:
+            if args.pytest_args:
+                report = build_not_runnable(
+                    {"status": "partial", "interpreter": None, "interpreter_path": None,
+                     "working_dir": os.path.abspath(project_dir), "missing": ["pytest_args"], "_framework": "pytest"},
+                    "python", "pytest arguments are rejected with authoritative automation evidence",
+                )
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 2
             target_error = validate_pytest_target_override(args.pytest_target, bindings, project_dir)
             if target_error:
                 report = build_not_runnable(

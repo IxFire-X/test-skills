@@ -149,6 +149,14 @@
         "then": {"properties": {"run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}, "execution_evidence": {"minItems": 1}}},
         "else": {"properties": {"run_id": {"type": "null"}, "execution_evidence": {"maxItems": 0}}}
       }
+      ,{
+        "if": {"properties": {"verdict": {"const": "NOT_RUNNABLE"}}, "required": ["verdict"]},
+        "then": {"properties": {"evidence_authoritative": {"const": false}, "run_id": {"type": "null"}, "execution_evidence": {"maxItems": 0}}}
+      },
+      {
+        "if": {"properties": {"verdict": {"const": "PASS"}}, "required": ["verdict"]},
+        "then": {"properties": {"execution_evidence": {"not": {"contains": {"properties": {"status": {"enum": ["failed", "error"]}}, "required": ["status"]}}}}}
+      }
     ],
     "additionalProperties": false
   }

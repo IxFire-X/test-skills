@@ -35,6 +35,18 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 missing_integrity.append(f"invalid:{relative}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             missing_integrity.append(f"invalid:{relative}")
+    pipeline_path = root / "contracts" / "pipeline.json"
+    if pipeline_path.is_file():
+        try:
+            try:
+                from contract_check import validate_pipeline_contract
+            except ModuleNotFoundError:
+                from tools.contract_check import validate_pipeline_contract
+            contract_report = validate_pipeline_contract(json.loads(pipeline_path.read_text(encoding="utf-8")), root, check_drift=False)
+            if contract_report["status"] != "passed":
+                missing_integrity.append("invalid:pipeline_contract")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError):
+            missing_integrity.append("invalid:pipeline_contract")
     dependencies = {
         name: {"required": True, "available": importlib.util.find_spec(name) is not None}
         for name in ("jsonschema", "yaml")
