@@ -113,7 +113,28 @@ def test_schema_rejects_noncanonical_portable_file_path(trace_check, valid_trace
     assert "invalid_input_schema" in _codes(trace_check.check(document))
 
 
-@pytest.mark.parametrize("path", ["tests/.fixtures/test_api.py", "src/test/java/com/acme/ApiTest.java"])
+@pytest.mark.parametrize("path", ["tests/a:b.py", "tests/a\x7f.py", "tests/a\x9f.py"])
+def test_schema_rejects_windows_colon_and_control_file_path_characters(trace_check, valid_trace, path):
+    document = copy.deepcopy(valid_trace)
+    document["generated_files"][0]["path"] = path
+    assert "invalid_input_schema" in _codes(trace_check.check(document))
+
+
+@pytest.mark.parametrize("path", ["CON.py", "dir/NUL.txt", "aux", "tests/COM1.log", "LPT9", "tests/name.", "tests/name "])
+def test_semantic_path_check_rejects_windows_device_and_segment_suffixes(trace_check, valid_trace, path):
+    document = copy.deepcopy(valid_trace)
+    document["generated_files"][0]["path"] = path
+    assert "NONPORTABLE_PATH" in _codes(trace_check.check(document))
+
+
+def test_semantic_path_check_defends_against_unicode_control_categories(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["generated_files"][0]["path"] = "tests/a\x9f.py"
+    errors, _ = trace_check._semantic_check(document, require_execution=False)
+    assert "NONPORTABLE_PATH" in {error["code"] for error in errors}
+
+
+@pytest.mark.parametrize("path", ["tests/.fixtures/test_api.py", "src/test/java/com/acme/ApiTest.java", "tests/conventional.py", "tests/com10.py", "tests/.con.py"])
 def test_schema_accepts_canonical_portable_file_path(trace_check, valid_trace, path):
     document = copy.deepcopy(valid_trace)
     document["generated_files"][0]["path"] = path

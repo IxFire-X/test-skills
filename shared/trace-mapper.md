@@ -46,11 +46,17 @@ topology.
 ```
 
 `generated_files.path` is a normalized portable relative POSIX path: no drive, absolute path,
-backslash, `.`/`..` segment, repeated slash, trailing slash, control character, or Windows-reserved
-character. Unicode paths and dotfiles are allowed, but paths must already be NFC-normalized.
-Physical path identity is compared by NFC/casefold as a deliberate portability restriction, so
-`tests/ApiTest.py` and `tests/apitest.py` cannot be separate generated files. A file may contain
-several methods, and a method may implement several requirements or test cases. A
+backslash, `:` or another Windows-reserved character, `.`/`..` segment, repeated slash, trailing
+slash, or C0/DEL/C1 control character. Every NFC-normalized segment must also avoid a trailing dot
+or space and Windows device basenames (case-insensitive, including extensions): `CON`, `PRN`,
+`AUX`, `NUL`, `CLOCK$`, `COM1`–`COM9`, and `LPT1`–`LPT9`. Thus `CON.py` and `dir/NUL.txt` are
+invalid, while `conventional.py`, `com10.py`, and `.con.py` are valid. Unicode paths and dotfiles
+are allowed, but paths must already be NFC-normalized. Semantic path portability diagnostics use
+`NONPORTABLE_PATH`; NFC and physical-identity diagnostics remain `NONCANONICAL_PATH` and
+`DUPLICATE_PATH` respectively. Physical path identity is compared by NFC/casefold as a deliberate
+portability restriction, so `tests/ApiTest.py` and `tests/apitest.py` cannot be separate generated
+files. A file may contain several methods, and a method may implement several requirements or test
+cases. A
 mapping is the explicit four-ID link; distinct mappings may share a method.
 
 ## Invariants

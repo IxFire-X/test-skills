@@ -26,6 +26,7 @@ else:
 
 DEFAULT_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "trace-document.schema.json"
 DEFAULT_ORCHESTRATOR_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "orchestrator-output.schema.json"
+_WINDOWS_DEVICE_BASENAMES = {"con", "prn", "aux", "nul", "clock$", *(f"com{number}" for number in range(1, 10)), *(f"lpt{number}" for number in range(1, 10))}
 
 
 def _pointer(parts: Iterable[object]) -> str:
@@ -155,6 +156,19 @@ def _canonical_path(path: object) -> str:
     return "/".join(segments).casefold()
 
 
+def _nonportable_path_problem(path: object) -> str | None:
+    """Return the first Windows-incompatible segment property, if any."""
+    for segment in unicodedata.normalize("NFC", str(path)).split("/"):
+        if any(unicodedata.category(character) == "Cc" for character in segment):
+            return "contains a Unicode control character"
+        if segment.endswith((".", " ")):
+            return "contains a segment ending with a dot or space"
+        basename = segment.split(".", 1)[0].casefold()
+        if basename in _WINDOWS_DEVICE_BASENAMES:
+            return f"contains a reserved Windows device basename: {segment}"
+    return None
+
+
 def _semantic_check(document: dict[str, object], require_execution: bool) -> tuple[list[dict[str, str]], list[dict[str, object]]]:
     errors: list[dict[str, str]] = []
     requirements = document["requirements"]
@@ -173,6 +187,8 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
         path = generated_file["path"]
         if path != unicodedata.normalize("NFC", str(path)):
             _append(errors, "NONCANONICAL_PATH", f"/generated_files/{index}/path", f"generated file path is not NFC-normalized: {path}")
+        if problem := _nonportable_path_problem(path):
+            _append(errors, "NONPORTABLE_PATH", f"/generated_files/{index}/path", f"generated file path {problem}: {path}")
         physical_path = _canonical_path(path)
         if physical_path in paths:
             _append(errors, "DUPLICATE_PATH", f"/generated_files/{index}/path", f"duplicate generated file path: {path}")
