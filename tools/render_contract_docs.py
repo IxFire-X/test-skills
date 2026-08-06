@@ -7,10 +7,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-try:
+if __package__:
+    from .json_cli import JsonArgumentParser, emit_error
+else:  # direct CLI execution
     from json_cli import JsonArgumentParser, emit_error
-except ModuleNotFoundError:  # imported as tools.render_contract_docs by tests
-    from tools.json_cli import JsonArgumentParser, emit_error
 
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}

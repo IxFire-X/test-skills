@@ -9,10 +9,10 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-try:
+if __package__:
+    from .json_cli import JsonArgumentParser
+else:  # direct CLI execution
     from json_cli import JsonArgumentParser
-except ModuleNotFoundError:  # imported as tools.contract_check by tests
-    from tools.json_cli import JsonArgumentParser
 
 from jsonschema import Draft202012Validator
 

@@ -6,15 +6,10 @@ import platform
 import sys
 from pathlib import Path
 
-try:
+if __package__:
+    from .json_cli import JsonArgumentParser
+else:  # direct CLI execution
     from json_cli import JsonArgumentParser
-except ModuleNotFoundError:  # imported as tools.doctor by tests
-    from tools.json_cli import JsonArgumentParser
-
-try:
-    from contract_check import validate_pipeline_contract
-except ModuleNotFoundError:  # imported as tools.doctor by tests
-    from tools.contract_check import validate_pipeline_contract
 
 
 def inspect_environment(root: Path) -> dict[str, object]:
@@ -43,6 +38,10 @@ def inspect_environment(root: Path) -> dict[str, object]:
     pipeline_path = root / "contracts" / "pipeline.json"
     if pipeline_path.is_file():
         try:
+            if __package__:
+                from .contract_check import validate_pipeline_contract
+            else:  # direct CLI execution
+                from contract_check import validate_pipeline_contract
             contract_report = validate_pipeline_contract(json.loads(pipeline_path.read_text(encoding="utf-8")), root, check_drift=False)
             if contract_report["status"] != "passed":
                 missing_integrity.append("invalid:pipeline_contract")

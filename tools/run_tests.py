@@ -44,10 +44,10 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-try:
+if __package__:
+    from .json_cli import JsonArgumentParser
+else:  # direct CLI execution
     from json_cli import JsonArgumentParser
-except ModuleNotFoundError:  # imported as tools.run_tests by tests
-    from tools.json_cli import JsonArgumentParser
 
 # ---------------------------------------------------------------------------
 # Конфигурация стека

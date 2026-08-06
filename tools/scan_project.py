@@ -49,10 +49,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
+if __package__:
+    from .json_cli import JsonArgumentParser
+else:  # direct CLI execution
     from json_cli import JsonArgumentParser
-except ModuleNotFoundError:  # imported as tools.scan_project by tests
-    from tools.json_cli import JsonArgumentParser
 
 # ---------------------------------------------------------------------------
 # Конфигурация распознавания манифестов
