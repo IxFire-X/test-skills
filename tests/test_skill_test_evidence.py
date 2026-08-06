@@ -20,6 +20,7 @@ PHASES = ("01-red-control", "02-green-initial", "04-green-final")
 REPETITIONS = tuple(f"rep-{number:02d}" for number in range(1, 6))
 SCORECARD_PHASES = ("red", "green-initial", "green-final")
 SCORECARD_OUTPUT_PHASES = dict(zip(SCORECARD_PHASES, PHASES, strict=True))
+PRESSURE_OUTPUT_PATH = "artifacts/outputs/03-pressure/pressure"
 UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 
 
@@ -155,6 +156,12 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             assert resolved_output not in output_paths
             output_paths.add(resolved_output)
         assert required_output in {output["path"] for output in run["outputs"]}
+        companion_prefix = (
+            f"{scenario['pressure_output_path']}/"
+            if phase == "pressure"
+            else f"artifacts/outputs/{phase}/{repetition}/"
+        )
+        assert any(output["path"].startswith(companion_prefix) for output in run["outputs"])
 
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
@@ -248,7 +255,19 @@ def complete_campaign(tmp_path, root):
         evidence_path = campaign / relative_path
         evidence_path.parent.mkdir(parents=True, exist_ok=True)
         evidence_path.write_bytes(content)
-        run["outputs"] = [{"path": relative_path, "sha256": hashlib.sha256(content).hexdigest()}]
+        companion_path = (
+            f"{scenario['pressure_output_path']}/companion.json"
+            if phase == "pressure"
+            else f"artifacts/outputs/{phase}/{repetition}/companion.json"
+        )
+        companion_content = f"{phase} {repetition} companion\n".encode()
+        companion_file = campaign / companion_path
+        companion_file.parent.mkdir(parents=True, exist_ok=True)
+        companion_file.write_bytes(companion_content)
+        run["outputs"] = [
+            {"path": relative_path, "sha256": hashlib.sha256(content).hexdigest()},
+            {"path": companion_path, "sha256": hashlib.sha256(companion_content).hexdigest()},
+        ]
     return campaign, scenario, scorecards, metadata
 
 
@@ -282,6 +301,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert scenario["repetitions"] == 5
         assert scenario["fork_turns"] == "none"
         assert scenario["output_paths"] == _expected_output_paths()
+        assert scenario["pressure_output_path"] == PRESSURE_OUTPUT_PATH
         assert len(set(scenario["output_paths"])) == len(scenario["output_paths"])
         assert all(not Path(output_path).is_absolute() and ".." not in Path(output_path).parts for output_path in scenario["output_paths"])
         assert hashlib.sha256(scenario["canonical_prompt"].encode("utf-8")).hexdigest() == scenario["prompt_sha256"]["canonical"]
@@ -293,6 +313,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         for phase in PHASES:
             for repetition in REPETITIONS:
                 assert (campaign / "artifacts/outputs" / phase / repetition / ".gitkeep").is_file()
+        assert (campaign / PRESSURE_OUTPUT_PATH / ".gitkeep").is_file()
         scorecards = []
         for phase in SCORECARD_PHASES:
             scorecard_path = campaign / "05-scorecards" / f"{phase}.json"
@@ -417,6 +438,14 @@ def _duplicate_command_id(campaign, scenario, scorecards, metadata):
     metadata["runs"][0]["commands"].append({"id": "evaluate", "exit_code": 1})
 
 
+def _remove_canonical_companion(campaign, scenario, scorecards, metadata):
+    metadata["runs"][0]["outputs"] = metadata["runs"][0]["outputs"][:1]
+
+
+def _remove_pressure_companion(campaign, scenario, scorecards, metadata):
+    metadata["runs"][-1]["outputs"] = metadata["runs"][-1]["outputs"][:1]
+
+
 @pytest.mark.parametrize(
     ("name", "mutate"),
     [
@@ -428,6 +457,8 @@ def _duplicate_command_id(campaign, scenario, scorecards, metadata):
         ("invalid calendar date", _invalid_calendar_timestamp),
         ("reversed timestamps", _reverse_timestamps),
         ("duplicate command ID", _duplicate_command_id),
+        ("missing canonical companion", _remove_canonical_companion),
+        ("missing pressure companion", _remove_pressure_companion),
     ],
 )
 def test_complete_campaign_evidence_rejects_file_backed_bypasses(complete_campaign, name, mutate):
