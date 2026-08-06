@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,10 @@ def _assert_schema_valid(validate_artifact, schema_path, document_path):
     assert validate_artifact.validate(str(schema_path), str(document_path))[0] == 0
 
 
+def _score_evidence_path(phase, repetition):
+    return f"{SCORECARD_OUTPUT_PHASES[phase]}/{repetition}.md"
+
+
 def _assert_scorecard_semantics(scorecard):
     if scorecard["status"] == "pending":
         assert scorecard["results"] == {}
@@ -49,7 +54,7 @@ def _assert_scorecard_semantics(scorecard):
         for result in scorecard["results"].values()
     )
     expected_evidence = {
-        f"{SCORECARD_OUTPUT_PHASES[scorecard['phase']]}/{repetition}.md"
+        _score_evidence_path(scorecard["phase"], repetition)
         for repetition in REPETITIONS
     }
     assert set(scorecard["evidence_files"]) == expected_evidence
@@ -82,7 +87,17 @@ def _expected_run_keys():
     }
 
 
-def _assert_metadata_semantics(metadata, scenario):
+def _parse_utc_z(timestamp):
+    assert UTC_Z_PATTERN.fullmatch(timestamp)
+    try:
+        value = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise AssertionError(f"invalid UTC timestamp: {timestamp}") from error
+    assert value.tzinfo == timezone.utc
+    return value
+
+
+def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     if metadata["status"] == "pending":
         assert metadata["evaluator"] is None
         assert metadata["host"] is None
@@ -95,29 +110,52 @@ def _assert_metadata_semantics(metadata, scenario):
     assert len(metadata["runs"]) == 16
     assert {(run["phase"], run["repetition"]) for run in metadata["runs"]} == _expected_run_keys()
     assert len({(run["phase"], run["repetition"]) for run in metadata["runs"]}) == 16
+    campaign_root = campaign.resolve()
+    output_paths = set()
     for run in metadata["runs"]:
         phase, repetition = run["phase"], run["repetition"]
         assert run["raw_input_allowlist"] == scenario["raw_input_allowlist"]
-        assert UTC_Z_PATTERN.fullmatch(run["started_at"])
-        assert UTC_Z_PATTERN.fullmatch(run["finished_at"])
+        started_at = _parse_utc_z(run["started_at"])
+        finished_at = _parse_utc_z(run["finished_at"])
+        assert finished_at >= started_at
         if phase == "pressure":
             assert repetition == "pressure"
             assert run["skill_present"] is True
             assert run["prompt_sha256"] == scenario["prompt_sha256"]["pressure"]
+            required_output = "03-pressure.md"
             output_prefix = "artifacts/outputs/03-pressure/pressure/"
         else:
             assert repetition in REPETITIONS
             assert run["skill_present"] is (phase != "01-red-control")
             assert run["prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
+            required_output = f"{phase}/{repetition}.md"
             output_prefix = f"artifacts/outputs/{phase}/{repetition}/"
         assert run["outputs"]
         assert run["commands"]
         assert len({output["path"] for output in run["outputs"]}) == len(run["outputs"])
+        assert len({command["id"] for command in run["commands"]}) == len(run["commands"])
         for output in run["outputs"]:
             output_path = Path(output["path"])
             assert not output_path.is_absolute()
             assert ".." not in output_path.parts
-            assert output["path"].startswith(output_prefix)
+            assert output["path"] == required_output or output["path"].startswith(output_prefix or "")
+            resolved_output = (campaign / output_path).resolve()
+            assert resolved_output.is_relative_to(campaign_root)
+            assert resolved_output.is_file()
+            assert hashlib.sha256(resolved_output.read_bytes()).hexdigest() == output["sha256"]
+            assert resolved_output not in output_paths
+            output_paths.add(resolved_output)
+        assert required_output in {output["path"] for output in run["outputs"]}
+
+    metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
+    for scorecard in scorecards:
+        _assert_scorecard_semantics(scorecard)
+        if scorecard["status"] == "complete":
+            for evidence_file in scorecard["evidence_files"]:
+                resolved_evidence = (campaign / evidence_file).resolve()
+                assert resolved_evidence.is_relative_to(campaign_root)
+                assert resolved_evidence.is_file()
+                assert evidence_file in metadata_output_paths
 
 
 def _complete_scorecard(scenario, phase="red"):
@@ -133,7 +171,7 @@ def _complete_scorecard(scenario, phase="red"):
             for repetition in REPETITIONS
         },
         "evidence_files": [
-            f"{SCORECARD_OUTPUT_PHASES[phase]}/{repetition}.md"
+            _score_evidence_path(phase, repetition)
             for repetition in REPETITIONS
         ],
         "all_passed": result_value,
@@ -155,7 +193,7 @@ def _complete_metadata(scenario):
                     "raw_input_allowlist": scenario["raw_input_allowlist"],
                     "started_at": "2026-08-07T12:00:00Z",
                     "finished_at": "2026-08-07T12:00:01Z",
-                    "outputs": [{"path": f"artifacts/outputs/{phase}/{repetition}/result.md", "sha256": "a" * 64}],
+                    "outputs": [{"path": f"{phase}/{repetition}.md", "sha256": "a" * 64}],
                     "commands": [{"id": "evaluate", "exit_code": 0}],
                 }
             )
@@ -168,7 +206,7 @@ def _complete_metadata(scenario):
             "raw_input_allowlist": scenario["raw_input_allowlist"],
             "started_at": "2026-08-07T12:00:00Z",
             "finished_at": "2026-08-07T12:00:01Z",
-            "outputs": [{"path": "artifacts/outputs/03-pressure/pressure/result.md", "sha256": "b" * 64}],
+            "outputs": [{"path": "03-pressure.md", "sha256": "b" * 64}],
             "commands": [{"id": "evaluate-pressure", "exit_code": 0}],
         }
     )
@@ -182,6 +220,32 @@ def _complete_metadata(scenario):
         "fork_turns": "none",
         "runs": runs,
     }
+
+
+@pytest.fixture
+def complete_campaign(tmp_path, root):
+    """A complete campaign whose evidence files and digest records are independently real."""
+    campaign = tmp_path / "context-marker"
+    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scorecards = [_complete_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
+    metadata = _complete_metadata(scenario)
+    for run in metadata["runs"]:
+        phase, repetition = run["phase"], run["repetition"]
+        if phase == "pressure":
+            relative_path = "03-pressure.md"
+        else:
+            relative_path = f"{phase}/{repetition}.md"
+        content = f"{phase} {repetition} evidence\n".encode()
+        evidence_path = campaign / relative_path
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_bytes(content)
+        run["outputs"] = [{"path": relative_path, "sha256": hashlib.sha256(content).hexdigest()}]
+    return campaign, scenario, scorecards, metadata
+
+
+def _assert_schema_instance_valid(validate_artifact, schema_path, document):
+    validator = validate_artifact.Draft202012Validator(_read_json(schema_path))
+    assert not list(validator.iter_errors(document))
 
 
 def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
@@ -215,7 +279,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert hashlib.sha256(scenario["pressure_prompt"].encode("utf-8")).hexdigest() == scenario["prompt_sha256"]["pressure"]
         _assert_schema_valid(validate_artifact, schema_path, scenario_path)
         _assert_schema_valid(validate_artifact, schema_path, metadata_path)
-        _assert_metadata_semantics(_read_json(metadata_path), scenario)
+        metadata = _read_json(metadata_path)
 
         for phase in PHASES:
             for repetition in REPETITIONS:
@@ -229,6 +293,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
             _assert_scorecard_semantics(scorecard)
             scorecards.append(scorecard)
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
         assert campaign.resolve().is_relative_to((root / "docs/to_do").resolve())
 
 
@@ -286,10 +351,79 @@ def test_scorecard_semantics_reject_bypass_fixtures(root, name, mutate):
         ),
     ],
 )
-def test_run_metadata_semantics_reject_bypass_fixtures(root, name, mutate):
+def test_run_metadata_semantics_reject_bypass_fixtures(complete_campaign, name, mutate):
     """Catches aggregate metadata that omits, aliases, or weakens individual campaign runs."""
-    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
-    metadata = _complete_metadata(scenario)
+    campaign, scenario, scorecards, metadata = complete_campaign
     mutate(metadata)
     with pytest.raises(AssertionError):
-        _assert_metadata_semantics(metadata, scenario)
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_complete_campaign_evidence_is_schema_valid_and_matches_real_files(root, complete_campaign):
+    """Catches completed evidence whose declared files or digests do not match disk."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    schema_path = root / "schemas/skill-test-evidence.schema.json"
+    validate_artifact = load_tool("validate_artifact")
+    for document in [scenario, *scorecards, metadata]:
+        _assert_schema_instance_valid(validate_artifact, schema_path, document)
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def _remove_first_output(campaign, scenario, scorecards, metadata):
+    (campaign / metadata["runs"][0]["outputs"][0]["path"]).unlink()
+
+
+def _tamper_first_output(campaign, scenario, scorecards, metadata):
+    (campaign / metadata["runs"][0]["outputs"][0]["path"]).write_text("tampered\n", encoding="utf-8")
+
+
+def _remove_first_score_evidence(campaign, scenario, scorecards, metadata):
+    (campaign / scorecards[0]["evidence_files"][0]).unlink()
+
+
+def _unlink_scorecard_from_metadata(campaign, scenario, scorecards, metadata):
+    replacement_path = "artifacts/outputs/01-red-control/rep-01/other.json"
+    replacement = campaign / replacement_path
+    content = b"replacement output\n"
+    replacement.parent.mkdir(parents=True, exist_ok=True)
+    replacement.write_bytes(content)
+    metadata["runs"][0]["outputs"] = [
+        {"path": replacement_path, "sha256": hashlib.sha256(content).hexdigest()}
+    ]
+
+
+def _duplicate_output_path(campaign, scenario, scorecards, metadata):
+    metadata["runs"][-1]["outputs"] = [copy.deepcopy(metadata["runs"][0]["outputs"][0])]
+
+
+def _invalid_calendar_timestamp(campaign, scenario, scorecards, metadata):
+    metadata["runs"][0]["started_at"] = "2026-02-30T12:00:00Z"
+
+
+def _reverse_timestamps(campaign, scenario, scorecards, metadata):
+    metadata["runs"][0]["finished_at"] = "2026-08-07T11:59:59Z"
+
+
+def _duplicate_command_id(campaign, scenario, scorecards, metadata):
+    metadata["runs"][0]["commands"].append({"id": "evaluate", "exit_code": 1})
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("missing referenced output", _remove_first_output),
+        ("tampered output bytes", _tamper_first_output),
+        ("missing score evidence", _remove_first_score_evidence),
+        ("score evidence absent from metadata", _unlink_scorecard_from_metadata),
+        ("duplicate path across runs", _duplicate_output_path),
+        ("invalid calendar date", _invalid_calendar_timestamp),
+        ("reversed timestamps", _reverse_timestamps),
+        ("duplicate command ID", _duplicate_command_id),
+    ],
+)
+def test_complete_campaign_evidence_rejects_file_backed_bypasses(complete_campaign, name, mutate):
+    """Catches complete campaigns that cite missing, overwritten, or chronologically invalid evidence."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    mutate(campaign, scenario, scorecards, metadata)
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
