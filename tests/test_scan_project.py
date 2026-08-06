@@ -100,6 +100,38 @@ def test_java_endpoint_lexer_ignores_comments_text_strings_and_chars(scanner, tm
     assert scanner._extract_endpoints(str(tmp_path), ["Demo.java"], "spring-boot") == ["/live"]
 
 
+def test_java_endpoint_lexer_keeps_escaped_text_block_delimiter_masked(scanner, tmp_path):
+    """Catches an escaped text-block delimiter exposing a fake mapping as code."""
+    source = '''class Demo {
+  String text = """
+    \\""" @GetMapping("/fake")
+    still text
+    """;
+  @GetMapping("/live") String live() { return "ok"; }
+}
+'''
+    (tmp_path / "Demo.java").write_text(source, encoding="utf-8")
+
+    assert scanner._extract_endpoints(str(tmp_path), ["Demo.java"], "spring-boot") == ["/live"]
+
+
+def test_java_mapping_arguments_accept_only_paths_values_and_positionals(scanner, tmp_path):
+    """Catches metadata strings such as produces or headers being treated as endpoints."""
+    source = '''class Demo {
+  @RequestMapping(produces = "application/json", headers = "X-Trace") void metadataOnly() {}
+  @GetMapping(path = {"/path-a", "/path-b"}, produces = "application/json") void paths() {}
+  @PostMapping(value = "/value", consumes = "application/json") void value() {}
+  @DeleteMapping("/direct") void direct() {}
+  @Path("/jax") void jax() {}
+}
+'''
+    (tmp_path / "Demo.java").write_text(source, encoding="utf-8")
+
+    assert scanner._extract_endpoints(str(tmp_path), ["Demo.java"], "spring-boot") == [
+        "/path-a", "/path-b", "/value", "/direct", "/jax",
+    ]
+
+
 def test_source_envelope_round_trips_delimiter_shaped_java_source(scanner, tmp_path):
     """Catches source evidence corrupting XML-like file/source framing delimiters."""
     source = '''class Demo {

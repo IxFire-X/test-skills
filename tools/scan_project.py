@@ -597,7 +597,13 @@ def _strip_java_comments_and_text_blocks(text: str) -> str:
                 result.append("\n" if text[index] == "\n" else " ")
                 index += 1
         elif state == "text_block":
-            if text.startswith('\"\"\"', index):
+            if text[index] == "\\" and index + 1 < len(text):
+                result.append(" ")
+                index += 1
+                escaped = text[index]
+                result.append("\n" if escaped == "\n" else " ")
+                index += 1
+            elif text.startswith('\"\"\"', index):
                 result.extend("   ")
                 index += 3
                 state = "code"
@@ -623,8 +629,9 @@ def _strip_java_comments_and_text_blocks(text: str) -> str:
 def _java_mapping_endpoints(text: str) -> list[str]:
     """Extract mapping strings only when the annotation token occurs in Java code."""
     mask = _strip_java_comments_and_text_blocks(text)
-    annotations = re.compile(r"@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@Path\s*\(", re.I)
+    annotations = re.compile(r"@(?P<name>Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@(?P<jax>Path)\s*\(", re.I)
     literal = re.compile(r'"((?:\\.|[^"\\])*)"')
+    named_path = re.compile(r"(?:^|,)\s*(?:path|value)\s*=\s*(\{[^}]*\}|\"(?:\\.|[^\"\\])*\")", re.S)
     endpoints: list[str] = []
     for match in annotations.finditer(mask):
         opening = mask.find("(", match.start(), match.end())
@@ -641,10 +648,31 @@ def _java_mapping_endpoints(text: str) -> list[str]:
         if closing is None:
             continue
         arguments = text[opening + 1:closing]
-        value_match = re.search(r"\bvalue\s*=\s*\"((?:\\.|[^\"\\])*)\"", arguments)
-        string_match = value_match or literal.search(arguments)
-        if string_match and string_match.group(1) not in endpoints:
-            endpoints.append(string_match.group(1))
+        values: list[str] = []
+        if match.group("jax"):
+            positional = arguments.lstrip()
+            if positional.startswith("{"):
+                end = positional.find("}")
+                values = literal.findall(positional[:end + 1]) if end >= 0 else []
+            elif positional.startswith('"'):
+                direct = literal.match(positional)
+                values = [direct.group(1)] if direct else []
+        else:
+            named_values = [item.group(1) for item in named_path.finditer(arguments)]
+            if named_values:
+                for value in named_values:
+                    values.extend(literal.findall(value))
+            else:
+                positional = arguments.lstrip()
+                if positional.startswith("{"):
+                    end = positional.find("}")
+                    values = literal.findall(positional[:end + 1]) if end >= 0 else []
+                elif positional.startswith('"'):
+                    direct = literal.match(positional)
+                    values = [direct.group(1)] if direct else []
+        for value in values:
+            if value not in endpoints:
+                endpoints.append(value)
     return endpoints
 
 
