@@ -15,11 +15,11 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": "2.1.0"},
-    "requirements": {"type": "array", "items": {"$ref": "#/$defs/requirement"}},
-    "test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
-    "generated_files": {"type": "array", "items": {"$ref": "#/$defs/generated_file"}},
-    "methods": {"type": "array", "items": {"$ref": "#/$defs/method"}},
-    "trace_map": {"type": "array", "items": {"$ref": "#/$defs/mapping"}},
+    "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/requirement"}},
+    "test_cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/test_case"}},
+    "generated_files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/generated_file"}},
+    "methods": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/method"}},
+    "trace_map": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mapping"}},
     "execution_required": {"type": "boolean"},
     "execution": {"$ref": "#/$defs/execution"},
     "final_verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}

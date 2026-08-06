@@ -8,7 +8,9 @@ not create an alternate contract.
 ## Model
 
 The document has `schema_version: "2.1.0"` and closed objects throughout. Stable IDs use these
-prefixes: `REQ-`, `TC-`, `FILE-`, `METHOD-`, and `RUN-`.
+prefixes: `REQ-`, `TC-`, `FILE-`, `METHOD-`, and `RUN-`. Requirements, test cases, generated
+files, methods, and mappings are all non-empty: a trace cannot claim success through an empty
+topology.
 
 ```json
 {
@@ -53,8 +55,12 @@ differ.
 
 Execution is required when either `execution_required` or the command-line
 `--require-execution` flag is true. Then the execution verdict must be `PASS` and each mapped
-method needs evidence. `failed` and `error` are failures. A `skipped` method is acceptable only
-with exactly one matching allowed-skip rule, which has a non-empty `reason` and `policy_ref`:
+method needs evidence. When execution is supplied at all, `FAIL` and `NOT_RUNNABLE` still make the
+trace invalid; optional topology-only success therefore requires omitting `execution` and setting
+`execution_required` to `false`. `NOT_RUNNABLE` has empty evidence and skip rules and is never an
+acceptance result. A `PASS` verdict may not contain failed/error evidence, and a `FAIL` verdict
+must have failure evidence. A `skipped` method is acceptable only with exactly one matching
+allowed-skip rule, which has a non-empty `reason` and `policy_ref`:
 
 ```json
 {
@@ -86,7 +92,9 @@ schema, missing runtime dependency, or invalid arguments. Schema diagnostics use
 `MISSING_MAPPING`, `MAPPING_MISMATCH`, and `EXECUTION_GATE`.
 
 The resulting `trace_audit` has `{verdict, mappings, errors}` and is the `trace_audit` artifact
-produced by the `trace-check` step in `contracts/pipeline.json`. Its mapping entries contain
-requirement, test-case, method, and execution evidence IDs, so they can be embedded directly in the
-orchestrator artifact. A topology-only check can have empty `evidence_ids`; it is not execution
-acceptance.
+produced by the `trace-check` step in `contracts/pipeline.json`. Each mapping contains
+`requirement_id`, `test_case_id`, `file_id`, `method_id`, and `evidence_ids`, so it can be embedded
+directly in the orchestrator artifact. Execution evidence intentionally records stable method and
+run IDs rather than outdated path strings; the complete file identity is reconstructed through the
+mapping's `file_id` and the generated method/file records. A topology-only check can have empty
+`evidence_ids`; it is not execution acceptance.

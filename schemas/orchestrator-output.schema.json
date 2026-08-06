@@ -93,15 +93,72 @@
                 }
               },
               "trace_audit": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "artifacts": {
+            "properties": {
+              "trace_audit": {
                 "properties": {
                   "verdict": {
                     "const": "PASS"
-                  },
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "properties": {
+              "trace_audit": {
+                "properties": {
                   "mappings": {
                     "minItems": 1
                   },
                   "errors": {
                     "maxItems": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "artifacts": {
+            "properties": {
+              "trace_audit": {
+                "properties": {
+                  "verdict": {
+                    "const": "FAIL"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "properties": {
+              "trace_audit": {
+                "properties": {
+                  "errors": {
+                    "minItems": 1
                   }
                 }
               }
@@ -339,6 +396,7 @@
             "required": [
               "requirement_id",
               "test_case_id",
+              "file_id",
               "method_id",
               "evidence_ids"
             ],
@@ -351,6 +409,10 @@
               "test_case_id": {
                 "type": "string",
                 "pattern": "^TC-[A-Za-z0-9_.:-]+$"
+              },
+              "file_id": {
+                "type": "string",
+                "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
               },
               "method_id": {
                 "type": "string",

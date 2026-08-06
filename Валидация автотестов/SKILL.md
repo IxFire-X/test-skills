@@ -372,9 +372,9 @@ CONFIDENCE: 0.0–1.0 (агрегированная уверенность в в
 ## Дополнительные ресурсы
 
 - Полный пример валидации автотестов: [examples.md](examples.md)
-- **Спецификация traceability (ТК-N → метод):** [`../shared/trace-mapper.md`](../shared/trace-mapper.md) — единый формат `<trace_map>` для маппинга ТК-N на java-методы. Используй `<trace_map>` (если передан) как дополнительный источник для кросс-валидации traceability: сверяй записи в `@DisplayName` и `<automation_matrix>` с эталонным `<trace_map>`.
+- **Спецификация traceability:** [`../shared/trace-mapper.md`](../shared/trace-mapper.md) — канонический JSON `trace_map`/`trace-document` для связей requirement → test case → file/method. Если он передан, используй его как дополнительный источник кросс-валидации с `@DisplayName` и `<automation_matrix>`.
 
-> **ВАЖНО:** если на вход передан `<trace_map>` (от `tc-to-autotest`), скилл ОБЯЗАН использовать его для верификации traceability. Расхождения между `<trace_map>` и `<automation_matrix>` / кодом фиксируются как КРИТИЧЕСКИЕ ошибки в `<autotest_review>`.
+> **ВАЖНО:** если на вход передан канонический JSON `trace_map` (от `tc-to-autotest`), используй его для верификации traceability. Расхождения с `<automation_matrix>` или кодом фиксируются как КРИТИЧЕСКИЕ ошибки в `<autotest_review>`.
 
 ---
 

@@ -54,6 +54,7 @@ def test_full_trace_with_passed_execution_is_valid(trace_check, valid_trace):
             {
                 "requirement_id": "REQ-1",
                 "test_case_id": "TC-1",
+                "file_id": "FILE-1",
                 "method_id": "METHOD-1",
                 "evidence_ids": ["RUN-1"],
             }
@@ -71,6 +72,102 @@ def test_topology_only_trace_is_valid_when_execution_is_not_required(trace_check
     assert result["trace_audit"]["mappings"][0]["evidence_ids"] == []
 
 
+@pytest.mark.parametrize("field", ["requirements", "test_cases", "generated_files", "methods", "trace_map"])
+def test_schema_rejects_vacuous_topology_arrays(trace_check, valid_trace, field):
+    document = copy.deepcopy(valid_trace)
+    document[field] = []
+    assert "invalid_input_schema" in _codes(trace_check.check(document))
+
+
+def test_required_execution_pass_with_empty_evidence_is_invalid(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["execution"]["evidence"] = []
+    assert "MISSING_EXECUTION" in _codes(trace_check.check(document))
+
+
+@pytest.mark.parametrize("verdict", ["FAIL", "NOT_RUNNABLE"])
+def test_optional_supplied_non_passing_execution_is_never_a_valid_topology(trace_check, valid_trace, verdict):
+    document = copy.deepcopy(valid_trace)
+    document["execution_required"] = False
+    document["execution"].update({"verdict": verdict, "evidence": [], "allowed_skips": []})
+    document["final_verdict"] = verdict
+    result = trace_check.check(document)
+    assert result["valid"] is False
+    assert "EXECUTION_GATE" in _codes(result)
+    assert "VERDICT_MISMATCH" not in _codes(result)
+
+
+def test_execution_verdict_must_match_failed_or_passing_evidence(trace_check, valid_trace):
+    pass_with_failure = copy.deepcopy(valid_trace)
+    pass_with_failure["execution"]["evidence"][0]["status"] = "failed"
+    assert {"EXECUTION_FAILURE", "EXECUTION_VERDICT_MISMATCH"} <= _codes(trace_check.check(pass_with_failure))
+    fail_with_pass = copy.deepcopy(valid_trace)
+    fail_with_pass["execution"]["verdict"] = "FAIL"
+    fail_with_pass["final_verdict"] = "FAIL"
+    result = trace_check.check(fail_with_pass)
+    assert "EXECUTION_VERDICT_MISMATCH" in _codes(result)
+    assert "VERDICT_MISMATCH" not in _codes(result)
+
+
+def test_not_runnable_execution_requires_empty_records_and_honest_final_verdict(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["execution"]["verdict"] = "NOT_RUNNABLE"
+    document["final_verdict"] = "NOT_RUNNABLE"
+    result = trace_check.check(document)
+    assert {"EXECUTION_GATE", "EXECUTION_VERDICT_MISMATCH"} <= _codes(result)
+    assert "VERDICT_MISMATCH" not in _codes(result)
+    assert result["trace_audit"]["mappings"] == []
+
+
+def test_reverse_mapping_coverage_catches_method_and_case_declarations(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["requirements"].append({"id": "REQ-2", "provenance": ["spec section 2"]})
+    document["test_cases"].append({"id": "TC-2", "requirement_ids": ["REQ-2"]})
+    document["generated_files"].append({"id": "FILE-2", "path": "tests/test_other.py"})
+    document["methods"][0].update(test_case_ids=["TC-1", "TC-2"], requirement_ids=["REQ-1", "REQ-2"])
+    document["methods"].append({"id": "METHOD-2", "file_id": "FILE-2", "name": "test_other", "test_case_ids": ["TC-2"], "requirement_ids": ["REQ-2"]})
+    document["trace_map"].append({"requirement_id": "REQ-2", "test_case_id": "TC-2", "file_id": "FILE-2", "method_id": "METHOD-2"})
+    errors = trace_check.check(document)["errors"]
+    missing = [error["message"] for error in errors if error["code"] == "MISSING_MAPPING"]
+    assert any("TC-2" in message and "METHOD-1" in message for message in missing)
+    assert any("REQ-2" in message and "METHOD-1" in message for message in missing)
+
+
+def test_reverse_case_requirement_pair_coverage_is_not_global_only(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["requirements"].append({"id": "REQ-2", "provenance": ["spec section 2"]})
+    document["test_cases"][0]["requirement_ids"].append("REQ-2")
+    document["test_cases"].append({"id": "TC-2", "requirement_ids": ["REQ-2"]})
+    document["generated_files"].append({"id": "FILE-2", "path": "tests/test_other.py"})
+    document["methods"].append({"id": "METHOD-2", "file_id": "FILE-2", "name": "test_other", "test_case_ids": ["TC-2"], "requirement_ids": ["REQ-2"]})
+    document["trace_map"].append({"requirement_id": "REQ-2", "test_case_id": "TC-2", "file_id": "FILE-2", "method_id": "METHOD-2"})
+    messages = [error["message"] for error in trace_check.check(document)["errors"] if error["code"] == "MISSING_MAPPING"]
+    assert any("TC-1" in message and "REQ-2" in message for message in messages)
+
+
+def test_duplicate_file_path_and_method_locator_are_rejected(trace_check, valid_trace):
+    duplicate_path = copy.deepcopy(valid_trace)
+    duplicate_path["generated_files"].append({"id": "FILE-2", "path": "tests/test_api.py"})
+    duplicate_path["methods"].append({"id": "METHOD-2", "file_id": "FILE-2", "name": "test_second", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"]})
+    duplicate_path["trace_map"].append({"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-2", "method_id": "METHOD-2"})
+    assert "DUPLICATE_PATH" in _codes(trace_check.check(duplicate_path))
+    duplicate_locator = copy.deepcopy(valid_trace)
+    duplicate_locator["methods"].append(copy.deepcopy(duplicate_locator["methods"][0]) | {"id": "METHOD-2"})
+    duplicate_locator["trace_map"].append({"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-2"})
+    assert "DUPLICATE_METHOD_LOCATOR" in _codes(trace_check.check(duplicate_locator))
+
+
+def test_same_method_name_in_different_file_is_valid_many_to_many(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["requirements"].append({"id": "REQ-2", "provenance": ["spec section 2"]})
+    document["test_cases"].append({"id": "TC-2", "requirement_ids": ["REQ-2"]})
+    document["generated_files"].append({"id": "FILE-2", "path": "tests/test_other.py"})
+    document["methods"].append({"id": "METHOD-2", "file_id": "FILE-2", "name": "test_tc_1", "test_case_ids": ["TC-2"], "requirement_ids": ["REQ-2"]})
+    document["trace_map"].append({"requirement_id": "REQ-2", "test_case_id": "TC-2", "file_id": "FILE-2", "method_id": "METHOD-2"})
+    document["execution"]["evidence"].append({"run_id": "RUN-2", "method_id": "METHOD-2", "status": "passed"})
+    assert trace_check.check(document)["valid"] is True
+
+
 def test_missing_requirement_and_case_mappings_are_independently_reported(trace_check, valid_trace):
     document = copy.deepcopy(valid_trace)
     document["requirements"].append({"id": "REQ-2", "provenance": ["spec section 2"]})
@@ -83,8 +180,8 @@ def test_missing_requirement_and_case_mappings_are_independently_reported(trace_
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [
-        (lambda d: d["trace_map"].clear(), "MISSING_MAPPING"),
-        (lambda d: d["trace_map"].pop(), "MISSING_MAPPING"),
+        (lambda d: d["requirements"].append({"id": "REQ-2", "provenance": ["source"]}), "MISSING_MAPPING"),
+        (lambda d: d["test_cases"].append({"id": "TC-2", "requirement_ids": ["REQ-1"]}), "MISSING_MAPPING"),
         (lambda d: d["methods"].append(copy.deepcopy(d["methods"][0]) | {"id": "METHOD-2"}), "ORPHAN_METHOD"),
         (lambda d: d["generated_files"].append({"id": "FILE-2", "path": "tests/orphan.py"}), "ORPHAN_FILE"),
         (lambda d: d["requirements"].append({"id": "REQ-1", "provenance": ["another source"]}), "DUPLICATE_ID"),
@@ -218,7 +315,7 @@ def test_document_execution_gate_requires_execution(trace_check, valid_trace):
 
 def test_final_verdict_claims_must_be_honest(trace_check, valid_trace):
     broken = copy.deepcopy(valid_trace)
-    broken["trace_map"].clear()
+    broken["requirements"].append({"id": "REQ-2", "provenance": ["source"]})
     assert "VERDICT_MISMATCH" in _codes(trace_check.check(broken))
     for false_claim in ("FAIL", "NOT_RUNNABLE"):
         document = copy.deepcopy(valid_trace)
@@ -282,7 +379,7 @@ def test_cli_reports_json_exit_codes_and_non_ascii(tmp_path, valid_trace, root):
     assert passed.returncode == 0
     assert json.loads(passed.stdout)["valid"] is True
     invalid = copy.deepcopy(valid_trace)
-    invalid["trace_map"].clear()
+    invalid["requirements"].append({"id": "REQ-2", "provenance": ["source"]})
     document.write_text(json.dumps(invalid), encoding="utf-8")
     failed = subprocess.run(command, text=True, capture_output=True, encoding="utf-8", check=False)
     assert failed.returncode == 1
@@ -309,3 +406,17 @@ def test_cli_input_and_schema_errors_are_json_exit_two(tmp_path, valid_trace, ro
     arguments = subprocess.run([sys.executable, tool], text=True, capture_output=True, check=False)
     assert arguments.returncode == 2
     assert json.loads(arguments.stdout)["errors"]
+
+
+def test_cli_runtime_exception_is_json_exit_two_without_traceback(root):
+    result = subprocess.run(
+        [sys.executable, root / "tools" / "trace_check.py", root / "contracts" / "pipeline.json", "--schema", root / "schemas" / "pipeline.schema.json"],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    report = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert report["errors"] == [{"code": "runtime_error", "path": "", "message": "runtime error during trace check"}]
+    assert result.stderr == ""

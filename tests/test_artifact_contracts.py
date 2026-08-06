@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = ROOT / "schemas"
 VALIDATOR_PATH = ROOT / "tools" / "validate_artifact.py"
+TRACE_CHECK_PATH = ROOT / "tools" / "trace_check.py"
 
 
 def _load_validator_module():
@@ -23,6 +24,28 @@ def _load_validator_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_trace_check_module():
+    spec = importlib.util.spec_from_file_location("trace_check", TRACE_CHECK_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _trace_document() -> dict:
+    return {
+        "schema_version": "2.1.0",
+        "requirements": [{"id": "REQ-1", "provenance": ["spec"]}],
+        "test_cases": [{"id": "TC-1", "requirement_ids": ["REQ-1"]}],
+        "generated_files": [{"id": "FILE-1", "path": "tests/test_api.py"}],
+        "methods": [{"id": "METHOD-1", "file_id": "FILE-1", "name": "test_api", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"]}],
+        "trace_map": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-1"}],
+        "execution_required": True,
+        "execution": {"verdict": "PASS", "evidence": [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], "allowed_skips": []},
+        "final_verdict": "PASS",
+    }
 
 
 def _schema(name: str) -> dict:
@@ -57,7 +80,7 @@ def valid_artifacts():
         "tc-reviewer-output.schema.json": _envelope("tc-reviewer", {"validation_report": {"verdict": "ПРИНЯТО", "reviewed_test_case_ids": ["TC-1"], "findings": [], "corrections": []}, "corrected_test_cases": []}),
         "tc-to-autotest-output.schema.json": _envelope("tc-to-autotest", {"automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}], "generated_test_files": [{"id": "FILE-1", "path": "tests/test_orders.py", "language": "python", "framework": "pytest", "content_digest": digest}], "generated_test_methods": [test_method]}),
         "autotest-reviewer-output.schema.json": _envelope("autotest-reviewer", {"autotest_review": {"verdict": "ПРИНЯТО", "reviewed_file_ids": ["FILE-1"], "reviewed_method_ids": ["METHOD-1"], "findings": [], "corrections": []}}),
-        "orchestrator-output.schema.json": _envelope("orchestrate", {"run_tests_verdict": {"verdict": "PASS", "reason": "All tests passed", "command": "pytest", "runner": "pytest", "exit_code": 0}, "execution_evidence": [{"method_id": "METHOD-1", "verdict": "PASS", "run_id": "RUN-1"}], "trace_audit": {"verdict": "PASS", "mappings": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "method_id": "METHOD-1", "evidence_ids": ["RUN-1"]}], "errors": []}}),
+        "orchestrator-output.schema.json": _envelope("orchestrate", {"run_tests_verdict": {"verdict": "PASS", "reason": "All tests passed", "command": "pytest", "runner": "pytest", "exit_code": 0}, "execution_evidence": [{"method_id": "METHOD-1", "verdict": "PASS", "run_id": "RUN-1"}], "trace_audit": {"verdict": "PASS", "mappings": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-1", "evidence_ids": ["RUN-1"]}], "errors": []}}),
         "finding": finding,
         "correction": correction,
         "test_case": test_case,
@@ -74,6 +97,39 @@ def test_schema_is_valid_draft_2020_12(schema_path):
 def test_stage_artifact_uses_versioned_envelope(schema_name, valid_artifacts):
     """Catches a stage schema that rejects its complete versioned envelope."""
     assert not _errors(schema_name, valid_artifacts[schema_name])
+
+
+def test_orchestrator_pass_run_accepts_real_checker_pass_and_semantic_fail(valid_artifacts):
+    checker = _load_trace_check_module()
+    passed = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    passed["artifacts"]["trace_audit"] = checker.check(_trace_document(), require_execution=True)["trace_audit"]
+    assert not _errors("orchestrator-output.schema.json", passed)
+    failed_document = _trace_document()
+    failed_document["execution"]["verdict"] = "FAIL"
+    failed_document["execution"]["evidence"][0]["status"] = "failed"
+    failed_document["final_verdict"] = "FAIL"
+    failed = copy.deepcopy(passed)
+    failed["artifacts"]["trace_audit"] = checker.check(failed_document, require_execution=True)["trace_audit"]
+    assert failed["artifacts"]["trace_audit"]["verdict"] == "FAIL"
+    assert not _errors("orchestrator-output.schema.json", failed)
+
+
+def test_orchestrator_not_runnable_embeds_real_checker_empty_trace_mappings(valid_artifacts):
+    checker = _load_trace_check_module()
+    document = _trace_document()
+    document["execution"].update({"verdict": "NOT_RUNNABLE", "evidence": [], "allowed_skips": []})
+    document["final_verdict"] = "NOT_RUNNABLE"
+    trace = checker.check(document)["trace_audit"]
+    assert trace["mappings"] == []
+    artifact = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    artifact["artifacts"].update(
+        {
+            "run_tests_verdict": {"verdict": "NOT_RUNNABLE", "reason": "runner unavailable"},
+            "execution_evidence": [],
+            "trace_audit": trace,
+        }
+    )
+    assert not _errors("orchestrator-output.schema.json", artifact)
 
 
 def test_tc_generator_uses_registered_generated_cases_key(valid_artifacts):
@@ -198,12 +254,12 @@ def test_orchestrator_rejects_pass_with_failed_method(valid_artifacts):
     assert _errors("orchestrator-output.schema.json", invalid)
 
 
-def test_orchestrator_rejects_pass_with_trace_failure(valid_artifacts):
-    """Catches a contradictory PASS verdict with failed trace audit."""
-    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
-    invalid["artifacts"]["trace_audit"]["verdict"] = "FAIL"
-    invalid["artifacts"]["trace_audit"]["errors"] = ["trace mismatch"]
-    assert _errors("orchestrator-output.schema.json", invalid)
+def test_orchestrator_allows_pass_run_with_trace_failure(valid_artifacts):
+    """A passed test run can still stop at the independent trace-audit gate."""
+    artifact = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    artifact["artifacts"]["trace_audit"]["verdict"] = "FAIL"
+    artifact["artifacts"]["trace_audit"]["errors"] = ["trace mismatch"]
+    assert not _errors("orchestrator-output.schema.json", artifact)
 
 
 def test_orchestrator_accepts_early_fail_without_method_evidence(valid_artifacts):

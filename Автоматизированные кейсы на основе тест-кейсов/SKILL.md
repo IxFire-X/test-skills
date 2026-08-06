@@ -481,6 +481,6 @@ assertThat(count).as("Запись аудита — ТК-N").isEqualTo(1);
 
 - Полный пример ТК → Java: [examples.md](examples.md)
 - **Утилита WireMock-мокирования:** [`../shared/stub-helper.md`](../shared/stub-helper.md) — инструкция по созданию WireMock-стабов для смежных сервисов. Используй при генерации тестов с внешними зависимостями.
-- **Спецификация traceability (ТК-N → метод):** [`../shared/trace-mapper.md`](../shared/trace-mapper.md) — единый формат `<trace_map>` для маппинга ТК-N на java-методы. ОБЯЗАН генерировать `<trace_map>` в дополнение к `<automation_matrix>`.
+- **Спецификация traceability (ТК-N → метод):** [`../shared/trace-mapper.md`](../shared/trace-mapper.md) — канонический JSON `trace_map`/`trace-document` с `REQ-`, `TC-`, `FILE-` и `METHOD-` идентификаторами. Генерируй его вместе с `automation_matrix`.
 
-> **ВАЖНО:** скилл ОБЯЗАН генерировать `<trace_map>` (согласно `trace-mapper.md`) для каждого запуска. Формат: `<trace_map version="1.0">` с записями `<entry>` для каждого ТК-N.
+> **ВАЖНО:** для каждого запуска формируй канонический JSON `trace_map` согласно `trace-mapper.md`; каждая запись связывает requirement, test case, generated file и method стабильными ID.

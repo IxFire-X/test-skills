@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -81,16 +82,22 @@ def _load_validator(schema_path: Path) -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-def _schema_report(document: object, schema_path: Path) -> tuple[list[dict[str, str]], str | None]:
+def _schema_diagnostics(error: Any) -> list[dict[str, str]]:
+    if error.validator == "additionalProperties" and isinstance(error.instance, dict) and isinstance(error.schema, dict):
+        properties = set(error.schema.get("properties", {}))
+        patterns = [re.compile(pattern) for pattern in error.schema.get("patternProperties", {})]
+        unexpected = sorted(key for key in error.instance if key not in properties and not any(pattern.search(key) for pattern in patterns))
+        if unexpected:
+            return [_diagnostic("invalid_input_schema", _pointer([*error.absolute_path, key]), f"additional property is not allowed: {key}") for key in unexpected]
+    return [_diagnostic("invalid_input_schema", _schema_path(error), error.message)]
+
+
+def _schema_report(document: object, schema_path: Path) -> list[dict[str, str]]:
     try:
         validator = _load_validator(schema_path)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError, RuntimeError) as error:
-        return [_diagnostic("schema_error", "", f"schema unavailable or invalid: {error}")], "schema_error"
-    errors = [
-        _diagnostic("invalid_input_schema", _schema_path(error), error.message)
-        for error in sorted(validator.iter_errors(document), key=lambda item: (_schema_path(item), item.message))
-    ]
-    return errors, None
+        return [_diagnostic("schema_error", "", f"schema unavailable or invalid: {error}")]
+    return [diagnostic for error in sorted(validator.iter_errors(document), key=lambda item: (_schema_path(item), item.message)) for diagnostic in _schema_diagnostics(error)]
 
 
 def _append(errors: list[dict[str, str]], code: str, path: str, message: str) -> None:
@@ -121,6 +128,20 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     case_by_id = _ids(test_cases, "test_cases", errors)
     file_by_id = _ids(files, "generated_files", errors)
     method_by_id = _ids(methods, "methods", errors)
+    paths: dict[object, int] = {}
+    for index, generated_file in enumerate(files):
+        path = generated_file["path"]
+        if path in paths:
+            _append(errors, "DUPLICATE_PATH", f"/generated_files/{index}/path", f"duplicate generated file path: {path}")
+        else:
+            paths[path] = index
+    locators: dict[tuple[object, object], int] = {}
+    for index, method in enumerate(methods):
+        locator = (method["file_id"], method["name"])
+        if locator in locators:
+            _append(errors, "DUPLICATE_METHOD_LOCATOR", f"/methods/{index}", f"duplicate generated method locator: {locator[0]}::{locator[1]}")
+        else:
+            locators[locator] = index
 
     for index, case in enumerate(test_cases):
         for requirement_id in case["requirement_ids"]:
@@ -140,7 +161,9 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     mapped_requirements: set[object] = set()
     mapped_cases: set[object] = set()
     mapped_methods: set[object] = set()
-    mapped_files: set[object] = set()
+    mapped_case_requirements: set[tuple[object, object]] = set()
+    mapped_method_cases: set[tuple[object, object]] = set()
+    mapped_method_requirements: set[tuple[object, object]] = set()
     audit_mappings: list[dict[str, object]] = []
     for index, mapping in enumerate(trace_map):
         key = (mapping["requirement_id"], mapping["test_case_id"], mapping["file_id"], mapping["method_id"])
@@ -150,8 +173,10 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
         requirement_id, case_id, file_id, method_id = key
         mapped_requirements.add(requirement_id)
         mapped_cases.add(case_id)
-        mapped_files.add(file_id)
         mapped_methods.add(method_id)
+        mapped_case_requirements.add((case_id, requirement_id))
+        mapped_method_cases.add((method_id, case_id))
+        mapped_method_requirements.add((method_id, requirement_id))
         if requirement_id not in requirement_by_id:
             _append(errors, "UNKNOWN_REQUIREMENT", f"/trace_map/{index}/requirement_id", f"unknown requirement: {requirement_id}")
         if case_id not in case_by_id:
@@ -178,9 +203,20 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     for identifier in sorted(case_by_id):
         if identifier not in mapped_cases:
             _append(errors, "MISSING_MAPPING", "/test_cases", f"test case has no trace mapping: {identifier}")
+    for case_index, case in enumerate(test_cases):
+        for requirement_index, requirement_id in enumerate(case["requirement_ids"]):
+            if (case["id"], requirement_id) not in mapped_case_requirements:
+                _append(errors, "MISSING_MAPPING", f"/test_cases/{case_index}/requirement_ids/{requirement_index}", f"test case {case['id']} declaration has no trace mapping for requirement {requirement_id}")
     for identifier in sorted(method_by_id):
         if identifier not in mapped_methods:
             _append(errors, "ORPHAN_METHOD", "/methods", f"generated method has no trace mapping: {identifier}")
+    for method_index, method in enumerate(methods):
+        for case_index, case_id in enumerate(method["test_case_ids"]):
+            if (method["id"], case_id) not in mapped_method_cases:
+                _append(errors, "MISSING_MAPPING", f"/methods/{method_index}/test_case_ids/{case_index}", f"method {method['id']} declaration has no trace mapping for test case {case_id}")
+        for requirement_index, requirement_id in enumerate(method["requirement_ids"]):
+            if (method["id"], requirement_id) not in mapped_method_requirements:
+                _append(errors, "MISSING_MAPPING", f"/methods/{method_index}/requirement_ids/{requirement_index}", f"method {method['id']} declaration has no trace mapping for requirement {requirement_id}")
     methods_per_file = {method["file_id"] for method in methods if method["file_id"] in file_by_id}
     for identifier in sorted(file_by_id):
         if identifier not in methods_per_file:
@@ -223,19 +259,29 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
                     _append(errors, "EXECUTION_FAILURE", "/execution/evidence", f"execution {record['status']} for method: {method_id}")
                 if record["status"] == "skipped" and len(skip_rules.get(method_id, [])) != 1:
                     _append(errors, "DISALLOWED_SKIP", "/execution/evidence", f"skipped method lacks exactly one allowed-skip rule: {method_id}")
+        failed_records = [record for records in evidence_by_method.values() for record in records if record["status"] in {"failed", "error"}]
+        if execution["verdict"] == "PASS" and failed_records:
+            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict PASS contradicts failed or error evidence")
+        if execution["verdict"] == "FAIL" and not failed_records:
+            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict FAIL has no failed or error evidence")
+        if execution["verdict"] == "NOT_RUNNABLE" and (execution["evidence"] or execution["allowed_skips"]):
+            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict NOT_RUNNABLE requires empty evidence and allowed skips")
 
     execution_is_effective = require_execution or bool(document["execution_required"])
-    if execution_is_effective and (not isinstance(execution, dict) or execution["verdict"] != "PASS"):
+    if isinstance(execution, dict) and execution["verdict"] != "PASS":
+        _append(errors, "EXECUTION_GATE", "/execution", "supplied execution must have verdict PASS for a valid trace")
+    elif execution_is_effective and not isinstance(execution, dict):
         _append(errors, "EXECUTION_GATE", "/execution", "execution is required and must have verdict PASS")
-    if isinstance(execution, dict):
+    if isinstance(execution, dict) and execution["verdict"] == "PASS":
         for method_id in sorted(mapped_methods, key=str):
             if method_id not in evidence_by_method:
                 _append(errors, "MISSING_EXECUTION", "/execution/evidence", f"mapped method has no execution evidence: {method_id}")
 
-    for mapping in trace_map:
-        method_id = mapping["method_id"]
-        evidence_ids = sorted({str(item["run_id"]) for item in evidence_by_method.get(method_id, [])})
-        audit_mappings.append({"requirement_id": mapping["requirement_id"], "test_case_id": mapping["test_case_id"], "method_id": method_id, "evidence_ids": evidence_ids})
+    if not unavailable:
+        for mapping in trace_map:
+            method_id = mapping["method_id"]
+            evidence_ids = sorted({str(item["run_id"]) for item in evidence_by_method.get(method_id, [])})
+            audit_mappings.append({"requirement_id": mapping["requirement_id"], "test_case_id": mapping["test_case_id"], "file_id": mapping["file_id"], "method_id": method_id, "evidence_ids": evidence_ids})
 
     base_errors = list(errors)
     expected_verdict = "NOT_RUNNABLE" if unavailable else "FAIL" if base_errors else "PASS"
@@ -246,7 +292,7 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
 
 def _check(document: object, require_execution: bool, schema_path: Path) -> dict[str, object]:
     summary = _summary(document)
-    schema_errors, _schema_failure = _schema_report(document, schema_path)
+    schema_errors = _schema_report(document, schema_path)
     if schema_errors:
         return _report(schema_errors, [], summary)
     assert isinstance(document, dict)
@@ -282,7 +328,11 @@ def main() -> int:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         _emit(_report([_diagnostic("input_error", "", f"document unreadable: {error}")], [], _summary({})))
         return 2
-    report = _check(document, args.require_execution, args.schema)
+    try:
+        report = _check(document, args.require_execution, args.schema)
+    except Exception:  # noqa: BLE001 - the CLI must never leak a traceback
+        _emit(_report([_diagnostic("runtime_error", "", "runtime error during trace check")], [], _summary(document)))
+        return 2
     if any(error["code"] in {"invalid_input_schema", "schema_error"} for error in report["errors"]):
         exit_code = 2
     else:

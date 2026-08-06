@@ -15,6 +15,7 @@ The six pipeline-stage schemas use JSON Schema Draft 2020-12 and one strict
 | `tc-to-autotest-output.schema.json` | `tc-to-autotest` | automation matrix, generated files and methods |
 | `autotest-reviewer-output.schema.json` | `autotest-reviewer` | review verdict, file/method IDs, findings and corrections |
 | `orchestrator-output.schema.json` | `orchestrate` | run verdict, execution evidence and trace audit |
+| `trace-document.schema.json` | `trace-check` input | requirement-to-case-to-file/method trace and optional execution evidence |
 
 Every stable object boundary uses `additionalProperties: false`. The sole
 documented open map is `.skillsrc`'s `skills_registry`, whose keys are
