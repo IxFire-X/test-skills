@@ -2,6 +2,7 @@ import copy
 import json
 import subprocess
 import sys
+import unicodedata
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -9,6 +10,17 @@ from jsonschema import Draft202012Validator
 
 def _codes(result):
     return {error["code"] for error in result["errors"]}
+
+
+def _set_non_passing_execution(document, verdict):
+    execution = document["execution"]
+    execution["verdict"] = verdict
+    if verdict == "FAIL":
+        execution["exit_code"] = 1
+        return
+    execution.update(evidence=[], allowed_skips=[])
+    for field in ("command", "runner", "exit_code"):
+        execution.pop(field)
 
 
 def _orchestrator_artifact(document, trace_audit):
@@ -25,9 +37,9 @@ def _orchestrator_artifact(document, trace_audit):
             if item["status"] == "skipped" and item["method_id"] in rules:
                 normalized.update({"reason": rules[item["method_id"]]["reason"], "policy_ref": rules[item["method_id"]]["policy_ref"]})
             evidence.append(normalized)
-        run = {"verdict": execution["verdict"], "reason": "runner result"}
+        run = {"verdict": execution["verdict"], "reason": execution["reason"]}
         if execution["verdict"] != "NOT_RUNNABLE":
-            run.update({"command": "pytest", "runner": "pytest", "exit_code": 0 if execution["verdict"] == "PASS" else 1})
+            run.update({key: execution[key] for key in ("command", "runner", "exit_code")})
     return {"schema_version": "2.1.0", "stage": "orchestrate", "warnings": [], "artifacts": {"run_tests_verdict": run, "execution_evidence": evidence, "trace_audit": copy.deepcopy(trace_audit)}}
 
 
@@ -57,7 +69,7 @@ def valid_trace():
         ],
         "execution_required": True,
         "execution": {
-            "verdict": "PASS",
+            "verdict": "PASS", "reason": "all tests passed", "command": "pytest -q", "runner": "pytest", "exit_code": 0,
             "evidence": [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}],
             "allowed_skips": [],
         },
@@ -68,7 +80,9 @@ def valid_trace():
 def test_full_trace_with_passed_execution_is_valid(trace_check, valid_trace):
     result = trace_check.check(valid_trace, require_execution=True)
     assert result["valid"] is True
-    assert result["trace_audit"] == {
+    audit = result["trace_audit"]
+    assert audit["source_digest"].startswith("sha256:") and len(audit["source_digest"]) == 71
+    assert {key: value for key, value in audit.items() if key != "source_digest"} == {
         "verdict": "PASS",
         "mappings": [
             {
@@ -106,6 +120,31 @@ def test_schema_accepts_canonical_portable_file_path(trace_check, valid_trace, p
     assert trace_check.check(document)["valid"] is True
 
 
+@pytest.mark.parametrize("path", ["tests/тест_api.py", "tests/café_test.py", "src/测试/ApiTest.java"])
+def test_schema_accepts_unicode_canonical_portable_file_path(trace_check, valid_trace, path):
+    document = copy.deepcopy(valid_trace)
+    document["generated_files"][0]["path"] = path
+    assert trace_check.check(document)["valid"] is True
+
+
+def test_nfd_unicode_path_is_semantically_noncanonical(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["generated_files"][0]["path"] = unicodedata.normalize("NFD", "tests/café_test.py")
+    assert "NONCANONICAL_PATH" in _codes(trace_check.check(document))
+
+
+def test_source_digest_binds_semantics_and_ignores_order(trace_check, valid_trace):
+    original = trace_check.check(valid_trace)["trace_audit"]["source_digest"]
+    changed = copy.deepcopy(valid_trace)
+    changed["execution"]["reason"] = "different reason"
+    assert trace_check.check(changed)["trace_audit"]["source_digest"] != original
+    nfd = copy.deepcopy(valid_trace)
+    nfd["generated_files"][0]["path"] = unicodedata.normalize("NFD", "tests/café_test.py")
+    nfc = copy.deepcopy(nfd)
+    nfc["generated_files"][0]["path"] = unicodedata.normalize("NFC", nfc["generated_files"][0]["path"])
+    assert trace_check.check(nfd)["trace_audit"]["source_digest"] == trace_check.check(nfc)["trace_audit"]["source_digest"]
+
+
 def test_casefold_equivalent_file_paths_are_duplicate_physical_identity(trace_check, valid_trace):
     document = copy.deepcopy(valid_trace)
     document["generated_files"].append({"id": "FILE-2", "path": "tests/TEST_API.py"})
@@ -132,7 +171,7 @@ def test_required_execution_pass_with_empty_evidence_is_invalid(trace_check, val
 def test_optional_supplied_non_passing_execution_is_never_a_valid_topology(trace_check, valid_trace, verdict):
     document = copy.deepcopy(valid_trace)
     document["execution_required"] = False
-    document["execution"].update({"verdict": verdict, "evidence": [], "allowed_skips": []})
+    _set_non_passing_execution(document, verdict)
     document["final_verdict"] = verdict
     result = trace_check.check(document)
     assert result["valid"] is False
@@ -146,6 +185,7 @@ def test_execution_verdict_must_match_failed_or_passing_evidence(trace_check, va
     assert {"EXECUTION_FAILURE", "EXECUTION_VERDICT_MISMATCH"} <= _codes(trace_check.check(pass_with_failure))
     fail_with_pass = copy.deepcopy(valid_trace)
     fail_with_pass["execution"]["verdict"] = "FAIL"
+    fail_with_pass["execution"]["exit_code"] = 1
     fail_with_pass["final_verdict"] = "FAIL"
     result = trace_check.check(fail_with_pass)
     assert "EXECUTION_VERDICT_MISMATCH" in _codes(result)
@@ -157,9 +197,7 @@ def test_not_runnable_execution_requires_empty_records_and_honest_final_verdict(
     document["execution"]["verdict"] = "NOT_RUNNABLE"
     document["final_verdict"] = "NOT_RUNNABLE"
     result = trace_check.check(document)
-    assert {"EXECUTION_GATE", "EXECUTION_VERDICT_MISMATCH"} <= _codes(result)
-    assert "VERDICT_MISMATCH" not in _codes(result)
-    assert result["trace_audit"]["mappings"] == []
+    assert "invalid_input_schema" in _codes(result)
 
 
 def test_reverse_mapping_coverage_catches_method_and_case_declarations(trace_check, valid_trace):
@@ -338,7 +376,7 @@ def test_unknown_and_duplicate_skip_rules_are_rejected(trace_check, valid_trace)
 @pytest.mark.parametrize("verdict", ["FAIL", "NOT_RUNNABLE"])
 def test_execution_gate_rejects_non_passing_execution(trace_check, valid_trace, verdict):
     document = copy.deepcopy(valid_trace)
-    document["execution"]["verdict"] = verdict
+    _set_non_passing_execution(document, verdict)
     assert "EXECUTION_GATE" in _codes(trace_check.check(document, require_execution=True))
 
 
@@ -422,6 +460,19 @@ def test_authoritative_orchestrator_cross_check_accepts_exact_full_pass(trace_ch
     assert result["errors"] == []
 
 
+@pytest.mark.parametrize("field", ["reason", "command", "runner", "exit_code"])
+def test_authoritative_cross_check_binds_complete_run_facts(trace_check, valid_trace, field):
+    document = copy.deepcopy(valid_trace)
+    if field == "exit_code":
+        _set_non_passing_execution(document, "FAIL")
+        document["execution"]["evidence"][0]["status"] = "failed"
+        document["final_verdict"] = "FAIL"
+    trace = trace_check.check(document, require_execution=True)["trace_audit"]
+    artifact = _orchestrator_artifact(document, trace)
+    artifact["artifacts"]["run_tests_verdict"][field] = 2 if field == "exit_code" else "fabricated"
+    assert "ORCHESTRATOR_EXECUTION_MISMATCH" in _codes(trace_check.check_orchestrator(artifact, document))
+
+
 @pytest.mark.parametrize(
     ("mutation", "code"),
     [
@@ -429,7 +480,7 @@ def test_authoritative_orchestrator_cross_check_accepts_exact_full_pass(trace_ch
         (lambda a: a["artifacts"]["execution_evidence"][0].update(method_id="METHOD-foreign"), "ORCHESTRATOR_EXECUTION_MISMATCH"),
         (lambda a: a["artifacts"]["trace_audit"]["mappings"][0].update(file_id="FILE-foreign"), "ORCHESTRATOR_TRACE_MISMATCH"),
         (lambda a: a["artifacts"]["trace_audit"].update(verdict="FAIL", errors=["changed trace error"]), "ORCHESTRATOR_TRACE_MISMATCH"),
-        (lambda a: a["artifacts"]["execution_evidence"].clear(), "ORCHESTRATOR_EXECUTION_MISMATCH"),
+        (lambda a: a["artifacts"]["execution_evidence"].clear(), "invalid_orchestrator_schema"),
     ],
 )
 def test_authoritative_orchestrator_cross_check_rejects_one_changed_fact(trace_check, valid_trace, mutation, code):
@@ -455,19 +506,17 @@ def test_authoritative_cross_check_rejects_topology_only_final_envelope(trace_ch
     document.update(execution_required=False)
     document.pop("execution")
     artifact = _orchestrator_artifact(document, trace_check.check(document)["trace_audit"])
-    artifact["artifacts"]["trace_audit"] = {"verdict": "FAIL", "mappings": [], "errors": ["not executed"]}
+    artifact["artifacts"]["trace_audit"] = {"verdict": "FAIL", "mappings": [], "errors": ["not executed"], "source_digest": "sha256:" + "0" * 64}
     assert "ORCHESTRATOR_EXECUTION_MISMATCH" in _codes(trace_check.check_orchestrator(artifact, document))
 
 
 @pytest.mark.parametrize("verdict", ["FAIL", "NOT_RUNNABLE"])
 def test_authoritative_cross_check_preserves_honest_nonpassing_pipeline_stop(trace_check, valid_trace, verdict):
     document = copy.deepcopy(valid_trace)
-    document["execution"]["verdict"] = verdict
+    _set_non_passing_execution(document, verdict)
     document["final_verdict"] = verdict
     if verdict == "FAIL":
         document["execution"]["evidence"][0]["status"] = "failed"
-    else:
-        document["execution"].update(evidence=[], allowed_skips=[])
     artifact = _orchestrator_artifact(document, trace_check.check(document, require_execution=True)["trace_audit"])
     result = trace_check.check_orchestrator(artifact, document)
     assert result["valid"] is False
@@ -535,6 +584,17 @@ def test_cli_orchestrator_cross_check_has_success_semantic_and_schema_exits(tmp_
     invalid = subprocess.run(command, text=True, capture_output=True, encoding="utf-8", check=False)
     assert invalid.returncode == 2
     assert "invalid_orchestrator_schema" in _codes(json.loads(invalid.stdout))
+
+
+@pytest.mark.parametrize("payload", ["null", "[]", "1"])
+def test_cli_orchestrator_argument_never_treats_json_scalar_as_absent(tmp_path, valid_trace, root, payload):
+    document_path = tmp_path / "trace.json"
+    document_path.write_text(json.dumps(valid_trace), encoding="utf-8")
+    artifact_path = tmp_path / "artifact.json"
+    artifact_path.write_text(payload, encoding="utf-8")
+    result = subprocess.run([sys.executable, root / "tools" / "trace_check.py", str(document_path), "--orchestrator-artifact", str(artifact_path)], text=True, capture_output=True, encoding="utf-8", check=False)
+    assert result.returncode == 2
+    assert "invalid_orchestrator_schema" in _codes(json.loads(result.stdout))
 
 
 def test_cli_input_and_schema_errors_are_json_exit_two(tmp_path, valid_trace, root):

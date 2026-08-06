@@ -30,7 +30,10 @@ python tools/trace_check.py trace-document.json --orchestrator-artifact orchestr
 ```
 
 That cross-check rejects foreign or missing trace mappings, execution evidence,
-and IDs that a standalone JSON Schema cannot relate to the trace document.
+run facts, and IDs that a standalone JSON Schema cannot relate to the trace document.
+The embedded trace audit includes a required `source_digest` (`sha256:` plus 64 lowercase hex
+characters), computed deterministically from the trace document. It is an integrity/cross-check
+aid, not an external cryptographic signature or provenance attestation.
 
 Validate one artifact with the portable helper:
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import re
 import sys
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -44,13 +46,35 @@ def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
     return {"code": code, "path": path, "message": message}
 
 
-def _report(errors: list[dict[str, str]], mappings: list[dict[str, object]], summary: dict[str, int]) -> dict[str, object]:
+def _canonical_value(value: object) -> object:
+    if isinstance(value, str):
+        return unicodedata.normalize("NFC", value)
+    if isinstance(value, dict):
+        return {unicodedata.normalize("NFC", str(key)): _canonical_value(item) for key, item in sorted(value.items(), key=lambda pair: unicodedata.normalize("NFC", str(pair[0])))}
+    if isinstance(value, list):
+        items = [_canonical_value(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return value
+
+
+def _source_digest(document: object) -> str:
+    try:
+        payload = json.dumps(_canonical_value(document), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError):
+        payload = b"null"
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _report(errors: list[dict[str, str]], mappings: list[dict[str, object]], summary: dict[str, int], source_digest: str | None = None) -> dict[str, object]:
     errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
     mappings.sort(key=lambda item: (str(item["requirement_id"]), str(item["test_case_id"]), str(item["method_id"])))
     messages = sorted({item["message"] for item in errors})
+    trace_audit: dict[str, object] = {"verdict": "PASS" if not errors else "FAIL", "mappings": mappings, "errors": messages}
+    if source_digest is not None:
+        trace_audit["source_digest"] = source_digest
     return {
         "valid": not errors,
-        "trace_audit": {"verdict": "PASS" if not errors else "FAIL", "mappings": mappings, "errors": messages},
+        "trace_audit": trace_audit,
         "errors": errors,
         "warnings": [],
         "summary": summary,
@@ -120,7 +144,7 @@ def _ids(records: list[dict[str, object]], entity: str, errors: list[dict[str, s
 def _canonical_path(path: object) -> str:
     """Return a defensive cross-platform physical identity key for a portable path."""
     segments: list[str] = []
-    for segment in str(path).replace("\\", "/").split("/"):
+    for segment in unicodedata.normalize("NFC", str(path)).replace("\\", "/").split("/"):
         if segment in {"", "."}:
             continue
         if segment == "..":
@@ -147,6 +171,8 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     paths: dict[str, int] = {}
     for index, generated_file in enumerate(files):
         path = generated_file["path"]
+        if path != unicodedata.normalize("NFC", str(path)):
+            _append(errors, "NONCANONICAL_PATH", f"/generated_files/{index}/path", f"generated file path is not NFC-normalized: {path}")
         physical_path = _canonical_path(path)
         if physical_path in paths:
             _append(errors, "DUPLICATE_PATH", f"/generated_files/{index}/path", f"duplicate generated file path: {path}")
@@ -309,12 +335,13 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
 
 def _check(document: object, require_execution: bool, schema_path: Path) -> dict[str, object]:
     summary = _summary(document)
+    source_digest = _source_digest(document)
     schema_errors = _schema_report(document, schema_path)
     if schema_errors:
-        return _report(schema_errors, [], summary)
+        return _report(schema_errors, [], summary, source_digest)
     assert isinstance(document, dict)
     errors, mappings = _semantic_check(document, require_execution)
-    return _report(errors, mappings, summary)
+    return _report(errors, mappings, summary, source_digest)
 
 
 def check(document: dict[str, object], require_execution: bool = False) -> dict[str, object]:
@@ -367,6 +394,19 @@ def _normalized_artifact_evidence(artifact: dict[str, object]) -> list[dict[str,
     return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
+def _normalized_document_run(document: dict[str, object]) -> dict[str, object] | None:
+    execution = document.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    return {key: execution[key] for key in ("verdict", "reason", "command", "runner", "exit_code") if key in execution}
+
+
+def _normalized_artifact_run(artifact: dict[str, object]) -> dict[str, object]:
+    run = artifact["artifacts"]["run_tests_verdict"]
+    assert isinstance(run, dict)
+    return {key: run[key] for key in ("verdict", "reason", "command", "runner", "exit_code") if key in run}
+
+
 def _cross_report(authoritative: dict[str, object], cross_errors: list[dict[str, str]]) -> dict[str, object]:
     report = copy.deepcopy(authoritative)
     errors = [*report["errors"], *cross_errors]
@@ -389,10 +429,8 @@ def _check_orchestrator(artifact: object, document: object, require_execution: b
     if not isinstance(execution, dict):
         _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/execution", "topology-only document cannot be accepted as a final orchestrator artifact")
     else:
-        run = artifacts["run_tests_verdict"]
-        assert isinstance(run, dict)
-        if run["verdict"] != execution["verdict"]:
-            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/run_tests_verdict/verdict", "orchestrator run verdict does not match trace execution verdict")
+        if _normalized_artifact_run(artifact) != _normalized_document_run(document):
+            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/run_tests_verdict", "orchestrator run facts do not match trace execution facts")
         if _normalized_artifact_evidence(artifact) != _normalized_document_evidence(document):
             _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/execution_evidence", "orchestrator execution evidence does not match trace execution evidence")
     if _normalized_trace_audit(artifacts["trace_audit"]) != _normalized_trace_audit(authoritative["trace_audit"]):
@@ -429,15 +467,16 @@ def main() -> int:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         _emit(_report([_diagnostic("input_error", "", f"document unreadable: {error}")], [], _summary({})))
         return 2
+    has_orchestrator_artifact = args.orchestrator_artifact is not None
     artifact: object | None = None
-    if args.orchestrator_artifact is not None:
+    if has_orchestrator_artifact:
         try:
             artifact = json.loads(args.orchestrator_artifact.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             _emit(_report([_diagnostic("orchestrator_input_error", "", f"orchestrator artifact unreadable: {error}")], [], _summary(document)))
             return 2
     try:
-        report = _check_orchestrator(artifact, document, args.require_execution, args.schema) if artifact is not None else _check(document, args.require_execution, args.schema)
+        report = _check_orchestrator(artifact, document, args.require_execution, args.schema) if has_orchestrator_artifact else _check(document, args.require_execution, args.schema)
     except Exception:  # noqa: BLE001 - the CLI must never leak a traceback
         _emit(_report([_diagnostic("runtime_error", "", "runtime error during trace check")], [], _summary(document)))
         return 2

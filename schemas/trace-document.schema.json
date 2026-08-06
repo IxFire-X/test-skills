@@ -31,7 +31,7 @@
     "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
     "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"},
     "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"},
-    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*//)(?!.*(?:^|/)\\.(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\/$)[A-Za-z0-9._/-]+$"},
+    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*//)(?!.*(?:^|/)\\.(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\/$)(?!.*[\\x00-\\x1F<>\u0022|?*\\\\]).+$"},
     "requirement": {
       "type": "object", "required": ["id", "provenance"], "additionalProperties": false,
       "properties": {"id": {"$ref": "#/$defs/requirement_id"}, "provenance": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}}}
@@ -65,8 +65,13 @@
       "properties": {"method_id": {"$ref": "#/$defs/method_id"}, "reason": {"$ref": "#/$defs/nonempty"}, "policy_ref": {"$ref": "#/$defs/nonempty"}}
     },
     "execution": {
-      "type": "object", "required": ["verdict", "evidence", "allowed_skips"], "additionalProperties": false,
-      "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}, "allowed_skips": {"type": "array", "items": {"$ref": "#/$defs/allowed_skip"}}}
+      "type": "object", "required": ["verdict", "reason", "evidence", "allowed_skips"], "additionalProperties": false,
+      "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "reason": {"$ref": "#/$defs/nonempty"}, "command": {"$ref": "#/$defs/nonempty"}, "runner": {"$ref": "#/$defs/nonempty"}, "exit_code": {"type": "integer"}, "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}, "allowed_skips": {"type": "array", "items": {"$ref": "#/$defs/allowed_skip"}}},
+      "allOf": [
+        {"if": {"properties": {"verdict": {"const": "PASS"}}}, "then": {"required": ["command", "runner", "exit_code"], "properties": {"exit_code": {"const": 0}}}},
+        {"if": {"properties": {"verdict": {"const": "FAIL"}}}, "then": {"required": ["command", "runner", "exit_code"], "properties": {"exit_code": {"not": {"const": 0}}}}},
+        {"if": {"properties": {"verdict": {"const": "NOT_RUNNABLE"}}}, "then": {"not": {"anyOf": [{"required": ["command"]}, {"required": ["runner"]}, {"required": ["exit_code"]}]}, "properties": {"evidence": {"maxItems": 0}, "allowed_skips": {"maxItems": 0}}}}
+      ]
     }
   }
 }

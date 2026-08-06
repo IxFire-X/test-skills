@@ -43,7 +43,7 @@ def _trace_document() -> dict:
         "methods": [{"id": "METHOD-1", "file_id": "FILE-1", "name": "test_api", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"]}],
         "trace_map": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-1"}],
         "execution_required": True,
-        "execution": {"verdict": "PASS", "evidence": [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], "allowed_skips": []},
+        "execution": {"verdict": "PASS", "reason": "passed", "command": "pytest", "runner": "pytest", "exit_code": 0, "evidence": [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], "allowed_skips": []},
         "final_verdict": "PASS",
     }
 
@@ -80,7 +80,7 @@ def valid_artifacts():
         "tc-reviewer-output.schema.json": _envelope("tc-reviewer", {"validation_report": {"verdict": "ПРИНЯТО", "reviewed_test_case_ids": ["TC-1"], "findings": [], "corrections": []}, "corrected_test_cases": []}),
         "tc-to-autotest-output.schema.json": _envelope("tc-to-autotest", {"automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}], "generated_test_files": [{"id": "FILE-1", "path": "tests/test_orders.py", "language": "python", "framework": "pytest", "content_digest": digest}], "generated_test_methods": [test_method]}),
         "autotest-reviewer-output.schema.json": _envelope("autotest-reviewer", {"autotest_review": {"verdict": "ПРИНЯТО", "reviewed_file_ids": ["FILE-1"], "reviewed_method_ids": ["METHOD-1"], "findings": [], "corrections": []}}),
-        "orchestrator-output.schema.json": _envelope("orchestrate", {"run_tests_verdict": {"verdict": "PASS", "reason": "All tests passed", "command": "pytest", "runner": "pytest", "exit_code": 0}, "execution_evidence": [{"method_id": "METHOD-1", "verdict": "PASS", "run_id": "RUN-1"}], "trace_audit": {"verdict": "PASS", "mappings": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-1", "evidence_ids": ["RUN-1"]}], "errors": []}}),
+        "orchestrator-output.schema.json": _envelope("orchestrate", {"run_tests_verdict": {"verdict": "PASS", "reason": "All tests passed", "command": "pytest", "runner": "pytest", "exit_code": 0}, "execution_evidence": [{"method_id": "METHOD-1", "verdict": "PASS", "run_id": "RUN-1"}], "trace_audit": {"verdict": "PASS", "mappings": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "file_id": "FILE-1", "method_id": "METHOD-1", "evidence_ids": ["RUN-1"]}], "errors": [], "source_digest": "sha256:" + "b" * 64}}),
         "finding": finding,
         "correction": correction,
         "test_case": test_case,
@@ -126,16 +126,18 @@ def test_orchestrator_pass_accepts_skip_with_policy_and_rejects_unqualified_skip
     assert _errors("orchestrator-output.schema.json", pass_with_policy)
 
 
-def test_orchestrator_pass_shape_allows_missing_evidence_for_authoritative_cross_check(valid_artifacts):
+def test_orchestrator_pass_shape_requires_execution_evidence(valid_artifacts):
     artifact = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
     artifact["artifacts"]["execution_evidence"] = []
-    assert not _errors("orchestrator-output.schema.json", artifact)
+    assert _errors("orchestrator-output.schema.json", artifact)
 
 
 def test_orchestrator_not_runnable_embeds_real_checker_empty_trace_mappings(valid_artifacts):
     checker = _load_trace_check_module()
     document = _trace_document()
     document["execution"].update({"verdict": "NOT_RUNNABLE", "evidence": [], "allowed_skips": []})
+    for field in ("command", "runner", "exit_code"):
+        document["execution"].pop(field)
     document["final_verdict"] = "NOT_RUNNABLE"
     trace = checker.check(document)["trace_audit"]
     assert trace["mappings"] == []
@@ -283,14 +285,14 @@ def test_orchestrator_allows_pass_run_with_trace_failure(valid_artifacts):
 def test_orchestrator_accepts_early_fail_without_method_evidence(valid_artifacts):
     """Allows compile/import failure before a generated method can execute."""
     valid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
-    valid["artifacts"].update({"run_tests_verdict": {"verdict": "FAIL", "reason": "ImportError", "command": "pytest", "runner": "pytest", "exit_code": 2}, "execution_evidence": [], "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["ImportError"]}})
+    valid["artifacts"].update({"run_tests_verdict": {"verdict": "FAIL", "reason": "ImportError", "command": "pytest", "runner": "pytest", "exit_code": 2}, "execution_evidence": [], "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["ImportError"], "source_digest": "sha256:" + "c" * 64}})
     assert not _errors("orchestrator-output.schema.json", valid)
 
 
 def test_orchestrator_accepts_not_runnable_without_method_evidence(valid_artifacts):
     """Allows an honest unavailable-runner verdict with no execution mappings."""
     valid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
-    valid["artifacts"].update({"run_tests_verdict": {"verdict": "NOT_RUNNABLE", "reason": "pytest unavailable"}, "execution_evidence": [], "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["runner unavailable"]}})
+    valid["artifacts"].update({"run_tests_verdict": {"verdict": "NOT_RUNNABLE", "reason": "pytest unavailable"}, "execution_evidence": [], "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["runner unavailable"], "source_digest": "sha256:" + "c" * 64}})
     assert not _errors("orchestrator-output.schema.json", valid)
 
 

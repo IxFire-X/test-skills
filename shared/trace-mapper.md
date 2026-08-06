@@ -34,6 +34,10 @@ topology.
   "execution_required": true,
   "execution": {
     "verdict": "PASS",
+    "reason": "all generated tests passed",
+    "command": "pytest -q",
+    "runner": "pytest",
+    "exit_code": 0,
     "evidence": [{"run_id": "RUN-01", "method_id": "METHOD-login", "status": "passed"}],
     "allowed_skips": []
   },
@@ -42,10 +46,11 @@ topology.
 ```
 
 `generated_files.path` is a normalized portable relative POSIX path: no drive, absolute path,
-backslash, `.`/`..` segment, repeated slash, or trailing slash. Dotfiles and normal extensions are
-allowed. Physical path identity is compared case-insensitively as a deliberate portability
-restriction, so `tests/ApiTest.py` and `tests/apitest.py` cannot be separate generated files. A
-file may contain several methods, and a method may implement several requirements or test cases. A
+backslash, `.`/`..` segment, repeated slash, trailing slash, control character, or Windows-reserved
+character. Unicode paths and dotfiles are allowed, but paths must already be NFC-normalized.
+Physical path identity is compared by NFC/casefold as a deliberate portability restriction, so
+`tests/ApiTest.py` and `tests/apitest.py` cannot be separate generated files. A file may contain
+several methods, and a method may implement several requirements or test cases. A
 mapping is the explicit four-ID link; distinct mappings may share a method.
 
 ## Invariants
@@ -55,6 +60,10 @@ generated file must own at least one method. References must resolve, a mapped c
 both declare its requirement and test case, and the method's `file_id` must equal the mapped file.
 Duplicate entity IDs, mappings, and execution run IDs are rejected even when surrounding objects
 differ.
+
+Every execution record has a nonempty `reason`. `PASS` and `FAIL` also require nonempty
+`command` and `runner` values plus an integer `exit_code`; `PASS` uses `0` and `FAIL` a nonzero
+value. `NOT_RUNNABLE` has no command, runner, or exit code, and has empty evidence and skip rules.
 
 Execution is required when either `execution_required` or the command-line
 `--require-execution` flag is true. Then the execution verdict must be `PASS` and each mapped
@@ -100,15 +109,20 @@ For final pipeline acceptance, also supply the structural orchestrator artifact:
 python tools/trace_check.py TRACE_DOCUMENT --orchestrator-artifact ORCHESTRATOR_ARTIFACT
 ```
 
-This compares the artifact's trace audit, run verdict, and per-method execution evidence against
+This compares the artifact's trace audit, complete run facts, and per-method execution evidence against
 the authoritative trace document. It preserves `SKIPPED` evidence only when the exact allowed-skip
 reason and policy reference match; standalone artifact-schema validation cannot establish those
 cross-document relationships.
 
-The resulting `trace_audit` has `{verdict, mappings, errors}` and is the `trace_audit` artifact
+The resulting `trace_audit` has `{verdict, mappings, errors, source_digest}` and is the `trace_audit` artifact
 produced by the `trace-check` step in `contracts/pipeline.json`. Each mapping contains
 `requirement_id`, `test_case_id`, `file_id`, `method_id`, and `evidence_ids`, so it can be embedded
 directly in the orchestrator artifact. Execution evidence intentionally records stable method and
 run IDs rather than outdated path strings; the complete file identity is reconstructed through the
 mapping's `file_id` and the generated method/file records. A topology-only check can have empty
 `evidence_ids`; it is not execution acceptance.
+
+`source_digest` is a deterministic `sha256:` digest of the semantic trace document. It NFC-normalizes
+strings and treats set-like lists as order-insensitive, so reordering does not change it while a
+semantic fact does. It is an integrity and cross-check aid, not an external cryptographic signature
+or proof of artifact origin.
