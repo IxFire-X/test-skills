@@ -631,7 +631,7 @@ def _java_mapping_endpoints(text: str) -> list[str]:
     mask = _strip_java_comments_and_text_blocks(text)
     annotations = re.compile(r"@(?P<name>Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@(?P<jax>Path)\s*\(", re.I)
     literal = re.compile(r'"((?:\\.|[^"\\])*)"')
-    named_path = re.compile(r"(?:^|,)\s*(?:path|value)\s*=\s*(\{[^}]*\}|\"(?:\\.|[^\"\\])*\")", re.S)
+    named_path = re.compile(r"(?:^|,)\s*(?:path|value)\s*=", re.S)
     endpoints: list[str] = []
     for match in annotations.finditer(mask):
         opening = mask.find("(", match.start(), match.end())
@@ -648,6 +648,7 @@ def _java_mapping_endpoints(text: str) -> list[str]:
         if closing is None:
             continue
         arguments = text[opening + 1:closing]
+        arguments_mask = mask[opening + 1:closing]
         values: list[str] = []
         if match.group("jax"):
             positional = arguments.lstrip()
@@ -658,10 +659,20 @@ def _java_mapping_endpoints(text: str) -> list[str]:
                 direct = literal.match(positional)
                 values = [direct.group(1)] if direct else []
         else:
-            named_values = [item.group(1) for item in named_path.finditer(arguments)]
-            if named_values:
-                for value in named_values:
-                    values.extend(literal.findall(value))
+            named_assignments = list(named_path.finditer(arguments_mask))
+            if named_assignments:
+                for assignment in named_assignments:
+                    start = assignment.end()
+                    while start < len(arguments) and arguments[start].isspace():
+                        start += 1
+                    if start < len(arguments) and arguments[start] == "{":
+                        end = arguments_mask.find("}", start)
+                        if end >= 0:
+                            values.extend(literal.findall(arguments[start:end + 1]))
+                    elif start < len(arguments) and arguments[start] == '"':
+                        direct = literal.match(arguments[start:])
+                        if direct:
+                            values.append(direct.group(1))
             else:
                 positional = arguments.lstrip()
                 if positional.startswith("{"):

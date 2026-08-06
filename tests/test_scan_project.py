@@ -132,6 +132,26 @@ def test_java_mapping_arguments_accept_only_paths_values_and_positionals(scanner
     ]
 
 
+def test_java_mapping_named_keys_must_be_lexical_code(scanner, tmp_path):
+    """Catches path/value-shaped metadata, comments, and text blocks becoming endpoints."""
+    source = '''class Demo {
+  @RequestMapping(headers = "x, path=\\"/fake-header\\"") void header() {}
+  @RequestMapping(/* , value="/fake-comment" */ produces = "application/json") void comment() {}
+  @RequestMapping(produces = """
+    metadata, path="/fake-text"
+    """) void text() {}
+  @GetMapping(headers = "X-Trace", path = "/real") void real() {}
+  @DeleteMapping("/direct") void direct() {}
+  @Path("/jax") void jax() {}
+}
+'''
+    (tmp_path / "Demo.java").write_text(source, encoding="utf-8")
+
+    assert scanner._extract_endpoints(str(tmp_path), ["Demo.java"], "spring-boot") == [
+        "/real", "/direct", "/jax",
+    ]
+
+
 def test_source_envelope_round_trips_delimiter_shaped_java_source(scanner, tmp_path):
     """Catches source evidence corrupting XML-like file/source framing delimiters."""
     source = '''class Demo {
