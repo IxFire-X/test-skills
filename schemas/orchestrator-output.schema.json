@@ -19,7 +19,8 @@
     "warnings": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1
       }
     },
     "artifacts": {
@@ -36,6 +37,7 @@
         },
         "execution_evidence": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/evidence"
           }
@@ -331,6 +333,7 @@
         },
         "mappings": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "type": "object",
             "required": [
@@ -367,6 +370,7 @@
         },
         "errors": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "minLength": 1

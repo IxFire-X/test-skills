@@ -36,6 +36,7 @@
         },
         "corrected_test_cases": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/test_case"
           }
@@ -203,15 +204,19 @@
         "evidence": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "related_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -233,8 +238,10 @@
         "related_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "description": {
@@ -244,8 +251,10 @@
         "evidence": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -284,6 +293,7 @@
         },
         "corrections": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/correction"
           }
@@ -325,6 +335,7 @@
         "categories": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
             "enum": [
               "positive",

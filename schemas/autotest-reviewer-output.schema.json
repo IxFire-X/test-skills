@@ -187,15 +187,19 @@
         "evidence": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "related_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -217,8 +221,10 @@
         "related_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "description": {
@@ -228,8 +234,10 @@
         "evidence": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -255,6 +263,7 @@
         "reviewed_file_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
@@ -263,6 +272,7 @@
         "reviewed_method_ids": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": {
             "type": "string",
             "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"
@@ -276,6 +286,7 @@
         },
         "corrections": {
           "type": "array",
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/correction"
           }

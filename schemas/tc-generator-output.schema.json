@@ -42,6 +42,7 @@
             "requirements": {
               "type": "array",
               "minItems": 1,
+              "uniqueItems": true,
               "items": {
                 "type": "object",
                 "required": [
@@ -73,6 +74,7 @@
             "test_cases": {
               "type": "array",
               "minItems": 1,
+              "uniqueItems": true,
               "items": {
                 "type": "object",
                 "required": [
@@ -97,7 +99,8 @@
                       "minItems": 1,
                       "uniqueItems": true,
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^REQ-[A-Za-z0-9_.:-]+$"
                     }
                   },
                   "title": {
@@ -182,6 +185,7 @@
             "coverage": {
               "type": "array",
               "minItems": 1,
+              "uniqueItems": true,
               "items": {
                 "type": "object",
                 "required": [
@@ -191,14 +195,16 @@
                 "additionalProperties": false,
                 "properties": {
                   "requirement_id": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^REQ-[A-Za-z0-9_.:-]+$"
                   },
                   "test_case_ids": {
                     "type": "array",
                     "minItems": 1,
+                    "uniqueItems": true,
                     "items": {
                       "type": "string",
-                      "pattern": "^TC-"
+                      "pattern": "^TC-[A-Za-z0-9_.:-]+$"
                     }
                   }
                 }

@@ -363,22 +363,327 @@ def test_corrected_case_is_generator_compatible(valid_artifacts):
     assert not _errors("tc-generator-output.schema.json", wrapper)
 
 
-def test_tc_reviewer_rejects_bare_fix_and_empty_warning(valid_artifacts):
-    invalid = copy.deepcopy(valid_artifacts["tc-reviewer-output.schema.json"])
+def _tc_auto_fix_artifact(valid_artifacts):
+    artifact = copy.deepcopy(valid_artifacts["tc-reviewer-output.schema.json"])
+    artifact["artifacts"]["validation_report"].update(
+        {"verdict": "AUTO_FIX_APPLIED", "corrections": [valid_artifacts["correction"]]}
+    )
+    artifact["artifacts"]["corrected_test_cases"] = [valid_artifacts["test_case"]]
+    return artifact
+
+
+def _autotest_auto_fix_artifact(valid_artifacts):
+    artifact = copy.deepcopy(valid_artifacts["autotest-reviewer-output.schema.json"])
+    artifact["artifacts"]["autotest_review"].update(
+        {"verdict": "AUTO_FIX_APPLIED", "corrections": [valid_artifacts["correction"]]}
+    )
+    return artifact
+
+
+def test_same_requirement_is_accepted_by_context_marker_and_generator(valid_artifacts):
+    """Keeps the producer requirement object portable across its first two stages."""
+    requirement = valid_artifacts["context-marker-output.schema.json"]["artifacts"][
+        "analytics_documentation"
+    ]["requirements"][0]
+    generated = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    generated["artifacts"]["generated_test_cases"]["requirements"] = [requirement]
+    assert not _errors("context-marker-output.schema.json", valid_artifacts["context-marker-output.schema.json"])
+    assert not _errors("tc-generator-output.schema.json", generated)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "path"),
+    [
+        pytest.param(
+            "context-marker-output.schema.json",
+            ["artifacts", "analytics_documentation", "requirements", 0, "id"],
+            id="context-marker-arbitrary-requirement-id",
+        ),
+        pytest.param(
+            "tc-generator-output.schema.json",
+            ["artifacts", "generated_test_cases", "requirements", 0, "id"],
+            id="generator-bare-requirement-id",
+        ),
+    ],
+)
+def test_requirement_records_reject_nonportable_requirement_ids(valid_artifacts, schema_name, path):
+    """Requirement records use the same meaningful REQ identifier across stages."""
+    invalid = copy.deepcopy(valid_artifacts[schema_name])
+    target = invalid
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = "X" if schema_name.startswith("context") else "REQ-"
+    assert _errors(schema_name, invalid)
+
+
+def test_same_generator_case_is_accepted_by_reviewer_auto_fix(valid_artifacts):
+    """Keeps a complete generator case usable unchanged in AUTO_FIX_APPLIED output."""
+    reviewer = _tc_auto_fix_artifact(valid_artifacts)
+    reviewer["artifacts"]["corrected_test_cases"] = [
+        valid_artifacts["tc-generator-output.schema.json"]["artifacts"]["generated_test_cases"][
+            "test_cases"
+        ][0]
+    ]
+    assert not _errors("tc-generator-output.schema.json", valid_artifacts["tc-generator-output.schema.json"])
+    assert not _errors("tc-reviewer-output.schema.json", reviewer)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        pytest.param("requirement_id", "", id="empty-requirement-id"),
+        pytest.param("requirement_id", "REQ-", id="bare-requirement-id"),
+        pytest.param("categories", ["positive", "positive"], id="duplicate-categories"),
+        pytest.param("preconditions", [""], id="empty-precondition-item"),
+        pytest.param("test_data", [""], id="empty-test-data-item"),
+    ],
+)
+def test_shared_manual_case_mutation_is_rejected_by_generator_and_reviewer(
+    valid_artifacts, mutation, value
+):
+    """Pins the manual-case contract shared by generator and reviewer."""
+    generated = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    reviewer = _tc_auto_fix_artifact(valid_artifacts)
+    generated_case = generated["artifacts"]["generated_test_cases"]["test_cases"][0]
+    reviewed_case = reviewer["artifacts"]["corrected_test_cases"][0]
+    if mutation == "requirement_id":
+        generated_case["requirement_ids"] = [value]
+        reviewed_case["requirement_ids"] = [value]
+    else:
+        generated_case[mutation] = value
+        reviewed_case[mutation] = value
+    assert _errors("tc-generator-output.schema.json", generated)
+    assert _errors("tc-reviewer-output.schema.json", reviewer)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        pytest.param("requirement_id", "", id="coverage-empty-requirement-id"),
+        pytest.param("requirement_id", "REQ-", id="coverage-bare-requirement-id"),
+        pytest.param("test_case_ids", ["TC-"], id="coverage-bare-test-case-id"),
+        pytest.param("test_case_ids", ["TC-1", "TC-1"], id="coverage-duplicate-test-case-id"),
+    ],
+)
+def test_generator_rejects_invalid_coverage_references(valid_artifacts, mutation, value):
+    """Rejects one malformed coverage reference at a time."""
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    invalid["artifacts"]["generated_test_cases"]["coverage"][0][mutation] = value
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+@pytest.mark.parametrize("collection", ["requirements", "test_cases", "coverage"])
+def test_generator_rejects_exact_duplicate_artifact_objects(valid_artifacts, collection):
+    """Rejects duplicate generator records without imposing cross-array membership."""
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    records = invalid["artifacts"]["generated_test_cases"][collection]
+    records.append(copy.deepcopy(records[0]))
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key", "record_kind", "field", "value"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "evidence", [""], id="tc-finding-empty-evidence"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "evidence", ["line", "line"], id="tc-finding-duplicate-evidence"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "related_ids", [""], id="tc-finding-empty-related-id"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "related_ids", ["TC-1", "TC-1"], id="tc-finding-duplicate-related-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "evidence", [""], id="autotest-finding-empty-evidence"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "evidence", ["line", "line"], id="autotest-finding-duplicate-evidence"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "related_ids", [""], id="autotest-finding-empty-related-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "related_ids", ["METHOD-1", "METHOD-1"], id="autotest-finding-duplicate-related-id"),
+    ],
+)
+def test_reviewers_reject_inactionable_finding_fields(
+    valid_artifacts, schema_name, report_key, record_kind, field, value
+):
+    """Requires nonempty, de-duplicated evidence and references for each finding."""
+    invalid = copy.deepcopy(valid_artifacts[schema_name])
+    report = invalid["artifacts"][report_key]
+    report.update({"verdict": "ТРЕБУЕТ ДОРАБОТКИ", "findings": [valid_artifacts["finding"]]})
+    report["findings"][0][field] = value
+    assert _errors(schema_name, invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key", "field", "value"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "evidence", [""], id="tc-correction-empty-evidence"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "evidence", ["diff", "diff"], id="tc-correction-duplicate-evidence"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "related_ids", [""], id="tc-correction-empty-related-id"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "related_ids", ["TC-1", "TC-1"], id="tc-correction-duplicate-related-id"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "id", "FIX-", id="tc-correction-bare-fix-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "evidence", [""], id="autotest-correction-empty-evidence"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "evidence", ["diff", "diff"], id="autotest-correction-duplicate-evidence"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "related_ids", [""], id="autotest-correction-empty-related-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "related_ids", ["METHOD-1", "METHOD-1"], id="autotest-correction-duplicate-related-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "id", "FIX-", id="autotest-correction-bare-fix-id"),
+    ],
+)
+def test_reviewers_reject_inactionable_correction_fields(
+    valid_artifacts, schema_name, report_key, field, value
+):
+    """Requires nonempty, de-duplicated evidence and references for each correction."""
+    invalid = _tc_auto_fix_artifact(valid_artifacts) if schema_name.startswith("tc-") else _autotest_auto_fix_artifact(valid_artifacts)
+    invalid["artifacts"][report_key]["corrections"][0][field] = value
+    assert _errors(schema_name, invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", id="tc-duplicate-fix"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", id="autotest-duplicate-fix"),
+    ],
+)
+def test_reviewers_reject_exact_duplicate_corrections(valid_artifacts, schema_name, report_key):
+    """Rejects an exact duplicate FIX record instead of reporting one change twice."""
+    invalid = _tc_auto_fix_artifact(valid_artifacts) if schema_name.startswith("tc-") else _autotest_auto_fix_artifact(valid_artifacts)
+    corrections = invalid["artifacts"][report_key]["corrections"]
+    corrections.append(copy.deepcopy(corrections[0]))
+    assert _errors(schema_name, invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key", "record_kind", "field"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "code", id="tc-empty-finding-code"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "finding", "message", id="tc-empty-finding-message"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "correction", "description", id="tc-empty-correction-description"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "code", id="autotest-empty-finding-code"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "finding", "message", id="autotest-empty-finding-message"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "correction", "description", id="autotest-empty-correction-description"),
+    ],
+)
+def test_reviewers_reject_empty_actionability_text(
+    valid_artifacts, schema_name, report_key, record_kind, field
+):
+    """Keeps each actionable finding and correction explanation nonempty."""
+    if record_kind == "finding":
+        invalid = copy.deepcopy(valid_artifacts[schema_name])
+        report = invalid["artifacts"][report_key]
+        report.update({"verdict": "ТРЕБУЕТ ДОРАБОТКИ", "findings": [valid_artifacts["finding"]]})
+        report["findings"][0][field] = ""
+    else:
+        invalid = _tc_auto_fix_artifact(valid_artifacts) if schema_name.startswith("tc-") else _autotest_auto_fix_artifact(valid_artifacts)
+        invalid["artifacts"][report_key]["corrections"][0][field] = ""
+    assert _errors(schema_name, invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key", "field", "value"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "reviewed_test_case_ids", ["TC-"], id="tc-bare-reviewed-case"),
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", "reviewed_test_case_ids", ["TC-1", "TC-1"], id="tc-duplicate-reviewed-case"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "reviewed_file_ids", ["FILE-"], id="autotest-bare-file-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "reviewed_file_ids", ["FILE-1", "FILE-1"], id="autotest-duplicate-file-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "reviewed_method_ids", ["METHOD-"], id="autotest-bare-method-id"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", "reviewed_method_ids", ["METHOD-1", "METHOD-1"], id="autotest-duplicate-method-id"),
+    ],
+)
+def test_reviewers_reject_nonunique_or_bare_reviewed_ids(
+    valid_artifacts, schema_name, report_key, field, value
+):
+    """Keeps review targets meaningful and one-to-one within every review record."""
+    invalid = copy.deepcopy(valid_artifacts[schema_name])
+    invalid["artifacts"][report_key][field] = value
+    assert _errors(schema_name, invalid)
+
+
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "context-marker-output.schema.json",
+        "tc-generator-output.schema.json",
+        "tc-reviewer-output.schema.json",
+        "tc-to-autotest-output.schema.json",
+        "autotest-reviewer-output.schema.json",
+        "orchestrator-output.schema.json",
+    ],
+)
+def test_stage_rejects_one_empty_warning(valid_artifacts, schema_name):
+    """Rejects a single empty warning for each independently versioned stage."""
+    invalid = copy.deepcopy(valid_artifacts[schema_name])
     invalid["warnings"] = [""]
-    invalid["artifacts"]["validation_report"].update({"verdict": "AUTO_FIX_APPLIED", "corrections": [{"id": "FIX-", "related_ids": ["TC-1"], "description": "fix", "evidence": ["diff"]}]})
-    invalid["artifacts"]["corrected_test_cases"] = [valid_artifacts["test_case"]]
-    assert _errors("tc-reviewer-output.schema.json", invalid)
+    assert _errors(schema_name, invalid)
 
 
-def test_autotest_reviewer_rejects_bare_file_method_fix(valid_artifacts):
-    invalid = copy.deepcopy(valid_artifacts["autotest-reviewer-output.schema.json"])
-    invalid["artifacts"]["autotest_review"].update({"reviewed_file_ids": ["FILE-"], "reviewed_method_ids": ["METHOD-"], "verdict": "AUTO_FIX_APPLIED", "corrections": [{"id": "FIX-", "related_ids": ["METHOD-1"], "description": "fix", "evidence": ["diff"]}]})
-    assert _errors("autotest-reviewer-output.schema.json", invalid)
-
-
-def test_orchestrator_rejects_empty_warning_and_extra_mapping(valid_artifacts):
+@pytest.mark.parametrize("collection", ["execution_evidence", "mappings", "errors"])
+def test_orchestrator_rejects_exact_duplicate_runtime_records(valid_artifacts, collection):
+    """Rejects one exact duplicate where a runtime record would be ambiguous."""
     invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
-    invalid["warnings"] = [""]
+    target = invalid["artifacts"]["trace_audit"][collection] if collection != "execution_evidence" else invalid["artifacts"][collection]
+    if collection == "errors":
+        valid = copy.deepcopy(invalid)
+        valid["artifacts"]["run_tests_verdict"].update({"verdict": "FAIL", "exit_code": 1})
+        valid["artifacts"]["execution_evidence"] = []
+        valid["artifacts"]["trace_audit"].update({"verdict": "FAIL", "mappings": [], "errors": ["failure"]})
+        valid["artifacts"]["trace_audit"]["errors"].append("failure")
+        assert _errors("orchestrator-output.schema.json", valid)
+        return
+    target.append(copy.deepcopy(target[0]))
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_orchestrator_rejects_extra_trace_mapping_field(valid_artifacts):
+    """Keeps trace mappings closed to the contract-defined evidence chain."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
     invalid["artifacts"]["trace_audit"]["mappings"][0]["extra"] = "x"
     assert _errors("orchestrator-output.schema.json", invalid)
+
+
+@pytest.mark.parametrize(
+    ("verdict", "field", "value"),
+    [
+        pytest.param("PASS", "command", "", id="pass-empty-command"),
+        pytest.param("PASS", "runner", "", id="pass-empty-runner"),
+        pytest.param("FAIL", "exit_code", 0, id="fail-zero-exit-code"),
+    ],
+)
+def test_orchestrator_rejects_invalid_executed_run_metadata(valid_artifacts, verdict, field, value):
+    """Rejects one contradictory metadata field for an executed run."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    run = invalid["artifacts"]["run_tests_verdict"]
+    run["verdict"] = verdict
+    if verdict == "FAIL":
+        invalid["artifacts"]["execution_evidence"][0]["verdict"] = "FAIL"
+        invalid["artifacts"]["trace_audit"].update({"verdict": "FAIL", "errors": ["failure"]})
+    run[field] = value
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+@pytest.mark.parametrize("field", ["command", "runner", "exit_code"])
+def test_orchestrator_rejects_one_not_runnable_execution_field(valid_artifacts, field):
+    """NOT_RUNNABLE must not claim one fragment of an execution that did not occur."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["artifacts"].update(
+        {
+            "run_tests_verdict": {"verdict": "NOT_RUNNABLE", "reason": "runner unavailable", field: "pytest" if field != "exit_code" else 1},
+            "execution_evidence": [],
+            "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["runner unavailable"]},
+        }
+    )
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_generated_method_digest_requires_full_sha256(valid_artifacts):
+    """Catches a shortened digest on a generated method independently of file output."""
+    invalid = copy.deepcopy(valid_artifacts["tc-to-autotest-output.schema.json"])
+    invalid["artifacts"]["generated_test_methods"][0]["content_digest"] = "sha256:abc"
+    assert _errors("tc-to-autotest-output.schema.json", invalid)
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "report_key"),
+    [
+        pytest.param("tc-reviewer-output.schema.json", "validation_report", id="tc-reviewer"),
+        pytest.param("autotest-reviewer-output.schema.json", "autotest_review", id="autotest-reviewer"),
+    ],
+)
+def test_reviewer_accepts_honest_rework_with_blocking_finding(valid_artifacts, schema_name, report_key):
+    """Allows rework only when its blocking finding is present and no correction leaks."""
+    valid = copy.deepcopy(valid_artifacts[schema_name])
+    valid["artifacts"][report_key].update(
+        {"verdict": "ТРЕБУЕТ ДОРАБОТКИ", "findings": [valid_artifacts["finding"]], "corrections": []}
+    )
+    assert not _errors(schema_name, valid)
