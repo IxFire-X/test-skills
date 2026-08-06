@@ -213,6 +213,25 @@ def test_trace_check_accepts_a_real_schema_valid_execution_trace(root, tmp_path)
     assert report["trace_audit"]["verdict"] == "PASS"
 
 
+def test_validate_artifact_uses_canonical_run_output_schema_id_after_rename(root, tmp_path):
+    """Catches semantic run-output validation being accidentally coupled to the schema filename."""
+    renamed = tmp_path / "renamed.schema.json"
+    renamed.write_text((root / "schemas" / "run-tests-output.schema.json").read_text(encoding="utf-8"), encoding="utf-8")
+    artifact = tmp_path / "run.json"
+    artifact.write_text(json.dumps({
+        "verdict": "PASS", "target": {"language": "python", "framework": "pytest", "runner": "pytest", "command": "pytest"},
+        "environment": {"status": "ready"}, "stats": {"total": 1, "passed": 1, "failed": 0, "errors": 0, "skipped": 0, "duration_sec": 0},
+        "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": "2026-01-01T00:00:00Z", "exit_code": 0,
+        "run_id": "RUN-1", "evidence_authoritative": True,
+        "execution_evidence": [{"run_id": "RUN-other", "method_id": "METHOD-1", "status": "passed"}],
+    }), encoding="utf-8")
+
+    completed = _run_cli(root, "validate_artifact.py", str(renamed), str(artifact))
+
+    assert completed.returncode == 1
+    assert _json_output(completed)["status"] == "invalid"
+
+
 @pytest.mark.parametrize("tool", [
     "doctor.py", "contract_check.py", "render_contract_docs.py", "scan_project.py",
     "run_tests.py", "validate_artifact.py", "trace_check.py",

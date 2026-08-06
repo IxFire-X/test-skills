@@ -363,6 +363,55 @@ def test_artifact_runner_compatibility_rejects_python_file_for_java(runner, tmp_
     assert runner.validate_artifact_runner_compatibility(bindings, "java")
 
 
+def test_java_cli_rejects_python_artifact_before_wrapper_runs(root, tmp_path):
+    """Catches a Python artifact reaching Java runner/binding despite matching method names."""
+    source = tmp_path / "test_wrong.py"
+    source.write_text("def test_one(): assert True\n", encoding="utf-8")
+    (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
+    sentinel = tmp_path / "ran.txt"
+    (tmp_path / "mvnw.cmd").write_text(f"@echo ran > \"{sentinel}\"\r\nexit /b 0\r\n", encoding="utf-8")
+    digest = "sha256:" + sha256(source.read_bytes()).hexdigest()
+    artifact = {"schema_version": "2.1.0", "stage": "tc-to-autotest", "warnings": [], "artifacts": {
+        "automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}],
+        "generated_test_files": [{"id": "FILE-1", "path": "test_wrong.py", "language": "python", "framework": "pytest", "content_digest": digest}],
+        "generated_test_methods": [{"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_one", "content_digest": "sha256:" + "1" * 64}],
+    }}
+    artifact_path = tmp_path / "artifact.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    environment = os.environ.copy()
+    environment["JAVA_HOME"] = r"D:\AI-Projects\.tools\jdk-17"
+    completed = subprocess.run([sys.executable, str(root / "tools" / "run_tests.py"), "--project", str(tmp_path), "--language", "java", "--automation-artifact", str(artifact_path)], capture_output=True, text=True, encoding="utf-8", env=environment, check=False)
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
+
+    assert completed.returncode == 2
+    assert report["verdict"] == "NOT_RUNNABLE"
+    assert "incompatible" in report["root_cause"][0]
+    assert report["evidence_authoritative"] is False
+    assert not sentinel.exists()
+
+
+def test_loader_rejects_orphan_and_extra_matrix_file_but_accepts_exact(runner, tmp_path):
+    """Catches known-but-unrelated files silently passing matrix relationship checks."""
+    source = tmp_path / "test_one.py"
+    extra = tmp_path / "test_extra.py"
+    source.write_text("def test_one(): assert True\n", encoding="utf-8")
+    extra.write_text("def test_extra(): assert True\n", encoding="utf-8")
+    method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_one", "content_digest": "sha256:" + "1" * 64}
+    artifact = _automation_artifact(source, [method])
+    valid = tmp_path / "valid.json"
+    valid.write_text(json.dumps(artifact), encoding="utf-8")
+    assert runner.load_automation_artifact(str(valid), str(tmp_path))[0] is not None
+    extra_file = {"id": "FILE-2", "path": extra.name, "language": "python", "framework": "pytest", "content_digest": "sha256:" + sha256(extra.read_bytes()).hexdigest()}
+    artifact["artifacts"]["generated_test_files"].append(extra_file)
+    orphan = tmp_path / "orphan.json"
+    orphan.write_text(json.dumps(artifact), encoding="utf-8")
+    assert runner.load_automation_artifact(str(orphan), str(tmp_path))[0] is None
+    artifact["artifacts"]["automation_matrix"][0]["generated_file_ids"].append("FILE-2")
+    unrelated = tmp_path / "unrelated.json"
+    unrelated.write_text(json.dumps(artifact), encoding="utf-8")
+    assert runner.load_automation_artifact(str(unrelated), str(tmp_path))[0] is None
+
+
 def test_report_root_confinement_rejects_resolved_escape_and_keeps_in_root(runner, tmp_path):
     """Catches report XML discovery escaping via any resolved report-root path."""
     outside = tmp_path.parent / "outside-reports"
