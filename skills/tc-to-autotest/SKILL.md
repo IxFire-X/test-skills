@@ -5,8 +5,6 @@ description: >
   (JUnit 5, RestAssured, AssertJ, WireMock, Allure). Runs after tc-generator and
   tc-reviewer in the pipeline. Use when the user asks to automate test cases, write
   Java API autotests from manual TCs, or translate ТК-N steps into RestAssured code.
-version: 3.1
-language: ru
 ---
 
 # СКИЛЛ: Генератор автотестов (Мультиязычный / Бэк-платформа)
