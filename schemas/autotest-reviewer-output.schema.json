@@ -15,7 +15,7 @@
   },
   "allOf": [
     {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}},
-    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"corrections": {"minItems": 1}}}}}}}},
+    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"corrections": {"minItems": 1}, "findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}}}}}}}}}}},
     {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ТРЕБУЕТ ДОРАБОТКИ"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}}}, "corrections": {"maxItems": 0}}}}}}}}
   ],
   "$defs": {

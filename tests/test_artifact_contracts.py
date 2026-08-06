@@ -49,12 +49,13 @@ def valid_artifacts():
     }
     finding = {"severity": "BLOCKING", "code": "ASSERTION_MISSING", "message": "Нет проверки статуса", "evidence": ["TC-2 step 1"], "related_ids": ["TC-2"]}
     correction = {"id": "FIX-1", "related_ids": ["TC-1"], "description": "Добавлена проверка статуса", "evidence": ["diff:1"]}
-    test_method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_submit_order", "content_digest": "sha256:abc"}
+    digest = "sha256:" + "a" * 64
+    test_method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_submit_order", "content_digest": digest}
     return {
         "context-marker-output.schema.json": _envelope("context-marker", {"analytics_documentation": {"requirements": [requirement]}, "source_code_and_diff": {"sources": ["src/orders.py"]}}),
         "tc-generator-output.schema.json": _envelope("tc-generator", {"generated_test_cases": {"requirements": [requirement], "test_cases": [test_case], "coverage": [{"requirement_id": "REQ-1", "test_case_ids": ["TC-1"]}]}}),
         "tc-reviewer-output.schema.json": _envelope("tc-reviewer", {"validation_report": {"verdict": "ПРИНЯТО", "reviewed_test_case_ids": ["TC-1"], "findings": [], "corrections": []}, "corrected_test_cases": []}),
-        "tc-to-autotest-output.schema.json": _envelope("tc-to-autotest", {"automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}], "generated_test_files": [{"id": "FILE-1", "path": "tests/test_orders.py", "language": "python", "framework": "pytest", "content_digest": "sha256:def"}], "generated_test_methods": [test_method]}),
+        "tc-to-autotest-output.schema.json": _envelope("tc-to-autotest", {"automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}], "generated_test_files": [{"id": "FILE-1", "path": "tests/test_orders.py", "language": "python", "framework": "pytest", "content_digest": digest}], "generated_test_methods": [test_method]}),
         "autotest-reviewer-output.schema.json": _envelope("autotest-reviewer", {"autotest_review": {"verdict": "ПРИНЯТО", "reviewed_file_ids": ["FILE-1"], "reviewed_method_ids": ["METHOD-1"], "findings": [], "corrections": []}}),
         "orchestrator-output.schema.json": _envelope("orchestrate", {"run_tests_verdict": {"verdict": "PASS", "reason": "All tests passed", "command": "pytest", "runner": "pytest", "exit_code": 0}, "execution_evidence": [{"method_id": "METHOD-1", "verdict": "PASS", "run_id": "RUN-1"}], "trace_audit": {"verdict": "PASS", "mappings": [{"requirement_id": "REQ-1", "test_case_id": "TC-1", "method_id": "METHOD-1", "evidence_ids": ["RUN-1"]}], "errors": []}}),
         "finding": finding,
@@ -267,3 +268,65 @@ def test_validator_cli_preserves_non_ascii_json(tmp_path, valid_artifacts):
     completed = subprocess.run([sys.executable, str(VALIDATOR_PATH), str(SCHEMA_DIR / "tc-generator-output.schema.json"), str(artifact_path)], capture_output=True, text=True, encoding="utf-8", check=False)
     assert completed.returncode == 0
     assert json.loads(completed.stdout) == {"errors": [], "status": "valid"}
+
+
+def test_tc_reviewer_accepts_complete_auto_fix_case(valid_artifacts):
+    """Catches AUTO_FIX_APPLIED outputs that cannot forward a usable corrected case."""
+    valid = copy.deepcopy(valid_artifacts["tc-reviewer-output.schema.json"])
+    valid["artifacts"]["validation_report"].update({"verdict": "AUTO_FIX_APPLIED", "corrections": [valid_artifacts["correction"]]})
+    valid["artifacts"]["corrected_test_cases"] = [valid_artifacts["test_case"]]
+    assert not _errors("tc-reviewer-output.schema.json", valid)
+
+
+def test_tc_reviewer_rejects_id_only_corrected_case(valid_artifacts):
+    """Catches correction branches that discard executable test-case details."""
+    invalid = copy.deepcopy(valid_artifacts["tc-reviewer-output.schema.json"])
+    invalid["artifacts"]["validation_report"].update({"verdict": "AUTO_FIX_APPLIED", "corrections": [valid_artifacts["correction"]]})
+    invalid["artifacts"]["corrected_test_cases"] = [{"id": "TC-1"}]
+    assert _errors("tc-reviewer-output.schema.json", invalid)
+
+
+def test_review_auto_fix_rejects_blocking_finding(valid_artifacts):
+    """Catches AUTO_FIX_APPLIED coexisting with a blocking unresolved finding."""
+    for schema_name, report_key in (("tc-reviewer-output.schema.json", "validation_report"), ("autotest-reviewer-output.schema.json", "autotest_review")):
+        invalid = copy.deepcopy(valid_artifacts[schema_name])
+        invalid["artifacts"][report_key].update({"verdict": "AUTO_FIX_APPLIED", "findings": [valid_artifacts["finding"]], "corrections": [valid_artifacts["correction"]]})
+        if schema_name.startswith("tc-"):
+            invalid["artifacts"]["corrected_test_cases"] = [valid_artifacts["test_case"]]
+        assert _errors(schema_name, invalid)
+
+
+def test_trace_mapping_rejects_partial_structure(valid_artifacts):
+    """Catches trace audit mappings that provide no requirement-to-evidence chain."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["artifacts"]["trace_audit"]["mappings"] = [{}]
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_orchestrator_rejects_pass_nonzero_exit(valid_artifacts):
+    """Catches PASS verdicts that retain a failing process exit code."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["artifacts"]["run_tests_verdict"]["exit_code"] = 1
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_orchestrator_rejects_fail_without_failed_evidence(valid_artifacts):
+    """Catches FAIL execution evidence that only records passing methods."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["artifacts"]["run_tests_verdict"].update({"verdict": "FAIL", "exit_code": 1})
+    invalid["artifacts"]["trace_audit"].update({"verdict": "FAIL", "errors": ["failure"]})
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_orchestrator_rejects_not_runnable_metadata(valid_artifacts):
+    """Catches NOT_RUNNABLE claims that carry a contradictory runner execution record."""
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["artifacts"].update({"run_tests_verdict": {"verdict": "NOT_RUNNABLE", "reason": "missing runner", "command": "pytest"}, "execution_evidence": [], "trace_audit": {"verdict": "FAIL", "mappings": [], "errors": ["missing runner"]}})
+    assert _errors("orchestrator-output.schema.json", invalid)
+
+
+def test_generated_digest_requires_full_sha256(valid_artifacts):
+    """Catches digest prefixes that cannot identify generated source content."""
+    invalid = copy.deepcopy(valid_artifacts["tc-to-autotest-output.schema.json"])
+    invalid["artifacts"]["generated_test_files"][0]["content_digest"] = "sha256:abc"
+    assert _errors("tc-to-autotest-output.schema.json", invalid)

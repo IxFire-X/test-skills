@@ -9,7 +9,7 @@ Use `tools/validate_artifact.py SCHEMA ARTIFACT` at every handoff. Its stdout
 is deterministic UTF-8 JSON:
 
 ```json
-{"errors":[{"message":"'id' is a required property","path":"/artifacts/test_cases/0/id"}],"status":"invalid"}
+{"errors":[{"message":"'id' is a required property","path":"/artifacts/generated_test_cases/test_cases/0/id"}],"status":"invalid"}
 ```
 
 Exit codes are fixed: `0` valid, `1` artifact invalid, `2` schema/input/missing
