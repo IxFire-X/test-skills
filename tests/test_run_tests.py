@@ -354,6 +354,33 @@ def test_gradlew_cmd_cli_emits_fresh_authoritative_method_evidence(root, tmp_pat
     assert report["execution_evidence"] == [{"run_id": report["run_id"], "method_id": "METHOD-1", "status": "passed"}]
 
 
+def test_report_root_confinement_rejects_resolved_escape_and_keeps_in_root(runner, tmp_path):
+    """Catches report XML discovery escaping via any resolved report-root path."""
+    outside = tmp_path.parent / "outside-reports"
+    outside.mkdir(exist_ok=True)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert runner.confined_report_dir(str(project), "build/test-results") == (project / "build" / "test-results").resolve()
+    assert runner.confined_report_dir(str(project), "../outside-reports") is None
+
+
+def test_report_root_symlink_escape_is_rejected_when_supported(runner, tmp_path):
+    """Catches an in-project Gradle report path resolving into external XML evidence."""
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = project / "build" / "test-results"
+    target.parent.mkdir()
+    try:
+        target.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("directory symlink privilege unavailable")
+
+    assert runner.confined_report_dir(str(project), "build/test-results") is None
+
+
 @pytest.mark.parametrize("run_id,evidence,authoritative", [
     (None, [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], True),
     ("RUN-1", [], True),

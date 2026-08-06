@@ -526,6 +526,17 @@ def _report_inventory(report_dir: Path) -> dict[Path, tuple[int, int, str]]:
     return inventory
 
 
+def confined_report_dir(project_dir: str, relative: str) -> Path | None:
+    """Resolve the selected runner report tree only when it remains inside project."""
+    root = Path(project_dir).resolve()
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
 def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
     """
     Парсит вывод pytest. Извлекает failed_methods[] и root_cause[].
@@ -743,10 +754,8 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
         cmd = ["mvn", "test"]
 
     project_root = Path(project_dir).resolve()
-    report_dir = (project_root / ("target/surefire-reports" if is_maven else "build/test-results")).resolve()
-    try:
-        report_dir.relative_to(project_root)
-    except ValueError:
+    report_dir = confined_report_dir(project_dir, "target/surefire-reports" if is_maven else "build/test-results")
+    if report_dir is None:
         return build_not_runnable({"status": "partial", "interpreter": None, "working_dir": str(project_root), "missing": ["report_dir"]}, "java", "selected report directory escapes project root")
     before_reports = _report_inventory(report_dir)
     exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
