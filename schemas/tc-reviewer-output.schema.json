@@ -1,151 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/tc-reviewer-output.schema.json",
-  "title": "TC Reviewer Output (Валидация тест-кейсов)",
-  "description": "Формальный контракт для выхода скилла 'Валидация тест-кейсов' (tc-reviewer). Определяет структуру validation_report после проверки ручных тест-кейсов.",
+  "title": "Portable tc-reviewer artifact envelope",
   "type": "object",
-  "required": ["verdict", "confidence", "test_cases_count", "review_date", "reviewer", "statistics", "categories"],
+  "required": ["schema_version", "stage", "artifacts", "warnings"], "additionalProperties": false,
   "properties": {
-    "verdict": {
-      "type": "string",
-      "enum": ["ПРИНЯТО", "ТРЕБУЕТ ДОРАБОТКИ", "AUTO_FIX_APPLIED"],
-      "description": "Итоговый вердикт валидации"
-    },
-    "confidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1,
-      "description": "Уверенность reviewer в вердикте (0.0–1.0). Согласно SKILL.md: 0.9–1.0 высокая, 0.7–0.89 средняя, 0.5–0.69 низкая, <0.5 недопустимо (вердикт должен быть ТРЕБУЕТ ДОРАБОТКИ с ручной эскалацией)"
-    },
-    "test_cases_count": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Количество проверенных тест-кейсов"
-    },
-
-    "review_date": {
-      "type": "string",
-      "format": "date",
-      "description": "Дата проведения валидации (YYYY-MM-DD)"
-    },
-    "reviewer": {
-      "type": "string",
-      "description": "Идентификатор скилла-валидатора (tc-reviewer)"
-    },
-    "source_test_cases": {
-      "type": "string",
-      "description": "Ссылка на исходный файл тест-кейсов"
-    },
-    "statistics": {
-      "type": "object",
-      "required": ["pass", "warn", "fail"],
+    "schema_version": {"const": "2.1.0"}, "stage": {"const": "tc-reviewer"},
+    "artifacts": {
+      "type": "object", "required": ["validation_report", "accepted_test_cases", "corrected_test_cases"], "additionalProperties": false,
       "properties": {
-        "pass": { "type": "integer", "minimum": 0, "description": "Количество проверок с вердиктом PASS" },
-        "warn": { "type": "integer", "minimum": 0, "description": "Количество проверок с вердиктом WARN" },
-        "fail": { "type": "integer", "minimum": 0, "description": "Количество проверок с вердиктом FAIL" }
+        "validation_report": {"$ref": "#/$defs/review_report"},
+        "accepted_test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
+        "corrected_test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}}
       }
-    },
-    "categories": {
-      "type": "object",
-      "description": "Результаты по 6 категориям проверки",
-      "required": ["structure", "limits", "determinism", "technical_accuracy", "coverage", "consistency"],
-      "properties": {
-        "structure": { "$ref": "#/$defs/category_result" },
-        "limits": { "$ref": "#/$defs/category_result" },
-        "determinism": { "$ref": "#/$defs/category_result" },
-        "technical_accuracy": { "$ref": "#/$defs/category_result" },
-        "coverage": { "$ref": "#/$defs/category_result" },
-        "consistency": { "$ref": "#/$defs/category_result" }
-      }
-    },
-    "auto_fixes_applied": {
-      "type": "array",
-      "description": "Список автоматически применённых исправлений (только при AUTO_FIX_APPLIED)",
-      "items": {
-        "$ref": "#/$defs/auto_fix"
-      }
-    },
-    "review_comments": {
-      "type": "array",
-      "description": "Замечания, требующие ручного исправления (при ТРЕБУЕТ ДОРАБОТКИ)",
-      "items": {
-        "$ref": "#/$defs/review_comment"
-      }
-    },
-    "corrected_test_cases": {
-      "type": "string",
-      "description": "Содержимое тест-кейсов после автофикса (только при AUTO_FIX_APPLIED). Формат: Zephyr Markdown."
-    }
+    }, "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
+  "allOf": [
+    {"if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"accepted_test_cases": {"minItems": 1}}}}}},
+    {"if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"corrected_test_cases": {"minItems": 1}}}}}}
+  ],
   "$defs": {
-    "category_result": {
-      "type": "object",
-      "required": ["status"],
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": ["PASS", "WARN", "FAIL"],
-          "description": "Вердикт для категории"
-        },
-        "details": {
-          "type": "string",
-          "description": "Детализация результата (конкретные номера ТК и проблемы)"
-        },
-        "affected_tc_ids": {
-          "type": "array",
-          "items": { "type": "string", "pattern": "^ТК-\\d+$" },
-          "description": "Список ТК-N, затронутых этой категорией"
-        }
-      }
-    },
-    "auto_fix": {
-      "type": "object",
-      "required": ["type", "description"],
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["HEADER_FIX", "FORMAT_FIX", "NUMBERING_FIX", "TAG_FIX"],
-          "description": "Тип автофикса"
-        },
-        "description": {
-          "type": "string",
-          "description": "Описание применённого исправления"
-        },
-        "affected_tc_id": {
-          "type": "string",
-          "pattern": "^ТК-\\d+$",
-          "description": "Затронутый ТК-N"
-        }
-      }
-    },
-    "review_comment": {
-      "type": "object",
-      "required": ["tc_id", "severity", "message"],
-      "properties": {
-        "tc_id": {
-          "type": "string",
-          "pattern": "^ТК-\\d+$",
-          "description": "Идентификатор тест-кейса с замечанием"
-        },
-        "severity": {
-          "type": "string",
-          "enum": ["CRITICAL", "WARN"],
-          "description": "Серьёзность замечания. CRITICAL → FAIL, WARN → предупреждение"
-        },
-        "category": {
-          "type": "string",
-          "enum": ["structure", "limits", "determinism", "technical_accuracy", "coverage", "consistency"],
-          "description": "Категория проверки, к которой относится замечание"
-        },
-        "message": {
-          "type": "string",
-          "description": "Текст замечания (что нужно исправить)"
-        },
-        "suggestion": {
-          "type": "string",
-          "description": "Рекомендация по исправлению (опционально)"
-        }
-      }
-    }
+    "review_report": {"type": "object", "required": ["verdict", "reviewed_test_case_ids"], "additionalProperties": false, "properties": {"verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]}, "reviewed_test_case_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}}}},
+    "test_case": {"type": "object", "required": ["id", "requirement_ids", "title"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "requirement_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}}, "title": {"type": "string", "minLength": 1}}}
   }
 }

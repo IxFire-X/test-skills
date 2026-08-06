@@ -1,149 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/tc-generator-output.schema.json",
-  "title": "TC Generator Output (Ручные тест-кейсы)",
-  "description": "Формальный контракт для выхода скилла 'Ручные тест-кейсы' (tc-generator). Определяет структуру сгенерированных тест-кейсов в формате Zephyr Markdown.",
+  "title": "Portable tc-generator artifact envelope",
   "type": "object",
-  "required": ["meta", "endpoint", "test_cases"],
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "additionalProperties": false,
   "properties": {
-    "meta": {
-      "type": "object",
-      "description": "Метаданные документа тест-кейсов",
-      "required": ["project", "author", "date", "source_analytics"],
+    "schema_version": {"const": "2.1.0"}, "stage": {"const": "tc-generator"},
+    "artifacts": {
+      "type": "object", "required": ["requirements", "test_cases", "coverage"], "additionalProperties": false,
       "properties": {
-        "project": {
-          "type": "string",
-          "description": "Название проекта (например, 'Subscription Renewal Service')"
-        },
-        "author": {
-          "type": "string",
-          "description": "Автор тест-кейсов"
-        },
-        "date": {
-          "type": "string",
-          "format": "date",
-          "description": "Дата создания тест-кейсов (YYYY-MM-DD)"
-        },
-        "source_analytics": {
-          "type": "string",
-          "description": "Ссылка на исходную аналитику, из которой сгенерированы ТК"
-        }
+        "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/requirement"}},
+        "test_cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/test_case"}},
+        "coverage": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/coverage"}}
       }
     },
-    "endpoint": {
-      "type": "object",
-      "description": "Информация о тестируемом эндпоинте",
-      "required": ["http_method", "path", "summary"],
-      "properties": {
-        "http_method": {
-          "type": "string",
-          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-          "description": "HTTP метод эндпоинта"
-        },
-        "path": {
-          "type": "string",
-          "description": "URL-путь эндпоинта (например, '/api/v1/subscriptions/renew')"
-        },
-        "summary": {
-          "type": "string",
-          "description": "Краткое описание назначения эндпоинта"
-        }
-      }
-    },
-    "test_cases": {
-      "type": "array",
-      "description": "Массив сгенерированных тест-кейсов",
-      "minItems": 1,
-      "items": {
-        "$ref": "#/$defs/test_case"
-      }
-    }
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
   "$defs": {
-    "test_case": {
-      "type": "object",
-      "description": "Отдельный тест-кейс (ТК-N)",
-      "required": ["id", "title", "purpose", "type", "steps"],
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^ТК-\\d+$",
-          "description": "Уникальный идентификатор (например, 'ТК-1', 'ТК-15')"
-        },
-        "title": {
-          "type": "string",
-          "maxLength": 150,
-          "description": "Название тест-кейса (заголовок после 'ТК-N:'). Лимит синхронизирован с SKILL.md (150 симв.)"
-        },
-        "purpose": {
-          "type": "string",
-          "description": "Цель тест-кейса"
-        },
-        "type": {
-          "type": "string",
-          "enum": ["positive", "negative", "boundary", "security", "observability", "concurrency"],
-          "description": "Класс тест-кейса (тег)"
-        },
-        "severity": {
-          "type": "string",
-          "enum": ["BLOCKER", "CRITICAL", "NORMAL", "MINOR"],
-          "description": "Severity тест-кейса (если указан)"
-        },
-        "preconditions": {
-          "type": "array",
-          "description": "Предусловия для выполнения ТК",
-          "items": {
-            "type": "string"
-          }
-        },
-        "steps": {
-          "type": "array",
-          "description": "Шаги выполнения тест-кейса",
-          "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/test_step"
-          }
-        },
-        "tags": {
-          "type": "array",
-          "description": "Теги для маршрутизации (начинаются с @)",
-          "items": {
-            "type": "string",
-            "pattern": "^@[a-z_]+$"
-          }
-        },
-        "flags": {
-          "type": "array",
-          "description": "Специальные флаги (⚠-маркеры, TODO)",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "test_step": {
-      "type": "object",
-      "description": "Отдельный шаг тест-кейса",
-      "required": ["step_number", "action", "expected_result"],
-      "properties": {
-        "step_number": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Номер шага"
-        },
-        "action": {
-          "type": "string",
-          "description": "Действие, которое нужно выполнить"
-        },
-        "test_data": {
-          "type": "string",
-          "description": "Тестовые данные для действия (опционально)"
-        },
-        "expected_result": {
-          "type": "string",
-          "description": "Ожидаемый результат. Должен быть ДЕТЕРМИНИРОВАННЫМ (без 'ИЛИ')"
-        }
-      }
-    }
+    "requirement": {"type": "object", "required": ["id", "text", "provenance"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}, "text": {"type": "string", "minLength": 1}, "provenance": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+    "test_case": {"type": "object", "required": ["id", "requirement_ids", "title"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "requirement_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}}, "title": {"type": "string", "minLength": 1}}},
+    "coverage": {"type": "object", "required": ["requirement_id", "test_case_ids"], "additionalProperties": false, "properties": {"requirement_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}, "test_case_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}}}}
   }
 }

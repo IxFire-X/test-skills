@@ -1,91 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/orchestrator-output.schema.json",
-  "title": "Orchestrator Output (Оркестратор)",
-  "description": "Формальный контракт для выхода скилла 'Оркестратор' (orchestrate). Определяет структуру <orchestration_result> — итогового отчёта о выполнении пайплайна (CONTRACTS.md §2 п.10).",
+  "title": "Portable orchestrate artifact envelope",
   "type": "object",
-  "required": ["status", "pipeline_name", "iterations", "steps"],
+  "required": ["schema_version", "stage", "artifacts", "warnings"], "additionalProperties": false,
   "properties": {
-    "execution_id": {
-      "type": "string",
-      "description": "Уникальный идентификатор запуска (UUID)"
-    },
-    "status": {
-      "type": "string",
-      "enum": ["completed", "partial", "failed", "retry"],
-      "description": "Итоговый статус пайплайна (канон CONTRACTS.md §3.3)"
-    },
-    "reason": {
-      "type": "string",
-      "description": "Причина статуса failed (например, 'contract_mismatch')"
-    },
-    "detail": {
-      "type": "string",
-      "description": "Подробности ошибки (при status=failed)"
-    },
-    "pipeline_name": {
-      "type": "string",
-      "description": "Имя запущенного пайплайна (например, 'test-pipeline')"
-    },
-    "iterations": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Количество выполненных итераций пайплайна"
-    },
-    "steps": {
-      "type": "array",
-      "description": "Список выполненных шагов пайплайна",
-      "items": {
-        "type": "object",
-        "required": ["name", "skill", "status"],
-        "properties": {
-          "name": { "type": "string", "description": "Человекочитаемое название шага" },
-          "skill": { "type": "string", "description": "Идентификатор скилла (например, 'tc-generator')" },
-          "status": {
-            "type": "string",
-            "enum": ["success", "skipped", "failed", "pending"]
-          },
-          "output": { "type": "string", "description": "Путь/ссылка на артефакт шага" },
-          "verdict": {
-            "type": "string",
-            "enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
-            "description": "Вердикт ревьюера для этого шага (если применимо)"
-          }
-        }
-      }
-    },
-    "final_result": {
-      "type": "string",
-      "description": "Путь к финальному артефакту пайплайна"
-    },
-    "warnings": {
-      "type": "array",
-      "description": "Список предупреждений, накопленных во время выполнения",
-      "items": { "type": "string" }
-    },
-    "recommendations": {
-      "type": "array",
-      "description": "Рекомендации пользователю (при status=partial/retry/failed)",
-      "items": { "type": "string" }
-    },
-    "contract_check": {
-      "type": "object",
-      "description": "Результат исполнимого Contract Check (CONTRACTS.md §5) перед стартом пайплайна",
+    "schema_version": {"const": "2.1.0"}, "stage": {"const": "orchestrate"},
+    "artifacts": {
+      "type": "object", "required": ["run_tests_verdict", "execution_evidence", "trace_audit"], "additionalProperties": false,
       "properties": {
-        "result": { "type": "string", "enum": ["PASS", "FAILED"] },
-        "checked_pairs": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "from_skill": { "type": "string" },
-              "to_skill": { "type": "string" },
-              "status": { "type": "string", "enum": ["PASS", "FAILED"] },
-              "error": { "type": "string" }
-            }
-          }
-        }
+        "run_tests_verdict": {"type": "object", "required": ["verdict"], "additionalProperties": false, "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}}},
+        "execution_evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+        "trace_audit": {"type": "object", "required": ["verdict", "mappings"], "additionalProperties": false, "properties": {"verdict": {"enum": ["PASS", "FAIL"]}, "mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/trace_mapping"}}}}
       }
-    }
+    }, "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "evidence": {"type": "object", "required": ["method_id", "verdict", "run_id"], "additionalProperties": false, "properties": {"method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"}, "verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}}},
+    "trace_mapping": {"type": "object", "required": ["requirement_id", "test_case_id", "method_id", "evidence_ids"], "additionalProperties": false, "properties": {"requirement_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}, "test_case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"}, "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}}}}
   }
 }
