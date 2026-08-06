@@ -769,7 +769,7 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
             "passed": total - int(m.group(2)) - int(m.group(3)) - int(m.group(4)),
         })
     elif not is_maven:
-        gradle = re.search(r"(\d+) tests completed(?:, (\d+) failed)?(?:, (\d+) skipped)?", combined)
+        gradle = re.search(r"(\d+) tests? completed(?:, (\d+) failed)?(?:, (\d+) skipped)?", combined)
         if gradle:
             total = int(gradle.group(1))
             failed = int(gradle.group(2) or 0)

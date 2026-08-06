@@ -11,7 +11,8 @@ from jsonschema import Draft202012Validator
 def _validate_output(root, schema_name, completed):
     document = json.loads(completed.stdout)
     schema = json.loads((root / "schemas" / schema_name).read_text(encoding="utf-8"))
-    assert list(Draft202012Validator(schema).iter_errors(document)) == []
+    errors = list(Draft202012Validator(schema).iter_errors(document))
+    assert errors == [], [(error.json_path, error.message) for error in errors]
     return document
 
 
