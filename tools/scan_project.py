@@ -46,6 +46,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 
@@ -232,14 +233,18 @@ def detect_stack(project_dir: str, target_rel: str) -> dict:
             text = _read_text(os.path.join(project_dir, runtime_manifest)) or ""
             names = _extract_dep_names(text)
             joined = " ".join(sorted(names))
-            framework = _match_markers(joined, PYTHON_FRAMEWORK_MARKERS)
+            # pyproject.toml declares dependencies in TOML arrays, which are not
+            # requirements-style lines; search the original manifest as well.
+            framework = (_match_markers(joined, PYTHON_FRAMEWORK_MARKERS)
+                         or _match_markers(text, PYTHON_FRAMEWORK_MARKERS))
             evidence.append(f"runtime deps из {runtime_manifest.replace(os.sep, '/')} ({len(names)} пакетов)")
 
         if dev_manifest:
             text = _read_text(os.path.join(project_dir, dev_manifest)) or ""
             names = _extract_dep_names(text)
             joined = " ".join(sorted(names))
-            tf = _match_markers(joined, PYTHON_TEST_MARKERS)
+            tf = (_match_markers(joined, PYTHON_TEST_MARKERS)
+                  or _match_markers(text, PYTHON_TEST_MARKERS))
             if tf:
                 test_framework = tf
                 evidence.append(f"test deps из {dev_manifest.replace(os.sep, '/')}")
@@ -517,16 +522,64 @@ def _xml_escape(text: str) -> str:
 
 
 def render_source_block(project_dir: str, files_rel: list[str]) -> str:
-    """Генерирует <source_code_and_diff>...</source_code_and_diff>."""
+    """Генерирует source block without transforming the extracted source bytes."""
     lines = ["<source_code_and_diff>"]
     for rel in files_rel:
         abs_p = os.path.join(project_dir, rel)
         content = _read_text(abs_p) or ""
         lines.append(f'  <file path="{_xml_escape(rel)}">')
-        lines.append(_xml_escape(content))
+        # Source is evidence, not XML data: escaping would change Java text
+        # blocks and embedded CDATA markers that downstream reviewers need.
+        lines.append(content)
         lines.append("  </file>")
     lines.append("</source_code_and_diff>")
     return "\n".join(lines)
+
+
+def _strip_java_comments_and_text_blocks(text: str) -> str:
+    """Blank comments and Java text blocks while preserving positions/newlines."""
+    result: list[str] = []
+    index = 0
+    state = "code"
+    while index < len(text):
+        if state == "code" and text.startswith("//", index):
+            state = "line_comment"
+            result.extend("  ")
+            index += 2
+        elif state == "code" and text.startswith("/*", index):
+            state = "block_comment"
+            result.extend("  ")
+            index += 2
+        elif state == "code" and text.startswith('\"\"\"', index):
+            state = "text_block"
+            result.extend("   ")
+            index += 3
+        elif state == "line_comment":
+            char = text[index]
+            result.append("\n" if char == "\n" else " ")
+            index += 1
+            if char == "\n":
+                state = "code"
+        elif state == "block_comment":
+            if text.startswith("*/", index):
+                result.extend("  ")
+                index += 2
+                state = "code"
+            else:
+                result.append("\n" if text[index] == "\n" else " ")
+                index += 1
+        elif state == "text_block":
+            if text.startswith('\"\"\"', index):
+                result.extend("   ")
+                index += 3
+                state = "code"
+            else:
+                result.append("\n" if text[index] == "\n" else " ")
+                index += 1
+        else:
+            result.append(text[index])
+            index += 1
+    return "".join(result)
 
 
 def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Optional[str]) -> list[str]:
@@ -556,6 +609,9 @@ def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Option
         if not (is_python_urls or is_java_source):
             continue
         text = _read_text(os.path.join(project_dir, rel)) or ""
+        # Parse a separate copy; source evidence remains byte-for-byte unchanged.
+        if is_java_source:
+            text = _strip_java_comments_and_text_blocks(text)
         for pat in patterns:
             for m in pat.finditer(text):
                 val = m.group(1)
@@ -783,6 +839,18 @@ def _norm(path: Optional[str]) -> Optional[str]:
     return path.replace("\\", "/")
 
 
+def resolve_persistent_output_path(output: str) -> tuple[Optional[str], Optional[str]]:
+    """Accept only paths beneath an exact docs/to_do directory, without traversal."""
+    raw = Path(output)
+    if ".." in raw.parts:
+        return None, "--output не должен содержать traversal '..'"
+    resolved = raw.resolve()
+    parts = resolved.parts
+    if not any(parts[index:index + 2] == ("docs", "to_do") for index in range(len(parts) - 1)):
+        return None, "--output должен находиться внутри exact docs/to_do"
+    return str(resolved), None
+
+
 def build_report(status: str, stack: dict, files_extracted: list[str],
                  output_file: Optional[str], skillsrc_updated: bool,
                  skillsrc_path: Optional[str], warnings: list[str],
@@ -853,6 +921,15 @@ def main() -> int:
     elif detection["status"] == "partial" and target_abs:
         status = "partial"
 
+    # Validate a persistent destination before attempting any write.
+    output_error = None
+    requested_output = None
+    if args.output:
+        requested_output, output_error = resolve_persistent_output_path(args.output)
+        if output_error:
+            errors.append(output_error)
+            status = "error"
+
     # 4 & 5. Генерация блоков (только если есть что генерировать)
     output_file = None
     source_block = ""
@@ -863,10 +940,8 @@ def main() -> int:
             stack, project_dir, files_extracted, target_rel, warnings
         )
         document = f"{source_block}\n\n{analytics_block}\n"
-        if args.output:
-            # --output интерпретируется ОТНОСИТЕЛЬНО ТЕКУЩЕГО каталога (CWD),
-            # как ожидает пользователь, а не относительно --project.
-            out_abs = os.path.abspath(args.output)
+        if requested_output:
+            out_abs = requested_output
             out_dir = os.path.dirname(out_abs)
             if out_dir:
                 os.makedirs(out_dir, exist_ok=True)
@@ -879,13 +954,10 @@ def main() -> int:
                 status = "error"
         # без --output документ печатается отдельно ниже (после JSON)
 
-    # 6. .skillsrc (только если стек хотя бы частично определён)
+    # Scanning is read-only by default. A scanner report must never silently
+    # rewrite project metadata; .skillsrc can be explicitly managed elsewhere.
     skillsrc_updated = False
     skillsrc_path = None
-    if stack.get("language") and stack.get("language") != "unknown":
-        skillsrc_updated, skillsrc_path = update_skillsrc(project_dir, stack)
-        if not skillsrc_updated:
-            warnings.append("Не удалось обновить .skillsrc (ошибка записи).")
 
     # 7. JSON-отчёт
     report = build_report(

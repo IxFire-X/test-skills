@@ -31,7 +31,7 @@
           "description": "Нативный раннер, которым запускались тесты. not_applicable — при NOT_RUNNABLE, когда запуск невозможен"
         },
         "command": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Фактически исполненная команда (для воспроизведения и аудита)"
         }
       }
@@ -47,22 +47,26 @@
             "description": "ready — окружение найдено и валидно. missing — ничего нет. partial — часть доступна, часть отсутствует."
           },
           "interpreter": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "Найденный интерпретатор и версия (например, 'python 3.11.4', 'openjdk 17.0.8'). Отсутствует при missing."
+          },
+          "interpreter_path": {
+            "type": ["string", "null"],
+            "description": "Exact Python executable selected for probing and execution; null when no candidate exists."
           },
           "working_dir": {
             "type": "string",
             "description": "Корневая директория проекта, в которой запускался раннер"
           },
           "missing": {
-            "type": "array",
+            "type": ["array", "null"],
             "description": "При NOT_RUNNABLE/partial — чего именно не хватает (например, ['python', 'pytest', 'inventree package'])",
             "items": { "type": "string" }
           }
         }
       },
       "stats": {
-        "type": "object",
+        "type": ["object", "null"],
         "description": "Сводка по результатам запуска. Присутствует только при verdict PASS/FAIL.",
         "properties": {
           "total": { "type": "integer", "minimum": 0 },
@@ -74,7 +78,7 @@
         }
       },
       "failed_methods": {
-        "type": "array",
+        "type": ["array", "null"],
         "description": "Список упавших тестовых методов (node id). Присутствует при FAIL. Кормит trace_map и отчёт причины.",
         "items": {
           "type": "object",
@@ -97,12 +101,12 @@
         }
       },
       "root_cause": {
-        "type": "array",
+        "type": ["array", "null"],
         "description": "Машинно-извлечённые классы причин падений (НЕ LLM-гипотезы). Группируют failed_methods по общей причине: например, 'ImportError: cannot import InvenTree', 'AssertionError: status_code 500 != 200'. Этим питается дорогая модель (Kimi K3) при диагностике FAIL — но сам вердикт от неё не зависит.",
         "items": { "type": "string" }
       },
       "raw_output_excerpt": {
-        "type": "string",
+        "type": ["string", "null"],
         "description": "Сжатый вывод раннера (последние N строк или ключевые строки traceback). Для воспроизводимости и отладки; не для принятия решений — вердикт в поле verdict."
       },
       "ran_at": {
@@ -111,7 +115,7 @@
         "description": "ISO-8601 timestamp запуска"
       },
       "exit_code": {
-        "type": "integer",
+        "type": ["integer", "null"],
         "description": "Exit code процесса раннера (0=PASS, !=0=FAIL). Null при NOT_RUNNABLE."
       }
     },

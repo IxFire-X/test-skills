@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 
@@ -122,14 +123,23 @@ def detect_language_from_skillsrc(skillsrc_path: str) -> Optional[dict]:
 # Проверка окружения
 # ---------------------------------------------------------------------------
 
-def check_python_env(project_dir: str) -> dict:
+def select_python_interpreter(project_dir: str, override: str | None) -> str | None:
+    """Select the project's execution interpreter without probing a different one."""
+    root = Path(project_dir)
+    candidates: list[str | Path | None] = [override]
+    candidates.extend([root / ".venv/Scripts/python.exe", root / ".venv/bin/python"])
+    candidates.append(Path(sys.executable))
+    return next((str(path) for path in candidates if path and Path(path).is_file()), None)
+
+
+def check_python_env(project_dir: str, python_executable: str | None = None) -> dict:
     """
     Проверяет доступность python + pytest для проекта.
     Возвращает environment-блок контракта.
     """
     missing = []
     interpreter = None
-    interpreter_bin = None
+    interpreter_bin = select_python_interpreter(project_dir, python_executable)
 
     def _probe(binary: str) -> Optional[str]:
         """Возвращает версию интерпретатора, если binary реально запускается.
@@ -152,34 +162,18 @@ def check_python_env(project_dir: str) -> dict:
             return None
         return out or binary
 
-    # 1) Приоритет — интерпретатор, которым запущен сам раннер (sys.executable).
-    #    Он гарантированно рабочий и не является Store-заглушкой. Это спасает от
-    #    ситуации, когда на PATH первой стоит мёртвая WindowsApps\\python3.exe.
-    # 2) Затем — интерпретаторы с PATH, но каждый ВАЛИДИРУЕМ реальным запуском.
-    candidates = [sys.executable] + [
-        p for p in (shutil.which(c) for c in PYTHON_STACK["interpreters"]) if p
-    ]
-    seen = set()
-    for binary in candidates:
-        if not binary:
-            continue
-        norm = os.path.normcase(os.path.abspath(binary))
-        if norm in seen:
-            continue
-        seen.add(norm)
-        version = _probe(binary)
-        if version:
-            interpreter_bin = binary
-            interpreter = version
-            break
+    # Do not fall back after selection: probing and execution must use precisely
+    # the same project/override interpreter so the verdict is reproducible.
+    if interpreter_bin:
+        interpreter = _probe(interpreter_bin)
 
 
-    if not interpreter_bin:
+    if not interpreter_bin or not interpreter:
         missing.append("python")
 
     # pytest: проверяем через -c "import pytest"
     pytest_available = False
-    if interpreter_bin:
+    if interpreter_bin and interpreter:
         try:
             r = subprocess.run(
                 [interpreter_bin, "-c", "import pytest; print(pytest.__version__)"],
@@ -209,7 +203,8 @@ def check_python_env(project_dir: str) -> dict:
         "interpreter": interpreter,
         "working_dir": os.path.abspath(project_dir),
         "missing": missing or None,
-        "_interpreter_bin": interpreter_bin,  # внутреннее, убирается перед выводом
+        "interpreter_path": interpreter_bin,
+        "_interpreter_bin": interpreter_bin if interpreter else None,
     }
 
 
@@ -218,7 +213,13 @@ def check_java_env(project_dir: str) -> dict:
     interpreter = None
 
     # java
-    java_bin = shutil.which("java")
+    java_home = os.environ.get("JAVA_HOME")
+    java_names = ["java.exe", "java"] if os.name == "nt" else ["java"]
+    java_bin = next(
+        (str(Path(java_home) / "bin" / name) for name in java_names
+         if java_home and (Path(java_home) / "bin" / name).is_file()),
+        None,
+    ) or shutil.which("java")
     if java_bin:
         try:
             ver = subprocess.run([java_bin, "-version"], capture_output=True, text=True, timeout=10)
@@ -230,15 +231,16 @@ def check_java_env(project_dir: str) -> dict:
 
     # maven или gradle
     runner = None
-    if shutil.which("mvn"):
-        runner = "maven"
-    elif shutil.which("gradle"):
-        runner = "gradle"
-    else:
-        # обёртки проекта
-        if os.path.isfile(os.path.join(project_dir, "mvnw")):
-            runner = "maven"
-        elif os.path.isfile(os.path.join(project_dir, "gradlew")):
+    wrapper_candidates = (["mvnw.cmd", "mvnw", "gradlew.bat", "gradlew"]
+                          if os.name == "nt" else ["mvnw", "mvnw.cmd", "gradlew", "gradlew.bat"])
+    for wrapper in wrapper_candidates:
+        if os.path.isfile(os.path.join(project_dir, wrapper)):
+            runner = wrapper
+            break
+    if not runner:
+        if shutil.which("mvn"):
+            runner = "mvn"
+        elif shutil.which("gradle"):
             runner = "gradle"
         else:
             missing.append("maven/gradle")
@@ -267,9 +269,10 @@ def run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
     # оборачиваем в `cmd /c`, тогда Maven/Gradle wrapper'ы работают.
     if os.name == "nt" and cmd:
         first = cmd[0]
-        resolved = shutil.which(first) if not os.path.isabs(first) else first
+        local_candidate = os.path.join(cwd, first) if not os.path.isabs(first) else first
+        resolved = local_candidate if os.path.isfile(local_candidate) else shutil.which(first)
         if resolved and resolved.lower().endswith((".cmd", ".bat")):
-            cmd = ["cmd", "/c"] + cmd
+            cmd = ["cmd", "/c", resolved] + cmd[1:]
     try:
         proc = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
@@ -486,10 +489,11 @@ def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[st
 
 def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
     """Запускает Maven/Gradle test."""
-    if runner == "maven":
-        cmd = ["mvn", "test"] + (extra_args or [])
-    elif runner == "gradle":
-        cmd = ["gradle", "test"] + (extra_args or [])
+    is_maven = runner.lower().startswith(("mvn", "maven"))
+    if is_maven:
+        cmd = [runner if runner not in {"maven"} else "mvn", "test"] + (extra_args or [])
+    elif runner.lower().startswith(("gradle", "gradlew")):
+        cmd = [runner if runner != "gradle" else "gradle", "test"] + (extra_args or [])
     else:
         cmd = ["mvn", "test"]
 
@@ -498,8 +502,10 @@ def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
 
     # Maven Surefire: "Tests run: 3, Failures: 1, Errors: 0, Skipped: 0"
     stats = {"total": None, "passed": 0, "failed": 0, "errors": 0, "skipped": 0, "duration_sec": None}
-    m = re.search(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)", combined)
-    if m:
+    matches = list(re.finditer(r"Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+)", combined))
+    if matches:
+        # Maven's final aggregate is authoritative; earlier entries are suites.
+        m = matches[-1]
         total = int(m.group(1))
         stats.update({
             "total": total,
@@ -527,7 +533,7 @@ def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
         "target": {
             "language": "java",
             "framework": "junit5",
-            "runner": runner,
+            "runner": "maven" if is_maven else "gradle",
             "command": " ".join(cmd),
         },
         "exit_code": exit_code,
@@ -606,6 +612,7 @@ def main() -> int:
     parser.add_argument("--pytest-target", help="Python: конкретный файл/директория pytest "
                                                  "(по умолчанию — автообнаружение pytest'ом)")
     parser.add_argument("--pytest-args", help="Дополнительные аргументы pytest (через запятую)")
+    parser.add_argument("--python-executable", help="Python interpreter override for both pytest probing and execution")
     args = parser.parse_args()
 
     # --- Определяем язык/проект ---
@@ -635,7 +642,7 @@ def main() -> int:
 
     # --- Проверяем окружение под язык ---
     if language == "python":
-        env = check_python_env(project_dir)
+        env = check_python_env(project_dir, args.python_executable)
         env["_framework"] = "pytest"
         if env["status"] == "missing" or not env.get("_interpreter_bin"):
             report = build_not_runnable(
@@ -643,7 +650,7 @@ def main() -> int:
                 "Окружение python недоступно: " + ", ".join(env["missing"] or ["unknown"]),
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0
+            return 2
         if env["status"] == "partial":
             # pytest есть, но, например, проекта нет — всё равно NOT_RUNNABLE
             report = build_not_runnable(
@@ -651,7 +658,7 @@ def main() -> int:
                 "Окружение python частично доступно, не хватает: " + ", ".join(env["missing"]),
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0
+            return 2
         # --- Запуск pytest ---
         extra = args.pytest_args.split(",") if args.pytest_args else None
         result = run_python_pytest(project_dir, env["_interpreter_bin"], args.pytest_target, extra)
@@ -675,8 +682,8 @@ def main() -> int:
                 "Окружение java недоступно: " + ", ".join(env["missing"] or ["unknown"]),
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0
-        result = run_java(project_dir, env.get("_runner") or "maven", None)
+            return 2
+        result = run_java(project_dir, env.get("_runner") or "mvn", None)
         report = build_report(
             verdict=result["verdict"],
             target=result["target"],
@@ -703,14 +710,14 @@ def main() -> int:
             "Это честный NOT_RUNNABLE — не ПРИНЯТО.".format(language),
         )
         print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 0
+        return 2
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
-    # exit codes для CI: 0=PASS/NOT_RUNNABLE, 1=FAIL
+    # exit codes для CI: 0=PASS, 1=FAIL, 2=NOT_RUNNABLE/internal error
     if report["verdict"] == "FAIL":
         return 1
-    return 0
+    return 0 if report["verdict"] == "PASS" else 2
 
 
 if __name__ == "__main__":

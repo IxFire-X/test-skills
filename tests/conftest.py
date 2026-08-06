@@ -44,6 +44,11 @@ def runner():
 
 
 @pytest.fixture
+def scanner():
+    return load_tool("scan_project")
+
+
+@pytest.fixture
 def trace_check():
     return load_tool("trace_check")
 

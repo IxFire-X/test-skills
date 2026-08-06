@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/scan-project-output.schema.json",
   "title": "Scan Project Output (Детерминированный сканер стека)",
-  "description": "Формальный контракт выхода tools/scan_project.py — Опора 2 (ROADMAP Шаг 4). Определяет стек проекта по манифестам сборки (НЕ по LLM-угадыванию), извлекает релевантный исходный код (target + models/serializers/urls/conftest того же модуля), генерирует <source_code_and_diff> + <analytics_documentation> и обновляет .skillsrc внутри --project. Принцип честности > удобства: если манифестов нет — status:error, а не молчаливый успех с пустым стеком.",
+  "description": "Формальный контракт выхода tools/scan_project.py. Scanner is read-only: it determines the stack and extracts source without changing .skillsrc or project source. Persistent --output is allowed only below an exact docs/to_do directory.",
   "type": "object",
   "required": ["status", "stack", "files_extracted", "skillsrc_updated", "scanned_at"],
   "properties": {
@@ -49,24 +49,24 @@
       "items": { "type": "string" }
     },
     "output_file": {
-      "type": "string",
+      "type": ["string", "null"],
       "description": "Путь к сгенерированному файлу с <source_code_and_diff> и <analytics_documentation>. Отсутствует/null, если --output не задан и результат выведен в stdout."
     },
     "skillsrc_updated": {
       "type": "boolean",
-      "description": "true — .skillsrc внутри --project создан или обновлён (project.language/framework/build_tool + test.framework). false — не записан (например, при status:error)."
+      "description": "Always false: scanner execution is read-only."
     },
     "skillsrc_path": {
-      "type": "string",
-      "description": "Путь к .skillsrc внутри --project, который был создан/обновлён"
+      "type": ["string", "null"],
+      "description": "Null for the read-only scanner."
     },
     "warnings": {
-      "type": "array",
+      "type": ["array", "null"],
       "description": "Некритичные замечания сканирования (например, 'target не найден', 'urls.py отсутствует на уровне модуля'). Кормит частичный статус, но не блокирует успех.",
       "items": { "type": "string" }
     },
     "errors": {
-      "type": "array",
+      "type": ["array", "null"],
       "description": "При status:error — причина невозможности сканирования (например, 'манифесты сборки не найдены', 'target-файл не существует').",
       "items": { "type": "string" }
     },
