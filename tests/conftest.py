@@ -1,10 +1,19 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+TOOL_ROOT = ROOT / "tools"
+
+# Dynamic specs execute tool modules outside package-import machinery.  Make their
+# sibling helpers and the `tools.*` fallback importable from this pack location,
+# never from the pytest current working directory.
+for import_root in (str(ROOT), str(TOOL_ROOT)):
+    if import_root not in sys.path:
+        sys.path.insert(0, import_root)
 
 
 def load_tool(name: str):
