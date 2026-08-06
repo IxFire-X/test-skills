@@ -98,6 +98,15 @@ def _parse_utc_z(timestamp):
 
 
 def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
+    assert metadata["skill_id"] == scenario["skill_id"]
+    for scorecard in scorecards:
+        assert scorecard["skill_id"] == scenario["skill_id"]
+        assert scorecard["rubric_ids"] == scenario["rubric_ids"]
+        if scorecard["status"] == "complete":
+            assert all(
+                set(result) == set(scenario["rubric_ids"])
+                for result in scorecard["results"].values()
+            )
     if metadata["status"] == "pending":
         assert metadata["evaluator"] is None
         assert metadata["host"] is None
@@ -423,6 +432,41 @@ def _duplicate_command_id(campaign, scenario, scorecards, metadata):
 )
 def test_complete_campaign_evidence_rejects_file_backed_bypasses(complete_campaign, name, mutate):
     """Catches complete campaigns that cite missing, overwritten, or chronologically invalid evidence."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    mutate(campaign, scenario, scorecards, metadata)
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def _switch_metadata_skill(campaign, scenario, scorecards, metadata):
+    metadata["skill_id"] = "tc-generator"
+
+
+def _switch_scorecard_skills(campaign, scenario, scorecards, metadata):
+    for scorecard in scorecards:
+        scorecard["skill_id"] = "tc-generator"
+
+
+def _switch_scorecard_rubrics(campaign, scenario, scorecards, metadata):
+    replacement_rubrics = ["alternate-rubric"]
+    for scorecard in scorecards:
+        scorecard["rubric_ids"] = replacement_rubrics
+        value = scorecard["phase"] != "red"
+        scorecard["results"] = {
+            repetition: {"alternate-rubric": value} for repetition in REPETITIONS
+        }
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("metadata skill differs from scenario", _switch_metadata_skill),
+        ("scorecard skills differ from scenario", _switch_scorecard_skills),
+        ("scorecard rubrics differ from scenario", _switch_scorecard_rubrics),
+    ],
+)
+def test_campaign_semantics_reject_documents_not_bound_to_scenario(complete_campaign, name, mutate):
+    """Catches individually valid evidence documents that belong to another scenario identity."""
     campaign, scenario, scorecards, metadata = complete_campaign
     mutate(campaign, scenario, scorecards, metadata)
     with pytest.raises(AssertionError):
