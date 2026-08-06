@@ -6,21 +6,56 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
 
-TERMINAL_TRANSFORMS = {
-    "PASS": "complete",
-    "FAIL": "stop_failed",
-    "NOT_RUNNABLE": "stop_not_runnable",
+CORE_SKILLS = ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]
+STAGES = [
+    ("context-marker", "skill"),
+    ("tc-generator", "skill"),
+    ("tc-reviewer", "skill"),
+    ("tc-to-autotest", "skill"),
+    ("autotest-reviewer", "skill"),
+    ("run-tests", "tool"),
+    ("trace-check", "tool"),
+]
+ARTIFACT_IDS = {
+    "raw_content",
+    "analytics_documentation",
+    "source_code_and_diff",
+    "generated_test_cases",
+    "validation_report",
+    "corrected_test_cases",
+    "automation_matrix",
+    "generated_test_files",
+    "generated_test_methods",
+    "autotest_review",
+    "run_tests_verdict",
+    "execution_evidence",
+    "trace_audit",
 }
-PROJECTION_RENDERERS = {
-    "contracts": "render_contracts",
-    "pipeline": "render_pipeline",
+CAPABILITIES = {
+    "java": {"language": "java", "framework": "junit5", "generation": True, "review": True, "execution": True, "status": "supported"},
+    "python": {"language": "python", "framework": "pytest", "generation": True, "review": True, "execution": True, "status": "supported"},
+    "typescript": {"language": "typescript", "framework": "jest", "generation": False, "review": False, "execution": False, "status": "experimental"},
+    "go": {"language": "go", "framework": "go-testing", "generation": False, "review": False, "execution": False, "status": "experimental"},
 }
+PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
+REQUIRED_TRANSITIONS = [
+    {"from": "tc-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
+    {"from": "tc-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
+    {"from": "tc-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
+    {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "continue_trace_audit"},
+    {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
+    {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"},
+    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"},
+]
 
 
 def _load_renderer_module():
@@ -45,62 +80,105 @@ def _schema_errors(contract: dict[str, Any], root: Path) -> list[str]:
     return [f"schema: {error.message}" for error in sorted(validator.iter_errors(contract), key=str)]
 
 
-def _is_safe_relative_path(path: str) -> bool:
-    candidate = Path(path)
-    return not candidate.is_absolute() and ".." not in candidate.parts and path != ""
+def _is_safe_projection_path(path: object, expected: str) -> bool:
+    if path != expected or not isinstance(path, str):
+        return False
+    windows_path = PureWindowsPath(path)
+    posix_path = PurePosixPath(path)
+    return not (
+        windows_path.is_absolute()
+        or windows_path.drive
+        or windows_path.root
+        or posix_path.is_absolute()
+        or ".." in windows_path.parts
+        or ".." in posix_path.parts
+        or "/" in path
+        or "\\" in path
+    )
 
 
 def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) -> list[str]:
     errors: list[str] = []
+    if contract.get("core_skills") != CORE_SKILLS:
+        errors.append("core skill registry must exactly match the portable core")
+
     artifact_ids = [artifact.get("id") for artifact in contract.get("artifacts", [])]
     known_artifacts = {artifact_id for artifact_id in artifact_ids if isinstance(artifact_id, str)}
     if len(artifact_ids) != len(known_artifacts):
         errors.append("artifact ids must be unique")
-    for step in contract.get("steps", []):
+    if known_artifacts != ARTIFACT_IDS:
+        errors.append("artifact registry must exactly match the portable trace chain")
+
+    steps = contract.get("steps", [])
+    stage_ids = [step.get("id") for step in steps]
+    if len(stage_ids) != len(set(stage_ids)):
+        errors.append("step ids must be unique")
+    if [(step.get("id"), step.get("kind")) for step in steps] != STAGES:
+        errors.append("stages must use the exact portable order and skill/tool identities")
+
+    available = {"raw_content"}
+    for step in steps:
         step_id = step.get("id", "<unknown>")
         for field in ("accepts", "forwards", "produces", "rejects"):
             for artifact_id in step.get(field, []):
                 if artifact_id not in known_artifacts:
                     errors.append(f"step {step_id} {field} unknown artifact: {artifact_id}")
-    transitions = contract.get("transitions", [])
-    observed: dict[str, str] = {}
-    for transition in transitions:
-        when = transition.get("when", {})
-        verdict = when.get("execution_verdict")
-        if verdict in TERMINAL_TRANSFORMS:
-            transform = transition.get("transform")
-            if transform != TERMINAL_TRANSFORMS[verdict]:
-                errors.append(
-                    f"terminal transform for {verdict} must be "
-                    f"{TERMINAL_TRANSFORMS[verdict]!r}, got {transform!r}"
-                )
-            if verdict in observed:
-                errors.append(f"duplicate terminal transition for {verdict}")
-            observed[verdict] = str(transform)
-    for verdict in TERMINAL_TRANSFORMS:
-        if verdict not in observed:
-            errors.append(f"missing terminal transition for {verdict}")
+        for artifact_id in step.get("accepts", []):
+            if artifact_id not in available:
+                errors.append(f"step {step_id} accepts artifact before it is connected: {artifact_id}")
+        available.update(step.get("forwards", []))
+        available.update(step.get("produces", []))
+
+    step_map = {step.get("id"): step for step in steps}
+    required_links = {
+        "tc-to-autotest": ("produces", {"generated_test_files", "generated_test_methods"}),
+        "autotest-reviewer": ("accepts", {"generated_test_files", "generated_test_methods"}),
+        "run-tests": ("accepts", {"generated_test_files", "generated_test_methods"}),
+        "trace-check": ("accepts", {"generated_test_methods", "execution_evidence"}),
+    }
+    for step_id, (field, required_artifacts) in required_links.items():
+        actual = set(step_map.get(step_id, {}).get(field, []))
+        if not required_artifacts <= actual:
+            errors.append(f"step {step_id} must {field} generated file/method trace artifacts")
+
+    terminal_transforms = {
+        "FAIL": "stop_failed",
+        "NOT_RUNNABLE": "stop_not_runnable",
+    }
+    for verdict, expected_transform in terminal_transforms.items():
+        transition = next(
+            (
+                item
+                for item in contract.get("transitions", [])
+                if item.get("from") == "run-tests"
+                and item.get("when", {}).get("execution_verdict") == verdict
+            ),
+            None,
+        )
+        if transition is not None and transition.get("transform") != expected_transform:
+            errors.append(f"terminal transform for {verdict} must be {expected_transform}")
+    if contract.get("transitions") != REQUIRED_TRANSITIONS:
+        errors.append("review and execution transitions must exactly preserve the portable branch policy")
+    if contract.get("capabilities") != list(CAPABILITIES.values()):
+        errors.append("capability baseline must preserve Java/Python support and TypeScript/Go non-execution")
+    if contract.get("artifact_policy", {}).get("persistent_root") != "docs/to_do":
+        errors.append("artifact_policy persistent_root must be exactly docs/to_do")
 
     projections = contract.get("projections", {})
-    for name, renderer_name in PROJECTION_RENDERERS.items():
+    for name, expected_path in PROJECTION_PATHS.items():
         path = projections.get(name)
-        if not isinstance(path, str) or not _is_safe_relative_path(path):
-            errors.append(f"projection path for {name} must be a safe relative path")
+        if not _is_safe_projection_path(path, expected_path):
+            errors.append(f"projection path for {name} must be the exact safe target {expected_path}")
             continue
-        target = root / path
         if check_drift:
+            target = root / path
             if not target.is_file():
                 errors.append(f"projection path missing: {path}")
                 continue
             renderer = _load_renderer_module()
-            expected = getattr(renderer, renderer_name)(contract)
-            actual = target.read_text(encoding="utf-8")
-            if actual != expected:
+            expected = getattr(renderer, f"render_{name}")(contract)
+            if target.read_text(encoding="utf-8") != expected:
                 errors.append(f"projection drift: {path}")
-
-    for capability in contract.get("capabilities", []):
-        if capability.get("language") in {"typescript", "go"} and capability.get("execution"):
-            errors.append(f"unsupported execution capability: {capability['language']}")
     return errors
 
 

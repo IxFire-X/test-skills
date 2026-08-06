@@ -2,6 +2,7 @@
   "$schema": "schemas/pipeline.schema.json",
   "version": "1.0",
   "pipeline": "test-pipeline",
+  "core_skills": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"],
   "artifacts": [
     {"id": "raw_content", "description": "Unstructured supplied requirements or code context."},
     {"id": "analytics_documentation", "description": "Normalized requirements with provenance."},
@@ -10,27 +11,38 @@
     {"id": "validation_report", "description": "Review result for manual test cases."},
     {"id": "corrected_test_cases", "description": "Safe corrected manual test cases."},
     {"id": "automation_matrix", "description": "Mapping from accepted cases to generated tests."},
+    {"id": "generated_test_files", "description": "Project-native generated test source files."},
+    {"id": "generated_test_methods", "description": "Traceable generated test methods."},
     {"id": "autotest_review", "description": "Review result for generated automated tests."},
     {"id": "run_tests_verdict", "description": "Deterministic execution evidence."},
+    {"id": "execution_evidence", "description": "Execution evidence for every generated test method."},
     {"id": "trace_audit", "description": "Requirement-to-execution traceability evidence."}
   ],
   "steps": [
-    {"id": "context-marker", "accepts": ["raw_content"], "forwards": [], "produces": ["analytics_documentation", "source_code_and_diff"], "rejects": []},
-    {"id": "tc-generator", "accepts": ["analytics_documentation", "source_code_and_diff"], "forwards": ["analytics_documentation", "source_code_and_diff"], "produces": ["generated_test_cases"], "rejects": []},
-    {"id": "tc-reviewer", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
-    {"id": "tc-to-autotest", "accepts": ["generated_test_cases", "corrected_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases"], "produces": ["automation_matrix"], "rejects": []},
-    {"id": "autotest-reviewer", "accepts": ["generated_test_cases", "corrected_test_cases", "automation_matrix"], "forwards": ["automation_matrix"], "produces": ["autotest_review"], "rejects": []},
-    {"id": "run-tests", "accepts": ["automation_matrix"], "forwards": [], "produces": ["run_tests_verdict"], "rejects": []},
-    {"id": "trace-check", "accepts": ["analytics_documentation", "generated_test_cases", "automation_matrix", "run_tests_verdict"], "forwards": [], "produces": ["trace_audit"], "rejects": []}
+    {"id": "context-marker", "kind": "skill", "accepts": ["raw_content"], "forwards": [], "produces": ["analytics_documentation", "source_code_and_diff"], "rejects": []},
+    {"id": "tc-generator", "kind": "skill", "accepts": ["analytics_documentation", "source_code_and_diff"], "forwards": ["analytics_documentation", "source_code_and_diff"], "produces": ["generated_test_cases"], "rejects": []},
+    {"id": "tc-reviewer", "kind": "skill", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
+    {"id": "tc-to-autotest", "kind": "skill", "accepts": ["generated_test_cases", "corrected_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases", "generated_test_files", "generated_test_methods"], "produces": ["automation_matrix", "generated_test_files", "generated_test_methods"], "rejects": []},
+    {"id": "autotest-reviewer", "kind": "skill", "accepts": ["generated_test_cases", "corrected_test_cases", "automation_matrix", "generated_test_files", "generated_test_methods"], "forwards": ["generated_test_files", "generated_test_methods"], "produces": ["autotest_review"], "rejects": []},
+    {"id": "run-tests", "kind": "tool", "accepts": ["generated_test_files", "generated_test_methods"], "forwards": ["generated_test_methods", "execution_evidence"], "produces": ["run_tests_verdict", "execution_evidence"], "rejects": []},
+    {"id": "trace-check", "kind": "tool", "accepts": ["analytics_documentation", "generated_test_cases", "generated_test_files", "generated_test_methods", "execution_evidence", "run_tests_verdict"], "forwards": [], "produces": ["trace_audit"], "rejects": []}
   ],
   "verdicts": {
     "review": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
-    "execution": ["PASS", "FAIL", "NOT_RUNNABLE"]
+    "execution": ["PASS", "FAIL", "NOT_RUNNABLE"],
+    "trace": ["PASS", "FAIL"]
   },
   "transitions": [
-    {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "complete"},
+    {"from": "tc-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
+    {"from": "tc-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
+    {"from": "tc-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
+    {"from": "autotest-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
+    {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "continue_trace_audit"},
     {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
-    {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"}
+    {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"},
+    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"}
   ],
   "capabilities": [
     {"language": "java", "framework": "junit5", "generation": true, "review": true, "execution": true, "status": "supported"},
@@ -42,7 +54,7 @@
     "persistent_root": "docs/to_do",
     "generated_test_source": "isolated workspace under docs/to_do unless explicitly requested"
   },
-  "traceability": ["requirement", "test_case", "generated_method", "execution_evidence"],
+  "traceability": ["requirement", "test_case", "generated_file", "generated_method", "execution_evidence"],
   "projections": {
     "contracts": "CONTRACTS.md",
     "pipeline": "PIPELINE.md"

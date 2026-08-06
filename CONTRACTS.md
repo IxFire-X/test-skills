@@ -13,23 +13,32 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `validation_report` | Review result for manual test cases. |
 | `corrected_test_cases` | Safe corrected manual test cases. |
 | `automation_matrix` | Mapping from accepted cases to generated tests. |
+| `generated_test_files` | Project-native generated test source files. |
+| `generated_test_methods` | Traceable generated test methods. |
 | `autotest_review` | Review result for generated automated tests. |
 | `run_tests_verdict` | Deterministic execution evidence. |
+| `execution_evidence` | Execution evidence for every generated test method. |
 | `trace_audit` | Requirement-to-execution traceability evidence. |
 
-## Review verdicts
+## Review verdict branches
 
-- `ПРИНЯТО`
-- `AUTO_FIX_APPLIED`
-- `ТРЕБУЕТ ДОРАБОТКИ`
+| Reviewer | Verdict | Transform |
+|---|---|---|
+| `tc-reviewer` | `ПРИНЯТО` | `continue_with_original` |
+| `tc-reviewer` | `AUTO_FIX_APPLIED` | `continue_with_corrected` |
+| `tc-reviewer` | `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
+| `autotest-reviewer` | `ПРИНЯТО` | `continue_with_original` |
+| `autotest-reviewer` | `AUTO_FIX_APPLIED` | `continue_with_corrected` |
+| `autotest-reviewer` | `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
 
 ## Execution verdict branches
 
 | Verdict | Transform |
 |---|---|
-| `PASS` | `complete` |
+| `PASS` | `continue_trace_audit` |
 | `FAIL` | `stop_failed` |
 | `NOT_RUNNABLE` | `stop_not_runnable` |
+| `PASS` | `complete` |
 
 ## Language capabilities
 
@@ -47,4 +56,4 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 ## Traceability
 
-`requirement` → `test_case` → `generated_method` → `execution_evidence`
+`requirement` → `test_case` → `generated_file` → `generated_method` → `execution_evidence`

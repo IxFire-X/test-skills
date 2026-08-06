@@ -10,6 +10,20 @@ from typing import Any
 
 
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
+PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
+
+
+def _projection_errors(contract: dict[str, Any]) -> list[str]:
+    projections = contract.get("projections")
+    if not isinstance(projections, dict):
+        return ["projections must be an object"]
+    errors = []
+    for name, expected_path in PROJECTION_PATHS.items():
+        if projections.get(name) != expected_path:
+            errors.append(f"projection {name} must be exactly {expected_path}")
+    if set(projections) != set(PROJECTION_PATHS):
+        errors.append("projection keys must be exactly contracts and pipeline")
+    return errors
 
 
 def render_pipeline(contract: dict[str, Any]) -> str:
@@ -23,9 +37,11 @@ def render_contracts(contract: dict[str, Any]) -> str:
     lines = ["# Contract Reference", "", MARKER, "", "## Artifacts", "", "| Artifact | Description |", "|---|---|"]
     for artifact in contract["artifacts"]:
         lines.append(f"| `{artifact['id']}` | {artifact['description']} |")
-    lines.extend(["", "## Review verdicts", ""])
-    for verdict in contract["verdicts"]["review"]:
-        lines.append(f"- `{verdict}`")
+    lines.extend(["", "## Review verdict branches", "", "| Reviewer | Verdict | Transform |", "|---|---|---|"])
+    for transition in contract["transitions"]:
+        verdict = transition.get("when", {}).get("review_verdict")
+        if verdict:
+            lines.append(f"| `{transition['from']}` | `{verdict}` | `{transition['transform']}` |")
     lines.extend(["", "## Execution verdict branches", "", "| Verdict | Transform |", "|---|---|"])
     for transition in contract["transitions"]:
         verdict = transition.get("when", {}).get("execution_verdict")
@@ -57,6 +73,10 @@ def main() -> int:
     root = Path(args.root).resolve()
     try:
         contract = json.loads((root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
+        errors = _projection_errors(contract)
+        if errors:
+            print("render failed: " + "; ".join(errors))
+            return 2
         files = _rendered_files(contract)
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
         print(f"render failed: {error}")
