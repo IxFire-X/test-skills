@@ -11,6 +11,11 @@ try:
 except ModuleNotFoundError:  # imported as tools.doctor by tests
     from tools.json_cli import JsonArgumentParser
 
+try:
+    from contract_check import validate_pipeline_contract
+except ModuleNotFoundError:  # imported as tools.doctor by tests
+    from tools.contract_check import validate_pipeline_contract
+
 
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
@@ -38,10 +43,6 @@ def inspect_environment(root: Path) -> dict[str, object]:
     pipeline_path = root / "contracts" / "pipeline.json"
     if pipeline_path.is_file():
         try:
-            try:
-                from contract_check import validate_pipeline_contract
-            except ModuleNotFoundError:
-                from tools.contract_check import validate_pipeline_contract
             contract_report = validate_pipeline_contract(json.loads(pipeline_path.read_text(encoding="utf-8")), root, check_drift=False)
             if contract_report["status"] != "passed":
                 missing_integrity.append("invalid:pipeline_contract")

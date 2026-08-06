@@ -18,7 +18,10 @@ def load_tool(name: str):
     module = importlib.util.module_from_spec(spec)
     original_path = list(sys.path)
     missing = object()
-    local_names = ("json_cli", "tools", "tools.json_cli")
+    local_names = (
+        "json_cli", "contract_check", "run_tests",
+        "tools", "tools.json_cli", "tools.contract_check", "tools.run_tests",
+    )
     original_modules = {key: sys.modules.get(key, missing) for key in local_names}
     try:
         sys.path[:] = [str(TOOL_ROOT), str(ROOT), *[entry for entry in original_path if entry not in {str(TOOL_ROOT), str(ROOT)}]]

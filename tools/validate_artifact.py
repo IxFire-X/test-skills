@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from collections.abc import Iterable
@@ -18,6 +19,41 @@ except ImportError as error:  # pragma: no cover
     _IMPORT_ERROR = error
 else:
     _IMPORT_ERROR = None
+
+
+def _load_local_run_tests_validator() -> Any:
+    """Load the sibling runner for callers that execute this file by spec alone."""
+    tool_root = Path(__file__).parent
+    original_path = list(sys.path)
+    missing = object()
+    local_names = ("json_cli", "tools", "tools.json_cli")
+    original_modules = {name: sys.modules.get(name, missing) for name in local_names}
+    try:
+        sys.path[:] = [str(tool_root), *[entry for entry in original_path if entry != str(tool_root)]]
+        for name in local_names:
+            sys.modules.pop(name, None)
+        spec = importlib.util.spec_from_file_location("_validate_artifact_run_tests", tool_root / "run_tests.py")
+        if spec is None or spec.loader is None:  # pragma: no cover
+            raise ImportError(f"Unable to load local run-tests validator: {tool_root / 'run_tests.py'}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.validate_execution_evidence
+    finally:
+        sys.path[:] = original_path
+        for name, saved in original_modules.items():
+            if saved is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
+
+
+try:
+    from run_tests import validate_execution_evidence
+except ModuleNotFoundError:  # imported as tools.validate_artifact by tests
+    try:
+        from tools.run_tests import validate_execution_evidence
+    except ModuleNotFoundError:  # loaded directly by file spec outside the pack root
+        validate_execution_evidence = _load_local_run_tests_validator()
 
 
 def _pointer(parts: Iterable[object]) -> str:
@@ -66,10 +102,6 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
         return 1, {"status": "invalid", "errors": [{"path": _error_path(error), "message": error.message} for error in errors]}
     if schema.get("$id") == "schemas/run-tests-output.schema.json":
         try:
-            try:
-                from run_tests import validate_execution_evidence
-            except ModuleNotFoundError:
-                from tools.run_tests import validate_execution_evidence
             semantic = validate_execution_evidence(
                 artifact["verdict"], artifact["run_id"], artifact["execution_evidence"], artifact["evidence_authoritative"]
             )
