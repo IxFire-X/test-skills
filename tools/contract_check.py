@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -64,13 +63,11 @@ REQUIRED_TRANSITIONS = [
 
 
 def _load_renderer_module():
-    path = Path(__file__).with_name("render_contract_docs.py")
-    spec = importlib.util.spec_from_file_location("render_contract_docs", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load renderer: {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    if __package__:
+        from . import render_contract_docs
+    else:  # direct CLI execution
+        import render_contract_docs
+    return render_contract_docs
 
 
 def _schema_errors(contract: dict[str, Any], root: Path) -> list[str]:

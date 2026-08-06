@@ -7,9 +7,11 @@ import importlib.util
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
+from conftest import load_tool
 from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,11 +21,7 @@ TRACE_CHECK_PATH = ROOT / "tools" / "trace_check.py"
 
 
 def _load_validator_module():
-    spec = importlib.util.spec_from_file_location("validate_artifact", VALIDATOR_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_tool("validate_artifact")
 
 
 def _load_trace_check_module():
@@ -328,6 +326,31 @@ def test_validator_reports_invalid_utf8_input_as_exit_two(tmp_path):
     exit_code, report = validator.validate(str(schema_path), str(artifact_path))
     assert exit_code == 2
     assert report["status"] == "error"
+
+
+def test_validator_semantic_hook_ignores_host_run_tests_module(monkeypatch, tmp_path):
+    """Catches supported validator loading a hostile top-level semantic helper."""
+    fake_runner = types.ModuleType("run_tests")
+    fake_runner.validate_execution_evidence = lambda *_args: []
+    monkeypatch.setitem(sys.modules, "run_tests", fake_runner)
+    validator = _load_validator_module()
+    schema_path = tmp_path / "run-output.schema.json"
+    schema_path.write_text((SCHEMA_DIR / "run-tests-output.schema.json").read_text(encoding="utf-8"), encoding="utf-8")
+    artifact_path = tmp_path / "invalid-run.json"
+    artifact_path.write_text(json.dumps({
+        "verdict": "PASS", "target": {"language": "python", "framework": "pytest", "runner": "pytest", "command": "pytest"},
+        "environment": {"status": "ready"}, "stats": {"total": 1, "passed": 1, "failed": 0, "errors": 0, "skipped": 0, "duration_sec": 0},
+        "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": "2026-01-01T00:00:00Z", "exit_code": 0,
+        "run_id": "RUN-1", "evidence_authoritative": True,
+        "execution_evidence": [{"run_id": "RUN-other", "method_id": "METHOD-1", "status": "passed"}],
+    }), encoding="utf-8")
+
+    exit_code, report = validator.validate(str(schema_path), str(artifact_path))
+
+    assert exit_code == 1
+    assert report["status"] == "invalid"
+    assert "run_id" in report["errors"][0]["message"]
+    assert sys.modules["run_tests"] is fake_runner
 
 
 def test_validator_cli_missing_arguments_returns_json_and_exit_two():

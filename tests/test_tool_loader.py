@@ -92,6 +92,27 @@ def test_deferred_sibling_imports_bind_local_modules_after_load(monkeypatch, tmp
     assert tuple(sys.modules[name] for name in ("json_cli", "contract_check", "run_tests", "tools")) == host
 
 
+def test_contract_drift_check_uses_local_renderer_despite_host_siblings(monkeypatch):
+    """Catches a nested projection renderer resolving hostile top-level helpers."""
+    host = _host_modules(monkeypatch)
+    fake_renderer = types.ModuleType("render_contract_docs")
+    fake_renderer.render_contracts = lambda _contract: "host renderer"
+    fake_renderer.render_pipeline = lambda _contract: "host renderer"
+    monkeypatch.setitem(sys.modules, "render_contract_docs", fake_renderer)
+    contract_check = load_tool("contract_check")
+    contract = json.loads((ROOT / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
+
+    report = contract_check.validate_pipeline_contract(contract, ROOT, check_drift=True)
+
+    renderer = sys.modules[f"{TOOL_NAMESPACE}.render_contract_docs"]
+    assert report == {"status": "passed", "errors": []}
+    assert _local_source(renderer.JsonArgumentParser.error) == TOOL_ROOT / "json_cli.py"
+    assert _local_source(renderer.render_contracts) == TOOL_ROOT / "render_contract_docs.py"
+    assert renderer.render_contracts(contract) == (ROOT / "CONTRACTS.md").read_text(encoding="utf-8")
+    assert sys.modules["render_contract_docs"] is fake_renderer
+    assert tuple(sys.modules[name] for name in ("json_cli", "contract_check", "run_tests", "tools")) == host
+
+
 def test_doctor_reports_missing_jsonschema_without_raising(monkeypatch):
     """Catches a lazy contract dependency becoming an unreportable doctor crash."""
     doctor = load_tool("doctor")
