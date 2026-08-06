@@ -42,11 +42,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import ntpath
 import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from json_cli import JsonArgumentParser
+except ModuleNotFoundError:  # imported as tools.scan_project by tests
+    from tools.json_cli import JsonArgumentParser
 
 # ---------------------------------------------------------------------------
 # Конфигурация распознавания манифестов
@@ -130,7 +136,7 @@ BUILD_TOOL_NORMALIZE = {
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = JsonArgumentParser(
         description=("Детерминированный сканер стека проекта (Опора 2). "
                      "Определяет стек по манифестам сборки, извлекает релевантный код, "
                      "генерирует <source_code_and_diff> + <analytics_documentation> и "
@@ -162,8 +168,10 @@ def _find_manifests(project_dir: str, names: list[str]) -> list[str]:
             continue
         for fn in files:
             if fn in names:
-                rel = os.path.relpath(os.path.join(root, fn), project_dir)
-                found.append(rel)
+                candidate = _confined_path(project_dir, os.path.join(root, fn))
+                if candidate and os.path.isfile(candidate):
+                    rel = os.path.relpath(candidate, project_dir)
+                    found.append(rel)
     return found
 
 
@@ -173,6 +181,27 @@ def _read_text(path: str) -> str | None:
             return f.read()
     except OSError:
         return None
+
+
+def _confined_path(project_dir: str, candidate: str) -> str | None:
+    """Return a real path below project_dir, or None without reading an escape."""
+    root = os.path.realpath(project_dir)
+    resolved = os.path.realpath(candidate)
+    try:
+        return resolved if os.path.commonpath([root, resolved]) == root else None
+    except ValueError:
+        return None
+
+
+def _valid_target_reference(target: str) -> bool:
+    """Reject portable absolute, drive-relative, UNC, and traversal target input."""
+    normalized = target.replace("\\", "/")
+    drive, _tail = ntpath.splitdrive(target)
+    return not (
+        not target or os.path.isabs(target) or normalized.startswith("/")
+        or target.startswith(("\\\\", "//")) or bool(drive)
+        or ".." in [part for part in normalized.split("/") if part]
+    )
 
 
 def _extract_dep_names(text: str) -> set[str]:
@@ -434,13 +463,12 @@ def _java_imported_sources(project_dir: str, target_abs: str) -> list[str]:
     source = _read_text(target_abs) or ""
     mask = _strip_java_comments_and_text_blocks(source)
     imported_types = sorted(set(re.findall(r"^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", mask, re.MULTILINE)))
-    root = os.path.realpath(project_dir)
     resolved: list[str] = []
     for imported in imported_types:
         suffix = imported.replace(".", "/") + ".java"
         for rel in sorted(_find_files_by_suffix(project_dir, suffix)):
-            candidate = os.path.realpath(os.path.join(project_dir, rel))
-            if os.path.commonpath([root, candidate]) != root:
+            candidate = _confined_path(project_dir, os.path.join(project_dir, rel))
+            if not candidate:
                 continue
             text = _read_text(candidate) or ""
             package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.MULTILINE)
@@ -462,7 +490,7 @@ def _find_files_by_suffix(project_dir: str, suffix: str) -> list[str]:
             continue
         for fn in files:
             rel = os.path.relpath(os.path.join(root, fn), project_dir).replace("\\", "/")
-            if rel.endswith(suffix):
+            if rel.endswith(suffix) and _confined_path(project_dir, os.path.join(root, fn)):
                 found.append(rel)
     return found
 
@@ -474,26 +502,35 @@ def resolve_target(project_dir: str, target_rel: str) -> tuple[str | None, list[
     src/backend/InvenTree/part/api.py), затем рекурсивно по имени файла (fallback).
     """
     warnings: list[str] = []
-    target_rel = target_rel.replace("\\", "/").lstrip("./")
+    if not _valid_target_reference(target_rel):
+        return None, [f"invalid target outside project root: {target_rel}"]
+    target_rel = target_rel.replace("\\", "/")
 
     # 1. Прямой путь
     direct = os.path.join(project_dir, target_rel)
-    if os.path.isfile(direct):
-        return direct, warnings
+    direct_confined = _confined_path(project_dir, direct)
+    if direct_confined and os.path.isfile(direct_confined):
+        return direct_confined, warnings
+    if os.path.lexists(direct) and not direct_confined:
+        return None, [f"invalid target outside project root: {target_rel}"]
 
     # 2. Поиск по суффиксу пути (точнее, чем по имени файла — учитывает модуль)
     suffix_matches = _find_files_by_suffix(project_dir, target_rel)
     if suffix_matches:
         best = min(suffix_matches, key=len)
         warnings.append(f"target задан как '{target_rel}', найден по пути: {best}")
-        return os.path.join(project_dir, best), warnings
+        candidate = _confined_path(project_dir, os.path.join(project_dir, best))
+        if candidate and os.path.isfile(candidate):
+            return candidate, warnings
 
     # 3. Fallback: по имени файла (target мог быть задан коротко, напр. 'api.py')
     basename = os.path.basename(target_rel)
     matches = _find_manifests(project_dir, [basename])  # переиспользуем поиск по имени
     if matches:
         warnings.append(f"target задан как '{target_rel}', найден по имени файла: {matches[0]}")
-        return os.path.join(project_dir, matches[0]), warnings
+        candidate = _confined_path(project_dir, os.path.join(project_dir, matches[0]))
+        if candidate and os.path.isfile(candidate):
+            return candidate, warnings
 
     warnings.append(f"target '{target_rel}' не найден в проекте.")
     return None, warnings
@@ -958,7 +995,7 @@ def resolve_persistent_output_path(output: str) -> tuple[str | None, str | None]
 def build_report(status: str, stack: dict, files_extracted: list[str],
                  output_file: str | None, skillsrc_updated: bool,
                  skillsrc_path: str | None, warnings: list[str],
-                 errors: list[str]) -> dict:
+                 errors: list[str], artifact: str | None = None) -> dict:
     # нормализуем пути в stack.detection (manifest может прийти с backslash)
     if isinstance(stack.get("detection"), dict) and stack["detection"].get("manifest"):
         stack["detection"]["manifest"] = _norm(stack["detection"]["manifest"])
@@ -971,6 +1008,7 @@ def build_report(status: str, stack: dict, files_extracted: list[str],
         "skillsrc_path": _norm(skillsrc_path),
         "warnings": warnings or None,
         "errors": errors or None,
+        "artifact": artifact,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
     return report
@@ -995,7 +1033,7 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 1
 
-    target_rel = args.target.replace("\\", "/").lstrip("./")
+    target_rel = args.target
 
     # 2. Определение стека
     detection = detect_stack(project_dir, target_rel)
@@ -1006,6 +1044,7 @@ def main() -> int:
     # 3. Извлечение кода (даже при partial стеке — target всё равно пробуем)
     target_abs, tgt_warnings = resolve_target(project_dir, target_rel)
     warnings.extend(tgt_warnings)
+    errors.extend(item for item in tgt_warnings if item.startswith("invalid target"))
 
     files_extracted: list[str] = []
     if target_abs:
@@ -1038,6 +1077,7 @@ def main() -> int:
 
     # 4 & 5. Генерация блоков (только если есть что генерировать)
     output_file = None
+    document = None
     source_block = ""
     analytics_block = ""
     if files_extracted:
@@ -1070,14 +1110,9 @@ def main() -> int:
         status=status, stack=stack, files_extracted=files_extracted,
         output_file=output_file, skillsrc_updated=skillsrc_updated,
         skillsrc_path=skillsrc_path, warnings=warnings, errors=errors,
+        artifact=document,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
-
-    # без --output печатаем сгенерированный документ после JSON, разделитель
-    if files_extracted and not args.output and status != "error":
-        sys.stderr.write("\n--- <source_code_and_diff> + <analytics_documentation> ---\n")
-        sys.stderr.write(f"{source_block}\n\n{analytics_block}\n")
-        sys.stderr.write("--- конец документа ---\n")
 
     return 0 if status != "error" else 1
 

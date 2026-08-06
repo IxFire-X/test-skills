@@ -1,4 +1,4 @@
-# Core runtime acceptance — 2026-08-06
+# Core runtime acceptance — current Fix Round (2026-08-07)
 
 ## Scope and environment
 
@@ -7,13 +7,15 @@ acceptance claim for the six skills, adapters, or end-to-end skill behavior;
 those remain Plan 2/3 work.
 
 - Worktree under test: `D:\AI-Projects\.worktrees\portable-testing-skills\test-orchestration-skills`
-- Base HEAD: `f6c2d5e`
+- Historical base evidence: `f6c2d5e` (the measurements below marked historical
+  describe that base and are not claims about current HEAD).
+- Current HEAD evidence: recorded below after the Fix Round verification commands.
 - Audit interpreter: `D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe`
 - Runtime dependencies: `jsonschema`, `PyYAML`, `pytest` from the audit venv.
 - Java baseline: `JAVA_HOME=D:\AI-Projects\.tools\jdk-17`, Maven bin
   `D:\AI-Projects\.tools\maven\bin`, OpenJDK `17.0.10`.
 
-## Behaviour-first evidence
+## Historical base evidence (not current HEAD)
 
 Before the runner correction, the newly added POSIX-wrapper unit coverage was
 run first and failed as expected:
@@ -28,7 +30,16 @@ The minimal fix invokes selected POSIX project wrappers as `./mvnw` or
 `./gradlew`; the Windows `.cmd` wrapper test remains Windows-only via
 `skipif(os.name != "nt")`.
 
-## Seven CLI smoke checks
+## Current Fix Round obligations
+
+Current HEAD adds scanner confinement (including symlink-resolved candidates), one
+schema-valid JSON scanner result containing its artifact, pack-integrity checks,
+zero-discovery FAIL policy, and method-level runner evidence from the existing
+`tc-to-autotest` artifact. `trace_check --require-execution` remains the terminal
+acceptance gate; unbound or ambiguous runner evidence is non-authoritative and
+cannot support pipeline PASS.
+
+## Seven CLI smoke checks (historical baseline)
 
 `tests/test_cli_smoke.py` invokes every command below as a real subprocess via
 the current interpreter, with raw byte capture, `check=False`, and a timeout.
@@ -64,7 +75,7 @@ python -m pytest tests/test_cli_smoke.py -q
 9 passed in 1.80s
 ```
 
-## Pack verification
+## Pack verification (historical baseline)
 
 ```text
 python -m pytest tests -q
@@ -83,7 +94,7 @@ exit 0; no output (checked-in projections are deterministic and clean)
 The full pytest suite includes schema meta-validation coverage for the existing
 JSON Schemas.
 
-## Real Java fixture baseline
+## Real Java fixture baseline (historical, external fixture)
 
 With `JAVA_HOME` and `PATH` set to the supplied JDK 17 and Maven locations:
 
@@ -98,6 +109,36 @@ stats: total=24, passed=24, failed=0, errors=0, skipped=0
 
 The project-local Windows wrapper `mvnw.cmd` was selected, and Maven’s final
 Surefire aggregate confirms 24/24 tests.
+
+The external `D:\AI-Projects\step5-java-demo` fixture is not part of this pack,
+so the historical 24/24 measurement is not reproducible from the pack alone.
+Current Fix Round Java verification must be reported separately with its exact
+fixture source and command; a missing external fixture is a limitation, not a
+replacement PASS claim.
+
+## Current Fix Round measurements (2026-08-07)
+
+```text
+python -m pytest tests -q
+297 passed, 1 skipped in 16.01s
+
+python -m ruff check tools tests
+All checks passed!
+
+python tools/contract_check.py --root . --full
+exit 0; {"status": "passed", "errors": []}
+
+python tools/render_contract_docs.py --root . --check
+exit 0; no output
+
+pytest tests/test_run_tests.py::test_python_artifact_binds_each_selected_method_to_real_pytest_outcome -q
+1 passed in 0.75s
+```
+
+The generated-method scenario invokes a real pytest subprocess and verifies one
+passed, one skipped, and one failed `METHOD-*` binding. The requested external
+Maven baseline was also re-run with JDK 17 and Maven: it returned `PASS`,
+`mvnw.cmd test`, and `total=24, passed=24`.
 
 ## Known warnings and deferred items
 

@@ -14,6 +14,7 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
 - Каждый скилл — отдельным промптом. **Оркестратор** — вся цепочка одним промптом.
 - **context-marker** — размечает сырой `.md` в XML (нужен, если аналитика без тегов).
 - **Execution Gate** (`tools/run_tests.py`) — детерминированный запуск автотестов; финальный `ПРИНЯТО` невозможен без `PASS`.
+- **Trace audit** (`tools/trace_check.py --require-execution`) — терминальный аудит: pipeline может завершиться `PASS` только после точного сопоставления method-level evidence с trace document и orchestrator artifact.
 - **Оркестратор Lite** (`SKILL-LITE.md`) — для моделей 7B–13B (<32K контекста).
 
 ## 2. Быстрый старт
@@ -44,13 +45,18 @@ python tools/doctor.py --root .
 python tools/contract_check.py --root . --full
 python tools/render_contract_docs.py --root . --check
 python tools/scan_project.py --project /path/to/project --target src/api.py
-python tools/run_tests.py --project /path/to/project --language python
+python tools/run_tests.py --project /path/to/project --language python --automation-artifact tc-to-autotest-output.json
 python tools/validate_artifact.py schemas/run-tests-output.schema.json artifact.json
 python tools/trace_check.py trace-document.json --require-execution
 ```
 
 Для `run_tests.py` exit code строго означает: `0` — `PASS`, `1` — `FAIL`,
-`2` — `NOT_RUNNABLE` или внутренняя ошибка runner. Для валидаторов
+`2` — `NOT_RUNNABLE` или внутренняя ошибка runner. При `--automation-artifact`
+runner использует уже валидированный `tc-to-autotest` artifact, выбирает его
+`generated_test_files` и выдаёт `RUN-*` + trace-compatible `execution_evidence` для
+каждого `METHOD-*`; отсутствующая или неоднозначная привязка — `FAIL`, даже если
+процесс тестового runner завершился с нулевым кодом. Ноль распознанных Python/Java
+тестов также всегда `FAIL` (`no_tests_discovered`). Для валидаторов
 `validate_artifact.py` и `trace_check.py`: `0` — валидно, `1` — невалидный
 документ, `2` — ошибка аргументов, входа или схемы. `scan_project.py` отдаёт
 `0` для `success`/`partial` и `1` для `error`; `doctor.py` отдаёт `0` для
@@ -68,6 +74,11 @@ python tools/trace_check.py trace-document.json --require-execution
 адаптеры и сквозное поведение скиллов относятся к планам 2/3 и здесь не
 заявляются завершёнными.
 
+Материалы в локализованных каталогах и старые XML-теговые примеры — **legacy,
+pre-migration (Plan 2)**. До их отдельной миграции authoritative являются
+`contracts/pipeline.json`, JSON Schemas, deterministic CLI outputs и этот terminal
+trace audit; legacy paths не задают runtime-контракт.
+
 **Проверка переносимой среды:**
 ```
 python tools/doctor.py --root .
@@ -81,7 +92,7 @@ Doctor выводит JSON: `PASS` означает, что обязательн
 ```
 Создай тест-кейсы и автотесты для <фича/сервис>
 ```
-Оркестратор: Deep Scan → (если SDD) context-marker → Contract Check → 4 скилла → Execution Gate (`run_tests.py`) → отчёт `docs/to_do/orchestration-report-<TS>.md`.
+Оркестратор: Deep Scan → (если SDD) context-marker → Contract Check → 4 скилла → Execution Gate (`run_tests.py`) → **terminal Trace audit** (`trace_check.py --require-execution`) → отчёт `docs/to_do/orchestration-report-<TS>.md`.
 
 **Только ТК:** `Сгенерируй тест-кейсы для X` (+ `<analytics_documentation>` + `<source_code_and_diff>`).
 **Только автотесты:** `Сгенерируй автотесты` (+ `<test_cases>`).
@@ -131,7 +142,7 @@ Doctor выводит JSON: `PASS` означает, что обязательн
 ## 5. Как читать результаты
 
 **Вердикты ревьюеров:** `ПРИНЯТО` (продолжить) / `AUTO_FIX_APPLIED` (брать `<corrected_*>`) / `ТРЕБУЕТ ДОРАБОТКИ` (читать `<review_comments>`, вернуть в генератор).
-**Execution Gate (`<run_tests_verdict>`):** `PASS` (тесты реально прошли → финальный `ПРИНЯТО`) / `FAIL` (упали → `ТРЕБУЕТ ДОРАБОТКИ`, смотреть `root_cause[]`) / `NOT_RUNNABLE` (окружения нет → честный отказ, не фейковый `PASS`).
+**Execution Gate (`<run_tests_verdict>`):** `PASS` (тесты реально прошли, но ещё не финальный verdict) / `FAIL` (упали → `ТРЕБУЕТ ДОРАБОТКИ`, смотреть `root_cause[]`) / `NOT_RUNNABLE` (окружения нет → честный отказ, не фейковый `PASS`). Финальный `ПРИНЯТО` выдаётся только после terminal trace audit с полным method-level evidence.
 **Статус оркестратора:** `completed` / `partial` / `failed` / `retry` (исчерпан max_iterations).
 
 ## 6. Обработка ошибок

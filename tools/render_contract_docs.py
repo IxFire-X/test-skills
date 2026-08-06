@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any
+
+try:
+    from json_cli import JsonArgumentParser, emit_error
+except ModuleNotFoundError:  # imported as tools.render_contract_docs by tests
+    from tools.json_cli import JsonArgumentParser, emit_error
 
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
@@ -67,7 +71,7 @@ def _rendered_files(contract: dict[str, Any]) -> dict[str, str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Render contract Markdown projections")
+    parser = JsonArgumentParser(description="Render contract Markdown projections")
     parser.add_argument("--root", default=".", help="Portable pack root")
     parser.add_argument("--check", action="store_true", help="Fail when checked-in projections drift")
     args = parser.parse_args()
@@ -80,7 +84,7 @@ def main() -> int:
             return 2
         files = _rendered_files(contract)
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
-        print(f"render failed: {error}")
+        emit_error(f"input error: {error}")
         return 2
     drifted = []
     for relative_path, contents in files.items():

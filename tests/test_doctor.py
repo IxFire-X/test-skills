@@ -30,6 +30,14 @@ def test_doctor_never_claims_ready_on_unsupported_python(doctor, monkeypatch, tm
     assert report["status"] == "NOT_RUNNABLE"
 
 
+def test_doctor_rejects_a_missing_pack_root(doctor, tmp_path):
+    """Catches a readiness PASS for a path that is not a portable skill pack."""
+    report = doctor.inspect_environment(tmp_path / "missing")
+
+    assert report["status"] == "NOT_RUNNABLE"
+    assert "root" in report["integrity"]["missing"]
+
+
 def test_doctor_cli_returns_runtime_error_for_missing_dependency(
     doctor, monkeypatch, tmp_path, capsys
 ):

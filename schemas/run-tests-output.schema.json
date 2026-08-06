@@ -4,7 +4,7 @@
   "title": "Run Tests Output (Оракул исполнения)",
   "description": "Формальный контракт выхода детерминированного раннера tools/run_tests.py — единственного источника правды о том, запустились ли автотесты. Фундаментальная Опора 1 (BACKLOG.md). В отличие от LLM-вердиктов, этот выход не интерпретируется моделью: PASS означает реальный запуск и успех, NOT_RUNNABLE — честное отсутствие окружения (а не фейковый PASS).",
   "type": "object",
-  "required": ["verdict", "target", "environment", "ran_at"],
+  "required": ["verdict", "target", "environment", "ran_at", "run_id", "execution_evidence", "evidence_authoritative"],
   "properties": {
     "verdict": {
       "type": "string",
@@ -117,6 +117,29 @@
       "exit_code": {
         "type": ["integer", "null"],
         "description": "Exit code процесса раннера (0=PASS, !=0=FAIL). Null при NOT_RUNNABLE."
+      },
+      "run_id": {
+        "type": ["string", "null"],
+        "pattern": "^RUN-[A-Za-z0-9_.:-]+$",
+        "description": "Stable run identity when an automation artifact selected concrete methods."
+      },
+      "execution_evidence": {
+        "type": "array",
+        "description": "Deterministic method evidence directly compatible with trace-document execution.evidence.",
+        "items": {
+          "type": "object",
+          "required": ["run_id", "method_id", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"},
+            "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"},
+            "status": {"enum": ["passed", "failed", "error", "skipped"]}
+          }
+        }
+      },
+      "evidence_authoritative": {
+        "type": "boolean",
+        "description": "True only when every selected generated method has one unambiguous physical runner outcome."
       }
     },
     "additionalProperties": false

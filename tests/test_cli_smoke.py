@@ -211,3 +211,16 @@ def test_trace_check_accepts_a_real_schema_valid_execution_trace(root, tmp_path)
     assert completed.returncode == 0
     assert report["valid"] is True
     assert report["trace_audit"]["verdict"] == "PASS"
+
+
+@pytest.mark.parametrize("tool", [
+    "doctor.py", "contract_check.py", "render_contract_docs.py", "scan_project.py",
+    "run_tests.py", "validate_artifact.py", "trace_check.py",
+])
+def test_every_runtime_cli_emits_utf8_json_for_invalid_arguments(root, tool):
+    """Catches argparse prose becoming the only response for machine callers."""
+    completed = _run_cli(root, tool, "--definitely-invalid")
+
+    assert completed.returncode == 2
+    payload = _json_output(completed)
+    assert isinstance(payload, dict)

@@ -4,7 +4,7 @@
   "title": "Scan Project Output (Детерминированный сканер стека)",
   "description": "Формальный контракт выхода tools/scan_project.py. Scanner is read-only: it determines the stack and extracts source without changing .skillsrc or project source. Persistent --output is allowed only below an exact docs/to_do directory.",
   "type": "object",
-  "required": ["status", "stack", "files_extracted", "skillsrc_updated", "scanned_at"],
+  "required": ["status", "stack", "files_extracted", "skillsrc_updated", "scanned_at", "artifact"],
   "properties": {
     "status": {
       "type": "string",
@@ -69,6 +69,10 @@
       "type": ["array", "null"],
       "description": "При status:error — причина невозможности сканирования (например, 'манифесты сборки не найдены', 'target-файл не существует').",
       "items": { "type": "string" }
+    },
+    "artifact": {
+      "type": ["string", "null"],
+      "description": "Complete deterministic source/analytics content, included in the single schema-valid JSON stdout result; null if no target was extracted."
     },
     "scanned_at": {
       "type": "string",

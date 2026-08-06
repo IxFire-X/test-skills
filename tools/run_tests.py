@@ -31,15 +31,21 @@ run_tests.py — детерминированный оракул исполне�
 
 from __future__ import annotations
 
-import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from json_cli import JsonArgumentParser
+except ModuleNotFoundError:  # imported as tools.run_tests by tests
+    from tools.json_cli import JsonArgumentParser
 
 # ---------------------------------------------------------------------------
 # Конфигурация стека
@@ -290,6 +296,116 @@ def run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
+def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, str | None]:
+    """Load the existing tc-to-autotest artifact and confine every declared file."""
+    try:
+        artifact = json.loads(Path(path).read_text(encoding="utf-8"))
+        artifacts = artifact["artifacts"]
+        if artifact.get("schema_version") != "2.1.0" or artifact.get("stage") != "tc-to-autotest":
+            return None, "automation artifact is not a tc-to-autotest 2.1.0 artifact"
+        files = artifacts["generated_test_files"]
+        methods = artifacts["generated_test_methods"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as error:
+        return None, f"automation artifact unreadable: {error}"
+    root = Path(project_dir).resolve()
+    file_map: dict[str, Path] = {}
+    for item in files:
+        try:
+            raw = Path(item["path"])
+            resolved = (root / raw).resolve()
+            resolved.relative_to(root)
+            if raw.is_absolute() or ".." in raw.parts or not resolved.is_file():
+                raise ValueError(item["path"])
+            file_map[item["id"]] = resolved
+        except (KeyError, TypeError, ValueError):
+            return None, "automation artifact contains an invalid or unavailable generated test file"
+    method_map: dict[tuple[str, str], str] = {}
+    for method in methods:
+        try:
+            key = (method["file_id"], method["name"])
+            if method["file_id"] not in file_map or key in method_map:
+                raise ValueError(method)
+            method_map[key] = method["id"]
+        except (KeyError, TypeError, ValueError):
+            return None, "automation artifact contains ambiguous generated method bindings"
+    return {"files": file_map, "methods": method_map}, None
+
+
+def _run_id(project_dir: str, bindings: dict | None) -> str:
+    material = str(Path(project_dir).resolve())
+    if bindings:
+        material += "|" + "|".join(sorted(bindings["methods"].values()))
+    return "RUN-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def bind_pytest_evidence(output: str, bindings: dict, run_id: str) -> tuple[list[dict], list[str]]:
+    """Bind pytest node IDs to artifact file identity + method name, deterministically."""
+    observed: dict[tuple[str, str], str] = {}
+    errors: list[str] = []
+    status_map = {"PASSED": "passed", "FAILED": "failed", "SKIPPED": "skipped", "ERROR": "error"}
+    line_re = re.compile(r"^(PASSED|FAILED|SKIPPED|ERROR)(?:\s+\[\d+\])?\s+([^\s]+)", re.MULTILINE)
+    progress_re = re.compile(r"^(\S+::\S+)\s+(PASSED|FAILED|SKIPPED|ERROR)\b", re.MULTILINE)
+    files_by_name: dict[str, list[str]] = {}
+    for file_id, path in bindings["files"].items():
+        files_by_name.setdefault(path.name, []).append(file_id)
+    for raw_status, nodeid in line_re.findall(output):
+        parts = nodeid.split("::")
+        if len(parts) < 2:
+            continue
+        candidate_ids = files_by_name.get(Path(parts[0]).name, [])
+        if len(candidate_ids) != 1:
+            continue
+        name = parts[-1].split("[", 1)[0]
+        key = (candidate_ids[0], name)
+        if key not in bindings["methods"]:
+            continue
+        if key in observed and observed[key] != status_map[raw_status]:
+            errors.append(f"ambiguous pytest outcome for {name}")
+        observed[key] = status_map[raw_status]
+    for nodeid, raw_status in progress_re.findall(output):
+        parts = nodeid.split("::")
+        candidate_ids = files_by_name.get(Path(parts[0]).name, [])
+        if len(candidate_ids) == 1 and (candidate_ids[0], parts[-1].split("[", 1)[0]) in bindings["methods"]:
+            observed[(candidate_ids[0], parts[-1].split("[", 1)[0])] = status_map[raw_status]
+    evidence = []
+    for key, method_id in sorted(bindings["methods"].items(), key=lambda item: item[1]):
+        if key not in observed:
+            errors.append(f"missing pytest outcome binding for {method_id}")
+            continue
+        evidence.append({"run_id": run_id, "method_id": method_id, "status": observed[key]})
+    return evidence, errors
+
+
+def parse_junit_xml_evidence(report_dirs: list[Path], bindings: dict, run_id: str) -> tuple[list[dict], list[str]]:
+    """Bind Surefire/Gradle JUnit XML testcase records by physical file + method name."""
+    observations: dict[tuple[str, str], str] = {}
+    errors: list[str] = []
+    for report_dir in report_dirs:
+        if not report_dir.is_dir():
+            continue
+        for report in sorted(report_dir.rglob("*.xml")):
+            try:
+                root = ET.parse(report).getroot()
+            except ET.ParseError:
+                continue
+            for case in root.iter("testcase"):
+                name = case.attrib.get("name", "").split("[", 1)[0]
+                status = "failed" if case.find("failure") is not None else "error" if case.find("error") is not None else "skipped" if case.find("skipped") is not None else "passed"
+                matching = [key for key in bindings["methods"] if key[1] == name]
+                if len(matching) == 1:
+                    key = matching[0]
+                    if key in observations and observations[key] != status:
+                        errors.append(f"ambiguous junit outcome for {name}")
+                    observations[key] = status
+    evidence = []
+    for key, method_id in sorted(bindings["methods"].items(), key=lambda item: item[1]):
+        if key not in observations:
+            errors.append(f"missing junit outcome binding for {method_id}")
+        else:
+            evidence.append({"run_id": run_id, "method_id": method_id, "status": observations[key]})
+    return evidence, errors
+
+
 def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
     """
     Парсит вывод pytest. Извлекает failed_methods[] и root_cause[].
@@ -447,19 +563,22 @@ def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
 
 
 def run_python_pytest(project_dir: str, env_bin: str, pytest_target: str | None,
-                      extra_args: list | None) -> dict:
+                       extra_args: list | None) -> dict:
     """Запускает pytest, возвращает блок результата."""
     cmd = [env_bin, "-m", "pytest", "-v", "--tb=short", "-rA"]
     if pytest_target:
-        cmd.append(pytest_target)
+        cmd.extend(pytest_target if isinstance(pytest_target, list) else [pytest_target])
     if extra_args:
         cmd.extend(extra_args)
 
     exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
     parsed = parse_pytest_output(stdout, stderr, exit_code)
 
-    if exit_code == 0:
+    if exit_code == 0 and (parsed["stats"]["total"] or 0) > 0:
         verdict = "PASS"
+    elif exit_code == 0:
+        verdict = "FAIL"
+        parsed["root_cause"].append("no_tests_discovered: pytest completed without recognized tests")
     elif exit_code == 5:
         # pytest exit 5 = "no tests collected". Это НЕ то же, что упавшие тесты:
         # тестов физически нет, поэтому подтверждать их прохождение нечем.
@@ -468,7 +587,7 @@ def run_python_pytest(project_dir: str, env_bin: str, pytest_target: str | None,
         if not parsed["root_cause"]:
             parsed["root_cause"] = [
                 (
-                    "no_tests_collected: pytest не нашёл ни одного теста "
+                    "no_tests_discovered: pytest не нашёл ни одного теста "
                     "(проверьте pytest-target / именование test_*.py)"
                 )
             ]
@@ -530,8 +649,10 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
                 "message": line.strip()[:300],
             })
 
-    verdict = "PASS" if exit_code == 0 else "FAIL"
+    verdict = "PASS" if exit_code == 0 and (stats["total"] or 0) > 0 else "FAIL"
     root_cause = list({fm["message"][:80] for fm in failed_methods})[:10] if failed_methods else []
+    if exit_code == 0 and (stats["total"] or 0) == 0:
+        root_cause.append("no_tests_discovered: java runner completed without recognized tests")
 
     return {
         "verdict": verdict,
@@ -565,7 +686,9 @@ def _excerpt(text: str) -> str:
 
 def build_report(verdict: str, target: dict, environment: dict,
                  stats: dict | None, failed_methods: list, root_cause: list,
-                 raw_output_excerpt: str | None, exit_code: int | None) -> dict:
+                 raw_output_excerpt: str | None, exit_code: int | None,
+                 run_id: str | None = None, execution_evidence: list | None = None,
+                 evidence_authoritative: bool = False) -> dict:
     """Собирает отчёт строго по schemas/run-tests-output.schema.json."""
     # убираем внутреннее поле
     env_out = {k: v for k, v in environment.items() if not k.startswith("_")}
@@ -579,6 +702,9 @@ def build_report(verdict: str, target: dict, environment: dict,
         "raw_output_excerpt": raw_output_excerpt,
         "ran_at": datetime.now(timezone.utc).isoformat(),
         "exit_code": exit_code,
+        "run_id": run_id,
+        "execution_evidence": execution_evidence or [],
+        "evidence_authoritative": evidence_authoritative,
     }
 
 
@@ -624,7 +750,7 @@ def build_internal_error_report(error: Exception) -> dict:
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(
+    parser = JsonArgumentParser(
         description="Детерминированный оракул исполнения автотестов (Опора 1). "
                     "Выводит JSON-вердикт PASS|FAIL|NOT_RUNNABLE по схеме schemas/run-tests-output.schema.json."
     )
@@ -636,12 +762,25 @@ def main() -> int:
                                                  "(по умолчанию — автообнаружение pytest'ом)")
     parser.add_argument("--pytest-args", help="Дополнительные аргументы pytest (через запятую)")
     parser.add_argument("--python-executable", help="Python interpreter override for both pytest probing and execution")
+    parser.add_argument("--automation-artifact", help="Validated tc-to-autotest JSON artifact used to select and bind generated methods")
     args = parser.parse_args()
 
     # --- Определяем язык/проект ---
     project_dir = args.project or os.getcwd()
     skillsrc_path = args.skillsrc or os.path.join(project_dir, ".skillsrc")
     language = args.language
+    bindings = None
+    artifact_error = None
+    if args.automation_artifact:
+        bindings, artifact_error = load_automation_artifact(args.automation_artifact, project_dir)
+        if artifact_error:
+            report = build_not_runnable(
+                {"status": "partial", "interpreter": None, "interpreter_path": None,
+                 "working_dir": os.path.abspath(project_dir), "missing": ["automation_artifact"], "_framework": "unknown"},
+                language or "unknown", artifact_error,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
 
     if not language:
         detected = detect_language_from_skillsrc(skillsrc_path)
@@ -684,7 +823,18 @@ def main() -> int:
             return 2
         # --- Запуск pytest ---
         extra = args.pytest_args.split(",") if args.pytest_args else None
-        result = run_python_pytest(project_dir, env["_interpreter_bin"], args.pytest_target, extra)
+        selected_targets = args.pytest_target
+        if bindings and not selected_targets:
+            selected_targets = [str(path) for path in bindings["files"].values()]
+        result = run_python_pytest(project_dir, env["_interpreter_bin"], selected_targets, extra)
+        run_id = _run_id(project_dir, bindings) if bindings else None
+        evidence, binding_errors = bind_pytest_evidence(
+            result["raw_output_excerpt"], bindings, run_id
+        ) if bindings and run_id else ([], [])
+        if binding_errors:
+            result["verdict"] = "FAIL"
+            result["root_cause"].extend(binding_errors)
+            result["exit_code"] = 1
         report = build_report(
             verdict=result["verdict"],
             target=result["target"],
@@ -694,6 +844,9 @@ def main() -> int:
             root_cause=result["root_cause"],
             raw_output_excerpt=result["raw_output_excerpt"],
             exit_code=result["exit_code"],
+            run_id=run_id,
+            execution_evidence=evidence,
+            evidence_authoritative=bool(bindings and not binding_errors),
         )
 
     elif language == "java":
@@ -707,6 +860,15 @@ def main() -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 2
         result = run_java(project_dir, env.get("_runner") or "mvn", None)
+        run_id = _run_id(project_dir, bindings) if bindings else None
+        evidence, binding_errors = parse_junit_xml_evidence(
+            [Path(project_dir) / "target" / "surefire-reports", Path(project_dir) / "build" / "test-results"],
+            bindings, run_id,
+        ) if bindings and run_id else ([], [])
+        if binding_errors:
+            result["verdict"] = "FAIL"
+            result["root_cause"].extend(binding_errors)
+            result["exit_code"] = 1
         report = build_report(
             verdict=result["verdict"],
             target=result["target"],
@@ -716,6 +878,9 @@ def main() -> int:
             root_cause=result["root_cause"],
             raw_output_excerpt=result["raw_output_excerpt"],
             exit_code=result["exit_code"],
+            run_id=run_id,
+            execution_evidence=evidence,
+            evidence_authoritative=bool(bindings and not binding_errors),
         )
 
     else:

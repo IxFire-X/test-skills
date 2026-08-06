@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from hashlib import sha256
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -152,3 +153,79 @@ def test_internal_error_report_is_schema_valid(runner, root):
 
     assert list(Draft202012Validator(schema).iter_errors(report)) == []
     assert report["verdict"] == "NOT_RUNNABLE"
+
+
+def _automation_artifact(file_path, methods):
+    digest = "sha256:" + sha256(file_path.read_bytes()).hexdigest()
+    return {
+        "schema_version": "2.1.0", "stage": "tc-to-autotest", "warnings": [],
+        "artifacts": {
+            "automation_matrix": [
+                {"test_case_id": method["test_case_ids"][0], "generated_file_ids": ["FILE-1"], "generated_method_ids": [method["id"]]}
+                for method in methods
+            ],
+            "generated_test_files": [{"id": "FILE-1", "path": file_path.name, "language": "python", "framework": "pytest", "content_digest": digest}],
+            "generated_test_methods": methods,
+        },
+    }
+
+
+def test_python_artifact_binds_each_selected_method_to_real_pytest_outcome(root, tmp_path):
+    """Catches a PASS that has no deterministic method evidence for generated tests."""
+    test_file = tmp_path / "test_bound.py"
+    test_file.write_text(
+        "import pytest\n\ndef test_pass(): assert True\n\n@pytest.mark.skip(reason='policy')\ndef test_skip(): assert False\n\ndef test_fail(): assert False\n",
+        encoding="utf-8",
+    )
+    methods = [
+        {"id": "METHOD-pass", "file_id": "FILE-1", "test_case_ids": ["TC-pass"], "requirement_ids": ["REQ-pass"], "name": "test_pass", "content_digest": "sha256:" + "1" * 64},
+        {"id": "METHOD-skip", "file_id": "FILE-1", "test_case_ids": ["TC-skip"], "requirement_ids": ["REQ-skip"], "name": "test_skip", "content_digest": "sha256:" + "2" * 64},
+        {"id": "METHOD-fail", "file_id": "FILE-1", "test_case_ids": ["TC-fail"], "requirement_ids": ["REQ-fail"], "name": "test_fail", "content_digest": "sha256:" + "3" * 64},
+    ]
+    artifact = tmp_path / "automation.json"
+    artifact.write_text(json.dumps(_automation_artifact(test_file, methods)), encoding="utf-8")
+
+    completed = _run_runner(root, "--project", str(tmp_path), "--language", "python", "--python-executable", sys.executable, "--automation-artifact", str(artifact))
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
+
+    assert completed.returncode == 1
+    assert report["verdict"] == "FAIL"
+    assert [(item["method_id"], item["status"]) for item in report["execution_evidence"]] == [
+        ("METHOD-fail", "failed"), ("METHOD-pass", "passed"), ("METHOD-skip", "skipped"),
+    ]
+    assert report["evidence_authoritative"] is True
+    assert report["run_id"].startswith("RUN-")
+
+
+def test_zero_discovery_is_never_python_pass(root, tmp_path):
+    """Catches pytest's zero exit status being promoted to PASS without discovered tests."""
+    empty = tmp_path / "empty.py"
+    empty.write_text("value = 1\n", encoding="utf-8")
+
+    completed = _run_runner(root, "--project", str(tmp_path), "--language", "python", "--python-executable", sys.executable, "--pytest-target", str(empty))
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
+
+    assert completed.returncode == 1
+    assert report["verdict"] == "FAIL"
+    assert report["stats"]["total"] == 0
+    assert any("no_tests_discovered" in reason for reason in report["root_cause"])
+
+
+def test_junit_xml_binds_pass_skip_and_failure_to_generated_methods(runner, tmp_path):
+    """Catches Java XML reports being reduced to aggregate stats without method identities."""
+    report_dir = tmp_path / "target" / "surefire-reports"
+    report_dir.mkdir(parents=True)
+    (report_dir / "TEST-demo.xml").write_text(
+        "<testsuite><testcase name='test_pass'/><testcase name='test_skip'><skipped/></testcase><testcase name='test_fail'><failure/></testcase></testsuite>",
+        encoding="utf-8",
+    )
+    bindings = {"files": {"FILE-java": tmp_path / "DemoTest.java"}, "methods": {
+        ("FILE-java", "test_pass"): "METHOD-java-pass", ("FILE-java", "test_skip"): "METHOD-java-skip", ("FILE-java", "test_fail"): "METHOD-java-fail",
+    }}
+
+    evidence, errors = runner.parse_junit_xml_evidence([report_dir], bindings, "RUN-java")
+
+    assert errors == []
+    assert [(item["method_id"], item["status"]) for item in evidence] == [
+        ("METHOD-java-fail", "failed"), ("METHOD-java-pass", "passed"), ("METHOD-java-skip", "skipped"),
+    ]

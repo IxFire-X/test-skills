@@ -3,6 +3,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+import pytest
 from jsonschema import Draft202012Validator
 
 
@@ -230,3 +231,49 @@ def test_scanner_writes_only_to_exact_docs_to_do(root, tmp_path):
     assert completed.returncode == 0
     assert report["output_file"] == str(output).replace("\\", "/")
     assert output.exists()
+
+
+def test_scanner_rejects_escape_like_targets_before_reading(root, tmp_path):
+    """Catches absolute, Windows drive, UNC, and traversal target escape attempts."""
+    _python_project(tmp_path)
+    outside = tmp_path.parent / "README.md"
+    outside.write_text("outside secret", encoding="utf-8")
+
+    for target in ("../README.md", "schemas/../../README.md", str(outside), "C:README.md", r"\\server\share\README.md"):
+        completed = _scan(root, tmp_path, target)
+        report = _validate_scan_output(root, completed)
+        assert completed.returncode == 1
+        assert report["status"] == "error"
+        assert report["files_extracted"] == []
+        assert any("outside project" in message.lower() or "invalid target" in message.lower() for message in report["errors"])
+
+
+def test_scanner_rejects_symlink_target_that_resolves_outside_project(root, tmp_path):
+    """Catches direct candidates that look local but resolve through a symlink outside root."""
+    _python_project(tmp_path)
+    outside = tmp_path.parent / "outside.py"
+    outside.write_text("secret = True\n", encoding="utf-8")
+    link = tmp_path / "src" / "linked.py"
+    try:
+        link.symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable on this platform")
+
+    completed = _scan(root, tmp_path, "src/linked.py")
+    report = _validate_scan_output(root, completed)
+    assert completed.returncode == 1
+    assert report["status"] == "error"
+    assert report["files_extracted"] == []
+
+
+def test_scanner_keeps_generated_artifact_in_its_json_stdout(root, tmp_path):
+    """Catches source/analytics content being available only by parsing operational stderr."""
+    _python_project(tmp_path)
+
+    completed = _scan(root, tmp_path, "src/api.py")
+    report = _validate_scan_output(root, completed)
+
+    assert completed.returncode == 0
+    assert "<source_code_and_diff>" in report["artifact"]
+    assert "<analytics_documentation>" in report["artifact"]
+    assert completed.stderr == ""

@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import json
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+
+try:
+    from json_cli import JsonArgumentParser
+except ModuleNotFoundError:  # imported as tools.contract_check by tests
+    from tools.json_cli import JsonArgumentParser
 
 from jsonschema import Draft202012Validator
 
@@ -197,7 +201,7 @@ def validate_pipeline_contract(contract: dict[str, Any], root: Path, check_drift
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Validate contracts/pipeline.json")
+    parser = JsonArgumentParser(description="Validate contracts/pipeline.json")
     parser.add_argument("--root", default=".", help="Portable pack root")
     parser.add_argument("--full", action="store_true", help="Also verify generated projections")
     args = parser.parse_args()
