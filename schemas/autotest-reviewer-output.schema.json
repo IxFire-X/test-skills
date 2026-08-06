@@ -1,26 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/autotest-reviewer-output.schema.json",
-  "title": "Portable autotest-reviewer artifact envelope",
   "type": "object",
-  "required": ["schema_version", "stage", "artifacts", "warnings"], "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "2.1.0"}, "stage": {"const": "autotest-reviewer"},
+    "schema_version": {"const": "2.1.0"},
+    "stage": {"const": "autotest-reviewer"},
+    "warnings": {"type": "array", "items": {"type": "string"}},
     "artifacts": {
-      "type": "object", "required": ["autotest_review", "accepted_test_methods", "corrected_test_methods"], "additionalProperties": false,
-      "properties": {
-        "autotest_review": {"$ref": "#/$defs/review_report"},
-        "accepted_test_methods": {"type": "array", "items": {"$ref": "#/$defs/test_method"}},
-        "corrected_test_methods": {"type": "array", "items": {"$ref": "#/$defs/test_method"}}
-      }
-    }, "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      "type": "object", "required": ["autotest_review"], "additionalProperties": false,
+      "properties": {"autotest_review": {"$ref": "#/$defs/review"}}
+    }
   },
   "allOf": [
-    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"accepted_test_methods": {"minItems": 1}}}}}},
-    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"corrected_test_methods": {"minItems": 1}}}}}}
+    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}},
+    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"corrections": {"minItems": 1}}}}}}}},
+    {"if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ТРЕБУЕТ ДОРАБОТКИ"}}}}}}}, "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}}}, "corrections": {"maxItems": 0}}}}}}}}
   ],
   "$defs": {
-    "review_report": {"type": "object", "required": ["verdict", "reviewed_method_ids"], "additionalProperties": false, "properties": {"verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]}, "reviewed_method_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"}}}},
-    "test_method": {"type": "object", "required": ["id", "file_id", "test_case_ids", "requirement_ids", "name"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"}, "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "test_case_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}}, "requirement_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"}}, "name": {"type": "string", "minLength": 1}}}
+    "finding": {"type": "object", "required": ["severity", "code", "message", "evidence", "related_ids"], "additionalProperties": false, "properties": {"severity": {"enum": ["BLOCKING", "WARNING", "INFO"]}, "code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}, "evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "related_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}}},
+    "correction": {"type": "object", "required": ["id", "related_ids", "description", "evidence"], "additionalProperties": false, "properties": {"id": {"type": "string", "pattern": "^FIX-"}, "related_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}, "description": {"type": "string", "minLength": 1}, "evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}}}},
+    "review": {"type": "object", "required": ["verdict", "reviewed_file_ids", "reviewed_method_ids", "findings", "corrections"], "additionalProperties": false, "properties": {"verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]}, "reviewed_file_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^FILE-"}}, "reviewed_method_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^METHOD-"}}, "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}}, "corrections": {"type": "array", "items": {"$ref": "#/$defs/correction"}}}}
   }
 }

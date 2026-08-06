@@ -10,10 +10,10 @@ The six pipeline-stage schemas use JSON Schema Draft 2020-12 and one strict
 | Schema | Stage | Required evidence in `artifacts` |
 |---|---|---|
 | `context-marker-output.schema.json` | `context-marker` | requirement provenance and source context |
-| `tc-generator-output.schema.json` | `tc-generator` | requirements, test cases, coverage mappings |
-| `tc-reviewer-output.schema.json` | `tc-reviewer` | review verdict and accepted/corrected cases |
+| `tc-generator-output.schema.json` | `tc-generator` | `generated_test_cases` payload: provenance, executable cases, coverage |
+| `tc-reviewer-output.schema.json` | `tc-reviewer` | review verdict/findings/corrections and `corrected_test_cases` |
 | `tc-to-autotest-output.schema.json` | `tc-to-autotest` | automation matrix, generated files and methods |
-| `autotest-reviewer-output.schema.json` | `autotest-reviewer` | review verdict and accepted/corrected methods |
+| `autotest-reviewer-output.schema.json` | `autotest-reviewer` | review verdict, file/method IDs, findings and corrections |
 | `orchestrator-output.schema.json` | `orchestrate` | run verdict, execution evidence and trace audit |
 
 Every stable object boundary uses `additionalProperties: false`. The sole

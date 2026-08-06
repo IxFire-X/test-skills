@@ -17,9 +17,10 @@ dependency/runtime failure. Schema validation happens before artifact
 validation, preventing a malformed schema from being reported as user data
 failure.
 
-Schemas require requirement provenance, requirement-to-test-case coverage,
-automation file/method mappings, Russian review verdicts (`ПРИНЯТО`,
-`AUTO_FIX_APPLIED`, `ТРЕБУЕТ ДОРАБОТКИ`), and execution/trace evidence.
-They reject empty evidence where a success claim would otherwise conceal
-incomplete work. JSON Schema cannot compare runtime values across independently
-listed arrays; `trace-check` is the semantic gate for orphan or mismatched IDs.
+Schemas require requirement provenance, executable manual cases, coverage,
+automation file/method locators, Russian review verdicts (`ПРИНЯТО`,
+`AUTO_FIX_APPLIED`, `ТРЕБУЕТ ДОРАБОТКИ`), structured findings/corrections, and
+verdict-consistent execution/trace evidence. An invalid schema is checked before
+the artifact is read, and the root JSON Pointer is the empty string. JSON Schema
+cannot compare runtime values across independently listed arrays; `trace-check`
+is the semantic gate for orphan or mismatched IDs.
