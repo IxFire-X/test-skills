@@ -290,6 +290,30 @@ def test_junit_binding_requires_generated_class_identity(runner, tmp_path):
     assert errors == ["missing junit outcome binding for METHOD-1"]
 
 
+def test_java_artifact_rejects_duplicate_fqn_in_executable_root(runner, tmp_path):
+    """Catches another Java file with the same FQN certifying a declared generated test."""
+    java_root = tmp_path / "src" / "test" / "java" / "demo"
+    java_root.mkdir(parents=True)
+    generated = java_root / "GeneratedTest.java"
+    generated.write_text("package demo; class GeneratedTest {}", encoding="utf-8")
+    duplicate = java_root / "other" / "GeneratedTest.java"
+    duplicate.parent.mkdir()
+    duplicate.write_text("package demo; class GeneratedTest {}", encoding="utf-8")
+    digest = "sha256:" + sha256(generated.read_bytes()).hexdigest()
+    artifact = {"schema_version": "2.1.0", "stage": "tc-to-autotest", "warnings": [], "artifacts": {
+        "automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}],
+        "generated_test_files": [{"id": "FILE-1", "path": "src/test/java/demo/GeneratedTest.java", "language": "java", "framework": "junit5", "content_digest": digest}],
+        "generated_test_methods": [{"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_one", "content_digest": "sha256:" + "1" * 64}],
+    }}
+    path = tmp_path / "artifact.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    bindings, error = runner.load_automation_artifact(str(path), str(tmp_path))
+
+    assert bindings is None
+    assert error
+
+
 @pytest.mark.parametrize("run_id,evidence,authoritative", [
     (None, [{"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}], True),
     ("RUN-1", [], True),
