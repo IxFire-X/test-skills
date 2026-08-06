@@ -330,3 +330,55 @@ def test_generated_digest_requires_full_sha256(valid_artifacts):
     invalid = copy.deepcopy(valid_artifacts["tc-to-autotest-output.schema.json"])
     invalid["artifacts"]["generated_test_files"][0]["content_digest"] = "sha256:abc"
     assert _errors("tc-to-autotest-output.schema.json", invalid)
+
+
+def test_generator_rejects_bare_tc_id(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    invalid["artifacts"]["generated_test_cases"]["test_cases"][0]["id"] = "TC-"
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+def test_generator_rejects_empty_requirement_id(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    invalid["artifacts"]["generated_test_cases"]["requirements"][0]["id"] = ""
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+def test_generator_rejects_duplicate_requirement_ids(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    invalid["artifacts"]["generated_test_cases"]["test_cases"][0]["requirement_ids"] = ["REQ-1", "REQ-1"]
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+def test_generator_rejects_empty_warning(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    invalid["warnings"] = [""]
+    assert _errors("tc-generator-output.schema.json", invalid)
+
+
+def test_corrected_case_is_generator_compatible(valid_artifacts):
+    case = valid_artifacts["test_case"]
+    wrapper = copy.deepcopy(valid_artifacts["tc-generator-output.schema.json"])
+    wrapper["artifacts"]["generated_test_cases"]["test_cases"] = [case]
+    assert not _errors("tc-generator-output.schema.json", wrapper)
+
+
+def test_tc_reviewer_rejects_bare_fix_and_empty_warning(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["tc-reviewer-output.schema.json"])
+    invalid["warnings"] = [""]
+    invalid["artifacts"]["validation_report"].update({"verdict": "AUTO_FIX_APPLIED", "corrections": [{"id": "FIX-", "related_ids": ["TC-1"], "description": "fix", "evidence": ["diff"]}]})
+    invalid["artifacts"]["corrected_test_cases"] = [valid_artifacts["test_case"]]
+    assert _errors("tc-reviewer-output.schema.json", invalid)
+
+
+def test_autotest_reviewer_rejects_bare_file_method_fix(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["autotest-reviewer-output.schema.json"])
+    invalid["artifacts"]["autotest_review"].update({"reviewed_file_ids": ["FILE-"], "reviewed_method_ids": ["METHOD-"], "verdict": "AUTO_FIX_APPLIED", "corrections": [{"id": "FIX-", "related_ids": ["METHOD-1"], "description": "fix", "evidence": ["diff"]}]})
+    assert _errors("autotest-reviewer-output.schema.json", invalid)
+
+
+def test_orchestrator_rejects_empty_warning_and_extra_mapping(valid_artifacts):
+    invalid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    invalid["warnings"] = [""]
+    invalid["artifacts"]["trace_audit"]["mappings"][0]["extra"] = "x"
+    assert _errors("orchestrator-output.schema.json", invalid)
