@@ -8,21 +8,30 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TOOL_ROOT = ROOT / "tools"
 
-# Dynamic specs execute tool modules outside package-import machinery.  Make their
-# sibling helpers and the `tools.*` fallback importable from this pack location,
-# never from the pytest current working directory.
-for import_root in (str(ROOT), str(TOOL_ROOT)):
-    if import_root not in sys.path:
-        sys.path.insert(0, import_root)
-
 
 def load_tool(name: str):
+    """Execute one tool with local sibling imports, restoring host import state."""
     path = ROOT / "tools" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Unable to load tool: {name}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    original_path = list(sys.path)
+    missing = object()
+    local_names = ("json_cli", "tools", "tools.json_cli")
+    original_modules = {key: sys.modules.get(key, missing) for key in local_names}
+    try:
+        sys.path[:] = [str(TOOL_ROOT), str(ROOT), *[entry for entry in original_path if entry not in {str(TOOL_ROOT), str(ROOT)}]]
+        for key in local_names:
+            sys.modules.pop(key, None)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = original_path
+        for key, saved in original_modules.items():
+            if saved is missing:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = saved
     return module
 
 
