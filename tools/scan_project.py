@@ -751,7 +751,10 @@ def _extract_endpoints(project_dir: str, files_rel: list[str], framework: str | 
         is_java_source = base.endswith(".java")
         if not (is_python_urls or is_java_source):
             continue
-        text = _read_text(os.path.join(project_dir, rel)) or ""
+        candidate = _confined_path(project_dir, os.path.join(project_dir, rel))
+        if not candidate:
+            continue
+        text = _read_text(candidate) or ""
         if is_java_source:
             for endpoint in _java_mapping_endpoints(text):
                 if endpoint not in endpoints:
@@ -772,7 +775,10 @@ def _extract_models(project_dir: str, files_rel: list[str], language: str) -> li
     models: list[str] = []
     for rel in files_rel:
         base = os.path.basename(rel)
-        text = _read_text(os.path.join(project_dir, rel)) or ""
+        candidate = _confined_path(project_dir, os.path.join(project_dir, rel))
+        if not candidate:
+            continue
+        text = _read_text(candidate) or ""
         if language == "python":
             if base != "models.py":
                 continue

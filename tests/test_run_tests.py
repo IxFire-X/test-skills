@@ -299,4 +299,4 @@ def test_junit_binding_requires_generated_class_identity(runner, tmp_path):
 ])
 def test_execution_evidence_semantic_invariants(runner, run_id, evidence, authoritative):
     """Catches impossible authoritative/non-authoritative evidence combinations."""
-    assert runner.validate_execution_evidence(run_id, evidence, authoritative)
+    assert runner.validate_execution_evidence("PASS", run_id, evidence, authoritative)

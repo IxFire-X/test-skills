@@ -306,3 +306,17 @@ def test_render_source_block_does_not_read_unconfined_paths(scanner, tmp_path, m
 
     assert "outside.py" not in rendered
     assert reads == []
+
+
+def test_endpoint_and_model_extractors_do_not_read_outside_paths(scanner, tmp_path, monkeypatch):
+    """Catches direct helper callers bypassing scan discovery confinement."""
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "api.py"
+    outside.write_text("@GetMapping('/secret')", encoding="utf-8")
+    reads = []
+    monkeypatch.setattr(scanner, "_read_text", lambda path: reads.append(path) or "")
+
+    assert scanner._extract_endpoints(str(project), ["../api.py"], "spring-boot") == []
+    assert scanner._extract_models(str(project), ["../api.py"], "python") == []
+    assert reads == []

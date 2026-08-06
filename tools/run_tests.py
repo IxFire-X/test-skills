@@ -360,8 +360,14 @@ def _run_id(project_dir: str, bindings: dict | None) -> str:
     return "RUN-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
-def validate_execution_evidence(run_id: str | None, evidence: list[dict], authoritative: bool) -> list[str]:
+def validate_execution_evidence(verdict: str, run_id: str | None, evidence: list[dict], authoritative: bool) -> list[str]:
     """Public deterministic guard used by pipeline consumers before trace assembly."""
+    if authoritative and verdict not in {"PASS", "FAIL"}:
+        return ["authoritative evidence requires PASS or FAIL verdict"]
+    if verdict == "NOT_RUNNABLE" and (authoritative or run_id is not None or evidence):
+        return ["NOT_RUNNABLE must not contain execution evidence"]
+    if verdict == "PASS" and any(item.get("status") in {"failed", "error"} for item in evidence):
+        return ["PASS cannot contain failed/error execution evidence"]
     if authoritative != bool(run_id and evidence):
         return ["authoritative evidence requires a run_id and non-empty evidence"]
     if not authoritative:
@@ -953,7 +959,7 @@ def main() -> int:
             execution_evidence=evidence,
             evidence_authoritative=bool(bindings and not binding_errors),
         )
-        semantic_errors = validate_execution_evidence(report["run_id"], report["execution_evidence"], report["evidence_authoritative"])
+        semantic_errors = validate_execution_evidence(report["verdict"], report["run_id"], report["execution_evidence"], report["evidence_authoritative"])
         if semantic_errors:
             report["verdict"] = "FAIL"
             report["root_cause"] = (report["root_cause"] or []) + semantic_errors
@@ -994,6 +1000,14 @@ def main() -> int:
             execution_evidence=evidence,
             evidence_authoritative=bool(bindings and not binding_errors),
         )
+        semantic_errors = validate_execution_evidence(report["verdict"], report["run_id"], report["execution_evidence"], report["evidence_authoritative"])
+        if semantic_errors:
+            report["verdict"] = "FAIL"
+            report["root_cause"] = (report["root_cause"] or []) + semantic_errors
+            report["exit_code"] = 1
+            report["run_id"] = None
+            report["execution_evidence"] = []
+            report["evidence_authoritative"] = False
 
     else:
         # go / typescript / kotlin — заглушка: честный NOT_RUNNABLE, пока не реализован раннер
