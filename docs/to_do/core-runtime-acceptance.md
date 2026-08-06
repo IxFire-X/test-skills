@@ -147,6 +147,11 @@ physical Python/Java method identity, and fail-closed Java report freshness.
 Gradle aggregate/XML parsing has fixture-level coverage; no real Gradle E2E is
 claimed because this environment supplied Maven only. The exact current probes:
 
+Java method evidence is authoritative only for a digest-bound generated source
+under conventional `src/test/java`, with a unique package/class FQN and a fresh
+report tree resolved beneath the project root. This is an exact physical identity
+check, not a basename or method-name-only claim.
+
 ```text
 python -m pytest tests -q
 314 passed, 1 skipped in 14.35s

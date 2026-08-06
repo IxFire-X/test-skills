@@ -328,6 +328,24 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
                 raise ValueError(item["path"])
             if resolved in file_map.values():
                 raise ValueError(item["path"])
+            if item.get("language") == "java":
+                java_root = (root / "src" / "test" / "java").resolve()
+                try:
+                    resolved.relative_to(java_root)
+                except ValueError:
+                    raise ValueError("java generated test is outside executable src/test/java")
+                source = resolved.read_text(encoding="utf-8")
+                package = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.MULTILINE)
+                fqn = (package.group(1) + "." if package else "") + resolved.stem
+                duplicates = []
+                for sibling in java_root.rglob("*.java"):
+                    text = sibling.read_text(encoding="utf-8", errors="replace")
+                    sibling_package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.MULTILINE)
+                    sibling_fqn = (sibling_package.group(1) + "." if sibling_package else "") + sibling.stem
+                    if sibling_fqn == fqn:
+                        duplicates.append(sibling.resolve())
+                if duplicates != [resolved]:
+                    raise ValueError("java generated test FQN is not unique in executable source root")
             file_map[item["id"]] = resolved
         except (KeyError, TypeError, ValueError):
             return None, "automation artifact contains an invalid, unavailable, or digest-mismatched generated test file"
@@ -724,7 +742,12 @@ def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
     else:
         cmd = ["mvn", "test"]
 
-    report_dir = Path(project_dir) / ("target/surefire-reports" if is_maven else "build/test-results")
+    project_root = Path(project_dir).resolve()
+    report_dir = (project_root / ("target/surefire-reports" if is_maven else "build/test-results")).resolve()
+    try:
+        report_dir.relative_to(project_root)
+    except ValueError:
+        return build_not_runnable({"status": "partial", "interpreter": None, "working_dir": str(project_root), "missing": ["report_dir"]}, "java", "selected report directory escapes project root")
     before_reports = _report_inventory(report_dir)
     exit_code, stdout, stderr = run_subprocess(cmd, project_dir)
     after_reports = _report_inventory(report_dir)

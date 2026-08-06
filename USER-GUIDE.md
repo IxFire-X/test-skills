@@ -22,7 +22,9 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
 ### 2.1 Переносимый runtime: требования и bootstrap
 
 Для детерминированного runtime нужен Python 3.10+ и зависимости из
-`requirements-dev.txt` (в том числе `jsonschema`, `PyYAML` и `pytest`). Java
+`requirements-dev.txt` (в том числе `jsonschema`, `PyYAML` и `pytest`); runtime
+schema checks intentionally import `jsonschema` and therefore не являются
+standard-library-only. Java
 проверки дополнительно требуют JDK и Maven или Gradle; project-local wrapper
 (`mvnw`/`mvnw.cmd`/`gradlew`) имеет приоритет над системным runner.
 
