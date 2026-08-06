@@ -148,6 +148,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             output_path = Path(output["path"])
             assert not output_path.is_absolute()
             assert ".." not in output_path.parts
+            assert all(not part.startswith(".") for part in output_path.parts)
             assert output["path"] == required_output or output["path"].startswith(output_prefix or "")
             resolved_output = (campaign / output_path).resolve()
             assert resolved_output.is_relative_to(campaign_root)
@@ -498,6 +499,44 @@ def _switch_scorecard_rubrics(campaign, scenario, scorecards, metadata):
 )
 def test_campaign_semantics_reject_documents_not_bound_to_scenario(complete_campaign, name, mutate):
     """Catches individually valid evidence documents that belong to another scenario identity."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    mutate(campaign, scenario, scorecards, metadata)
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def _replace_companions_with_placeholders(campaign, scenario, scorecards, metadata):
+    for run in metadata["runs"]:
+        companion = run["outputs"][1]
+        placeholder = campaign / Path(companion["path"]).parent / ".gitkeep"
+        placeholder.parent.mkdir(parents=True, exist_ok=True)
+        placeholder.write_bytes(b"placeholder\n")
+        companion.update(
+            path=str(placeholder.relative_to(campaign)).replace("\\", "/"),
+            sha256=hashlib.sha256(placeholder.read_bytes()).hexdigest(),
+        )
+
+
+def _replace_companion_with_hidden_segment(campaign, scenario, scorecards, metadata):
+    run = metadata["runs"][0]["outputs"][1]
+    hidden_file = campaign / "artifacts/outputs/01-red-control/rep-01/.reserved/result.json"
+    hidden_file.parent.mkdir(parents=True, exist_ok=True)
+    hidden_file.write_bytes(b"hidden\n")
+    run.update(
+        path=str(hidden_file.relative_to(campaign)).replace("\\", "/"),
+        sha256=hashlib.sha256(hidden_file.read_bytes()).hexdigest(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("placeholder companions", _replace_companions_with_placeholders),
+        ("hidden companion segment", _replace_companion_with_hidden_segment),
+    ],
+)
+def test_complete_campaign_evidence_rejects_reserved_placeholder_paths(complete_campaign, name, mutate):
+    """Catches evidence records that point to tracked placeholders or hidden reserved paths."""
     campaign, scenario, scorecards, metadata = complete_campaign
     mutate(campaign, scenario, scorecards, metadata)
     with pytest.raises(AssertionError):
