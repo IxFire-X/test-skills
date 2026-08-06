@@ -2,6 +2,24 @@ import json
 import subprocess
 import sys
 
+from jsonschema import Draft202012Validator
+
+
+def _validate_output(root, schema_name, completed):
+    document = json.loads(completed.stdout)
+    schema = json.loads((root / "schemas" / schema_name).read_text(encoding="utf-8"))
+    assert list(Draft202012Validator(schema).iter_errors(document)) == []
+    return document
+
+
+def _run_runner(root, *arguments):
+    return subprocess.run(
+        [sys.executable, str(root / "tools" / "run_tests.py"), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
 
 def test_python_override_precedes_current_interpreter(runner, tmp_path):
     """Catches ignoring an explicit Python interpreter selected for the project."""
@@ -24,20 +42,12 @@ def test_python_cli_reports_selected_interpreter_and_nonzero_not_runnable(root, 
     """Catches a missing selected interpreter being reported as a successful execution."""
     missing_python = tmp_path / "not-runnable-python.exe"
     missing_python.write_text("not an executable", encoding="utf-8")
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(root / "tools" / "run_tests.py"),
-            "--project", str(tmp_path),
-            "--language", "python",
-            "--python-executable", str(missing_python),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+    completed = _run_runner(
+        root, "--project", str(tmp_path), "--language", "python",
+        "--python-executable", str(missing_python),
     )
 
-    report = json.loads(completed.stdout)
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
     assert completed.returncode != 0
     assert report["verdict"] == "NOT_RUNNABLE"
     assert report["environment"]["interpreter_path"] == str(missing_python)
@@ -88,3 +98,37 @@ def test_windows_project_wrapper_is_resolved_from_project_directory(runner, tmp_
     runner.run_subprocess(["mvnw.cmd", "test"], str(tmp_path))
 
     assert observed["cmd"] == ["cmd", "/c", str(wrapper), "test"]
+
+
+def test_no_language_cli_is_nonzero_and_schema_valid(root, tmp_path):
+    """Catches the no-.skillsrc NOT_RUNNABLE branch returning a success process code."""
+    completed = _run_runner(root, "--project", str(tmp_path))
+
+    report = _validate_output(root, "run-tests-output.schema.json", completed)
+    assert completed.returncode == 2
+    assert report["verdict"] == "NOT_RUNNABLE"
+
+
+def test_python_pass_and_fail_cli_outputs_validate_against_schema(root, tmp_path):
+    """Catches CLI PASS/FAIL documents drifting from the public output schema."""
+    passing = tmp_path / "test_passing.py"
+    passing.write_text("def test_passing():\n    assert True\n", encoding="utf-8")
+    passed = _run_runner(root, "--project", str(tmp_path), "--language", "python", "--pytest-target", str(passing))
+    pass_report = _validate_output(root, "run-tests-output.schema.json", passed)
+    assert passed.returncode == 0
+    assert pass_report["verdict"] == "PASS"
+
+    passing.write_text("def test_failing():\n    assert False\n", encoding="utf-8")
+    failed = _run_runner(root, "--project", str(tmp_path), "--language", "python", "--pytest-target", str(passing))
+    fail_report = _validate_output(root, "run-tests-output.schema.json", failed)
+    assert failed.returncode == 1
+    assert fail_report["verdict"] == "FAIL"
+
+
+def test_internal_error_report_is_schema_valid(runner, root):
+    """Catches the top-level exception report drifting from the normal CLI contract."""
+    report = runner.build_internal_error_report(RuntimeError("forced internal error"))
+    schema = json.loads((root / "schemas" / "run-tests-output.schema.json").read_text(encoding="utf-8"))
+
+    assert list(Draft202012Validator(schema).iter_errors(report)) == []
+    assert report["verdict"] == "NOT_RUNNABLE"

@@ -596,6 +596,22 @@ def build_not_runnable(environment: dict, language: str, reason: str) -> dict:
     )
 
 
+def build_internal_error_report(error: Exception) -> dict:
+    """Return the same schema-compatible NOT_RUNNABLE shape used by the CLI guard."""
+    return build_not_runnable(
+        {
+            "status": "missing",
+            "interpreter": None,
+            "interpreter_path": None,
+            "working_dir": os.getcwd(),
+            "missing": ["runner_internal_error"],
+            "_framework": "unknown",
+        },
+        "unknown",
+        "runner_internal_error: " + str(error)[:200],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Точка входа
 # ---------------------------------------------------------------------------
@@ -638,7 +654,7 @@ def main() -> int:
                 "Укажите --language явно или положите .skillsrc.",
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0  # NOT_RUNNABLE — это честный ответ, не ошибка раннера
+            return 2
 
     # --- Проверяем окружение под язык ---
     if language == "python":
@@ -725,21 +741,5 @@ if __name__ == "__main__":
         sys.exit(main())
     except Exception as e:  # noqa: BLE001 — раннер не должен падать молча
         # Ошибка самого раннера — отдаём структурированный отчёт, а не трейс
-        error_report = {
-            "verdict": "NOT_RUNNABLE",
-            "target": {"language": "unknown", "framework": "unknown", "runner": "not_applicable"},
-            "environment": {
-                "status": "missing",
-                "interpreter": None,
-                "working_dir": os.getcwd(),
-                "missing": ["runner_internal_error"],
-            },
-            "stats": None,
-            "failed_methods": None,
-            "root_cause": ["runner_internal_error: " + str(e)[:200]],
-            "raw_output_excerpt": None,
-            "ran_at": datetime.now(timezone.utc).isoformat(),
-            "exit_code": None,
-        }
-        print(json.dumps(error_report, ensure_ascii=False, indent=2))
+        print(json.dumps(build_internal_error_report(e), ensure_ascii=False, indent=2))
         sys.exit(2)

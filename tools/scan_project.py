@@ -432,6 +432,27 @@ def _java_companions(project_dir: str, target_abs: str) -> list[str]:
     return companions
 
 
+def _java_imported_sources(project_dir: str, target_abs: str) -> list[str]:
+    """Resolve direct project-local Java imports without leaving project_dir."""
+    source = _read_text(target_abs) or ""
+    mask = _strip_java_comments_and_text_blocks(source)
+    imported_types = sorted(set(re.findall(r"^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", mask, re.M)))
+    root = os.path.realpath(project_dir)
+    resolved: list[str] = []
+    for imported in imported_types:
+        suffix = imported.replace(".", "/") + ".java"
+        for rel in sorted(_find_files_by_suffix(project_dir, suffix)):
+            candidate = os.path.realpath(os.path.join(project_dir, rel))
+            if os.path.commonpath([root, candidate]) != root:
+                continue
+            text = _read_text(candidate) or ""
+            package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.M)
+            if package and package.group(1) + "." + os.path.splitext(os.path.basename(rel))[0] == imported:
+                resolved.append(rel.replace("\\", "/"))
+                break
+    return resolved
+
+
 def _find_files_by_suffix(project_dir: str, suffix: str) -> list[str]:
     """Ищет файлы, чей относительный путь (forward-slash) заканчивается на suffix."""
     suffix = suffix.replace("\\", "/").lstrip("./")
@@ -488,7 +509,9 @@ def extract_companions(project_dir: str, target_abs: str, language: str) -> list
     """
     companions: list[str] = []
     if language == "java":
-        return _java_companions(project_dir, target_abs)
+        companions = _java_companions(project_dir, target_abs)
+        imports = _java_imported_sources(project_dir, target_abs)
+        return companions + [path for path in imports if path not in companions]
     if language not in COMPANION_FILES or not COMPANION_FILES[language]:
         return companions
 
@@ -522,22 +545,19 @@ def _xml_escape(text: str) -> str:
 
 
 def render_source_block(project_dir: str, files_rel: list[str]) -> str:
-    """Генерирует source block without transforming the extracted source bytes."""
+    """Emit a well-formed envelope while XML parsing round-trips source exactly."""
     lines = ["<source_code_and_diff>"]
     for rel in files_rel:
         abs_p = os.path.join(project_dir, rel)
         content = _read_text(abs_p) or ""
-        lines.append(f'  <file path="{_xml_escape(rel)}">')
-        # Source is evidence, not XML data: escaping would change Java text
-        # blocks and embedded CDATA markers that downstream reviewers need.
-        lines.append(content)
-        lines.append("  </file>")
+        cdata = content.replace("]]>", "]]" + "]]><![CDATA[>")
+        lines.append(f'  <file path="{_xml_escape(rel)}"><![CDATA[{cdata}]]></file>')
     lines.append("</source_code_and_diff>")
     return "\n".join(lines)
 
 
 def _strip_java_comments_and_text_blocks(text: str) -> str:
-    """Blank comments and Java text blocks while preserving positions/newlines."""
+    """Mask non-code Java lexemes, retaining newlines and code positions."""
     result: list[str] = []
     index = 0
     state = "code"
@@ -554,6 +574,14 @@ def _strip_java_comments_and_text_blocks(text: str) -> str:
             state = "text_block"
             result.extend("   ")
             index += 3
+        elif state == "code" and text[index] == '"':
+            state = "string"
+            result.append(" ")
+            index += 1
+        elif state == "code" and text[index] == "'":
+            state = "char"
+            result.append(" ")
+            index += 1
         elif state == "line_comment":
             char = text[index]
             result.append("\n" if char == "\n" else " ")
@@ -576,10 +604,48 @@ def _strip_java_comments_and_text_blocks(text: str) -> str:
             else:
                 result.append("\n" if text[index] == "\n" else " ")
                 index += 1
+        elif state in {"string", "char"}:
+            char = text[index]
+            result.append("\n" if char == "\n" else " ")
+            index += 1
+            if char == "\\" and index < len(text):
+                escaped = text[index]
+                result.append("\n" if escaped == "\n" else " ")
+                index += 1
+            elif (state == "string" and char == '"') or (state == "char" and char == "'"):
+                state = "code"
         else:
             result.append(text[index])
             index += 1
     return "".join(result)
+
+
+def _java_mapping_endpoints(text: str) -> list[str]:
+    """Extract mapping strings only when the annotation token occurs in Java code."""
+    mask = _strip_java_comments_and_text_blocks(text)
+    annotations = re.compile(r"@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@Path\s*\(", re.I)
+    literal = re.compile(r'"((?:\\.|[^"\\])*)"')
+    endpoints: list[str] = []
+    for match in annotations.finditer(mask):
+        opening = mask.find("(", match.start(), match.end())
+        depth = 0
+        closing = None
+        for index in range(opening, len(mask)):
+            if mask[index] == "(":
+                depth += 1
+            elif mask[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    closing = index
+                    break
+        if closing is None:
+            continue
+        arguments = text[opening + 1:closing]
+        value_match = re.search(r"\bvalue\s*=\s*\"((?:\\.|[^\"\\])*)\"", arguments)
+        string_match = value_match or literal.search(arguments)
+        if string_match and string_match.group(1) not in endpoints:
+            endpoints.append(string_match.group(1))
+    return endpoints
 
 
 def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Optional[str]) -> list[str]:
@@ -609,9 +675,11 @@ def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Option
         if not (is_python_urls or is_java_source):
             continue
         text = _read_text(os.path.join(project_dir, rel)) or ""
-        # Parse a separate copy; source evidence remains byte-for-byte unchanged.
         if is_java_source:
-            text = _strip_java_comments_and_text_blocks(text)
+            for endpoint in _java_mapping_endpoints(text):
+                if endpoint not in endpoints:
+                    endpoints.append(endpoint)
+            continue
         for pat in patterns:
             for m in pat.finditer(text):
                 val = m.group(1)

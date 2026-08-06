@@ -22,22 +22,22 @@
           "description": "Язык, определённый по манифесту сборки (pyproject/requirements→python, pom.xml→java, package.json→typescript, go.mod→go). unknown — манифест не опознан."
         },
         "framework": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Основной фреймворк приложения: django, fastapi, spring-boot, gin, express, nextjs и т.д. Отсутствует/null, если не удалось определить."
         },
         "test_framework": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Тестовый фреймворк: pytest, junit5, jest, go-testing и т.д. Определяется по dev-зависимостям (requirements-dev.txt, pom.xml, package.json devDeps)."
         },
         "build_tool": {
-          "type": "string",
+          "type": ["string", "null"],
           "description": "Инструмент сборки/управления зависимостями: pip, poetry, maven, gradle, npm, yarn, go-mod. Пишется в .skillsrc в допустимом значении enum."
         },
         "detection": {
           "type": "object",
           "description": "Как именно был определён стек — для аудита и отладки",
           "properties": {
-            "manifest": { "type": "string", "description": "Файл манифеста, по которому определён язык (например, 'src/backend/requirements.txt')" },
+            "manifest": { "type": ["string", "null"], "description": "Файл манифеста, по которому определён язык (например, 'src/backend/requirements.txt')" },
             "evidence": { "type": "array", "items": { "type": "string" }, "description": "Конкретные маркеры (например, ['django', 'djangorestframework', 'pytest in requirements-dev.txt'])" }
           }
         }
