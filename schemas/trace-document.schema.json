@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/trace-document.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "requirements",
+    "test_cases",
+    "generated_files",
+    "methods",
+    "trace_map",
+    "execution_required",
+    "final_verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "2.1.0"},
+    "requirements": {"type": "array", "items": {"$ref": "#/$defs/requirement"}},
+    "test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
+    "generated_files": {"type": "array", "items": {"$ref": "#/$defs/generated_file"}},
+    "methods": {"type": "array", "items": {"$ref": "#/$defs/method"}},
+    "trace_map": {"type": "array", "items": {"$ref": "#/$defs/mapping"}},
+    "execution_required": {"type": "boolean"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "final_verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+    "requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"},
+    "test_case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"},
+    "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
+    "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"},
+    "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"},
+    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"},
+    "requirement": {
+      "type": "object", "required": ["id", "provenance"], "additionalProperties": false,
+      "properties": {"id": {"$ref": "#/$defs/requirement_id"}, "provenance": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}}}
+    },
+    "test_case": {
+      "type": "object", "required": ["id", "requirement_ids"], "additionalProperties": false,
+      "properties": {"id": {"$ref": "#/$defs/test_case_id"}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/requirement_id"}}}
+    },
+    "generated_file": {
+      "type": "object", "required": ["id", "path"], "additionalProperties": false,
+      "properties": {"id": {"$ref": "#/$defs/file_id"}, "path": {"$ref": "#/$defs/portable_path"}}
+    },
+    "method": {
+      "type": "object", "required": ["id", "file_id", "name", "test_case_ids", "requirement_ids"], "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/method_id"}, "file_id": {"$ref": "#/$defs/file_id"}, "name": {"$ref": "#/$defs/nonempty"},
+        "test_case_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/test_case_id"}},
+        "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/requirement_id"}}
+      }
+    },
+    "mapping": {
+      "type": "object", "required": ["requirement_id", "test_case_id", "file_id", "method_id"], "additionalProperties": false,
+      "properties": {"requirement_id": {"$ref": "#/$defs/requirement_id"}, "test_case_id": {"$ref": "#/$defs/test_case_id"}, "file_id": {"$ref": "#/$defs/file_id"}, "method_id": {"$ref": "#/$defs/method_id"}}
+    },
+    "evidence": {
+      "type": "object", "required": ["run_id", "method_id", "status"], "additionalProperties": false,
+      "properties": {"run_id": {"$ref": "#/$defs/run_id"}, "method_id": {"$ref": "#/$defs/method_id"}, "status": {"enum": ["passed", "failed", "error", "skipped"]}}
+    },
+    "allowed_skip": {
+      "type": "object", "required": ["method_id", "reason", "policy_ref"], "additionalProperties": false,
+      "properties": {"method_id": {"$ref": "#/$defs/method_id"}, "reason": {"$ref": "#/$defs/nonempty"}, "policy_ref": {"$ref": "#/$defs/nonempty"}}
+    },
+    "execution": {
+      "type": "object", "required": ["verdict", "evidence", "allowed_skips"], "additionalProperties": false,
+      "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}, "allowed_skips": {"type": "array", "items": {"$ref": "#/$defs/allowed_skip"}}}
+    }
+  }
+}

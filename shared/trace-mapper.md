@@ -1,134 +1,92 @@
-# /shared — Trace Mapper (ТК-N ↔ Код)
+# SDD trace document
 
-> **Назначение:** единый формат маппинга ТК-N → метод теста для всех скиллов тестирования.
->
-> **Версия:** 1.0
+`schemas/trace-document.schema.json` defines the host-neutral JSON record that proves the chain
+from a source requirement to a test case, generated source, generated method, and (when required)
+execution evidence. Validate it with `tools/trace_check.py`; this document is explanatory and does
+not create an alternate contract.
 
-## Проблема
+## Model
 
-`tc-to-autotest` генерирует `<automation_matrix>` для маппинга ТК-N → java-методы. Но `autotest-reviewer` должен проверять traceability, а между ними нет формального контракта для формата этого маппинга.
+The document has `schema_version: "2.1.0"` and closed objects throughout. Stable IDs use these
+prefixes: `REQ-`, `TC-`, `FILE-`, `METHOD-`, and `RUN-`.
 
-## Решение
-
-Определяем единый machine-readable формат для `<trace_map>`, который:
-- Используется `tc-to-autotest` при генерации output
-- Используется `autotest-reviewer` при проверке traceability
-- Используется Оркестратором для передачи контекста между скиллами
-
-## ФОРМАТ `<trace_map>` (v1.0)
-
-```xml
-<trace_map version="1.0" source="tc-to-autotest" timestamp="2026-07-03T17:00:00Z">
-  <entry>
-    <tc_id>ТК-1</tc_id>
-    <class>SubscriptionRenewalClientApiTest</class>
-    <method>shouldRenewSubscriptionSuccessfully</method>
-    <test_type>positive</test_type>
-    <status>generated</status>  <!-- generated | updated | removed | todo -->
-    <notes></notes>
-  </entry>
-  <entry>
-    <tc_id>ТК-2</tc_id>
-    <class>SubscriptionRenewalServiceTest</class>
-    <method>shouldAutoRetryAfterFirstFailure</method>
-    <test_type>positive</test_type>
-    <status>generated</status>
-    <notes>Awaitility для асинхронной проверки retry</notes>
-  </entry>
-  <entry>
-    <tc_id>ТК-4</tc_id>
-    <class>SubscriptionRenewalAdminApiTest</class>
-    <method>shouldRecoverSubscriptionFromGrace</method>
-    <test_type>positive</test_type>
-    <status>todo</status>
-    <notes>TODO: уточнить expected status после recovery (ACTIVE vs IN_GRACE)</notes>
-  </entry>
-  <entry>
-    <tc_id>ТК-EX</tc_id>
-    <class>SubscriptionRenewalClientApiTest</class>
-    <method>shouldReturn400ForInvalidRequest</method>
-    <test_type>negative</test_type>
-    <status>generated</status>
-    <notes></notes>
-  </entry>
-</trace_map>
+```json
+{
+  "schema_version": "2.1.0",
+  "requirements": [{"id": "REQ-login", "provenance": ["spec §3"]}],
+  "test_cases": [{"id": "TC-login", "requirement_ids": ["REQ-login"]}],
+  "generated_files": [{"id": "FILE-login", "path": "tests/test_login.py"}],
+  "methods": [{
+    "id": "METHOD-login",
+    "file_id": "FILE-login",
+    "name": "test_login",
+    "test_case_ids": ["TC-login"],
+    "requirement_ids": ["REQ-login"]
+  }],
+  "trace_map": [{
+    "requirement_id": "REQ-login",
+    "test_case_id": "TC-login",
+    "file_id": "FILE-login",
+    "method_id": "METHOD-login"
+  }],
+  "execution_required": true,
+  "execution": {
+    "verdict": "PASS",
+    "evidence": [{"run_id": "RUN-01", "method_id": "METHOD-login", "status": "passed"}],
+    "allowed_skips": []
+  },
+  "final_verdict": "PASS"
+}
 ```
 
-## Поля
+`generated_files.path` is a portable relative path: no drive, absolute path, backslash, or parent
+traversal. A file may contain several methods, and a method may implement several requirements or
+test cases. A mapping is the explicit four-ID link; distinct mappings may share a method.
 
-| Поле | Тип | Обязательность | Описание |
-|------|-----|---------------|----------|
-| `tc_id` | string | **Да** | Идентификатор тест-кейса (ТК-N) |
-| `class` | string | **Да** | Полное имя тестового класса (без package) |
-| `method` | string | **Да** | Имя метода в camelCase |
-| `test_type` | enum | **Да** | `positive`, `negative`, `boundary`, `security`, `observability`, `concurrency` |
-| `status` | enum | **Да** | `generated`, `updated`, `removed`, `todo` |
-| `notes` | string | Нет | Дополнительная информация (TODO-причины, особенности) |
+## Invariants
 
-## ПРАВИЛА ИСПОЛЬЗОВАНИЯ
+Every requirement and test case needs a mapping. Every generated method needs a mapping, and every
+generated file must own at least one method. References must resolve, a mapped case and method must
+both declare its requirement and test case, and the method's `file_id` must equal the mapped file.
+Duplicate entity IDs, mappings, and execution run IDs are rejected even when surrounding objects
+differ.
 
-### Для `tc-to-autotest`
+Execution is required when either `execution_required` or the command-line
+`--require-execution` flag is true. Then the execution verdict must be `PASS` and each mapped
+method needs evidence. `failed` and `error` are failures. A `skipped` method is acceptable only
+with exactly one matching allowed-skip rule, which has a non-empty `reason` and `policy_ref`:
 
-При генерации автотестов, **ОБЯЗАН** сгенерировать `<trace_map>` в дополнение к `<automation_analysis>` и `<automation_matrix>`:
-
-```xml
-<automation_analysis>...</automation_analysis>
-<automation_matrix>...</automation_matrix>
-<trace_map version="1.0" source="tc-to-autotest">
-  <!-- для каждого сгенерированного ТК-N -->
-  <entry>...</entry>
-</trace_map>
+```json
+{
+  "verdict": "PASS",
+  "evidence": [{"run_id": "RUN-02", "method_id": "METHOD-login", "status": "skipped"}],
+  "allowed_skips": [{
+    "method_id": "METHOD-login",
+    "reason": "isolated environment lacks the external identity service",
+    "policy_ref": "test-policy §5.2"
+  }]
+}
 ```
 
-**Правила:**
-1. Каждый ТК-N из входа должен иметь запись в `<trace_map>`.
-2. Если ТК-N не удалось сгенерировать → `status="todo"` + `notes` с причиной.
-3. Если ТК-N был удалён (конфликт case B) → `status="removed"`.
-4. `class` и `method` должны точно совпадать с фактически сгенерированным кодом.
+The skip rule does not replace evidence; the skipped evidence still supplies the `RUN-` ID. Unused,
+duplicate, unknown, or unqualified rules are rejected. `NOT_RUNNABLE` is never an acceptance
+result. `final_verdict` must honestly match the derived state: `PASS` only for a trace without
+semantic errors, `FAIL` for an invalid trace, and `NOT_RUNNABLE` only when execution is unavailable.
 
-### Для `autotest-reviewer`
+## Command and output
 
-При проверке автотестов, **ОБЯЗАН** использовать `<trace_map>` как источник истины для проверки traceability:
-
-```
-1. ЗАГРУЗИТЬ <trace_map> из выхода tc-to-autotest
-2. ДЛЯ КАЖДОГО entry в trace_map:
-   a. ПРОВЕРИТЬ, что класс <class> существует в тестовом пакете
-   b. ПРОВЕРИТЬ, что метод <method> существует в классе
-   c. ПРОВЕРИТЬ, что @DisplayName содержит "ТК-N: ..."
-   d. ПРОВЕРИТЬ, что status != "todo" (todo-методы не проверяются на traceability)
-3. ЕСЛИ entry отсутствует в фактическом коде → CRITICAL: MISSING_TRACE
-4. ЕСЛИ фактический @Test метод не имеет записи в trace_map → WARN: UNTRACED_TEST
+```text
+python tools/trace_check.py DOCUMENT [--require-execution] [--schema PATH]
 ```
 
-### Для Оркестратора
+The command writes one UTF-8 JSON object to stdout. Exit `0` means the trace is valid, `1` means a
+semantic trace failure, and `2` means unreadable JSON, invalid input shape, unavailable/invalid
+schema, missing runtime dependency, or invalid arguments. Schema diagnostics use
+`invalid_input_schema` and RFC-6901 paths; semantic diagnostics use codes such as
+`MISSING_MAPPING`, `MAPPING_MISMATCH`, and `EXECUTION_GATE`.
 
-При передаче контекста между `tc-to-autotest` → `autotest-reviewer`:
-
-```
-1. СОХРАНИТЬ <trace_map> в отчёте выполнения (orchestration-report, секция context.trace_map)
-2. ПЕРЕДАТЬ как входной тег autotest-reviewer:
-   <trace_map>...</trace_map>
-```
-
-## ПРИМЕР ПОЛНОГО ЦИКЛА
-
-```
-tc-generator → ТК (Markdown)
-    ↓
-tc-reviewer → validation_report (ПРИНЯТО)
-    ↓
-tc-to-autotest → <trace_map> + Java-файлы
-    ↓
-autotest-reviewer → использует <trace_map> для проверки traceability
-```
-
-## КОНТРАКТ С ЭТАЛОННЫМИ ПРАКТИКАМИ
-
-- **Anthropic Context Engineering (reference:2):** `<trace_map>` — это компактная форма Note-Taking. Вместо передачи полного контекста между скиллами, передаётся только структурированный маппинг.
-- **OpenAI Routines (reference:4):** `<trace_map>` обеспечивает передачу состояния между шагами рутины.
-- **Machine-Readable (DeepSeek/Qwen, reference:5):** XML-формат позволяет автоматическую валидацию без LLM-парсинга.
-
----
-
-*См. также: `CONTRACTS.md` (контракты скиллов), `PIPELINE.md` (последовательность выполнения).*
+The resulting `trace_audit` has `{verdict, mappings, errors}` and is the `trace_audit` artifact
+produced by the `trace-check` step in `contracts/pipeline.json`. Its mapping entries contain
+requirement, test-case, method, and execution evidence IDs, so they can be embedded directly in the
+orchestrator artifact. A topology-only check can have empty `evidence_ids`; it is not execution
+acceptance.
