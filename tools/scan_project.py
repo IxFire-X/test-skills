@@ -47,8 +47,6 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Конфигурация распознавания манифестов
@@ -169,7 +167,7 @@ def _find_manifests(project_dir: str, names: list[str]) -> list[str]:
     return found
 
 
-def _read_text(path: str) -> Optional[str]:
+def _read_text(path: str) -> str | None:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -185,7 +183,7 @@ def _extract_dep_names(text: str) -> set[str]:
     names: set[str] = set()
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("#") or line.startswith("-"):
+        if not line or line.startswith(("#", "-")):
             continue
         # обрезаем git-ссылки, -e, markers
         line = re.split(r"[;@\s]", line, 1)[0]
@@ -195,7 +193,7 @@ def _extract_dep_names(text: str) -> set[str]:
     return names
 
 
-def _match_markers(names_or_text: str, markers: list[tuple[str, str]]) -> Optional[str]:
+def _match_markers(names_or_text: str, markers: list[tuple[str, str]]) -> str | None:
     """Возвращает framework по первому совпавшему маркеру (по подстроке)."""
     low = names_or_text.lower()
     for needle, framework in markers:
@@ -299,12 +297,11 @@ def detect_stack(project_dir: str, target_rel: str) -> dict:
     if js_manifests:
         manifest = _pick_nearest(js_manifests, target_rel) or js_manifests[0]
         text = _read_text(os.path.join(project_dir, manifest)) or ""
-        # package.json — JSON; определяем язык по наличию TS-маркеров
-        is_ts = ("typescript" in text.lower() or ".ts" in text.lower())
+        # package.json — JavaScript/TypeScript share the portable runtime category.
         framework = _match_markers(text, JS_FRAMEWORK_MARKERS)
         test_framework = _match_markers(text, JS_TEST_MARKERS) or "jest"
         stack = {
-            "language": "typescript" if is_ts else "typescript",  # typescript как umbrella
+            "language": "typescript",  # typescript как umbrella
             "framework": framework,
             "test_framework": test_framework,
             "build_tool": "npm",
@@ -349,7 +346,7 @@ def detect_stack(project_dir: str, target_rel: str) -> dict:
     }
 
 
-def _pick_nearest(candidates: list[str], target_rel: str) -> Optional[str]:
+def _pick_nearest(candidates: list[str], target_rel: str) -> str | None:
     """Выбирает манифест с наибольшим совпадением пути с target (общий родитель)."""
     if not candidates:
         return None
@@ -369,7 +366,7 @@ def _pick_nearest(candidates: list[str], target_rel: str) -> Optional[str]:
     return best
 
 
-def _python_build_tool(runtime_manifest: Optional[str], all_manifests: list[str]) -> str:
+def _python_build_tool(runtime_manifest: str | None, all_manifests: list[str]) -> str:
     """Определяет build_tool для python с нормализацией под enum skillsrc."""
     names = {os.path.basename(m) for m in all_manifests}
     if "pyproject.toml" in names:
@@ -436,7 +433,7 @@ def _java_imported_sources(project_dir: str, target_abs: str) -> list[str]:
     """Resolve direct project-local Java imports without leaving project_dir."""
     source = _read_text(target_abs) or ""
     mask = _strip_java_comments_and_text_blocks(source)
-    imported_types = sorted(set(re.findall(r"^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", mask, re.M)))
+    imported_types = sorted(set(re.findall(r"^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", mask, re.MULTILINE)))
     root = os.path.realpath(project_dir)
     resolved: list[str] = []
     for imported in imported_types:
@@ -446,7 +443,7 @@ def _java_imported_sources(project_dir: str, target_abs: str) -> list[str]:
             if os.path.commonpath([root, candidate]) != root:
                 continue
             text = _read_text(candidate) or ""
-            package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.M)
+            package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.MULTILINE)
             if package and package.group(1) + "." + os.path.splitext(os.path.basename(rel))[0] == imported:
                 resolved.append(rel.replace("\\", "/"))
                 break
@@ -470,7 +467,7 @@ def _find_files_by_suffix(project_dir: str, suffix: str) -> list[str]:
     return found
 
 
-def resolve_target(project_dir: str, target_rel: str) -> tuple[Optional[str], list[str]]:
+def resolve_target(project_dir: str, target_rel: str) -> tuple[str | None, list[str]]:
     """
     Разрешает target в реальный путь и возвращает (abs_path, warnings).
     Ищет по прямому пути, затем по путевому суффиксу (напр. target='part/api.py' →
@@ -629,9 +626,9 @@ def _strip_java_comments_and_text_blocks(text: str) -> str:
 def _java_mapping_endpoints(text: str) -> list[str]:
     """Extract mapping strings only when the annotation token occurs in Java code."""
     mask = _strip_java_comments_and_text_blocks(text)
-    annotations = re.compile(r"@(?P<name>Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@(?P<jax>Path)\s*\(", re.I)
+    annotations = re.compile(r"@(?P<name>Get|Post|Put|Delete|Patch|Request)Mapping\s*\(|@(?P<jax>Path)\s*\(", re.IGNORECASE)
     literal = re.compile(r'"((?:\\.|[^"\\])*)"')
-    named_path = re.compile(r"(?:^|,)\s*(?:path|value)\s*=", re.S)
+    named_path = re.compile(r"(?:^|,)\s*(?:path|value)\s*=", re.DOTALL)
     endpoints: list[str] = []
     for match in annotations.finditer(mask):
         opening = mask.find("(", match.start(), match.end())
@@ -687,7 +684,7 @@ def _java_mapping_endpoints(text: str) -> list[str]:
     return endpoints
 
 
-def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Optional[str]) -> list[str]:
+def _extract_endpoints(project_dir: str, files_rel: list[str], framework: str | None) -> list[str]:
     """
     Грубая эвристика эндпоинтов для аналитики: ищет URL-паттерны и/или HTTP-методы
     в urls.py / api.py / serializers. НЕ LLM — простые regex.
@@ -699,13 +696,13 @@ def _extract_endpoints(project_dir: str, files_rel: list[str], framework: Option
         # Django url conf
         re.compile(r"""(?:path|url|re_path|include)\(\s*['"]([^'"'\n]{1,120})['"]"""),
         # HTTP-методы рядом со строковым путём
-        re.compile(r"""(?:GET|POST|PUT|PATCH|DELETE)\b[^\n]{0,80}?['"]([^'"'\n]{1,120})['"]""", re.I),
+        re.compile(r"""(?:GET|POST|PUT|PATCH|DELETE)\b[^\n]{0,80}?['"]([^'"'\n]{1,120})['"]""", re.IGNORECASE),
         # DRF @api_view / python-декораторы
-        re.compile(r"""@(?:get|post|put|patch|delete|api_view)\s*\(\s*(?:.*?['"]([^'"'\n]{1,120})['"])?""", re.I),
+        re.compile(r"""@(?:get|post|put|patch|delete|api_view)\s*\(\s*(?:.*?['"]([^'"'\n]{1,120})['"])?""", re.IGNORECASE),
         # Spring @*Mapping: @GetMapping("/..."), @RequestMapping(value = "/...")
-        re.compile(r"""@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"'\n]{1,120})['"]""", re.I),
+        re.compile(r"""@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"'\n]{1,120})['"]""", re.IGNORECASE),
         # JAX-RS: @Path("/...")
-        re.compile(r"""@Path\s*\(\s*['"]([^'"'\n]{1,120})['"]""", re.I),
+        re.compile(r"""@Path\s*\(\s*['"]([^'"'\n]{1,120})['"]""", re.IGNORECASE),
     ]
     for rel in files_rel:
         base = os.path.basename(rel)
@@ -739,7 +736,7 @@ def _extract_models(project_dir: str, files_rel: list[str], language: str) -> li
             if base != "models.py":
                 continue
             # class Foo(models.Model) / class Foo(models.ModelBase)
-            for m in re.finditer(r"^\s*class\s+(\w+)\s*\(\s*(?:[\w.]*Model[^,)]*)", text, re.M):
+            for m in re.finditer(r"^\s*class\s+(\w+)\s*\(\s*(?:[\w.]*Model[^,)]*)", text, re.MULTILINE):
                 name = m.group(1)
                 if name not in models:
                     models.append(name)
@@ -939,14 +936,14 @@ def _patch_skillsrc_fields(text: str, language: str, framework: str,
 # 7. Сборка отчёта
 # ---------------------------------------------------------------------------
 
-def _norm(path: Optional[str]) -> Optional[str]:
+def _norm(path: str | None) -> str | None:
     """Нормализует разделители путей в forward-slash для кроссплатформенного вывода."""
     if not path:
         return path
     return path.replace("\\", "/")
 
 
-def resolve_persistent_output_path(output: str) -> tuple[Optional[str], Optional[str]]:
+def resolve_persistent_output_path(output: str) -> tuple[str | None, str | None]:
     """Accept only paths beneath an exact docs/to_do directory, without traversal."""
     raw = Path(output)
     if ".." in raw.parts:
@@ -959,8 +956,8 @@ def resolve_persistent_output_path(output: str) -> tuple[Optional[str], Optional
 
 
 def build_report(status: str, stack: dict, files_extracted: list[str],
-                 output_file: Optional[str], skillsrc_updated: bool,
-                 skillsrc_path: Optional[str], warnings: list[str],
+                 output_file: str | None, skillsrc_updated: bool,
+                 skillsrc_path: str | None, warnings: list[str],
                  errors: list[str]) -> dict:
     # нормализуем пути в stack.detection (manifest может прийти с backslash)
     if isinstance(stack.get("detection"), dict) and stack["detection"].get("manifest"):

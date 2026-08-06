@@ -24,9 +24,9 @@ run_tests.py — детерминированный оракул исполне�
     NOT_RUNNABLE — это ЧЕСТНЫЙ ответ «не могу проверить», а не ПРИНЯТО.
 
 Выходные exit codes (для встраивания в CI):
-    0 — PASS (тесты прошли) ИЛИ NOT_RUNNABLE (окружения нет, но отчёт честный)
+    0 — PASS (тесты прошли)
     1 — FAIL (тесты упали)
-    2 — ошибка самого раннера (некорректный вызов)
+    2 — NOT_RUNNABLE или ошибка самого раннера (некорректный вызов)
 """
 
 from __future__ import annotations
@@ -40,8 +40,6 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Конфигурация стека
@@ -74,7 +72,12 @@ MAX_OUTPUT_EXCERPT = 60  # строк сырого вывода в raw_output_ex
 COMMAND_TIMEOUT = 600     # секунд на весь запуск раннера
 
 
-def detect_language_from_skillsrc(skillsrc_path: str) -> Optional[dict]:
+def is_windows() -> bool:
+    """Return the host command-wrapper convention without exposing global state to tests."""
+    return os.name == "nt"
+
+
+def detect_language_from_skillsrc(skillsrc_path: str) -> dict | None:
     """
     Простейший парсер .skillsrc (YAML-подобный, без внешних зависимостей).
     Извлекает project.language / project.framework / test.framework / build_tool.
@@ -141,7 +144,7 @@ def check_python_env(project_dir: str, python_executable: str | None = None) -> 
     interpreter = None
     interpreter_bin = select_python_interpreter(project_dir, python_executable)
 
-    def _probe(binary: str) -> Optional[str]:
+    def _probe(binary: str) -> str | None:
         """Возвращает версию интерпретатора, если binary реально запускается.
 
         Store-заглушка Windows (WindowsApps\\python3.exe) возвращает rc=9009 и
@@ -150,7 +153,7 @@ def check_python_env(project_dir: str, python_executable: str | None = None) -> 
         """
         try:
             ver = subprocess.run(
-                [binary, "--version"], capture_output=True, text=True, timeout=10
+                [binary, "--version"], capture_output=True, text=True, timeout=10, check=False
             )
         except (subprocess.SubprocessError, OSError):
             return None
@@ -177,7 +180,7 @@ def check_python_env(project_dir: str, python_executable: str | None = None) -> 
         try:
             r = subprocess.run(
                 [interpreter_bin, "-c", "import pytest; print(pytest.__version__)"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, check=False,
             )
             if r.returncode == 0:
                 pytest_available = True
@@ -222,7 +225,7 @@ def check_java_env(project_dir: str) -> dict:
     ) or shutil.which("java")
     if java_bin:
         try:
-            ver = subprocess.run([java_bin, "-version"], capture_output=True, text=True, timeout=10)
+            ver = subprocess.run([java_bin, "-version"], capture_output=True, text=True, timeout=10, check=False)
             interpreter = (ver.stderr or ver.stdout).strip().splitlines()[0] if (ver.stderr or ver.stdout) else "java"
         except (subprocess.SubprocessError, OSError):
             interpreter = "java"
@@ -276,7 +279,7 @@ def run_subprocess(cmd: list[str], cwd: str) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
-            timeout=COMMAND_TIMEOUT,
+            timeout=COMMAND_TIMEOUT, check=False,
         )
         return proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired:
@@ -443,8 +446,8 @@ def parse_pytest_output(stdout: str, stderr: str, exit_code: int) -> dict:
     }
 
 
-def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[str],
-                      extra_args: Optional[list]) -> dict:
+def run_python_pytest(project_dir: str, env_bin: str, pytest_target: str | None,
+                      extra_args: list | None) -> dict:
     """Запускает pytest, возвращает блок результата."""
     cmd = [env_bin, "-m", "pytest", "-v", "--tb=short", "-rA"]
     if pytest_target:
@@ -464,8 +467,10 @@ def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[st
         verdict = "FAIL"
         if not parsed["root_cause"]:
             parsed["root_cause"] = [
-                "no_tests_collected: pytest не нашёл ни одного теста "
-                "(проверьте pytest-target / именование test_*.py)"
+                (
+                    "no_tests_collected: pytest не нашёл ни одного теста "
+                    "(проверьте pytest-target / именование test_*.py)"
+                )
             ]
     else:
         # exit 2 (collection error) и прочие — это FAIL, тесты не прошли
@@ -487,13 +492,14 @@ def run_python_pytest(project_dir: str, env_bin: str, pytest_target: Optional[st
     }
 
 
-def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
+def run_java(project_dir: str, runner: str, extra_args: list | None) -> dict:
     """Запускает Maven/Gradle test."""
     is_maven = runner.lower().startswith(("mvn", "maven"))
+    executable = f"./{runner}" if not is_windows() and runner in {"mvnw", "gradlew"} else runner
     if is_maven:
-        cmd = [runner if runner not in {"maven"} else "mvn", "test"] + (extra_args or [])
+        cmd = [executable if runner not in {"maven"} else "mvn", "test"] + (extra_args or [])
     elif runner.lower().startswith(("gradle", "gradlew")):
-        cmd = [runner if runner != "gradle" else "gradle", "test"] + (extra_args or [])
+        cmd = [executable if runner != "gradle" else "gradle", "test"] + (extra_args or [])
     else:
         cmd = ["mvn", "test"]
 
@@ -516,7 +522,6 @@ def run_java(project_dir: str, runner: str, extra_args: Optional[list]) -> dict:
         })
 
     failed_methods = []
-    fail_re = re.compile(r"(Test\s+[\w.]+|<<<\s*(FAILURE|ERROR)!)")
     for line in combined.splitlines():
         if "FAILURE!" in line or "ERROR!" in line:
             failed_methods.append({
@@ -551,7 +556,7 @@ def _excerpt(text: str) -> str:
         return text.strip()
     head = "\n".join(lines[:5])
     tail = "\n".join(lines[-MAX_OUTPUT_EXCERPT + 5:])
-    return head + "\n...\n[усечено {} строк]\n...\n".format(len(lines) - MAX_OUTPUT_EXCERPT) + tail
+    return head + f"\n...\n[усечено {len(lines) - MAX_OUTPUT_EXCERPT} строк]\n...\n" + tail
 
 
 # ---------------------------------------------------------------------------
@@ -559,8 +564,8 @@ def _excerpt(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def build_report(verdict: str, target: dict, environment: dict,
-                 stats: Optional[dict], failed_methods: list, root_cause: list,
-                 raw_output_excerpt: Optional[str], exit_code: Optional[int]) -> dict:
+                 stats: dict | None, failed_methods: list, root_cause: list,
+                 raw_output_excerpt: str | None, exit_code: int | None) -> dict:
     """Собирает отчёт строго по schemas/run-tests-output.schema.json."""
     # убираем внутреннее поле
     env_out = {k: v for k, v in environment.items() if not k.startswith("_")}
@@ -722,8 +727,8 @@ def main() -> int:
         }
         report = build_not_runnable(
             env, language,
-            "Раннер для {} ещё не реализован в tools/run_tests.py. "
-            "Это честный NOT_RUNNABLE — не ПРИНЯТО.".format(language),
+            f"Раннер для {language} ещё не реализован в tools/run_tests.py. "
+            "Это честный NOT_RUNNABLE — не ПРИНЯТО.",
         )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 2

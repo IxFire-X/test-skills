@@ -11,7 +11,6 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-
 CORE_SKILLS = ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]
 STAGES = [
     ("context-marker", "skill"),

@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
 

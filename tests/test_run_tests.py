@@ -1,7 +1,9 @@
 import json
+import os
 import subprocess
 import sys
 
+import pytest
 from jsonschema import Draft202012Validator
 
 
@@ -67,11 +69,11 @@ def test_java_wrapper_precedes_system_maven(runner, tmp_path, monkeypatch):
 
 def test_maven_uses_final_surefire_aggregate(runner, monkeypatch, tmp_path):
     """Catches reporting only the first suite instead of Maven's final aggregate."""
-    output = "\n".join([
-        "Tests run: 13, Failures: 0, Errors: 0, Skipped: 0",
-        "Tests run: 11, Failures: 0, Errors: 0, Skipped: 0",
-        "Tests run: 24, Failures: 0, Errors: 0, Skipped: 0",
-    ])
+    output = (
+        "Tests run: 13, Failures: 0, Errors: 0, Skipped: 0\n"
+        "Tests run: 11, Failures: 0, Errors: 0, Skipped: 0\n"
+        "Tests run: 24, Failures: 0, Errors: 0, Skipped: 0"
+    )
     monkeypatch.setattr(runner, "run_subprocess", lambda cmd, cwd: (0, output, ""))
 
     result = runner.run_java(str(tmp_path), "mvnw.cmd", None)
@@ -81,10 +83,9 @@ def test_maven_uses_final_surefire_aggregate(runner, monkeypatch, tmp_path):
     assert result["stats"]["passed"] == 24
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows command-wrapper behavior")
 def test_windows_project_wrapper_is_resolved_from_project_directory(runner, tmp_path, monkeypatch):
     """Catches invoking mvnw.cmd by PATH instead of its project-local wrapper path."""
-    if runner.os.name != "nt":
-        return
     wrapper = tmp_path / "mvnw.cmd"
     wrapper.write_text("@echo off\n", encoding="utf-8")
     observed = {}
@@ -98,6 +99,25 @@ def test_windows_project_wrapper_is_resolved_from_project_directory(runner, tmp_
     runner.run_subprocess(["mvnw.cmd", "test"], str(tmp_path))
 
     assert observed["cmd"] == ["cmd", "/c", str(wrapper), "test"]
+
+
+@pytest.mark.parametrize("wrapper", ["mvnw", "gradlew"])
+def test_posix_project_wrapper_is_invoked_from_project_directory(runner, monkeypatch, tmp_path, wrapper):
+    """Catches project wrappers being selected but lost because POSIX PATH omits dot."""
+    observed = {}
+
+    def fake_run(command, cwd):
+        observed["command"] = command
+        observed["cwd"] = cwd
+        return 0, "Tests run: 1, Failures: 0, Errors: 0, Skipped: 0", ""
+
+    monkeypatch.setattr(runner, "run_subprocess", fake_run)
+    monkeypatch.setattr(runner, "is_windows", lambda: False)
+
+    result = runner.run_java(str(tmp_path), wrapper, None)
+
+    assert result["verdict"] == "PASS"
+    assert observed == {"command": [f"./{wrapper}", "test"], "cwd": str(tmp_path)}
 
 
 def test_no_language_cli_is_nonzero_and_schema_valid(root, tmp_path):

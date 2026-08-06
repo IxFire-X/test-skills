@@ -1,0 +1,99 @@
+# Core runtime acceptance — 2026-08-06
+
+## Scope and environment
+
+Accepted subject: the deterministic portable core runtime only. This is not an
+acceptance claim for the six skills, adapters, or end-to-end skill behavior;
+those remain Plan 2/3 work.
+
+- Worktree under test: `D:\AI-Projects\.worktrees\portable-testing-skills\test-orchestration-skills`
+- Base HEAD: `f6c2d5e`
+- Audit interpreter: `D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe`
+- Runtime dependencies: `jsonschema`, `PyYAML`, `pytest` from the audit venv.
+- Java baseline: `JAVA_HOME=D:\AI-Projects\.tools\jdk-17`, Maven bin
+  `D:\AI-Projects\.tools\maven\bin`, OpenJDK `17.0.10`.
+
+## Behaviour-first evidence
+
+Before the runner correction, the newly added POSIX-wrapper unit coverage was
+run first and failed as expected:
+
+```text
+python -m pytest tests/test_run_tests.py -q
+2 failed, 9 passed
+observed command: ['mvnw', 'test']; expected: ['./mvnw', 'test']
+```
+
+The minimal fix invokes selected POSIX project wrappers as `./mvnw` or
+`./gradlew`; the Windows `.cmd` wrapper test remains Windows-only via
+`skipif(os.name != "nt")`.
+
+## Seven CLI smoke checks
+
+`tests/test_cli_smoke.py` invokes every command below as a real subprocess via
+the current interpreter, with UTF-8 decoding, `check=False`, and a timeout.
+Temporary Python project, artifact/schema, and trace inputs are pytest-owned
+`tmp_path` fixtures; no persistent temporary project is created.
+
+| CLI and direct command shape | Exit | Key observed output |
+| --- | ---: | --- |
+| `doctor.py --root ROOT` | 0 | JSON `status: PASS` |
+| `contract_check.py --root ROOT --full` | 0 | JSON `status: passed` |
+| `render_contract_docs.py --root ROOT --check` | 0 | clean empty stdout/stderr |
+| `scan_project.py --project TMP --target src/api.py` | 0 | schema-valid JSON, `status: success`, only `src/api.py`, no `.skillsrc` write |
+| `run_tests.py --project TMP --language python --python-executable SYS --pytest-target TMP/test_smoke.py` | 0 | schema-valid JSON `verdict: PASS`, `stats.total/passed: 1/1` |
+| `validate_artifact.py TMP/schema.json TMP/valid.json` | 0 | JSON `status: valid` |
+| `validate_artifact.py TMP/schema.json TMP/invalid.json` | 1 | JSON `status: invalid` |
+| `trace_check.py TMP/trace.json --require-execution` | 0 | JSON `valid: true`, `trace_audit.verdict: PASS` |
+
+Focused smoke and runner command:
+
+```text
+python -m pytest tests/test_cli_smoke.py tests/test_run_tests.py -q
+16 passed
+```
+
+## Pack verification
+
+```text
+python -m pytest tests -q
+280 passed in 11.49s
+
+python -m ruff check tools tests
+All checks passed!
+
+python tools/contract_check.py --root . --full
+exit 0; {"status": "passed", "errors": []}
+
+python tools/render_contract_docs.py --root . --check
+exit 0; no output (checked-in projections are deterministic and clean)
+```
+
+The full pytest suite includes schema meta-validation coverage for the existing
+JSON Schemas.
+
+## Real Java fixture baseline
+
+With `JAVA_HOME` and `PATH` set to the supplied JDK 17 and Maven locations:
+
+```text
+python tools/run_tests.py --project D:\AI-Projects\step5-java-demo --language java
+exit 0
+verdict: PASS
+target.command: mvnw.cmd test
+environment.interpreter: openjdk version "17.0.10" 2024-01-16
+stats: total=24, passed=24, failed=0, errors=0, skipped=0
+```
+
+The project-local Windows wrapper `mvnw.cmd` was selected, and Maven’s final
+Surefire aggregate confirms 24/24 tests.
+
+## Known warnings and deferred items
+
+- The Java fixture emitted its application-level expected warning about a
+  missing request parameter; the Maven build and all tests passed.
+- `scan_project.py` may legitimately return `partial` when a project lacks
+  enough manifest evidence. The smoke fixture provides both application and
+  test dependency evidence and therefore verifies `success`.
+- Skill semantics, adapter integration, and end-to-end skill acceptance are
+  explicitly deferred to Plans 2/3 and are not covered by this report.

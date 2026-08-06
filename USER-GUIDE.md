@@ -18,6 +18,56 @@ context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-
 
 ## 2. Быстрый старт
 
+### 2.1 Переносимый runtime: требования и bootstrap
+
+Для детерминированного runtime нужен Python 3.10+ и зависимости из
+`requirements-dev.txt` (в том числе `jsonschema`, `PyYAML` и `pytest`). Java
+проверки дополнительно требуют JDK и Maven или Gradle; project-local wrapper
+(`mvnw`/`mvnw.cmd`/`gradlew`) имеет приоритет над системным runner.
+
+```sh
+python -m pip install -r requirements-dev.txt
+python tools/doctor.py --root .
+```
+
+`doctor.py` — первая проверка переносимой среды. Его JSON-статус `PASS`
+означает, что Python runtime готов; `NOT_RUNNABLE` означает честно
+недоступную зависимость или среду.
+
+### 2.2 Семь CLI runtime
+
+Все команды запускайте из корня пакета. Их stdout предназначен для JSON,
+кроме `render_contract_docs.py --check`, который при чистых проекциях молчит.
+
+```sh
+python tools/doctor.py --root .
+python tools/contract_check.py --root . --full
+python tools/render_contract_docs.py --root . --check
+python tools/scan_project.py --project /path/to/project --target src/api.py
+python tools/run_tests.py --project /path/to/project --language python
+python tools/validate_artifact.py schemas/run-tests-output.schema.json artifact.json
+python tools/trace_check.py trace-document.json --require-execution
+```
+
+Для `run_tests.py` exit code строго означает: `0` — `PASS`, `1` — `FAIL`,
+`2` — `NOT_RUNNABLE` или внутренняя ошибка runner. Для валидаторов
+`validate_artifact.py` и `trace_check.py`: `0` — валидно, `1` — невалидный
+документ, `2` — ошибка аргументов, входа или схемы. `scan_project.py` отдаёт
+`0` для `success`/`partial` и `1` для `error`; `doctor.py` отдаёт `0` для
+`PASS` и `2` для `NOT_RUNNABLE`. Ненулевой код никогда нельзя преобразовывать
+в успешный verdict в CI.
+
+### 2.3 Артефакты и границы runtime
+
+Постоянные диагностические и приёмочные артефакты runtime хранятся только в
+`docs/to_do/`; `scan_project.py --output` также принимает только путь внутри
+точного каталога `docs/to_do`. Не записывайте результаты проверки в исходные
+файлы скиллов или в проект клиента.
+
+Этот runtime принят только как детерминированное ядро: шесть скиллов,
+адаптеры и сквозное поведение скиллов относятся к планам 2/3 и здесь не
+заявляются завершёнными.
+
 **Проверка переносимой среды:**
 ```
 python tools/doctor.py --root .
