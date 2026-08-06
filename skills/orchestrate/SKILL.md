@@ -5,6 +5,8 @@ description: >
   Единственный пайплайн:
   - test: context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
   context-marker вызывается автоматически при обнаружении сырых .md-файлов (SDD-проекты).
+  Используй, когда нужно: создай тест-кейсы, сгенерируй автотесты, запусти тестовый
+  пайплайн, создай тесты, инициализируй проект, quickstart или настрой проект.
 ---
 
 # Скилл: Оркестратор (orchestrate v2.0)

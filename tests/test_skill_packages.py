@@ -44,3 +44,29 @@ def test_registered_skill_packages_have_supported_frontmatter(root):
         assert fields["description"]
         assert "<" not in fields["description"]
         assert ">" not in fields["description"]
+
+
+def test_frontmatter_descriptions_preserve_required_discovery_intents(root):
+    """Catches frontmatter cleanup that removes the only metadata-level discovery intent."""
+    contract = json.loads((root / "contracts/pipeline.json").read_text(encoding="utf-8"))
+    descriptions = {
+        skill_id: _frontmatter_fields(root / relative_path)["description"]
+        for skill_id, relative_path in contract["skill_files"].items()
+    }
+
+    for intent in (
+        "проверь сгенерированные автотесты",
+        "отвалидируй Java-код автотестов",
+        "после tc-to-autotest",
+    ):
+        assert intent in descriptions["autotest-reviewer"]
+    for intent in (
+        "создай тест-кейсы",
+        "сгенерируй автотесты",
+        "запусти тестовый пайплайн",
+        "создай тесты",
+        "инициализируй проект",
+        "quickstart",
+        "настрой проект",
+    ):
+        assert intent in descriptions["orchestrate"]
