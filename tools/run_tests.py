@@ -622,6 +622,8 @@ def build_internal_error_report(error: Exception) -> dict:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Детерминированный оракул исполнения автотестов (Опора 1). "
                     "Выводит JSON-вердикт PASS|FAIL|NOT_RUNNABLE по схеме schemas/run-tests-output.schema.json."

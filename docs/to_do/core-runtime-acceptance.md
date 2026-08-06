@@ -31,33 +31,44 @@ The minimal fix invokes selected POSIX project wrappers as `./mvnw` or
 ## Seven CLI smoke checks
 
 `tests/test_cli_smoke.py` invokes every command below as a real subprocess via
-the current interpreter, with UTF-8 decoding, `check=False`, and a timeout.
-Temporary Python project, artifact/schema, and trace inputs are pytest-owned
-`tmp_path` fixtures; no persistent temporary project is created.
+the current interpreter, with raw byte capture, `check=False`, and a timeout.
+It decodes contract-bearing stdout as strict UTF-8 before JSON parsing; stderr
+is separately decoded with UTF-8 replacement only for diagnostics. Temporary
+Python project, artifact/schema, and trace inputs are pytest-owned `tmp_path`
+fixtures; no persistent temporary project is created.
+
+Fix Round 1 found a Windows CP1251 framing defect: scanner and runner JSON
+with Cyrillic text failed strict UTF-8 decoding in a normal inherited
+environment. The smoke helper no longer sets `PYTHONUTF8` or
+`PYTHONIOENCODING`. Instead, `scan_project.py`, `run_tests.py`, `doctor.py`,
+and `contract_check.py` explicitly reconfigure stdout to UTF-8 at entry. The
+scanner smoke snapshots the complete fixture tree before invocation—every
+relative directory plus every relative file and exact bytes—and requires exact
+equality afterward.
 
 | CLI and direct command shape | Exit | Key observed output |
 | --- | ---: | --- |
 | `doctor.py --root ROOT` | 0 | JSON `status: PASS` |
 | `contract_check.py --root ROOT --full` | 0 | JSON `status: passed` |
 | `render_contract_docs.py --root ROOT --check` | 0 | clean empty stdout/stderr |
-| `scan_project.py --project TMP --target src/api.py` | 0 | schema-valid JSON, `status: success`, only `src/api.py`, no `.skillsrc` write |
+| `scan_project.py --project TMP --target src/api.py` | 0 | schema-valid JSON, `status: success`, only `src/api.py`, exact fixture tree unchanged (including directories and file bytes) |
 | `run_tests.py --project TMP --language python --python-executable SYS --pytest-target TMP/test_smoke.py` | 0 | schema-valid JSON `verdict: PASS`, `stats.total/passed: 1/1` |
 | `validate_artifact.py TMP/schema.json TMP/valid.json` | 0 | JSON `status: valid` |
 | `validate_artifact.py TMP/schema.json TMP/invalid.json` | 1 | JSON `status: invalid` |
 | `trace_check.py TMP/trace.json --require-execution` | 0 | JSON `valid: true`, `trace_audit.verdict: PASS` |
 
-Focused smoke and runner command:
+Focused Fix Round 1 smoke command:
 
 ```text
-python -m pytest tests/test_cli_smoke.py tests/test_run_tests.py -q
-16 passed
+python -m pytest tests/test_cli_smoke.py -q
+9 passed in 1.80s
 ```
 
 ## Pack verification
 
 ```text
 python -m pytest tests -q
-280 passed in 11.49s
+284 passed in 11.45s
 
 python -m ruff check tools tests
 All checks passed!
@@ -95,5 +106,8 @@ Surefire aggregate confirms 24/24 tests.
 - `scan_project.py` may legitimately return `partial` when a project lacks
   enough manifest evidence. The smoke fixture provides both application and
   test dependency evidence and therefore verifies `success`.
+- Normal Windows console code-page inheritance is no longer accepted as JSON
+  framing: runtime CLI stdout is explicitly UTF-8, while stderr remains
+  diagnostic-only and is safely replacement-decoded by the smoke harness.
 - Skill semantics, adapter integration, and end-to-end skill acceptance are
   explicitly deferred to Plans 2/3 and are not covered by this report.

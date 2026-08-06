@@ -34,6 +34,8 @@ def inspect_environment(root: Path) -> dict[str, object]:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Report portable skill-pack runtime readiness as JSON."
     )

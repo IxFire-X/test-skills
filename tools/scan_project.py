@@ -977,6 +977,8 @@ def build_report(status: str, stack: dict, files_extracted: list[str],
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args()
 

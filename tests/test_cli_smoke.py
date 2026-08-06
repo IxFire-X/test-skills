@@ -7,24 +7,49 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
 
 
-def _run_cli(root: Path, tool: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+def _run_cli(root: Path, tool: str, *arguments: str) -> subprocess.CompletedProcess[bytes]:
     """Run a runtime CLI through the current interpreter with bounded output."""
     return subprocess.run(
         [sys.executable, str(root / "tools" / tool), *arguments],
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        text=False,
         check=False,
         timeout=30,
     )
 
 
-def _json_output(completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
-    return json.loads(completed.stdout)
+def _stdout_text(completed: subprocess.CompletedProcess[bytes]) -> str:
+    """Decode contract-bearing stdout strictly so malformed JSON bytes cannot be repaired."""
+    try:
+        return completed.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        error.add_note("CLI stdout must be strict UTF-8 JSON; stderr is diagnostic-only.")
+        raise
+
+
+def _stderr_text(completed: subprocess.CompletedProcess[bytes]) -> str:
+    """Decode non-contract diagnostic stderr without masking stdout contract failures."""
+    return completed.stderr.decode("utf-8", errors="replace")
+
+
+def _json_output(completed: subprocess.CompletedProcess[bytes]) -> dict[str, object]:
+    return json.loads(_stdout_text(completed))
+
+
+def _project_tree_snapshot(root: Path) -> tuple[tuple[str, ...], tuple[tuple[str, bytes], ...]]:
+    """Return every relative directory and every relative file with its exact bytes."""
+    paths = sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix())
+    directories = tuple(path.relative_to(root).as_posix() for path in paths if path.is_dir())
+    files = tuple(
+        (path.relative_to(root).as_posix(), path.read_bytes())
+        for path in paths
+        if path.is_file()
+    )
+    return directories, files
 
 
 def _schema(root: Path, name: str) -> Draft202012Validator:
@@ -53,6 +78,36 @@ def _valid_trace() -> dict[str, object]:
     }
 
 
+def test_run_cli_keeps_stdout_as_raw_bytes(root):
+    """Catches replacement decoding before smoke assertions can validate CLI stdout."""
+    completed = _run_cli(root, "doctor.py", "--root", str(root))
+
+    assert isinstance(completed.stdout, bytes)
+    assert isinstance(completed.stderr, bytes)
+
+
+def test_strict_stdout_rejects_invalid_utf8_bytes():
+    """Catches malformed stdout being repaired before its JSON contract is checked."""
+    completed = subprocess.CompletedProcess(
+        args=["fake-cli"], returncode=0, stdout=b'{"value":"\xff"}', stderr=b"",
+    )
+
+    with pytest.raises(UnicodeDecodeError, match="invalid start byte"):
+        _stdout_text(completed)
+
+
+def test_project_tree_snapshot_detects_a_single_file_mutation(tmp_path):
+    """Catches a snapshot implementation that ignores changed fixture file bytes."""
+    source = tmp_path / "src" / "api.py"
+    source.parent.mkdir()
+    source.write_bytes(b"before")
+    before = _project_tree_snapshot(tmp_path)
+
+    source.write_bytes(b"after")
+
+    assert before != _project_tree_snapshot(tmp_path)
+
+
 def test_doctor_and_contract_tools_report_ready_portable_pack(root):
     """Catches runtime CLIs that stop returning successful machine-readable pack checks."""
     doctor = _run_cli(root, "doctor.py", "--root", str(root))
@@ -64,8 +119,8 @@ def test_doctor_and_contract_tools_report_ready_portable_pack(root):
     assert contract.returncode == 0
     assert _json_output(contract)["status"] == "passed"
     assert rendered.returncode == 0
-    assert rendered.stdout == ""
-    assert rendered.stderr == ""
+    assert _stdout_text(rendered) == ""
+    assert _stderr_text(rendered) == ""
 
 
 def test_scan_project_emits_schema_valid_json_without_persistent_project_writes(root, tmp_path):
@@ -78,6 +133,7 @@ def test_scan_project_emits_schema_valid_json_without_persistent_project_writes(
     source = tmp_path / "src" / "api.py"
     source.parent.mkdir()
     source.write_text("from fastapi import FastAPI\napp = FastAPI()\n", encoding="utf-8")
+    before = _project_tree_snapshot(tmp_path)
 
     completed = _run_cli(root, "scan_project.py", "--project", str(tmp_path), "--target", "src/api.py")
     report = _json_output(completed)
@@ -87,6 +143,7 @@ def test_scan_project_emits_schema_valid_json_without_persistent_project_writes(
     assert report["status"] == "success"
     assert report["files_extracted"] == ["src/api.py"]
     assert not (tmp_path / ".skillsrc").exists()
+    assert _project_tree_snapshot(tmp_path) == before
 
 
 def test_run_tests_executes_a_real_pytest_case_and_reports_its_count(root, tmp_path):
@@ -113,6 +170,16 @@ def test_run_tests_executes_a_real_pytest_case_and_reports_its_count(root, tmp_p
     assert report["verdict"] == "PASS"
     assert report["stats"]["total"] == 1
     assert report["stats"]["passed"] == 1
+
+
+def test_run_tests_emits_non_ascii_not_runnable_json_as_utf8(root, tmp_path):
+    """Catches Windows console-code-page bytes in runner JSON error output."""
+    completed = _run_cli(root, "run_tests.py", "--project", str(tmp_path), "--language", "go")
+    report = _json_output(completed)
+
+    assert completed.returncode == 2
+    assert report["verdict"] == "NOT_RUNNABLE"
+    assert "Раннер" in report["root_cause"][0]
 
 
 def test_validate_artifact_reports_valid_and_invalid_json(root, tmp_path):
