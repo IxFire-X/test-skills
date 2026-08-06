@@ -354,6 +354,15 @@ def test_gradlew_cmd_cli_emits_fresh_authoritative_method_evidence(root, tmp_pat
     assert report["execution_evidence"] == [{"run_id": report["run_id"], "method_id": "METHOD-1", "status": "passed"}]
 
 
+def test_artifact_runner_compatibility_rejects_python_file_for_java(runner, tmp_path):
+    """Catches a schema-valid Python artifact reaching Java evidence binding."""
+    source = tmp_path / "test_wrong.py"
+    source.write_text("def test_one(): assert True\n", encoding="utf-8")
+    bindings = {"file_specs": {"FILE-1": {"language": "python", "framework": "pytest"}}}
+
+    assert runner.validate_artifact_runner_compatibility(bindings, "java")
+
+
 def test_report_root_confinement_rejects_resolved_escape_and_keeps_in_root(runner, tmp_path):
     """Catches report XML discovery escaping via any resolved report-root path."""
     outside = tmp_path.parent / "outside-reports"

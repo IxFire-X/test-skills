@@ -140,7 +140,7 @@ passed, one skipped, and one failed `METHOD-*` binding. The requested external
 Maven baseline was also re-run with JDK 17 and Maven: it returned `PASS`,
 `mvnw.cmd test`, and `total=24, passed=24`.
 
-## Fix Round 2 measurements
+## Fix Round 4 measurements
 
 Current HEAD adds schema/digest validation of `tc-to-autotest` input, exact
 physical Python/Java method identity, and fail-closed Java report freshness.

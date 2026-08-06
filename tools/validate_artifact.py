@@ -64,7 +64,7 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
         return _report_error(f"runtime error: {error}")
     if errors:
         return 1, {"status": "invalid", "errors": [{"path": _error_path(error), "message": error.message} for error in errors]}
-    if Path(schema_path).name == "run-tests-output.schema.json":
+    if schema.get("$id") == "schemas/run-tests-output.schema.json":
         try:
             try:
                 from run_tests import validate_execution_evidence

@@ -316,6 +316,7 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
     if len({item["id"] for item in files}) != len(files) or len({item["id"] for item in methods}) != len(methods):
         return None, "automation artifact contains duplicate FILE or METHOD identities"
     file_map: dict[str, Path] = {}
+    file_specs: dict[str, dict] = {}
     for item in files:
         try:
             raw = Path(item["path"])
@@ -347,6 +348,7 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
                 if duplicates != [resolved]:
                     raise ValueError("java generated test FQN is not unique in executable source root")
             file_map[item["id"]] = resolved
+            file_specs[item["id"]] = item
         except (KeyError, TypeError, ValueError):
             return None, "automation artifact contains an invalid, unavailable, or digest-mismatched generated test file"
     method_map: dict[tuple[str, str], str] = {}
@@ -362,6 +364,7 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
     method_details = {item["id"]: item for item in methods}
     file_ids = set(file_map)
     referenced_methods: set[str] = set()
+    referenced_files: set[str] = set()
     for row in matrix:
         if any(file_id not in file_ids for file_id in row["generated_file_ids"]):
             return None, "automation artifact matrix references an unknown generated file"
@@ -370,12 +373,28 @@ def load_automation_artifact(path: str, project_dir: str) -> tuple[dict | None, 
             if not method or method["file_id"] not in row["generated_file_ids"] or row["test_case_id"] not in method["test_case_ids"]:
                 return None, "automation artifact matrix does not match declared generated files/methods"
             referenced_methods.add(method_id)
+            referenced_files.add(method["file_id"])
+        expected_files = {method_details[method_id]["file_id"] for method_id in row["generated_method_ids"] if method_id in method_details}
+        if set(row["generated_file_ids"]) != expected_files:
+            return None, "automation artifact matrix file ids are not exact method ownership"
     if referenced_methods != set(method_details):
         return None, "automation artifact matrix does not cover every generated method"
+    if referenced_files != file_ids:
+        return None, "automation artifact contains orphan generated files"
     # Method content digests cannot be extracted portably across Python/Java AST
     # variants without a parser. We validate their physical file digest and exact
     # declared method name during runner evidence binding instead of claiming it.
-    return {"files": file_map, "methods": method_map, "project_root": root, "method_digest_verified": False}, None
+    return {"files": file_map, "file_specs": file_specs, "methods": method_map, "project_root": root, "method_digest_verified": False}, None
+
+
+def validate_artifact_runner_compatibility(bindings: dict, language: str) -> str | None:
+    """Reject mixed or wrong generated source before starting a runner."""
+    expected = {"python": ("python", "pytest"), "java": ("java", "junit5")}.get(language)
+    if not expected:
+        return "automation artifact runner language is unsupported"
+    if any((item.get("language"), item.get("framework")) != expected for item in bindings["file_specs"].values()):
+        return f"automation artifact files are incompatible with {language} runner"
+    return None
 
 
 def _run_id(project_dir: str, bindings: dict | None) -> str:
@@ -945,6 +964,17 @@ def main() -> int:
                 env, "unknown",
                 "Не удалось определить язык проекта: .skillsrc не найден или без project.language. "
                 "Укажите --language явно или положите .skillsrc.",
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
+
+    if bindings:
+        compatibility_error = validate_artifact_runner_compatibility(bindings, language)
+        if compatibility_error:
+            report = build_not_runnable(
+                {"status": "partial", "interpreter": None, "interpreter_path": None,
+                 "working_dir": os.path.abspath(project_dir), "missing": ["automation_artifact"], "_framework": "unknown"},
+                language, compatibility_error,
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 2
