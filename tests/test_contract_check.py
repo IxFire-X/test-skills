@@ -1,5 +1,79 @@
 import copy
 
+CANONICAL_SKILL_FILES = {
+    "context-marker": "skills/context-marker/SKILL.md",
+    "tc-generator": "skills/tc-generator/SKILL.md",
+    "tc-reviewer": "skills/tc-reviewer/SKILL.md",
+    "tc-to-autotest": "skills/tc-to-autotest/SKILL.md",
+    "autotest-reviewer": "skills/autotest-reviewer/SKILL.md",
+    "orchestrate": "skills/orchestrate/SKILL.md",
+}
+LEGACY_SKILL_ROOTS = [
+    "Разметка контекста",
+    "Ручные тест-кейсы",
+    "Валидация тест-кейсов",
+    "Автоматизированные кейсы на основе тест-кейсов",
+    "Валидация автотестов",
+    "Оркестратор",
+]
+
+
+def test_skill_files_registry_is_exact_and_steps_have_no_skill_file(contract_check, contract, root):
+    """Catches missing or per-step skill paths instead of one portable registry."""
+    assert contract["skill_files"] == CANONICAL_SKILL_FILES
+    assert all("skill_file" not in step for step in contract["steps"])
+
+    invalid_contract = copy.deepcopy(contract)
+    invalid_contract["steps"][0]["skill_file"] = "skills/context-marker/SKILL.md"
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("skill_file" in error for error in report["errors"])
+
+
+def test_registered_skill_files_exist_and_legacy_skill_roots_are_absent(contract, root):
+    """Catches portable registry paths that do not match the completed directory move."""
+    assert all((root / relative_path).is_file() for relative_path in contract["skill_files"].values())
+    assert all(not (root / legacy_root).exists() for legacy_root in LEGACY_SKILL_ROOTS)
+
+
+def test_tc_to_autotest_requires_validation_report_and_two_canonical_case_branches(contract, contract_check, root):
+    """Catches bypassing reviewer evidence or either accepted/corrected case branch."""
+    steps = {step["id"]: step for step in contract["steps"]}
+    assert set(steps["tc-to-autotest"]["accepts"]) == {
+        "validation_report",
+        "generated_test_cases",
+        "corrected_test_cases",
+    }
+    assert set(steps["tc-to-autotest"]["forwards"]) == {
+        "validation_report",
+        "generated_test_cases",
+        "corrected_test_cases",
+        "generated_test_files",
+        "generated_test_methods",
+    }
+
+    invalid_contract = copy.deepcopy(contract)
+    invalid_contract["steps"][3]["accepts"].remove("validation_report")
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("tc-to-autotest" in error and "validation_report" in error for error in report["errors"])
+
+
+def test_contract_check_rejects_alias_artifact_in_autotest_stage(contract, contract_check, root):
+    """Catches a renamed generated-file artifact entering the automation stage."""
+    invalid_contract = copy.deepcopy(contract)
+    invalid_contract["steps"][3]["forwards"].remove("generated_test_files")
+    invalid_contract["steps"][3]["forwards"].append("generated_files")
+
+    report = contract_check.validate_pipeline_contract(invalid_contract, root, check_drift=False)
+
+    assert report["status"] == "failed"
+    assert any("tc-to-autotest canonical routing" in error for error in report["errors"])
+
 
 def test_pass_transition_is_terminal_not_user_rework(contract_check, contract, root):
     """Catches treating a successful execution verdict as a rework branch."""

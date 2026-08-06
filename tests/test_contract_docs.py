@@ -3,6 +3,15 @@ import json
 import sys
 
 
+def test_rendered_contracts_include_canonical_skill_files(render_contract_docs, contract):
+    """Catches a generated contract projection omitting portable skill locations."""
+    rendered = render_contract_docs.render_contracts(contract)
+
+    assert "## Canonical skill files" in rendered
+    assert "| `context-marker` | `skills/context-marker/SKILL.md` |" in rendered
+    assert "| `orchestrate` | `skills/orchestrate/SKILL.md` |" in rendered
+
+
 def test_markdown_projections_equal_rendered_contract(render_contract_docs, root):
     """Catches Markdown projections drifting from the normative JSON contract."""
     contract = json.loads((root / "contracts/pipeline.json").read_text(encoding="utf-8"))

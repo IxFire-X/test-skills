@@ -16,6 +16,14 @@ else:  # direct CLI execution
 from jsonschema import Draft202012Validator
 
 CORE_SKILLS = ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]
+CANONICAL_SKILL_FILES = {
+    "context-marker": "skills/context-marker/SKILL.md",
+    "tc-generator": "skills/tc-generator/SKILL.md",
+    "tc-reviewer": "skills/tc-reviewer/SKILL.md",
+    "tc-to-autotest": "skills/tc-to-autotest/SKILL.md",
+    "autotest-reviewer": "skills/autotest-reviewer/SKILL.md",
+    "orchestrate": "skills/orchestrate/SKILL.md",
+}
 STAGES = [
     ("context-marker", "skill"),
     ("tc-generator", "skill"),
@@ -103,6 +111,8 @@ def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) ->
     errors: list[str] = []
     if contract.get("core_skills") != CORE_SKILLS:
         errors.append("core skill registry must exactly match the portable core")
+    if contract.get("skill_files") != CANONICAL_SKILL_FILES:
+        errors.append("skill file registry must exactly match the portable core paths")
 
     artifact_ids = [artifact.get("id") for artifact in contract.get("artifacts", [])]
     known_artifacts = {artifact_id for artifact_id in artifact_ids if isinstance(artifact_id, str)}
@@ -117,6 +127,8 @@ def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) ->
         errors.append("step ids must be unique")
     if [(step.get("id"), step.get("kind")) for step in steps] != STAGES:
         errors.append("stages must use the exact portable order and skill/tool identities")
+    if any("skill_file" in step for step in steps):
+        errors.append("steps must not declare skill_file; skill_files is the sole path registry")
 
     available = {"raw_content"}
     for step in steps:
@@ -135,6 +147,24 @@ def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) ->
         available.update(step.get("produces", []))
 
     step_map = {step.get("id"): step for step in steps}
+    if step_map.get("tc-reviewer", {}).get("forwards") != [
+        "generated_test_cases",
+        "validation_report",
+        "corrected_test_cases",
+    ]:
+        errors.append("tc-reviewer canonical routing must forward validation_report and both case branches")
+    if step_map.get("tc-to-autotest", {}).get("accepts") != [
+        "validation_report",
+        "generated_test_cases",
+        "corrected_test_cases",
+    ] or step_map.get("tc-to-autotest", {}).get("forwards") != [
+        "validation_report",
+        "generated_test_cases",
+        "corrected_test_cases",
+        "generated_test_files",
+        "generated_test_methods",
+    ]:
+        errors.append("tc-to-autotest canonical routing must preserve validation_report and canonical case/file/method artifacts")
     required_links = {
         "tc-to-autotest": ("produces", {"generated_test_files", "generated_test_methods"}),
         "autotest-reviewer": ("accepts", {"generated_test_files", "generated_test_methods"}),

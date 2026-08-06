@@ -40,6 +40,9 @@ def render_contracts(contract: dict[str, Any]) -> str:
     lines = ["# Contract Reference", "", MARKER, "", "## Artifacts", "", "| Artifact | Description |", "|---|---|"]
     for artifact in contract["artifacts"]:
         lines.append(f"| `{artifact['id']}` | {artifact['description']} |")
+    lines.extend(["", "## Canonical skill files", "", "| Skill | Path |", "|---|---|"])
+    for skill in contract["core_skills"]:
+        lines.append(f"| `{skill}` | `{contract['skill_files'][skill]}` |")
     lines.extend(["", "## Review verdict branches", "", "| Reviewer | Verdict | Transform |", "|---|---|---|"])
     for transition in contract["transitions"]:
         verdict = transition.get("when", {}).get("review_verdict")

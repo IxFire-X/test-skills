@@ -20,6 +20,17 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `execution_evidence` | Execution evidence for every generated test method. |
 | `trace_audit` | Requirement-to-execution traceability evidence. |
 
+## Canonical skill files
+
+| Skill | Path |
+|---|---|
+| `context-marker` | `skills/context-marker/SKILL.md` |
+| `tc-generator` | `skills/tc-generator/SKILL.md` |
+| `tc-reviewer` | `skills/tc-reviewer/SKILL.md` |
+| `tc-to-autotest` | `skills/tc-to-autotest/SKILL.md` |
+| `autotest-reviewer` | `skills/autotest-reviewer/SKILL.md` |
+| `orchestrate` | `skills/orchestrate/SKILL.md` |
+
 ## Review verdict branches
 
 | Reviewer | Verdict | Transform |

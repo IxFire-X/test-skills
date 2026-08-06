@@ -3,12 +3,25 @@
   "$id": "schemas/pipeline.schema.json",
   "title": "Portable Testing Skills Pipeline Contract",
   "type": "object",
-  "required": ["version", "pipeline", "core_skills", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections"],
+  "required": ["version", "pipeline", "core_skills", "skill_files", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections"],
   "properties": {
     "$schema": {"type": "string"},
     "version": {"type": "string", "minLength": 1},
     "pipeline": {"const": "test-pipeline"},
     "core_skills": {"type": "array", "const": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]},
+    "skill_files": {
+      "type": "object",
+      "required": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"],
+      "properties": {
+        "context-marker": {"const": "skills/context-marker/SKILL.md"},
+        "tc-generator": {"const": "skills/tc-generator/SKILL.md"},
+        "tc-reviewer": {"const": "skills/tc-reviewer/SKILL.md"},
+        "tc-to-autotest": {"const": "skills/tc-to-autotest/SKILL.md"},
+        "autotest-reviewer": {"const": "skills/autotest-reviewer/SKILL.md"},
+        "orchestrate": {"const": "skills/orchestrate/SKILL.md"}
+      },
+      "additionalProperties": false
+    },
     "artifacts": {
       "type": "array",
       "minItems": 1,

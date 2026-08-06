@@ -3,6 +3,14 @@
   "version": "1.0",
   "pipeline": "test-pipeline",
   "core_skills": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"],
+  "skill_files": {
+    "context-marker": "skills/context-marker/SKILL.md",
+    "tc-generator": "skills/tc-generator/SKILL.md",
+    "tc-reviewer": "skills/tc-reviewer/SKILL.md",
+    "tc-to-autotest": "skills/tc-to-autotest/SKILL.md",
+    "autotest-reviewer": "skills/autotest-reviewer/SKILL.md",
+    "orchestrate": "skills/orchestrate/SKILL.md"
+  },
   "artifacts": [
     {"id": "raw_content", "description": "Unstructured supplied requirements or code context."},
     {"id": "analytics_documentation", "description": "Normalized requirements with provenance."},
@@ -21,8 +29,8 @@
   "steps": [
     {"id": "context-marker", "kind": "skill", "accepts": ["raw_content"], "forwards": [], "produces": ["analytics_documentation", "source_code_and_diff"], "rejects": []},
     {"id": "tc-generator", "kind": "skill", "accepts": ["analytics_documentation", "source_code_and_diff"], "forwards": ["analytics_documentation", "source_code_and_diff"], "produces": ["generated_test_cases"], "rejects": []},
-    {"id": "tc-reviewer", "kind": "skill", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
-    {"id": "tc-to-autotest", "kind": "skill", "accepts": ["generated_test_cases", "corrected_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases", "generated_test_files", "generated_test_methods"], "produces": ["automation_matrix", "generated_test_files", "generated_test_methods"], "rejects": []},
+    {"id": "tc-reviewer", "kind": "skill", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases", "validation_report", "corrected_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
+    {"id": "tc-to-autotest", "kind": "skill", "accepts": ["validation_report", "generated_test_cases", "corrected_test_cases"], "forwards": ["validation_report", "generated_test_cases", "corrected_test_cases", "generated_test_files", "generated_test_methods"], "produces": ["automation_matrix", "generated_test_files", "generated_test_methods"], "rejects": []},
     {"id": "autotest-reviewer", "kind": "skill", "accepts": ["generated_test_cases", "corrected_test_cases", "automation_matrix", "generated_test_files", "generated_test_methods"], "forwards": ["generated_test_files", "generated_test_methods"], "produces": ["autotest_review"], "rejects": []},
     {"id": "run-tests", "kind": "tool", "accepts": ["generated_test_files", "generated_test_methods"], "forwards": ["generated_test_methods", "execution_evidence"], "produces": ["run_tests_verdict", "execution_evidence"], "rejects": []},
     {"id": "trace-check", "kind": "tool", "accepts": ["analytics_documentation", "generated_test_cases", "generated_test_files", "generated_test_methods", "execution_evidence", "run_tests_verdict"], "forwards": [], "produces": ["trace_audit"], "rejects": []}
