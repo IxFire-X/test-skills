@@ -34,6 +34,11 @@ def render_contract_docs():
 
 
 @pytest.fixture
+def contract_check():
+    return load_tool("contract_check")
+
+
+@pytest.fixture
 def runner():
     return load_tool("run_tests")
 

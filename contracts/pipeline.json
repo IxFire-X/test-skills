@@ -1,0 +1,50 @@
+{
+  "$schema": "schemas/pipeline.schema.json",
+  "version": "1.0",
+  "pipeline": "test-pipeline",
+  "artifacts": [
+    {"id": "raw_content", "description": "Unstructured supplied requirements or code context."},
+    {"id": "analytics_documentation", "description": "Normalized requirements with provenance."},
+    {"id": "source_code_and_diff", "description": "Read-only project context and supplied changes."},
+    {"id": "generated_test_cases", "description": "Manual test cases derived from requirements."},
+    {"id": "validation_report", "description": "Review result for manual test cases."},
+    {"id": "corrected_test_cases", "description": "Safe corrected manual test cases."},
+    {"id": "automation_matrix", "description": "Mapping from accepted cases to generated tests."},
+    {"id": "autotest_review", "description": "Review result for generated automated tests."},
+    {"id": "run_tests_verdict", "description": "Deterministic execution evidence."},
+    {"id": "trace_audit", "description": "Requirement-to-execution traceability evidence."}
+  ],
+  "steps": [
+    {"id": "context-marker", "accepts": ["raw_content"], "forwards": [], "produces": ["analytics_documentation", "source_code_and_diff"], "rejects": []},
+    {"id": "tc-generator", "accepts": ["analytics_documentation", "source_code_and_diff"], "forwards": ["analytics_documentation", "source_code_and_diff"], "produces": ["generated_test_cases"], "rejects": []},
+    {"id": "tc-reviewer", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
+    {"id": "tc-to-autotest", "accepts": ["generated_test_cases", "corrected_test_cases"], "forwards": ["generated_test_cases", "corrected_test_cases"], "produces": ["automation_matrix"], "rejects": []},
+    {"id": "autotest-reviewer", "accepts": ["generated_test_cases", "corrected_test_cases", "automation_matrix"], "forwards": ["automation_matrix"], "produces": ["autotest_review"], "rejects": []},
+    {"id": "run-tests", "accepts": ["automation_matrix"], "forwards": [], "produces": ["run_tests_verdict"], "rejects": []},
+    {"id": "trace-check", "accepts": ["analytics_documentation", "generated_test_cases", "automation_matrix", "run_tests_verdict"], "forwards": [], "produces": ["trace_audit"], "rejects": []}
+  ],
+  "verdicts": {
+    "review": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
+    "execution": ["PASS", "FAIL", "NOT_RUNNABLE"]
+  },
+  "transitions": [
+    {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "complete"},
+    {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
+    {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"}
+  ],
+  "capabilities": [
+    {"language": "java", "framework": "junit5", "generation": true, "review": true, "execution": true, "status": "supported"},
+    {"language": "python", "framework": "pytest", "generation": true, "review": true, "execution": true, "status": "supported"},
+    {"language": "typescript", "framework": "jest", "generation": false, "review": false, "execution": false, "status": "experimental"},
+    {"language": "go", "framework": "go-testing", "generation": false, "review": false, "execution": false, "status": "experimental"}
+  ],
+  "artifact_policy": {
+    "persistent_root": "docs/to_do",
+    "generated_test_source": "isolated workspace under docs/to_do unless explicitly requested"
+  },
+  "traceability": ["requirement", "test_case", "generated_method", "execution_evidence"],
+  "projections": {
+    "contracts": "CONTRACTS.md",
+    "pipeline": "PIPELINE.md"
+  }
+}
