@@ -1,16 +1,16 @@
 # Portable Skills and Adapters Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. A task is not accepted until its RED/green evidence and read-only Sol review are complete.
 
-**Goal:** Make the six testing skills portable, prove their schema contracts in a fresh-agent campaign, and provide byte-preserving installation adapters.
+**Goal:** Relocate six testing skills to portable paths, validate their contract and behavior with reproducible fresh-agent campaigns, and add byte-preserving optional adapters.
 
-**Architecture:** `pipeline.json` is the sole registry for canonical skill locations and artifact routing. Each skill keeps its interface in `SKILL.md`, references, scripts, and assets only. The deterministic controller, not a reviewer or a Markdown report, validates every machine artifact and execution trace.
+**Architecture:** `contracts/pipeline.json` is the sole canonical routing and skill-path registry. A stage's schema-valid JSON envelope is machine authority; generated source files may be declared companions but execution evidence comes only from `run_tests.py`. `docs/to_do/skill-tests/` is immutable campaign evidence.
 
-**Tech Stack:** Markdown skills, JSON Schema Draft 2020-12, Python 3.11, PowerShell, pytest, Maven, pytest (Python projects).
+**Tech Stack:** Markdown Agent Skills, Draft 2020-12 JSON Schema, Python/pytest, Java/JUnit 5/Maven, PowerShell.
 
 ## Global constraints and campaign protocol
 
-Work from the worktree root and use these variables in every command:
+Run from `D:\AI-Projects\.worktrees\portable-testing-skills`:
 
 ```powershell
 $py = 'D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe'
@@ -18,13 +18,12 @@ $pack = 'test-orchestration-skills'
 $validator = 'C:\Users\User\.codex\skills\.system\skill-creator\scripts\quick_validate.py'
 ```
 
-- Preserve unrelated changes. Do not add package `README.md`, `SKILL-LITE.md`, or a `templates/` directory. A portable package contains only `SKILL.md`, `references/`, `scripts/`, and `assets/`.
-- Do not change a skill's wording while relocating it in Task 1. `git mv` moves contents; subsequent skill tasks make the only intentional skill-content edits.
-- Run TDD red/green/refactor for every production change. Add the named narrow test before implementation, demonstrate its failure, then make it pass.
-- Every changed JSON envelope is validated with `tools/validate_artifact.py`; `quick_validate.py` is supplemental skill-package validation only.
-- An evaluator is observation-only: it may write only its assigned evidence and artifact files. The implementation owner applies fixes after a batch. A fresh evaluator receives no expected verdict, scorecard conclusion, or previous evaluator output.
+- Preserve concurrent work. A package contains only `SKILL.md`, `references/`, `scripts/`, and `assets/`; no package `README.md`, `SKILL-LITE.md`, or `templates/` directory survives.
+- Every implementation task is RED → minimal GREEN → pressure → minimal refactor → final GREEN. `quick_validate.py` supplements, never replaces, schema validation.
+- Evaluators are observation-only and write only their assigned evidence. Each evaluator spawn explicitly uses `fork_turns: "none"`, receives no expected answer/verdict or prior output, and is run sequentially (one active observer, safely within four global slots). A fresh Sol reviewer reads evidence/diff but does not edit.
+- A stage with a schema writes its output JSON under `artifacts/outputs/<phase>/rep-<nn>/`; validate it with `tools/validate_artifact.py`. Markdown captures raw prompt/observation only. Never overwrite a previous rep, pressure run, scorecard, source companion, or controller output.
 
-### One campaign layout for every `context-marker`, `tc-generator`, `tc-reviewer`, `tc-to-autotest`, `autotest-reviewer`, and `orchestrate` campaign
+Create this exact tree for every skill campaign before RED:
 
 ```text
 docs/to_do/skill-tests/<skill-id>/
@@ -38,41 +37,30 @@ docs/to_do/skill-tests/<skill-id>/
   05-scorecards/green-final.json
   06-run-metadata.json
   artifacts/inputs/
-  artifacts/outputs/
+  artifacts/outputs/<phase>/rep-<nn>/
 ```
 
-`00-scenario.json` stores one canonical comprehensive application prompt, one separate pressure prompt, its raw-input allowlist, and rubric IDs. Run the **identical canonical prompt** five times for RED (`rep-01` through `rep-05`) and five times for each GREEN phase. Do not turn repetitions into five different samples. If a true variant is later needed, it is a second scenario and receives its own five repetitions; this plan deliberately uses one comprehensive scenario plus one pressure prompt.
+`00-scenario.json` contains one comprehensive canonical application prompt, one pressure prompt, raw-input allowlist, and rubric IDs. Run that **identical** canonical prompt five independent times for RED and five times for each green batch; any essential second scenario needs its own five repetitions, but this plan uses one scenario plus pressure only. Scorecards hold `results[rep-01..rep-05][rubric-id]: boolean`, evidence links, and `all_passed`; final green needs every value true. RED must record at least one failing repetition×rubric, or record `no_gap: true`, the five observations, and `no_edit_reason` before proceeding. Pressure runs before the minimal refactor, then five fresh final green repetitions run. `06-run-metadata.json` records model, host, `fork_turns`, UTC timestamps, prompt SHA-256, exact allowlist, skill-present flag, output digests, and exits.
 
-Spawn every evaluator with `fork_turns: "none"`. Run each five-repetition batch sequentially (one active evaluator at a time), so the root plus observer work cannot exceed the global four-agent limit. Nested evaluators are feasible because they are short-lived fresh observation tasks; the owner waits for every evaluator before making a fix. A fresh Sol reviewer reads the completed scorecard and artifacts only; it does not edit files.
+## Gate 0: establish the current runtime boundary
 
-Each repetition Markdown file contains the raw prompt, raw observation, and command transcript only. If the stage has an output schema, the evaluator also writes the required schema-valid JSON envelope to `artifacts/outputs/<phase>/rep-<nn>/`; every quoted output filename below is relative to that phase-and-repetition directory unless it is explicitly a final deterministic-controller result. The controller validates it, for example:
-
-```powershell
-& $py "$pack\tools\validate_artifact.py" "$pack\schemas\tc-generator-output.schema.json" "$pack\docs\to_do\skill-tests\tc-generator\artifacts\outputs\02-green-initial\rep-01\tc-generator-output.json"
-```
-
-Use a unique output filename for labelled fixture outputs; never overwrite any evidence, output, scorecard, or metadata file. `06-run-metadata.json` records evaluator identity/model/host, `fork_turns`, UTC timestamps, prompt SHA-256, exact allowlist, skill-present flag, output file digests, and command exit codes. Each scorecard is JSON with one boolean per rubric ID, links to the five rep files, and `all_passed`; acceptance requires all five booleans true in the final GREEN scorecard. Task 9 adds and validates the evidence/scorecard schema.
-
-## Gate 0: preserve the accepted runtime baseline
-
-Plan 1 was accepted at `2894662`; its historical evidence (322 passed, 2 skipped; Ruff, contract/render, Maven 24/24, real pytest and fake Gradle) is context, not a frozen acceptance claim. Before and after this plan, record current measurements:
+Plan 1 acceptance `2894662` and its 322 passed/2 skipped, Ruff/contract/render, Maven 24/24, pytest/fake-Gradle results are historical only. Record fresh command output before and after this plan:
 
 ```powershell
 & $py -m pytest "$pack\tests" -q
 & $py -m ruff check "$pack\tools" "$pack\tests"
-& $py "$pack\tools\contract_check.py" --root "$pack"
-& $py "$pack\tools\render_pipeline.py" --root "$pack"
+& $py "$pack\tools\contract_check.py" --root "$pack" --full
+& $py "$pack\tools\render_contract_docs.py" --root "$pack" --check
 ```
 
-Commit no code in this gate. Continue only if any regression is diagnosed and resolved in its owning task.
+Do not commit code in this gate. A regression is diagnosed in its owning task, not waived by historical measurements.
 
-## Task 1: establish the portable registry and artifact route
+## Task 1: relocate packages and register the exact portable contract
 
-**Files:** Create `skills/`; move the six existing skill directories to `skills/<id>/`; modify `contracts/pipeline.json`, `schemas/pipeline.schema.json`, `tools/contract_check.py`, `tools/render_pipeline.py`, `docs/CONTRACTS.md`, `docs/PIPELINE.md`, `tests/test_contract_check.py`, `tests/test_contract_docs.py`.
+**Files:** Create `skills/`; move only the six source directories; modify `contracts/pipeline.json`, `schemas/pipeline.schema.json`, `tools/contract_check.py`, `tools/render_contract_docs.py`, root `CONTRACTS.md`, root `PIPELINE.md`, `tests/test_contract_check.py`, `tests/test_contract_docs.py`.
 
-1. Create the parent before moving: `New-Item -ItemType Directory -Force "$pack\skills" | Out-Null`.
-2. Add red tests named `test_skill_files_registry_is_exact_and_steps_have_no_skill_file`, `test_tc_to_autotest_requires_validation_report_and_two_canonical_case_branches`, `test_contract_check_rejects_alias_artifact_in_autotest_stage`, and `test_rendered_contracts_include_canonical_skill_files`; run only these tests and capture their failure.
-3. Add this exact `skill_files` object at the top level of `contracts/pipeline.json`:
+1. Add failing tests named `test_skill_files_registry_is_exact_and_steps_have_no_skill_file`, `test_tc_to_autotest_requires_validation_report_and_two_canonical_case_branches`, `test_contract_check_rejects_alias_artifact_in_autotest_stage`, and `test_rendered_contracts_include_canonical_skill_files`.
+2. Create `skills/`, add this exact top-level map to `contracts/pipeline.json`, and add it to schema `required`. Its schema is an object with these six required properties, `additionalProperties: false`, and `const` for every value; do not add `steps[*].skill_file`:
 
 ```json
 {
@@ -85,93 +73,141 @@ Commit no code in this gate. Continue only if any regression is diagnosed and re
 }
 ```
 
-4. In `pipeline.schema.json`, add `skill_files` to top-level `required`, and add an object property with `additionalProperties: false`, the same six-key `required` list, and one `const` property per exact path above. Do not add `steps[*].skill_file`.
-5. Set `tc-reviewer.forwards` exactly to `generated_test_cases`, `validation_report`, `corrected_test_cases`. Set `tc-to-autotest.accepts` exactly to `validation_report`, `generated_test_cases`, `corrected_test_cases`; set its `forwards` exactly to those three plus `generated_test_files`, `generated_test_methods`. Keep canonical artifact names only.
-6. Add `CANONICAL_SKILL_FILES` and, in `_semantic_errors`, reject a non-identical map, any step containing `skill_file`, and the three exact routing-set violations. Keep artifact-registry alias rejection. Add the contract table headed `## Canonical skill files` in `render_contracts`, regenerate `docs/CONTRACTS.md` and `docs/PIPELINE.md`, and make the renderer projection test assert the table.
-7. Move without rewriting: `git mv "$pack\Разметка контекста" "$pack\skills\context-marker"`, then similarly move the five existing source directories to `tc-generator`, `tc-reviewer`, `tc-to-autotest`, `autotest-reviewer`, and `orchestrate`. The `skill_files` registry and regenerated contract projections are the Task 1 route update; do not edit additional direct documentation links in this commit. Task 9 owns the repository-wide `rg -n "Разметка контекста|Генерация тест-кейсов|Валидация тест-кейсов|Автоматизированные кейсы|Валидация автотестов|Оркестратор" "$pack"` cleanup and its explicit historical allowlist. Do not invent step-level routes.
-8. Run the four tests, `contract_check`, `render_pipeline`, the full test suite, and `& $py $validator "$pack\skills\<id>"` for all six packages. Request a fresh Sol review. Commit only the listed paths with `git add -- "test-orchestration-skills/skills" "test-orchestration-skills/contracts/pipeline.json" "test-orchestration-skills/schemas/pipeline.schema.json" "test-orchestration-skills/tools/contract_check.py" "test-orchestration-skills/tools/render_pipeline.py" "test-orchestration-skills/docs/CONTRACTS.md" "test-orchestration-skills/docs/PIPELINE.md" "test-orchestration-skills/tests/test_contract_check.py" "test-orchestration-skills/tests/test_contract_docs.py"`.
-
-## Task 2: campaign the context marker
-
-**Files:** `skills/context-marker/SKILL.md`, its `references/`, `scripts/`, and `assets/`; `docs/to_do/skill-tests/context-marker/`.
-
-1. Put a schema-valid raw-content fixture in `artifacts/inputs/raw-content.json` and the canonical prompt in `00-scenario.json`: classify a supplied order-management change into source code, documentation, and requirement context while preserving quoted source facts. Require `context-marker-output.json`.
-2. Run five RED evaluators without the skill, then five fresh GREEN evaluators with only this skill and its declared files; validate every output against `context-marker-output.schema.json`.
-3. Score provenance preservation, no invented authentication/retention requirements, and a valid envelope. Apply minimal skill/reference fixes, run five fresh final GREEN repetitions, then run the separate pressure prompt and validate its output. Run `quick_validate.py` and commit evidence and package changes.
-
-## Task 3: campaign the test-case generator
-
-**Files:** `skills/tc-generator/`; `docs/to_do/skill-tests/tc-generator/`.
-
-1. Store a schema-valid analytics/source fixture and one canonical prompt: generate boundary, negative, and role-aware cases for the supplied order change. Require `artifacts/outputs/tc-generator-output.json`.
-2. Execute the global five RED, five initial GREEN, pressure, and five final GREEN protocol; validate each output with `tc-generator-output.schema.json`.
-3. Score traceable requirement IDs, executable expected results, and no unstated authorization rules. Fix only the smallest missing instruction/reference, rerun final GREEN, run `quick_validate.py`, and commit.
-
-## Task 4: campaign the test-case reviewer with branch-consistent fixtures
-
-**Files:** `skills/tc-reviewer/`; `docs/to_do/skill-tests/tc-reviewer/`.
-
-1. Create four separate schema-valid `tc-generator-output` envelopes in `artifacts/inputs/`: `clean-accepted.json`, `typo-only.json`, `blocking-missing-result.json`, and `blocking-fabricated-auth.json`. Label the case set inside each envelope.
-2. The one repeated canonical prompt says to review all four labelled envelopes and write four outputs in its phase-and-repetition output directory: `clean-accepted-tc-reviewer-output.json`, `typo-only-tc-reviewer-output.json`, `blocking-missing-result-tc-reviewer-output.json`, and `blocking-fabricated-auth-tc-reviewer-output.json`. Validate all four with `tc-reviewer-output.schema.json` on every repetition.
-3. The rubric requires: clean is accepted with no correction; typo-only is safely AUTO_FIX with a corrected case; missing-result and fabricated-auth are blocking, rejected, and do not silently invent a correction. Run the common RED/GREEN/pressure/final protocol, `quick_validate.py`, and commit.
-
-## Task 5: prove tc-to-autotest through real execution and deterministic trace construction
-
-**Files:** `skills/tc-to-autotest/`; `tools/build_trace_document.py`; `tests/test_build_trace_document.py`; `docs/to_do/skill-tests/tc-to-autotest/`.
-
-1. Add red tests for `build_trace_document.py`: it accepts only canonical requirement/case/file/method IDs plus runner JSON, copies runner evidence verbatim, and rejects missing or fabricated execution evidence. Keep existing convention examples in `artifacts/inputs/existing-conventions/java/` and `.../python/`; keep destination trees separately empty in `artifacts/projects/java/` and `.../python/` before generation.
-2. Store accepted reviewer output, generated cases, and source conventions as distinct inputs. The canonical prompt directs the agent to emit one machine-authority envelope, `tc-to-autotest-output.json`, plus the Java/Python source files declared by its `generated_test_files` entries in the separately empty destination trees. The envelope is the only machine-authority artifact: it contains the matrix, file paths, languages/frameworks, and SHA-256 file digests; the schema intentionally does not contain source bytes. The companion source files are generated outputs, not execution evidence and not a second JSON authority. The agent must not run tests or append evidence.
-3. Use the campaign protocol and validate that sole generator artifact after every repetition:
+3. Set `tc-reviewer.forwards` exactly to `generated_test_cases`, `validation_report`, `corrected_test_cases`; set `tc-to-autotest.accepts` exactly to those three and its `forwards` exactly to those three plus `generated_test_files`, `generated_test_methods`. In `_semantic_errors`, compare to `CANONICAL_SKILL_FILES`, reject any step `skill_file`, exact routing violations, and aliases. Render a `## Canonical skill files` table with `render_contract_docs.py`; regenerate root `CONTRACTS.md` and `PIPELINE.md`.
+4. Move contents only—no `SKILL.md` rewrite—with these exact commands:
 
 ```powershell
-& $py "$pack\tools\validate_artifact.py" "$pack\schemas\tc-to-autotest-output.schema.json" "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-output.json"
+New-Item -ItemType Directory -Force "$pack\skills" | Out-Null
+git mv "$pack\Разметка контекста" "$pack\skills\context-marker"
+git mv "$pack\Ручные тест-кейсы" "$pack\skills\tc-generator"
+git mv "$pack\Валидация тест-кейсов" "$pack\skills\tc-reviewer"
+git mv "$pack\Автоматизированные кейсы на основе тест-кейсов" "$pack\skills\tc-to-autotest"
+git mv "$pack\Валидация автотестов" "$pack\skills\autotest-reviewer"
+git mv "$pack\Оркестратор" "$pack\skills\orchestrate"
 ```
 
-4. After final GREEN, the deterministic controller verifies every declared companion path is inside its language project, exists, and byte-hashes to `generated_test_files[*].content_digest`; it rejects every undeclared source file. It then copies only those verified declared files into the empty Java/Python destination projects and invokes the real runner twice. `run_tests.py --automation-artifact` repeats the schema/path/digest/matrix/method binding before Maven or pytest:
+5. The registry/projections are the Task 1 route update. Task 9 owns repository-wide link migration; do not widen this task's commit to unrelated documents. Run the named tests, `contract_check.py --full`, `render_contract_docs.py --check`, full pytest, and `quick_validate.py` for six packages. Commit only the files named in this task.
+
+## Task 1B: validate campaign scaffolding before the first campaign
+
+**Files:** Create `schemas/skill-test-evidence.schema.json`, `tests/test_skill_test_evidence.py`, and each campaign's empty tree/JSON scaffolding under `docs/to_do/skill-tests/`.
+
+1. Add RED tests for required phase paths, immutable unique output paths, scenario fields, scorecard `results[rep][rubric]`, `no_gap`/`no_edit_reason`, and run metadata. Add the evidence schema with explicit scenario, scorecard, and metadata variants.
+2. Scaffold all six campaign trees with valid `00-scenario.json`, three scorecards, and `06-run-metadata.json`; validate each JSON using `validate_artifact.py` and `skill-test-evidence.schema.json` before Task 2. The schema test discovers every campaign directory, so a later campaign cannot omit validation.
+3. Commit this schema/test/scaffold separately. There is no first RED evaluator until this gate is green.
+
+## Cleanup map applied before each skill campaign
+
+Before editing a target `SKILL.md`, preserve useful legacy material in the named destination, repair every relative link to that destination, then delete the listed legacy files/directories. Never leave a package-level `templates/` directory.
+
+| Skill | Move useful material to | Delete after migration |
+|---|---|---|
+| `context-marker` | `references/context-artifact-contract.md`, `assets/context-fixtures/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+| `tc-generator` | `references/case-generation-contract.md`, `assets/case-fixtures/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+| `tc-reviewer` | `references/review-verdicts.md`, `assets/reviewer-fixtures/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+| `tc-to-autotest` | `references/automation-output-contract.md`, `assets/java-python-conventions/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+| `autotest-reviewer` | `references/autotest-review-contract.md`, `assets/autotest-fixtures/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+| `orchestrate` | `references/orchestration-contract.md`, `assets/orchestration-fixtures/` | `README.md`, `examples.md`, `SKILL-LITE.md`, `templates/` |
+
+Run `quick_validate.py` and the local-link test after each row.
+
+## Task 2: context-marker campaign
+
+**Files:** `skills/context-marker/`, `docs/to_do/skill-tests/context-marker/`.
+
+1. Apply its cleanup-map row. Put schema-valid raw input in `artifacts/inputs/raw-content.json`; canonical prompt: classify the supplied order change into source, documentation, and requirement context while preserving quoted facts. Every rep writes `context-marker-output.json` and validates against `context-marker-output.schema.json`.
+2. Rubric: provenance on every claim, no invented authentication/retention rule, split canonical outputs, stable IDs. Execute five RED, five initial green, pressure, minimal refactor, five final green; save all per-phase outputs and scorecards. Run validator/link test and commit task-owned paths.
+
+## Task 3: tc-generator campaign
+
+**Files:** `skills/tc-generator/`, `docs/to_do/skill-tests/tc-generator/`.
+
+1. Apply its cleanup-map row. Inputs are schema-valid analytics/source envelopes. Canonical prompt: generate boundary, negative, and role-aware cases for the supplied order change; every rep writes and validates `tc-generator-output.json` with `tc-generator-output.schema.json`.
+2. Rubric: traceable requirement IDs, executable expected results, no unstated authorization. Execute the exact global five/five/pressure/refactor/five sequence; run validator/link test and commit task-owned paths.
+
+## Task 4: tc-reviewer campaign
+
+**Files:** `skills/tc-reviewer/`, `docs/to_do/skill-tests/tc-reviewer/`.
+
+1. Apply its cleanup-map row. Create four distinct schema-valid `tc-generator-output` inputs: `clean-accepted.json`, `typo-only.json`, `blocking-missing-result.json`, `blocking-fabricated-auth.json`.
+2. The single repeated prompt reviews all four labelled inputs. Every repetition writes and validates four separately named envelopes in its own output directory: `clean-accepted-tc-reviewer-output.json`, `typo-only-tc-reviewer-output.json`, `blocking-missing-result-tc-reviewer-output.json`, and `blocking-fabricated-auth-tc-reviewer-output.json`, each against `tc-reviewer-output.schema.json`.
+3. Four global verdict assertions: clean accepted/no correction; typo only AUTO_FIX with correction; missing result blocking/no invented correction; fabricated auth blocking/no invented correction. Execute the global campaign sequence, validator/link test, and task-owned commit.
+
+## Task 5: tc-to-autotest campaign and real Java/Python trace
+
+**Files:** `skills/tc-to-autotest/`, `tools/build_trace_document.py`, `tests/test_build_trace_document.py`, `docs/to_do/skill-tests/tc-to-autotest/`.
+
+1. Apply its cleanup-map row. Add RED tests for `build_trace_document.py`: it accepts canonical requirements/cases, one language automation envelope, and one runner result; copies `run_id` and `execution_evidence` verbatim; rejects absent/fabricated runner evidence. Its exact CLI is:
 
 ```powershell
-& $py "$pack\tools\run_tests.py" --project "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\projects\java" --language java --automation-artifact "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-output.json" | Set-Content "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\controller\run-result-java.json" -Encoding utf8
-& $py "$pack\tools\run_tests.py" --project "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\projects\python" --language python --automation-artifact "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-output.json" | Set-Content "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\controller\run-result-python.json" -Encoding utf8
+& $py "$pack\tools\build_trace_document.py" --requirements <requirements.json> --test-cases <cases.json> --automation-artifact <language-artifact.json> --run-result <run-result.json> --output <trace-document.json>
 ```
 
-5. Validate both runner envelopes with `run-tests-output.schema.json`. Run the new deterministic builder with the canonical case artifact and each runner result to create `trace-document-java.json` and `trace-document-python.json`; validate both with `trace-document.schema.json`, then run `trace_check.py <trace-document> --require-execution`. The builder never accepts manually appended evidence.
-6. For TypeScript or Go capability preflight, emit no generator artifact. Instead emit and validate `orchestrator-output.json` using the existing `orchestrator-output` schema: `run_tests_verdict.verdict` is `NOT_RUNNABLE` with a capability reason and no command/runner/exit code, `execution_evidence` is empty, and `trace_audit` is `FAIL` with no mappings. This existing branch is sufficient; do not claim generator-stage `NOT_RUNNABLE` and do not add a new schema branch.
-7. Score schema-only generator output, real Maven/pytest evidence, and trace evidence copied only from the runner. Run `quick_validate.py`, request Sol review, and commit.
+2. Pre-scaffold two isolated runnable projects for **each** phase/repetition at `artifacts/workspaces/<phase>/rep-<nn>/java` and `.../python`. Each has its convention examples in `artifacts/inputs/existing-conventions/<language>/`, an empty generated-test location (`java/src/test/java/` or `python/tests/generated/`), and no prior answer/source. Repetitions never share a project.
+3. The evaluator writes generated source directly to that repetition's empty generated-test location and writes two machine-authority envelopes in its output directory: `tc-to-autotest-java-output.json` and `tc-to-autotest-python-output.json`. Each is schema-valid `tc-to-autotest-output`; each lists only its language/framework (`java`/`junit5` or `python`/`pytest`), project-relative generated file paths, matrix, methods, and file SHA-256 digests. Schema envelopes do not contain source bytes; declared source files are companions, never manual execution evidence.
+4. For every rep, validate both envelopes, then invoke the runner against that same isolated workspace. `run_tests.py --automation-artifact` must validate schema, project-relative confined paths, actual file digest, matrix ownership, language/framework, and exact declared method names; it must not claim method content digests are verified. Preserve `run-result-java.json` and `run-result-python.json` beside that repetition's outputs.
 
-## Task 6: campaign autotest review before run-tests
+```powershell
+& $py "$pack\tools\run_tests.py" --project "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\workspaces\04-green-final\rep-05\java" --language java --automation-artifact "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-java-output.json" | Set-Content "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\run-result-java.json" -Encoding utf8
+& $py "$pack\tools\run_tests.py" --project "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\workspaces\04-green-final\rep-05\python" --language python --automation-artifact "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-python-output.json" | Set-Content "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\run-result-python.json" -Encoding utf8
+```
 
-**Files:** `skills/autotest-reviewer/`; `docs/to_do/skill-tests/autotest-reviewer/`.
+5. Build and validate one trace document per language from the final runner result, then require execution:
 
-1. Create separate Java valid/defective and Python valid/defective fixtures containing only generated cases, matrix, files, and methods. Do not place a run verdict or execution evidence in canonical inputs.
-2. The repeated canonical prompt reviews all four labelled fixtures and writes schema-valid `autotest-reviewer-output.json`; validate it with `autotest-reviewer-output.schema.json` for every repetition.
-3. The pressure prompt includes a user's unsupported textual claim that tests pass. The rubric requires rejecting that claim as evidence, detecting the defective fixtures, and accepting only the valid fixtures on generated-artifact quality. Run RED/GREEN/pressure/final, `quick_validate.py`, and commit.
+```powershell
+& $py "$pack\tools\build_trace_document.py" --requirements "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\inputs\requirements.json" --test-cases "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\inputs\generated-test-cases.json" --automation-artifact "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\tc-to-autotest-java-output.json" --run-result "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\run-result-java.json" --output "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\trace-document-java.json"
+& $py "$pack\tools\trace_check.py" "$pack\docs\to_do\skill-tests\tc-to-autotest\artifacts\outputs\04-green-final\rep-05\trace-document-java.json" --require-execution
+```
 
-## Task 7: campaign canonical orchestration and trace authority
+6. TypeScript/Go never enter generator runs. Capability preflight writes only schema-valid `orchestrator-output.json`: `artifacts.run_tests_verdict = {"verdict":"NOT_RUNNABLE","reason":"<capability reason>"}`, `artifacts.execution_evidence = []`, and `artifacts.trace_audit = {"verdict":"FAIL","mappings":[],"errors":["<capability reason>"]}`; it has no command, runner, exit code, generator envelope, or trace acceptance. Validate this existing schema branch. Java/Python may not be `NOT_RUNNABLE`.
+7. Run the global campaign protocol, scorer, validator/link test, and Sol review. Acceptance needs real Maven and pytest PASS runner evidence and verbatim trace evidence.
 
-**Files:** `skills/orchestrate/`; `docs/to_do/skill-tests/orchestrate/`.
+## Task 6: autotest-reviewer campaign before execution
 
-1. Put schema-valid stage inputs in `artifacts/inputs/`. The GREEN allowlist is this orchestration skill, its declared files, and the direct lower skill paths/tools named in `pipeline.json`; no plugin is allowed.
-2. The canonical prompt directs the orchestrator to persist `artifacts/outputs/orchestrator-output.json`, `trace-document.json`, and `trace-result.json`; a human Markdown report is optional and never authoritative.
-3. For every repetition validate every stage envelope with `validate_artifact.py`, validate the orchestrator output with `orchestrator-output.schema.json`, validate the trace document with `trace-document.schema.json`, and run `trace_check.py <trace-document> --require-execution`. Trace execution evidence must be runner-produced.
-4. Score exact canonical routing, validated machine authority, and fail-closed behavior: `NOT_RUNNABLE`, `FAIL`, or rework is not final acceptance. Run the common campaign, `quick_validate.py`, and commit.
+**Files:** `skills/autotest-reviewer/`, `docs/to_do/skill-tests/autotest-reviewer/`.
 
-## Task 8: create byte-preserving adapters
+1. Apply its cleanup-map row. Create four labelled inputs containing only generated cases/matrix/files/methods: `java-valid.json`, `java-defective.json`, `python-valid.json`, `python-defective.json`; no runner verdict/evidence is canonical reviewer input.
+2. The repeated prompt reviews all four labels. Every rep writes four separately named and schema-valid `autotest-reviewer-output` envelopes: `java-valid-autotest-reviewer-output.json`, `java-defective-autotest-reviewer-output.json`, `python-valid-autotest-reviewer-output.json`, `python-defective-autotest-reviewer-output.json`. Validate each against `autotest-reviewer-output.schema.json` and score one verdict per input.
+3. Pressure includes only an unsupported textual claim that tests pass; rubric requires not treating it as evidence, accepting valid inputs, and rejecting defects. Complete the global protocol, validator/link test, and task-owned commit.
 
-**Files:** `adapters/generic/install_skills.py`, `adapters/windows/install.ps1`, optional `adapters/codex/README.md`; `tests/test_adapters.py`; `docs/to_do/skill-tests/adapters/`.
+## Task 7: orchestration campaign with executable traces
 
-1. Add six exact adapter tests: `test_generic_install_copies_canonical_bytes`, `test_generic_second_install_same_destination_is_unchanged`, `test_generic_dry_run_creates_no_destination`, `test_windows_whatif_creates_no_destination`, `test_windows_install_copies_canonical_bytes`, and `test_direct_generic_install_requires_no_host_adapter`.
-2. Implement `adapters/generic/install_skills.py` with explicit source and destination roots, `--dry-run`, deterministic copy, and a second invocation that does not mutate bytes or timestamps when files already match. Implement `adapters/windows/install.ps1` using the same canonical source and `-WhatIf`; keep `adapters/codex/README.md` manual/optional only.
-3. In each test compare each installed destination byte-for-byte with `skills/<id>/`, install twice into the **same** destination, assert no second-install mutation, assert Python dry-run creates no destination, assert PowerShell `-WhatIf` creates no destination, and prove generic direct use without any adapter. Run the six tests, full suite, and commit.
+**Files:** `skills/orchestrate/`, `docs/to_do/skill-tests/orchestrate/`.
 
-## Task 9: final portable-package and evidence audit
+1. Apply its cleanup-map row. Every rep has isolated runnable Java and Python projects at `artifacts/workspaces/<phase>/rep-<nn>/java` and `.../python`, language-specific automation envelopes and toolchains, and stage inputs in `artifacts/inputs/`. GREEN allowlist is this skill plus declared references and the direct lower skill paths/tools in `pipeline.json`; no plugin.
+2. Each rep persists `orchestrator-output.json`, `tc-to-autotest-java-output.json`, `tc-to-autotest-python-output.json`, `run-result-java.json`, `run-result-python.json`, `trace-document-java.json`, `trace-document-python.json`, `trace-result.json`, and optional non-authoritative human report in its own output directory. Validate each stage envelope.
+3. Invoke the same isolated final-green projects with the same exact `run_tests.py --automation-artifact` Java/Python command shapes from Task 5. Validate trace authority with both language documents:
 
-**Files:** `schemas/skill-test-evidence.schema.json`; `tests/test_portable_package.py`; root documentation links and `docs/to_do/skill-tests/` evidence.
+```powershell
+& $py "$pack\tools\trace_check.py" "$pack\docs\to_do\skill-tests\orchestrate\artifacts\outputs\04-green-final\rep-05\trace-document-java.json" --orchestrator-artifact "$pack\docs\to_do\skill-tests\orchestrate\artifacts\outputs\04-green-final\rep-05\orchestrator-output.json" --require-execution
+& $py "$pack\tools\trace_check.py" "$pack\docs\to_do\skill-tests\orchestrate\artifacts\outputs\04-green-final\rep-05\trace-document-python.json" --orchestrator-artifact "$pack\docs\to_do\skill-tests\orchestrate\artifacts\outputs\04-green-final\rep-05\orchestrator-output.json" --require-execution
+```
 
-1. Add red tests that assert exactly the six canonical `skills/<id>/SKILL.md` paths; no localized canonical path reference or legacy XML authority outside explicit historical migration allowlist `docs/superpowers/plans/2026-08-06-portable-skills-adapters.md`; every local Markdown link resolves; and no package README, SKILL-LITE, or templates clutter exists.
-2. Add `skill-test-evidence.schema.json` for scenario, scorecard, and run-metadata required fields. Validate all `00-scenario.json`, three scorecards, and `06-run-metadata.json` files in every campaign directory; assert required phase directories/files exist and that schema-stage outputs are validated by their stage schema.
-3. Update root documentation links to the six canonical paths, run the portable-package tests, all artifact validations, contract/render checks, full pytest and Ruff, and record current measured results in the acceptance report. Do not copy historical counts as current evidence.
-4. Self-review this plan and implementation diff: verify headings Gate 0 and Tasks 1–9, the exact evidence names/phases, all canonical output names, no `steps[*].skill_file`, no Markdown-only authority, and no unvalidated schema-stage artifact. Commit narrow paths only.
+4. `NOT_RUNNABLE`, `FAIL`, or rework is not final acceptance. Java/Python must execute; TypeScript/Go follows Task 5's validated `NOT_RUNNABLE` preflight. Complete global protocol, validator/link test, Sol review, and task-owned commit.
 
-## Final acceptance
+## Task 8: byte-preserving adapters
 
-The implementation is accepted only when all final GREEN scorecards are all-pass, each schema-stage output and campaign metadata validates, Maven and pytest runner evidence produces execution-required traces, adapters pass the six byte/dry-run/idempotency tests, package cleanup tests pass, and the worktree is clean. A `NOT_RUNNABLE`, failed run, rework verdict, invalid envelope, or unresolved Sol finding is a failed acceptance, not a substitute for GREEN.
+**Files:** `adapters/generic/install_skills.py`, `adapters/windows/install.ps1`, optional `adapters/codex/README.md`, `tests/test_adapters.py`, `docs/to_do/skill-tests/adapters/`.
+
+1. Implement exact CLIs: `python adapters/generic/install_skills.py --source <skills-root> --destination <dir> [--dry-run]` and `adapters/windows/install.ps1 -SkillPackRoot <pack-root> -Destination <dir> [-WhatIf]`. Neither changes `contracts/pipeline.json`.
+2. Add exactly six tests: `test_generic_install_copies_canonical_bytes`, `test_generic_second_install_same_destination_is_unchanged`, `test_generic_dry_run_creates_no_destination`, `test_windows_whatif_creates_no_destination`, `test_windows_install_copies_canonical_bytes`, `test_direct_generic_install_requires_no_host_adapter`.
+3. Snapshot canonical source bytes **and timestamps** before/after each adapter test. Invoke generic twice into the same `artifacts/install-generic/` destination, and Windows twice into the same `artifacts/install-windows/` destination; assert second invocation mutates neither destination bytes/timestamps and adapters do not mutate source. Assert Python dry-run and PowerShell `-WhatIf` create no destination. For direct mode, temporarily rename/unmake available the `adapters/` directory in an isolated fixture and read/invoke all six canonical `skills/<id>/SKILL.md` paths directly; it must not call an installer.
+4. Run six tests, full suite, and task-owned commit.
+
+## Task 9: root-link, stale-authority, package, and evidence acceptance audit
+
+**Files:** root docs with links, `tests/test_portable_package.py`, `docs/to_do/skill-tests/` acceptance report.
+
+1. Add tests rejecting exactly these stale canonical-directory strings except when the line exactly equals one of the six Task 1 `git mv "$pack\<old>" "$pack\skills\<id>"` migration commands: `Разметка контекста`, `Ручные тест-кейсы`, `Валидация тест-кейсов`, `Автоматизированные кейсы на основе тест-кейсов`, `Валидация автотестов`, `Оркестратор`. Reject obsolete XML authorities exactly: `generated_files`, `trace_map`, and `automation_bundle_json`. The exception is those six exact command spans, not this whole plan or a document-level allowlist.
+2. Add a deterministic local Markdown-link test: collect inline links and reference definitions whose target has no URI scheme, `#` fragment, or mailto; resolve from the source file's parent, strip fragment/query, and require an existing file or directory. Check all tracked `.md` files except generated build output. Assert exactly six `skills/<id>/SKILL.md` paths, no package README/SKILL-LITE/templates, and every campaign phase/metadata/scorecard JSON validates `skill-test-evidence.schema.json`.
+3. Update root docs, run stale/link/package/evidence tests, all stage artifact validations, `contract_check.py --full`, `render_contract_docs.py --check`, full pytest, Ruff, and record fresh measurements. Acceptance requires task-owned paths clean, RED failure or documented no-gap/no-edit evidence, final green all-pass, Java/Python PASS (never `NOT_RUNNABLE`), and TypeScript/Go validated `NOT_RUNNABLE` only.
+
+## Plan self-review and final acceptance
+
+- [x] Gate 0 and Task 1 use current `render_contract_docs.py`, root projections, `--full`, and `--check` commands.
+- [x] Task 1B validates evidence before campaigns; campaigns use identical five-repetition prompts, phase-preserved outputs, pressure-before-refactor, and per-repetition×rubric score results.
+- [x] Task 5 has isolated per-repetition Java/Python projects, separate artifacts, real runner/trace commands, and no fabricated evidence or method-digest claim.
+- [x] Tasks 4/6 preserve four independent reviewer verdict envelopes; Task 7 cross-checks traces with orchestrator output.
+- [x] Cleanup is mapped to named references/assets before deletion; adapters prove byte/timestamp idempotency and adapter-free direct mode; Task 9 has exact stale/XML and link rules.
+
+Implementation is accepted only after all final green scorecards pass, every required envelope/evidence JSON validates, Java and Python have runner-produced execution-required traces, adapter tests pass, no task-owned file is dirty, and Sol has no unresolved finding.
