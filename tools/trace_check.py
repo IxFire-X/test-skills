@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -22,6 +23,7 @@ else:
 
 
 DEFAULT_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "trace-document.schema.json"
+DEFAULT_ORCHESTRATOR_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "orchestrator-output.schema.json"
 
 
 def _pointer(parts: Iterable[object]) -> str:
@@ -115,6 +117,20 @@ def _ids(records: list[dict[str, object]], entity: str, errors: list[dict[str, s
     return result
 
 
+def _canonical_path(path: object) -> str:
+    """Return a defensive cross-platform physical identity key for a portable path."""
+    segments: list[str] = []
+    for segment in str(path).replace("\\", "/").split("/"):
+        if segment in {"", "."}:
+            continue
+        if segment == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(segment)
+    return "/".join(segments).casefold()
+
+
 def _semantic_check(document: dict[str, object], require_execution: bool) -> tuple[list[dict[str, str]], list[dict[str, object]]]:
     errors: list[dict[str, str]] = []
     requirements = document["requirements"]
@@ -128,13 +144,14 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     case_by_id = _ids(test_cases, "test_cases", errors)
     file_by_id = _ids(files, "generated_files", errors)
     method_by_id = _ids(methods, "methods", errors)
-    paths: dict[object, int] = {}
+    paths: dict[str, int] = {}
     for index, generated_file in enumerate(files):
         path = generated_file["path"]
-        if path in paths:
+        physical_path = _canonical_path(path)
+        if physical_path in paths:
             _append(errors, "DUPLICATE_PATH", f"/generated_files/{index}/path", f"duplicate generated file path: {path}")
         else:
-            paths[path] = index
+            paths[physical_path] = index
     locators: dict[tuple[object, object], int] = {}
     for index, method in enumerate(methods):
         locator = (method["file_id"], method["name"])
@@ -305,6 +322,89 @@ def check(document: dict[str, object], require_execution: bool = False) -> dict[
     return _check(document, require_execution, DEFAULT_SCHEMA)
 
 
+def _orchestrator_schema_report(artifact: object) -> list[dict[str, str]]:
+    diagnostics = _schema_report(artifact, DEFAULT_ORCHESTRATOR_SCHEMA)
+    return [_diagnostic("invalid_orchestrator_schema", item["path"], item["message"]) for item in diagnostics]
+
+
+def _normalized_trace_audit(trace_audit: object) -> object:
+    if not isinstance(trace_audit, dict):
+        return trace_audit
+    normalized = copy.deepcopy(trace_audit)
+    mappings = normalized.get("mappings")
+    if isinstance(mappings, list):
+        for mapping in mappings:
+            if isinstance(mapping, dict) and isinstance(mapping.get("evidence_ids"), list):
+                mapping["evidence_ids"] = sorted(mapping["evidence_ids"])
+        mappings.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    if isinstance(normalized.get("errors"), list):
+        normalized["errors"] = sorted(normalized["errors"])
+    return normalized
+
+
+def _normalized_document_evidence(document: object) -> list[dict[str, object]] | None:
+    if not isinstance(document, dict) or not isinstance(document.get("execution"), dict):
+        return None
+    execution = document["execution"]
+    rules: dict[object, list[dict[str, object]]] = {}
+    for rule in execution["allowed_skips"]:
+        rules.setdefault(rule["method_id"], []).append(rule)
+    status_to_verdict = {"passed": "PASS", "failed": "FAIL", "error": "FAIL", "skipped": "SKIPPED"}
+    normalized: list[dict[str, object]] = []
+    for evidence in execution["evidence"]:
+        item: dict[str, object] = {"run_id": evidence["run_id"], "method_id": evidence["method_id"], "verdict": status_to_verdict[evidence["status"]]}
+        if evidence["status"] == "skipped" and len(rules.get(evidence["method_id"], [])) == 1:
+            rule = rules[evidence["method_id"]][0]
+            item.update({"reason": rule["reason"], "policy_ref": rule["policy_ref"]})
+        normalized.append(item)
+    return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
+def _normalized_artifact_evidence(artifact: dict[str, object]) -> list[dict[str, object]]:
+    evidence = artifact["artifacts"]["execution_evidence"]
+    assert isinstance(evidence, list)
+    normalized = [{key: item[key] for key in ("run_id", "method_id", "verdict", "reason", "policy_ref") if key in item} for item in evidence]
+    return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
+def _cross_report(authoritative: dict[str, object], cross_errors: list[dict[str, str]]) -> dict[str, object]:
+    report = copy.deepcopy(authoritative)
+    errors = [*report["errors"], *cross_errors]
+    errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
+    report["errors"] = errors
+    report["valid"] = not errors
+    return report
+
+
+def _check_orchestrator(artifact: object, document: object, require_execution: bool, schema_path: Path) -> dict[str, object]:
+    authoritative = _check(document, require_execution, schema_path)
+    schema_errors = _orchestrator_schema_report(artifact)
+    if schema_errors:
+        return _cross_report(authoritative, schema_errors)
+    assert isinstance(artifact, dict) and isinstance(document, dict)
+    artifacts = artifact["artifacts"]
+    assert isinstance(artifacts, dict)
+    cross_errors: list[dict[str, str]] = []
+    execution = document.get("execution")
+    if not isinstance(execution, dict):
+        _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/execution", "topology-only document cannot be accepted as a final orchestrator artifact")
+    else:
+        run = artifacts["run_tests_verdict"]
+        assert isinstance(run, dict)
+        if run["verdict"] != execution["verdict"]:
+            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/run_tests_verdict/verdict", "orchestrator run verdict does not match trace execution verdict")
+        if _normalized_artifact_evidence(artifact) != _normalized_document_evidence(document):
+            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/execution_evidence", "orchestrator execution evidence does not match trace execution evidence")
+    if _normalized_trace_audit(artifacts["trace_audit"]) != _normalized_trace_audit(authoritative["trace_audit"]):
+        _append(cross_errors, "ORCHESTRATOR_TRACE_MISMATCH", "/artifacts/trace_audit", "orchestrator trace audit does not match authoritative trace audit")
+    return _cross_report(authoritative, cross_errors)
+
+
+def check_orchestrator(artifact: dict[str, object], document: dict[str, object], require_execution: bool = True) -> dict[str, object]:
+    """Validate a final orchestrator envelope against its authoritative trace document."""
+    return _check_orchestrator(artifact, document, require_execution, DEFAULT_SCHEMA)
+
+
 def _emit(report: dict[str, object]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -322,18 +422,26 @@ def main() -> int:
     parser.add_argument("document")
     parser.add_argument("--require-execution", action="store_true")
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
+    parser.add_argument("--orchestrator-artifact", type=Path)
     args = parser.parse_args()
     try:
         document = json.loads(Path(args.document).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         _emit(_report([_diagnostic("input_error", "", f"document unreadable: {error}")], [], _summary({})))
         return 2
+    artifact: object | None = None
+    if args.orchestrator_artifact is not None:
+        try:
+            artifact = json.loads(args.orchestrator_artifact.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            _emit(_report([_diagnostic("orchestrator_input_error", "", f"orchestrator artifact unreadable: {error}")], [], _summary(document)))
+            return 2
     try:
-        report = _check(document, args.require_execution, args.schema)
+        report = _check_orchestrator(artifact, document, args.require_execution, args.schema) if artifact is not None else _check(document, args.require_execution, args.schema)
     except Exception:  # noqa: BLE001 - the CLI must never leak a traceback
         _emit(_report([_diagnostic("runtime_error", "", "runtime error during trace check")], [], _summary(document)))
         return 2
-    if any(error["code"] in {"invalid_input_schema", "schema_error"} for error in report["errors"]):
+    if any(error["code"] in {"invalid_input_schema", "schema_error", "invalid_orchestrator_schema", "orchestrator_input_error"} for error in report["errors"]):
         exit_code = 2
     else:
         exit_code = 0 if report["valid"] else 1

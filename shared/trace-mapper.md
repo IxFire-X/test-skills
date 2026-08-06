@@ -41,9 +41,12 @@ topology.
 }
 ```
 
-`generated_files.path` is a portable relative path: no drive, absolute path, backslash, or parent
-traversal. A file may contain several methods, and a method may implement several requirements or
-test cases. A mapping is the explicit four-ID link; distinct mappings may share a method.
+`generated_files.path` is a normalized portable relative POSIX path: no drive, absolute path,
+backslash, `.`/`..` segment, repeated slash, or trailing slash. Dotfiles and normal extensions are
+allowed. Physical path identity is compared case-insensitively as a deliberate portability
+restriction, so `tests/ApiTest.py` and `tests/apitest.py` cannot be separate generated files. A
+file may contain several methods, and a method may implement several requirements or test cases. A
+mapping is the explicit four-ID link; distinct mappings may share a method.
 
 ## Invariants
 
@@ -90,6 +93,17 @@ semantic trace failure, and `2` means unreadable JSON, invalid input shape, unav
 schema, missing runtime dependency, or invalid arguments. Schema diagnostics use
 `invalid_input_schema` and RFC-6901 paths; semantic diagnostics use codes such as
 `MISSING_MAPPING`, `MAPPING_MISMATCH`, and `EXECUTION_GATE`.
+
+For final pipeline acceptance, also supply the structural orchestrator artifact:
+
+```text
+python tools/trace_check.py TRACE_DOCUMENT --orchestrator-artifact ORCHESTRATOR_ARTIFACT
+```
+
+This compares the artifact's trace audit, run verdict, and per-method execution evidence against
+the authoritative trace document. It preserves `SKIPPED` evidence only when the exact allowed-skip
+reason and policy reference match; standalone artifact-schema validation cannot establish those
+cross-document relationships.
 
 The resulting `trace_audit` has `{verdict, mappings, errors}` and is the `trace_audit` artifact
 produced by the `trace-check` step in `contracts/pipeline.json`. Each mapping contains

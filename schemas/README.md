@@ -22,6 +22,16 @@ documented open map is `.skillsrc`'s `skills_registry`, whose keys are
 manifest-defined skill IDs. JSON Schema ensures typed, non-empty identifiers
 and mappings; `trace-check` performs value-level cross-reference checks.
 
+`validate_artifact.py` is structural-only. Final orchestrator acceptance must
+also compare the envelope to its upstream trace document:
+
+```bash
+python tools/trace_check.py trace-document.json --orchestrator-artifact orchestrator-output.json
+```
+
+That cross-check rejects foreign or missing trace mappings, execution evidence,
+and IDs that a standalone JSON Schema cannot relate to the trace document.
+
 Validate one artifact with the portable helper:
 
 ```bash

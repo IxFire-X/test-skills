@@ -31,7 +31,7 @@
     "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
     "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"},
     "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"},
-    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"},
+    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*//)(?!.*(?:^|/)\\.(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\/$)[A-Za-z0-9._/-]+$"},
     "requirement": {
       "type": "object", "required": ["id", "provenance"], "additionalProperties": false,
       "properties": {"id": {"$ref": "#/$defs/requirement_id"}, "provenance": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}}}

@@ -83,11 +83,13 @@
                 }
               },
               "execution_evidence": {
-                "minItems": 1,
                 "items": {
                   "properties": {
                     "verdict": {
-                      "const": "PASS"
+                      "enum": [
+                        "PASS",
+                        "SKIPPED"
+                      ]
                     }
                   }
                 }
@@ -364,14 +366,48 @@
         "verdict": {
           "enum": [
             "PASS",
-            "FAIL"
+            "FAIL",
+            "SKIPPED"
           ]
         },
         "run_id": {
           "type": "string",
           "pattern": "^RUN-[A-Za-z0-9_.:-]+$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_ref": {
+          "type": "string",
+          "minLength": 1
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "SKIPPED"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason",
+              "policy_ref"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["reason"]},
+                {"required": ["policy_ref"]}
+              ]
+            }
+          }
+        }
+      ]
     },
     "trace": {
       "type": "object",

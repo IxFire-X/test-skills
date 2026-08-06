@@ -114,6 +114,24 @@ def test_orchestrator_pass_run_accepts_real_checker_pass_and_semantic_fail(valid
     assert not _errors("orchestrator-output.schema.json", failed)
 
 
+def test_orchestrator_pass_accepts_skip_with_policy_and_rejects_unqualified_skip(valid_artifacts):
+    valid = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    valid["artifacts"]["execution_evidence"][0].update({"verdict": "SKIPPED", "reason": "approved environment exclusion", "policy_ref": "POLICY-1"})
+    assert not _errors("orchestrator-output.schema.json", valid)
+    missing_policy = copy.deepcopy(valid)
+    missing_policy["artifacts"]["execution_evidence"][0].pop("policy_ref")
+    assert _errors("orchestrator-output.schema.json", missing_policy)
+    pass_with_policy = copy.deepcopy(valid)
+    pass_with_policy["artifacts"]["execution_evidence"][0].update({"verdict": "PASS", "reason": "not allowed"})
+    assert _errors("orchestrator-output.schema.json", pass_with_policy)
+
+
+def test_orchestrator_pass_shape_allows_missing_evidence_for_authoritative_cross_check(valid_artifacts):
+    artifact = copy.deepcopy(valid_artifacts["orchestrator-output.schema.json"])
+    artifact["artifacts"]["execution_evidence"] = []
+    assert not _errors("orchestrator-output.schema.json", artifact)
+
+
 def test_orchestrator_not_runnable_embeds_real_checker_empty_trace_mappings(valid_artifacts):
     checker = _load_trace_check_module()
     document = _trace_document()
