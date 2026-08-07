@@ -1,0 +1,1 @@
+{"artifact":"context-marker-output.json","status":"missing","validator":"tools/validate_artifact.py","reason":"the envelope was written to a noncanonical nested path, not the reserved output path"}

@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [
+        {
+          "id": "REQ-OC-1",
+          "text": "POST /orders accepts customerId and one or more lines containing sku and positive quantity.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-1"
+          ]
+        },
+        {
+          "id": "REQ-OC-2",
+          "text": "The service rejects a line whose SKU is unknown or whose quantity is zero or negative.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-2"
+          ]
+        },
+        {
+          "id": "REQ-OC-3",
+          "text": "A successful request creates an order with status CREATED, calculates the line-total sum, and emits order.created with the new order identifier.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-3"
+          ]
+        }
+      ]
+    },
+    "source_code_and_diff": {
+      "sources": [
+        "artifacts/inputs/source-diff.patch#CreateOrderService.create: the method validates customerId, validates lines for known SKU and positive quantity, saves Order.created(customerId, lines), and publishes OrderCreated(order.id()).",
+        "artifacts/inputs/source-diff.patch#approval-retention-comment: no approval or retention branch is present in the supplied diff."
+      ]
+    }
+  },
+  "warnings": [
+    "Gap: no manager-approval rule is specified; order-change.md#OC-4 states that it is unspecified, not a requirement.",
+    "Gap: no retention-period rule is specified; order-change.md#OC-4 states that it is unspecified, not a requirement.",
+    "Gap: no authorization policy is specified in the supplied inputs."
+  ]
+}

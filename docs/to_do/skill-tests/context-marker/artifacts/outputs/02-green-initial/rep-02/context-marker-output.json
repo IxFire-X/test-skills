@@ -1,0 +1,28 @@
+{
+  "context_marker_output": {
+    "analytics_requirements": [
+      {
+        "provenance": "order-change.md#OC-1",
+        "requirement": "POST /orders accepts customerId and one or more lines, each containing sku and a positive quantity."
+      },
+      {
+        "provenance": "order-change.md#OC-2",
+        "requirement": "Reject a line with an unknown SKU or a quantity that is zero or negative."
+      },
+      {
+        "provenance": "order-change.md#OC-3",
+        "requirement": "For a successful request, create an order in CREATED status, calculate the line-total sum, and emit order.created with the new order identifier."
+      }
+    ],
+    "source_context_and_provenance": [
+      {
+        "provenance": "source-diff.patch: orders/CreateOrderService.java#create",
+        "context": "create validates the customer and validates that all lines have known SKUs and positive quantities before saving Order.created(customerId, lines)."
+      },
+      {
+        "provenance": "source-diff.patch: orders/CreateOrderService.java#create",
+        "context": "After saving, create publishes new OrderCreated(order.id()) and returns the order."
+      }
+    ]
+  }
+}

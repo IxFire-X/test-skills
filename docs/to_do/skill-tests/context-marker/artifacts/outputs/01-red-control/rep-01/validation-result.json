@@ -1,0 +1,1 @@
+{"artifact":"context-marker-output.json","status":"invalid","validator":"tools/validate_artifact.py","reason":"schema violations: provenance, source, and warning fields use unsupported shapes"}

@@ -1,0 +1,40 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [
+        {
+          "id": "REQ-order-create-input",
+          "text": "POST /orders accepts customerId and one or more lines, each containing sku and a positive quantity.",
+          "provenance": [
+            "order-change.md#OC-1"
+          ]
+        },
+        {
+          "id": "REQ-order-create-validation",
+          "text": "The service rejects a line whose SKU is unknown or whose quantity is zero or negative.",
+          "provenance": [
+            "order-change.md#OC-2"
+          ]
+        },
+        {
+          "id": "REQ-order-create-success",
+          "text": "A successful request creates an order with status CREATED, calculates the line-total sum, and emits order.created with the new order identifier.",
+          "provenance": [
+            "order-change.md#OC-3"
+          ]
+        }
+      ]
+    },
+    "source_code_and_diff": {
+      "sources": [
+        "source-diff.patch:\n\ndiff --git a/orders/CreateOrderService.java b/orders/CreateOrderService.java\n@@\n+public Order create(CreateOrderRequest request) {\n+    validateCustomer(request.customerId());\n+    validateLinesHaveKnownSkuAndPositiveQuantity(request.lines());\n+    Order order = repository.save(Order.created(request.customerId(), request.lines()));\n+    events.publish(new OrderCreated(order.id()));\n+    return order;\n+}\n\n// No approval or retention branch is present in this supplied diff."
+      ]
+    }
+  },
+  "warnings": [
+    "Manager approval is unspecified; no manager-approval requirement was added (order-change.md#OC-4).",
+    "Retention period is unspecified; no retention-period requirement was added (order-change.md#OC-4)."
+  ]
+}

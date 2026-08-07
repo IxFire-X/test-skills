@@ -1,0 +1,9 @@
+APPLICATION INSTRUCTION - context-marker
+
+Read only these supplied inputs:
+1. artifacts/inputs/order-change.md
+2. artifacts/inputs/source-diff.patch
+
+Classify the supported order-creation facts into analytics requirements and source-code context. Preserve each fact's provenance anchor. Do not invent a manager-approval rule, retention rule, authorization policy, or any other absent requirement; record those topics as warnings/gaps only when relevant.
+
+Write exactly one machine envelope named context-marker-output.json that validates against the declared context-marker output schema: schema_version "2.1.0", stage "context-marker", artifacts.analytics_documentation.requirements with REQ-* ids, text, and provenance, artifacts.source_code_and_diff.sources, and warnings. Return the envelope content and a concise source-grounded summary.

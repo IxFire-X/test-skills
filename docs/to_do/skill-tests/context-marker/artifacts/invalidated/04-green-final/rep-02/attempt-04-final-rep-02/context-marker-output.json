@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [
+        {
+          "id": "REQ-OC-1",
+          "text": "POST /orders accepts customerId and one or more lines containing sku and positive quantity.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-1"
+          ]
+        },
+        {
+          "id": "REQ-OC-2",
+          "text": "The service rejects a line whose SKU is unknown or whose quantity is zero or negative.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-2"
+          ]
+        },
+        {
+          "id": "REQ-OC-3",
+          "text": "A successful request creates an order with status CREATED, calculates the line-total sum, and emits order.created with the new order identifier.",
+          "provenance": [
+            "artifacts/inputs/order-change.md#OC-3"
+          ]
+        }
+      ]
+    },
+    "source_code_and_diff": {
+      "sources": [
+        "artifacts/inputs/source-diff.patch#CreateOrderService.create: create validates the customer and validates lines have known SKUs and positive quantities before saving an order.",
+        "artifacts/inputs/source-diff.patch#CreateOrderService.create: create saves Order.created for the request customer and lines, then publishes OrderCreated with the saved order identifier.",
+        "artifacts/inputs/source-diff.patch#approval-retention-comment: the supplied diff contains no approval or retention branch."
+      ]
+    }
+  },
+  "warnings": [
+    "Manager approval is unspecified: the supplied analytics input contains no manager-approval rule.",
+    "Retention period is unspecified: the supplied analytics input contains no retention-period rule."
+  ]
+}
