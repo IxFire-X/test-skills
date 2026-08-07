@@ -22,25 +22,32 @@ SCORECARD_PHASES = ("red", "green-initial", "green-final")
 SCORECARD_OUTPUT_PHASES = dict(zip(SCORECARD_PHASES, PHASES, strict=True))
 PRESSURE_OUTPUT_PATH = "artifacts/outputs/03-pressure/pressure"
 UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+DEFAULT_FINAL_PHASE = "04-green-final"
 
 
 def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _expected_output_paths():
-    return [f"artifacts/outputs/{phase}/{rep}" for phase in PHASES for rep in REPETITIONS]
+def _effective_final_phase(scenario):
+    return scenario.get("effective_final_phase", DEFAULT_FINAL_PHASE)
+
+
+def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE):
+    phases = ("01-red-control", "02-green-initial", effective_final_phase)
+    return [f"artifacts/outputs/{phase}/{rep}" for phase in phases for rep in REPETITIONS]
 
 
 def _assert_schema_valid(validate_artifact, schema_path, document_path):
     assert validate_artifact.validate(str(schema_path), str(document_path))[0] == 0
 
 
-def _score_evidence_path(phase, repetition):
-    return f"{SCORECARD_OUTPUT_PHASES[phase]}/{repetition}.md"
+def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE):
+    output_phase = effective_final_phase if phase == "green-final" else SCORECARD_OUTPUT_PHASES[phase]
+    return f"{output_phase}/{repetition}.md"
 
 
-def _assert_scorecard_semantics(scorecard):
+def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE):
     if scorecard["status"] == "pending":
         assert scorecard["results"] == {}
         assert scorecard["evidence_files"] == []
@@ -55,7 +62,7 @@ def _assert_scorecard_semantics(scorecard):
         for result in scorecard["results"].values()
     )
     expected_evidence = {
-        _score_evidence_path(scorecard["phase"], repetition)
+        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase)
         for repetition in REPETITIONS
     }
     assert set(scorecard["evidence_files"]) == expected_evidence
@@ -85,8 +92,9 @@ def _assert_scorecard_semantics(scorecard):
         assert scorecard["no_edit_reason"] is None
 
 
-def _expected_run_keys():
-    return {(phase, repetition) for phase in PHASES for repetition in REPETITIONS} | {
+def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE):
+    phases = ("01-red-control", "02-green-initial", effective_final_phase)
+    return {(phase, repetition) for phase in phases for repetition in REPETITIONS} | {
         ("pressure", "pressure")
     }
 
@@ -103,6 +111,8 @@ def _parse_utc_z(timestamp):
 
 def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     assert metadata["skill_id"] == scenario["skill_id"]
+    effective_final_phase = _effective_final_phase(scenario)
+    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase)
     for scorecard in scorecards:
         assert scorecard["skill_id"] == scenario["skill_id"]
         assert scorecard["rubric_ids"] == scenario["rubric_ids"]
@@ -116,12 +126,14 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert metadata["host"] is None
         assert metadata["model"] is None
         assert metadata["runs"] == []
+        assert metadata.get("invalidated_attempts", []) == []
         return
 
     assert all(metadata[field].strip() for field in ("evaluator", "host", "model"))
     assert metadata["fork_turns"] == "none"
     assert len(metadata["runs"]) == 16
-    assert {(run["phase"], run["repetition"]) for run in metadata["runs"]} == _expected_run_keys()
+    scored_keys = _expected_run_keys(effective_final_phase)
+    assert {(run["phase"], run["repetition"]) for run in metadata["runs"]} == scored_keys
     assert len({(run["phase"], run["repetition"]) for run in metadata["runs"]}) == 16
     campaign_root = campaign.resolve()
     output_paths = set()
@@ -139,6 +151,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             output_prefix = "artifacts/outputs/03-pressure/pressure/"
         else:
             assert repetition in REPETITIONS
+            assert phase in {"01-red-control", "02-green-initial", effective_final_phase}
             assert run["skill_present"] is (phase != "01-red-control")
             assert run["prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
             required_output = f"{phase}/{repetition}.md"
@@ -167,9 +180,39 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         )
         assert any(output["path"].startswith(companion_prefix) for output in run["outputs"])
 
+    attempt_ids = set()
+    invalidated_keys = set()
+    for attempt in metadata.get("invalidated_attempts", []):
+        assert attempt["classification"] == "protocol-invalid"
+        assert attempt["excluded_from_score"] is True
+        assert attempt["attempt_id"] not in attempt_ids
+        attempt_ids.add(attempt["attempt_id"])
+        key = (attempt["phase"], attempt["repetition"])
+        assert key not in scored_keys
+        assert key not in invalidated_keys
+        invalidated_keys.add(key)
+        assert attempt["raw_input_allowlist"] == scenario["raw_input_allowlist"]
+        if "prompt-mismatch" in attempt["reason_codes"]:
+            assert attempt["observed_prompt_sha256"] != scenario["prompt_sha256"]["canonical"]
+        else:
+            assert attempt["observed_prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
+        evidence = [attempt["observation"], *attempt["outputs"]]
+        assert len({item["path"] for item in evidence}) == len(evidence)
+        for item in evidence:
+            evidence_path = Path(item["path"])
+            assert not evidence_path.is_absolute()
+            assert ".." not in evidence_path.parts
+            assert all(not part.startswith(".") for part in evidence_path.parts)
+            resolved_evidence = (campaign / evidence_path).resolve()
+            assert resolved_evidence.is_relative_to(campaign_root)
+            assert resolved_evidence.is_file()
+            assert hashlib.sha256(resolved_evidence.read_bytes()).hexdigest() == item["sha256"]
+            assert resolved_evidence not in output_paths
+            output_paths.add(resolved_evidence)
+
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
-        _assert_scorecard_semantics(scorecard)
+        _assert_scorecard_semantics(scorecard, effective_final_phase)
         if scorecard["status"] == "complete":
             for evidence_file in scorecard["evidence_files"]:
                 resolved_evidence = (campaign / evidence_file).resolve()
@@ -272,6 +315,53 @@ def complete_campaign(tmp_path, root):
             {"path": relative_path, "sha256": hashlib.sha256(content).hexdigest()},
             {"path": companion_path, "sha256": hashlib.sha256(companion_content).hexdigest()},
         ]
+    return campaign, scenario, scorecards, metadata
+
+
+def _write_evidence(campaign, path, content):
+    target = campaign / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    return {"path": path, "sha256": hashlib.sha256(content).hexdigest()}
+
+
+def _versioned_final_campaign(complete_campaign):
+    """Replace the scored final phase while retaining one failed protocol attempt."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    effective_final_phase = "05-green-final-v2"
+    scenario["effective_final_phase"] = effective_final_phase
+    scenario["output_paths"] = [
+        path.replace("04-green-final", effective_final_phase)
+        for path in scenario["output_paths"]
+    ]
+    for run in metadata["runs"]:
+        if run["phase"] != "04-green-final":
+            continue
+        for output in run["outputs"]:
+            original = campaign / output["path"]
+            replacement_path = output["path"].replace("04-green-final", effective_final_phase)
+            replacement = campaign / replacement_path
+            replacement.parent.mkdir(parents=True, exist_ok=True)
+            original.rename(replacement)
+            output["path"] = replacement_path
+        run["phase"] = effective_final_phase
+    final_scorecard = next(scorecard for scorecard in scorecards if scorecard["phase"] == "green-final")
+    final_scorecard["evidence_files"] = [
+        path.replace("04-green-final", effective_final_phase)
+        for path in final_scorecard["evidence_files"]
+    ]
+    metadata["invalidated_attempts"] = [{
+        "attempt_id": "green-final-rep-01-protocol-invalid",
+        "classification": "protocol-invalid",
+        "phase": "04-green-final",
+        "repetition": "rep-01",
+        "reason_codes": ["prompt-mismatch", "validation-not-recorded"],
+        "excluded_from_score": True,
+        "observed_prompt_sha256": "0" * 64,
+        "raw_input_allowlist": scenario["raw_input_allowlist"],
+        "observation": _write_evidence(campaign, "artifacts/invalidated/04-green-final/rep-01/observation.json", b"protocol mismatch\n"),
+        "outputs": [_write_evidence(campaign, "04-green-final/rep-01.md", b"preserved behavioral output\n")],
+    }]
     return campaign, scenario, scorecards, metadata
 
 
@@ -446,6 +536,62 @@ def test_complete_campaign_evidence_is_schema_valid_and_matches_real_files(root,
     for document in [scenario, *scorecards, metadata]:
         _assert_schema_instance_valid(validate_artifact, schema_path, document)
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_legacy_complete_campaign_remains_valid(complete_campaign):
+    """Catches optional invalidated-attempt support invalidating prior campaigns."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_versioned_effective_final_phase_excludes_protocol_invalid_attempt(root, complete_campaign):
+    """Catches immutable invalid attempts being unable to coexist with a fresh scored final."""
+    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    validate_artifact = load_tool("validate_artifact")
+    schema_path = root / "schemas/skill-test-evidence.schema.json"
+
+    for document in [scenario, *scorecards, metadata]:
+        _assert_schema_instance_valid(validate_artifact, schema_path, document)
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("counted invalid attempt", lambda metadata: metadata["invalidated_attempts"][0].update(phase="05-green-final-v2")),
+        ("only four effective final runs", lambda metadata: metadata["runs"][-2].update(phase="04-green-final")),
+        ("prompt mismatch contradiction", lambda metadata: metadata["invalidated_attempts"][0].update(reason_codes=["validation-not-recorded"])),
+        ("duplicate invalidated output", lambda metadata: metadata["invalidated_attempts"][0]["outputs"][0].update(path=metadata["runs"][10]["outputs"][0]["path"])),
+    ],
+)
+def test_invalidated_attempt_semantics_reject_scoring_and_evidence_contradictions(complete_campaign, name, mutate):
+    """Catches invalid attempts being scored or contradicting their immutable ledger."""
+    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    mutate(metadata)
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("missing observation", lambda attempt: attempt.pop("observation")),
+        ("missing output hash", lambda attempt: attempt["outputs"][0].pop("sha256")),
+        ("traversal output", lambda attempt: attempt["outputs"][0].update(path="artifacts/invalidated/../escape.json")),
+        ("hidden observation", lambda attempt: attempt["observation"].update(path="artifacts/invalidated/.placeholder.json")),
+    ],
+)
+def test_invalidated_attempt_schema_rejects_incomplete_or_unsafe_evidence(root, complete_campaign, name, mutate):
+    """Catches incomplete, traversal, or placeholder ledger evidence before scoring."""
+    _campaign, _scenario, _scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    mutate(metadata["invalidated_attempts"][0])
+    validator = load_tool("validate_artifact").Draft202012Validator(
+        _read_json(root / "schemas/skill-test-evidence.schema.json")
+    )
+
+    assert list(validator.iter_errors(metadata)), name
 
 
 def _remove_first_output(campaign, scenario, scorecards, metadata):
