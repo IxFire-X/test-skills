@@ -237,7 +237,7 @@ def _complete_scorecard(scenario, phase="red"):
             for repetition in REPETITIONS
         },
         "evidence_files": [
-            _score_evidence_path(phase, repetition)
+            _score_evidence_path(phase, repetition, _effective_final_phase(scenario))
             for repetition in REPETITIONS
         ],
         "all_passed": result_value,
@@ -248,7 +248,7 @@ def _complete_scorecard(scenario, phase="red"):
 
 def _complete_metadata(scenario):
     runs = []
-    for phase in PHASES:
+    for phase in ("01-red-control", "02-green-initial", _effective_final_phase(scenario)):
         for repetition in REPETITIONS:
             runs.append(
                 {
@@ -293,6 +293,8 @@ def complete_campaign(tmp_path, root):
     """A complete campaign whose evidence files and digest records are independently real."""
     campaign = tmp_path / "context-marker"
     scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scenario.pop("effective_final_phase", None)
+    scenario["output_paths"] = _expected_output_paths()
     scorecards = [_complete_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
     metadata = _complete_metadata(scenario)
     for run in metadata["runs"]:
@@ -328,21 +330,21 @@ def _write_evidence(campaign, path, content):
     return {"path": path, "sha256": hashlib.sha256(content).hexdigest()}
 
 
-def _versioned_final_campaign(complete_campaign):
+def _versioned_final_campaign(complete_campaign, effective_final_phase="07-green-final-v4"):
     """Replace the scored final phase while retaining one failed protocol attempt."""
     campaign, scenario, scorecards, metadata = complete_campaign
-    effective_final_phase = "05-green-final-v2"
+    prior_final_phase = _effective_final_phase(scenario)
     scenario["effective_final_phase"] = effective_final_phase
     scenario["output_paths"] = [
-        path.replace("04-green-final", effective_final_phase)
+        path.replace(prior_final_phase, effective_final_phase)
         for path in scenario["output_paths"]
     ]
     for run in metadata["runs"]:
-        if run["phase"] != "04-green-final":
+        if run["phase"] != prior_final_phase:
             continue
         for output in run["outputs"]:
             original = campaign / output["path"]
-            replacement_path = output["path"].replace("04-green-final", effective_final_phase)
+            replacement_path = output["path"].replace(prior_final_phase, effective_final_phase)
             replacement = campaign / replacement_path
             replacement.parent.mkdir(parents=True, exist_ok=True)
             original.rename(replacement)
@@ -350,16 +352,17 @@ def _versioned_final_campaign(complete_campaign):
         run["phase"] = effective_final_phase
     final_scorecard = next(scorecard for scorecard in scorecards if scorecard["phase"] == "green-final")
     final_scorecard["evidence_files"] = [
-        path.replace("04-green-final", effective_final_phase)
+        path.replace(prior_final_phase, effective_final_phase)
         for path in final_scorecard["evidence_files"]
     ]
     attempt_id = "green-final-rep-01-protocol-invalid"
-    attempt_root = f"artifacts/invalidated/04-green-final/rep-01/{attempt_id}"
+    invalidated_phase = prior_final_phase
+    attempt_root = f"artifacts/invalidated/{invalidated_phase}/rep-01/{attempt_id}"
     observed_prompt = b"preserved prompt with protocol mismatch\n"
     metadata["invalidated_attempts"] = [{
         "attempt_id": attempt_id,
         "classification": "protocol-invalid",
-        "phase": "04-green-final",
+        "phase": invalidated_phase,
         "repetition": "rep-01",
         "reason_codes": ["prompt-mismatch", "validation-not-recorded"],
         "excluded_from_score": True,
@@ -553,9 +556,10 @@ def test_legacy_complete_campaign_remains_valid(complete_campaign):
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
-def test_versioned_effective_final_phase_excludes_protocol_invalid_attempt(root, complete_campaign):
+@pytest.mark.parametrize("effective_final_phase", ["05-green-final-v2", "07-green-final-v4"])
+def test_versioned_effective_final_phase_excludes_protocol_invalid_attempt(root, complete_campaign, effective_final_phase):
     """Catches immutable invalid attempts being unable to coexist with a fresh scored final."""
-    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign, effective_final_phase)
     validate_artifact = load_tool("validate_artifact")
     schema_path = root / "schemas/skill-test-evidence.schema.json"
 
@@ -577,16 +581,16 @@ def test_versioned_effective_final_phase_excludes_protocol_invalid_attempt(root,
 @pytest.mark.parametrize(
     ("name", "mutate"),
     [
-        ("counted invalid attempt", lambda metadata: metadata["invalidated_attempts"][0].update(phase="05-green-final-v2")),
-        ("only four effective final runs", lambda metadata: metadata["runs"][-2].update(phase="04-green-final")),
-        ("prompt mismatch contradiction", lambda metadata: metadata["invalidated_attempts"][0].update(reason_codes=["validation-not-recorded"])),
-        ("duplicate invalidated output", lambda metadata: metadata["invalidated_attempts"][0]["outputs"][0].update(path=metadata["runs"][10]["outputs"][0]["path"])),
+        ("counted invalid attempt", lambda metadata, scenario: metadata["invalidated_attempts"][0].update(phase=_effective_final_phase(scenario))),
+        ("only four effective final runs", lambda metadata, _scenario: metadata["runs"][-2].update(phase=DEFAULT_FINAL_PHASE)),
+        ("prompt mismatch contradiction", lambda metadata, _scenario: metadata["invalidated_attempts"][0].update(reason_codes=["validation-not-recorded"])),
+        ("duplicate invalidated output", lambda metadata, _scenario: metadata["invalidated_attempts"][0]["outputs"][0].update(path=metadata["runs"][10]["outputs"][0]["path"])),
     ],
 )
 def test_invalidated_attempt_semantics_reject_scoring_and_evidence_contradictions(complete_campaign, name, mutate):
     """Catches invalid attempts being scored or contradicting their immutable ledger."""
     campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
-    mutate(metadata)
+    mutate(metadata, scenario)
 
     with pytest.raises(AssertionError):
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
@@ -598,7 +602,7 @@ def test_invalidated_attempt_rejects_evidence_swapped_to_another_attempt_key(com
     attempt = metadata["invalidated_attempts"][0]
     attempt["observation"] = _write_evidence(
         campaign,
-        "artifacts/invalidated/04-green-final/rep-02/another-attempt/observation.json",
+        f"artifacts/invalidated/{attempt['phase']}/rep-02/another-attempt/observation.json",
         b"real but unrelated observation\n",
     )
 
