@@ -1,0 +1,18 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "requirements": [],
+  "sources": [
+    {
+      "path": "artifacts/inputs/order-change.md",
+      "provenance": "not read: the assigned absolute path was unavailable"
+    },
+    {
+      "path": "artifacts/inputs/source-diff.patch",
+      "provenance": "not read: the assigned absolute path was unavailable"
+    }
+  ],
+  "warnings": [
+    "No order-creation facts were classified because the assigned input path was unavailable."
+  ]
+}
