@@ -140,7 +140,10 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
             assert resolved_evidence.is_relative_to(campaign_root)
             assert resolved_evidence.is_file()
             assert hashlib.sha256(resolved_evidence.read_bytes()).hexdigest() == item["sha256"]
-            assert resolved_evidence not in evidence_paths
+            assert all(
+                not resolved_evidence.samefile(existing_path)
+                for existing_path in evidence_paths
+            ), "evidence file collision"
             evidence_paths.add(resolved_evidence)
         assert attempt["observed_prompt_sha256"] == attempt["prompt_snapshot"]["sha256"]
 
@@ -162,6 +165,11 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert metadata["host"] is None
         assert metadata["model"] is None
         assert metadata["runs"] == []
+        assert len(scorecards) == len(SCORECARD_PHASES)
+        assert {scorecard["phase"] for scorecard in scorecards} == set(SCORECARD_PHASES)
+        for scorecard in scorecards:
+            _assert_scorecard_semantics(scorecard, effective_final_phase)
+            assert scorecard["status"] == "pending", "pending campaigns require pending scorecards"
         _assert_invalidated_attempt_semantics(metadata, campaign, scenario, set(), set())
         return
 
@@ -444,6 +452,52 @@ def _pending_campaign_with_invalidated_attempt(complete_campaign):
     }
     pending_scorecards = [_pending_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
     return campaign, scenario, pending_scorecards, pending_metadata, complete_scorecards, complete_metadata
+
+
+def _pending_campaign_with_superseded_final_attempt(complete_campaign):
+    """Build a pending campaign after an invalidated final attempt was superseded."""
+    campaign, scenario, complete_scorecards, complete_metadata = _versioned_final_campaign(
+        complete_campaign, "05-green-final-v2"
+    )
+    pending_metadata = {
+        "artifact_type": "run-metadata",
+        "skill_id": scenario["skill_id"],
+        "status": "pending",
+        "evaluator": None,
+        "host": None,
+        "model": None,
+        "fork_turns": "none",
+        "runs": [],
+        "invalidated_attempts": copy.deepcopy(complete_metadata["invalidated_attempts"]),
+    }
+    pending_scorecards = [_pending_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
+    return campaign, scenario, pending_scorecards, pending_metadata, complete_scorecards, complete_metadata
+
+
+def _append_hard_linked_pending_invalidated_attempt(campaign, scenario, metadata):
+    """Add an otherwise-valid attempt whose output aliases prior preserved evidence."""
+    attempt_id = "red-rep-02-protocol-invalid"
+    attempt_root = f"artifacts/invalidated/01-red-control/rep-02/{attempt_id}"
+    prompt = scenario["canonical_prompt"].encode("utf-8")
+    aliased_output = campaign / f"{attempt_root}/output.json"
+    aliased_output.parent.mkdir(parents=True, exist_ok=True)
+    aliased_output.hardlink_to(campaign / metadata["invalidated_attempts"][0]["outputs"][0]["path"])
+    metadata["invalidated_attempts"].append({
+        "attempt_id": attempt_id,
+        "classification": "protocol-invalid",
+        "phase": "01-red-control",
+        "repetition": "rep-02",
+        "reason_codes": ["evaluator-identity-missing"],
+        "excluded_from_score": True,
+        "observed_prompt_sha256": hashlib.sha256(prompt).hexdigest(),
+        "raw_input_allowlist": scenario["raw_input_allowlist"],
+        "prompt_snapshot": _write_evidence(campaign, f"{attempt_root}/prompt.txt", prompt),
+        "observation": _write_evidence(campaign, f"{attempt_root}/observation.json", b"identity missing\n"),
+        "outputs": [{
+            "path": str(aliased_output.relative_to(campaign)).replace("\\", "/"),
+            "sha256": hashlib.sha256(aliased_output.read_bytes()).hexdigest(),
+        }],
+    })
 
 
 def _rewrite_protocol(campaign, run, mutate):
@@ -786,6 +840,17 @@ def test_pending_campaign_rejects_scored_run_even_with_invalidated_ledger(comple
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
+def test_pending_campaign_rejects_completed_scorecard(complete_campaign):
+    """Requires every pending campaign scorecard to remain unscored and evidence-free."""
+    campaign, scenario, scorecards, metadata, complete_scorecards, _complete_metadata = (
+        _pending_campaign_with_invalidated_attempt(complete_campaign)
+    )
+    scorecards[0] = copy.deepcopy(complete_scorecards[0])
+
+    with pytest.raises(AssertionError, match="pending campaigns require pending scorecards"):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -810,37 +875,31 @@ def test_pending_invalidated_attempt_rejects_missing_hash_or_file(complete_campa
             _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
-def test_pending_invalidated_attempt_rejects_duplicate_evidence_collision(complete_campaign):
-    """Prevents two pending invalidations from reusing the same preserved evidence bytes."""
+def test_pending_invalidated_attempt_rejects_global_evidence_collision(complete_campaign):
+    """Rejects a valid-root attempt whose hard-linked output aliases global evidence."""
     campaign, scenario, scorecards, metadata, _complete_scorecards, _complete_metadata = (
         _pending_campaign_with_invalidated_attempt(complete_campaign)
     )
-    duplicate = copy.deepcopy(metadata["invalidated_attempts"][0])
-    duplicate["attempt_id"] = "red-rep-02-protocol-invalid"
-    duplicate["repetition"] = "rep-02"
-    metadata["invalidated_attempts"].append(duplicate)
+    _append_hard_linked_pending_invalidated_attempt(campaign, scenario, metadata)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="evidence file collision"):
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
-def test_pending_invalidated_ledger_survives_complete_exact_sixteen_transition(complete_campaign, root):
-    """Retains invalidation history without reducing the required sixteen scored runs."""
-    campaign, scenario, _pending_scorecards, metadata, complete_scorecards, complete_metadata = (
-        _pending_campaign_with_invalidated_attempt(complete_campaign)
+def test_pending_superseded_final_ledger_survives_complete_exact_sixteen_transition(complete_campaign, root):
+    """Retains an unchanged superseded-final ledger without reducing scored runs."""
+    campaign, scenario, pending_scorecards, metadata, complete_scorecards, complete_metadata = (
+        _pending_campaign_with_superseded_final_attempt(complete_campaign)
     )
-    attempt = metadata["invalidated_attempts"][0]
-    attempt["phase"] = "05-green-final-v2"
-    attempt["repetition"] = "rep-01"
-    attempt_id = attempt["attempt_id"]
-    old_root = f"artifacts/invalidated/01-red-control/rep-01/{attempt_id}"
-    new_root = f"artifacts/invalidated/05-green-final-v2/rep-01/{attempt_id}"
-    for evidence in [attempt["prompt_snapshot"], attempt["observation"], *attempt["outputs"]]:
-        source = campaign / evidence["path"]
-        destination = campaign / evidence["path"].replace(old_root, new_root)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source.rename(destination)
-        evidence["path"] = str(destination.relative_to(campaign)).replace("\\", "/")
+    ledger_before = copy.deepcopy(metadata["invalidated_attempts"])
+    evidence_bytes_before = {
+        evidence["path"]: (campaign / evidence["path"]).read_bytes()
+        for attempt in ledger_before
+        for evidence in [attempt["prompt_snapshot"], attempt["observation"], *attempt["outputs"]]
+    }
+    assert ledger_before[0]["phase"] == DEFAULT_FINAL_PHASE
+    assert _effective_final_phase(scenario) == "05-green-final-v2"
+    _assert_metadata_semantics(metadata, campaign, scenario, pending_scorecards)
     metadata.update(
         status="complete",
         evaluator=complete_metadata["evaluator"],
@@ -856,7 +915,11 @@ def test_pending_invalidated_ledger_survives_complete_exact_sixteen_transition(c
     )
     _assert_metadata_semantics(metadata, campaign, scenario, complete_scorecards)
     assert len(metadata["runs"]) == 16
-    assert metadata["invalidated_attempts"] == [attempt]
+    assert metadata["invalidated_attempts"] == ledger_before
+    assert {
+        path: (campaign / path).read_bytes()
+        for path in evidence_bytes_before
+    } == evidence_bytes_before
 
 
 @pytest.mark.parametrize("effective_final_phase", ["05-green-final-v2", "07-green-final-v4"])
