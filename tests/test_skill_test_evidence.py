@@ -75,9 +75,12 @@ def _assert_scorecard_semantics(scorecard):
             assert scorecard["no_gap"] is True
             assert isinstance(scorecard["no_edit_reason"], str)
             assert scorecard["no_edit_reason"].strip()
-    else:
+    elif scorecard["phase"] == "green-final":
         assert all(values)
         assert scorecard["all_passed"] is True
+        assert scorecard["no_gap"] is False
+        assert scorecard["no_edit_reason"] is None
+    else:
         assert scorecard["no_gap"] is False
         assert scorecard["no_edit_reason"] is None
 
@@ -351,6 +354,51 @@ def test_scorecard_semantics_reject_bypass_fixtures(root, name, mutate):
     phase = "green-initial" if name in {"green gap claim", "cross phase evidence"} else "red"
     scorecard = _complete_scorecard(scenario, phase)
     mutate(scorecard)
+    with pytest.raises(AssertionError):
+        _assert_scorecard_semantics(scorecard)
+
+
+def test_green_initial_complete_scorecard_allows_honest_failed_rubrics(root, tmp_path):
+    """Catches green-initial evidence being forced to claim success before remediation."""
+    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scorecard = _complete_scorecard(scenario, "green-initial")
+    scorecard["results"]["rep-01"][scenario["rubric_ids"][0]] = False
+    scorecard["all_passed"] = False
+    scorecard_path = tmp_path / "green-initial-scorecard.json"
+    scorecard_path.write_text(json.dumps(scorecard), encoding="utf-8")
+
+    _assert_schema_valid(load_tool("validate_artifact"), root / "schemas/skill-test-evidence.schema.json", scorecard_path)
+    _assert_scorecard_semantics(scorecard)
+    assert scorecard["no_gap"] is False
+    assert scorecard["no_edit_reason"] is None
+
+
+def test_green_final_complete_scorecard_requires_all_true_rubrics(root, tmp_path):
+    """Catches final certification accepting an unresolved rubric failure."""
+    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scorecard = _complete_scorecard(scenario, "green-final")
+    scorecard["results"]["rep-01"][scenario["rubric_ids"][0]] = False
+    scorecard_path = tmp_path / "green-final-scorecard.json"
+    scorecard_path.write_text(json.dumps(scorecard), encoding="utf-8")
+
+    exit_code, _report = load_tool("validate_artifact").validate(
+        str(root / "schemas/skill-test-evidence.schema.json"), str(scorecard_path)
+    )
+
+    assert exit_code == 1
+
+
+@pytest.mark.parametrize(
+    ("result_value", "all_passed"),
+    [(False, True), (True, False)],
+)
+def test_green_initial_rejects_all_passed_contradiction(root, result_value, all_passed):
+    """Catches green-initial scorecards whose summary disagrees with their rubrics."""
+    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scorecard = _complete_scorecard(scenario, "green-initial")
+    scorecard["results"]["rep-01"][scenario["rubric_ids"][0]] = result_value
+    scorecard["all_passed"] = all_passed
+
     with pytest.raises(AssertionError):
         _assert_scorecard_semantics(scorecard)
 
