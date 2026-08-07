@@ -1,0 +1,33 @@
+{
+  "artifact_type": "rejected-run-batch-manifest",
+  "skill_id": "context-marker",
+  "batch": "final-green-r3",
+  "status": "rejected-not-scored-not-active",
+  "moved_evidence_count": 20,
+  "copied_skill_snapshot_count": 2,
+  "reason": "Protocol and schema validation were clean 5/5, but the semantic exact-locator rubric failed rep-03 and rep-04 because their requirement provenance used decorated locator — quoted text values. The entire batch is abandoned without rerun; rep-01, rep-02, and rep-05 are otherwise passing but not carried forward.",
+  "entries": [
+    {"kind":"moved_evidence","original_active_path":"04-green-final/rep-01.md","archived_path":"archive/r3/e/obs/01.md","sha256":"951854fc6fae8c3e0a7f3f5db754254a15f1eb1a72f4754cd1345fdde3b4713c"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/outputs/04-green-final/rep-01/context-marker-output.json","archived_path":"archive/r3/e/out/01/result.json","sha256":"890df2fc94cd6eba6b674ad45bf326a26281320e99f7278e4897c6141aae1322"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-01/prompt.txt","archived_path":"archive/r3/e/pro/01/prompt.txt","sha256":"2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-01/run-protocol.json","archived_path":"archive/r3/e/pro/01/run.json","sha256":"0422f414d7931a6ee4e3080d83307f909f6ade7812346c8e6e5b411c483b709e"},
+    {"kind":"moved_evidence","original_active_path":"04-green-final/rep-02.md","archived_path":"archive/r3/e/obs/02.md","sha256":"74de18781c933c67c8a738ffc72af7f995b4cac44172042c1c2496ed7ce18d6a"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/outputs/04-green-final/rep-02/context-marker-output.json","archived_path":"archive/r3/e/out/02/result.json","sha256":"9cce11f5272e2337e4015a9dab0821200d58e529f5fa6ff99cb01acbcec48976"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-02/prompt.txt","archived_path":"archive/r3/e/pro/02/prompt.txt","sha256":"2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-02/run-protocol.json","archived_path":"archive/r3/e/pro/02/run.json","sha256":"bbd34e14dcd86bdd3daa9ddce31609fd3686492a36c669a402b3d37cbdeac837"},
+    {"kind":"moved_evidence","original_active_path":"04-green-final/rep-03.md","archived_path":"archive/r3/e/obs/03.md","sha256":"d4096a91fb7f93a636907518038156663099a5d6e696b1eb99f6dcd2f05cb99a"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/outputs/04-green-final/rep-03/context-marker-output.json","archived_path":"archive/r3/e/out/03/result.json","sha256":"e176d859cc8b159c2fb8341210f270be150b2aeb97e4bc5215276ee05ed36c31"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-03/prompt.txt","archived_path":"archive/r3/e/pro/03/prompt.txt","sha256":"2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-03/run-protocol.json","archived_path":"archive/r3/e/pro/03/run.json","sha256":"a836897373ebb8cf09b54f48f1f64566efee9d7ba1b5d908cc623c675c92c872"},
+    {"kind":"moved_evidence","original_active_path":"04-green-final/rep-04.md","archived_path":"archive/r3/e/obs/04.md","sha256":"2d604baf3f6f2bcc35dc975f74caea885baa729ddfb395fc1221bce8a9ac281f"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/outputs/04-green-final/rep-04/context-marker-output.json","archived_path":"archive/r3/e/out/04/result.json","sha256":"b231633f143e28a340dae5c9c5ca92a653b15d18c642ce26d6b76c0e999c4076"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-04/prompt.txt","archived_path":"archive/r3/e/pro/04/prompt.txt","sha256":"2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-04/run-protocol.json","archived_path":"archive/r3/e/pro/04/run.json","sha256":"2a92175014ccc62bb2b079fec520de97ba0f52a19150b572fc50dfd8c467d1c9"},
+    {"kind":"moved_evidence","original_active_path":"04-green-final/rep-05.md","archived_path":"archive/r3/e/obs/05.md","sha256":"207f00a1d3522af29d255b2f6ee15819846034e03be0daf74e11becce76931e9"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/outputs/04-green-final/rep-05/context-marker-output.json","archived_path":"archive/r3/e/out/05/result.json","sha256":"16caa59d48b13be5d8ce7e5ec9f7e23832bf56192b51aa52c9e4f550cd9f938c"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-05/prompt.txt","archived_path":"archive/r3/e/pro/05/prompt.txt","sha256":"2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"},
+    {"kind":"moved_evidence","original_active_path":"artifacts/protocol/04-green-final/rep-05/run-protocol.json","archived_path":"archive/r3/e/pro/05/run.json","sha256":"e36268f6da2d12e3dd964f10cf1eb3e5a3cce101c1ed48609bcad1e9f4fed49c"},
+    {"kind":"copied_skill_snapshot","source_path":"skills/context-marker/SKILL.md","archived_path":"archive/r3/skill-snapshot/SKILL.md","sha256":"56c7cc5007501f0dd577f53b90b95edc95adf7ff0741900da6b07790fc9dec23"},
+    {"kind":"copied_skill_snapshot","source_path":"skills/context-marker/references/context-artifact-contract.md","archived_path":"archive/r3/skill-snapshot/references/context-artifact-contract.md","sha256":"0fb4bf26bbd15da619f254df412197cb55338a7fa1b6c5ce2d89f9e6aec77dde"}
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [
+        {
+          "id": "REQ-0001",
+          "text": "The request contains customerId and one or more lines with sku and positive quantity.",
+          "provenance": [
+            "/order_change/facts/0/id",
+            "/order_change/facts/0/quote"
+          ]
+        },
+        {
+          "id": "REQ-0002",
+          "text": "Unknown SKUs and nonpositive quantities are rejected.",
+          "provenance": [
+            "/order_change/facts/1/id",
+            "/order_change/facts/1/quote"
+          ]
+        },
+        {
+          "id": "REQ-0003",
+          "text": "A successful request creates a CREATED order, calculates the line-total sum, and emits order.created with the new order identifier.",
+          "provenance": [
+            "/order_change/facts/2/id",
+            "/order_change/facts/2/quote"
+          ]
+        }
+      ]
+    },
+    "source_code_and_diff": {
+      "sources": [
+        "/order_change/endpoint — POST /orders",
+        "/source_context/observations/0 — CreateOrderService validates customer and order lines before saving the order.",
+        "/source_context/observations/1 — The supplied change publishes OrderCreated with the saved order identifier."
+      ]
+    }
+  },
+  "warnings": [
+    "/order_change/absent_policy_topics/0 — Unsupported gap: no authentication policy is supplied.",
+    "/order_change/absent_policy_topics/1 — Unsupported gap: no authorization policy is supplied.",
+    "/order_change/absent_policy_topics/2 — Unsupported gap: no retention policy is supplied.",
+    "/order_change/absent_policy_topics/3 — Unsupported gap: no approval policy is supplied."
+  ]
+}
