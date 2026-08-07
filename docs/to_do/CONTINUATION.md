@@ -15,18 +15,21 @@
 
 ## Принятая история
 
-Plan 1/core и Plan 2 scaffold/ASCII migrations приняты исторически. Важные архивные commits: `0334bcd` (failed context final batch) и `1b0ac0c` (unstable context final batch). Локальные инструменты этой машины: worktree `D:\AI-Projects\.worktrees\portable-testing-skills`, Python `D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe`, quick validator `C:\Users\User\.codex\skills\.system\skill-creator\scripts\quick_validate.py`, Sol skill `C:\Users\User\.codex\plugins\cache\sol-advisor\sol-advisor\0.4.0\skills\orchestration\SKILL.md`.
+Plan 1/core и Plan 2 scaffold/ASCII migrations приняты исторически. Важные архивные commits: `0334bcd` (failed context final batch), `1b0ac0c` (unstable context final batch) и `c41896c` (stopped failed context final v1 batch, archive/r5). Локальные инструменты этой машины: worktree `D:\AI-Projects\.worktrees\portable-testing-skills`, Python `D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe`, quick validator `C:\Users\User\.codex\skills\.system\skill-creator\scripts\quick_validate.py`, Sol skill `C:\Users\User\.codex\plugins\cache\sol-advisor\sol-advisor\0.4.0\skills\orchestration\SKILL.md`.
 
 ## Точный checkpoint
 
-Перед commit этого файла `HEAD` был `1b0ac0c`. Незакоммичены context-marker RED/initial/pressure и hardening skill/protocol. Финалы r3/r4 отклонены и архивированы; официальные metadata и три scorecard ещё не собраны; в активном FINAL остались только placeholders. Combined checks сейчас: **410 passed, 2 skipped**. Нужен свежий bypass re-review: пока он не дал `ship`, context-marker **не принят**.
+Перед commit этого файла `HEAD` был `c41896c`. `archive/r5` уже закоммичен: stopped v1 batch содержит 3 завершённых rep, `rep-04` только с prompt и прерван, `rep-05` отсутствует; в активном FINAL остались только placeholders. `rep-03` schema-valid, но семантически провалился: `REQ-ORDER` ids, нет provenance identity, нет inline locator у sources/warnings, endpoint потерян. Повторно не запускать и не заменять/чинить r5. Context-marker **не принят**.
+
+Незакоммичены семантика skill и protocol v1; parent checks: **410 passed, 2 skipped**. Sol ранее дал `ship` для pre-run wording/protocol bypass fix, но это не acceptance batch. Официальные metadata и три scorecard ещё pending; активные RED/initial/pressure evidence тоже незакоммичены.
 
 ## Следующий маршрут
 
-1. Получить/восстановить вердикт свежего Sol. Если `ship`, выполнить ровно пять свежих последовательных FINAL-rep текущим skill и `protocol_contract_version: 1`: literal `argv`/`cwd`, без replacement/reuse.
-2. Получить семантический Sol scoring; собрать metadata для 16 runs и 3 scorecards; прогнать полную verification; сделать scoped commit; получить final Sol acceptance.
-3. Затем кампании оставшихся skill по порядку: `tc-generator` → `tc-reviewer` → `tc-to-autotest` → `autotest-reviewer` → `orchestrate`.
-4. Затем Plan 3 E2E: `step5-java-demo`, `InvenTree-master`, `subscription-renewal-service`; в конце полный audit и verdict.
+1. Новый чат сначала диагностирует, почему fresh evaluator не последовал текущему `SKILL.md`/reference: подтвердить injection/read path skill и evaluator brief, исследовать r5 и evaluator harness. Не добавлять текст и не запускать новые reps вслепую.
+2. Создать новый RED/causal plan; только после root cause — исправление, review и новый отдельный 5-run FINAL с текущим skill и `protocol_contract_version: 1`, literal `argv`/`cwd`, без replacement/reuse. r5 не переиспользовать и не ремонтировать.
+3. Получить семантический Sol scoring; собрать metadata для 16 runs и 3 scorecards; прогнать полную verification; сделать scoped commit; получить final Sol acceptance.
+4. Затем кампании оставшихся skill по порядку: `tc-generator` → `tc-reviewer` → `tc-to-autotest` → `autotest-reviewer` → `orchestrate`.
+5. Затем Plan 3 E2E: `step5-java-demo`, `InvenTree-master`, `subscription-renewal-service`; в конце полный audit и verdict.
 
 ## Безопасное возобновление
 
