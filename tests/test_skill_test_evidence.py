@@ -196,10 +196,12 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             assert attempt["observed_prompt_sha256"] != scenario["prompt_sha256"]["canonical"]
         else:
             assert attempt["observed_prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
-        evidence = [attempt["observation"], *attempt["outputs"]]
+        attempt_root = f"artifacts/invalidated/{attempt['phase']}/{attempt['repetition']}/{attempt['attempt_id']}/"
+        evidence = [attempt["prompt_snapshot"], attempt["observation"], *attempt["outputs"]]
         assert len({item["path"] for item in evidence}) == len(evidence)
         for item in evidence:
             evidence_path = Path(item["path"])
+            assert item["path"].startswith(attempt_root)
             assert not evidence_path.is_absolute()
             assert ".." not in evidence_path.parts
             assert all(not part.startswith(".") for part in evidence_path.parts)
@@ -209,6 +211,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             assert hashlib.sha256(resolved_evidence.read_bytes()).hexdigest() == item["sha256"]
             assert resolved_evidence not in output_paths
             output_paths.add(resolved_evidence)
+        assert attempt["observed_prompt_sha256"] == attempt["prompt_snapshot"]["sha256"]
 
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
@@ -350,17 +353,21 @@ def _versioned_final_campaign(complete_campaign):
         path.replace("04-green-final", effective_final_phase)
         for path in final_scorecard["evidence_files"]
     ]
+    attempt_id = "green-final-rep-01-protocol-invalid"
+    attempt_root = f"artifacts/invalidated/04-green-final/rep-01/{attempt_id}"
+    observed_prompt = b"preserved prompt with protocol mismatch\n"
     metadata["invalidated_attempts"] = [{
-        "attempt_id": "green-final-rep-01-protocol-invalid",
+        "attempt_id": attempt_id,
         "classification": "protocol-invalid",
         "phase": "04-green-final",
         "repetition": "rep-01",
         "reason_codes": ["prompt-mismatch", "validation-not-recorded"],
         "excluded_from_score": True,
-        "observed_prompt_sha256": "0" * 64,
+        "observed_prompt_sha256": hashlib.sha256(observed_prompt).hexdigest(),
         "raw_input_allowlist": scenario["raw_input_allowlist"],
-        "observation": _write_evidence(campaign, "artifacts/invalidated/04-green-final/rep-01/observation.json", b"protocol mismatch\n"),
-        "outputs": [_write_evidence(campaign, "04-green-final/rep-01.md", b"preserved behavioral output\n")],
+        "prompt_snapshot": _write_evidence(campaign, f"{attempt_root}/prompt.txt", observed_prompt),
+        "observation": _write_evidence(campaign, f"{attempt_root}/observation.json", b"protocol mismatch\n"),
+        "outputs": [_write_evidence(campaign, f"{attempt_root}/output.json", b"preserved behavioral output\n")],
     }]
     return campaign, scenario, scorecards, metadata
 
@@ -394,7 +401,8 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert scenario["skill_id"] == skill_id
         assert scenario["repetitions"] == 5
         assert scenario["fork_turns"] == "none"
-        assert scenario["output_paths"] == _expected_output_paths()
+        effective_final_phase = _effective_final_phase(scenario)
+        assert scenario["output_paths"] == _expected_output_paths(effective_final_phase)
         assert scenario["pressure_output_path"] == PRESSURE_OUTPUT_PATH
         assert len(set(scenario["output_paths"])) == len(scenario["output_paths"])
         assert all(not Path(output_path).is_absolute() and ".." not in Path(output_path).parts for output_path in scenario["output_paths"])
@@ -404,7 +412,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         _assert_schema_valid(validate_artifact, schema_path, metadata_path)
         metadata = _read_json(metadata_path)
 
-        for phase in PHASES:
+        for phase in ("01-red-control", "02-green-initial", effective_final_phase):
             for repetition in REPETITIONS:
                 assert (campaign / "artifacts/outputs" / phase / repetition / ".gitkeep").is_file()
         assert (campaign / PRESSURE_OUTPUT_PATH / ".gitkeep").is_file()
@@ -414,7 +422,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
             assert scorecard_path.is_file()
             _assert_schema_valid(validate_artifact, schema_path, scorecard_path)
             scorecard = _read_json(scorecard_path)
-            _assert_scorecard_semantics(scorecard)
+            _assert_scorecard_semantics(scorecard, effective_final_phase)
             scorecards.append(scorecard)
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
@@ -551,9 +559,19 @@ def test_versioned_effective_final_phase_excludes_protocol_invalid_attempt(root,
     validate_artifact = load_tool("validate_artifact")
     schema_path = root / "schemas/skill-test-evidence.schema.json"
 
+    for phase in ("01-red-control", "02-green-initial", _effective_final_phase(scenario)):
+        for repetition in REPETITIONS:
+            scaffold = campaign / "artifacts/outputs" / phase / repetition / ".gitkeep"
+            scaffold.parent.mkdir(parents=True, exist_ok=True)
+            scaffold.write_text("", encoding="utf-8")
+
     for document in [scenario, *scorecards, metadata]:
         _assert_schema_instance_valid(validate_artifact, schema_path, document)
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+    assert all(
+        (campaign / "artifacts/outputs" / _effective_final_phase(scenario) / repetition / ".gitkeep").is_file()
+        for repetition in REPETITIONS
+    )
 
 
 @pytest.mark.parametrize(
@@ -569,6 +587,30 @@ def test_invalidated_attempt_semantics_reject_scoring_and_evidence_contradiction
     """Catches invalid attempts being scored or contradicting their immutable ledger."""
     campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
     mutate(metadata)
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_invalidated_attempt_rejects_evidence_swapped_to_another_attempt_key(complete_campaign):
+    """Catches a real immutable file being reassigned to a different invalidated key."""
+    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    attempt = metadata["invalidated_attempts"][0]
+    attempt["observation"] = _write_evidence(
+        campaign,
+        "artifacts/invalidated/04-green-final/rep-02/another-attempt/observation.json",
+        b"real but unrelated observation\n",
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_invalidated_attempt_rejects_prompt_snapshot_content_or_hash_mismatch(complete_campaign):
+    """Catches a self-attested observed prompt digest without preserved matching bytes."""
+    campaign, scenario, scorecards, metadata = _versioned_final_campaign(complete_campaign)
+    prompt_path = campaign / metadata["invalidated_attempts"][0]["prompt_snapshot"]["path"]
+    prompt_path.write_bytes(b"tampered prompt bytes\n")
 
     with pytest.raises(AssertionError):
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
