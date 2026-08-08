@@ -60,7 +60,7 @@ def _envelope(stage: str, artifacts: dict) -> dict:
 
 @pytest.fixture
 def valid_artifacts():
-    requirement = {"id": "REQ-1", "text": "Клиент оформляет заказ.", "provenance": ["requirements.md#order"]}
+    requirement = {"id": "REQ-0001", "text": "Клиент оформляет заказ.", "provenance": ["requirements.md#order"]}
     test_case = {
         "id": "TC-1", "requirement_ids": ["REQ-1"], "title": "Оформление заказа",
         "categories": ["positive", "functional"], "priority": "HIGH",
@@ -73,7 +73,7 @@ def valid_artifacts():
     digest = "sha256:" + "a" * 64
     test_method = {"id": "METHOD-1", "file_id": "FILE-1", "test_case_ids": ["TC-1"], "requirement_ids": ["REQ-1"], "name": "test_submit_order", "content_digest": digest}
     return {
-        "context-marker-output.schema.json": _envelope("context-marker", {"analytics_documentation": {"requirements": [requirement]}, "source_code_and_diff": {"sources": ["src/orders.py"]}}),
+        "context-marker-output.schema.json": _envelope("context-marker", {"analytics_documentation": {"requirements": [requirement]}, "source_code_and_diff": {"sources": ["src/orders.py — source observation"]}}),
         "tc-generator-output.schema.json": _envelope("tc-generator", {"generated_test_cases": {"requirements": [requirement], "test_cases": [test_case], "coverage": [{"requirement_id": "REQ-1", "test_case_ids": ["TC-1"]}]}}),
         "tc-reviewer-output.schema.json": _envelope("tc-reviewer", {"validation_report": {"verdict": "ПРИНЯТО", "reviewed_test_case_ids": ["TC-1"], "findings": [], "corrections": []}, "corrected_test_cases": []}),
         "tc-to-autotest-output.schema.json": _envelope("tc-to-autotest", {"automation_matrix": [{"test_case_id": "TC-1", "generated_file_ids": ["FILE-1"], "generated_method_ids": ["METHOD-1"]}], "generated_test_files": [{"id": "FILE-1", "path": "tests/test_orders.py", "language": "python", "framework": "pytest", "content_digest": digest}], "generated_test_methods": [test_method]}),
@@ -95,6 +95,110 @@ def test_schema_is_valid_draft_2020_12(schema_path):
 def test_stage_artifact_uses_versioned_envelope(schema_name, valid_artifacts):
     """Catches a stage schema that rejects its complete versioned envelope."""
     assert not _errors(schema_name, valid_artifacts[schema_name])
+
+
+def _context_marker_fixture_defects(raw: dict, artifact: dict) -> list[str]:
+    requirements = artifact["artifacts"]["analytics_documentation"]["requirements"]
+    defects = []
+    if len(requirements) != len(raw["order_change"]["facts"]):
+        defects.append("requirement_count_mismatch")
+    for index, requirement in enumerate(requirements):
+        expected = [
+            f"/order_change/facts/{index}/id",
+            f"/order_change/facts/{index}/quote",
+        ]
+        if requirement["provenance"] != expected:
+            defects.append(f"requirement_{index}_identity_then_quote_locator_missing")
+    endpoint = f"/order_change/endpoint — {raw['order_change']['endpoint']}"
+    if endpoint not in artifact["artifacts"]["source_code_and_diff"]["sources"]:
+        defects.append("endpoint_source_observation_dropped")
+    return defects
+
+
+def _correct_context_marker_candidate(raw: dict) -> dict:
+    requirements = [
+        {
+            "id": f"REQ-{index + 1:04d}",
+            "text": fact["quote"],
+            "provenance": [
+                f"/order_change/facts/{index}/id",
+                f"/order_change/facts/{index}/quote",
+            ],
+        }
+        for index, fact in enumerate(raw["order_change"]["facts"])
+    ]
+    sources = [f"/order_change/endpoint — {raw['order_change']['endpoint']}"]
+    sources.extend(
+        f"/source_context/observations/{index} — {observation}"
+        for index, observation in enumerate(raw["source_context"]["observations"])
+    )
+    warnings = [
+        f"/order_change/absent_policy_topics/{index} — {topic} policy is not supplied"
+        for index, topic in enumerate(raw["order_change"]["absent_policy_topics"])
+    ]
+    return _envelope(
+        "context-marker",
+        {
+            "analytics_documentation": {"requirements": requirements},
+            "source_code_and_diff": {"sources": sources},
+        },
+    ) | {"warnings": warnings}
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_path"),
+    [
+        (
+            lambda artifact: artifact["artifacts"]["analytics_documentation"]["requirements"][0].update(id="REQ-ORDER-001"),
+            ["artifacts", "analytics_documentation", "requirements", 0, "id"],
+        ),
+        (
+            lambda artifact: artifact["artifacts"]["source_code_and_diff"]["sources"].__setitem__(0, "source observation"),
+            ["artifacts", "source_code_and_diff", "sources", 0],
+        ),
+        (
+            lambda artifact: artifact.update(warnings=["unsupported policy gap"]),
+            ["warnings", 0],
+        ),
+    ],
+    ids=["noncanonical-id", "source-without-inline-provenance", "warning-without-inline-provenance"],
+)
+def test_context_marker_schema_rejects_each_universal_mechanical_defect(
+    valid_artifacts, mutate, expected_path
+):
+    """Catches independent regression of each universal context-marker guard."""
+    artifact = copy.deepcopy(valid_artifacts["context-marker-output.schema.json"])
+    mutate(artifact)
+
+    assert expected_path in [list(error.absolute_path) for error in _errors("context-marker-output.schema.json", artifact)]
+
+
+def test_context_marker_fixture_semantics_distinguish_r5_from_correct_candidate():
+    """Keeps ordered fact locators and endpoint preservation fixture-specific."""
+    raw = json.loads(
+        (ROOT / "docs/to_do/skill-tests/context-marker/artifacts/inputs/raw-content.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    r5 = json.loads(
+        (ROOT / "docs/to_do/skill-tests/context-marker/archive/r5/e/out/03/result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    candidate = _correct_context_marker_candidate(raw)
+
+    assert _context_marker_fixture_defects(raw, r5) == [
+        "requirement_0_identity_then_quote_locator_missing",
+        "requirement_1_identity_then_quote_locator_missing",
+        "requirement_2_identity_then_quote_locator_missing",
+        "endpoint_source_observation_dropped",
+    ]
+    assert not _errors("context-marker-output.schema.json", candidate)
+    assert [requirement["id"] for requirement in candidate["artifacts"]["analytics_documentation"]["requirements"]] == [
+        f"REQ-{ordinal:04d}"
+        for ordinal in range(1, len(raw["order_change"]["facts"]) + 1)
+    ]
+    assert _context_marker_fixture_defects(raw, candidate) == []
 
 
 def test_orchestrator_pass_run_accepts_real_checker_pass_and_semantic_fail(valid_artifacts):

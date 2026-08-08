@@ -1,0 +1,16 @@
+{
+  "reviewer": "sol_advisor_sol_reviewer",
+  "task": "/root/context_marker_five_rep_semantic_review",
+  "verdict": "ship",
+  "overall": "PASS",
+  "repetitions": {
+    "rep-01": {"verdict":"PASS","rubrics":{"provenance-every-claim":true,"no-invented-authentication-retention":true,"split-canonical-outputs":true,"stable-identifiers":true},"findings":[]},
+    "rep-02": {"verdict":"PASS","rubrics":{"provenance-every-claim":true,"no-invented-authentication-retention":true,"split-canonical-outputs":true,"stable-identifiers":true},"findings":[]},
+    "rep-03": {"verdict":"PASS","rubrics":{"provenance-every-claim":true,"no-invented-authentication-retention":true,"split-canonical-outputs":true,"stable-identifiers":true},"findings":[]},
+    "rep-04": {"verdict":"PASS","rubrics":{"provenance-every-claim":true,"no-invented-authentication-retention":true,"split-canonical-outputs":true,"stable-identifiers":true},"findings":[]},
+    "rep-05": {"verdict":"PASS","rubrics":{"provenance-every-claim":true,"no-invented-authentication-retention":true,"split-canonical-outputs":true,"stable-identifiers":true},"findings":[]}
+  },
+  "variance": "All five runs have identical requirements, provenance, source observations, branch structure, and identifiers. Only faithful warning phrasing varies; rep-02 through rep-04 are byte-identical.",
+  "residual_risk": "Low: rep-04 omits read_inputs from its observation and rep-05 uses a reduced observation shape; the remaining scoped protocol and report evidence is consistent with no semantic or hash contradiction.",
+  "observed_isolation": "All prompt snapshots match the canonical prompt hash; skill and contract hashes match the scenario manifest; each run uses a distinct role-pinned native evaluator task and scoped output path."
+}

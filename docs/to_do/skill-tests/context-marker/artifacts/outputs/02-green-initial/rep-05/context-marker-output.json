@@ -1,0 +1,55 @@
+{
+  "format": "context-marker-output/v1",
+  "analytics_documentation": {
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "text": "The request must contain customerId and one or more lines with sku and positive quantity.",
+        "quote": "The request contains customerId and one or more lines with sku and positive quantity.",
+        "provenance": "/order_change/facts/0/quote"
+      },
+      {
+        "id": "REQ-2",
+        "text": "Unknown SKUs and nonpositive quantities must be rejected.",
+        "quote": "Unknown SKUs and nonpositive quantities are rejected.",
+        "provenance": "/order_change/facts/1/quote"
+      },
+      {
+        "id": "REQ-3",
+        "text": "A successful request must create a CREATED order, calculate the line-total sum, and emit order.created with the new order identifier.",
+        "quote": "A successful request creates a CREATED order, calculates the line-total sum, and emits order.created with the new order identifier.",
+        "provenance": "/order_change/facts/2/quote"
+      }
+    ]
+  },
+  "source_code_and_diff": {
+    "sources": [
+      {
+        "text": "CreateOrderService validates customer and order lines before saving the order.",
+        "provenance": "/source_context/observations/0"
+      },
+      {
+        "text": "The supplied change publishes OrderCreated with the saved order identifier.",
+        "provenance": "/source_context/observations/1"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "text": "No authentication policy is supplied; none is inferred.",
+      "provenance": "/order_change/absent_policy_topics/0"
+    },
+    {
+      "text": "No authorization policy is supplied; none is inferred.",
+      "provenance": "/order_change/absent_policy_topics/1"
+    },
+    {
+      "text": "No retention policy is supplied; none is inferred.",
+      "provenance": "/order_change/absent_policy_topics/2"
+    },
+    {
+      "text": "No approval policy is supplied; none is inferred.",
+      "provenance": "/order_change/absent_policy_topics/3"
+    }
+  ]
+}

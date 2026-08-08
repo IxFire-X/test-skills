@@ -5,37 +5,22 @@ description: Use when converting supplied requirements and source changes into a
 
 # Context Marker
 
-Produce one JSON artifact named `context-marker-output.json`. Read only the inputs named by the caller; never scan unrelated files.
+Produce one JSON artifact named `context-marker-output.json`. Read only caller-allowlisted inputs; never scan unrelated files. The machine authority is the repository [schema](../../schemas/context-marker-output.schema.json); read the local [contract](references/context-artifact-contract.md) for concise usage rules.
 
-## Required output
+## Workflow
 
-The artifact must validate against [the context artifact contract](references/context-artifact-contract.md). Its top-level shape is:
+1. Classify only claims supported by caller-allowlisted evidence before assigning canonical IDs: explicit behavior or acceptance assertions are requirements; standalone contextual metadata are source observations.
+2. Follow the local contract's deterministic recipe for requirement IDs, exact requirement locators, inline provenance for string fields, and nonempty branches.
+3. Write the schema's canonical envelope with `schema_version` `2.1.0`, `stage` `context-marker`, and the two `artifacts` branches. Do not add wrapper or alternate keys.
+4. Put any unsupported or requester-asserted claim absent from the allowlisted evidence only in a warning/gap, never as a requirement or source fact.
+5. Report a blocker rather than fabricate content needed for the envelope.
+6. When the validator, schema, and output path are reachable, validate once with `tools/validate_artifact.py`; otherwise report the validation failure or unavailability honestly.
 
-```json
-{
-  "schema_version": "2.1.0",
-  "stage": "context-marker",
-  "artifacts": {
-    "analytics_documentation": {"requirements": []},
-    "source_code_and_diff": {"sources": []}
-  },
-  "warnings": []
-}
-```
+## Проверка перед записью
 
-For every supported requirement, emit a `REQ-*` id, faithful text, and an array of precise source anchors. `sources` and `warnings` are arrays of strings. Quote unsupported, missing, or ambiguous policy only as a warning; never promote it to a requirement.
-
-## Method
-
-1. Extract only explicit behavior from the supplied analytics input.
-2. Record code/diff observations as source strings, without inventing behavior.
-3. Preserve an input path plus a stable local anchor for each requirement.
-4. Add a warning when a requested policy is absent or unsupported.
-5. Validate the single JSON envelope before returning it.
+До назначения canonical ID проверьте eligibility и классификацию: самостоятельные metadata контекста сохраняются как source observation, а требованием становится только явное поведенческое или acceptance-утверждение; ни один поддержанный факт нельзя молча удалить. Затем для каждой структурированной claim/fact-записи с отдельными полями identity и claim text проверьте два точных locator в `requirements[].provenance` в порядке identity, затем claim text; identity не является `REQ-*` ID. Каждый locator содержит только JSON Pointer, `path#anchor` или `path:line`: без цитаты, описания, поясняющей метки, разделителя ` — ` или суффикса. Формат `<locator> — <faithful observation or gap>` допустим только для строковых `sources` и `warnings`.
 
 ## Boundaries
 
-- Do not output XML, batch results, wrappers, or alternate envelope keys.
-- Do not create authorization, approval, retention, privacy, or execution claims absent from the inputs.
-- Do not read a schema or fixture unless this skill links it or the caller permits it.
-
+- Do not output XML, batch results, wrappers, empty-array skeletons, or alternate envelope keys.
+- Never drop, invent, or reclassify supported or unsupported claims solely to satisfy the schema.

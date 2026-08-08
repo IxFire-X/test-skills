@@ -2,12 +2,11 @@
 
 The authoritative machine schema is [context-marker-output.schema.json](../../../schemas/context-marker-output.schema.json).
 
-Required rules:
+Use the schema for field names and validation; this reference owns the authoring recipe.
 
-- `schema_version` is `2.1.0`; `stage` is `context-marker`.
-- `artifacts.analytics_documentation.requirements` is a nonempty array of objects with `id`, `text`, and a nonempty `provenance` string array. Requirement ids begin with `REQ-`.
-- `artifacts.source_code_and_diff.sources` is a nonempty string array.
-- `warnings` is a string array. State an unsupported claim as a warning, not as a requirement.
-- No additional top-level or nested fields are permitted by the schema.
-
-Use local provenance anchors such as `input.md#AC-1` or `change.patch#function-name`; preserve the supplied wording where possible.
+- Set `schema_version` to `2.1.0` and `stage` to `context-marker`; populate both required artifact branches with supported, nonempty content.
+- For every supported requirement, retain faithful text and an exact locator in `provenance`: a JSON Pointer for JSON, or `path#anchor` / `path:line` for text. Каждый элемент `requirements[].provenance` равен только locator: без цитаты, описания, разделителя ` — ` и любого суффикса. Если структурированная claim/fact-запись содержит отдельные поля identity и claim text, provenance обязательно содержит точные locator обоих полей в порядке identity, затем claim text; source identity не является `REQ-*` ID. Preserve source observations and warnings as strings with inline provenance: `<locator> — <faithful observation or gap>`; этот формат не применяется к `requirements[].provenance`.
+- Самостоятельные metadata контекста (method, route, path, module или symbol) сохраняйте как source observation и не делайте requirement без явного поведенческого или acceptance-утверждения. Не удаляйте поддержанную metadata.
+- Assign canonical IDs deterministically. For sorting only, normalize each locator and faithful claim text by Unicode NFC normalization, trimming outer whitespace, replacing `\` with `/`, and collapsing each whitespace run to one ASCII space. Represent every locator as `(normalized_locator, raw_locator)`; ordinal-sort those pairs by normalized then raw locator, except that an identity/claim-text pair remains in the canonical identity-then-claim-text order. Sort requirements by the ordered normalized locator tuple, ordered raw locator tuple, normalized faithful text, then raw faithful text, all in ordinal code-point order. Assign `REQ-0001`, `REQ-0002`, and so on in that total order.
+- If evidence supplies an identifier, retain that source identity in provenance but still map the requirement to the canonical `REQ-####` ID; do not blindly preserve an invalid or non-`REQ-*` identifier.
+- Preserve supplied wording where practical. Any unsupported or requester-asserted claim absent from allowlisted evidence is a warning/gap only, never a requirement or source fact.

@@ -23,6 +23,7 @@ SCORECARD_OUTPUT_PHASES = dict(zip(SCORECARD_PHASES, PHASES, strict=True))
 PRESSURE_OUTPUT_PATH = "artifacts/outputs/03-pressure/pressure"
 UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 DEFAULT_FINAL_PHASE = "04-green-final"
+CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION = 1
 
 
 def _read_json(path: Path):
@@ -33,9 +34,114 @@ def _effective_final_phase(scenario):
     return scenario.get("effective_final_phase", DEFAULT_FINAL_PHASE)
 
 
+def _expected_phase_prompt_sha256(scenario, phase):
+    if phase == "pressure":
+        return scenario["prompt_sha256"]["pressure"]
+    return scenario.get("phase_prompt_sha256", {}).get(phase, scenario["prompt_sha256"]["canonical"])
+
+
+def test_context_marker_declared_historical_phase_hashes_bind_immutable_prompts(root):
+    """Allows a historical prompt only when its phase hash is declared by the scenario."""
+    campaign = root / "docs/to_do/skill-tests/context-marker"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    assert _expected_phase_prompt_sha256(scenario, "01-red-control") == (
+        "2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"
+    )
+    assert _expected_phase_prompt_sha256(scenario, "02-green-initial") == (
+        "2277516492736557a03d3b3a5f296bf4920db62b007038c8d205313c9e355cf4"
+    )
+    assert _expected_phase_prompt_sha256(scenario, "04-green-final") == (
+        "2b7503172747a037981e3f2c57fd93338e5ed6b73e19b7097e3f21980ea4571b"
+    )
+    assert _expected_phase_prompt_sha256(scenario, "04-green-final") == scenario["prompt_sha256"][
+        "canonical"
+    ]
+    assert _expected_phase_prompt_sha256(scenario, "pressure") == scenario["prompt_sha256"]["pressure"]
+
+    for phase in ("01-red-control", "02-green-initial", "04-green-final"):
+        for repetition in REPETITIONS:
+            prompt = campaign / "artifacts/protocol" / phase / repetition / "prompt.txt"
+            assert hashlib.sha256(prompt.read_bytes()).hexdigest() == _expected_phase_prompt_sha256(
+                scenario, phase
+            )
+
+
 def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE):
     phases = ("01-red-control", "02-green-initial", effective_final_phase)
     return [f"artifacts/outputs/{phase}/{rep}" for phase in phases for rep in REPETITIONS]
+
+
+def _uses_context_marker_literal_command_contract(scenario):
+    return (
+        scenario["skill_id"] == "context-marker"
+        and scenario.get("protocol_contract_version") == CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION
+    )
+
+
+def _campaign_repository_root(campaign):
+    return campaign.parents[3]
+
+
+def _captured_context_marker_final_commands(campaign, phase, repetition):
+    repository_root = _campaign_repository_root(campaign)
+    expected_output = campaign / "artifacts/outputs" / phase / repetition / "context-marker-output.json"
+    return [
+        {
+            "id": "evaluate",
+            "argv": [str((repository_root / "bin/evaluator.exe").resolve()), "--task", "skill-evaluation"],
+            "cwd": str(campaign.resolve()),
+            "exit_code": 0,
+        },
+        {
+            "id": "validate-artifact",
+            "argv": [
+                str((repository_root / "bin/python.exe").resolve()),
+                str((repository_root / "tools/validate_artifact.py").resolve()),
+                str((repository_root / "schemas/context-marker-output.schema.json").resolve()),
+                str(expected_output.resolve()),
+            ],
+            "cwd": str(campaign.resolve()),
+            "exit_code": 0,
+        },
+    ]
+
+
+def _assert_context_marker_final_command_capture(scenario, campaign, phase, repetition, commands):
+    if not _uses_context_marker_literal_command_contract(scenario) or phase != _effective_final_phase(scenario):
+        return
+
+    assert all(set(command) == {"id", "argv", "cwd", "exit_code"} for command in commands)
+    assert all(
+        isinstance(command["argv"], list)
+        and command["argv"]
+        and all(isinstance(argument, str) and argument for argument in command["argv"])
+        and isinstance(command["cwd"], str)
+        and Path(command["cwd"]).is_absolute()
+        and Path(command["cwd"]).resolve() == campaign.resolve()
+        for command in commands
+    )
+    canonical_validator_path = (_campaign_repository_root(campaign) / "tools/validate_artifact.py").resolve()
+    validator_positions = [
+        index
+        for index, command in enumerate(commands)
+        if len(command["argv"]) > 1
+        and Path(command["argv"][1]).is_absolute()
+        and Path(command["argv"][1]).resolve() == canonical_validator_path
+    ]
+    assert validator_positions == [len(commands) - 1]
+    validator = commands[-1]
+    assert validator["id"] == "validate-artifact"
+    assert validator["exit_code"] == 0
+    assert len(validator["argv"]) == 4
+    executable, validator_path, schema_path, output_path = map(Path, validator["argv"])
+    assert all(path.is_absolute() for path in (executable, validator_path, schema_path, output_path))
+    repository_root = _campaign_repository_root(campaign)
+    assert validator_path == canonical_validator_path
+    assert schema_path == (repository_root / "schemas/context-marker-output.schema.json").resolve()
+    assert output_path == (
+        campaign / "artifacts/outputs" / phase / repetition / "context-marker-output.json"
+    ).resolve()
 
 
 def _assert_schema_valid(validate_artifact, schema_path, document_path):
@@ -197,7 +303,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             assert repetition in REPETITIONS
             assert phase in {"01-red-control", "02-green-initial", effective_final_phase}
             assert run["skill_present"] is (phase != "01-red-control")
-            assert run["prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
+            assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
             required_output = f"{phase}/{repetition}.md"
             output_prefix = f"artifacts/outputs/{phase}/{repetition}/"
         assert run["outputs"]
@@ -230,11 +336,6 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert run["protocol_snapshot"]["path"] == f"{protocol_root}run-protocol.json"
         prompt_file = campaign / run["prompt_snapshot"]["path"]
         protocol_file = campaign / run["protocol_snapshot"]["path"]
-        expected_prompt = (
-            scenario["pressure_prompt"].encode("utf-8")
-            if phase == "pressure"
-            else scenario["canonical_prompt"].encode("utf-8")
-        )
         for snapshot in (run["prompt_snapshot"], run["protocol_snapshot"]):
             snapshot_path = Path(snapshot["path"])
             assert not snapshot_path.is_absolute()
@@ -247,7 +348,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             assert resolved_snapshot not in output_paths
             output_paths.add(resolved_snapshot)
         prompt_bytes = prompt_file.read_bytes()
-        assert prompt_bytes == expected_prompt
+        assert hashlib.sha256(prompt_bytes).hexdigest() == _expected_phase_prompt_sha256(scenario, phase)
         assert run["prompt_sha256"] == hashlib.sha256(prompt_bytes).hexdigest()
         protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
         assert set(protocol) == {"artifact_type", "skill_id", "phase", "repetition", "application_prompt_sha256", "started_at", "finished_at", "evaluator", "task", "observation_path", "output_paths", "commands"}
@@ -262,6 +363,9 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert isinstance(protocol["task"], str) and protocol["task"].strip()
         assert protocol["output_paths"] == [output["path"] for output in run["outputs"]]
         assert protocol["commands"] == run["commands"]
+        _assert_context_marker_final_command_capture(
+            scenario, campaign, phase, repetition, protocol["commands"]
+        )
         assert protocol["observation_path"] == f"{protocol_root}observation.json"
         observation = campaign / protocol["observation_path"]
         assert observation.is_file()
@@ -348,10 +452,13 @@ def _complete_metadata(scenario):
 @pytest.fixture
 def complete_campaign(tmp_path, root):
     """A complete campaign whose evidence files and digest records are independently real."""
-    campaign = tmp_path / "context-marker"
+    campaign = tmp_path / "docs/to_do/skill-tests/context-marker"
     scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
     scenario.pop("effective_final_phase", None)
     scenario["output_paths"] = _expected_output_paths()
+    scenario["phase_prompt_sha256"] = {
+        phase: scenario["prompt_sha256"]["canonical"] for phase in PHASES
+    }
     scorecards = [_complete_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
     metadata = _complete_metadata(scenario)
     for run in metadata["runs"]:
@@ -377,6 +484,24 @@ def complete_campaign(tmp_path, root):
             {"path": relative_path, "sha256": hashlib.sha256(content).hexdigest()},
             {"path": companion_path, "sha256": hashlib.sha256(companion_content).hexdigest()},
         ]
+        if (
+            _uses_context_marker_literal_command_contract(scenario)
+            and phase == _effective_final_phase(scenario)
+        ):
+            validator_output_path = (
+                f"artifacts/outputs/{phase}/{repetition}/context-marker-output.json"
+            )
+            validator_output_content = b"schema-bound context-marker output\n"
+            validator_output = campaign / validator_output_path
+            validator_output.parent.mkdir(parents=True, exist_ok=True)
+            validator_output.write_bytes(validator_output_content)
+            run["outputs"].append(
+                {
+                    "path": validator_output_path,
+                    "sha256": hashlib.sha256(validator_output_content).hexdigest(),
+                }
+            )
+            run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
         protocol_root = f"artifacts/protocol/{phase}/{repetition}"
         prompt_bytes = (
             scenario["pressure_prompt"].encode("utf-8")
@@ -546,6 +671,11 @@ def _versioned_final_campaign(complete_campaign, effective_final_phase="07-green
         protocol["phase"] = effective_final_phase
         protocol["observation_path"] = str(observation.relative_to(campaign)).replace("\\", "/")
         protocol["output_paths"] = [output["path"] for output in run["outputs"]]
+        if _uses_context_marker_literal_command_contract(scenario):
+            run["commands"] = _captured_context_marker_final_commands(
+                campaign, effective_final_phase, run["repetition"]
+            )
+            protocol["commands"] = run["commands"]
         protocol_path.write_text(json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         run["protocol_snapshot"]["sha256"] = hashlib.sha256(protocol_path.read_bytes()).hexdigest()
         run["phase"] = effective_final_phase
@@ -629,6 +759,46 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
         assert campaign.resolve().is_relative_to((root / "docs/to_do").resolve())
+
+
+def test_context_marker_v1_canonical_brief_binds_required_skill_inputs(root):
+    """Catches a FINAL brief that omits the canonical skill or local contract."""
+    campaign = root / "docs/to_do/skill-tests/context-marker"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    assert _uses_context_marker_literal_command_contract(scenario)
+    assert scenario["skill_input_base"] == "repository-root"
+    assert "skill-pack repository root" in scenario["canonical_prompt"]
+    protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "skill-pack repository root" in protocol
+    assert "independently of the campaign command cwd" in protocol
+    expected_paths = [
+        "skills/context-marker/SKILL.md",
+        "skills/context-marker/references/context-artifact-contract.md",
+    ]
+    assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
+    repository_root = _campaign_repository_root(campaign)
+    for item in scenario["required_skill_inputs"]:
+        source = repository_root / item["path"]
+        assert source.is_file()
+        assert item["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert item["path"] in scenario["canonical_prompt"]
+    assert "Read only artifacts/inputs/raw-content.json" not in scenario["canonical_prompt"]
+
+
+@pytest.mark.parametrize("missing_field", ["required_skill_inputs", "skill_input_base"])
+def test_context_marker_v1_schema_requires_skill_input_manifest_and_base(root, tmp_path, missing_field):
+    """Catches protocol-v1 scenarios that omit either manifest field."""
+    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scenario.pop(missing_field)
+    scenario_path = tmp_path / "scenario.json"
+    scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+
+    validate_artifact = load_tool("validate_artifact")
+    status, _ = validate_artifact.validate(
+        str(root / "schemas/skill-test-evidence.schema.json"), str(scenario_path)
+    )
+    assert status != 0
 
 
 @pytest.mark.parametrize(
@@ -748,6 +918,48 @@ def test_complete_campaign_evidence_is_schema_valid_and_matches_real_files(root,
     for run in metadata["runs"]:
         _assert_schema_instance_valid(validate_artifact, schema_path, _read_json(campaign / run["protocol_snapshot"]["path"]))
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda command: command.pop("argv"),
+        lambda command: command["argv"].__setitem__(3, "context-marker-output.json"),
+        lambda command: command["argv"].__setitem__(3, "C:/tampered/context-marker-output.json"),
+        lambda command: command["argv"].__setitem__(1, "C:/tampered/validate_artifact.py"),
+        lambda command: command.pop("cwd"),
+        lambda command: command.update(cwd="relative/campaign"),
+        lambda command: command.update(cwd="C:/tampered/campaign"),
+    ],
+)
+def test_context_marker_v1_final_protocol_rejects_non_literal_validator_capture(complete_campaign, mutate):
+    """Requires the forward final contract to retain literal validator invocation evidence."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    scenario["protocol_contract_version"] = 1
+    run = next(run for run in metadata["runs"] if run["phase"] == _effective_final_phase(scenario))
+    phase, repetition = run["phase"], run["repetition"]
+    run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
+    command = run["commands"][-1]
+    mutate(command)
+    _rewrite_protocol(campaign, run, lambda protocol: protocol.update(commands=run["commands"]))
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_context_marker_v1_final_protocol_rejects_early_validator_argv_with_an_alias_id(complete_campaign):
+    """Counts validator attempts by the executed validator path, not a self-attested command id."""
+    campaign, scenario, scorecards, metadata = complete_campaign
+    run = next(run for run in metadata["runs"] if run["phase"] == _effective_final_phase(scenario))
+    phase, repetition = run["phase"], run["repetition"]
+    run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
+    aliased_validator = copy.deepcopy(run["commands"][-1])
+    aliased_validator["id"] = "preflight"
+    run["commands"].insert(0, aliased_validator)
+    _rewrite_protocol(campaign, run, lambda protocol: protocol.update(commands=run["commands"]))
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
 def test_completed_runs_reject_missing_protocol_snapshots(complete_campaign):

@@ -1,0 +1,40 @@
+{
+  "format": "context-marker-output/v1",
+  "analytics_documentation": {
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "text": "The request contains customerId and one or more lines with sku and positive quantity.",
+        "provenance": "/order_change/facts/0/quote"
+      },
+      {
+        "id": "REQ-2",
+        "text": "Unknown SKUs and nonpositive quantities are rejected.",
+        "provenance": "/order_change/facts/1/quote"
+      },
+      {
+        "id": "REQ-3",
+        "text": "A successful request creates a CREATED order, calculates the line-total sum, and emits order.created with the new order identifier.",
+        "provenance": "/order_change/facts/2/quote"
+      }
+    ]
+  },
+  "source_code_and_diff": {
+    "sources": [
+      {
+        "text": "CreateOrderService validates customer and order lines before saving the order.",
+        "provenance": "/source_context/observations/0"
+      },
+      {
+        "text": "The supplied change publishes OrderCreated with the saved order identifier.",
+        "provenance": "/source_context/observations/1"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "text": "Authentication, authorization, retention, and approval are unsupported gaps: the supplied input explicitly lists them as absent policy topics.",
+      "provenance": "/order_change/absent_policy_topics"
+    }
+  ]
+}
