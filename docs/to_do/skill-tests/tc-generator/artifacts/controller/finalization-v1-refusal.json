@@ -1,0 +1,46 @@
+{
+  "artifact_type": "controller-finalization-v1-refusal",
+  "status": "refused",
+  "error": "final green scorecard drifted from the planned bytes",
+  "command": {
+    "argv": [
+      "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+      "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\finalize_campaign.py",
+      "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\protocol\\04-green-final\\rep-05\\run-draft.json"
+    ],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+    "exit_code": 1
+  },
+  "stdout": "{\"status\":\"refused\",\"error\":\"final green scorecard drifted from the planned bytes\"}",
+  "duration_seconds": 1.4,
+  "started_at": null,
+  "finished_at": null,
+  "timestamp_note": "The exposed command result reported wall time only; no UTC start or finish timestamp was available.",
+  "pre_state": {
+    "inferred": true,
+    "inference_note": "The v1 refusal is on its no-write path before the transaction writes; this pre-state was inferred from that code path, not independently observed before invocation."
+  },
+  "postcheck": {
+    "metadata": {
+      "status": "pending",
+      "runs": 13,
+      "sha256": "1bf993170df33333104fd85e5d4dbd3d0cfa813b5a448d38a100dd5d2539e1eb"
+    },
+    "final_scorecard": {
+      "status": "pending",
+      "sha256": "8557b4baa91dbb3c136f2cf345e9955b9299e6197fa0ed269d321afdf7f94ee1"
+    },
+    "terminal_protocol": {
+      "present": false
+    },
+    "writes_committed": false
+  },
+  "root_cause": {
+    "json_equal": true,
+    "bytes_equal": false,
+    "actual_bytes": 276,
+    "expected_bytes": 275,
+    "expected_compact_sha256": "09c95647569d3dd077def79d6310a6d41c410f6adfef88fa57900886a00f680f"
+  }
+}

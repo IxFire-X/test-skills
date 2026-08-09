@@ -1,0 +1,77 @@
+{
+  "phase": "01-red-control-v2",
+  "repetition": "rep-01",
+  "skill_present": false,
+  "prompt_sha256": "c63cbae7a51489338780d2b7944fd079d3d457f6794c034940707202e5edd1a5",
+  "prompt_snapshot": {
+    "path": "artifacts/protocol/01-red-control-v2/rep-01/prompt.txt",
+    "sha256": "c63cbae7a51489338780d2b7944fd079d3d457f6794c034940707202e5edd1a5"
+  },
+  "started_at": "2026-08-09T15:37:36.610Z",
+  "finished_at": "2026-08-09T15:40:24.243Z",
+  "evaluator": {
+    "name": "sol_advisor_terra_implementer",
+    "host": "native-subagent-v2",
+    "model": "gpt-5.6-terra/high (role-pinned)"
+  },
+  "task": "/root/tc_generator_red_v2_rep_01",
+  "observation": {
+    "path": "artifacts/protocol/01-red-control-v2/rep-01/observation.json"
+  },
+  "output_paths": [
+    "01-red-control-v2/rep-01.md",
+    "artifacts/outputs/01-red-control-v2/rep-01/tc-generator-output.json",
+    "artifacts/outputs/01-red-control-v2/rep-01/validation-result.json",
+    "artifacts/outputs/01-red-control-v2/rep-01/semantic-result.json"
+  ],
+  "commands": [
+    {
+      "id": "role-integrity-check",
+      "argv": [
+        "C:\\Program Files\\Git\\bin\\sh.exe",
+        "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+        "--check"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "verify-prompt-hash",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import hashlib,pathlib,sys; actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); print(actual); raise SystemExit(0 if actual == sys.argv[2] else 1)",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\protocol\\01-red-control-v2\\rep-01\\prompt.txt",
+        "c63cbae7a51489338780d2b7944fd079d3d457f6794c034940707202e5edd1a5"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "validate-artifact",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-generator-output.schema.json",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\outputs\\01-red-control-v2\\rep-01\\tc-generator-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "semantic-check",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\check_output.py",
+        "--input",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\inputs\\context-marker-output.json",
+        "--output",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\outputs\\01-red-control-v2\\rep-01\\tc-generator-output.json",
+        "--mode",
+        "red-control"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    }
+  ]
+}

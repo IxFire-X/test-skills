@@ -1,0 +1,7 @@
+{
+  "artifact_type": "evaluator-spawn-observation",
+  "phase": "03-pressure-v2",
+  "repetition": "pressure",
+  "outcome": "Stopped before evaluator process creation; no evaluator command was executed.",
+  "diagnostic_path": "artifacts/invalidated/03-pressure-v2/pressure/pressure-v2-evaluator-spawn-failed/diagnostic.json"
+}

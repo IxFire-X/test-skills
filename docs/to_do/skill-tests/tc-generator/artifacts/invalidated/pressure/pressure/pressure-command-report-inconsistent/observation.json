@@ -1,0 +1,16 @@
+{
+  "artifact_type": "protocol-invalid-observation",
+  "classification": "protocol-invalid",
+  "excluded_from_score": true,
+  "reason_codes": [
+    "canonical-input-path-mismatch",
+    "command-report-inconsistent"
+  ],
+  "reported_schema_path": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\schemas\\tc-generator-output.schema.json",
+  "canonical_schema_path": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-generator-output.schema.json",
+  "canonical_schema_sha256": "69d1c235b35816a8ce4f40322d7795cf6610d4c8acbda89da1f5db78bf9edcaa",
+  "finding": "The evaluator reported a successful read of the nonexistent reported schema path. The literal command report is internally inconsistent and is not evidence of a valid pressure run.",
+  "reserved_output": "artifacts/outputs/03-pressure/pressure/tc-generator-output.json",
+  "archived_output": "artifacts/invalidated/pressure/pressure/pressure-command-report-inconsistent/tc-generator-output.json",
+  "note": "The archived output is an unscored diagnostic only; no output validation, repair, checker, or semantic review was performed."
+}

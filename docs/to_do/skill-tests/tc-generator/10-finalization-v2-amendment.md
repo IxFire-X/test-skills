@@ -1,0 +1,11 @@
+# Finalization v2 amendment
+
+This amendment is limited to the recorded no-write refusal of v1 finalization for `04-green-final/rep-05`. It does not create a new campaign phase, rerun the evaluator, schema validation, or semantic check, or alter the immutable draft, observation, output, validation, semantic, metadata, scorecards, or protocol evidence.
+
+`finalize_campaign_v2.py` imports the v1 finalizer and reuses its strict campaign planning, evidence attestation, lock, atomic writes, rollback, partial-recovery, and already-complete checks. It accepts the known pending final scorecard through v1's JSON-semantic pending check, while pinning the observed real pending scorecard SHA-256. It deliberately omits v1's redundant compact-byte pending guard that rejected the harmless trailing newline.
+
+The wrapper also pins the recorded v1 refusal and this amendment by relative path and SHA-256. `artifacts/controller/finalization-v2-success.json` is the final state transition: on a pending campaign the transaction writes the terminal protocol, final scorecard, and complete metadata first, then captures `finished_at` and atomically creates the success record. The record links both immutable records and attests the v2 invocation, script, known pre-state, final post-state hashes, timestamps captured by v2, and `writes_committed: true`. An `OSError` or catchable `BaseException` at any point in that transaction restores pending metadata and scorecard and removes newly created controller/protocol files; lock cleanup remains in `finally`.
+
+An uncatchable termination after the metadata commit but before success-record creation cannot claim success. On a later invocation, the completed branch first strictly revalidates the v1 complete campaign and all pinned recovery evidence. If the success record is absent, it creates one final truthful recovery attestation with `attestation_recovered: true` and `completion_preexisted: true`; an existing valid record is only validated and never rewritten. A record found while metadata is still pending is conflicting and refuses.
+
+The recovery is intentionally not applied to the real campaign by this amendment. The controller only permits the one existing terminal key and refuses any semantic or pinning drift before writes.

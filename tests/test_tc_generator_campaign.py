@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "docs/to_do/skill-tests/tc-generator/check_output.py"
 INPUT = ROOT / "docs/to_do/skill-tests/tc-generator/artifacts/inputs/context-marker-output.json"
@@ -324,7 +323,7 @@ def test_rejects_grafts_in_every_free_text_case_field(tmp_path: Path) -> None:
         "step expected_result": lambda case: case["steps"][0].update(expected_result=case["steps"][0]["expected_result"] + " payment is captured."),
         "expected_outcome": lambda case: case.update(expected_outcome=case["expected_outcome"] + " email notification sent."),
     }
-    for field, mutate in mutations.items():
+    for mutate in mutations.values():
         output = canonical_output()
         mutate(output["artifacts"]["generated_test_cases"]["test_cases"][0])
         assert_semantic_failure(tmp_path, output, "violates closed-world field contract")

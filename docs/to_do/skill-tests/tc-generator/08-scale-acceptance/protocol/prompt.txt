@@ -1,0 +1,9 @@
+APPLICATION INSTRUCTION - tc-generator 36-case scale acceptance
+
+Read the canonical instruction files in this exact order before task data: skills/tc-generator/SKILL.md, then skills/tc-generator/references/case-generation-contract.md, then schemas/tc-generator-output.schema.json. Resolve those paths from the skill-pack repository root. Then read docs/to_do/skill-tests/tc-generator/08-scale-acceptance/input/context-marker-output.json as the only task-data input. Do not read the expected matrix, checker, tests, prior campaign outputs, or any other task data.
+
+Generate exactly 36 complete manual test cases for the supplied bulk-shipment feature, ordered as six successful operations, twelve accepted boundary cases, twelve immediately-outside negative boundary cases, and six explicit authorization denials. Copy all 18 supplied requirements, their identifiers, text, provenance, and the supplied warning exactly. Preserve exact bidirectional requirement coverage. Every case must represent exactly one supported atom, contain one executable action step, and state a concrete HTTP status and response code oracle.
+
+The input explicitly says that no authorization policy is supplied for claims_adjuster. Preserve that statement only as the supplied warning; do not create a claims_adjuster case or invent any authorization outcome, policy, role, or behavior.
+
+Write exactly one schema-bound JSON artifact to docs/to_do/skill-tests/tc-generator/08-scale-acceptance/output/tc-generator-output.json. Do not write any other file and do not run the validator or semantic checker; the controller performs those checks exactly once after your write.

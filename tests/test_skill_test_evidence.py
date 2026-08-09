@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,10 +46,110 @@ def _effective_red_phase(scenario):
     return scenario.get("effective_red_phase", DEFAULT_RED_PHASE)
 
 
+def _effective_red_repetitions(scenario):
+    return scenario.get("effective_red_repetitions", 5)
+
+
+def _effective_green_initial_phase(scenario):
+    return scenario.get("effective_green_initial_phase", "02-green-initial")
+
+
+def _effective_pressure_phase(scenario):
+    return scenario.get("effective_pressure_phase", "pressure")
+
+
 def _expected_phase_prompt_sha256(scenario, phase):
-    if phase == "pressure":
-        return scenario["prompt_sha256"]["pressure"]
+    if phase == "pressure" or phase.startswith("03-pressure-v"):
+        return scenario.get("phase_prompt_sha256", {}).get(phase, scenario["prompt_sha256"]["pressure"])
     return scenario.get("phase_prompt_sha256", {}).get(phase, scenario["prompt_sha256"]["canonical"])
+
+
+def test_tc_generator_versioned_initial_green_uses_only_v3_scorecard_paths(root):
+    """Keeps both stopped initial attempts outside the active GREEN scorecard."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+    assert _effective_green_initial_phase(scenario) == "02-green-initial-v3"
+    assert {
+        _score_evidence_path("green-initial", repetition, effective_green_initial_phase="02-green-initial-v3")
+        for repetition in REPETITIONS
+    } == {f"02-green-initial-v3/{repetition}.md" for repetition in REPETITIONS}
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda attempt: attempt["commands"][1]["argv"].__setitem__(2, "synthetic argv"),
+        lambda attempt: attempt["commands"][1].__setitem__("cwd", "D:\\synthetic-cwd"),
+    ],
+)
+def test_tc_generator_predelegation_prompt_mismatch_rejects_synthesized_command(root, mutate):
+    """The exceptional no-evaluator ledger accepts only the literal stopped command record."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    attempt = copy.deepcopy(next(
+        item for item in metadata["invalidated_attempts"]
+        if item["attempt_id"] == "green-initial-rep-01-prompt-mismatch"
+    ))
+    mutate(attempt)
+
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda attempt: attempt.pop("checked_output"),
+        lambda attempt: attempt["checked_output"].update(sha256="0" * 64),
+        lambda attempt: attempt["commands"][-1].update(exit_code=0),
+        lambda attempt: attempt["commands"][-1]["argv"].__setitem__(-1, "D:\\other-output.json"),
+        lambda attempt: attempt["commands"].append({"id": "semantic-check", "argv": ["D:\\python.exe"], "cwd": attempt["commands"][-1]["cwd"], "exit_code": 0}),
+    ],
+)
+def test_tc_generator_archived_initial_schema_failure_rejects_relaxed_validator_contract(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    attempt = copy.deepcopy(next(
+        item for item in metadata["invalidated_attempts"]
+        if (item["phase"], item["repetition"]) == ("02-green-initial-v2", "rep-01")
+    ))
+    mutate(attempt)
+
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+
+
+@pytest.mark.parametrize("field", ["phase", "repetition", "application_prompt_sha256", "started_at", "finished_at"])
+def test_tc_generator_predelegation_prompt_mismatch_rejects_protocol_field_mutation(tmp_path, root, field):
+    """The archived protocol must repeat every identity field from the no-delegation ledger."""
+    campaign = tmp_path / "docs/to_do/skill-tests/tc-generator"
+    shutil.copytree(root / "docs/to_do/skill-tests/tc-generator", campaign)
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    attempt = next(item for item in metadata["invalidated_attempts"] if item["attempt_id"] == "green-initial-rep-01-prompt-mismatch")
+    protocol_path = campaign / attempt["protocol_snapshot"]["path"]
+    protocol = _read_json(protocol_path)
+    cwd = str(campaign.resolve())
+    prompt = str((campaign / "artifacts/protocol/02-green-initial/rep-01/prompt.txt").resolve())
+    for command_set in (attempt["commands"], protocol["commands"]):
+        command_set[0]["cwd"] = cwd
+        command_set[1]["cwd"] = cwd
+        command_set[1]["argv"][3] = prompt
+    protocol[field] = f"mutated-{field}"
+    protocol_path.write_text(json.dumps(protocol), encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
 
 
 def test_context_marker_declared_historical_phase_hashes_bind_immutable_prompts(root):
@@ -78,9 +179,11 @@ def test_context_marker_declared_historical_phase_hashes_bind_immutable_prompts(
             )
 
 
-def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
-    phases = (effective_red_phase, "02-green-initial", effective_final_phase)
-    return [f"artifacts/outputs/{phase}/{rep}" for phase in phases for rep in REPETITIONS]
+def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial", effective_red_repetitions=5):
+    return [
+        *(f"artifacts/outputs/{effective_red_phase}/{rep}" for rep in REPETITIONS[:effective_red_repetitions]),
+        *(f"artifacts/outputs/{phase}/{rep}" for phase in (effective_green_initial_phase, effective_final_phase) for rep in REPETITIONS),
+    ]
 
 
 def _uses_protocol_v1_literal_command_contract(scenario):
@@ -98,12 +201,16 @@ def _protocol_v1_reserved_output(campaign, skill_id, phase, repetition):
     _schema_name, output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[skill_id]
     if phase == "pressure":
         return campaign / PRESSURE_OUTPUT_PATH / output_name
+    if phase.startswith("03-pressure-v"):
+        return campaign / "artifacts/outputs" / phase / "pressure" / output_name
     return campaign / "artifacts/outputs" / phase / repetition / output_name
 
 
 def _tc_generator_semantic_mode(phase):
     if phase == DEFAULT_RED_PHASE or phase.startswith(f"{DEFAULT_RED_PHASE}-v"):
         return "red-control"
+    if phase == "pressure" or phase.startswith("03-pressure-v"):
+        return "pressure"
     if phase == "pressure":
         return "pressure"
     return "canonical"
@@ -223,12 +330,12 @@ def _assert_schema_valid(validate_artifact, schema_path, document_path):
     assert validate_artifact.validate(str(schema_path), str(document_path))[0] == 0
 
 
-def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
-    output_phase = effective_final_phase if phase == "green-final" else (effective_red_phase if phase == "red" else SCORECARD_OUTPUT_PHASES[phase])
+def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial"):
+    output_phase = effective_final_phase if phase == "green-final" else (effective_red_phase if phase == "red" else effective_green_initial_phase)
     return f"{output_phase}/{repetition}.md"
 
 
-def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
+def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial"):
     if scorecard["status"] == "pending":
         assert scorecard["results"] == {}
         assert scorecard["evidence_files"] == []
@@ -243,7 +350,7 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         for result in scorecard["results"].values()
     )
     expected_evidence = {
-        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase, effective_red_phase)
+        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase, effective_red_phase, effective_green_initial_phase)
         for repetition in REPETITIONS
     }
     assert set(scorecard["evidence_files"]) == expected_evidence
@@ -273,18 +380,19 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         assert scorecard["no_edit_reason"] is None
 
 
-def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
-    phases = (effective_red_phase, "02-green-initial", effective_final_phase)
-    return {(phase, repetition) for phase in phases for repetition in REPETITIONS} | {
-        ("pressure", "pressure")
+def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure"):
+    return {(effective_red_phase, repetition) for repetition in REPETITIONS[:effective_red_repetitions]} | {
+        (phase, repetition) for phase in (effective_green_initial_phase, effective_final_phase) for repetition in REPETITIONS
+    } | {
+        (effective_pressure_phase, "pressure")
     }
 
 
-def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
+def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure"):
     return [
-        *( (effective_red_phase, repetition) for repetition in REPETITIONS ),
-        *( ("02-green-initial", repetition) for repetition in REPETITIONS ),
-        ("pressure", "pressure"),
+        *( (effective_red_phase, repetition) for repetition in REPETITIONS[:effective_red_repetitions] ),
+        *( (effective_green_initial_phase, repetition) for repetition in REPETITIONS ),
+        (effective_pressure_phase, "pressure"),
         *( (effective_final_phase, repetition) for repetition in REPETITIONS ),
     ]
 
@@ -346,6 +454,126 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
 
 
 def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario):
+    pressure_report_inconsistency = (
+        scenario.get("effective_pressure_phase") in {"03-pressure-v2", "03-pressure-v3", "03-pressure-v4"}
+        and attempt["attempt_id"] == "pressure-command-report-inconsistent"
+        and (attempt["phase"], attempt["repetition"]) == ("pressure", "pressure")
+        and attempt["reason_codes"] == ["canonical-input-path-mismatch", "command-report-inconsistent"]
+        and attempt["started_at"] == "2026-08-09T19:34:20.542Z"
+        and attempt["finished_at"] == "2026-08-09T19:38:22.255Z"
+    )
+    if pressure_report_inconsistency:
+        assert "checked_output" not in attempt
+        archive_root = "artifacts/invalidated/pressure/pressure/pressure-command-report-inconsistent"
+        assert attempt["prompt_snapshot"]["path"] == f"{archive_root}/prompt.txt"
+        assert attempt["observation"]["path"] == f"{archive_root}/observation.json"
+        assert attempt["protocol_snapshot"]["path"] == f"{archive_root}/run-protocol.json"
+        archive = next(output for output in attempt["outputs"] if output["path"] == f"{archive_root}/tc-generator-output.json")
+        reserved = campaign / "artifacts/outputs/03-pressure/pressure/tc-generator-output.json"
+        assert (campaign / archive["path"]).read_bytes() == reserved.read_bytes()
+        protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        assert protocol["output_paths"] == [output["path"] for output in attempt["outputs"]]
+        assert all("artifacts/outputs/03-pressure/pressure" not in path for path in protocol["output_paths"])
+        assert {command["id"] for command in attempt["commands"]}.isdisjoint({"validate-artifact", "semantic-check"})
+        assert attempt["commands"][10]["argv"][-1] == "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\schemas\\tc-generator-output.schema.json"
+        return
+    pressure_v2_spawn_failure = (
+        scenario.get("effective_pressure_phase") in {"03-pressure-v3", "03-pressure-v4"}
+        and attempt["attempt_id"] == "pressure-v2-evaluator-spawn-failed"
+        and (attempt["phase"], attempt["repetition"]) == ("03-pressure-v2", "pressure")
+        and attempt["reason_codes"] == ["evaluator-process-spawn-failed"]
+        and attempt["started_at"] == "2026-08-09T20:20:18.804Z"
+        and attempt["finished_at"] == "2026-08-09T20:22:13.565Z"
+    )
+    if pressure_v2_spawn_failure:
+        assert "checked_output" not in attempt
+        archive_root = "artifacts/invalidated/03-pressure-v2/pressure/pressure-v2-evaluator-spawn-failed"
+        assert attempt["prompt_snapshot"]["path"] == f"{archive_root}/prompt.txt"
+        assert attempt["observation"]["path"] == f"{archive_root}/observation.json"
+        assert attempt["protocol_snapshot"]["path"] == f"{archive_root}/run-protocol.json"
+        assert [output["path"] for output in attempt["outputs"]] == [f"{archive_root}/diagnostic.json"]
+        assert [command["id"] for command in attempt["commands"]] == [
+            "role-integrity-check", "materialize-prompt-snapshot", "verify-prompt-hash", "verify-skill-inputs"
+        ]
+        assert all(command["exit_code"] == 0 for command in attempt["commands"])
+        protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        assert protocol["output_paths"] == [f"{archive_root}/diagnostic.json"]
+        diagnostic = _read_json(campaign / f"{archive_root}/diagnostic.json")
+        assert diagnostic == {
+            "artifact_type": "evaluator-spawn-failure",
+            "id": "read-prompt",
+            "argv": [
+                "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "-c",
+                "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+                str((campaign / "artifacts/protocol/03-pressure-v2/pressure/prompt.txt").resolve()),
+            ],
+            "cwd": str(campaign.resolve()), "process_created": False, "exit_code": None,
+            "windows_api": "CreateProcessAsUserW", "win32_error": 5,
+            "error": "CreateProcessAsUserW failed: 5 (Отказано в доступе.)",
+        }
+        return
+    pressure_v3_fork_mismatch = (
+        scenario.get("effective_pressure_phase") == "03-pressure-v4"
+        and attempt["attempt_id"] == "pressure-v3-evaluator-fork-mismatch"
+        and (attempt["phase"], attempt["repetition"]) == ("03-pressure-v3", "pressure")
+        and attempt["reason_codes"] == ["evaluator-fork-turns-mismatch"]
+    )
+    if pressure_v3_fork_mismatch:
+        root = "artifacts/invalidated/03-pressure-v3/pressure/pressure-v3-evaluator-fork-mismatch"
+        assert attempt["checked_output"]["path"] == f"{root}/tc-generator-output.json"
+        assert [item["path"] for item in attempt["outputs"]] == [f"{root}/validation-result.json", f"{root}/semantic-result.json"]
+        observation = _read_json(campaign / f"{root}/observation.json")
+        protocol = _read_json(campaign / f"{root}/run-protocol.json")
+        assert observation["expected_fork_turns"] == "none" and observation["actual_fork_turns"] == "3"
+        assert protocol["commands"] == observation["commands"] == attempt["commands"]
+        assert protocol["output_paths"][-1] == "artifacts/outputs/03-pressure-v3/pressure/tc-generator-output.json"
+        return
+    predelegation_mismatch = (
+        isinstance(scenario.get("effective_green_initial_phase"), str)
+        and scenario["effective_green_initial_phase"].startswith("02-green-initial-v")
+        and attempt["attempt_id"] == "green-initial-rep-01-prompt-mismatch"
+        and (attempt["phase"], attempt["repetition"]) == ("02-green-initial", "rep-01")
+        and attempt["reason_codes"] == ["prompt-mismatch"]
+        and attempt["observed_prompt_sha256"] == "aadebcffe151d667295c83f9de988fd2cee79d865f4e3f5c4e8195bda0217f98"
+        and attempt["started_at"] == "2026-08-09T17:16:02.918Z"
+        and attempt["finished_at"] == "2026-08-09T17:19:30.414Z"
+    )
+    if predelegation_mismatch:
+        assert {"evaluator", "task", "checked_output"}.isdisjoint(attempt)
+        attempt_root = "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-prompt-mismatch"
+        cwd = str(campaign.resolve())
+        assert attempt["prompt_snapshot"]["path"] == f"{attempt_root}/prompt.txt"
+        assert attempt["observation"]["path"] == f"{attempt_root}/observation.json"
+        assert attempt["outputs"] == [{"path": f"{attempt_root}/prompt-hash-check.txt", "sha256": attempt["outputs"][0]["sha256"]}]
+        assert attempt["protocol_snapshot"]["path"] == f"{attempt_root}/run-protocol.json"
+        assert attempt["commands"] == [
+            {"id": "role-integrity-check", "argv": ["C:\\Program Files\\Git\\bin\\sh.exe", "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh", "--check"], "cwd": cwd, "exit_code": 0},
+            {"id": "verify-prompt-hash", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "-c", "import hashlib,pathlib,sys; actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); print(actual); raise SystemExit(0 if actual==sys.argv[2] else 1)", str((campaign / "artifacts/protocol/02-green-initial/rep-01/prompt.txt").resolve()), "acf5684969ec08c2cedf4907e0497d1dd30d3afe0c33d197eff958d44b8b4420"], "cwd": cwd, "exit_code": 1},
+        ]
+        assert attempt["observed_prompt_sha256"] == attempt["prompt_snapshot"]["sha256"]
+        protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        assert {"evaluator", "task"}.isdisjoint(protocol)
+        assert protocol["phase"] == attempt["phase"]
+        assert protocol["repetition"] == attempt["repetition"]
+        assert protocol["application_prompt_sha256"] == attempt["observed_prompt_sha256"]
+        assert protocol["started_at"] == attempt["started_at"]
+        assert protocol["finished_at"] == attempt["finished_at"]
+        assert protocol["commands"] == attempt["commands"]
+        assert protocol["observation_path"] == attempt["observation"]["path"]
+        assert protocol["output_paths"] == [attempt["outputs"][0]["path"]]
+        return
+    schema_failure = (
+        (
+            attempt["phase"].startswith("02-green-initial-v")
+            and attempt["phase"] != _effective_green_initial_phase(scenario)
+            and attempt["repetition"] == "rep-01"
+        )
+        or attempt["reason_codes"] == ["schema-validation-failed"]
+    )
+    if schema_failure:
+        assert attempt["reason_codes"] == ["schema-validation-failed"]
+    else:
+        assert "schema-validation-failed" not in attempt["reason_codes"]
     required_fields = {
         "started_at",
         "finished_at",
@@ -391,6 +619,10 @@ def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario
     semantic_positions = [
         index for index, command in enumerate(commands) if command["id"] == "semantic-check"
     ]
+    if schema_failure:
+        assert validator_positions == [len(commands) - 1]
+        assert semantic_positions == []
+        assert "checked_output" in attempt
     if validator_positions:
         validator_index = validator_positions[0]
         validator = commands[validator_index]
@@ -509,10 +741,45 @@ def _assert_historical_run_semantics(metadata, campaign, scenario, effective_red
         evidence_paths.add(observation)
         identities.append(protocol["evaluator"])
     invalidated = metadata.get("invalidated_attempts", [])
-    assert [(attempt["phase"], attempt["repetition"]) for attempt in invalidated] == [
-        (DEFAULT_RED_PHASE, f"rep-{len(historical_runs) + 1:02d}")
-    ]
-    identities.extend(attempt["evaluator"] for attempt in invalidated)
+    expected_invalidated = [(DEFAULT_RED_PHASE, f"rep-{len(historical_runs) + 1:02d}")]
+    permitted_invalidated = [expected_invalidated]
+    if scenario.get("effective_red_repetitions") == 3:
+        permitted_invalidated.append([
+            *expected_invalidated, (effective_red_phase, "rep-04")
+        ])
+    invalidated_keys = [(attempt["phase"], attempt["repetition"]) for attempt in invalidated]
+    if _effective_green_initial_phase(scenario) != "02-green-initial" and ("02-green-initial", "rep-01") in invalidated_keys:
+        expected = {
+            *expected_invalidated,
+            (effective_red_phase, "rep-04"),
+            ("02-green-initial", "rep-01"),
+        }
+        expected.update(
+            (attempt["phase"], "rep-01")
+            for attempt in invalidated
+            if attempt["phase"].startswith("02-green-initial-v")
+            and attempt["phase"] != _effective_green_initial_phase(scenario)
+            and attempt["reason_codes"] == ["schema-validation-failed"]
+        )
+        if _effective_pressure_phase(scenario) == "03-pressure-v2":
+            expected.add(("pressure", "pressure"))
+        if _effective_pressure_phase(scenario) == "03-pressure-v3":
+            expected.update({("pressure", "pressure"), ("03-pressure-v2", "pressure")})
+        if _effective_pressure_phase(scenario) == "03-pressure-v4":
+            expected.update({("pressure", "pressure"), ("03-pressure-v2", "pressure"), ("03-pressure-v3", "pressure")})
+        assert set(invalidated_keys) == expected
+    else:
+        assert invalidated_keys in permitted_invalidated
+    identities.extend(
+        attempt["evaluator"]
+        for attempt in invalidated
+        if "evaluator" in attempt
+        and not (
+            attempt["phase"].startswith("02-green-initial-v")
+            and attempt["phase"] != _effective_green_initial_phase(scenario)
+            and attempt["reason_codes"] == ["schema-validation-failed"]
+        )
+    )
     assert all(identity == identities[0] for identity in identities)
     active_keys = {(run["phase"], run["repetition"]) for run in metadata["runs"]}
     assert not active_keys & set(expected_keys)
@@ -522,7 +789,10 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     assert metadata["skill_id"] == scenario["skill_id"]
     effective_final_phase = _effective_final_phase(scenario)
     effective_red_phase = _effective_red_phase(scenario)
-    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, effective_red_phase)
+    effective_red_repetitions = _effective_red_repetitions(scenario)
+    effective_green_initial_phase = _effective_green_initial_phase(scenario)
+    effective_pressure_phase = _effective_pressure_phase(scenario)
+    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, effective_red_phase, effective_green_initial_phase, effective_red_repetitions)
     for scorecard in scorecards:
         assert scorecard["skill_id"] == scenario["skill_id"]
         assert scorecard["rubric_ids"] == scenario["rubric_ids"]
@@ -541,7 +811,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert len(scorecards) == len(SCORECARD_PHASES)
         assert {scorecard["phase"] for scorecard in scorecards} == set(SCORECARD_PHASES)
         for scorecard in scorecards:
-            _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase)
+            _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase, effective_green_initial_phase)
             assert scorecard["status"] == "pending", "pending campaigns require pending scorecards"
         _assert_historical_run_semantics(metadata, campaign, scenario, effective_red_phase)
         _assert_invalidated_attempt_semantics(metadata, campaign, scenario, set(), _historical_evidence_paths(metadata, campaign))
@@ -551,13 +821,16 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     assert metadata["fork_turns"] == "none"
     run_keys_in_order = [(run["phase"], run["repetition"]) for run in metadata["runs"]]
     if metadata["status"] == "complete":
-        assert len(metadata["runs"]) == 16
-        scored_keys = _expected_run_keys(effective_final_phase, effective_red_phase)
+        expected_keys = _expected_run_keys(effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase)
+        assert len(metadata["runs"]) == len(expected_keys)
+        scored_keys = expected_keys
         assert set(run_keys_in_order) == scored_keys
-        assert len(set(run_keys_in_order)) == 16
+        assert len(set(run_keys_in_order)) == len(expected_keys)
     else:
         assert metadata["skill_id"] == "tc-generator"
-        expected_order = _tc_generator_execution_order(effective_final_phase, effective_red_phase)
+        expected_order = _tc_generator_execution_order(
+            effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase
+        )
         assert 1 <= len(run_keys_in_order) < len(expected_order)
         assert run_keys_in_order == expected_order[:len(run_keys_in_order)]
         scored_keys = set(run_keys_in_order)
@@ -569,15 +842,15 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         started_at = _parse_utc_z(run["started_at"])
         finished_at = _parse_utc_z(run["finished_at"])
         assert finished_at >= started_at
-        if phase == "pressure":
+        if phase == "pressure" or phase.startswith("03-pressure-v"):
             assert repetition == "pressure"
             assert run["skill_present"] is True
             assert run["prompt_sha256"] == scenario["prompt_sha256"]["pressure"]
-            required_output = "03-pressure.md"
-            output_prefix = "artifacts/outputs/03-pressure/pressure/"
+            required_output = "03-pressure.md" if phase == "pressure" else f"{phase}.md"
+            output_prefix = "artifacts/outputs/03-pressure/pressure/" if phase == "pressure" else f"artifacts/outputs/{phase}/pressure/"
         else:
             assert repetition in REPETITIONS
-            assert phase in {effective_red_phase, "02-green-initial", effective_final_phase}
+            assert phase in {effective_red_phase, effective_green_initial_phase, effective_final_phase}
             assert run["skill_present"] is (phase != effective_red_phase)
             assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
             required_output = f"{phase}/{repetition}.md"
@@ -601,7 +874,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert required_output in {output["path"] for output in run["outputs"]}
         companion_prefix = (
             f"{scenario['pressure_output_path']}/"
-            if phase == "pressure"
+            if phase == "pressure" or phase.startswith("03-pressure-v")
             else f"artifacts/outputs/{phase}/{repetition}/"
         )
         assert any(output["path"].startswith(companion_prefix) for output in run["outputs"])
@@ -643,7 +916,17 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             scenario, campaign, phase, repetition, protocol["commands"]
         )
         assert protocol["observation_path"] == f"{protocol_root}observation.json"
-        observation = campaign / protocol["observation_path"]
+        if scenario["skill_id"] == "tc-generator":
+            assert run["observation"]["path"] == protocol["observation_path"]
+            observation_path = Path(run["observation"]["path"])
+            assert not observation_path.is_absolute()
+            assert ".." not in observation_path.parts
+            assert all(not part.startswith(".") for part in observation_path.parts)
+            observation = (campaign / observation_path).resolve()
+            assert observation.is_relative_to(campaign_root)
+            assert hashlib.sha256(observation.read_bytes()).hexdigest() == run["observation"]["sha256"]
+        else:
+            observation = campaign / protocol["observation_path"]
         assert observation.is_file()
         assert observation.resolve() not in output_paths
         output_paths.add(observation.resolve())
@@ -660,16 +943,42 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             if attempt["phase"] != DEFAULT_RED_PHASE or not metadata.get("historical_runs")
         }
         if active_invalidated_keys:
-            assert active_invalidated_keys == {
-                _tc_generator_execution_order(effective_final_phase, effective_red_phase)[len(metadata["runs"])]
+            terminal_short_red = {
+                (effective_red_phase, f"rep-{effective_red_repetitions + 1:02d}")
             }
+            predelegation_initial = {("02-green-initial", "rep-01")}
+            archived_initial_schema = {
+                (attempt["phase"], "rep-01")
+                for attempt in metadata.get("invalidated_attempts", [])
+                if attempt["phase"].startswith("02-green-initial-v")
+                and attempt["phase"] != effective_green_initial_phase
+                and attempt["reason_codes"] == ["schema-validation-failed"]
+            }
+            pressure_inconsistency = {("pressure", "pressure")} if effective_pressure_phase in {"03-pressure-v2", "03-pressure-v3", "03-pressure-v4"} else set()
+            pressure_v2_spawn_failure = {("03-pressure-v2", "pressure")} if effective_pressure_phase in {"03-pressure-v3", "03-pressure-v4"} else set()
+            pressure_v3_fork_mismatch = {("03-pressure-v3", "pressure")} if effective_pressure_phase == "03-pressure-v4" else set()
+            if effective_red_repetitions == 3 and (
+                active_invalidated_keys == terminal_short_red
+                or active_invalidated_keys == terminal_short_red | predelegation_initial
+                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema
+                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency
+                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure
+                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure | pressure_v3_fork_mismatch
+            ):
+                assert "effective_red_repetitions" in scenario
+            else:
+                assert active_invalidated_keys == {
+                    _tc_generator_execution_order(
+                    effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase
+                    )[len(metadata["runs"])]
+                }
 
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
-        _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase)
+        _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase, effective_green_initial_phase)
         if scorecard["status"] == "complete":
             if metadata["status"] == "pending":
-                required_phase = effective_red_phase if scorecard["phase"] == "red" else SCORECARD_OUTPUT_PHASES[scorecard["phase"]]
+                required_phase = effective_red_phase if scorecard["phase"] == "red" else (effective_green_initial_phase if scorecard["phase"] == "green-initial" else effective_final_phase)
                 assert {
                     (required_phase, repetition) for repetition in REPETITIONS
                 } <= scored_keys
@@ -899,15 +1208,29 @@ def _tc_generator_forward_invalidated_campaign(tmp_path, root, phase="01-red-con
     return campaign, scenario, scorecards, metadata
 
 
-def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidated=False):
+def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidated=False, effective_red_repetitions=None):
     """Build a forward pending tc-generator prefix with real run evidence."""
     campaign = tmp_path / "docs/to_do/skill-tests/tc-generator"
     scenario = _read_json(root / "docs/to_do/skill-tests/tc-generator/00-scenario.json")
+    if effective_red_repetitions is not None:
+        if effective_red_repetitions == 5:
+            scenario.pop("effective_red_repetitions", None)
+        else:
+            scenario["effective_red_repetitions"] = effective_red_repetitions
+    scenario["output_paths"] = _expected_output_paths(
+        _effective_final_phase(scenario),
+        _effective_red_phase(scenario),
+        _effective_green_initial_phase(scenario),
+        _effective_red_repetitions(scenario),
+    )
     evaluator = "evidence-runner"
     host = "ci"
     model = "test-model"
     runs = []
-    order = _tc_generator_execution_order(_effective_final_phase(scenario), _effective_red_phase(scenario))
+    order = _tc_generator_execution_order(
+        _effective_final_phase(scenario), _effective_red_phase(scenario), _effective_red_repetitions(scenario),
+        _effective_green_initial_phase(scenario),
+    )
     for index, (phase, repetition) in enumerate(order[:successful_count], start=1):
         protocol_root = f"artifacts/protocol/{phase}/{repetition}"
         prompt_bytes = (
@@ -942,6 +1265,7 @@ def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidat
             "skill_present": phase != _effective_red_phase(scenario),
             "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
             "prompt_snapshot": _write_evidence(campaign, f"{protocol_root}/prompt.txt", prompt_bytes),
+            "observation": observation,
             "raw_input_allowlist": scenario["raw_input_allowlist"],
             "started_at": started_at,
             "finished_at": finished_at,
@@ -967,7 +1291,7 @@ def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidat
         "model": model if runs else None, "fork_turns": "none", "runs": runs,
     }
     scorecards = [_pending_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
-    if successful_count >= len(REPETITIONS):
+    if _effective_red_repetitions(scenario) == len(REPETITIONS) and successful_count >= len(REPETITIONS):
         scorecards[0] = _complete_scorecard(scenario, "red")
     if invalidated:
         phase, repetition = order[successful_count]
@@ -1219,8 +1543,16 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert scenario["repetitions"] == 5
         assert scenario["fork_turns"] == "none"
         effective_final_phase = _effective_final_phase(scenario)
-        assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, _effective_red_phase(scenario))
-        assert scenario["pressure_output_path"] == PRESSURE_OUTPUT_PATH
+        assert scenario["output_paths"] == _expected_output_paths(
+            effective_final_phase, _effective_red_phase(scenario), _effective_green_initial_phase(scenario),
+            _effective_red_repetitions(scenario),
+        )
+        expected_pressure_output_path = (
+            f"artifacts/outputs/{_effective_pressure_phase(scenario)}/pressure"
+            if skill_id == "tc-generator" and _effective_pressure_phase(scenario) != "pressure"
+            else PRESSURE_OUTPUT_PATH
+        )
+        assert scenario["pressure_output_path"] == expected_pressure_output_path
         assert len(set(scenario["output_paths"])) == len(scenario["output_paths"])
         assert all(not Path(output_path).is_absolute() and ".." not in Path(output_path).parts for output_path in scenario["output_paths"])
         assert hashlib.sha256(scenario["canonical_prompt"].encode("utf-8")).hexdigest() == scenario["prompt_sha256"]["canonical"]
@@ -1229,20 +1561,20 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         _assert_schema_valid(validate_artifact, schema_path, metadata_path)
         metadata = _read_json(metadata_path)
 
-        for phase in (_effective_red_phase(scenario), "02-green-initial", effective_final_phase):
+        for phase in (_effective_red_phase(scenario), _effective_green_initial_phase(scenario), effective_final_phase):
             for repetition in REPETITIONS:
                 assert (campaign / "artifacts/outputs" / phase / repetition / ".gitkeep").is_file()
                 if skill_id == "tc-generator" and phase == _effective_red_phase(scenario):
                     assert (campaign / phase / ".gitkeep").is_file()
                     assert (campaign / "artifacts/protocol" / phase / repetition / ".gitkeep").is_file()
-        assert (campaign / PRESSURE_OUTPUT_PATH / ".gitkeep").is_file()
+        assert (campaign / expected_pressure_output_path / ".gitkeep").is_file()
         scorecards = []
         for phase in SCORECARD_PHASES:
             scorecard_path = campaign / "05-scorecards" / f"{phase}.json"
             assert scorecard_path.is_file()
             _assert_schema_valid(validate_artifact, schema_path, scorecard_path)
             scorecard = _read_json(scorecard_path)
-            _assert_scorecard_semantics(scorecard, effective_final_phase, _effective_red_phase(scenario))
+            _assert_scorecard_semantics(scorecard, effective_final_phase, _effective_red_phase(scenario), _effective_green_initial_phase(scenario))
             scorecards.append(scorecard)
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
@@ -1291,6 +1623,7 @@ def test_tc_generator_v1_canonical_brief_binds_pipeline_input_and_required_skill
     expected_paths = [
         "skills/tc-generator/SKILL.md",
         "skills/tc-generator/references/case-generation-contract.md",
+        "schemas/tc-generator-output.schema.json",
     ]
     assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
     repository_root = _campaign_repository_root(campaign)
@@ -1412,12 +1745,116 @@ def test_tc_generator_versioned_red_excludes_stopped_v1_from_active_scorecards(r
 
     assert _effective_red_phase(scenario) == "01-red-control-v2"
     assert scenario["phase_prompt_sha256"]["01-red-control-v2"] == scenario["phase_prompt_sha256"]["01-red-control"]
-    assert metadata["runs"] == []
-    assert (metadata["evaluator"], metadata["host"], metadata["model"]) == (None, None, None)
+    active_keys = [(run["phase"], run["repetition"]) for run in metadata["runs"]]
+    execution_order = _tc_generator_execution_order(
+        _effective_final_phase(scenario), _effective_red_phase(scenario), _effective_red_repetitions(scenario),
+        _effective_green_initial_phase(scenario), _effective_pressure_phase(scenario),
+    )
+    assert metadata["status"] == "complete"
+    assert active_keys == execution_order
+    assert all(phase != "01-red-control" for phase, _ in active_keys)
+    evaluator_identity = (metadata["evaluator"], metadata["host"], metadata["model"])
+    if metadata["runs"]:
+        assert all(isinstance(value, str) and value for value in evaluator_identity)
+    else:
+        assert evaluator_identity == (None, None, None)
     assert [(run["phase"], run["repetition"]) for run in metadata["historical_runs"]] == [
         ("01-red-control", "rep-01"), ("01-red-control", "rep-02")
     ]
-    assert all(scorecard["status"] == "pending" and scorecard["evidence_files"] == [] for scorecard in scorecards)
+    assert all(
+        "01-red-control/" not in evidence_file
+        for scorecard in scorecards
+        for evidence_file in scorecard["evidence_files"]
+    )
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pressure_v4_recovery_keeps_full_chain_and_next_key(root):
+    """Catches a v3 fork-mismatch archive failing to preserve the finalized v4 chain."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [_read_json(campaign / "05-scorecards" / f"{phase}.json") for phase in SCORECARD_PHASES]
+    validate_artifact = load_tool("validate_artifact")
+
+    assert scenario["repetitions"] == 5
+    assert scenario["effective_red_repetitions"] == 3
+    assert metadata["effective_red_repetitions"] == 3
+    assert _assert_schema_valid(validate_artifact, root / "schemas/skill-test-evidence.schema.json", campaign / "00-scenario.json") is None
+    assert _assert_schema_valid(validate_artifact, root / "schemas/skill-test-evidence.schema.json", campaign / "06-run-metadata.json") is None
+    assert metadata["status"] == "complete"
+    assert [(run["phase"], run["repetition"]) for run in metadata["runs"]] == [
+        ("01-red-control-v2", "rep-01"), ("01-red-control-v2", "rep-02"), ("01-red-control-v2", "rep-03"),
+        *( ("02-green-initial-v3", repetition) for repetition in REPETITIONS ),
+        ("03-pressure-v4", "pressure"),
+        *( ("04-green-final", repetition) for repetition in REPETITIONS ),
+    ]
+    assert [(attempt["phase"], attempt["repetition"]) for attempt in metadata["invalidated_attempts"]] == [
+        ("02-green-initial", "rep-01"), ("01-red-control", "rep-03"), ("01-red-control-v2", "rep-04"),
+        ("02-green-initial-v2", "rep-01"), ("pressure", "pressure"), ("03-pressure-v2", "pressure"), ("03-pressure-v3", "pressure"),
+    ]
+    assert len(_tc_generator_execution_order(
+        _effective_final_phase(scenario), _effective_red_phase(scenario), _effective_red_repetitions(scenario),
+        _effective_green_initial_phase(scenario), _effective_pressure_phase(scenario),
+    )) == 14
+    assert scorecards[0]["status"] == "pending"
+    assert scorecards[0]["results"] == {}
+    assert scorecards[0]["evidence_files"] == []
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_shortened_red_schema_uses_fourteen_complete_and_thirteen_pending_runs(tmp_path, root):
+    """Catches shortened campaigns accepting a fifteenth pending run or rejecting their 14-run finalizer input."""
+    campaign, scenario, _scorecards, metadata = _pending_tc_generator_campaign(
+        tmp_path, root, successful_count=13
+    )
+    validate_artifact = load_tool("validate_artifact")
+    metadata_path = campaign / "06-run-metadata.json"
+    scenario_path = campaign / "00-scenario.json"
+
+    metadata["effective_red_repetitions"] = 3
+    scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    assert validate_artifact.validate(str(root / "schemas/skill-test-evidence.schema.json"), str(metadata_path))[0] == 0
+    metadata["runs"].append(metadata["runs"][-1])
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    assert validate_artifact.validate(str(root / "schemas/skill-test-evidence.schema.json"), str(metadata_path))[0] == 1
+    metadata["runs"] = _pending_tc_generator_campaign(tmp_path / "complete", root, successful_count=14)[3]["runs"]
+    metadata["status"] = "complete"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    assert validate_artifact.validate(str(root / "schemas/skill-test-evidence.schema.json"), str(metadata_path))[0] == 0
+
+
+def test_tc_generator_default_red_repetition_compatibility_remains_five(tmp_path, root):
+    """Catches an absent amendment field shortening a different campaign’s normal five RED runs."""
+    _campaign, scenario, _scorecards, _metadata = _pending_tc_generator_campaign(tmp_path, root, successful_count=5)
+    scenario.pop("effective_red_repetitions")
+
+    assert _effective_red_repetitions(scenario) == 5
+    default_scenario_path = tmp_path / "default-scenario.json"
+    default_scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+    assert load_tool("validate_artifact").validate(
+        str(root / "schemas/skill-test-evidence.schema.json"), str(default_scenario_path)
+    )[0] == 0
+    assert _tc_generator_execution_order(
+        _effective_final_phase(scenario), _effective_red_phase(scenario), _effective_red_repetitions(scenario),
+        _effective_green_initial_phase(scenario),
+    )[:6] == [
+        ("01-red-control-v2", "rep-01"), ("01-red-control-v2", "rep-02"), ("01-red-control-v2", "rep-03"),
+        ("01-red-control-v2", "rep-04"), ("01-red-control-v2", "rep-05"), (_effective_green_initial_phase(scenario), "rep-01"),
+    ]
+
+
+def test_tc_generator_short_red_scorecard_stays_pending_after_green_transition(tmp_path, root):
+    """Catches a three-run RED baseline being incorrectly promoted to a complete comparable scorecard."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
+        tmp_path, root, successful_count=4
+    )
+
+    assert (metadata["runs"][-1]["phase"], metadata["runs"][-1]["repetition"]) == (
+        _effective_green_initial_phase(scenario), "rep-01"
+    )
+    assert scorecards[0] == _pending_scorecard(scenario, "red")
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
@@ -1486,8 +1923,6 @@ def test_tc_generator_v1_requires_schema_validation_immediately_before_semantic_
     expected_output = _protocol_v1_reserved_output(
         campaign, scenario["skill_id"], phase, repetition
     )
-    repository_root = _campaign_repository_root(campaign)
-
     _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, commands)
     validator, semantic_check = commands[-2:]
     assert validator["id"] == "validate-artifact"
@@ -1664,6 +2099,44 @@ def test_tc_generator_pending_lifecycle_persists_a_successful_red_prefix(tmp_pat
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
+def test_tc_generator_active_run_requires_hashed_observation_in_schema(tmp_path, root):
+    """Catches scored tc-generator runs that preserve only an unhashed protocol observation path."""
+    campaign, _scenario, _scorecards, metadata = _pending_tc_generator_campaign(tmp_path, root)
+    observation = campaign / "artifacts/protocol/01-red-control-v2/rep-01/observation.json"
+    metadata["runs"][0]["observation"] = {
+        "path": "artifacts/protocol/01-red-control-v2/rep-01/observation.json",
+        "sha256": hashlib.sha256(observation.read_bytes()).hexdigest(),
+    }
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    validate_artifact = load_tool("validate_artifact")
+
+    assert validate_artifact.validate(
+        str(root / "schemas/skill-test-evidence.schema.json"), str(metadata_path)
+    )[0] == 0
+    metadata["runs"][0].pop("observation")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    assert validate_artifact.validate(
+        str(root / "schemas/skill-test-evidence.schema.json"), str(metadata_path)
+    )[0] == 1
+
+
+def test_tc_generator_active_run_rejects_tampered_observation_bytes(tmp_path, root):
+    """Catches an active observation whose ledger hash no longer matches its preserved bytes."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(tmp_path, root)
+    run = metadata["runs"][0]
+    observation = campaign / "artifacts/protocol/01-red-control-v2/rep-01/observation.json"
+    run["observation"] = {
+        "path": "artifacts/protocol/01-red-control-v2/rep-01/observation.json",
+        "sha256": hashlib.sha256(observation.read_bytes()).hexdigest(),
+    }
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+    observation.write_bytes(b"tampered observation\n")
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
 def test_tc_generator_pending_lifecycle_preserves_prefix_before_invalidated_attempt(tmp_path, root):
     """Allows RED rep-01 evidence followed by the immutable failed rep-02 attempt."""
     campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
@@ -1696,7 +2169,7 @@ def test_tc_generator_pending_lifecycle_rejects_invalidated_attempt_without_prio
 def test_tc_generator_pending_lifecycle_allows_only_evidenced_completed_prefix_scorecards(tmp_path, root):
     """Allows a completed RED card after five preserved runs, never after fewer."""
     campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
-        tmp_path, root, successful_count=5
+        tmp_path, root, successful_count=5, effective_red_repetitions=5
     )
     _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 

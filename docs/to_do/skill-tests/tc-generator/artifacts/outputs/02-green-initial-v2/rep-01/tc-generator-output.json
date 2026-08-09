@@ -1,0 +1,203 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-generator",
+  "artifacts": {
+    "generated_test_cases": {
+      "requirements": [
+        {
+          "id": "REQ-0001",
+          "text": "A valid sales_manager order creation request returns HTTP 201 with code CREATED.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/0"
+          ]
+        },
+        {
+          "id": "REQ-0002",
+          "text": "Each order line quantity is an integer from 1 through 100 inclusive; quantities 0 and 101 are rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/1"
+          ]
+        },
+        {
+          "id": "REQ-0003",
+          "text": "The viewer role is denied order creation with HTTP 403 and code FORBIDDEN.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/2"
+          ]
+        }
+      ],
+      "test_cases": [
+        {
+          "id": "TC-0001",
+          "requirement_id": "REQ-0001",
+          "title": "sales_manager creates a valid order",
+          "categories": [
+            "positive",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as sales_manager."
+          ],
+          "test_data": [
+            "quantity: 2"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 201 CREATED"
+            }
+          ],
+          "expected_outcome": "HTTP 201 with code CREATED."
+        },
+        {
+          "id": "TC-0002",
+          "requirement_id": "REQ-0002",
+          "title": "quantity 1 is accepted",
+          "categories": [
+            "positive",
+            "boundary"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as sales_manager."
+          ],
+          "test_data": [
+            "quantity: 1"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 201 CREATED"
+            }
+          ],
+          "expected_outcome": "HTTP 201 with code CREATED."
+        },
+        {
+          "id": "TC-0003",
+          "requirement_id": "REQ-0002",
+          "title": "quantity 100 is accepted",
+          "categories": [
+            "positive",
+            "boundary"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as sales_manager."
+          ],
+          "test_data": [
+            "quantity: 100"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 201 CREATED"
+            }
+          ],
+          "expected_outcome": "HTTP 201 with code CREATED."
+        },
+        {
+          "id": "TC-0004",
+          "requirement_id": "REQ-0002",
+          "title": "quantity 0 is rejected",
+          "categories": [
+            "negative",
+            "boundary"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as sales_manager."
+          ],
+          "test_data": [
+            "quantity: 0"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 422 QUANTITY_OUT_OF_RANGE"
+            }
+          ],
+          "expected_outcome": "HTTP 422 with code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0005",
+          "requirement_id": "REQ-0002",
+          "title": "quantity 101 is rejected",
+          "categories": [
+            "negative",
+            "boundary"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as sales_manager."
+          ],
+          "test_data": [
+            "quantity: 101"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 422 QUANTITY_OUT_OF_RANGE"
+            }
+          ],
+          "expected_outcome": "HTTP 422 with code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0006",
+          "requirement_id": "REQ-0003",
+          "title": "viewer cannot create an order",
+          "categories": [
+            "negative",
+            "authorization"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "Authenticated as viewer."
+          ],
+          "test_data": [
+            "quantity: 2"
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "POST /api/v1/orders",
+              "expected_result": "HTTP 403 FORBIDDEN"
+            }
+          ],
+          "expected_outcome": "HTTP 403 with code FORBIDDEN."
+        }
+      ],
+      "coverage": [
+        {
+          "requirement_id": "REQ-0001",
+          "test_case_ids": [
+            "TC-0001"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0002",
+          "test_case_ids": [
+            "TC-0002",
+            "TC-0003",
+            "TC-0004",
+            "TC-0005"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0003",
+          "test_case_ids": [
+            "TC-0006"
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": [
+    "analytics/order-creation.md — No authorization policy is supplied for warehouse_operator."
+  ]
+}

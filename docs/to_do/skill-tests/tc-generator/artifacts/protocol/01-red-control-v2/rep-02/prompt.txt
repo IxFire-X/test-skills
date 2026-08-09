@@ -1,0 +1,5 @@
+APPLICATION INSTRUCTION - tc-generator RED control
+
+Read only artifacts/inputs/context-marker-output.json. Treat the one context-marker-output.schema.json v2.1.0 envelope as the only task input: use artifacts.analytics_documentation for requirement-derived cases and artifacts.source_code_and_diff only for technical precision. Generate boundary, negative, and role-aware manual test cases for the supplied order-creation change. Preserve all supplied REQ-* identifiers and provenance, make every expected result executable, and generate authorization coverage only for policies explicitly present in the envelope. Preserve unsupported authorization requests as gaps; do not invent a policy or expected authorization outcome.
+
+Write exactly one schema-bound tc-generator-output.json and validate it with tools/validate_artifact.py against schemas/tc-generator-output.schema.json at the evaluator's exact reserved artifacts/outputs/<phase>/<rep>/tc-generator-output.json path.

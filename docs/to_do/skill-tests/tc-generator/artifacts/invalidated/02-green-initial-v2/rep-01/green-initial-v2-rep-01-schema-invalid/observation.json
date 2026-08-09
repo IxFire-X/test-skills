@@ -1,0 +1,1 @@
+{"classification":"protocol-invalid","reason_codes":["schema-validation-failed"],"summary":"Archived the already-failed schema-validation attempt without retrying, repairing, replacing, or scoring it. The checked output uses scalar test_cases[].requirement_id where the output schema requires the nonempty test_cases[].requirement_ids array; semantic validation was not run."}

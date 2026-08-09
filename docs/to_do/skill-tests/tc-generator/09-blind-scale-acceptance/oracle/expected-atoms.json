@@ -1,0 +1,28 @@
+{
+  "expected_total": 36,
+  "warnings": ["analytics/subscription-invoicing.md — No authorization policy is supplied for claims_adjuster."],
+  "operations": [
+    ["REQ-2001","subscription_admin","POST","/api/v2/subscriptions",201,"SUBSCRIPTION_CREATED",["seat_count: 2","trial_days: 1"]],
+    ["REQ-2002","plan_manager","PATCH","/api/v2/subscriptions/{subscription_id}/plan",200,"PLAN_CHANGED",["billing_day: 2"]],
+    ["REQ-2003","invoice_manager","POST","/api/v2/subscriptions/{subscription_id}/invoices",201,"INVOICE_ISSUED",["invoice_line_count: 2"]],
+    ["REQ-2004","billing_manager","POST","/api/v2/invoices/{invoice_id}/finalize",200,"INVOICE_FINALIZED",["adjustment_cents: -49999"]],
+    ["REQ-2005","collections_operator","POST","/api/v2/invoices/{invoice_id}/payment-attempts",202,"PAYMENT_QUEUED",["retry_attempt: 1"]],
+    ["REQ-2006","billing_manager","POST","/api/v2/invoices/{invoice_id}/void",200,"INVOICE_VOIDED",[]]
+  ],
+  "ranges": [
+    ["REQ-2011","subscription_admin","seat_count",1,500,0,501,"POST","/api/v2/subscriptions",201,"SUBSCRIPTION_CREATED","SEAT_COUNT_OUT_OF_RANGE"],
+    ["REQ-2012","subscription_admin","trial_days",0,60,-1,61,"POST","/api/v2/subscriptions",201,"SUBSCRIPTION_CREATED","TRIAL_DAYS_OUT_OF_RANGE"],
+    ["REQ-2013","plan_manager","billing_day",1,28,0,29,"PATCH","/api/v2/subscriptions/{subscription_id}/plan",200,"PLAN_CHANGED","BILLING_DAY_OUT_OF_RANGE"],
+    ["REQ-2014","invoice_manager","invoice_line_count",1,100,0,101,"POST","/api/v2/subscriptions/{subscription_id}/invoices",201,"INVOICE_ISSUED","INVOICE_LINE_COUNT_OUT_OF_RANGE"],
+    ["REQ-2015","collections_operator","retry_attempt",0,5,-1,6,"POST","/api/v2/invoices/{invoice_id}/payment-attempts",202,"PAYMENT_QUEUED","RETRY_ATTEMPT_OUT_OF_RANGE"],
+    ["REQ-2016","billing_manager","adjustment_cents",-50000,50000,-50001,50001,"POST","/api/v2/invoices/{invoice_id}/finalize",200,"INVOICE_FINALIZED","ADJUSTMENT_CENTS_OUT_OF_RANGE"]
+  ],
+  "denials": [
+    ["REQ-2021","analyst","POST","/api/v2/subscriptions",["seat_count: 2","trial_days: 1"]],
+    ["REQ-2022","support_agent","PATCH","/api/v2/subscriptions/{subscription_id}/plan",["billing_day: 2"]],
+    ["REQ-2023","viewer","POST","/api/v2/subscriptions/{subscription_id}/invoices",["invoice_line_count: 2"]],
+    ["REQ-2024","billing_clerk","POST","/api/v2/invoices/{invoice_id}/finalize",["adjustment_cents: -49999"]],
+    ["REQ-2025","partner","POST","/api/v2/invoices/{invoice_id}/payment-attempts",["retry_attempt: 1"]],
+    ["REQ-2026","auditor","POST","/api/v2/invoices/{invoice_id}/void",[]]
+  ]
+}

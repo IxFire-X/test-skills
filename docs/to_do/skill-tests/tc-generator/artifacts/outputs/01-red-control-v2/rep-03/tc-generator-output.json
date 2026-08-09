@@ -1,0 +1,257 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-generator",
+  "warnings": [
+    "No authorization policy is supplied for warehouse_operator; no authorization test or expected outcome is generated for that role."
+  ],
+  "artifacts": {
+    "generated_test_cases": {
+      "requirements": [
+        {
+          "id": "REQ-0001",
+          "text": "A valid sales_manager order creation request returns HTTP 201 with code CREATED.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/0"
+          ]
+        },
+        {
+          "id": "REQ-0002",
+          "text": "Each order line quantity is an integer from 1 through 100 inclusive; quantities 0 and 101 are rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/1"
+          ]
+        },
+        {
+          "id": "REQ-0003",
+          "text": "The viewer role is denied order creation with HTTP 403 and code FORBIDDEN.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/2"
+          ]
+        }
+      ],
+      "test_cases": [
+        {
+          "id": "TC-0001",
+          "requirement_ids": [
+            "REQ-0001"
+          ],
+          "title": "Create an order as sales_manager with a valid line quantity",
+          "categories": [
+            "positive",
+            "functional",
+            "authorization"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A user authenticated with the sales_manager role is available.",
+            "The user has valid order-line data accepted by the order creation API."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with a valid order body containing one line with integer quantity 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the sales_manager user.",
+              "expected_result": "Authentication succeeds and the request is made under the sales_manager role."
+            },
+            {
+              "order": 2,
+              "action": "Send the valid POST /api/v1/orders request.",
+              "expected_result": "The response HTTP status is 201 and the response code is CREATED."
+            }
+          ],
+          "expected_outcome": "A valid sales_manager order creation request returns HTTP 201 with code CREATED."
+        },
+        {
+          "id": "TC-0002",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Accept the inclusive lower quantity boundary",
+          "categories": [
+            "boundary",
+            "positive",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A user authenticated with the sales_manager role is available.",
+            "All order data other than quantity is valid."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with one line whose quantity is integer 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the sales_manager user.",
+              "expected_result": "Authentication succeeds and the request is made under the sales_manager role."
+            },
+            {
+              "order": 2,
+              "action": "Send the order creation request with quantity 1.",
+              "expected_result": "The request is accepted; the response HTTP status is 201 and the response code is CREATED."
+            }
+          ],
+          "expected_outcome": "Quantity 1 is accepted as the inclusive lower bound."
+        },
+        {
+          "id": "TC-0003",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Accept the inclusive upper quantity boundary",
+          "categories": [
+            "boundary",
+            "positive",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A user authenticated with the sales_manager role is available.",
+            "All order data other than quantity is valid."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with one line whose quantity is integer 100."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the sales_manager user.",
+              "expected_result": "Authentication succeeds and the request is made under the sales_manager role."
+            },
+            {
+              "order": 2,
+              "action": "Send the order creation request with quantity 100.",
+              "expected_result": "The request is accepted; the response HTTP status is 201 and the response code is CREATED."
+            }
+          ],
+          "expected_outcome": "Quantity 100 is accepted as the inclusive upper bound."
+        },
+        {
+          "id": "TC-0004",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Reject quantity below the permitted range",
+          "categories": [
+            "boundary",
+            "negative",
+            "functional"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A user authenticated with the sales_manager role is available.",
+            "All order data other than quantity is valid."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with one line whose quantity is integer 0."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the sales_manager user.",
+              "expected_result": "Authentication succeeds and the request is made under the sales_manager role."
+            },
+            {
+              "order": 2,
+              "action": "Send the order creation request with quantity 0.",
+              "expected_result": "The response HTTP status is 422 and the response error code is QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 0 is rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0005",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Reject quantity above the permitted range",
+          "categories": [
+            "boundary",
+            "negative",
+            "functional"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A user authenticated with the sales_manager role is available.",
+            "All order data other than quantity is valid."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with one line whose quantity is integer 101."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the sales_manager user.",
+              "expected_result": "Authentication succeeds and the request is made under the sales_manager role."
+            },
+            {
+              "order": 2,
+              "action": "Send the order creation request with quantity 101.",
+              "expected_result": "The response HTTP status is 422 and the response error code is QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 101 is rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0006",
+          "requirement_ids": [
+            "REQ-0003"
+          ],
+          "title": "Deny order creation to the viewer role",
+          "categories": [
+            "authorization",
+            "negative",
+            "security"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A user authenticated with the viewer role is available.",
+            "A valid order creation request body is available."
+          ],
+          "test_data": [
+            "Request: POST /api/v1/orders with a valid order body containing one line with integer quantity 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Authenticate as the viewer user.",
+              "expected_result": "Authentication succeeds and the request is made under the viewer role."
+            },
+            {
+              "order": 2,
+              "action": "Send the valid POST /api/v1/orders request.",
+              "expected_result": "The response HTTP status is 403 and the response code is FORBIDDEN."
+            }
+          ],
+          "expected_outcome": "The viewer role is denied order creation with HTTP 403 and code FORBIDDEN."
+        }
+      ],
+      "coverage": [
+        {
+          "requirement_id": "REQ-0001",
+          "test_case_ids": [
+            "TC-0001"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0002",
+          "test_case_ids": [
+            "TC-0002",
+            "TC-0003",
+            "TC-0004",
+            "TC-0005"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0003",
+          "test_case_ids": [
+            "TC-0006"
+          ]
+        }
+      ]
+    }
+  }
+}

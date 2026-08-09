@@ -1,0 +1,3 @@
+Read the canonical tc-generator skill, its reference, and output schema. Then read the supplied blind context-marker artifact and generate one complete, minimal, non-redundant test suite as one schema-valid tc-generator output JSON file.
+
+Cover every explicitly supported happy operation, every documented inclusive numeric range at both accepted boundaries and its immediately-outside negative values, and every explicit role denial. Determine the necessary suite yourself from the input. Copy the requirements, provenance, warnings, and coverage faithfully. Do not invent coverage for stated gaps. Write the output once.

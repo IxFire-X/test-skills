@@ -1,0 +1,36 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [
+        {"id":"REQ-2001","text":"The subscription_admin role can send a valid subscription creation request to POST /api/v2/subscriptions and receives HTTP 201 with code SUBSCRIPTION_CREATED.","provenance":["analytics/subscription-invoicing.md#/operations/create-subscription"]},
+        {"id":"REQ-2002","text":"The plan_manager role can send a valid plan-change request to PATCH /api/v2/subscriptions/{subscription_id}/plan and receives HTTP 200 with code PLAN_CHANGED.","provenance":["analytics/subscription-invoicing.md#/operations/change-plan"]},
+        {"id":"REQ-2003","text":"The invoice_manager role can send a valid invoice issue request to POST /api/v2/subscriptions/{subscription_id}/invoices and receives HTTP 201 with code INVOICE_ISSUED.","provenance":["analytics/subscription-invoicing.md#/operations/issue-invoice"]},
+        {"id":"REQ-2004","text":"The billing_manager role can send a valid invoice finalization request to POST /api/v2/invoices/{invoice_id}/finalize and receives HTTP 200 with code INVOICE_FINALIZED.","provenance":["analytics/subscription-invoicing.md#/operations/finalize-invoice"]},
+        {"id":"REQ-2005","text":"The collections_operator role can send a valid payment-attempt request to POST /api/v2/invoices/{invoice_id}/payment-attempts and receives HTTP 202 with code PAYMENT_QUEUED.","provenance":["analytics/subscription-invoicing.md#/operations/queue-payment"]},
+        {"id":"REQ-2006","text":"The billing_manager role can send a valid invoice void request to POST /api/v2/invoices/{invoice_id}/void and receives HTTP 200 with code INVOICE_VOIDED.","provenance":["analytics/subscription-invoicing.md#/operations/void-invoice"]},
+        {"id":"REQ-2011","text":"The subscription_admin role calling POST /api/v2/subscriptions accepts seat_count as an integer from 1 through 500 inclusive and returns HTTP 201 with code SUBSCRIPTION_CREATED at either boundary; seat_count values 0 and 501 return HTTP 422 with code SEAT_COUNT_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/seat_count"]},
+        {"id":"REQ-2012","text":"The subscription_admin role calling POST /api/v2/subscriptions accepts trial_days as an integer from 0 through 60 inclusive and returns HTTP 201 with code SUBSCRIPTION_CREATED at either boundary; trial_days values -1 and 61 return HTTP 422 with code TRIAL_DAYS_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/trial_days"]},
+        {"id":"REQ-2013","text":"The plan_manager role calling PATCH /api/v2/subscriptions/{subscription_id}/plan accepts billing_day as an integer from 1 through 28 inclusive and returns HTTP 200 with code PLAN_CHANGED at either boundary; billing_day values 0 and 29 return HTTP 422 with code BILLING_DAY_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/billing_day"]},
+        {"id":"REQ-2014","text":"The invoice_manager role calling POST /api/v2/subscriptions/{subscription_id}/invoices accepts invoice_line_count as an integer from 1 through 100 inclusive and returns HTTP 201 with code INVOICE_ISSUED at either boundary; invoice_line_count values 0 and 101 return HTTP 422 with code INVOICE_LINE_COUNT_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/invoice_line_count"]},
+        {"id":"REQ-2015","text":"The collections_operator role calling POST /api/v2/invoices/{invoice_id}/payment-attempts accepts retry_attempt as an integer from 0 through 5 inclusive and returns HTTP 202 with code PAYMENT_QUEUED at either boundary; retry_attempt values -1 and 6 return HTTP 422 with code RETRY_ATTEMPT_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/retry_attempt"]},
+        {"id":"REQ-2016","text":"The billing_manager role calling POST /api/v2/invoices/{invoice_id}/finalize accepts adjustment_cents as an integer from -50000 through 50000 inclusive and returns HTTP 200 with code INVOICE_FINALIZED at either boundary; adjustment_cents values -50001 and 50001 return HTTP 422 with code ADJUSTMENT_CENTS_OUT_OF_RANGE.","provenance":["analytics/subscription-invoicing.md#/validation/adjustment_cents"]},
+        {"id":"REQ-2021","text":"The analyst role calling POST /api/v2/subscriptions is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/analyst-create-subscription"]},
+        {"id":"REQ-2022","text":"The support_agent role calling PATCH /api/v2/subscriptions/{subscription_id}/plan is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/support-agent-change-plan"]},
+        {"id":"REQ-2023","text":"The viewer role calling POST /api/v2/subscriptions/{subscription_id}/invoices is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/viewer-issue-invoice"]},
+        {"id":"REQ-2024","text":"The billing_clerk role calling POST /api/v2/invoices/{invoice_id}/finalize is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/billing-clerk-finalize-invoice"]},
+        {"id":"REQ-2025","text":"The partner role calling POST /api/v2/invoices/{invoice_id}/payment-attempts is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/partner-queue-payment"]},
+        {"id":"REQ-2026","text":"The auditor role calling POST /api/v2/invoices/{invoice_id}/void is denied with HTTP 403 and code FORBIDDEN.","provenance":["analytics/subscription-invoicing.md#/authorization/auditor-void-invoice"]}
+      ]
+    },
+    "source_code_and_diff": {
+      "sources": [
+        "src/billing/subscriptions.py — subscription, plan, and invoice operations use the documented endpoint oracles",
+        "src/billing/validation.py — documented inclusive ranges reject their immediately outside values",
+        "src/billing/authorization.py — documented role denials return 403 FORBIDDEN"
+      ]
+    }
+  },
+  "warnings": ["analytics/subscription-invoicing.md — No authorization policy is supplied for claims_adjuster."]
+}

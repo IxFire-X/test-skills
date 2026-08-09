@@ -1,0 +1,74 @@
+{
+  "artifact_type": "evaluator-observation",
+  "skill_id": "tc-generator",
+  "phase": "04-green-final",
+  "repetition": "rep-04",
+  "evaluator": {
+    "name": "sol_advisor_terra_implementer",
+    "host": "native-subagent-v2",
+    "model": "gpt-5.6-terra/high (role-pinned)"
+  },
+  "task": "/root/tc_generator_final_rep04_evaluator",
+  "result": "output-written",
+  "reported_output_path": "artifacts/outputs/04-green-final/rep-04/tc-generator-output.json",
+  "shell_commands": [],
+  "repository_reads": [
+    {
+      "id": "read-prompt",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\protocol\\04-green-final\\rep-04\\prompt.txt"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "read-skill",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\skills\\tc-generator\\SKILL.md"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "read-contract",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\skills\\tc-generator\\references\\case-generation-contract.md"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "read-schema",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-generator-output.schema.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    },
+    {
+      "id": "read-input",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "-c",
+        "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator\\artifacts\\inputs\\context-marker-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-generator",
+      "exit_code": 0
+    }
+  ],
+  "isolation": "The evaluator used fork_turns none and read only the immutable FINAL-GREEN prompt, canonical skill and contract inputs, output schema, and the one allowlisted context-marker input. Checker, tests, scenario, metadata, history, and prior outputs were withheld."
+}
+
