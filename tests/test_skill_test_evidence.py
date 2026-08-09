@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,11 @@ PRESSURE_OUTPUT_PATH = "artifacts/outputs/03-pressure/pressure"
 UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 DEFAULT_FINAL_PHASE = "04-green-final"
 CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION = 1
+PROTOCOL_V1_SKILL_IDS = frozenset({"context-marker", "tc-generator"})
+PROTOCOL_V1_OUTPUT_CONTRACTS = {
+    "context-marker": ("context-marker-output.schema.json", "context-marker-output.json"),
+    "tc-generator": ("tc-generator-output.schema.json", "tc-generator-output.json"),
+}
 
 
 def _read_json(path: Path):
@@ -72,9 +78,9 @@ def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE):
     return [f"artifacts/outputs/{phase}/{rep}" for phase in phases for rep in REPETITIONS]
 
 
-def _uses_context_marker_literal_command_contract(scenario):
+def _uses_protocol_v1_literal_command_contract(scenario):
     return (
-        scenario["skill_id"] == "context-marker"
+        scenario["skill_id"] in PROTOCOL_V1_SKILL_IDS
         and scenario.get("protocol_contract_version") == CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION
     )
 
@@ -83,10 +89,31 @@ def _campaign_repository_root(campaign):
     return campaign.parents[3]
 
 
-def _captured_context_marker_final_commands(campaign, phase, repetition):
+def _protocol_v1_reserved_output(campaign, skill_id, phase, repetition):
+    _schema_name, output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[skill_id]
+    if phase == "pressure":
+        return campaign / PRESSURE_OUTPUT_PATH / output_name
+    return campaign / "artifacts/outputs" / phase / repetition / output_name
+
+
+def _tc_generator_semantic_mode(phase):
+    if phase == "01-red-control":
+        return "red-control"
+    if phase == "pressure":
+        return "pressure"
+    return "canonical"
+
+
+def _captured_protocol_v1_final_commands(campaign, skill_id, phase, repetition):
     repository_root = _campaign_repository_root(campaign)
-    expected_output = campaign / "artifacts/outputs" / phase / repetition / "context-marker-output.json"
-    return [
+    schema_name, _output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[skill_id]
+    expected_output = _protocol_v1_reserved_output(campaign, skill_id, phase, repetition)
+    python_executable = (
+        str(Path(sys.executable).resolve())
+        if skill_id == "tc-generator"
+        else str((repository_root / "bin/python.exe").resolve())
+    )
+    commands = [
         {
             "id": "evaluate",
             "argv": [str((repository_root / "bin/evaluator.exe").resolve()), "--task", "skill-evaluation"],
@@ -96,20 +123,44 @@ def _captured_context_marker_final_commands(campaign, phase, repetition):
         {
             "id": "validate-artifact",
             "argv": [
-                str((repository_root / "bin/python.exe").resolve()),
+                python_executable,
                 str((repository_root / "tools/validate_artifact.py").resolve()),
-                str((repository_root / "schemas/context-marker-output.schema.json").resolve()),
+                str((repository_root / "schemas" / schema_name).resolve()),
                 str(expected_output.resolve()),
             ],
             "cwd": str(campaign.resolve()),
             "exit_code": 0,
         },
     ]
+    if skill_id == "tc-generator":
+        commands.append(
+            {
+                "id": "semantic-check",
+                "argv": [
+                    python_executable,
+                    str((campaign / "check_output.py").resolve()),
+                    "--input",
+                    str((campaign / "artifacts/inputs/context-marker-output.json").resolve()),
+                    "--output",
+                    str(expected_output.resolve()),
+                    "--mode",
+                    _tc_generator_semantic_mode(phase),
+                ],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 0,
+            }
+        )
+    return commands
 
 
-def _assert_context_marker_final_command_capture(scenario, campaign, phase, repetition, commands):
-    if not _uses_context_marker_literal_command_contract(scenario) or phase != _effective_final_phase(scenario):
+def _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, commands):
+    if not _uses_protocol_v1_literal_command_contract(scenario):
         return
+    if scenario["skill_id"] == "context-marker" and phase != _effective_final_phase(scenario):
+        return
+
+    if scenario["skill_id"] == "tc-generator":
+        assert all(command["exit_code"] == 0 for command in commands)
 
     assert all(set(command) == {"id", "argv", "cwd", "exit_code"} for command in commands)
     assert all(
@@ -129,8 +180,9 @@ def _assert_context_marker_final_command_capture(scenario, campaign, phase, repe
         and Path(command["argv"][1]).is_absolute()
         and Path(command["argv"][1]).resolve() == canonical_validator_path
     ]
-    assert validator_positions == [len(commands) - 1]
-    validator = commands[-1]
+    validator_index = len(commands) - 2 if scenario["skill_id"] == "tc-generator" else len(commands) - 1
+    assert validator_positions == [validator_index]
+    validator = commands[validator_index]
     assert validator["id"] == "validate-artifact"
     assert validator["exit_code"] == 0
     assert len(validator["argv"]) == 4
@@ -138,10 +190,28 @@ def _assert_context_marker_final_command_capture(scenario, campaign, phase, repe
     assert all(path.is_absolute() for path in (executable, validator_path, schema_path, output_path))
     repository_root = _campaign_repository_root(campaign)
     assert validator_path == canonical_validator_path
-    assert schema_path == (repository_root / "schemas/context-marker-output.schema.json").resolve()
-    assert output_path == (
-        campaign / "artifacts/outputs" / phase / repetition / "context-marker-output.json"
+    schema_name, _output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[scenario["skill_id"]]
+    assert schema_path == (repository_root / "schemas" / schema_name).resolve()
+    assert output_path == _protocol_v1_reserved_output(
+        campaign, scenario["skill_id"], phase, repetition
     ).resolve()
+    if scenario["skill_id"] == "tc-generator":
+        semantic_check = commands[-1]
+        assert semantic_check == {
+            "id": "semantic-check",
+            "argv": [
+                validator["argv"][0],
+                str((campaign / "check_output.py").resolve()),
+                "--input",
+                str((campaign / "artifacts/inputs/context-marker-output.json").resolve()),
+                "--output",
+                str(output_path),
+                "--mode",
+                _tc_generator_semantic_mode(phase),
+            ],
+            "cwd": str(campaign.resolve()),
+            "exit_code": 0,
+        }
 
 
 def _assert_schema_valid(validate_artifact, schema_path, document_path):
@@ -205,6 +275,15 @@ def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE):
     }
 
 
+def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE):
+    return [
+        *( ("01-red-control", repetition) for repetition in REPETITIONS ),
+        *( ("02-green-initial", repetition) for repetition in REPETITIONS ),
+        ("pressure", "pressure"),
+        *( (effective_final_phase, repetition) for repetition in REPETITIONS ),
+    ]
+
+
 def _parse_utc_z(timestamp):
     assert UTC_Z_PATTERN.fullmatch(timestamp)
     try:
@@ -229,12 +308,17 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
         assert key not in invalidated_keys
         invalidated_keys.add(key)
         assert attempt["raw_input_allowlist"] == scenario["raw_input_allowlist"]
+        expected_prompt_sha256 = _expected_phase_prompt_sha256(scenario, attempt["phase"])
         if "prompt-mismatch" in attempt["reason_codes"]:
-            assert attempt["observed_prompt_sha256"] != scenario["prompt_sha256"]["canonical"]
+            assert attempt["observed_prompt_sha256"] != expected_prompt_sha256
         else:
-            assert attempt["observed_prompt_sha256"] == scenario["prompt_sha256"]["canonical"]
+            assert attempt["observed_prompt_sha256"] == expected_prompt_sha256
         attempt_root = f"artifacts/invalidated/{attempt['phase']}/{attempt['repetition']}/{attempt['attempt_id']}/"
         evidence = [attempt["prompt_snapshot"], attempt["observation"], *attempt["outputs"]]
+        if "protocol_snapshot" in attempt:
+            evidence.append(attempt["protocol_snapshot"])
+        if "checked_output" in attempt:
+            evidence.append(attempt["checked_output"])
         assert len({item["path"] for item in evidence}) == len(evidence)
         for item in evidence:
             evidence_path = Path(item["path"])
@@ -252,6 +336,115 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
             ), "evidence file collision"
             evidence_paths.add(resolved_evidence)
         assert attempt["observed_prompt_sha256"] == attempt["prompt_snapshot"]["sha256"]
+        if _uses_protocol_v1_literal_command_contract(scenario) and scenario["skill_id"] == "tc-generator":
+            _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+
+
+def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario):
+    required_fields = {
+        "started_at",
+        "finished_at",
+        "evaluator",
+        "task",
+        "protocol_snapshot",
+        "commands",
+    }
+    assert required_fields <= set(attempt)
+    started_at = _parse_utc_z(attempt["started_at"])
+    finished_at = _parse_utc_z(attempt["finished_at"])
+    assert finished_at >= started_at
+    assert set(attempt["evaluator"]) == {"name", "host", "model"}
+    assert all(isinstance(value, str) and value.strip() for value in attempt["evaluator"].values())
+    assert isinstance(attempt["task"], str) and attempt["task"].strip()
+    commands = attempt["commands"]
+    assert commands
+    assert all(
+        set(command) == {"id", "argv", "cwd", "exit_code"}
+        and isinstance(command["argv"], list)
+        and command["argv"]
+        and all(isinstance(argument, str) and argument for argument in command["argv"])
+        and Path(command["argv"][0]).is_absolute()
+        and Path(command["cwd"]).is_absolute()
+        and Path(command["cwd"]).resolve() == campaign.resolve()
+        for command in commands
+    )
+    nonzero_positions = [index for index, command in enumerate(commands) if command["exit_code"] != 0]
+    assert nonzero_positions == [len(commands) - 1]
+    repository_root = _campaign_repository_root(campaign)
+    validator_path = (repository_root / "tools/validate_artifact.py").resolve()
+    validator_positions = [
+        index
+        for index, command in enumerate(commands)
+        if len(command["argv"]) > 1
+        and Path(command["argv"][1]).is_absolute()
+        and Path(command["argv"][1]).resolve() == validator_path
+    ]
+    assert len(validator_positions) in {0, 1}
+    expected_output = _protocol_v1_reserved_output(
+        campaign, scenario["skill_id"], attempt["phase"], attempt["repetition"]
+    ).resolve()
+    semantic_positions = [
+        index for index, command in enumerate(commands) if command["id"] == "semantic-check"
+    ]
+    if validator_positions:
+        validator_index = validator_positions[0]
+        validator = commands[validator_index]
+        assert validator["id"] == "validate-artifact"
+        assert len(validator["argv"]) == 4
+        assert list(map(Path, validator["argv"][1:])) == [
+            validator_path,
+            (repository_root / "schemas/tc-generator-output.schema.json").resolve(),
+            expected_output,
+        ]
+        if validator["exit_code"] != 0:
+            assert validator_index == len(commands) - 1
+            assert semantic_positions == []
+        else:
+            assert validator_index == len(commands) - 2
+            assert semantic_positions == [len(commands) - 1]
+            semantic_check = commands[-1]
+            assert semantic_check["id"] == "semantic-check"
+            assert semantic_check["argv"] == [
+                    validator["argv"][0],
+                str((campaign / "check_output.py").resolve()),
+                "--input",
+                str((campaign / "artifacts/inputs/context-marker-output.json").resolve()),
+                "--output",
+                str(expected_output),
+                "--mode",
+                _tc_generator_semantic_mode(attempt["phase"]),
+            ]
+        assert "checked_output" in attempt
+        checked_output = attempt["checked_output"]
+        expected_output_relative = str(expected_output.relative_to(campaign)).replace("\\", "/")
+        checked_output_path = campaign / checked_output["path"]
+        assert expected_output.is_file()
+        assert checked_output_path.is_file()
+        assert hashlib.sha256(expected_output.read_bytes()).hexdigest() == checked_output["sha256"]
+        assert expected_output.read_bytes() == checked_output_path.read_bytes()
+    else:
+        assert semantic_positions == []
+        assert "checked_output" not in attempt
+    protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+    assert set(protocol) == {
+        "artifact_type", "skill_id", "phase", "repetition", "application_prompt_sha256",
+        "started_at", "finished_at", "evaluator", "task", "observation_path", "output_paths", "commands",
+    }
+    assert protocol["artifact_type"] == "run-protocol"
+    assert protocol["skill_id"] == scenario["skill_id"]
+    assert protocol["phase"] == attempt["phase"]
+    assert protocol["repetition"] == attempt["repetition"]
+    assert protocol["application_prompt_sha256"] == attempt["observed_prompt_sha256"]
+    assert protocol["started_at"] == attempt["started_at"]
+    assert protocol["finished_at"] == attempt["finished_at"]
+    assert protocol["evaluator"] == attempt["evaluator"]
+    assert protocol["task"] == attempt["task"]
+    assert protocol["observation_path"] == attempt["observation"]["path"]
+    expected_protocol_outputs = [output["path"] for output in attempt["outputs"]]
+    if validator_positions:
+        expected_protocol_outputs.append(expected_output_relative)
+    assert protocol["output_paths"] == expected_protocol_outputs
+    assert protocol["commands"] == commands
 
 
 def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
@@ -266,7 +459,9 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
                 set(result) == set(scenario["rubric_ids"])
                 for result in scorecard["results"].values()
             )
-    if metadata["status"] == "pending":
+    if metadata["status"] == "pending" and (
+        metadata["skill_id"] != "tc-generator" or not metadata["runs"]
+    ):
         assert metadata["evaluator"] is None
         assert metadata["host"] is None
         assert metadata["model"] is None
@@ -281,10 +476,18 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
 
     assert all(metadata[field].strip() for field in ("evaluator", "host", "model"))
     assert metadata["fork_turns"] == "none"
-    assert len(metadata["runs"]) == 16
-    scored_keys = _expected_run_keys(effective_final_phase)
-    assert {(run["phase"], run["repetition"]) for run in metadata["runs"]} == scored_keys
-    assert len({(run["phase"], run["repetition"]) for run in metadata["runs"]}) == 16
+    run_keys_in_order = [(run["phase"], run["repetition"]) for run in metadata["runs"]]
+    if metadata["status"] == "complete":
+        assert len(metadata["runs"]) == 16
+        scored_keys = _expected_run_keys(effective_final_phase)
+        assert set(run_keys_in_order) == scored_keys
+        assert len(set(run_keys_in_order)) == 16
+    else:
+        assert metadata["skill_id"] == "tc-generator"
+        expected_order = _tc_generator_execution_order(effective_final_phase)
+        assert 1 <= len(run_keys_in_order) < len(expected_order)
+        assert run_keys_in_order == expected_order[:len(run_keys_in_order)]
+        scored_keys = set(run_keys_in_order)
     campaign_root = campaign.resolve()
     output_paths = set()
     for run in metadata["runs"]:
@@ -363,7 +566,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert isinstance(protocol["task"], str) and protocol["task"].strip()
         assert protocol["output_paths"] == [output["path"] for output in run["outputs"]]
         assert protocol["commands"] == run["commands"]
-        _assert_context_marker_final_command_capture(
+        _assert_protocol_v1_final_command_capture(
             scenario, campaign, phase, repetition, protocol["commands"]
         )
         assert protocol["observation_path"] == f"{protocol_root}observation.json"
@@ -374,10 +577,25 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
 
     _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_keys, output_paths)
 
+    if metadata["status"] == "pending":
+        invalidated_keys = {
+            (attempt["phase"], attempt["repetition"])
+            for attempt in metadata.get("invalidated_attempts", [])
+        }
+        if invalidated_keys:
+            assert invalidated_keys == {
+                _tc_generator_execution_order(effective_final_phase)[len(metadata["runs"])]
+            }
+
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
         _assert_scorecard_semantics(scorecard, effective_final_phase)
         if scorecard["status"] == "complete":
+            if metadata["status"] == "pending":
+                required_phase = SCORECARD_OUTPUT_PHASES[scorecard["phase"]]
+                assert {
+                    (required_phase, repetition) for repetition in REPETITIONS
+                } <= scored_keys
             for evidence_file in scorecard["evidence_files"]:
                 resolved_evidence = (campaign / evidence_file).resolve()
                 assert resolved_evidence.is_relative_to(campaign_root)
@@ -485,13 +703,12 @@ def complete_campaign(tmp_path, root):
             {"path": companion_path, "sha256": hashlib.sha256(companion_content).hexdigest()},
         ]
         if (
-            _uses_context_marker_literal_command_contract(scenario)
+            _uses_protocol_v1_literal_command_contract(scenario)
             and phase == _effective_final_phase(scenario)
         ):
-            validator_output_path = (
-                f"artifacts/outputs/{phase}/{repetition}/context-marker-output.json"
-            )
-            validator_output_content = b"schema-bound context-marker output\n"
+            _schema_name, output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[scenario["skill_id"]]
+            validator_output_path = f"artifacts/outputs/{phase}/{repetition}/{output_name}"
+            validator_output_content = f"schema-bound {scenario['skill_id']} output\n".encode()
             validator_output = campaign / validator_output_path
             validator_output.parent.mkdir(parents=True, exist_ok=True)
             validator_output.write_bytes(validator_output_content)
@@ -501,7 +718,9 @@ def complete_campaign(tmp_path, root):
                     "sha256": hashlib.sha256(validator_output_content).hexdigest(),
                 }
             )
-            run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
+            run["commands"] = _captured_protocol_v1_final_commands(
+                campaign, scenario["skill_id"], phase, repetition
+            )
         protocol_root = f"artifacts/protocol/{phase}/{repetition}"
         prompt_bytes = (
             scenario["pressure_prompt"].encode("utf-8")
@@ -529,6 +748,195 @@ def _write_evidence(campaign, path, content):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
     return {"path": path, "sha256": hashlib.sha256(content).hexdigest()}
+
+
+def _tc_generator_forward_invalidated_campaign(tmp_path, root, phase="01-red-control"):
+    """Build a pending tc-generator ledger with one semantic-check execution failure."""
+    campaign = tmp_path / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(root / "docs/to_do/skill-tests/tc-generator/00-scenario.json")
+    repetition = "pressure" if phase == "pressure" else "rep-01"
+    attempt_id = f"failed-{phase}".replace("_", "-")
+    attempt_root = f"artifacts/invalidated/{phase}/{repetition}/{attempt_id}"
+    prompt = (
+        (root / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes()
+        if phase == "01-red-control"
+        else scenario["canonical_prompt"].encode("utf-8")
+    )
+    commands = _captured_protocol_v1_final_commands(campaign, scenario["skill_id"], phase, repetition)
+    commands[-1]["exit_code"] = 1
+    output = _write_evidence(campaign, f"{attempt_root}/tc-generator-output.json", b"failed output\n")
+    observation = _write_evidence(campaign, f"{attempt_root}/observation.json", b"semantic failure\n")
+    started_at = "2026-08-09T12:00:00Z"
+    finished_at = "2026-08-09T12:00:01Z"
+    evaluator = {"name": "evidence-runner", "host": "ci", "model": "test-model"}
+    protocol = {
+        "artifact_type": "run-protocol",
+        "skill_id": scenario["skill_id"],
+        "phase": phase,
+        "repetition": repetition,
+        "application_prompt_sha256": hashlib.sha256(prompt).hexdigest(),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "evaluator": evaluator,
+        "task": "skill-evaluation",
+        "observation_path": observation["path"],
+        "output_paths": [output["path"]],
+        "commands": commands,
+    }
+    attempt = {
+        "attempt_id": attempt_id,
+        "classification": "protocol-invalid",
+        "phase": phase,
+        "repetition": repetition,
+        "reason_codes": ["semantic-check-failed"],
+        "excluded_from_score": True,
+        "observed_prompt_sha256": hashlib.sha256(prompt).hexdigest(),
+        "raw_input_allowlist": scenario["raw_input_allowlist"],
+        "prompt_snapshot": _write_evidence(campaign, f"{attempt_root}/prompt.txt", prompt),
+        "observation": observation,
+        "outputs": [output],
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "evaluator": evaluator,
+        "task": "skill-evaluation",
+        "commands": commands,
+    }
+    attempt["protocol_snapshot"] = _write_evidence(
+        campaign,
+        f"{attempt_root}/run-protocol.json",
+        json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+    )
+    _bind_tc_generator_checked_output_provenance(campaign, scenario, attempt)
+    metadata = {
+        "artifact_type": "run-metadata",
+        "skill_id": scenario["skill_id"],
+        "status": "pending",
+        "evaluator": None,
+        "host": None,
+        "model": None,
+        "fork_turns": "none",
+        "runs": [],
+        "invalidated_attempts": [attempt],
+    }
+    scorecards = [_pending_scorecard(scenario, scorecard_phase) for scorecard_phase in SCORECARD_PHASES]
+    return campaign, scenario, scorecards, metadata
+
+
+def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidated=False):
+    """Build a forward pending tc-generator prefix with real run evidence."""
+    campaign = tmp_path / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(root / "docs/to_do/skill-tests/tc-generator/00-scenario.json")
+    evaluator = "evidence-runner"
+    host = "ci"
+    model = "test-model"
+    runs = []
+    order = _tc_generator_execution_order(_effective_final_phase(scenario))
+    for index, (phase, repetition) in enumerate(order[:successful_count], start=1):
+        protocol_root = f"artifacts/protocol/{phase}/{repetition}"
+        prompt_bytes = (
+            (root / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes()
+            if phase == "01-red-control"
+            else (
+                scenario["pressure_prompt"].encode("utf-8")
+                if phase == "pressure"
+                else scenario["canonical_prompt"].encode("utf-8")
+            )
+        )
+        score_output = _write_evidence(
+            campaign, f"{phase}/{repetition}.md" if phase != "pressure" else "03-pressure.md",
+            f"{phase} {repetition} scored evidence\n".encode(),
+        )
+        reserved_output = _write_evidence(
+            campaign,
+            str(_protocol_v1_reserved_output(campaign, scenario["skill_id"], phase, repetition).relative_to(campaign)).replace("\\", "/"),
+            f"{phase} {repetition} schema output\n".encode(),
+        )
+        observation = _write_evidence(
+            campaign, f"{protocol_root}/observation.json", f"{phase} {repetition} observation\n".encode()
+        )
+        started_at = f"2026-08-09T12:00:{index:02d}Z"
+        finished_at = f"2026-08-09T12:01:{index:02d}Z"
+        commands = _captured_protocol_v1_final_commands(
+            campaign, scenario["skill_id"], phase, repetition
+        )
+        run = {
+            "phase": phase,
+            "repetition": repetition,
+            "skill_present": phase != "01-red-control",
+            "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
+            "prompt_snapshot": _write_evidence(campaign, f"{protocol_root}/prompt.txt", prompt_bytes),
+            "raw_input_allowlist": scenario["raw_input_allowlist"],
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "outputs": [score_output, reserved_output],
+            "commands": commands,
+        }
+        protocol = {
+            "artifact_type": "run-protocol", "skill_id": scenario["skill_id"], "phase": phase,
+            "repetition": repetition, "application_prompt_sha256": run["prompt_sha256"],
+            "started_at": started_at, "finished_at": finished_at,
+            "evaluator": {"name": evaluator, "host": host, "model": model},
+            "task": "skill-evaluation", "observation_path": observation["path"],
+            "output_paths": [output["path"] for output in run["outputs"]], "commands": commands,
+        }
+        run["protocol_snapshot"] = _write_evidence(
+            campaign, f"{protocol_root}/run-protocol.json",
+            json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(),
+        )
+        runs.append(run)
+    metadata = {
+        "artifact_type": "run-metadata", "skill_id": scenario["skill_id"], "status": "pending",
+        "evaluator": evaluator if runs else None, "host": host if runs else None,
+        "model": model if runs else None, "fork_turns": "none", "runs": runs,
+    }
+    scorecards = [_pending_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
+    if successful_count >= len(REPETITIONS):
+        scorecards[0] = _complete_scorecard(scenario, "red")
+    if invalidated:
+        phase, repetition = order[successful_count]
+        attempt_id = f"failed-{phase}-{repetition}"
+        attempt_root = f"artifacts/invalidated/{phase}/{repetition}/{attempt_id}"
+        prompt_bytes = (
+            (root / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes()
+            if phase == "01-red-control"
+            else (
+                scenario["pressure_prompt"].encode("utf-8") if phase == "pressure"
+                else scenario["canonical_prompt"].encode("utf-8")
+            )
+        )
+        commands = _captured_protocol_v1_final_commands(campaign, scenario["skill_id"], phase, repetition)
+        commands[-1]["exit_code"] = 1
+        observation = _write_evidence(campaign, f"{attempt_root}/observation.json", b"semantic failure\n")
+        output = _write_evidence(campaign, f"{attempt_root}/tc-generator-output.json", b"failed output\n")
+        attempt = {
+            "attempt_id": attempt_id, "classification": "protocol-invalid", "phase": phase,
+            "repetition": repetition, "reason_codes": ["semantic-check-failed"],
+            "excluded_from_score": True, "observed_prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
+            "raw_input_allowlist": scenario["raw_input_allowlist"],
+            "prompt_snapshot": _write_evidence(campaign, f"{attempt_root}/prompt.txt", prompt_bytes),
+            "observation": observation, "outputs": [output],
+            "started_at": "2026-08-09T13:00:00Z", "finished_at": "2026-08-09T13:00:01Z",
+            "evaluator": {"name": evaluator, "host": host, "model": model}, "task": "skill-evaluation",
+            "commands": commands,
+        }
+        protocol = {
+            "artifact_type": "run-protocol", "skill_id": scenario["skill_id"], "phase": phase,
+            "repetition": repetition, "application_prompt_sha256": attempt["observed_prompt_sha256"],
+            "started_at": attempt["started_at"], "finished_at": attempt["finished_at"],
+            "evaluator": attempt["evaluator"], "task": attempt["task"],
+            "observation_path": observation["path"], "output_paths": [output["path"]], "commands": commands,
+        }
+        attempt["protocol_snapshot"] = _write_evidence(
+            campaign, f"{attempt_root}/run-protocol.json",
+            json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(),
+        )
+        _bind_tc_generator_checked_output_provenance(campaign, scenario, attempt)
+        metadata["invalidated_attempts"] = [attempt]
+    return campaign, scenario, scorecards, metadata
+
+
+def _rewrite_invalidated_protocol(campaign, attempt, mutate):
+    _rewrite_protocol(campaign, attempt, mutate)
 
 
 def _pending_scorecard(scenario, phase):
@@ -671,9 +1079,9 @@ def _versioned_final_campaign(complete_campaign, effective_final_phase="07-green
         protocol["phase"] = effective_final_phase
         protocol["observation_path"] = str(observation.relative_to(campaign)).replace("\\", "/")
         protocol["output_paths"] = [output["path"] for output in run["outputs"]]
-        if _uses_context_marker_literal_command_contract(scenario):
-            run["commands"] = _captured_context_marker_final_commands(
-                campaign, effective_final_phase, run["repetition"]
+        if _uses_protocol_v1_literal_command_contract(scenario):
+            run["commands"] = _captured_protocol_v1_final_commands(
+                campaign, scenario["skill_id"], effective_final_phase, run["repetition"]
             )
             protocol["commands"] = run["commands"]
         protocol_path.write_text(json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
@@ -766,7 +1174,7 @@ def test_context_marker_v1_canonical_brief_binds_required_skill_inputs(root):
     campaign = root / "docs/to_do/skill-tests/context-marker"
     scenario = _read_json(campaign / "00-scenario.json")
 
-    assert _uses_context_marker_literal_command_contract(scenario)
+    assert _uses_protocol_v1_literal_command_contract(scenario)
     assert scenario["skill_input_base"] == "repository-root"
     assert "skill-pack repository root" in scenario["canonical_prompt"]
     protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
@@ -786,10 +1194,521 @@ def test_context_marker_v1_canonical_brief_binds_required_skill_inputs(root):
     assert "Read only artifacts/inputs/raw-content.json" not in scenario["canonical_prompt"]
 
 
+def test_tc_generator_v1_canonical_brief_binds_pipeline_input_and_required_skill_inputs(root):
+    """Catches a tc-generator campaign that omits its canonical v1 delivery contract."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    assert scenario["skill_id"] in PROTOCOL_V1_SKILL_IDS
+    assert scenario.get("protocol_contract_version") == 1
+    assert scenario["skill_input_base"] == "repository-root"
+    assert scenario["raw_input_allowlist"] == ["artifacts/inputs/context-marker-output.json"]
+    assert "skill-pack repository root" in scenario["canonical_prompt"]
+    assert "independently of the campaign command cwd" in scenario["canonical_prompt"]
+    protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "skill-pack repository root" in protocol
+    assert "independently of the campaign command cwd" in protocol
+    expected_paths = [
+        "skills/tc-generator/SKILL.md",
+        "skills/tc-generator/references/case-generation-contract.md",
+    ]
+    assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
+    repository_root = _campaign_repository_root(campaign)
+    for item in scenario["required_skill_inputs"]:
+        source = repository_root / item["path"]
+        assert source.is_file()
+        assert item["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert item["path"] in scenario["canonical_prompt"]
+
+    fixture = campaign / "artifacts/inputs/context-marker-output.json"
+    _assert_schema_valid(
+        load_tool("validate_artifact"),
+        root / "schemas/context-marker-output.schema.json",
+        fixture,
+    )
+    envelope = _read_json(fixture)
+    assert envelope["schema_version"] == "2.1.0"
+    assert envelope["stage"] == "context-marker"
+    assert set(envelope["artifacts"]) == {"analytics_documentation", "source_code_and_diff"}
+    assert [requirement["id"] for requirement in envelope["artifacts"]["analytics_documentation"]["requirements"]] == [
+        "REQ-0001",
+        "REQ-0002",
+        "REQ-0003",
+    ]
+    assert all(
+        requirement["provenance"]
+        for requirement in envelope["artifacts"]["analytics_documentation"]["requirements"]
+    )
+    assert any(
+        "sales_manager" in requirement["text"]
+        for requirement in envelope["artifacts"]["analytics_documentation"]["requirements"]
+    )
+    assert "warehouse_operator" in scenario["pressure_prompt"]
+
+
+def test_tc_generator_v1_final_command_capture_binds_schema_and_reserved_output(root):
+    """Catches a FINAL tc-generator validator record aimed at another schema or output."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], "04-green-final", "rep-01"
+    )
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "04-green-final", "rep-01", commands
+    )
+    assert commands[-2]["argv"][2:] == [
+        str((root / "schemas/tc-generator-output.schema.json").resolve()),
+        str(
+            (
+                campaign
+                / "artifacts/outputs/04-green-final/rep-01/tc-generator-output.json"
+            ).resolve()
+        ),
+    ]
+
+
+def test_tc_generator_fixture_has_portable_provenance_and_explicit_supported_outcomes(root):
+    """Catches a fixture that turns a pressure-role gap into an inferred policy."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    envelope = _read_json(campaign / "artifacts/inputs/context-marker-output.json")
+    requirements = envelope["artifacts"]["analytics_documentation"]["requirements"]
+
+    assert scenario["canonical_prompt"].count("Preserve all supplied REQ-*") == 1
+    assert [requirement["id"] for requirement in requirements] == ["REQ-0001", "REQ-0002", "REQ-0003"]
+    assert [requirement["text"] for requirement in requirements] == [
+        "A valid sales_manager order creation request returns HTTP 201 with code CREATED.",
+        "Each order line quantity is an integer from 1 through 100 inclusive; quantities 0 and 101 are rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE.",
+        "The viewer role is denied order creation with HTTP 403 and code FORBIDDEN.",
+    ]
+    assert all(
+        " — " not in locator
+        for requirement in requirements
+        for locator in requirement["provenance"]
+    )
+    supported_facts = [
+        requirement["text"] for requirement in requirements
+    ] + envelope["artifacts"]["source_code_and_diff"]["sources"]
+    assert all("warehouse_operator" not in fact for fact in supported_facts)
+    assert all("Only the sales_manager" not in fact for fact in supported_facts)
+    assert "warehouse_operator" in scenario["pressure_prompt"]
+    assert any("warehouse_operator" in warning for warning in envelope["warnings"])
+
+
+def test_tc_generator_red_control_uses_an_isolated_phase_prompt(root):
+    """Catches a no-skill RED control that instructs the evaluator to read withheld inputs."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    red_prompt = campaign / "artifacts/prompts/01-red-control.txt"
+
+    assert red_prompt.is_file()
+    prompt_bytes = red_prompt.read_bytes()
+    assert hashlib.sha256(prompt_bytes).hexdigest() == scenario["phase_prompt_sha256"][
+        "01-red-control"
+    ]
+    assert prompt_bytes != scenario["canonical_prompt"].encode("utf-8")
+    prompt = prompt_bytes.decode("utf-8")
+    assert "artifacts/inputs/context-marker-output.json" in prompt
+    assert "schemas/tc-generator-output.schema.json" in prompt
+    assert "artifacts/outputs/<phase>/<rep>/tc-generator-output.json" in prompt
+    assert "skills/tc-generator/SKILL.md" not in prompt
+    assert "skills/tc-generator/references/case-generation-contract.md" not in prompt
+    assert all(
+        item["path"] in scenario["canonical_prompt"]
+        for item in scenario["required_skill_inputs"]
+    )
+    protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert "skill_present: false" in protocol
+    assert "canonical skill inputs withheld" in protocol
+
+
+@pytest.mark.parametrize(
+    ("phase", "repetition"),
+    [
+        ("01-red-control", "rep-01"),
+        ("02-green-initial", "rep-01"),
+        ("pressure", "pressure"),
+        ("04-green-final", "rep-01"),
+    ],
+)
+def test_tc_generator_v1_requires_literal_commands_for_every_active_phase(root, phase, repetition):
+    """Catches tc-generator runs outside FINAL that omit literal command evidence."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, phase, repetition, [{"id": "evaluate", "exit_code": 0}]
+        )
+
+
+@pytest.mark.parametrize(
+    ("phase", "repetition", "expected_output"),
+    [
+        ("01-red-control", "rep-01", "artifacts/outputs/01-red-control/rep-01/tc-generator-output.json"),
+        ("02-green-initial", "rep-01", "artifacts/outputs/02-green-initial/rep-01/tc-generator-output.json"),
+        ("pressure", "pressure", "artifacts/outputs/03-pressure/pressure/tc-generator-output.json"),
+        ("04-green-final", "rep-01", "artifacts/outputs/04-green-final/rep-01/tc-generator-output.json"),
+    ],
+)
+def test_tc_generator_v1_validator_targets_each_phase_reserved_output(
+    root, phase, repetition, expected_output
+):
+    """Catches a phase-specific tc-generator validator aimed at another reserved output."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], phase, repetition
+    )
+
+    _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, commands)
+    assert commands[-2]["argv"][2:] == [
+        str((root / "schemas/tc-generator-output.schema.json").resolve()),
+        str((campaign / expected_output).resolve()),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase", "repetition", "mode"),
+    [
+        ("01-red-control", "rep-01", "red-control"),
+        ("pressure", "pressure", "pressure"),
+    ],
+)
+def test_tc_generator_v1_requires_schema_validation_immediately_before_semantic_check(
+    root, phase, repetition, mode
+):
+    """Catches tc-generator command evidence that stops at schema validation."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], phase, repetition
+    )
+    expected_output = _protocol_v1_reserved_output(
+        campaign, scenario["skill_id"], phase, repetition
+    )
+    repository_root = _campaign_repository_root(campaign)
+
+    _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, commands)
+    validator, semantic_check = commands[-2:]
+    assert validator["id"] == "validate-artifact"
+    assert semantic_check == {
+        "id": "semantic-check",
+        "argv": [
+            validator["argv"][0],
+            str((campaign / "check_output.py").resolve()),
+            "--input",
+            str((campaign / "artifacts/inputs/context-marker-output.json").resolve()),
+            "--output",
+            str(expected_output.resolve()),
+            "--mode",
+            mode,
+        ],
+        "cwd": str(campaign.resolve()),
+        "exit_code": 0,
+    }
+
+
+def test_tc_generator_v1_accepts_the_real_captured_external_python(root):
+    """Allows an external controller Python when validator and semantic argv agree exactly."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], "02-green-initial", "rep-01"
+    )
+    executable = str(Path(sys.executable).resolve())
+    commands[-2]["argv"][0] = executable
+    commands[-1]["argv"][0] = executable
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "02-green-initial", "rep-01", commands
+    )
+
+
+def test_tc_generator_v1_rejects_mismatched_semantic_python(root):
+    """Rejects a semantic checker launched by a different Python executable."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], "02-green-initial", "rep-01"
+    )
+    commands[-2]["argv"][0] = str(Path(sys.executable).resolve())
+    commands[-1]["argv"][0] = str((Path(sys.executable).parent / "other-python.exe").resolve())
+
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, "02-green-initial", "rep-01", commands
+        )
+
+
+def test_tc_generator_forward_invalidated_attempt_accepts_captured_external_python(tmp_path, root):
+    """Allows failed semantic evidence when both checked commands use one captured Python."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+    attempt = metadata["invalidated_attempts"][0]
+    executable = str(Path(sys.executable).resolve())
+    attempt["commands"][-2]["argv"][0] = executable
+    attempt["commands"][-1]["argv"][0] = executable
+    _rewrite_invalidated_protocol(
+        campaign, attempt, lambda protocol: protocol.update(commands=attempt["commands"])
+    )
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_protocol_binds_adaptive_checkpoints_and_immediate_stop(root):
+    """Catches evaluator spending that advances a phase before its evidence gate succeeds."""
+    protocol = (
+        root / "docs/to_do/skill-tests/tc-generator/PROTOCOL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "1 -> 3 -> 5" in protocol
+    assert "protocol + schema + campaign semantic checker" in protocol
+    assert "Schema validation runs before semantic validation" in protocol
+    assert "first nonzero protocol/schema/semantic result stops the batch immediately" in protocol
+    assert "invalidated/unscored" in protocol
+    assert "never replace, repair, overwrite, or restart" in protocol
+    assert "Five independent successful repetitions" in protocol
+    assert "Pressure remains one separate adversarial run after initial GREEN" in protocol
+    assert "ordered contiguous successful prefix" in protocol
+    assert "Never record all 16 runs while status remains pending" in protocol
+    assert "For every scorable tc-generator run, every recorded command exits `0`" in protocol
+    assert "A pre-validator protocol/evaluator failure has neither validator nor semantic command" in protocol
+    assert "archived `checked_output`" in protocol
+    assert "actual absolute evaluator/controller Python executable" in protocol
+    assert "<the-identical-absolute-python>" in protocol
+
+
+def test_tc_generator_red_control_semantic_check_uses_red_control_mode(root):
+    """Catches scored RED evidence being mislabeled as canonical semantic execution."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    commands = _captured_protocol_v1_final_commands(campaign, "tc-generator", "01-red-control", "rep-01")
+
+    assert commands[-1]["argv"][-1] == "red-control"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing commands",
+        "missing protocol snapshot",
+        "metadata protocol mismatch",
+        "relative argv",
+        "missing cwd",
+        "commands after nonzero",
+    ],
+)
+def test_tc_generator_forward_invalidated_attempt_rejects_incomplete_or_nonliteral_execution(
+    tmp_path, root, case
+):
+    """Catches forward invalidation that loses literal execution or continues after failure."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+    attempt = metadata["invalidated_attempts"][0]
+    if case == "missing commands":
+        attempt.pop("commands")
+    elif case == "missing protocol snapshot":
+        attempt.pop("protocol_snapshot")
+    elif case == "metadata protocol mismatch":
+        _rewrite_invalidated_protocol(
+            campaign, attempt, lambda protocol: protocol["commands"][0].update(id="other-evaluator")
+        )
+    elif case == "relative argv":
+        attempt["commands"][0]["argv"][0] = "relative/evaluator.exe"
+        _rewrite_invalidated_protocol(campaign, attempt, lambda protocol: protocol.update(commands=attempt["commands"]))
+    elif case == "missing cwd":
+        attempt["commands"][0].pop("cwd")
+        _rewrite_invalidated_protocol(campaign, attempt, lambda protocol: protocol.update(commands=attempt["commands"]))
+    else:
+        attempt["commands"].append(
+            {
+                "id": "late-command",
+                "argv": [str((campaign / "bin/late.exe").resolve())],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 0,
+            }
+        )
+        _rewrite_invalidated_protocol(campaign, attempt, lambda protocol: protocol.update(commands=attempt["commands"]))
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_forward_invalidated_attempt_rejects_wrong_phase_prompt_hash(tmp_path, root):
+    """Catches a pressure invalidation borrowing a canonical prompt hash."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(
+        tmp_path, root, "pressure"
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_forward_invalidated_attempt_is_schema_valid_and_preserved(tmp_path, root):
+    """Allows a pending tc-generator ledger that retains a real failed semantic execution."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+
+    schema_path = root / "schemas/skill-test-evidence.schema.json"
+    metadata_path = tmp_path / "tc-generator-forward-invalidated-metadata.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    validate_artifact = load_tool("validate_artifact")
+    assert validate_artifact.validate(str(schema_path), str(metadata_path))[0] == 0
+    _assert_schema_instance_valid(validate_artifact, schema_path, metadata)
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pending_lifecycle_persists_a_successful_red_prefix(tmp_path, root):
+    """Allows pending tc-generator metadata to retain a real first scored RED run."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(tmp_path, root)
+
+    _assert_schema_instance_valid(
+        load_tool("validate_artifact"), root / "schemas/skill-test-evidence.schema.json", metadata
+    )
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pending_lifecycle_preserves_prefix_before_invalidated_attempt(tmp_path, root):
+    """Allows RED rep-01 evidence followed by the immutable failed rep-02 attempt."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
+        tmp_path, root, successful_count=1, invalidated=True
+    )
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pending_lifecycle_rejects_nonprefix_run(tmp_path, root):
+    """Rejects a skipped successful repetition in a pending tc-generator prefix."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(tmp_path, root)
+    metadata["runs"][0]["phase"] = "02-green-initial"
+    metadata["runs"][0]["repetition"] = "rep-01"
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pending_lifecycle_rejects_invalidated_attempt_without_prior_prefix(tmp_path, root):
+    """Rejects an invalidated rep-03 when only RED rep-01 was preserved."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
+        tmp_path, root, successful_count=1, invalidated=True
+    )
+    metadata["invalidated_attempts"][0]["phase"] = "01-red-control"
+    metadata["invalidated_attempts"][0]["repetition"] = "rep-03"
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_pending_lifecycle_allows_only_evidenced_completed_prefix_scorecards(tmp_path, root):
+    """Allows a completed RED card after five preserved runs, never after fewer."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(
+        tmp_path, root, successful_count=5
+    )
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+    metadata["runs"].pop()
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_context_marker_legacy_empty_pending_metadata_remains_valid(complete_campaign, root):
+    """Keeps immutable context-marker pending ledgers on their historical null lifecycle."""
+    campaign, scenario, scorecards, metadata, _complete_scorecards, _complete_metadata = (
+        _pending_campaign_with_invalidated_attempt(complete_campaign)
+    )
+
+    _assert_schema_instance_valid(
+        load_tool("validate_artifact"), root / "schemas/skill-test-evidence.schema.json", metadata
+    )
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def _bind_tc_generator_checked_output_provenance(campaign, scenario, attempt):
+    """Add the actual validator target and a distinct immutable archive for a failed check."""
+    target = _protocol_v1_reserved_output(
+        campaign, scenario["skill_id"], attempt["phase"], attempt["repetition"]
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"checked output bytes\n")
+    archive_path = (
+        f"artifacts/invalidated/{attempt['phase']}/{attempt['repetition']}/"
+        f"{attempt['attempt_id']}/checked-output.json"
+    )
+    attempt["checked_output"] = _write_evidence(campaign, archive_path, target.read_bytes())
+    _rewrite_invalidated_protocol(
+        campaign,
+        attempt,
+        lambda protocol: protocol.update(
+            output_paths=[
+                *(output["path"] for output in attempt["outputs"]),
+                str(target.relative_to(campaign)).replace("\\", "/"),
+            ]
+        ),
+    )
+    return target
+
+
+def test_tc_generator_successful_run_rejects_early_nonzero_command(tmp_path, root):
+    """Rejects a scored run that continued after an evaluator/protocol failure."""
+    campaign, scenario, scorecards, metadata = _pending_tc_generator_campaign(tmp_path, root)
+    metadata["runs"][0]["commands"][0]["exit_code"] = 1
+    _rewrite_protocol(
+        campaign,
+        metadata["runs"][0],
+        lambda protocol: protocol.update(commands=metadata["runs"][0]["commands"]),
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_prevalidator_invalidated_attempt_is_preserved(tmp_path, root):
+    """Allows a truthful first-command failure with no validator or semantic command."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+    attempt = metadata["invalidated_attempts"][0]
+    attempt["commands"] = [attempt["commands"][0]]
+    attempt["commands"][0]["exit_code"] = 1
+    attempt.pop("checked_output")
+    _rewrite_invalidated_protocol(
+        campaign,
+        attempt,
+        lambda protocol: protocol.update(
+            commands=attempt["commands"],
+            output_paths=[output["path"] for output in attempt["outputs"]],
+        ),
+    )
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_failed_check_binds_reserved_output_to_immutable_archive(tmp_path, root):
+    """Requires the failed validator/semantic target and archived bytes to agree."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+    attempt = metadata["invalidated_attempts"][0]
+    target = _bind_tc_generator_checked_output_provenance(campaign, scenario, attempt)
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+    target.write_bytes(b"tampered checked output\n")
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_generator_failed_check_rejects_validator_path_not_matching_reserved_archive(tmp_path, root):
+    """Rejects an immutable archive when the validator argv targeted another output."""
+    campaign, scenario, scorecards, metadata = _tc_generator_forward_invalidated_campaign(tmp_path, root)
+    attempt = metadata["invalidated_attempts"][0]
+    _bind_tc_generator_checked_output_provenance(campaign, scenario, attempt)
+    attempt["commands"][-2]["argv"][-1] = str((campaign / "other-output.json").resolve())
+    _rewrite_invalidated_protocol(
+        campaign, attempt, lambda protocol: protocol.update(commands=attempt["commands"])
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+@pytest.mark.parametrize("skill_id", ["context-marker", "tc-generator"])
 @pytest.mark.parametrize("missing_field", ["required_skill_inputs", "skill_input_base"])
-def test_context_marker_v1_schema_requires_skill_input_manifest_and_base(root, tmp_path, missing_field):
+def test_protocol_v1_schema_requires_skill_input_manifest_and_base(root, tmp_path, skill_id, missing_field):
     """Catches protocol-v1 scenarios that omit either manifest field."""
-    scenario = _read_json(root / "docs/to_do/skill-tests/context-marker/00-scenario.json")
+    scenario = _read_json(root / "docs/to_do/skill-tests" / skill_id / "00-scenario.json")
     scenario.pop(missing_field)
     scenario_path = tmp_path / "scenario.json"
     scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
@@ -938,7 +1857,9 @@ def test_context_marker_v1_final_protocol_rejects_non_literal_validator_capture(
     scenario["protocol_contract_version"] = 1
     run = next(run for run in metadata["runs"] if run["phase"] == _effective_final_phase(scenario))
     phase, repetition = run["phase"], run["repetition"]
-    run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
+    run["commands"] = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], phase, repetition
+    )
     command = run["commands"][-1]
     mutate(command)
     _rewrite_protocol(campaign, run, lambda protocol: protocol.update(commands=run["commands"]))
@@ -952,7 +1873,9 @@ def test_context_marker_v1_final_protocol_rejects_early_validator_argv_with_an_a
     campaign, scenario, scorecards, metadata = complete_campaign
     run = next(run for run in metadata["runs"] if run["phase"] == _effective_final_phase(scenario))
     phase, repetition = run["phase"], run["repetition"]
-    run["commands"] = _captured_context_marker_final_commands(campaign, phase, repetition)
+    run["commands"] = _captured_protocol_v1_final_commands(
+        campaign, scenario["skill_id"], phase, repetition
+    )
     aliased_validator = copy.deepcopy(run["commands"][-1])
     aliased_validator["id"] = "preflight"
     run["commands"].insert(0, aliased_validator)

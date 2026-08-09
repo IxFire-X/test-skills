@@ -1,0 +1,226 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-generator",
+  "artifacts": {
+    "generated_test_cases": {
+      "requirements": [
+        {
+          "id": "REQ-0001",
+          "text": "A valid sales_manager order creation request returns HTTP 201 with code CREATED.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/0"
+          ]
+        },
+        {
+          "id": "REQ-0002",
+          "text": "Each order line quantity is an integer from 1 through 100 inclusive; quantities 0 and 101 are rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/1"
+          ]
+        },
+        {
+          "id": "REQ-0003",
+          "text": "The viewer role is denied order creation with HTTP 403 and code FORBIDDEN.",
+          "provenance": [
+            "analytics/order-creation.md#/requirements/2"
+          ]
+        }
+      ],
+      "test_cases": [
+        {
+          "id": "TC-0001",
+          "requirement_ids": [
+            "REQ-0001"
+          ],
+          "title": "Sales manager creates an order with a valid line quantity",
+          "categories": [
+            "positive",
+            "functional"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A sales_manager account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request as the authenticated sales_manager.",
+              "expected_result": "The response has HTTP status 201 and response code CREATED."
+            }
+          ],
+          "expected_outcome": "The valid sales_manager order creation request succeeds with HTTP 201 and code CREATED."
+        },
+        {
+          "id": "TC-0002",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Order line accepts the minimum allowed quantity",
+          "categories": [
+            "boundary",
+            "positive",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A sales_manager account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request with quantity 1 as the authenticated sales_manager.",
+              "expected_result": "The response does not have HTTP status 422 with error code QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 1 is accepted as the inclusive lower boundary."
+        },
+        {
+          "id": "TC-0003",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Order line accepts the maximum allowed quantity",
+          "categories": [
+            "boundary",
+            "positive",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A sales_manager account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 100."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request with quantity 100 as the authenticated sales_manager.",
+              "expected_result": "The response does not have HTTP status 422 with error code QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 100 is accepted as the inclusive upper boundary."
+        },
+        {
+          "id": "TC-0004",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Order line rejects a quantity below the allowed range",
+          "categories": [
+            "boundary",
+            "negative",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A sales_manager account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 0."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request with quantity 0 as the authenticated sales_manager.",
+              "expected_result": "The response has HTTP status 422 and error code QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 0 is rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0005",
+          "requirement_ids": [
+            "REQ-0002"
+          ],
+          "title": "Order line rejects a quantity above the allowed range",
+          "categories": [
+            "boundary",
+            "negative",
+            "functional"
+          ],
+          "priority": "HIGH",
+          "preconditions": [
+            "A sales_manager account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 101."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request with quantity 101 as the authenticated sales_manager.",
+              "expected_result": "The response has HTTP status 422 and error code QUANTITY_OUT_OF_RANGE."
+            }
+          ],
+          "expected_outcome": "Quantity 101 is rejected with HTTP 422 and error code QUANTITY_OUT_OF_RANGE."
+        },
+        {
+          "id": "TC-0006",
+          "requirement_ids": [
+            "REQ-0003"
+          ],
+          "title": "Viewer is denied order creation",
+          "categories": [
+            "authorization",
+            "negative",
+            "security"
+          ],
+          "priority": "CRITICAL",
+          "preconditions": [
+            "A viewer account is available and authenticated.",
+            "The order creation endpoint is available."
+          ],
+          "test_data": [
+            "Order creation request with one order line whose quantity is 1."
+          ],
+          "steps": [
+            {
+              "order": 1,
+              "action": "Submit the order creation request as the authenticated viewer.",
+              "expected_result": "The response has HTTP status 403 and code FORBIDDEN."
+            }
+          ],
+          "expected_outcome": "The viewer is denied order creation with HTTP 403 and code FORBIDDEN."
+        }
+      ],
+      "coverage": [
+        {
+          "requirement_id": "REQ-0001",
+          "test_case_ids": [
+            "TC-0001"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0002",
+          "test_case_ids": [
+            "TC-0002",
+            "TC-0003",
+            "TC-0004",
+            "TC-0005"
+          ]
+        },
+        {
+          "requirement_id": "REQ-0003",
+          "test_case_ids": [
+            "TC-0006"
+          ]
+        }
+      ]
+    }
+  },
+  "warnings": [
+    "No authorization policy is supplied for warehouse_operator; no authorization test or expected authorization outcome was generated for that role."
+  ]
+}

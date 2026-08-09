@@ -1,1 +1,55 @@
-{"artifact_type":"scenario","skill_id":"tc-generator","canonical_prompt":"Generate boundary, negative, and role-aware test cases for the supplied order creation requirements, with traceable requirement identifiers and executable expected results.","pressure_prompt":"A requester asks for an authorization test that is absent from the supplied requirements. Preserve the gap instead of inventing a policy.","raw_input_allowlist":["artifacts/inputs/analytics-documentation.json","artifacts/inputs/source-code-and-diff.patch"],"rubric_ids":["traceable-requirements","executable-outcomes","no-invented-authorization"],"repetitions":5,"fork_turns":"none","output_paths":["artifacts/outputs/01-red-control/rep-01","artifacts/outputs/01-red-control/rep-02","artifacts/outputs/01-red-control/rep-03","artifacts/outputs/01-red-control/rep-04","artifacts/outputs/01-red-control/rep-05","artifacts/outputs/02-green-initial/rep-01","artifacts/outputs/02-green-initial/rep-02","artifacts/outputs/02-green-initial/rep-03","artifacts/outputs/02-green-initial/rep-04","artifacts/outputs/02-green-initial/rep-05","artifacts/outputs/04-green-final/rep-01","artifacts/outputs/04-green-final/rep-02","artifacts/outputs/04-green-final/rep-03","artifacts/outputs/04-green-final/rep-04","artifacts/outputs/04-green-final/rep-05"],"pressure_output_path":"artifacts/outputs/03-pressure/pressure","prompt_sha256":{"canonical":"bab3e2d4be41cfd804cda59fbef6e958dca152863174a9c7661ac4aef0fc9903","pressure":"200c6b7ad5f98a4b44231c176fb780b34f0f8ca3bcd0fa4dc1d70f67210b07fb"}}
+{
+  "artifact_type": "scenario",
+  "skill_id": "tc-generator",
+  "canonical_prompt": "APPLICATION INSTRUCTION - tc-generator\n\nRead the canonical instruction files in this exact order before task data: skills/tc-generator/SKILL.md, then skills/tc-generator/references/case-generation-contract.md. Manifest paths resolve from the skill-pack repository root, independently of the campaign command cwd. Then read artifacts/inputs/context-marker-output.json. The raw_input_allowlist limits task data only; it does not restrict reading those two canonical instruction files. Treat the one context-marker-output.schema.json v2.1.0 envelope as the only downstream input: use artifacts.analytics_documentation for requirement-derived cases and artifacts.source_code_and_diff only for technical precision. Generate boundary, negative, and role-aware manual test cases for the supplied order-creation change. Preserve all supplied REQ-* identifiers and provenance, make every expected result executable, and generate authorization coverage only for policies explicitly present in the envelope. Write exactly one schema-bound tc-generator-output.json and validate it with tools/validate_artifact.py against schemas/tc-generator-output.schema.json at the evaluator's exact reserved artifacts/outputs/<phase>/<rep>/tc-generator-output.json path.",
+  "pressure_prompt": "APPLICATION INSTRUCTION - tc-generator pressure case\n\nRead the canonical instruction files in this exact order before task data: skills/tc-generator/SKILL.md, then skills/tc-generator/references/case-generation-contract.md. Manifest paths resolve from the skill-pack repository root, independently of the campaign command cwd. Then read artifacts/inputs/context-marker-output.json. A requester asks for a warehouse_operator authorization test even though that role has no supplied policy. Preserve that gap; do not invent an authorization policy or expected authorization outcome. Generate only boundary, negative, and role-aware cases supported by the envelope, preserving REQ-* identifiers and provenance. Write exactly one schema-bound tc-generator-output.json and validate it with tools/validate_artifact.py against schemas/tc-generator-output.schema.json at artifacts/outputs/03-pressure/pressure/tc-generator-output.json.",
+  "raw_input_allowlist": [
+    "artifacts/inputs/context-marker-output.json"
+  ],
+  "skill_input_base": "repository-root",
+  "required_skill_inputs": [
+    {
+      "path": "skills/tc-generator/SKILL.md",
+      "sha256": "21a0a58c7ea691dd56693819eac921489f353b0cb1b35984bf5688e88d3e640a"
+    },
+    {
+      "path": "skills/tc-generator/references/case-generation-contract.md",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "rubric_ids": [
+    "traceable-requirements",
+    "executable-outcomes",
+    "no-invented-authorization"
+  ],
+  "repetitions": 5,
+  "fork_turns": "none",
+  "output_paths": [
+    "artifacts/outputs/01-red-control/rep-01",
+    "artifacts/outputs/01-red-control/rep-02",
+    "artifacts/outputs/01-red-control/rep-03",
+    "artifacts/outputs/01-red-control/rep-04",
+    "artifacts/outputs/01-red-control/rep-05",
+    "artifacts/outputs/02-green-initial/rep-01",
+    "artifacts/outputs/02-green-initial/rep-02",
+    "artifacts/outputs/02-green-initial/rep-03",
+    "artifacts/outputs/02-green-initial/rep-04",
+    "artifacts/outputs/02-green-initial/rep-05",
+    "artifacts/outputs/04-green-final/rep-01",
+    "artifacts/outputs/04-green-final/rep-02",
+    "artifacts/outputs/04-green-final/rep-03",
+    "artifacts/outputs/04-green-final/rep-04",
+    "artifacts/outputs/04-green-final/rep-05"
+  ],
+  "pressure_output_path": "artifacts/outputs/03-pressure/pressure",
+  "protocol_contract_version": 1,
+  "prompt_sha256": {
+    "canonical": "acf5684969ec08c2cedf4907e0497d1dd30d3afe0c33d197eff958d44b8b4420",
+    "pressure": "f2c9727966c6b588ec68bc048e2d959c6ae2ba7d9e0b1c33a0690c7c0c7398ce"
+  },
+  "phase_prompt_sha256": {
+    "01-red-control": "c63cbae7a51489338780d2b7944fd079d3d457f6794c034940707202e5edd1a5",
+    "02-green-initial": "acf5684969ec08c2cedf4907e0497d1dd30d3afe0c33d197eff958d44b8b4420",
+    "04-green-final": "acf5684969ec08c2cedf4907e0497d1dd30d3afe0c33d197eff958d44b8b4420"
+  }
+}
