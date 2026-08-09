@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
 from conftest import load_tool
 
 
@@ -71,16 +74,16 @@ def _draft(campaign: Path, phase: str = "01-red-control", repetition: str = "rep
     checked_output = campaign / output_root / "tc-generator-output.json"
     validation = campaign / output_root / "validation-result.json"
     semantic = campaign / output_root / "semantic-result.json"
-    prompt_bytes = b"pressure prompt" if phase == "pressure" else (b"red-control prompt\n" if phase == "01-red-control" else b"canonical prompt")
+    prompt_bytes = b"pressure prompt" if phase == "pressure" else (b"red-control prompt\n" if phase.startswith("01-red-control") else b"canonical prompt")
     for path, content in ((prompt, prompt_bytes), (observation, b"observation"), (evaluator_output, b"evaluator output"), (checked_output, b"checked output"), (validation, b"validation result"), (semantic, b"semantic result")):
         _write(path, content)
     validate = [str(Path(sys.executable).resolve()), str((campaign.parents[3] / "tools/validate_artifact.py").resolve()), str((campaign.parents[3] / "schemas/tc-generator-output.schema.json").resolve()), str(checked_output.resolve())]
-    mode = "pressure" if phase == "pressure" else ("red-control" if phase == "01-red-control" else "canonical")
+    mode = "pressure" if phase == "pressure" else ("red-control" if phase.startswith("01-red-control") else "canonical")
     semantic_argv = [str(Path(sys.executable).resolve()), str((campaign / "check_output.py").resolve()), "--input", str((campaign / "artifacts/inputs/context-marker-output.json").resolve()), "--output", str(checked_output.resolve()), "--mode", mode]
     draft = {
         "phase": phase,
         "repetition": repetition,
-        "skill_present": phase != "01-red-control",
+        "skill_present": not phase.startswith("01-red-control"),
         "prompt_sha256": _sha256(prompt),
         "prompt_snapshot": {"path": str(prompt.relative_to(campaign)).replace("\\", "/"), "sha256": _sha256(prompt)},
         "started_at": "2026-08-09T10:00:00Z",
@@ -342,7 +345,7 @@ def test_refuses_next_key_already_preserved_as_invalidated(tmp_path: Path) -> No
 
 def test_recorded_run_validates_against_schema_and_authoritative_pending_semantics(tmp_path: Path) -> None:
     campaign = _integration_campaign(tmp_path)
-    draft = _draft(campaign)
+    draft = _draft(campaign, "01-red-control-v2", "rep-01")
     _set_draft_prompt(campaign, draft, (ROOT / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes())
     result = _run(campaign, draft)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -353,3 +356,173 @@ def test_recorded_run_validates_against_schema_and_authoritative_pending_semanti
     scenario = _load(campaign / "00-scenario.json")
     scorecards = [evidence._pending_scorecard(scenario, phase) for phase in evidence.SCORECARD_PHASES]
     evidence._assert_metadata_semantics(_load(metadata_path), campaign, scenario, scorecards)
+
+
+def _versioned_red_campaign(tmp_path: Path) -> Path:
+    campaign = _campaign(tmp_path)
+    for repetition in ("rep-01", "rep-02"):
+        assert _run(campaign, _draft(campaign, "01-red-control", repetition)).returncode == 0
+    metadata = _load(campaign / "06-run-metadata.json")
+    historical_runs = metadata.pop("runs")
+    scenario = _load(campaign / "00-scenario.json")
+    effective_red_phase = "01-red-control-v2"
+    scenario["effective_red_phase"] = effective_red_phase
+    scenario["output_paths"] = [
+        *(f"artifacts/outputs/{phase}/rep-{number:02d}" for phase in (effective_red_phase, "02-green-initial", "04-green-final") for number in range(1, 6)),
+    ]
+    scenario["phase_prompt_sha256"][effective_red_phase] = scenario["phase_prompt_sha256"]["01-red-control"]
+    _write(campaign / "00-scenario.json", json.dumps(scenario).encode())
+    metadata.update(evaluator=None, host=None, model=None, runs=[], historical_runs=historical_runs)
+    draft = _load(_draft(campaign, "01-red-control", "rep-03"))
+    commands = draft["commands"]
+    commands[-1] = {**commands[-1], "id": "validate-artifact", "exit_code": 1}
+    commands.pop()
+    attempt_root = "artifacts/invalidated/01-red-control/rep-03/stopped"
+    prompt = _write_evidence = lambda path, content: (_write(campaign / path, content), {"path": path, "sha256": hashlib.sha256(content).hexdigest()})[1]
+    diagnostic = _write_evidence(f"{attempt_root}/validation-result.json", b"invalid schema\n")
+    archive = _write_evidence(f"{attempt_root}/tc-generator-output.json", b"checked output")
+    reserved = campaign / "artifacts/outputs/01-red-control/rep-03/tc-generator-output.json"
+    _write(reserved, b"checked output")
+    observation = _write_evidence(f"{attempt_root}/observation.json", b"observation")
+    prompt_snapshot = _write_evidence(f"{attempt_root}/prompt.txt", b"red-control prompt\n")
+    evaluator = {"name": "evidence-runner", "host": "test-host", "model": "test-model"}
+    protocol = {"artifact_type": "run-protocol", "skill_id": "tc-generator", "phase": "01-red-control", "repetition": "rep-03", "application_prompt_sha256": prompt_snapshot["sha256"], "started_at": "2026-08-09T10:00:00Z", "finished_at": "2026-08-09T10:01:00Z", "evaluator": evaluator, "task": "skill-evaluation", "observation_path": observation["path"], "output_paths": [diagnostic["path"], "artifacts/outputs/01-red-control/rep-03/tc-generator-output.json"], "commands": commands}
+    protocol_snapshot = _write_evidence(f"{attempt_root}/run-protocol.json", json.dumps(protocol, sort_keys=True, separators=(",", ":")).encode())
+    metadata["invalidated_attempts"] = [{"attempt_id": "stopped", "classification": "protocol-invalid", "phase": "01-red-control", "repetition": "rep-03", "reason_codes": ["schema-validation-failed"], "excluded_from_score": True, "observed_prompt_sha256": prompt_snapshot["sha256"], "raw_input_allowlist": scenario["raw_input_allowlist"], "prompt_snapshot": prompt_snapshot, "observation": observation, "outputs": [diagnostic], "started_at": "2026-08-09T10:00:00Z", "finished_at": "2026-08-09T10:01:00Z", "evaluator": evaluator, "task": "skill-evaluation", "protocol_snapshot": protocol_snapshot, "commands": commands, "checked_output": archive}]
+    _write(campaign / "06-run-metadata.json", json.dumps(metadata).encode())
+    return campaign
+
+
+def test_versioned_red_first_append_requires_historical_evaluator_identity(tmp_path: Path) -> None:
+    campaign = _versioned_red_campaign(tmp_path)
+    draft = _draft(campaign, "01-red-control-v2", "rep-01")
+    payload = _load(draft)
+    payload["evaluator"]["model"] = "other-model"
+    _write(draft, json.dumps(payload).encode())
+
+    before = (campaign / "06-run-metadata.json").read_bytes()
+    result = _run(campaign, draft)
+
+    assert result.returncode == 1
+    assert (campaign / "06-run-metadata.json").read_bytes() == before
+    assert not (campaign / "artifacts/protocol/01-red-control-v2/rep-01/run-protocol.json").exists()
+
+
+def test_versioned_red_first_append_preserves_stopped_ledgers_and_uses_red_semantics(tmp_path: Path) -> None:
+    campaign = _versioned_red_campaign(tmp_path)
+    draft = _draft(campaign, "01-red-control-v2", "rep-01")
+    before = _load(campaign / "06-run-metadata.json")
+
+    result = _run(campaign, draft)
+
+    assert result.returncode == 0, result.stderr
+    updated = _load(campaign / "06-run-metadata.json")
+    assert updated["runs"][0]["phase"] == "01-red-control-v2"
+    assert updated["runs"][0]["skill_present"] is False
+    assert updated["evaluator"] == "evidence-runner"
+    assert updated["historical_runs"] == before["historical_runs"]
+    assert updated["invalidated_attempts"] == before["invalidated_attempts"]
+    protocol = _load(campaign / "artifacts/protocol/01-red-control-v2/rep-01/run-protocol.json")
+    assert protocol["commands"][-1]["argv"][-1] == "red-control"
+
+
+def test_real_stopped_red_history_accepts_the_first_active_v2_append(tmp_path: Path) -> None:
+    campaign = tmp_path / "docs/to_do/skill-tests/tc-generator"
+    shutil.copytree(ROOT / "docs/to_do/skill-tests/tc-generator", campaign)
+    _write(tmp_path / "tools/validate_artifact.py", b"# validator command target\n")
+    _write(tmp_path / "schemas/tc-generator-output.schema.json", b"{}")
+    metadata = _load(campaign / "06-run-metadata.json")
+    for run in metadata["historical_runs"]:
+        protocol_path = campaign / run["protocol_snapshot"]["path"]
+        protocol = _load(protocol_path)
+        template = _load(_draft(campaign, "01-red-control-v2", run["repetition"]))["commands"]
+        for command in template:
+            command["argv"] = [argument.replace("01-red-control-v2", run["phase"]) for argument in command["argv"]]
+        protocol["commands"] = [{**protocol["commands"][0], "cwd": str(campaign.resolve())}, *template[-2:]]
+        run["commands"] = protocol["commands"]
+        _write(protocol_path, json.dumps(protocol, sort_keys=True, separators=(",", ":")).encode())
+        run["protocol_snapshot"]["sha256"] = _sha256(protocol_path)
+    attempt = metadata["invalidated_attempts"][0]
+    attempt_protocol_path = campaign / attempt["protocol_snapshot"]["path"]
+    attempt_protocol = _load(attempt_protocol_path)
+    source_root = str(ROOT)
+    target_root = str(tmp_path)
+    attempt["commands"] = [
+        {**command, "argv": [argument.replace(source_root, target_root) for argument in command["argv"]], "cwd": str(campaign.resolve())}
+        for command in attempt["commands"]
+    ]
+    attempt_protocol["commands"] = attempt["commands"]
+    _write(attempt_protocol_path, json.dumps(attempt_protocol, sort_keys=True, separators=(",", ":")).encode())
+    attempt["protocol_snapshot"]["sha256"] = _sha256(attempt_protocol_path)
+    _write(campaign / "06-run-metadata.json", json.dumps(metadata).encode())
+    historical_protocol = _load(campaign / metadata["historical_runs"][0]["protocol_snapshot"]["path"])
+    draft = _draft(campaign, "01-red-control-v2", "rep-01")
+    _set_draft_prompt(campaign, draft, (campaign / "artifacts/prompts/01-red-control.txt").read_bytes())
+    payload = _load(draft)
+    payload["evaluator"] = historical_protocol["evaluator"]
+    _write(draft, json.dumps(payload).encode())
+
+    result = _run(campaign, draft)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = _load(campaign / "06-run-metadata.json")
+    assert load_tool("validate_artifact").validate(
+        str(ROOT / "schemas/skill-test-evidence.schema.json"), str(campaign / "06-run-metadata.json")
+    )[0] == 0
+    evidence = _evidence_module()
+    scenario = _load(campaign / "00-scenario.json")
+    scorecards = [evidence._pending_scorecard(scenario, phase) for phase in evidence.SCORECARD_PHASES]
+    evidence._assert_metadata_semantics(updated, campaign, scenario, scorecards)
+
+
+def test_refuses_hardlinked_v2_output_aliasing_historical_evidence(tmp_path: Path) -> None:
+    campaign = _versioned_red_campaign(tmp_path)
+    draft = _draft(campaign, "01-red-control-v2", "rep-01")
+    payload = _load(draft)
+    alias = campaign / payload["output_paths"][1]
+    source = campaign / _load(campaign / "06-run-metadata.json")["historical_runs"][0]["outputs"][1]["path"]
+    alias.unlink()
+    try:
+        alias.hardlink_to(source)
+    except OSError as error:
+        pytest.skip(f"filesystem cannot create hard links: {error}")
+
+    result = _run(campaign, draft)
+
+    assert result.returncode == 1
+    assert "draft output reuses evidence" in result.stdout
+
+
+def test_real_stopped_history_rejects_tampered_archived_checked_output_hash() -> None:
+    campaign = ROOT / "docs/to_do/skill-tests/tc-generator"
+    scenario = _load(campaign / "00-scenario.json")
+    attempt = deepcopy(_load(campaign / "06-run-metadata.json")["invalidated_attempts"][0])
+    attempt["checked_output"]["sha256"] = "0" * 64
+    module = _module()
+
+    with pytest.raises(module.Refusal, match="checked output"):
+        module._invalidated_protocol_identity(campaign, scenario, attempt)
+
+
+def test_historical_invalidation_without_protocol_snapshot_refuses_before_write(tmp_path: Path) -> None:
+    campaign = _versioned_red_campaign(tmp_path)
+    metadata = _load(campaign / "06-run-metadata.json")
+    metadata["invalidated_attempts"][0].pop("protocol_snapshot")
+    _write(campaign / "06-run-metadata.json", json.dumps(metadata).encode())
+    before = (campaign / "06-run-metadata.json").read_bytes()
+    result = _run(campaign, _draft(campaign, "01-red-control-v2", "rep-01"))
+    assert result.returncode == 2
+    assert (campaign / "06-run-metadata.json").read_bytes() == before
+
+
+def test_refuses_sixteenth_run_without_creating_final_protocol(tmp_path: Path) -> None:
+    campaign = _campaign(tmp_path)
+    order = [(phase, repetition) for phase in ("01-red-control", "02-green-initial") for repetition in (f"rep-{number:02d}" for number in range(1, 6))] + [("pressure", "pressure")] + [("04-green-final", f"rep-{number:02d}") for number in range(1, 6)]
+    for phase, repetition in order[:15]:
+        assert _run(campaign, _draft(campaign, phase, repetition)).returncode == 0
+    before = (campaign / "06-run-metadata.json").read_bytes()
+    result = _run(campaign, _draft(campaign, *order[15]))
+    assert result.returncode == 1
+    assert "final repetition requires atomic campaign completion" in result.stdout
+    assert (campaign / "06-run-metadata.json").read_bytes() == before
+    assert not (campaign / "artifacts/protocol/04-green-final/rep-05/run-protocol.json").exists()

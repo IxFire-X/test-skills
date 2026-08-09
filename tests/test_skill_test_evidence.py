@@ -24,6 +24,7 @@ SCORECARD_OUTPUT_PHASES = dict(zip(SCORECARD_PHASES, PHASES, strict=True))
 PRESSURE_OUTPUT_PATH = "artifacts/outputs/03-pressure/pressure"
 UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 DEFAULT_FINAL_PHASE = "04-green-final"
+DEFAULT_RED_PHASE = "01-red-control"
 CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION = 1
 PROTOCOL_V1_SKILL_IDS = frozenset({"context-marker", "tc-generator"})
 PROTOCOL_V1_OUTPUT_CONTRACTS = {
@@ -38,6 +39,10 @@ def _read_json(path: Path):
 
 def _effective_final_phase(scenario):
     return scenario.get("effective_final_phase", DEFAULT_FINAL_PHASE)
+
+
+def _effective_red_phase(scenario):
+    return scenario.get("effective_red_phase", DEFAULT_RED_PHASE)
 
 
 def _expected_phase_prompt_sha256(scenario, phase):
@@ -73,8 +78,8 @@ def test_context_marker_declared_historical_phase_hashes_bind_immutable_prompts(
             )
 
 
-def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE):
-    phases = ("01-red-control", "02-green-initial", effective_final_phase)
+def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
+    phases = (effective_red_phase, "02-green-initial", effective_final_phase)
     return [f"artifacts/outputs/{phase}/{rep}" for phase in phases for rep in REPETITIONS]
 
 
@@ -97,7 +102,7 @@ def _protocol_v1_reserved_output(campaign, skill_id, phase, repetition):
 
 
 def _tc_generator_semantic_mode(phase):
-    if phase == "01-red-control":
+    if phase == DEFAULT_RED_PHASE or phase.startswith(f"{DEFAULT_RED_PHASE}-v"):
         return "red-control"
     if phase == "pressure":
         return "pressure"
@@ -218,12 +223,12 @@ def _assert_schema_valid(validate_artifact, schema_path, document_path):
     assert validate_artifact.validate(str(schema_path), str(document_path))[0] == 0
 
 
-def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE):
-    output_phase = effective_final_phase if phase == "green-final" else SCORECARD_OUTPUT_PHASES[phase]
+def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
+    output_phase = effective_final_phase if phase == "green-final" else (effective_red_phase if phase == "red" else SCORECARD_OUTPUT_PHASES[phase])
     return f"{output_phase}/{repetition}.md"
 
 
-def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE):
+def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
     if scorecard["status"] == "pending":
         assert scorecard["results"] == {}
         assert scorecard["evidence_files"] == []
@@ -238,7 +243,7 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         for result in scorecard["results"].values()
     )
     expected_evidence = {
-        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase)
+        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase, effective_red_phase)
         for repetition in REPETITIONS
     }
     assert set(scorecard["evidence_files"]) == expected_evidence
@@ -268,16 +273,16 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         assert scorecard["no_edit_reason"] is None
 
 
-def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE):
-    phases = ("01-red-control", "02-green-initial", effective_final_phase)
+def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
+    phases = (effective_red_phase, "02-green-initial", effective_final_phase)
     return {(phase, repetition) for phase in phases for repetition in REPETITIONS} | {
         ("pressure", "pressure")
     }
 
 
-def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE):
+def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE):
     return [
-        *( ("01-red-control", repetition) for repetition in REPETITIONS ),
+        *( (effective_red_phase, repetition) for repetition in REPETITIONS ),
         *( ("02-green-initial", repetition) for repetition in REPETITIONS ),
         ("pressure", "pressure"),
         *( (effective_final_phase, repetition) for repetition in REPETITIONS ),
@@ -447,10 +452,77 @@ def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario
     assert protocol["commands"] == commands
 
 
+def _historical_evidence_paths(metadata, campaign):
+    paths = set()
+    for run in metadata.get("historical_runs", []):
+        protocol = _read_json(campaign / run["protocol_snapshot"]["path"])
+        for evidence in [*run["outputs"], run["prompt_snapshot"], run["protocol_snapshot"]]:
+            paths.add((campaign / evidence["path"]).resolve())
+        paths.add((campaign / protocol["observation_path"]).resolve())
+    return paths
+
+
+def _assert_historical_run_semantics(metadata, campaign, scenario, effective_red_phase):
+    historical_runs = metadata.get("historical_runs", [])
+    assert isinstance(historical_runs, list)
+    if not historical_runs:
+        return
+    assert effective_red_phase != DEFAULT_RED_PHASE
+    expected_keys = [(DEFAULT_RED_PHASE, repetition) for repetition in REPETITIONS[:len(historical_runs)]]
+    assert [(run["phase"], run["repetition"]) for run in historical_runs] == expected_keys
+    assert len(historical_runs) < len(REPETITIONS)
+    identities = []
+    evidence_paths = set()
+    for run in historical_runs:
+        phase, repetition = run["phase"], run["repetition"]
+        assert run["skill_present"] is False
+        assert run["raw_input_allowlist"] == scenario["raw_input_allowlist"]
+        assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
+        assert _parse_utc_z(run["finished_at"]) >= _parse_utc_z(run["started_at"])
+        protocol_root = f"artifacts/protocol/{phase}/{repetition}/"
+        assert run["prompt_snapshot"]["path"] == f"{protocol_root}prompt.txt"
+        assert run["protocol_snapshot"]["path"] == f"{protocol_root}run-protocol.json"
+        for evidence in [*run["outputs"], run["prompt_snapshot"], run["protocol_snapshot"]]:
+            path = (campaign / evidence["path"]).resolve()
+            assert path.is_file()
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == evidence["sha256"]
+            assert path not in evidence_paths
+            evidence_paths.add(path)
+        assert f"{phase}/{repetition}.md" in {output["path"] for output in run["outputs"]}
+        assert all(
+            output["path"] == f"{phase}/{repetition}.md" or output["path"].startswith(f"artifacts/outputs/{phase}/{repetition}/")
+            for output in run["outputs"]
+        )
+        protocol = _read_json(campaign / run["protocol_snapshot"]["path"])
+        assert protocol["phase"] == phase
+        assert protocol["repetition"] == repetition
+        assert protocol["application_prompt_sha256"] == run["prompt_sha256"]
+        assert protocol["started_at"] == run["started_at"]
+        assert protocol["finished_at"] == run["finished_at"]
+        assert protocol["output_paths"] == [output["path"] for output in run["outputs"]]
+        assert protocol["commands"] == run["commands"]
+        _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, protocol["commands"])
+        observation = (campaign / protocol["observation_path"]).resolve()
+        assert protocol["observation_path"] == f"{protocol_root}observation.json"
+        assert observation.is_file()
+        assert observation not in evidence_paths
+        evidence_paths.add(observation)
+        identities.append(protocol["evaluator"])
+    invalidated = metadata.get("invalidated_attempts", [])
+    assert [(attempt["phase"], attempt["repetition"]) for attempt in invalidated] == [
+        (DEFAULT_RED_PHASE, f"rep-{len(historical_runs) + 1:02d}")
+    ]
+    identities.extend(attempt["evaluator"] for attempt in invalidated)
+    assert all(identity == identities[0] for identity in identities)
+    active_keys = {(run["phase"], run["repetition"]) for run in metadata["runs"]}
+    assert not active_keys & set(expected_keys)
+
+
 def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     assert metadata["skill_id"] == scenario["skill_id"]
     effective_final_phase = _effective_final_phase(scenario)
-    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase)
+    effective_red_phase = _effective_red_phase(scenario)
+    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, effective_red_phase)
     for scorecard in scorecards:
         assert scorecard["skill_id"] == scenario["skill_id"]
         assert scorecard["rubric_ids"] == scenario["rubric_ids"]
@@ -469,9 +541,10 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert len(scorecards) == len(SCORECARD_PHASES)
         assert {scorecard["phase"] for scorecard in scorecards} == set(SCORECARD_PHASES)
         for scorecard in scorecards:
-            _assert_scorecard_semantics(scorecard, effective_final_phase)
+            _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase)
             assert scorecard["status"] == "pending", "pending campaigns require pending scorecards"
-        _assert_invalidated_attempt_semantics(metadata, campaign, scenario, set(), set())
+        _assert_historical_run_semantics(metadata, campaign, scenario, effective_red_phase)
+        _assert_invalidated_attempt_semantics(metadata, campaign, scenario, set(), _historical_evidence_paths(metadata, campaign))
         return
 
     assert all(metadata[field].strip() for field in ("evaluator", "host", "model"))
@@ -479,12 +552,12 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     run_keys_in_order = [(run["phase"], run["repetition"]) for run in metadata["runs"]]
     if metadata["status"] == "complete":
         assert len(metadata["runs"]) == 16
-        scored_keys = _expected_run_keys(effective_final_phase)
+        scored_keys = _expected_run_keys(effective_final_phase, effective_red_phase)
         assert set(run_keys_in_order) == scored_keys
         assert len(set(run_keys_in_order)) == 16
     else:
         assert metadata["skill_id"] == "tc-generator"
-        expected_order = _tc_generator_execution_order(effective_final_phase)
+        expected_order = _tc_generator_execution_order(effective_final_phase, effective_red_phase)
         assert 1 <= len(run_keys_in_order) < len(expected_order)
         assert run_keys_in_order == expected_order[:len(run_keys_in_order)]
         scored_keys = set(run_keys_in_order)
@@ -504,8 +577,8 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             output_prefix = "artifacts/outputs/03-pressure/pressure/"
         else:
             assert repetition in REPETITIONS
-            assert phase in {"01-red-control", "02-green-initial", effective_final_phase}
-            assert run["skill_present"] is (phase != "01-red-control")
+            assert phase in {effective_red_phase, "02-green-initial", effective_final_phase}
+            assert run["skill_present"] is (phase != effective_red_phase)
             assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
             required_output = f"{phase}/{repetition}.md"
             output_prefix = f"artifacts/outputs/{phase}/{repetition}/"
@@ -575,24 +648,28 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert observation.resolve() not in output_paths
         output_paths.add(observation.resolve())
 
-    _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_keys, output_paths)
+    _assert_historical_run_semantics(metadata, campaign, scenario, effective_red_phase)
+    historical_paths = _historical_evidence_paths(metadata, campaign)
+    assert not output_paths & historical_paths
+    _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_keys, output_paths | historical_paths)
 
     if metadata["status"] == "pending":
-        invalidated_keys = {
+        active_invalidated_keys = {
             (attempt["phase"], attempt["repetition"])
             for attempt in metadata.get("invalidated_attempts", [])
+            if attempt["phase"] != DEFAULT_RED_PHASE or not metadata.get("historical_runs")
         }
-        if invalidated_keys:
-            assert invalidated_keys == {
-                _tc_generator_execution_order(effective_final_phase)[len(metadata["runs"])]
+        if active_invalidated_keys:
+            assert active_invalidated_keys == {
+                _tc_generator_execution_order(effective_final_phase, effective_red_phase)[len(metadata["runs"])]
             }
 
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
-        _assert_scorecard_semantics(scorecard, effective_final_phase)
+        _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase)
         if scorecard["status"] == "complete":
             if metadata["status"] == "pending":
-                required_phase = SCORECARD_OUTPUT_PHASES[scorecard["phase"]]
+                required_phase = effective_red_phase if scorecard["phase"] == "red" else SCORECARD_OUTPUT_PHASES[scorecard["phase"]]
                 assert {
                     (required_phase, repetition) for repetition in REPETITIONS
                 } <= scored_keys
@@ -616,7 +693,7 @@ def _complete_scorecard(scenario, phase="red"):
             for repetition in REPETITIONS
         },
         "evidence_files": [
-            _score_evidence_path(phase, repetition, _effective_final_phase(scenario))
+            _score_evidence_path(phase, repetition, _effective_final_phase(scenario), _effective_red_phase(scenario))
             for repetition in REPETITIONS
         ],
         "all_passed": result_value,
@@ -633,7 +710,7 @@ def _complete_metadata(scenario):
                 {
                     "phase": phase,
                     "repetition": repetition,
-                    "skill_present": phase != "01-red-control",
+                    "skill_present": phase != _effective_red_phase(scenario),
                     "prompt_sha256": scenario["prompt_sha256"]["canonical"],
                     "raw_input_allowlist": scenario["raw_input_allowlist"],
                     "started_at": "2026-08-07T12:00:00Z",
@@ -830,12 +907,12 @@ def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidat
     host = "ci"
     model = "test-model"
     runs = []
-    order = _tc_generator_execution_order(_effective_final_phase(scenario))
+    order = _tc_generator_execution_order(_effective_final_phase(scenario), _effective_red_phase(scenario))
     for index, (phase, repetition) in enumerate(order[:successful_count], start=1):
         protocol_root = f"artifacts/protocol/{phase}/{repetition}"
         prompt_bytes = (
             (root / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes()
-            if phase == "01-red-control"
+            if phase == _effective_red_phase(scenario)
             else (
                 scenario["pressure_prompt"].encode("utf-8")
                 if phase == "pressure"
@@ -862,7 +939,7 @@ def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidat
         run = {
             "phase": phase,
             "repetition": repetition,
-            "skill_present": phase != "01-red-control",
+            "skill_present": phase != _effective_red_phase(scenario),
             "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
             "prompt_snapshot": _write_evidence(campaign, f"{protocol_root}/prompt.txt", prompt_bytes),
             "raw_input_allowlist": scenario["raw_input_allowlist"],
@@ -898,7 +975,7 @@ def _pending_tc_generator_campaign(tmp_path, root, successful_count=1, invalidat
         attempt_root = f"artifacts/invalidated/{phase}/{repetition}/{attempt_id}"
         prompt_bytes = (
             (root / "docs/to_do/skill-tests/tc-generator/artifacts/prompts/01-red-control.txt").read_bytes()
-            if phase == "01-red-control"
+            if phase == _effective_red_phase(scenario)
             else (
                 scenario["pressure_prompt"].encode("utf-8") if phase == "pressure"
                 else scenario["canonical_prompt"].encode("utf-8")
@@ -1142,7 +1219,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert scenario["repetitions"] == 5
         assert scenario["fork_turns"] == "none"
         effective_final_phase = _effective_final_phase(scenario)
-        assert scenario["output_paths"] == _expected_output_paths(effective_final_phase)
+        assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, _effective_red_phase(scenario))
         assert scenario["pressure_output_path"] == PRESSURE_OUTPUT_PATH
         assert len(set(scenario["output_paths"])) == len(scenario["output_paths"])
         assert all(not Path(output_path).is_absolute() and ".." not in Path(output_path).parts for output_path in scenario["output_paths"])
@@ -1152,9 +1229,12 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         _assert_schema_valid(validate_artifact, schema_path, metadata_path)
         metadata = _read_json(metadata_path)
 
-        for phase in ("01-red-control", "02-green-initial", effective_final_phase):
+        for phase in (_effective_red_phase(scenario), "02-green-initial", effective_final_phase):
             for repetition in REPETITIONS:
                 assert (campaign / "artifacts/outputs" / phase / repetition / ".gitkeep").is_file()
+                if skill_id == "tc-generator" and phase == _effective_red_phase(scenario):
+                    assert (campaign / phase / ".gitkeep").is_file()
+                    assert (campaign / "artifacts/protocol" / phase / repetition / ".gitkeep").is_file()
         assert (campaign / PRESSURE_OUTPUT_PATH / ".gitkeep").is_file()
         scorecards = []
         for phase in SCORECARD_PHASES:
@@ -1162,7 +1242,7 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
             assert scorecard_path.is_file()
             _assert_schema_valid(validate_artifact, schema_path, scorecard_path)
             scorecard = _read_json(scorecard_path)
-            _assert_scorecard_semantics(scorecard, effective_final_phase)
+            _assert_scorecard_semantics(scorecard, effective_final_phase, _effective_red_phase(scenario))
             scorecards.append(scorecard)
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
@@ -1321,6 +1401,24 @@ def test_tc_generator_red_control_uses_an_isolated_phase_prompt(root):
     protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
     assert "skill_present: false" in protocol
     assert "canonical skill inputs withheld" in protocol
+
+
+def test_tc_generator_versioned_red_excludes_stopped_v1_from_active_scorecards(root):
+    """Keeps stopped RED-v1 integrity evidence outside the fresh v2 baseline."""
+    campaign = root / "docs/to_do/skill-tests/tc-generator"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [_read_json(campaign / "05-scorecards" / f"{phase}.json") for phase in SCORECARD_PHASES]
+
+    assert _effective_red_phase(scenario) == "01-red-control-v2"
+    assert scenario["phase_prompt_sha256"]["01-red-control-v2"] == scenario["phase_prompt_sha256"]["01-red-control"]
+    assert metadata["runs"] == []
+    assert (metadata["evaluator"], metadata["host"], metadata["model"]) == (None, None, None)
+    assert [(run["phase"], run["repetition"]) for run in metadata["historical_runs"]] == [
+        ("01-red-control", "rep-01"), ("01-red-control", "rep-02")
+    ]
+    assert all(scorecard["status"] == "pending" and scorecard["evidence_files"] == [] for scorecard in scorecards)
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
 
 
 @pytest.mark.parametrize(

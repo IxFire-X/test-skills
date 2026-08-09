@@ -124,7 +124,7 @@ Run `quick_validate.py` and the local-link test after each row.
 **Files:** `skills/tc-generator/`, `docs/to_do/skill-tests/tc-generator/`.
 
 1. Apply its cleanup-map row. Inputs are schema-valid analytics/source envelopes. Canonical prompt: generate boundary, negative, and role-aware cases for the supplied order change; every rep writes and validates `tc-generator-output.json` with `tc-generator-output.schema.json`.
-2. Rubric: traceable requirement IDs, executable expected results, no unstated authorization. Execute the exact global five/five/pressure/refactor/five sequence; run validator/link test and commit task-owned paths.
+2. Rubric: traceable requirement IDs, executable expected results, no unstated authorization. Original `01-red-control` is terminal-stopped after immutable invalid `rep-03`; retain `rep-01..02` as historical integrity evidence only. Start separate `01-red-control-v2` with the same baseline input, exact RED prompt semantics/hash, rubric, evaluator tuple, and adaptive `1 -> 3 -> 5` gate; do not merge evidence. No implementation follows until five successful v2 repetitions complete. Then execute the active five/five/pressure/refactor/five sequence; run validator/link test and commit task-owned paths.
 
 ## Task 4: tc-reviewer campaign
 
