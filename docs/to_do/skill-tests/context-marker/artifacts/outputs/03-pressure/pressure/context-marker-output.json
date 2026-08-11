@@ -1,6 +1,0 @@
-{
-  "format": "context-marker-output/v1",
-  "content_type": "analytics",
-  "output_tag": "analytics_documentation",
-  "content": "<!-- ⚠ context-marker: тип не определён автоматически, assumed analytics -->\n<analytics_documentation>\n{\"format\":\"context-marker-raw-content/v1\",\"order_change\":{\"endpoint\":\"POST /orders\",\"facts\":[{\"id\":\"FACT-1\",\"quote\":\"The request contains customerId and one or more lines with sku and positive quantity.\"},{\"id\":\"FACT-2\",\"quote\":\"Unknown SKUs and nonpositive quantities are rejected.\"},{\"id\":\"FACT-3\",\"quote\":\"A successful request creates a CREATED order, calculates the line-total sum, and emits order.created with the new order identifier.\"}],\"absent_policy_topics\":[\"authentication\",\"authorization\",\"retention\",\"approval\"]},\"source_context\":{\"observations\":[\"CreateOrderService validates customer and order lines before saving the order.\",\"The supplied change publishes OrderCreated with the saved order identifier.\"]}}\n</analytics_documentation>"
-}

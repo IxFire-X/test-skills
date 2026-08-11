@@ -1,6 +1,0 @@
-STATUS: partial
-OBJECTIVE: Produce the frozen-snapshot context-marker result for raw-content.json.
-CHANGES: D:\AI-Projects\.worktrees\portable-testing-skills\test-orchestration-skills\docs\to_do\skill-tests\context-marker\02-green-initial\rep-04.md; D:\AI-Projects\.worktrees\portable-testing-skills\test-orchestration-skills\docs\to_do\skill-tests\context-marker\artifacts\outputs\02-green-initial\rep-04\context-marker-output.json
-VERIFIED: `D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe tools\validate_artifact.py schemas\context-marker-output.schema.json D:\AI-Projects\.worktrees\portable-testing-skills\test-orchestration-skills\docs\to_do\skill-tests\context-marker\artifacts\outputs\02-green-initial\rep-04\context-marker-output.json` exited 1. It reported that `artifacts`, `schema_version`, and `stage` are required; `analytics_documentation`, `format`, and `source_code_and_diff` are unexpected; and `warnings/0` must be a string.
-JUDGMENT CALLS: Treated all three order-change facts as requirements, the two implementation observations as source-code context, and recorded explicitly absent policy topics as one unsupported-gap warning without inventing policy.
-GAPS: The frozen snapshot does not describe the evaluator output JSON schema; per the isolation constraint, the schema was not read and the output was not repaired after its one validation.

@@ -1,9 +1,0 @@
-test-orchestration-skills/docs/to_do/e2e/manifest.json
-test-orchestration-skills/docs/to_do/e2e/not-runnable/COMMANDS.json
-test-orchestration-skills/docs/to_do/e2e/not-runnable/README.md
-test-orchestration-skills/docs/to_do/e2e/not-runnable/assessment.md
-test-orchestration-skills/docs/to_do/e2e/not-runnable/changed-files-manifest.txt
-test-orchestration-skills/docs/to_do/e2e/not-runnable/fixture-integrity.json
-test-orchestration-skills/docs/to_do/e2e/not-runnable/run-result.json
-test-orchestration-skills/docs/to_do/e2e/not-runnable/scan-result.json
-test-orchestration-skills/tests/test_not_runnable_fixture.py

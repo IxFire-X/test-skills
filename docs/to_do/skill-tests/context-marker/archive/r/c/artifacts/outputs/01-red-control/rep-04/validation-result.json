@@ -1,1 +1,0 @@
-{"artifact":"context-marker-output.json","status":"invalid","validator":"tools/validate_artifact.py","reason":"schema violations: required artifacts object is absent and top-level fields are unsupported"}

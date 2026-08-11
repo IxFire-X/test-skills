@@ -1,6 +1,0 @@
-test-orchestration-skills/docs/to_do/e2e/changed-files-manifest.txt
-test-orchestration-skills/docs/to_do/e2e/java/README.md
-test-orchestration-skills/docs/to_do/e2e/manifest.json
-test-orchestration-skills/docs/to_do/e2e/not-runnable/README.md
-test-orchestration-skills/docs/to_do/e2e/python/README.md
-test-orchestration-skills/tests/test_e2e_manifest.py

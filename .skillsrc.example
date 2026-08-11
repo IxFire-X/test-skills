@@ -1,0 +1,32 @@
+# Скопируйте файл в корень целевого проекта как .skillsrc и замените значения.
+version: "2.0"
+
+project:
+  name: "my-service"
+  language: "python"
+  framework: "fastapi"
+  build_tool: "poetry"
+  type: "microservice"
+
+paths:
+  source: "src"
+  tests: "tests"
+  resources: "resources"
+  docs: "docs"
+
+test:
+  framework: "pytest"
+  api_client: "httpx"
+  database: "postgresql"
+
+methodology: "sdd"
+
+sdd:
+  openapi: "docs/api/openapi.yaml"
+  requirements: "docs/requirements"
+  architecture: "docs/architecture"
+
+resolution:
+  analytics_vs_code: "analytics_wins"
+  status_conflict: "ask_user"
+  skillsrc_vs_scan: "scan_wins"

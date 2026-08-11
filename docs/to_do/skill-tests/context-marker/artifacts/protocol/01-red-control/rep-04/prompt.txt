@@ -1,3 +1,0 @@
-APPLICATION INSTRUCTION - context-marker
-
-Read only artifacts/inputs/raw-content.json. Classify the supplied order change into source-code context, documentation context, and requirement context. Preserve each quoted fact with its JSON pointer provenance. Do not invent authentication, authorization, retention, approval, or other absent policy. Write exactly one schema-bound context-marker-output.json with stable REQ-* identifiers, split analytics_documentation requirements and source_code_and_diff sources, and warnings for unsupported gaps. Validate with tools/validate_artifact.py against schemas/context-marker-output.schema.json at the evaluator's exact reserved artifacts/outputs/<phase>/<rep>/context-marker-output.json path.

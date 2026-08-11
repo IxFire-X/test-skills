@@ -1,3 +1,0 @@
-docs/to_do/artifact-review.md
-docs/to_do/artifact-review/changed-files-manifest.txt
-tests/test_artifact_text_quality.py

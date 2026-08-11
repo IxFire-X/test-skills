@@ -1,9 +1,0 @@
-{
-  "status": "invalid",
-  "exit_code": 1,
-  "first_error": {
-    "path": "/artifacts/corrected_test_cases",
-    "message": "The generated tc-generator envelope object is not of type 'array'."
-  },
-  "normalization_note": "This compact diagnostic preserves the returned status, path, type mismatch, and exit code. The validator's full stdout was not retained after the tool result was compacted, so it is not represented as a byte-identical stdout capture."
-}

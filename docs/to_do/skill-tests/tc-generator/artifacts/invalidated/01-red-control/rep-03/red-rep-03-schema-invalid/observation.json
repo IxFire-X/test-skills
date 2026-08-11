@@ -1,1 +1,0 @@
-{"classification":"protocol-invalid","reason_codes":["schema-validation-failed"],"summary":"Archived the already-failed schema-validation attempt without retrying, repairing, replacing, or scoring it. The reserved output contains six test_data object values where the output schema requires arrays."}

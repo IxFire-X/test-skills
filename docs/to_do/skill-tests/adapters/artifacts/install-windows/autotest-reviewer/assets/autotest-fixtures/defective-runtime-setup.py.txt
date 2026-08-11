@@ -1,6 +1,0 @@
-def test_tc_0001_reads_resource(client):
-    """TC-0001: авторизованный пользователь получает ресурс."""
-    # Defect fixture: input requires authorization, but setup uses an anonymous client.
-    response = client.get("/resources/1")
-    assert response.status_code == 200
-    assert response.json["id"] == 1

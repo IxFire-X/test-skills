@@ -1,72 +1,86 @@
 ---
 name: tc-reviewer
-description: Review generated manual test cases for traceability, executable expected results, and unsupported assumptions; apply only safe mechanical corrections and return the canonical tc-reviewer JSON envelope. Use after tc-generator or whenever schema-valid generated test cases need deterministic acceptance, correction, or blocking review.
+description: Использовать после tc-generator или при проверке соответствующих схеме ручных тест-кейсов. Скилл проверяет трассируемость, исполнимость ожидаемых результатов и неподтверждённые предположения, применяет только безопасные механические исправления и возвращает канонический JSON-артефакт tc-reviewer.
 ---
 
-# Test-case reviewer
+# Проверка тест-кейсов
 
-Review supplied `tc-generator` output without adding product behavior that the input does not state.
+Проверь переданный результат `tc-generator`, не добавляя поведение продукта,
+которого нет во входных данных.
 
-## Required inputs
+## Обязательные входные данные
 
-Read, in order:
+Прочитай в указанном порядке:
 
-1. the supplied `tc-generator` JSON envelope;
+1. переданный JSON-артефакт `tc-generator`;
 2. [review-verdicts.md](references/review-verdicts.md);
-3. `schemas/tc-reviewer-output.schema.json` from the skill-pack repository root.
+3. `schemas/tc-reviewer-output.schema.json` из корня пакета скиллов.
 
-The input envelope is the only authority for requirements, provenance, roles, endpoints, data, and expected behavior. Do not use repository knowledge or plausible defaults to fill gaps unless the task explicitly supplies them as an additional input.
+Входной артефакт — единственный источник истины для требований, их происхождения,
+ролей, маршрутов, данных и ожидаемого поведения. Не заполняй пробелы знаниями о
+репозитории или правдоподобными значениями по умолчанию, если задача явно не
+передала их как дополнительный вход.
 
-## Review workflow
+## Порядок проверки
 
-1. Collect the ordered requirement IDs, test-case IDs, and coverage links.
-2. Review every test case named in the input. Preserve that input order in `reviewed_test_case_ids`.
-3. Check each case for:
-   - requirement IDs that exist and are covered bidirectionally;
-   - actions, roles, endpoints, and data grounded in the supplied requirements;
-   - steps with a concrete, observable expected result;
-   - an `expected_outcome` consistent with the step-level oracle;
-   - the complete `setup → action → observable result` chain is internally executable: the declared harness can actually produce the claimed response media type, body shape, status, and state;
-   - no placeholder such as `TBD`, `TODO`, `unknown`, or `not specified` where an executable result is required.
-4. Classify every defect before changing anything:
-   - `mechanical`: spelling, punctuation, or formatting whose single replacement is explicit in the same input;
-   - `blocking`: missing behavior, missing oracle, unsupported authorization, dangling traceability, contradiction, or any correction that requires choosing product semantics.
-5. Apply verdict precedence from the reference. One blocking finding makes the whole review `ТРЕБУЕТ ДОРАБОТКИ` and prohibits corrections.
-6. Emit one JSON envelope that validates against `schemas/tc-reviewer-output.schema.json`.
+1. Собери упорядоченные ID требований, ID тест-кейсов и связи покрытия.
+2. Проверь каждый тест-кейс из входного артефакта. Сохрани исходный порядок в `reviewed_test_case_ids`.
+3. Для каждого тест-кейса проверь:
+   - что ID требований существуют, а прямые и обратные связи покрытия совпадают;
+   - что действия, роли, маршруты и данные подтверждены переданными требованиями;
+   - что каждый шаг содержит конкретный наблюдаемый ожидаемый результат;
+   - что `expected_outcome` согласуется с проверяемым результатом шага;
+   - что полная цепочка «подготовка → действие → наблюдаемый результат» внутренне исполнима: заявленная тестовая среда действительно может получить указанные тип ответа, форму тела, статус и состояние;
+   - что в обязательном исполнимом результате нет заглушек `TBD`, `TODO`, `unknown` или `not specified`.
+4. До внесения изменений классифицируй каждый дефект:
+   - `mechanical` — орфография, пунктуация или форматирование, для которых в тех же входных данных существует единственная точная замена;
+   - `blocking` — отсутствующее поведение или ожидаемый результат, неподтверждённая авторизация, оборванная трассируемость, противоречие либо любое исправление, требующее выбора продуктового поведения.
+5. Примени приоритет вердиктов из справочника. Один блокирующий дефект задаёт всему результату вердикт `ТРЕБУЕТ ДОРАБОТКИ` и запрещает исправления.
+6. Выведи один JSON-артефакт, соответствующий `schemas/tc-reviewer-output.schema.json`.
 
-## Closed-world rule
+## Правило замкнутого мира
 
-Never invent or substitute:
+Никогда не выдумывай и не подменяй:
 
-- HTTP statuses or response codes;
-- roles, permissions, or authentication policy;
-- endpoints, methods, fields, records, or state transitions;
-- retries, persistence, notifications, audit behavior, or other side effects;
-- expected results for placeholders or missing outcomes.
+- HTTP-статусы или коды ответа;
+- роли, разрешения или правила аутентификации;
+- маршруты, методы, поля, записи или переходы состояния;
+- повторы, сохранение данных, уведомления, аудит и другие побочные эффекты;
+- ожидаемые результаты вместо заглушек или отсутствующих результатов.
 
-Treat a harness/oracle contradiction as blocking even when every individual token appears in the input. Do not accept, for example, a JSON response oracle when the stated action returns plain text, or an authenticated outcome when the stated setup never establishes that role.
+Считай противоречие между тестовой средой и ожидаемым результатом блокирующим,
+даже если каждое отдельное значение присутствует во входных данных. Например,
+нельзя принимать ожидание JSON-ответа, когда указанное действие возвращает
+обычный текст, или результат для авторизованного пользователя, когда подготовка
+не устанавливает требуемую роль.
 
-State the unsupported claim as a `BLOCKING` finding with field-level evidence. Do not rewrite the case into a behavior that merely seems reasonable.
+Оформи неподтверждённое утверждение как находку уровня `BLOCKING` с доказательством
+на уровне конкретного поля. Не переписывай тест-кейс под поведение, которое лишь
+кажется разумным.
 
-## Safe corrections
+## Безопасные исправления
 
-Use `AUTO_FIX_APPLIED` only when every defect is mechanical and each replacement has exactly one interpretation supported by the input. For each changed case:
+Используй `AUTO_FIX_APPLIED`, только если все дефекты механические и каждая замена
+имеет ровно одно толкование, подтверждённое входными данными. Для каждого
+изменённого тест-кейса:
 
-- copy the complete test-case object;
-- change only the evidenced mechanical defect;
-- add one correction record linked to the case;
-- keep all unrelated fields byte-for-byte equivalent as JSON values.
+- скопируй полный объект тест-кейса;
+- измени только подтверждённый механический дефект;
+- добавь одну запись об исправлении, связанную с тест-кейсом;
+- сохрани все остальные поля эквивалентными исходным JSON-значениям.
 
-A missing or placeholder expected result is never a mechanical correction. An unsupported role is never replaced with a supported role automatically.
+Отсутствующий ожидаемый результат или заглушка никогда не являются механическим
+исправлением. Неподтверждённую роль нельзя автоматически заменять подтверждённой.
 
-## Output rules
+## Правила результата
 
-- `ПРИНЯТО`: no findings, no corrections, and no corrected cases.
-- `AUTO_FIX_APPLIED`: at least one non-blocking finding, at least one correction, and only the changed complete cases in `corrected_test_cases`.
-- `ТРЕБУЕТ ДОРАБОТКИ`: at least one `BLOCKING` finding, no corrections, and no corrected cases.
-- Every finding and correction uses only supplied requirement or test-case IDs in `related_ids`.
-- Evidence names the exact input field and observed value; it does not claim unseen execution.
-- `warnings` is for stage-level limitations only, not a substitute for findings.
-- Return JSON only when the caller requests the pipeline artifact.
+- `ПРИНЯТО`: нет находок, исправлений и исправленных тест-кейсов.
+- `AUTO_FIX_APPLIED`: есть хотя бы одна неблокирующая находка и одно исправление; `corrected_test_cases` содержит только изменённые полные тест-кейсы.
+- `ТРЕБУЕТ ДОРАБОТКИ`: есть хотя бы одна находка `BLOCKING`, а исправления и исправленные тест-кейсы отсутствуют.
+- Каждая находка и исправление использует в `related_ids` только переданные ID требований или тест-кейсов.
+- Доказательство называет точное входное поле и наблюдаемое значение, но не утверждает, что код запускался.
+- `warnings` предназначен только для ограничений всего этапа и не заменяет находки.
+- Возвращай только JSON, когда вызывающая сторона запрашивает артефакт пайплайна.
 
-Before returning, validate the artifact with the repository validator and the canonical output schema.
+Перед возвратом проверь артефакт репозиторным валидатором и канонической схемой
+результата.

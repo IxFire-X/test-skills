@@ -1,41 +1,60 @@
 ---
 name: context-marker
-description: Use when converting supplied requirements and source changes into a provenance-preserving context artifact for the testing pipeline.
+description: Использовать, когда нужно преобразовать переданные требования и изменения исходного кода в артефакт контекста тестового пайплайна с сохранением происхождения каждого факта.
 ---
 
-# Context Marker
+# Разметка контекста
 
-Produce one JSON artifact named `context-marker-output.json`. Read only caller-allowlisted inputs; never scan unrelated files. The machine authority is the repository [schema](../../schemas/context-marker-output.schema.json); read the local [contract](references/context-artifact-contract.md) for concise usage rules.
+Создай один JSON-артефакт `context-marker-output.json`. Читай только входы,
+явно разрешённые вызывающей стороной; не сканируй посторонние файлы. Машинным
+источником истины является репозиторная [схема](../../schemas/context-marker-output.schema.json).
+Перед работой прочитай краткий [контракт артефакта](references/context-artifact-contract.md).
 
-## Workflow
+## Порядок работы
 
-1. Classify only claims supported by caller-allowlisted evidence before assigning canonical IDs: explicit behavior or acceptance assertions are requirements; standalone contextual metadata are source observations.
-2. Follow the local contract's deterministic recipe for requirement IDs, exact requirement locators, inline provenance for string fields, and nonempty branches.
-3. Write the schema's canonical envelope with `schema_version` `2.1.0`, `stage` `context-marker`, and the two `artifacts` branches. Do not add wrapper or alternate keys.
-4. Put any unsupported or requester-asserted claim absent from the allowlisted evidence only in a warning/gap, never as a requirement or source fact.
-5. Report a blocker rather than fabricate content needed for the envelope.
-6. When the validator, schema, and output path are reachable, validate once with `tools/validate_artifact.py`; otherwise report the validation failure or unavailability honestly.
+1. До назначения канонических ID классифицируй только утверждения, подтверждённые разрешёнными источниками. Явное описание поведения или критерий приёмки является требованием. Самостоятельные контекстные метаданные являются наблюдениями по источнику.
+2. Следуй детерминированному алгоритму локального контракта для ID требований, точных ссылок на их источники, встроенных сведений о происхождении и непустых ветвей.
+3. Создай только каноническую структуру схемы с `schema_version: "2.1.0"`, `stage: "context-marker"` и двумя ветвями `artifacts`. Не добавляй обёртки и альтернативные ключи.
+4. Любое неподтверждённое утверждение, включая утверждение заказчика, которого нет в разрешённых источниках, помещай только в `warnings` как пробел в данных. Не превращай его в требование или факт об исходном коде.
+5. Если для заполнения структуры пришлось бы выдумать данные, верни блокирующую диагностику.
+6. Если доступны валидатор, схема и путь выходного файла, один раз проверь результат через `tools/validate_artifact.py`. Иначе честно сообщи об ошибке или невозможности проверки.
 
-## Observable requirement gate
+## Проверка требования на наблюдаемый результат
 
-Before assigning canonical IDs, apply this gate to every behavioral or acceptance
-requirement. When allowlisted evidence explicitly supplies an action/condition plus
-externally observable result (status, response field, error code, state/event),
-retain enough of that supported observable in the requirement text to make it
-deterministic and testable; do not reduce the requirement to route or method metadata.
+Прежде чем назначать канонический ID, проверь каждое требование к поведению и
+каждый критерий приёмки. Из разрешённых источников должны быть понятны:
 
-Evidence may span multiple allowlisted sources: join only exact supported facts and
-include provenance for every contributing fact in deterministic order. Do not copy
-secret values or credentials while preserving non-secret observables such as HTTP
-status, response-field presence or absence, and event/state. If no observable exists
-in allowlisted evidence, preserve the partial behavior but emit a warning/gap rather
-than inventing an oracle.
+- действие или условие;
+- результат, который можно наблюдать извне: HTTP-статус, поле ответа, код ошибки,
+  изменение состояния или событие.
+
+Сформулируй требование так, чтобы ожидаемый результат был однозначным и его можно
+было проверить тестом. Одного указания маршрута или HTTP-метода недостаточно.
+
+Подтверждение может быть распределено между несколькими разрешёнными источниками.
+Объединяй только явно подтверждённые факты и добавляй `provenance` каждого факта
+в детерминированном порядке. Не копируй секреты и учётные данные. Сохраняй
+несекретные наблюдаемые результаты: HTTP-статус, наличие или отсутствие поля
+ответа, событие или состояние. Если наблюдаемого результата нет, сохрани
+частичное описание поведения и добавь предупреждение о пробеле в данных вместо
+выдуманного ожидаемого результата.
 
 ## Проверка перед записью
 
-До назначения canonical ID проверьте eligibility и классификацию: самостоятельные metadata контекста сохраняются как source observation, а требованием становится только явное поведенческое или acceptance-утверждение; ни один поддержанный факт нельзя молча удалить. Затем для каждой структурированной claim/fact-записи с отдельными полями identity и claim text проверьте два точных locator в `requirements[].provenance` в порядке identity, затем claim text; identity не является `REQ-*` ID. Каждый locator содержит только JSON Pointer, `path#anchor` или `path:line`: без цитаты, описания, поясняющей метки, разделителя ` — ` или суффикса. Формат `<locator> — <faithful observation or gap>` допустим только для строковых `sources` и `warnings`.
+До назначения канонического ID проверь, подходит ли утверждение под критерии
+требования, и правильно его классифицируй. Самостоятельные контекстные метаданные
+остаются наблюдением по источнику. Требованием становится только явное описание
+поведения или критерий приёмки. Нельзя молча удалить ни один подтверждённый факт.
 
-## Boundaries
+Если структурированная запись факта содержит отдельные поля идентификатора и
+текста утверждения, помести в `requirements[].provenance` две точные ссылки:
+сначала на идентификатор, затем на текст. Исходный идентификатор не является ID
+вида `REQ-*`. Ссылка содержит только JSON Pointer, `path#anchor` или `path:line`:
+без цитаты, описания, поясняющей метки, разделителя ` — ` и суффикса. Формат
+`<ссылка> — <точное наблюдение или пробел>` допустим только для строк в `sources`
+и `warnings`.
 
-- Do not output XML, batch results, wrappers, empty-array skeletons, or alternate envelope keys.
-- Never drop, invent, or reclassify supported or unsupported claims solely to satisfy the schema.
+## Границы
+
+- Не выводи XML, пакетные результаты, обёртки, пустые каркасы массивов и альтернативные ключи структуры.
+- Не удаляй, не выдумывай и не переклассифицируй утверждения только ради прохождения схемы.

@@ -1,98 +1,109 @@
 # Контракт оркестрации
 
-## Авторитеты
+## Источники истины
 
 | Назначение | Канонический источник |
 |---|---|
-| Порядок, skill paths, accepts/forwards/transitions | `contracts/pipeline.json` |
-| Контракт pipeline | `schemas/pipeline.schema.json` |
-| Stage output | `schemas/<stage>-output.schema.json` |
-| Исполнение | `tools/run_tests.py` + `schemas/run-tests-output.schema.json` |
-| Trace topology | `tools/build_trace_document.py` + `schemas/trace-document.schema.json` |
-| Trace semantics | `tools/trace_check.py` |
-| Финальный envelope | `schemas/orchestrator-output.schema.json` |
+| порядок, пути скиллов, `accepts`, `forwards` и переходы | `contracts/pipeline.json` |
+| контракт пайплайна | `schemas/pipeline.schema.json` |
+| результат этапа | `schemas/<stage>-output.schema.json` |
+| выполнение | `tools/run_tests.py` и `schemas/run-tests-output.schema.json` |
+| структура трассировки | `tools/build_trace_document.py` и `schemas/trace-document.schema.json` |
+| смысл трассировки | `tools/trace_check.py` |
+| итоговый артефакт | `schemas/orchestrator-output.schema.json` |
 
-Если prose расходится с этими файлами, остановись и сообщи contract mismatch.
+Если поясняющий текст расходится с этими файлами, остановись и сообщи о
+несоответствии контракта.
 
 ## Маршрут артефактов
 
-| Этап | Вход | Выход и решение |
+| Этап | Вход | Результат и решение |
 |---|---|---|
-| context-marker | `raw_content` | `analytics_documentation`, `source_code_and_diff` |
-| tc-generator | оба предыдущих JSON-блока | `generated_test_cases`; затем обязательный CSV companion |
-| tc-reviewer | `generated_test_cases` | original при `ПРИНЯТО`; `corrected_test_cases` при `AUTO_FIX_APPLIED`; stop при rework |
-| tc-to-autotest | выбранные cases + validation report | `automation_matrix`, `generated_test_files`, `generated_test_methods` |
-| autotest-reviewer | cases + automation artifacts + source companions | accepted/rework `autotest_review`; без execution claims |
-| run-tests | validated automation artifact + isolated project | `run_tests_verdict`, method-level `execution_evidence` |
-| trace-check | requirements, cases, files, methods, runner evidence | `trace_audit` |
+| `context-marker` | `raw_content` | `analytics_documentation`, `source_code_and_diff` |
+| `tc-generator` | оба предыдущих блока JSON | `generated_test_cases`, затем обязательная CSV-копия |
+| `tc-reviewer` | `generated_test_cases` | исходные тест-кейсы при `ПРИНЯТО`; `corrected_test_cases` при `AUTO_FIX_APPLIED`; остановка при запросе доработки |
+| `tc-to-autotest` | выбранные тест-кейсы и отчёт проверки | `automation_matrix`, `generated_test_files`, `generated_test_methods` |
+| `autotest-reviewer` | тест-кейсы, артефакты автоматизации и сопутствующий исходный код | принятый результат или запрос доработки в `autotest_review`, без утверждений о выполнении |
+| `run-tests` | проверенный артефакт автоматизации и изолированный проект | `run_tests_verdict`, доказательства выполнения `execution_evidence` на уровне методов |
+| `trace-check` | требования, тест-кейсы, файлы, методы и доказательства средства запуска | `trace_audit` |
 
-CSV нужен для Jira Zephyr-ориентированного переноса и просмотра человеком. Он обязан точно восстанавливаться в исходный ordered `test_cases`, но downstream stage всегда читает JSON.
+CSV нужен для переноса в Jira Zephyr и просмотра человеком. Из него должны без
+потерь восстанавливаться исходные упорядоченные `test_cases`, но каждый последующий
+этап всегда читает JSON.
 
 ## Исполнимый порядок
 
-Используй абсолютные пути в фактическом command ledger и абсолютный cwd. В командах ниже `<root>` — абсолютный корень package.
+В фактическом журнале команд используй абсолютные пути и абсолютный рабочий
+каталог. В командах ниже `<root>` означает абсолютный корень пакета.
 
-1. Валидируй stage artifact:
+1. Проверь артефакт этапа:
 
    `python <root>/tools/validate_artifact.py <root>/schemas/<stage>-output.schema.json <artifact.json>`
 
-2. После tc-generator:
+2. После `tc-generator`:
 
    `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv>`
 
    `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv> --verify-only`
 
-3. После принятого autotest review:
+3. После принятой проверки автотестов:
 
    `python <root>/tools/run_tests.py --project <isolated-project> --language <java|python> --automation-artifact <tc-to-autotest-output.json>`
 
-   Сохрани stdout без изменения как run-result JSON и валидируй `run-tests-output.schema.json`.
+   Сохрани стандартный вывод без изменений как JSON результата запуска и проверь
+   его по `run-tests-output.schema.json`.
 
-4. Построй trace:
+4. Построй трассировку:
 
    `python <root>/tools/build_trace_document.py --requirements <context-marker-output.json> --test-cases <tc-generator-output.json> --automation-artifact <tc-to-autotest-output.json> --run-result <run-result.json> --output <trace-document.json>`
 
-5. Получи trace audit:
+5. Выполни аудит трассировки:
 
    `python <root>/tools/trace_check.py <trace-document.json> --require-execution`
 
-6. Собери `orchestrator-output.json` только из сохранённых run/trace facts, провалидируй его и выполни cross-check:
+6. Собери `orchestrator-output.json` только из сохранённых фактов запуска и трассировки, проверь его по схеме и выполни перекрёстную проверку:
 
    `python <root>/tools/trace_check.py <trace-document.json> --orchestrator-artifact <orchestrator-output.json> --require-execution`
 
-Native exit каждого command сохраняй отдельно от stdout. Не синтезируй runner или trace receipts вручную.
+Сохраняй штатный код завершения каждой команды отдельно от стандартного вывода.
+Не составляй квитанции средства запуска или трассировки вручную.
 
-## Project boundary
+## Граница проекта
 
-Разрешены read-only source inspection и новый generated test companion в заранее выбранном изолированном каталоге. Не разрешены изменения production source, существующих tests, configuration, lockfiles, dependencies, permissions или application behavior ради прохождения теста.
+Разрешены чтение исходного кода без изменений и новый файл сгенерированных тестов
+в заранее выбранном изолированном каталоге. Запрещено менять рабочий исходный код,
+существующие тесты, конфигурацию, файлы блокировки версий, зависимости, разрешения
+или поведение приложения ради прохождения теста.
 
-Если generated test не совместим с проектом, исправляй генератор/входной контракт в новой попытке. Никогда не подстраивай проект под тест-кейс.
+Если сгенерированный тест несовместим с проектом, исправляй генератор или входной
+контракт в новой попытке. Никогда не подстраивай проект под тест-кейс.
 
 ## Контекст этапа
 
 Передавай:
 
-- declared JSON inputs;
-- необходимые файлы generated source;
-- только source-backed project conventions/setup/roles/permissions/auth/oracles;
-- точный output path.
+- объявленные входные JSON;
+- необходимые файлы сгенерированного исходного кода;
+- только подтверждённые исходным кодом проектные соглашения, подготовку, роли, разрешения, аутентификацию и ожидаемые результаты;
+- точный путь результата.
 
 Не передавай:
 
-- ответы предыдущего evaluator;
-- скрытый oracle или scorecard;
-- reasoning/черновики;
-- лишние project files;
-- credentials и environment secrets.
+- ответы предыдущего проверяющего;
+- скрытый ожидаемый результат или оценочную карточку;
+- внутренние рассуждения и черновики;
+- лишние файлы проекта;
+- учётные данные и секреты окружения.
 
-## Финальный envelope
+## Итоговый артефакт
 
 `orchestrator-output.json` должен пройти `schemas/orchestrator-output.schema.json`.
 
-- `run_tests_verdict` копирует verdict/reason/command/runner/exit из runner result.
-- `execution_evidence` нормализует только сохранённые method-level runner records.
+- `run_tests_verdict` копирует вердикт, причину, команду, средство запуска и код завершения из результата запуска.
+- `execution_evidence` нормализует только сохранённые записи средства запуска на уровне методов.
 - `trace_audit` копируется из `trace_check.py`.
-- `PASS` требует exit 0, непустое evidence и trace `PASS`.
-- `FAIL` и `NOT_RUNNABLE` — честные terminal states, не acceptance.
+- `PASS` требует кода завершения 0, непустых доказательств и результата трассировки `PASS`.
+- `FAIL` и `NOT_RUNNABLE` — честные конечные состояния, а не принятие.
 
-Минимальный PASS и честный `NOT_RUNNABLE` находятся в `../assets/orchestration-fixtures/`.
+Минимальный `PASS` и честный `NOT_RUNNABLE` находятся в
+`../assets/orchestration-fixtures/`.

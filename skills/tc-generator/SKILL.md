@@ -1,28 +1,34 @@
 ---
 name: tc-generator
-description: Use when converting one context-marker-output v2.1.0 envelope into deterministic, schema-bound manual test cases for an API, operation, resource, or business requirement.
+description: Использовать, когда нужно преобразовать один артефакт context-marker-output версии 2.1.0 в детерминированные ручные тест-кейсы для API, операции, ресурса или бизнес-требования, соответствующие схеме.
 ---
 
-# Test-case generator
+# Генератор тест-кейсов
 
-Produce one portable, deterministic `tc-generator-output.json`. The requirements artifact is the authority for case coverage; source observations only supply explicit technical tokens. Read [the case-generation contract](references/case-generation-contract.md) before task data and use the repository [output schema](../../schemas/tc-generator-output.schema.json) as the machine authority.
+Создай один переносимый и детерминированный файл `tc-generator-output.json`.
+Артефакт требований является источником истины для покрытия тест-кейсами.
+Наблюдения по исходному коду дают только явно указанные технические сведения.
+Перед данными задачи прочитай
+[контракт генерации тест-кейсов](references/case-generation-contract.md), а
+репозиторную [схему результата](../../schemas/tc-generator-output.schema.json)
+используй как машинный источник истины.
 
-## Workflow
+## Порядок работы
 
-1. Read the local contract, then the repository output schema, then accept exactly one `context-marker-output` v2.1.0 envelope as task data. The schema is the machine authority whenever a prose rendering rule is ambiguous.
-2. Read `artifacts.analytics_documentation.requirements`; preserve that array exactly, including each `id`, `text`, `provenance`, and order.
-3. Use `artifacts.source_code_and_diff` only to resolve an explicit method, path, HTTP status, code, role, resource, field, or bound already supported by a requirement. Do not turn a source observation into a behavior or override a requirement.
-4. Extract supported atomic behaviors only. Do not invent roles, policies, fields, requests, response codes, side effects, severities, or oracles.
-5. Apply the contract's atom rules, stable ordering, rendering templates, category sets, priority rule, and exact bidirectional coverage mapping. In each `artifacts.generated_test_cases.test_cases[]` item write `requirement_ids` as a nonempty array (even for one ID); only each `artifacts.generated_test_cases.coverage[]` item uses the scalar `requirement_id`.
-6. If an atom lacks a concrete required token or oracle, omit it. Preserve the exact input warning array verbatim; never paraphrase or add warnings.
-7. Build only the schema envelope: `schema_version` `2.1.0`, `stage` `tc-generator`, `artifacts.generated_test_cases`, and `warnings`.
-8. Write exactly one canonical `tc-generator-output.json` to the caller-reserved path and validate it with `tools/validate_artifact.py schemas/tc-generator-output.schema.json <output>`.
-9. JSON remains the sole machine authority. After successful JSON validation, always create the sibling CSV companion with `python skills/tc-generator/scripts/export_test_cases_csv.py --input <output.json> --output <output.csv>`. Require exit `0`, `status: valid`, and the reported JSON↔CSV equivalence; never hand-author or repair CSV rows.
-10. Emit no Markdown, XML, wrapper, or batch result. The CSV is a deterministic transport view for Jira Zephyr-style import, not a second source of truth.
+1. Прочитай локальный контракт, затем схему результата. После этого прими в качестве данных задачи ровно один артефакт `context-marker-output` версии 2.1.0. Если текстовое правило допускает несколько толкований, приоритет имеет схема.
+2. Прочитай `artifacts.analytics_documentation.requirements`. Скопируй этот массив без изменений, сохранив каждый `id`, `text`, `provenance` и исходный порядок.
+3. Используй `artifacts.source_code_and_diff` только для уточнения метода, пути, HTTP-статуса, кода, роли, ресурса, поля или границы, уже явно подтверждённых требованием. Не превращай наблюдение по исходному коду в новое поведение и не переопределяй им требование.
+4. Выделяй только подтверждённые атомарные варианты поведения. Не выдумывай роли, правила, поля, запросы, коды ответа, побочные эффекты, критичность или ожидаемые результаты.
+5. Примени правила выделения атомов, стабильную сортировку, шаблоны представления, наборы категорий, правило приоритета и точное двунаправленное покрытие из контракта. В каждом элементе `artifacts.generated_test_cases.test_cases[]` записывай `requirement_ids` как непустой массив, даже если ID один. Только элемент `artifacts.generated_test_cases.coverage[]` использует строковое поле `requirement_id`.
+6. Если для атома не хватает обязательного конкретного значения или проверяемого ожидаемого результата, не создавай такой атом. Скопируй входной массив `warnings` дословно: не перефразируй его и не добавляй предупреждения.
+7. Создай только структуру, предусмотренную схемой: `schema_version` со значением `2.1.0`, `stage` со значением `tc-generator`, `artifacts.generated_test_cases` и `warnings`.
+8. Запиши ровно один канонический `tc-generator-output.json` по зарезервированному вызывающей стороной пути и проверь его командой `tools/validate_artifact.py schemas/tc-generator-output.schema.json <output>`.
+9. JSON остаётся единственным машинным источником истины. После успешной проверки JSON всегда создай рядом CSV-копию командой `python skills/tc-generator/scripts/export_test_cases_csv.py --input <output.json> --output <output.csv>`. Требуй код завершения `0`, `status: valid` и подтверждённую эквивалентность JSON и CSV. Никогда не составляй и не исправляй строки CSV вручную.
+10. Не выводи Markdown, XML, обёртку или пакетный результат. CSV — детерминированное транспортное представление для импорта в системы наподобие Jira Zephyr, а не второй источник истины.
 
-## Boundaries
+## Ограничения
 
-- Keep every case to one supported atom and one action step; use no generic authentication step, database/log/audit/payment/inventory claim, technical negative, extra field, or unsupported role.
-- Use `HIGH` unless the envelope explicitly supports another priority. Do not infer a severity.
-- Copy input `warnings` exactly for stable gap disclosure; never add, remove, or paraphrase a warning.
-- Keep JSON and its CSV companion adjacent and immutable for a recorded run. If an existing CSV differs, use a new reserved output path rather than overwriting evidence.
+- Каждый тест-кейс проверяет ровно один подтверждённый атом поведения и содержит ровно один шаг действия. Не добавляй общий шаг аутентификации, утверждения о базе данных, журналах, аудите, платежах или запасах, технические негативные сценарии, лишние поля и неподтверждённые роли.
+- Используй `HIGH`, если входной артефакт явно не подтверждает другой приоритет. Не выводи критичность самостоятельно.
+- Копируй входной `warnings` без изменений, чтобы пробелы в требованиях раскрывались стабильно. Не добавляй, не удаляй и не перефразируй предупреждения.
+- Храни JSON и его CSV-копию рядом и не изменяй их после фиксации прогона. Если существующий CSV отличается, используй новый зарезервированный путь вместо перезаписи доказательства.

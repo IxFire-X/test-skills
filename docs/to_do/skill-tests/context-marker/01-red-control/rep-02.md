@@ -1,1 +1,0 @@
-The supplied change describes request validation, successful order creation, total calculation, and an emitted creation event. It supplies no authentication, authorization, retention, or approval policy.

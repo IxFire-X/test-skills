@@ -1,1 +1,0 @@
-{"artifact":"context-marker-output.json","status":"invalid","validator":"tools/validate_artifact.py","reason":"schema violations: a wrapper replaced the required envelope fields"}

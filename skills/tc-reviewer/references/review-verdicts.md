@@ -1,93 +1,108 @@
-# Tc-reviewer verdict and correction contract
+# Контракт вердиктов и исправлений tc-reviewer
 
-## Decision table
+## Таблица решений
 
-| Highest defect class | Verdict | Findings | Corrections | Corrected cases |
+| Наивысший класс дефекта | Вердикт | Находки | Исправления | Исправленные тест-кейсы |
 |---|---|---|---|---|
-| none | `ПРИНЯТО` | empty | empty | empty |
-| mechanical only | `AUTO_FIX_APPLIED` | one or more `WARNING` or `INFO` | one or more | complete changed cases only |
-| any blocking defect | `ТРЕБУЕТ ДОРАБОТКИ` | includes `BLOCKING` | empty | empty |
+| дефектов нет | `ПРИНЯТО` | пусто | пусто | пусто |
+| только механические | `AUTO_FIX_APPLIED` | одна или несколько находок `WARNING` или `INFO` | одно или несколько | только полные изменённые тест-кейсы |
+| любой блокирующий дефект | `ТРЕБУЕТ ДОРАБОТКИ` | содержит `BLOCKING` | пусто | пусто |
 
-Blocking takes precedence over every mechanical issue. Do not partially auto-fix a review that also contains a blocking defect.
+Блокирующий дефект имеет приоритет над всеми механическими. Не применяй частичные
+автоматические исправления, если в той же проверке есть блокирующий дефект.
 
-## Mechanical corrections
+## Механические исправления
 
-A correction is mechanical only when all of these are true:
+Исправление является механическим, только если одновременно выполнены все условия:
 
-1. The original value is visible in the supplied test case.
-2. The replacement is visible or uniquely implied by another value in the same supplied envelope.
-3. The replacement does not choose product behavior.
-4. No role, endpoint, data value, state transition, status, or error code changes.
-5. A reviewer can describe the change as one exact textual or formatting operation.
+1. Исходное значение видно в переданном тест-кейсе.
+2. Замена видна или однозначно следует из другого значения в том же входном артефакте.
+3. Замена не выбирает поведение продукта.
+4. Роль, маршрут, значение данных, переход состояния, статус и код ошибки не меняются.
+5. Исправление можно описать одной точной текстовой операцией или операцией форматирования.
 
-Typical mechanical defects:
+Типичные механические дефекты:
 
-- an unambiguous spelling error such as `sesion` where the same artifact consistently uses `session`;
-- punctuation or whitespace that does not change meaning;
-- a mechanically malformed label whose exact normalized form is already present in the input.
+- однозначная опечатка, например `sesion`, когда во всём остальном артефакте последовательно используется `session`;
+- пунктуация или пробелы, не меняющие смысл;
+- механически некорректная метка, точная нормализованная форма которой уже присутствует во входных данных.
 
-Not mechanical:
+Не являются механическими:
 
-- filling `TBD`, `TODO`, `unknown`, or an empty semantic result;
-- changing an expected status or response code;
-- replacing an unsupported role with a supported role;
-- choosing an endpoint, field, value, precondition, or state transition;
-- resolving contradictory requirements;
-- adding missing coverage or inventing a requirement association.
+- заполнение `TBD`, `TODO`, `unknown` или пустого значимого результата;
+- изменение ожидаемого статуса или кода ответа;
+- замена неподтверждённой роли подтверждённой;
+- выбор маршрута, поля, значения, предусловия или перехода состояния;
+- разрешение противоречащих друг другу требований;
+- добавление отсутствующего покрытия или придумывание связи с требованием.
 
-## Blocking findings
+## Блокирующие находки
 
-Use `BLOCKING` when the case cannot be executed or trusted without a product decision. Recommended stable codes include:
+Используй `BLOCKING`, когда тест-кейс нельзя выполнить или считать надёжным без
+решения о поведении продукта. Рекомендуемые стабильные коды:
 
-- `EXPECTED_RESULT_MISSING`: step or outcome is a placeholder or lacks an observable result;
-- `UNSUPPORTED_AUTHORIZATION`: the case claims a role or permission absent from the supplied policy;
-- `UNSUPPORTED_BEHAVIOR`: the case asserts an endpoint, status, field, or side effect absent from requirements;
-- `DANGLING_REQUIREMENT_ID`: a case references an unknown requirement;
-- `COVERAGE_MISMATCH`: case links and reverse coverage disagree;
-- `CONTRADICTORY_ORACLE`: step results and final outcome conflict;
-- `NONDETERMINISTIC_ORACLE`: success/failure is asserted without an observable condition.
-- `HARNESS_ORACLE_MISMATCH`: the stated setup/action/harness cannot produce the claimed media type, body shape, status, or state.
+- `EXPECTED_RESULT_MISSING`: ожидаемый результат шага или всего тест-кейса является заглушкой либо не содержит наблюдаемого результата;
+- `UNSUPPORTED_AUTHORIZATION`: тест-кейс заявляет роль или разрешение, которых нет в переданных правилах;
+- `UNSUPPORTED_BEHAVIOR`: тест-кейс заявляет маршрут, статус, поле или побочный эффект, которых нет в требованиях;
+- `DANGLING_REQUIREMENT_ID`: тест-кейс ссылается на неизвестное требование;
+- `COVERAGE_MISMATCH`: прямые связи тест-кейсов и обратное покрытие не совпадают;
+- `CONTRADICTORY_ORACLE`: результаты шагов противоречат итоговому ожидаемому результату;
+- `NONDETERMINISTIC_ORACLE`: заявлен успех или отказ без наблюдаемого условия;
+- `HARNESS_ORACLE_MISMATCH`: указанная подготовка, действие или тестовая среда не могут дать заявленные тип ответа, форму тела, статус либо состояние.
 
-Codes are descriptive, not a license to infer missing behavior. The finding message explains what is unsupported and what source information is needed.
+Коды описывают дефект, но не дают права додумывать отсутствующее поведение. Текст
+находки объясняет, что именно не подтверждено и какие сведения из источника нужны.
 
-## Evidence and identity
+## Доказательства и идентификаторы
 
-`reviewed_test_case_ids` contains every input test-case ID exactly once and preserves input order.
+`reviewed_test_case_ids` содержит каждый ID входного тест-кейса ровно один раз и
+сохраняет исходный порядок.
 
-Every `related_ids` entry must be a requirement ID or test-case ID from the same input. Evidence should use field pointers such as:
+Каждый элемент `related_ids` должен быть ID требования или тест-кейса из того же
+входного артефакта. В доказательствах используй ссылки на поля, например:
 
 - `TC-0042.steps[0].expected_result=TBD`
 - `TC-0042.preconditions[0]=Authenticated as warehouse_operator`
 - `REQ-AUTH-001.text permits only sales_manager`
 
-Do not use fabricated log lines, database observations, HTTP responses, or execution claims as evidence.
+Не используй в качестве доказательства выдуманные строки журналов, наблюдения из
+базы данных, HTTP-ответы или утверждения о выполнении кода.
 
-## Corrected-case integrity
+## Целостность исправленного тест-кейса
 
-For `AUTO_FIX_APPLIED`, copy the complete changed case and preserve:
+При вердикте `AUTO_FIX_APPLIED` скопируй полный изменённый тест-кейс и сохрани:
 
-- `id` and `requirement_ids`;
-- categories and priority;
-- preconditions and test data;
-- every unchanged step field;
-- the unchanged expected outcome.
+- `id` и `requirement_ids`;
+- категории и приоритет;
+- предусловия и тестовые данные;
+- каждое неизменённое поле шага;
+- неизменённый итоговый ожидаемый результат.
 
-Only the exact field cited by the correction may differ. Do not include unchanged cases in `corrected_test_cases`.
+Отличаться может только точное поле, указанное в исправлении. Не добавляй
+неизменённые тест-кейсы в `corrected_test_cases`.
 
-## Examples
+## Примеры
 
-### Accept
+### Принятие
 
-A case matches its requirement, uses existing IDs, and contains an observable expected result. Return `ПРИНЯТО` with empty findings, corrections, and corrected cases.
+Тест-кейс соответствует требованию, использует существующие ID и содержит
+наблюдаемый ожидаемый результат. Верни `ПРИНЯТО` с пустыми находками,
+исправлениями и исправленными тест-кейсами.
 
-### Mechanical correction
+### Механическое исправление
 
-The title says `Delete active sesion`, while the requirement and all other fields use `session`. Return `AUTO_FIX_APPLIED`, cite the title, replace only `sesion` with `session`, and include the complete corrected case.
+В заголовке написано `Delete active sesion`, а требование и все остальные поля
+используют `session`. Верни `AUTO_FIX_APPLIED`, укажи заголовок как доказательство,
+замени только `sesion` на `session` и включи полный исправленный тест-кейс.
 
-### Missing result
+### Отсутствующий результат
 
-A step expected result and final outcome are `TBD`. Return `ТРЕБУЕТ ДОРАБОТКИ` with `EXPECTED_RESULT_MISSING`. Do not infer an HTTP status or success response.
+Ожидаемый результат шага и итоговый результат равны `TBD`. Верни
+`ТРЕБУЕТ ДОРАБОТКИ` с кодом `EXPECTED_RESULT_MISSING`. Не выводи самостоятельно
+HTTP-статус или успешный ответ.
 
-### Unsupported authorization
+### Неподтверждённая авторизация
 
-A case authenticates as `warehouse_operator`, but the only supplied approval policy names `sales_manager`. Return `ТРЕБУЕТ ДОРАБОТКИ` with `UNSUPPORTED_AUTHORIZATION`. Do not replace the role or predict the denied response.
+Тест-кейс выполняется от имени `warehouse_operator`, но единственное переданное
+правило разрешения называет `sales_manager`. Верни `ТРЕБУЕТ ДОРАБОТКИ` с кодом
+`UNSUPPORTED_AUTHORIZATION`. Не заменяй роль и не предсказывай ответ с отказом.

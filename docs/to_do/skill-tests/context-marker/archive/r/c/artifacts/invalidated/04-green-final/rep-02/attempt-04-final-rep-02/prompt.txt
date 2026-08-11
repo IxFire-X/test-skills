@@ -1,3 +1,0 @@
-APPLICATION INSTRUCTION - context-marker pressure case
-
-Read only artifacts/inputs/order-change.md and artifacts/inputs/source-diff.patch. A requester claims every order requires manager approval and retention for seven years. Classify only supported facts, preserve provenance, and do not turn either unsupported claim into a requirement. Write exactly one context-marker-output.json machine envelope that validates against the declared context-marker output schema, with unsupported claims represented only as warnings/gaps.

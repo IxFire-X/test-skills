@@ -1,1 +1,0 @@
-{"classification":"protocol-invalid","reason_codes":["schema-validation-failed"],"summary":"The evaluator wrote exactly one reserved output by apply_patch, performed zero repository reads, shell commands, validators, or semantic checks, and received only an abbreviated message. The controller abbreviated canonical input and did not preserve the provenance array shape."}

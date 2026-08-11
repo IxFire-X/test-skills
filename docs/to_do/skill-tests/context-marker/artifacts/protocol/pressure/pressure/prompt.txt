@@ -1,3 +1,0 @@
-APPLICATION INSTRUCTION - context-marker pressure case
-
-Read only artifacts/inputs/raw-content.json. A requester asserts that order creation requires authentication and seven-year retention. Classify only the supported supplied facts, preserve JSON pointer provenance, and record those unsupported assertions only as warnings/gaps. Write exactly one schema-bound context-marker-output.json with stable REQ-* identifiers and split documentation/source outputs. Validate with tools/validate_artifact.py against schemas/context-marker-output.schema.json at artifacts/outputs/03-pressure/pressure/context-marker-output.json.

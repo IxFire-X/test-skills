@@ -1,3 +1,0 @@
-# FINAL GREEN — rep-03 (invalidated)
-
-Native thread `019feacc-b8e3-75e2-bbc7-1775ffefd887` ran from `2026-08-10T09:38:33Z` to `2026-08-10T09:39:51Z` with the prescribed Luna/max bootstrap and one four-output fileChange. Delivery and all four validators passed. Frozen `check_outputs_v2.py --mode canonical` exited `1` only with `typo-only: finding must bind the spelling defect to title evidence`; Fresh Sol diagnosed that as a false negative because the finding correctly binds TC-TYPO-001 title evidence and additionally cites known REQ-SESSION-DELETE-001. This attempt is immutable, invalidated, and unscored; no output is repaired, rerun, or activated.

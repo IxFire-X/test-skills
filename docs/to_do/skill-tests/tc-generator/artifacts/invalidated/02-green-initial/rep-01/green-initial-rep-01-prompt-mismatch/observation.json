@@ -1,9 +1,0 @@
-{
-  "artifact_type": "pre-delegation-observation",
-  "phase": "02-green-initial",
-  "repetition": "rep-01",
-  "expected_prompt_sha256": "acf5684969ec08c2cedf4907e0497d1dd30d3afe0c33d197eff958d44b8b4420",
-  "observed_prompt_sha256": "aadebcffe151d667295c83f9de988fd2cee79d865f4e3f5c4e8195bda0217f98",
-  "delegation_started": false,
-  "outcome": "Stopped before evaluator delegation because the immutable prompt snapshot has one trailing LF beyond the canonical bytes."
-}

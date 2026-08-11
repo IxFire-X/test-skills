@@ -1,7 +1,0 @@
-{
-  "schema_version":"1.0.0",
-  "project":{"name":"Paperclip","path":"D:\\AI-Projects\\real-chain-projects\\paperclip","repository":"https://github.com/paperclipai/paperclip.git","commit":"66575fe519db7320147aece94fa66e15eba375c1"},
-  "required_documents_read_in_order":["doc/GOAL.md","doc/PRODUCT.md","doc/SPEC-implementation.md","doc/DEVELOPING.md","doc/DATABASE.md"],
-  "expected_baseline":{"argv":["pnpm","test"],"source":"AGENTS.md and doc/DEVELOPING.md"},
-  "project_files_changed":0
-}
