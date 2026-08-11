@@ -1,0 +1,12 @@
+{
+  "schema_version":"1.0.0",
+  "status":"blocked",
+  "failed_stage":"dependency-bootstrap-before-baseline",
+  "classification":"WINDOWS_SYMLINK_PERMISSION",
+  "root_cause":"The pinned pnpm 9.15.4 frozen install downloaded dependencies but the repository postinstall could not create the required plugin-sdk symlink and returned EPERM.",
+  "baseline_executed":false,
+  "skill_stages_executed":false,
+  "project_files_changed":0,
+  "forbidden_recovery":"Do not modify Paperclip source, scripts, lockfile, or dependencies to fit the test chain.",
+  "possible_external_recovery":"Run on Windows with symlink creation enabled or on a supported Unix environment, then begin a fresh attempt."
+}

@@ -1,0 +1,98 @@
+{
+  "artifact_type": "run-protocol",
+  "skill_id": "tc-reviewer",
+  "phase": "02-green-initial",
+  "repetition": "rep-01",
+  "application_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+  "started_at": "2026-08-10T02:03:06Z",
+  "finished_at": "2026-08-10T02:04:13Z",
+  "evaluator": {
+    "name": "codex-app-luna-evaluator",
+    "host": "local",
+    "model": "gpt-5.6-luna/max"
+  },
+  "task": "Isolated tc-reviewer initial-GREEN rep-01 with exact canonical inputs and four raw inputs embedded",
+  "controller_preflight": {
+    "id": "role-integrity-check",
+    "argv": [
+      "C:\\Program Files\\Git\\bin\\sh.exe",
+      "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+      "--check"
+    ],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "exit_code": 0
+  },
+  "observation_path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/observation.json",
+  "output_paths": [
+    "artifacts/outputs/02-green-initial/rep-01/clean-accepted-tc-reviewer-output.json",
+    "artifacts/outputs/02-green-initial/rep-01/typo-only-tc-reviewer-output.json",
+    "artifacts/outputs/02-green-initial/rep-01/blocking-missing-result-tc-reviewer-output.json",
+    "artifacts/outputs/02-green-initial/rep-01/blocking-fabricated-auth-tc-reviewer-output.json",
+    "artifacts/outputs/02-green-initial/rep-01/validation-clean-accepted.json",
+    "artifacts/outputs/02-green-initial/rep-01/validation-typo-only.json",
+    "artifacts/outputs/02-green-initial/rep-01/validation-blocking-missing-result.json",
+    "artifacts/outputs/02-green-initial/rep-01/validation-blocking-fabricated-auth.json",
+    "artifacts/outputs/02-green-initial/rep-01/semantic-result.json"
+  ],
+  "commands": [
+    {
+      "id": "validate-artifact-clean-accepted",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\clean-accepted-tc-reviewer-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+      "exit_code": 0
+    },
+    {
+      "id": "validate-artifact-typo-only",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\typo-only-tc-reviewer-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+      "exit_code": 0
+    },
+    {
+      "id": "validate-artifact-blocking-missing-result",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\blocking-missing-result-tc-reviewer-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+      "exit_code": 0
+    },
+    {
+      "id": "validate-artifact-blocking-fabricated-auth",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\blocking-fabricated-auth-tc-reviewer-output.json"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+      "exit_code": 0
+    },
+    {
+      "id": "semantic-check",
+      "argv": [
+        "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+        "--input-dir",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+        "--output-dir",
+        "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01",
+        "--mode",
+        "canonical"
+      ],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+      "exit_code": 1
+    }
+  ]
+}

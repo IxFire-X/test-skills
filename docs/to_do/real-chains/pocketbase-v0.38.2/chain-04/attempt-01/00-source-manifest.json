@@ -1,0 +1,7 @@
+{
+  "project": "D:\\AI-Projects\\real-chain-projects\\pocketbase-v0.38.2",
+  "head": "3616b9d66769dcda95841c52b00c166246323333",
+  "allowlisted_sources": ["apis/record_crud.go", "apis/record_auth.go", "apis/record_crud_test.go", "apis/record_auth_with_password_test.go", "tests/api.go", "go.mod"],
+  "scope": "Authenticated record CRUD and ListRule/ViewRule/CreateRule/UpdateRule/DeleteRule enforcement, with password-auth prerequisite.",
+  "secret_handling": "No tokens, passwords, or credentials from fixtures, source, logs, or inputs are copied into chain artifacts or generated code."
+}

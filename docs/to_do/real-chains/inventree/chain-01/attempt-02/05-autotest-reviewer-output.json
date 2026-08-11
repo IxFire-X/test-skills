@@ -1,0 +1,16 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "autotest-reviewer",
+  "artifacts": {
+    "autotest_review": {
+      "verdict": "ПРИНЯТО",
+      "reviewed_file_ids": ["FILE-PART-CATEGORY-REAL-CHAIN"],
+      "reviewed_method_ids": ["METHOD-TC-0001","METHOD-TC-0002","METHOD-TC-0003","METHOD-TC-0004","METHOD-TC-0005","METHOD-TC-0006"],
+      "findings": [],
+      "corrections": []
+    }
+  },
+  "warnings": [
+    "Execution pending — imports, fixtures, database behavior, and all six assertions must still pass the isolated Django execution gate."
+  ]
+}

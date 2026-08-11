@@ -351,7 +351,6 @@ def test_mapping_relationships_must_match_declared_ownership(trace_check, valid_
     ("mutation", "code"),
     [
         (lambda d: d["execution"]["evidence"][0].update(method_id="METHOD-404"), "UNKNOWN_METHOD"),
-        (lambda d: d["execution"]["evidence"].append({"run_id": "RUN-1", "method_id": "METHOD-1", "status": "passed"}), "DUPLICATE_ID"),
         (lambda d: d["execution"]["evidence"].append(copy.deepcopy(d["execution"]["evidence"][0])), "DUPLICATE_MAPPING"),
         (lambda d: d["execution"]["evidence"].clear(), "MISSING_EXECUTION"),
         (lambda d: d["execution"]["evidence"][0].update(status="failed"), "EXECUTION_FAILURE"),
@@ -363,6 +362,30 @@ def test_execution_evidence_is_method_level_and_honest(trace_check, valid_trace,
     document = copy.deepcopy(valid_trace)
     mutation(document)
     assert code in _codes(trace_check.check(document, require_execution=True))
+
+
+def test_one_runner_run_id_may_cover_multiple_methods(trace_check, valid_trace):
+    document = copy.deepcopy(valid_trace)
+    document["requirements"].append({"id": "REQ-2", "provenance": ["spec 2"]})
+    document["test_cases"].append({"id": "TC-2", "requirement_ids": ["REQ-2"]})
+    document["generated_files"].append({"id": "FILE-2", "path": "tests/test_second.py"})
+    document["methods"].append(
+        {
+            "id": "METHOD-2",
+            "file_id": "FILE-2",
+            "name": "test_second",
+            "test_case_ids": ["TC-2"],
+            "requirement_ids": ["REQ-2"],
+        }
+    )
+    document["trace_map"].append(
+        {"requirement_id": "REQ-2", "test_case_id": "TC-2", "file_id": "FILE-2", "method_id": "METHOD-2"}
+    )
+    document["execution"]["evidence"].append(
+        {"run_id": "RUN-1", "method_id": "METHOD-2", "status": "passed"}
+    )
+
+    assert trace_check.check(document, require_execution=True)["valid"] is True
 
 
 def test_allowed_skip_accepts_only_the_matching_skipped_method(trace_check, valid_trace):

@@ -1,0 +1,24 @@
+{
+  "artifact_type": "scorecard",
+  "skill_id": "tc-reviewer",
+  "phase": "pressure",
+  "status": "complete",
+  "rubric_ids": [
+    "deterministic-outcome",
+    "traceable-review",
+    "blocking-gap-preserved"
+  ],
+  "results": {
+    "pressure": {
+      "deterministic-outcome": true,
+      "traceable-review": true,
+      "blocking-gap-preserved": true
+    }
+  },
+  "evidence_files": [
+    "03-pressure-v2.md"
+  ],
+  "all_passed": true,
+  "no_gap": false,
+  "no_edit_reason": null
+}

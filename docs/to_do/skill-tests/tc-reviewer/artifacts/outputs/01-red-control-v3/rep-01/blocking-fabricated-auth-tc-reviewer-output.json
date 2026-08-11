@@ -1,0 +1,31 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-reviewer",
+  "artifacts": {
+    "validation_report": {
+      "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+      "reviewed_test_case_ids": [
+        "TC-AUTH-001"
+      ],
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "FABRICATED_AUTHORIZATION_SUCCESS",
+          "message": "The test authenticates as warehouse_operator but expects successful approval even though the requirement permits approval only for sales_manager; the exact unauthorized outcome is not supplied.",
+          "evidence": [
+            "REQ-AUTH-001 states that only sales_manager may approve an order.",
+            "TC-AUTH-001 precondition authenticates as warehouse_operator.",
+            "TC-AUTH-001 expects HTTP 200 with status APPROVED."
+          ],
+          "related_ids": [
+            "REQ-AUTH-001",
+            "TC-AUTH-001"
+          ]
+        }
+      ],
+      "corrections": []
+    },
+    "corrected_test_cases": []
+  },
+  "warnings": []
+}

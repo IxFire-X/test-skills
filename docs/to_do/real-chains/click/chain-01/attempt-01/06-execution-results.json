@@ -1,0 +1,7 @@
+{
+  "schema_version":"1.0.0","result":"PASS","project":{"name":"Click","commit":"9c4dfdaebe0e6b2aabc566eb81f6f10eb5cd6ea1"},
+  "generated_scope":{"test_cases":8,"generated_files":1,"generated_methods":8,"path":"tests/test_int_range_real_chain.py","sha256":"61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+  "targeted_execution":{"argv":["D:\\AI-Projects\\.tools\\click-real-chain-venv\\Scripts\\python.exe","-m","pytest","-q","tests/test_int_range_real_chain.py"],"cwd":"D:\\AI-Projects\\real-chain-projects\\click","exit_code":0,"passed":8,"skipped":0,"failed":0},
+  "full_execution":{"argv":["D:\\AI-Projects\\.tools\\click-real-chain-venv\\Scripts\\python.exe","-m","pytest","-q"],"cwd":"D:\\AI-Projects\\real-chain-projects\\click","exit_code":0,"baseline":{"passed":1882,"skipped":95,"deselected":31000,"xfailed":1,"failed":0},"after_generation":{"passed":1890,"skipped":95,"deselected":31000,"xfailed":1,"failed":0},"delta":{"passed":8,"skipped":0,"deselected":0,"xfailed":0,"failed":0}},
+  "project_integrity":{"production_files_changed":[],"existing_test_files_changed":[],"configuration_files_changed":[],"dependency_files_changed":[],"git_status":["?? tests/test_int_range_real_chain.py"],"test_environment":"D:\\AI-Projects\\.tools\\click-real-chain-venv"}
+}

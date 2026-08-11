@@ -1,0 +1,25 @@
+{
+  "schema_version":"2.1.0","stage":"tc-to-autotest","artifacts":{
+    "automation_matrix":[
+      {"test_case_id":"TC-0001","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0001"]},
+      {"test_case_id":"TC-0002","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0002"]},
+      {"test_case_id":"TC-0003","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0003"]},
+      {"test_case_id":"TC-0004","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0004"]},
+      {"test_case_id":"TC-0005","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0005"]},
+      {"test_case_id":"TC-0006","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0006"]},
+      {"test_case_id":"TC-0007","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0007"]},
+      {"test_case_id":"TC-0008","generated_file_ids":["FILE-CLICK-RANGE-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0008"]}
+    ],
+    "generated_test_files":[{"id":"FILE-CLICK-RANGE-REAL-CHAIN","path":"tests/test_int_range_real_chain.py","language":"python","framework":"pytest+click-clirunner","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"}],
+    "generated_test_methods":[
+      {"id":"METHOD-TC-0001","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0001"],"requirement_ids":["REQ-0001"],"name":"test_tc_0001_int_range_accepts_an_interior_integer","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0002","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0002"],"requirement_ids":["REQ-0002"],"name":"test_tc_0002_closed_lower_boundary_is_accepted","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0003","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0003"],"requirement_ids":["REQ-0003"],"name":"test_tc_0003_closed_upper_boundary_is_accepted","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0004","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0004"],"requirement_ids":["REQ-0004"],"name":"test_tc_0004_below_range_is_rejected_without_clamping","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0005","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0005"],"requirement_ids":["REQ-0005"],"name":"test_tc_0005_above_range_is_rejected_without_clamping","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0006","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0006"],"requirement_ids":["REQ-0006"],"name":"test_tc_0006_closed_lower_clamping_returns_the_minimum","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0007","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0007"],"requirement_ids":["REQ-0007"],"name":"test_tc_0007_open_lower_clamping_moves_inward","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"},
+      {"id":"METHOD-TC-0008","file_id":"FILE-CLICK-RANGE-REAL-CHAIN","test_case_ids":["TC-0008"],"requirement_ids":["REQ-0008"],"name":"test_tc_0008_open_upper_clamping_moves_inward","content_digest":"sha256:61272d44a8ccfda8782b454708d88f7c43633cd4636d78f4653054a2c926e75d"}
+    ]
+  },"warnings":["Project-native setup — tests use the repository's CliRunner fixture and public click.command/option/IntRange API.","Project integrity — only one isolated test file is added; implementation, existing tests, configuration, lockfile and dependencies are unchanged."]
+}

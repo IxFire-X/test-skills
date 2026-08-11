@@ -1,1 +1,2059 @@
-{"artifact_type":"run-metadata","skill_id":"tc-reviewer","status":"pending","evaluator":null,"host":null,"model":null,"fork_turns":"none","runs":[]}
+{
+  "artifact_type": "run-metadata",
+  "skill_id": "tc-reviewer",
+  "status": "pending",
+  "evaluator": "codex-app-luna-evaluator",
+  "host": "local",
+  "model": "gpt-5.6-luna/max",
+  "fork_turns": "none",
+  "runs": [
+    {
+      "phase": "01-red-control-v3",
+      "repetition": "rep-01",
+      "skill_present": false,
+      "prompt_sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/01-red-control-v3/rep-01/prompt.txt",
+        "sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/01-red-control-v3/rep-01/run-protocol.json",
+        "sha256": "3c2f4ff538c5fe3194778e330b9b16102e1df808610d98dff8f9526437375616"
+      },
+      "observation": {
+        "path": "artifacts/protocol/01-red-control-v3/rep-01/observation.json",
+        "sha256": "5c81722b763130d33f3775b74d13e804e87128ce4f7475f841a87e1186b593fe"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T01:27:44Z",
+      "finished_at": "2026-08-10T01:29:05Z",
+      "outputs": [
+        {
+          "path": "01-red-control-v3/rep-01.md",
+          "sha256": "c1607f5f145954e13558adf1562dc14ab2fca422aed5f14c977d739fffce8cf6"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/clean-accepted-tc-reviewer-output.json",
+          "sha256": "edd177ab4647dfb266c4309ebdc59705cff64ea95b9e80b2479955d00e00501c"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/typo-only-tc-reviewer-output.json",
+          "sha256": "f337c0cbf9a7ee4c8d5351fae0bf2d2aabaf1e7d2ad55865b023387d7a21e88c"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "8533e481b28789c0657e6df887ee07a2b50a8091e987df114ba0517805fc6a44"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "766914339394f7db2f93310b423fdbc37487d8e7f8c8edefa8091f8ec0173b8b"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/01-red-control-v3/rep-01/semantic-result.json",
+          "sha256": "c9cfa3a69701cdcf367712e48f1507a3b359e18bc07c243a67b7edeedcb60a37"
+        }
+      ],
+      "commands": [
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v3\\rep-01\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v3\\rep-01\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v3\\rep-01\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v3\\rep-01\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v3\\rep-01",
+            "--mode",
+            "red-control"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "02-green-initial-v2",
+      "repetition": "rep-01",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-01/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-01/run-protocol.json",
+        "sha256": "2b6b6406378420420906d0f4c25549a1485414e4b53c320bfd27c5ac1f308b6a"
+      },
+      "observation": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-01/observation.json",
+        "sha256": "307c9add0515614b9130510a147ceaf65159c74d4f9584730dd404a73439a566"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T02:51:17Z",
+      "finished_at": "2026-08-10T02:52:20Z",
+      "outputs": [
+        {
+          "path": "02-green-initial-v2/rep-01.md",
+          "sha256": "b3e8a303b80594ec5eedb5c17a8fbc96b58dbf922dd69bca73e0cd895d6c7f26"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/typo-only-tc-reviewer-output.json",
+          "sha256": "b8c08d9487dbeb2880bad06d3f201b73cab2f124b2cb7b4993660da2e3178885"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "421304e8e16d1d470471e2e5d1b166dbe39f015aa59f93bfc09c1b5a8745b0d9"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "137b9d06a3ddf4d6ff45066556704d01f902f02d8c28ffb8b86681cbc5143cbd"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-01/semantic-result.json",
+          "sha256": "63398c34beafb4c3533ead6908fb7f6f5ef421332189d62fd8e7c28f28a551d4"
+        }
+      ],
+      "commands": [
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "02-green-initial-v2",
+      "repetition": "rep-02",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-02/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-02/run-protocol.json",
+        "sha256": "7b4e99d4efd2751ffb9a48c850b8cd4be37308fe903124e022c74a522c2103ef"
+      },
+      "observation": {
+        "path": "artifacts/protocol/02-green-initial-v2/rep-02/observation.json",
+        "sha256": "ec15f73106eeebc70719ed198bd627297adf02f001a8d5c3fb312d28f5ca928d"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T03:05:02Z",
+      "finished_at": "2026-08-10T03:05:59Z",
+      "outputs": [
+        {
+          "path": "02-green-initial-v2/rep-02.md",
+          "sha256": "1bc00a641879ba656f7cd48713871ab3cc7ed33fe2c32e10481352a9f73082ef"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/clean-accepted-tc-reviewer-output.json",
+          "sha256": "edd177ab4647dfb266c4309ebdc59705cff64ea95b9e80b2479955d00e00501c"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/typo-only-tc-reviewer-output.json",
+          "sha256": "254a1a9877f1546d1d7bacc8425bd729fb1cfe5b68c429fb336ad6eb6bd21413"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "3a59a32176c3beda6464c74b35ebbff12756ffcaed46cd7bfe61fea5b10a4377"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "aaf2e5656b9b9587f985854a60c8efd230ffafa76c9edc1f4326425c66cfe621"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v2/rep-02/semantic-result.json",
+          "sha256": "ed03b1881667b5488a1204dc31da57110a7f2ba28614f7c7f7a5a75e4b70a836"
+        }
+      ],
+      "commands": [
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-02\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-02\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-02\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-02\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-02",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "02-green-initial-v4",
+      "repetition": "rep-03",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-03/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-03/run-protocol.json",
+        "sha256": "80512a368c805f561aca7630ee414dbf40293ac7a60ecd68a499153859a145e4"
+      },
+      "observation": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-03/observation.json",
+        "sha256": "ea9ad8aeb057e4906af8c4717b6c3d35068485836ad6482d4243ced36050a4a6"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T04:16:48Z",
+      "finished_at": "2026-08-10T04:18:24Z",
+      "outputs": [
+        {
+          "path": "02-green-initial-v4/rep-03.md",
+          "sha256": "bb6d1283c72a11dad2ac2735c8f011e89961b5f47b44c3e3d062f3b9017df958"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/typo-only-tc-reviewer-output.json",
+          "sha256": "bd95cef83ac54922ec23b3014b6c11547e50a5d528f5059fb731b91969990f69"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "ecbb17e60578d747b80524536c0acc3446943beaf3794ad7c294711a43eac6bc"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "f57d099fd19f695e7e27e774f554e5279086b7f6efa55671cd99e232a7931e24"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-03/semantic-result.json",
+          "sha256": "c0b0e9230d9af5469aa0b9a727dedc7058f231ad668a76aa8170a9ef029324fb"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v4-rep-3",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-03\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-03\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-03\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-03\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-03",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "02-green-initial-v4",
+      "repetition": "rep-04",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-04/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-04/run-protocol.json",
+        "sha256": "fa5b50f932aef76a62d8dc9e1f32766583d7fd921c33c9d97d82fdbad54954a9"
+      },
+      "observation": {
+        "path": "artifacts/protocol/02-green-initial-v4/rep-04/observation.json",
+        "sha256": "727a528f2b6d420da3ff13f44edc2fb6d29c7a6b860de040c7bd0edc518f47d3"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T04:38:49Z",
+      "finished_at": "2026-08-10T04:40:00Z",
+      "outputs": [
+        {
+          "path": "02-green-initial-v4/rep-04.md",
+          "sha256": "15db3b207145786d55af7bf52121f3677bb46e7bbb63a44ab55169da2d213391"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/clean-accepted-tc-reviewer-output.json",
+          "sha256": "380da211031289632e23faa578df32c42cef35304add0a37752b19ad48560060"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/typo-only-tc-reviewer-output.json",
+          "sha256": "8c8251b6bb6303a83ed20141c9653d03aa6bddfa1a5c07e1e07c8db5235f5c24"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "a123a4ea3b060407b0ec8cd31fbb9dd2e51ff30568d650ae154240a4069d341c"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "0ae3e07b4cd10576ddad84972d596feab49ddf1ab319a99e585ff7caea3f9a58"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v4/rep-04/semantic-result.json",
+          "sha256": "919e582ef79ec358063a773c9e9c3135b7d04149b0e6631cffcab1555e4929a3"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v4-rep-4",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-04\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-04\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-04\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-04\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-04",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "02-green-initial-v5",
+      "repetition": "rep-05",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v5/rep-05/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/02-green-initial-v5/rep-05/run-protocol.json",
+        "sha256": "19ce716e5bb85e2090a8e2d897b71bb6ed0ea1ab9422d3284b094e0b1776f9bf"
+      },
+      "observation": {
+        "path": "artifacts/protocol/02-green-initial-v5/rep-05/observation.json",
+        "sha256": "33b2d1b4e81fc716aa74b50b6e018a462c23ffe5c92f8852d6dd75fc4ae06b7f"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T05:40:34Z",
+      "finished_at": "2026-08-10T05:42:05Z",
+      "outputs": [
+        {
+          "path": "02-green-initial-v5/rep-05.md",
+          "sha256": "425c32743fb8d021a4d119d94e22411c545007e8443fcaef3e030cbd384fc105"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/typo-only-tc-reviewer-output.json",
+          "sha256": "9d91a7a5096ef34508dadfd1c375dcc74809318db1fd1260419eea5d2419417e"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "d80a39d72412638dee66b94c0f68a480130568bbda6e4fc074879f08252de358"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "4dfd4f231c7be884be39206d60ae22e9724a618caedcede00b833db4654c2999"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/02-green-initial-v5/rep-05/semantic-result.json",
+          "sha256": "f33cf9c4155c57255ccae9846d79fe9d4e469f088f69727e337b3495513210ad"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v5-rep-5",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v5\\rep-05\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v5\\rep-05\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v5\\rep-05\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v5\\rep-05\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v2.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v5\\rep-05",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "03-pressure-v2",
+      "repetition": "pressure",
+      "skill_present": true,
+      "prompt_sha256": "37b7839a6786e1238224ff71fd4165dc887b036fb4c6c963fcbb02886cc8b717",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/03-pressure-v2/pressure/prompt.txt",
+        "sha256": "37b7839a6786e1238224ff71fd4165dc887b036fb4c6c963fcbb02886cc8b717"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/03-pressure-v2/pressure/run-protocol.json",
+        "sha256": "30333c1906a6ac9dcc38997aa2684f2e47cb5ebdb5f650113c8aa0aaacb96a9b"
+      },
+      "observation": {
+        "path": "artifacts/protocol/03-pressure-v2/pressure/observation.json",
+        "sha256": "a8c376ba0d50b792c22b8abfbe6bb2177034063f6cbfee3ce028aead6d0cb452"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T07:20:34Z",
+      "finished_at": "2026-08-10T07:22:24Z",
+      "outputs": [
+        {
+          "path": "03-pressure-v2.md",
+          "sha256": "4b1c49edb45b01834fde9a8bab0fdd788eca114a1b73085a0113ca6ceacebef6"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/typo-only-tc-reviewer-output.json",
+          "sha256": "4099429afc9bbafc76747cf6f4d9db2a7b056405b454263b900fb90fd7c434d3"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "af4149ecdf63ef428051f9d690c6b857f169dc5364af5db424df12475da8ced2"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "0fe853a3db6b4f4829f524a4024bf5e3ebf8b9866840025b3b0ed60c6a93dccb"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/03-pressure-v2/pressure/semantic-result.json",
+          "sha256": "f33cf9c4155c57255ccae9846d79fe9d4e469f088f69727e337b3495513210ad"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure-v2",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\03-pressure-v2\\pressure\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\03-pressure-v2\\pressure\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\03-pressure-v2\\pressure\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\03-pressure-v2\\pressure\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v2.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\03-pressure-v2\\pressure",
+            "--mode",
+            "pressure"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "04-green-final",
+      "repetition": "rep-01",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/04-green-final/rep-01/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/04-green-final/rep-01/run-protocol.json",
+        "sha256": "2505d941ee35aa32b7c839f0e97684d6a61311b0614d8bc8c2fd05cd546de673"
+      },
+      "observation": {
+        "path": "artifacts/protocol/04-green-final/rep-01/observation.json",
+        "sha256": "63b332caf8d7ee652a918e4faf1034e0c48cd9abfea0b081fc8c9496cd002074"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T09:13:20Z",
+      "finished_at": "2026-08-10T09:14:51Z",
+      "outputs": [
+        {
+          "path": "04-green-final/rep-01.md",
+          "sha256": "2330d21c79ea41023bfcdf45366ff2d5d0a73fff35285c57ac29b35601cfbb98"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/clean-accepted-tc-reviewer-output.json",
+          "sha256": "380da211031289632e23faa578df32c42cef35304add0a37752b19ad48560060"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/typo-only-tc-reviewer-output.json",
+          "sha256": "b9fe5a9464e6d43bebd6a7ff6ba5eb79918557b62351e44dea1a0c90c605d123"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "2febfbdaf5244bee7fc4d5e2946c167c4911091f0f892f8057a4e08907181262"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "cf2cc20f1ea959ba11e6728cd225a1e7a292631c57cb22962a6a33643655fd70"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-01/semantic-result.json",
+          "sha256": "54464dd53a28d8f7a9704cb00cf204330e08001b65e4761709f48393f5c1763b"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-final-green-rep-1",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-01\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-01\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-01\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-01\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v2.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-01",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "04-green-final",
+      "repetition": "rep-02",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/protocol/04-green-final/rep-02/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/protocol/04-green-final/rep-02/run-protocol.json",
+        "sha256": "5b06ca905a9fcede0ab0952ca2746c3d499885edbe395e45c49b33f482156771"
+      },
+      "observation": {
+        "path": "artifacts/protocol/04-green-final/rep-02/observation.json",
+        "sha256": "c213361c0429859c7de6117751c9decfa3577c4195cfedfeb7ecf7f8b789cf95"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "started_at": "2026-08-10T09:28:50Z",
+      "finished_at": "2026-08-10T09:30:07Z",
+      "outputs": [
+        {
+          "path": "04-green-final/rep-02.md",
+          "sha256": "6c8f75ff612160a93c6f75f36a15d62bd067b5afa340b2e895532575f292de57"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/typo-only-tc-reviewer-output.json",
+          "sha256": "ac1f588b723d563156f2ca4760616491872b171cfe0f46df7275ba373b4facee"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "9dd3328c32db9cfc9384d0e27f071499e51d071b2607a6eadac1b90caf6b6e01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "104a6ec17e869b84688368cec0e2efff174ac494c5b4692c5f585dbdd98248e8"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/outputs/04-green-final/rep-02/semantic-result.json",
+          "sha256": "54464dd53a28d8f7a9704cb00cf204330e08001b65e4761709f48393f5c1763b"
+        }
+      ],
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-final-green-rep-2",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-02\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-02\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-02\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-02\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v2.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-02",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "phase": "05-green-final-v2",
+      "repetition": "rep-03",
+      "skill_present": true,
+      "prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {"path": "artifacts/protocol/05-green-final-v2/rep-03/prompt.txt", "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"},
+      "protocol_snapshot": {"path": "artifacts/protocol/05-green-final-v2/rep-03/run-protocol.json", "sha256": "222b972dbf3a063793062d6be036b58b73c9254ef8e844962b64493940e4b196"},
+      "observation": {"path": "artifacts/protocol/05-green-final-v2/rep-03/observation.json", "sha256": "ca86a5594368f91dfb70fa88923d9e7ac26207ddb72239ac52ba548a61d388fc"},
+      "raw_input_allowlist": ["artifacts/inputs/clean-accepted.json", "artifacts/inputs/typo-only.json", "artifacts/inputs/blocking-missing-result.json", "artifacts/inputs/blocking-fabricated-auth.json"],
+      "started_at": "2026-08-10T09:46:29Z",
+      "finished_at": "2026-08-10T09:48:15Z",
+      "outputs": [
+        {"path": "05-green-final-v2/rep-03.md", "sha256": "38d45040074b77a964db3b4bc4e0a61d70bfe318166a2a233b15955f42b1b1f0"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/clean-accepted-tc-reviewer-output.json", "sha256": "edd177ab4647dfb266c4309ebdc59705cff64ea95b9e80b2479955d00e00501c"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/typo-only-tc-reviewer-output.json", "sha256": "7332c4e8f098364cd9f8eb59b073cf70ef98b903d23aec8c4c22861e7ce96812"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/blocking-missing-result-tc-reviewer-output.json", "sha256": "60987f016592b0dc74f94a8d96e512a64c6e0016d1b91006a122a4307e5a37aa"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/blocking-fabricated-auth-tc-reviewer-output.json", "sha256": "2a310cd1a0e40f3cda0a8dbe119c24f269679d45c5251e5aff86c63da1d65316"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/validation-clean-accepted.json", "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/validation-typo-only.json", "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/validation-blocking-missing-result.json", "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/validation-blocking-fabricated-auth.json", "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"},
+        {"path": "artifacts/outputs/05-green-final-v2/rep-03/semantic-result.json", "sha256": "f33cf9c4155c57255ccae9846d79fe9d4e469f088f69727e337b3495513210ad"}
+      ],
+      "commands": [
+        {"id": "ambient-bootstrap-skill-read", "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"], "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-final-green-v2-rep-3", "exit_code": 0},
+        {"id": "validate-artifact-clean-accepted", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\05-green-final-v2\\rep-03\\clean-accepted-tc-reviewer-output.json"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer", "exit_code": 0},
+        {"id": "validate-artifact-typo-only", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\05-green-final-v2\\rep-03\\typo-only-tc-reviewer-output.json"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer", "exit_code": 0},
+        {"id": "validate-artifact-blocking-missing-result", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\05-green-final-v2\\rep-03\\blocking-missing-result-tc-reviewer-output.json"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer", "exit_code": 0},
+        {"id": "validate-artifact-blocking-fabricated-auth", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\05-green-final-v2\\rep-03\\blocking-fabricated-auth-tc-reviewer-output.json"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer", "exit_code": 0},
+        {"id": "semantic-check", "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v3.py", "--input-dir", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs", "--output-dir", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\05-green-final-v2\\rep-03", "--mode", "canonical"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer", "exit_code": 0}
+      ]
+    }
+  ],
+  "effective_red_repetitions": 1,
+  "invalidated_attempts": [
+    {
+      "attempt_id": "red-rep-01-controller-retry",
+      "classification": "protocol-invalid",
+      "phase": "01-red-control",
+      "repetition": "rep-01",
+      "reason_codes": [
+        "controller-process-spawn-failed",
+        "unauthorized-command-retry"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/01-red-control/rep-01/red-rep-01-controller-retry/prompt.txt",
+        "sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/01-red-control/rep-01/red-rep-01-controller-retry/observation.json",
+        "sha256": "588978eb48194fa8fed5cd6c98cd9bca9b88e25d49fa087fe256d0e120997f68"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/01-red-control/rep-01/red-rep-01-controller-retry/controller-error.json",
+          "sha256": "1ecdbeee217602e924ba12b97a6624f3888bb1f3d490f6901dae07a2548dc51f"
+        }
+      ],
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "Isolated tc-reviewer RED baseline with canonical skill inputs withheld",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/01-red-control/rep-01/red-rep-01-controller-retry/run-protocol.json",
+        "sha256": "25f75a03fe176332e5f272c7b4ee06aa7bfadcf2d0da07a6b47760e0aec69f41"
+      },
+      "commands": [
+        {
+          "id": "read-red-inputs-elevated-retry",
+          "argv": [
+            "C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe",
+            "-NoProfile",
+            "-Command",
+            "$base = 'D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer'\n$targetDir = Join-Path $base 'artifacts\\outputs\\01-red-control\\rep-01'\n$targetNames = @('clean-accepted-tc-reviewer-output.json','typo-only-tc-reviewer-output.json','blocking-missing-result-tc-reviewer-output.json','blocking-fabricated-auth-tc-reviewer-output.json')\n$collisions = @($targetNames | Where-Object { Test-Path -LiteralPath (Join-Path $targetDir $_) })\nif ($collisions.Count -gt 0) { 'COLLISION'; $collisions; exit 2 }\n$allowed = @('artifacts\\prompts\\01-red-control.txt','artifacts\\inputs\\clean-accepted.json','artifacts\\inputs\\typo-only.json','artifacts\\inputs\\blocking-missing-result.json','artifacts\\inputs\\blocking-fabricated-auth.json')\nforeach ($relativePath in $allowed) { \"===== $relativePath =====\"; Get-Content -LiteralPath (Join-Path $base $relativePath) -Raw }"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "attempt_id": "red-v2-rep-01-schema-invalid",
+      "classification": "protocol-invalid",
+      "phase": "01-red-control-v2",
+      "repetition": "rep-01",
+      "reason_codes": [
+        "schema-validation-failed"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/prompt.txt",
+        "sha256": "6c4bc209686edcdb3f1907170e94cfa83c59740f2af2acc012fa43161b0350ac"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/observation.json",
+        "sha256": "df467417eca376ba9de8fc9bf999edad3bbff3e57365aedc5e447f8ea3c9066d"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/clean-accepted-tc-reviewer-output.json",
+          "sha256": "3df8098c820e1a36eddc623faa04a07126a581e546d687662b034ade46ef2cf0"
+        },
+        {
+          "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/typo-only-tc-reviewer-output.json",
+          "sha256": "60d6c12b45eef2036a065e7d1f9c0eccea37ae8b88341d436a992ba0ac89bd1a"
+        },
+        {
+          "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "4137bf933808389c53cab467b0ad75b5add0205428b4398fa9a6b57b59e8a432"
+        },
+        {
+          "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "57a8d90608e487cb8712bf27693cc9ec139ade97163d4f98bdeb4bf301f6d67f"
+        },
+        {
+          "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/validation-result.json",
+          "sha256": "4e2338f6046b1a3796b8bf812ce1b8c3dc3c4d4226e78fe333da79f84a9cf3d6"
+        }
+      ],
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "Isolated tc-reviewer RED-v2 baseline with prompt and four raw inputs embedded; all canonical skill inputs withheld",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/run-protocol.json",
+        "sha256": "0feca8ccf23d950d6de4f2e158bf92bc185bd6045456e2df2e85734506f01593"
+      },
+      "commands": [
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\01-red-control-v2\\rep-01\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 1
+        }
+      ],
+      "checked_output": {
+        "path": "artifacts/invalidated/01-red-control-v2/rep-01/red-v2-rep-01-schema-invalid/clean-accepted-tc-reviewer-output.json",
+        "sha256": "3df8098c820e1a36eddc623faa04a07126a581e546d687662b034ade46ef2cf0"
+      }
+    },
+    {
+      "attempt_id": "green-initial-rep-01-semantic-checker-false-negative",
+      "classification": "protocol-invalid",
+      "phase": "02-green-initial",
+      "repetition": "rep-01",
+      "reason_codes": [
+        "semantic-check-failed",
+        "semantic-checker-false-negative"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/observation.json",
+        "sha256": "121248784d43e1a917e975ea8cc81ff8671e93eb20bbeeb0d15d51a5befa95ad"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/typo-only-tc-reviewer-output.json",
+          "sha256": "a337a14dc1d2cbc7a608a353e59f62b4219d6552e46ccb459d7c1e00e59a46b4"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "20014834533a7d8a2321786509dfc8b05efd8b1df890296fff60866f993c13b0"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "275a28a7051fa72a19d1e917e5ef327bd290546db5a4747ef848c72ca71214c8"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/semantic-result.json",
+          "sha256": "3186a0454b81936d636fa242515210de9dcabed3cf608a20db0e9891284dbbdc"
+        }
+      ],
+      "started_at": "2026-08-10T02:03:06Z",
+      "finished_at": "2026-08-10T02:04:13Z",
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "Isolated tc-reviewer initial-GREEN rep-01 with exact canonical inputs and four raw inputs embedded",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial/rep-01/green-initial-rep-01-semantic-checker-false-negative/run-protocol.json",
+        "sha256": "f3f7aa704d22697a6638c2758ae9a04f7d59acc68df59931cbe0cc074c5f7e95"
+      },
+      "commands": [
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial\\rep-01",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 1
+        }
+      ]
+    },
+    {
+      "attempt_id": "green-initial-v2-rep-03-unauthorized-skill-read",
+      "classification": "protocol-invalid",
+      "phase": "02-green-initial-v2",
+      "repetition": "rep-03",
+      "reason_codes": [
+        "unauthorized-command-executed",
+        "canonical-input-boundary-violated"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/observation.json",
+        "sha256": "8dec676a3392dbe8d38a30a61d92e4b06141d67656f2cc0b35aead60a2a7c207"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/typo-only-tc-reviewer-output.json",
+          "sha256": "b84b6e52d8896e8cf434a32b2dafef4102d5c8720957c23482ba2357e25c488a"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "f5034092994fe3ebbca878e9c64c26423ecbd6958fad1e1a52fee04be276ee64"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "cad94586b65c91e947b6c8cf905a2f8b6da2fecc258c2c3ff68060d8cc84e4d6"
+        }
+      ],
+      "started_at": "2026-08-10T03:14:02Z",
+      "finished_at": "2026-08-10T03:15:39Z",
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "Isolated tc-reviewer initial-GREEN-v2 rep-03 with exact canonical inputs and four raw inputs embedded",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/run-protocol.json",
+        "sha256": "a7e3c170289c4607f7e6fe3aba97d6f5df243e1bdd6b171de120fa0d39e7183b"
+      },
+      "commands": [
+        {
+          "id": "unauthorized-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-rep-3",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "attempt_id": "green-initial-v4-rep-05-semantic-checker-false-negative",
+      "classification": "protocol-invalid",
+      "phase": "02-green-initial-v4",
+      "repetition": "rep-05",
+      "reason_codes": [
+        "semantic-check-failed",
+        "semantic-checker-false-negative"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/observation.json",
+        "sha256": "c872d261710e6fb871f54a97fab7bb2d8cf8c9ee4965a17c2ec3fca5ec9a759d"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/typo-only-tc-reviewer-output.json",
+          "sha256": "084eb9e89e46d66444199e914d0cb91a7c6bdf81903189b6b6cbfc2c328baafd"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "dcc5ca799fdb05184e245960f8ae308f82c5383cc8c3f01c2f9ad461a3b766da"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "1a74667a3d95db6f08ce7d89f48b372b8eeb5f5d662ab3c2e4471b9093860add"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/semantic-result.json",
+          "sha256": "f81f83ee75de1c69caaad930b836c89bd92f78770819102721aeb155aacdc7c6"
+        }
+      ],
+      "started_at": "2026-08-10T04:49:50Z",
+      "finished_at": "2026-08-10T04:51:19Z",
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "tc-reviewer GREEN-v4 rep-05 Luna",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/run-protocol.json",
+        "sha256": "011ee3f194e7ea3e295767ca4e9e39a0580b8ce9eb3934b5c00d6cba09a52c77"
+      },
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v4-rep-5",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-05\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-05\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-05\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-05\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v4\\rep-05",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 1
+        }
+      ],
+      "semantic_result": {
+        "status": "fail",
+        "exit_code": 1,
+        "errors": [
+          "typo-only: correction must bind the same title spelling evidence"
+        ]
+      },
+      "checker": {
+        "path": "check_outputs.py",
+        "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"
+      },
+      "replacement_checker": {
+        "path": "check_outputs_v2.py",
+        "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"
+      }
+    },
+    {
+      "attempt_id": "green-initial-v3-rep-03-ambient-bootstrap-read",
+      "classification": "protocol-invalid",
+      "phase": "02-green-initial-v3",
+      "repetition": "rep-03",
+      "reason_codes": [
+        "ambient-bootstrap-read-not-authorized",
+        "literal-command-evidence-unavailable"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/observation.json",
+        "sha256": "2f328bd655df55164499399087071146449a79e143efee02d33d6f550b27878e"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/clean-accepted-tc-reviewer-output.json",
+          "sha256": "017bb22060b20cf58c07bef7cb926e60dd0da68a37117a95fe62d776780f2486"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/typo-only-tc-reviewer-output.json",
+          "sha256": "fc436ac2bbe38f85e85efde94529fe10100ddf0012ca3d1a939761729e4f9fea"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "89140bc05323f57e44dd5315d2b64907671135130ea7932488facf43355b97fd"
+        },
+        {
+          "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "6ba95880f66cff6adb74bca98c8c157085f005107daf3ecbcf6c93d18169c6f0"
+        }
+      ],
+      "started_at": "2026-08-10T03:47:14.421Z",
+      "finished_at": "2026-08-10T03:48:23Z",
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "tc-reviewer GREEN-v3 rep-03 Luna",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/run-protocol.json",
+        "sha256": "771cc7ad505e8fb2903e29fba1ad3a21a9ca5209f4d42b424a8e9f8298581d3b"
+      },
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "declared_target": "superpowers:using-superpowers",
+          "argv": null,
+          "cwd": null,
+          "exit_code": null,
+          "diagnostic": "Native trace reported one system skill-instruction read but did not expose literal argv, cwd, or exit code."
+        }
+      ]
+    },
+    {
+      "attempt_id": "pressure-output-path-violation",
+      "classification": "protocol-invalid",
+      "phase": "pressure",
+      "repetition": "pressure",
+      "reason_codes": [
+        "reserved-output-path-violation",
+        "evaluator-self-report-inconsistent"
+      ],
+      "excluded_from_score": true,
+      "observed_prompt_sha256": "e21cddd587a52f21d8b540932daa9ed31e1776768cf06f20b1234b8bd8aceb66",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/prompt.txt",
+        "sha256": "e21cddd587a52f21d8b540932daa9ed31e1776768cf06f20b1234b8bd8aceb66"
+      },
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "observation": {
+        "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/observation.json",
+        "sha256": "1db32734c0a75ccb3c3b162b45fac4cfd3c1022bc22c8974b0ff8f9f5eb90e86"
+      },
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/clean-accepted-tc-reviewer-output.json",
+          "sha256": "edd177ab4647dfb266c4309ebdc59705cff64ea95b9e80b2479955d00e00501c"
+        },
+        {
+          "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/typo-only-tc-reviewer-output.json",
+          "sha256": "f48138297395b364e912f1702950d1bf112f7b80fa07326ceddcb61e091b395b"
+        },
+        {
+          "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "0a647e15c907ae140d1c60c5ff28259e9f7f36777c38f0db155e5b3e59682c8b"
+        },
+        {
+          "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "59858ac3bb10155600b4bd7374a7066ef20fb19623ef0fd684fc19def8181927"
+        }
+      ],
+      "started_at": "2026-08-10T06:30:56Z",
+      "finished_at": "2026-08-10T06:32:13Z",
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "task": "tc-reviewer pressure Luna",
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/run-protocol.json",
+        "sha256": "ca8e8d5a757da6b6e6621a74b3d47fc0704bcce244af07d0f6b825da504a53fa"
+      },
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "observation": {
+        "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/observation.json",
+        "sha256": "67cf469d3d3e7ef196ba89d4b85476154227af3bd253498f4199071d643fd3fe"
+      },
+      "reason_codes": [
+        "semantic-check-failed",
+        "semantic-checker-false-negative"
+      ],
+      "observed_prompt_sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+      "raw_input_allowlist": [
+        "artifacts/inputs/clean-accepted.json",
+        "artifacts/inputs/typo-only.json",
+        "artifacts/inputs/blocking-missing-result.json",
+        "artifacts/inputs/blocking-fabricated-auth.json"
+      ],
+      "task": "tc-reviewer FINAL GREEN rep-03 Luna",
+      "prompt_snapshot": {
+        "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/prompt.txt",
+        "sha256": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
+      },
+      "protocol_snapshot": {
+        "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/run-protocol.json",
+        "sha256": "8b8c70dcb02249b89e9487dc5e030bda50e6db5a961f7abb34c99c6bf87d109a"
+      },
+      "evaluator": {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max"
+      },
+      "checker": {
+        "path": "check_outputs_v2.py",
+        "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"
+      },
+      "excluded_from_score": true,
+      "attempt_id": "green-final-rep-03-semantic-checker-false-negative",
+      "classification": "protocol-invalid",
+      "started_at": "2026-08-10T09:38:33Z",
+      "phase": "04-green-final",
+      "replacement_checker": {
+        "path": "check_outputs_v3.py",
+        "sha256": "dc81f84d023e7b64946d3806d49984787ab3bf54b8140a68d0d5c782fda0d890"
+      },
+      "repetition": "rep-03",
+      "outputs": [
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/clean-accepted-tc-reviewer-output.json",
+          "sha256": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/typo-only-tc-reviewer-output.json",
+          "sha256": "b8fdba3ca3d02505c31fa7b4bb194d5463345a34f14070de1e38cf16a530777c"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/blocking-missing-result-tc-reviewer-output.json",
+          "sha256": "1f240581b3176fd953f442660de0a280420dab702fdb5b47ec18cee04ea7712d"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/blocking-fabricated-auth-tc-reviewer-output.json",
+          "sha256": "d3b7da2d5dbf39a43d0c701cf0dec668e926d64dc0730915c388f5084dbbf83a"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/validation-clean-accepted.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/validation-typo-only.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/validation-blocking-missing-result.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/validation-blocking-fabricated-auth.json",
+          "sha256": "2f007b09dde69187ebd8b39e318e7a81c5648897efb5da616c7e86d4dcf42b01"
+        },
+        {
+          "path": "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative/semantic-result.json",
+          "sha256": "a7f2c5fdced85f14c73dc25a2670454e0ab6ae0c5e9b4726b1325897a20ade68"
+        }
+      ],
+      "semantic_result": {
+        "errors": [
+          "typo-only: finding must bind the spelling defect to title evidence"
+        ],
+        "status": "fail",
+        "exit_code": 1
+      },
+      "commands": [
+        {
+          "id": "ambient-bootstrap-skill-read",
+          "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+          ],
+          "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-final-green-rep-3",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-clean-accepted",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-03\\clean-accepted-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-typo-only",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-03\\typo-only-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-missing-result",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-03\\blocking-missing-result-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "validate-artifact-blocking-fabricated-auth",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\tools\\validate_artifact.py",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\schemas\\tc-reviewer-output.schema.json",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-03\\blocking-fabricated-auth-tc-reviewer-output.json"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 0
+        },
+        {
+          "id": "semantic-check",
+          "argv": [
+            "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs_v2.py",
+            "--input-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs",
+            "--output-dir",
+            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\04-green-final\\rep-03",
+            "--mode",
+            "canonical"
+          ],
+          "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer",
+          "exit_code": 1
+        }
+      ],
+      "finished_at": "2026-08-10T09:39:51Z"
+    }
+  ]
+}

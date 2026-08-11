@@ -1,0 +1,28 @@
+{
+  "artifact_sha256": {
+    "blocking-fabricated-auth": "766914339394f7db2f93310b423fdbc37487d8e7f8c8edefa8091f8ec0173b8b",
+    "blocking-missing-result": "8533e481b28789c0657e6df887ee07a2b50a8091e987df114ba0517805fc6a44",
+    "clean-accepted": "edd177ab4647dfb266c4309ebdc59705cff64ea95b9e80b2479955d00e00501c",
+    "typo-only": "f337c0cbf9a7ee4c8d5351fae0bf2d2aabaf1e7d2ad55865b023387d7a21e88c"
+  },
+  "errors": [
+    "typo-only: finding must bind the spelling defect to title evidence",
+    "typo-only: correction must bind the same title spelling evidence",
+    "blocking-missing-result: blocking diagnosis must bind semantic code, IDs, and field evidence"
+  ],
+  "reviewed_test_case_ids": {
+    "blocking-fabricated-auth": [
+      "TC-AUTH-001"
+    ],
+    "blocking-missing-result": [
+      "TC-MISSING-001"
+    ],
+    "clean-accepted": [
+      "TC-CLEAN-001"
+    ],
+    "typo-only": [
+      "TC-TYPO-001"
+    ]
+  },
+  "status": "gap"
+}

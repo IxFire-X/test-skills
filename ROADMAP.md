@@ -1,432 +1,102 @@
-# ROADMAP — Пошаговый план для GLM
+# Portable testing skills roadmap
 
-> **Единственный плановый документ.** Читай сверху вниз, выполняй по порядку.
-> **Текущая позиция:** Шаг 5 завершён частично: Java PASS; InvenTree доведён до Execution Gate и заблокирован окружением. Проведён внешний архитектурный аудит (2026-07-31, см. Шаг 6) — выявлены критические расхождения контрактов и мусорный файл `nul`, который, вопреки Шагу 3, **не удалён**. Приоритет — Шаг 7 «Исправление замечаний аудита».
-> **Последняя проверка:** 2026-07-31. Полный Java pipeline подтверждён на JDK 24; Python/InvenTree pipeline дошёл до gate и получил `FAIL` от pytest (0 тестов, 74 collection errors), а оркестрация классифицировала результат как `BLOCKED (окружение)` — ложный `PASS` не выдавался. Аудит зафиксировал: `nul` существует, контракты `PIPELINE.md`/`CONTRACTS.md` рассинхронизированы, `BACKLOG.md` отсутствует, версии статус-маркеров разъехались (`.skillsrc` v1.2 vs `CONTRACTS.md` 1.0). Дополнительная проверка выявила ложный зелёный результат текущего `contract_check.py`, drift контрактов в `.skillsrc` и нереализованные Execution Gate для Go/TypeScript.
+Актуально на 2026-08-11. Это operational roadmap; подробная история исходного аудита сохранена в [docs/audit-report-2026-07-31.md](docs/audit-report-2026-07-31.md).
 
----
+## Цель
 
-## Шаг 0: Понять контекст (5 минут, уже сделано)
+Host-neutral drop-in пакет из шести skills, который:
 
-Проект: `test-orchestration-skills` — мультиагентная система для генерации тестов.
-Цель: пользователь кладёт папку со скиллами в любой проект → скиллы сами его сканируют → выдают рабочие автотесты.
+- превращает source-backed требования в полные ручные test cases;
+- всегда создаёт JSON и lossless CSV для Jira Zephyr-ориентированного переноса;
+- независимо review-ит manual и automated tests;
+- генерирует project-native Java/Python tests без изменения проекта;
+- принимает результат только после runner evidence и полной trace;
+- работает через прямые portable paths без обязательного plugin/adapter.
 
-**Проблема, которую решаем:** раньше система выдавала `AUTO_FIX_APPLIED` на код, который физически не запускался (InvenTree 0/25). Теперь есть детерминированный `run_tests.py`, который честно различает `PASS`, `FAIL` и `NOT_RUNNABLE`; при внешнем блокере оркестрация дополнительно фиксирует состояние `BLOCKED`.
+## Завершено
 
----
+### Core runtime
 
-## Шаг 1: Опора 1 — run_tests.py ✅ ГОТОВО (требует проверки агрегации)
+- contracts/pipeline.json — единственный registry routes, artifacts и skill paths.
+- Draft 2020-12 schemas для stage outputs, runner, trace и orchestrator.
+- validate_artifact.py, contract_check.py и generated contract docs.
+- run_tests.py с честными PASS, FAIL и NOT_RUNNABLE.
+- build_trace_document.py и trace_check.py с REQ → TC → FILE → METHOD → RUN topology.
 
-**Что сделано:**
-- `tools/run_tests.py` — запускает pytest/maven, возвращает JSON-вердикт `PASS|FAIL|NOT_RUNNABLE`
-- `schemas/run-tests-output.schema.json` — контракт выхода
-- `Оркестратор/SKILL.md` строка 651 — Execution Gate: `autotest-reviewer` не выдаёт `ПРИНЯТО` без `PASS` от `run_tests.py`
+### Portable skills
 
-**Проверка:** `python tools/run_tests.py --project . --language python` → должен вернуть JSON с `verdict`.
+- context-marker сохраняет provenance и source observations без secrets.
+- tc-generator создаёт traceable cases и обязательный lossless CSV.
+- tc-reviewer проверяет полноту, лишние/неверные cases и полный harness/oracle.
+- tc-to-autotest следует project-native setup, roles, permissions, fixtures и auth.
+- autotest-reviewer независимо проверяет exact source semantics и coverage.
+- orchestrate связывает schemas, reviewers, runner и trace и fail-closed останавливает цепочку.
 
-**⚠️ Замечание аудита (Шаг 6.5):** в доказательном прогоне (внешний `run-report`) оракул в `stats` фиксировал `total=13`, тогда как фактический Maven-прогон содержал 24 теста. Вердикт `PASS` и `exit_code 0` подтверждены, но **агрегация тестовых классов требует проверки** — включено в Шаг 7.
+### Adapters
 
----
+- Generic Python installer: byte/timestamp preserving, dry-run, idempotent.
+- Windows PowerShell installer: byte/timestamp preserving, WhatIf, idempotent.
+- Прямое использование skills не требует host adapter.
 
-## Шаг 2: Опора 3 — Шаблоны ✅ ГОТОВО
+### Практические цепочки
 
-**Что сделано:**
-- Все 4 шаблона v2.0: `java-junit5.md`, `python-pytest.md`, `typescript-jest.md`, `go-testing.md`
-- В каждом есть STEP 0 (проверка базовых фикстур) + traceability (ТК-N) + анти-паттерны
+Проверены Click, Flask, Hono, Spring PetClinic REST, step5-java-demo, InvenTree и PocketBase. Подробные артефакты находятся в docs/to_do/real-chains/.
 
----
+- Полные PASS не смешиваются с generated-slice PASS.
+- Environment/toolchain blockers сохраняются как blockers.
+- Production/config/dependencies проектов не менялись ради тестов.
+- Найденные переносимые дефекты превращены в skill regressions.
 
-## Шаг 3: Опора 4 — Контрактная гигиена ⚠️ ЧАСТИЧНО (требует доводки по аудиту)
+## Текущий gate
 
-**Что сделано:**
-- `trace_map` инлайнен в `schemas/tc-to-autotest-output.schema.json` (строки 149-173)
-- Часть битых ссылок убрана
+Plan 2 Task 9: package/evidence acceptance audit.
 
-**⚠️ Что НЕ сделано (зафиксировано аудитом 2026-07-31):**
-- Файл `nul` **НЕ удалён** — он существует в корне папки. Прежняя формулировка «файл `nul` удалён» была ошибочной.
-- Битые ссылки на `BACKLOG.md` остались в `Instruction.md`, `PIPELINE.md`, `USER-GUIDE.md`, а также в docstring/описании схемы инструментов (сам файл отсутствует). Поскольку ROADMAP объявлен единственным плановым документом, второй `BACKLOG.md` создавать не следует: ссылки нужно заменить на `ROADMAP.md` или удалить.
-- Рассинхрон контрактов `PIPELINE.md` ↔ `CONTRACTS.md` — детали в Шаге 6.1.
+Требуется:
 
----
+1. шесть и только шесть canonical skill packages;
+2. никаких package README, SKILL-LITE или templates;
+3. все local Markdown links существуют;
+4. нет obsolete artifact aliases в authority declarations;
+5. все campaign scenario/metadata/scorecards schema-valid;
+6. adapters повторно копируют финальные current bytes;
+7. full pytest, Ruff, contract/render checks и quick validation проходят.
 
-## Шаг 4: Опора 2 — scan_project.py ✅ ГОТОВО
+Formal tc-reviewer FINAL и orchestrate evaluator scorecards остаются отдельным evidence debt; это нельзя скрывать как complete. Дорогие fresh-model проверки выполняются один раз в final acceptance, а не после каждой wording-правки.
 
-**Файл:** `tools/scan_project.py`
+## Следом
 
-**Что сделано:**
-- `tools/scan_project.py` — детерминированный сканер проекта: определение стека по манифестам (pyproject.toml, pom.xml, package.json, go.mod), извлечение релевантного кода (target + models/serializers/urls/conftest), генерация `<source_code_and_diff>` + `<analytics_documentation>`, обновление/создание `.skillsrc`
-- `schemas/scan-project-output.schema.json` — контракт выхода (status, stack, files_extracted, output_file, skillsrc_updated, warnings, errors)
-- Проверка на InvenTree (`--target part/api.py`): `status: success`, стек `python/django/pytest`, извлечены `api.py`, `models.py`, `serializers.py`, создан файл аналитики, `.skillsrc` обновлён
+### Plan 3 E2E acceptance
 
-**Проверка:** `python tools/scan_project.py --project InvenTree-master --target part/api.py --output docs/to_do/analytics-check.md` → JSON с `status: success` + файл с XML-блоками.
+- одна Java и одна Python execution-required chain в изолированных workspaces;
+- exact orchestrator cross-check;
+- проверка установленной adapter-копии, а не только source package;
+- понятный пошаговый human report рядом с JSON authorities.
 
-**Спецификация поведения (актуальная реализация — в `tools/scan_project.py`, НЕ дублируется здесь):**
+### Пользовательская проверка
 
-> **Замечание аудита (Шаг 6.4):** ниже в этом разделе ранее был приведён пример кода (парсер аргументов, определение стека, извлечение кода, JSON-выход). Это дублировало реальную реализацию и создавало риск рассинхрона. По итогам аудита пример кода **удалён** — единственный источник правды теперь `tools/scan_project.py`.
+После package acceptance:
 
-### Краткое описание назначения (без кода):
-- **4.1** Парсер аргументов: `--project`, `--target`, `--output`
-- **4.2** Определение стека по манифестам (pyproject.toml/pom.xml/package.json/go.mod; для Python — django/pytest)
-- **4.3** Извлечение релевантного кода (target + models.py + serializers.py + urls.py + conftest.py; весь проект НЕ читается)
-- **4.4–4.5** Генерация `<source_code_and_diff>` и заготовки `<analytics_documentation>`
-- **4.6** Обновление/создание `.skillsrc`
-- **4.7** Выходной JSON (status, stack, files_extracted, output_file, skillsrc_updated)
+- запустить полную цепочку на проектах из AI SKILLS;
+- отдельно повторить InvenTree и step5-java-demo;
+- показать пользователю JSON, CSV, reviewer verdict, generated source, runner output и trace на каждом шаге;
+- вносить изменения в skills только по воспроизводимым chain failures, не подстраивая проекты.
 
-**Критерии готовности Шага 4:**
-- [x] `tools/scan_project.py` создан и запускается
-- [x] `python tools/scan_project.py --project InvenTree-master --target part/api.py` → создаёт файл с `<source_code_and_diff>` + `<analytics_documentation>`
-- [x] `.skillsrc` в InvenTree-master обновлён (или создан) с `language: python`, `framework: django`
+## Будущие улучшения
 
----
+1. Отдельный Zephyr import adapter под выбранную Jira/Zephyr версию и field mapping.
+2. SDD/OpenAPI validation: operation, request/response schema и spec/code drift.
+3. Deterministic boundary generation из JSON Schema.
+4. TypeScript/Go generation и execution только после project-native capability gate.
+5. AsyncAPI/event-driven trace.
+6. Optional UI для human approval; JSON receipts остаются authority.
 
-## Шаг 5: Точка доказательства ⚠️ ЧАСТИЧНО ГОТОВО
+## Неизменные правила
 
-**Цель:** Полный прогон на ЛЮБОМ проекте от сканирования до вердикта. InvenTree — это тестовый полигон, но система должна работать с любым стеком.
+- Честность выше удобства: non-PASS не преобразуется в PASS.
+- Project source не меняется ради generated tests.
+- Secrets не попадают в artifacts.
+- Failed attempts immutable.
+- Один source of truth на каждый contract.
+- Не заявлять универсальность для любой LLM до независимого финального acceptance.
 
-**Фактический результат проверки 2026-07-31:**
-- ✅ **Java/Spring Boot — полный PASS.** `step5-java-demo`, target `StudentController`, run2 выполнен на JDK 24: analytics → 10 ТК → review `ПРИНЯТО` → 10 автотестов с traceability 100% → autotest-review `ПРИНЯТО` → `run_tests.py PASS`; Maven подтвердил `24/24`, `0` failures/errors.
-- ℹ️ Отдельная повторная команда из текущей оболочки увидела JDK 8 и не является доказательным прогоном: проект был после этого успешно проверен в окружении с JDK 24, что зафиксировано в `run-report-student-controller.md` и `orchestration-report-student-controller.md`.
-- ⚠️ **Python/Django/InvenTree — pipeline до Execution Gate.** run3: 28 ТК, `tc-reviewer ПРИНЯТО (warn 3)`, автотест создан. `run_tests.py` реально запустил pytest, но получил `0` тестов и 74 collection errors, поэтому его machine-readable verdict — `FAIL`; orchestration report классифицировал внешний блокер как `BLOCKED (окружение)`. Это корректный `FAIL + BLOCKED`, а не `NOT_RUNNABLE` и не ложный `PASS`.
-- ✅ Снято замечание run2 по URL: актуальные URL сверены с `part/api.py`.
-- ⏳ Шаг 5 считается **не полностью закрытым**, пока InvenTree не даст исполняемый `PASS` в поддерживаемом окружении.
-
-### Вариант A: Java-проект (твой основной сценарий)
-```bash
-# 1. Сканирование Java-проекта (Spring Boot)
-python tools/scan_project.py --project /path/to/your-java-project --target src/main/java/com/example/billing/TransferService.java
-
-# 2. Запуск сгенерированных тестов (Maven)
-python tools/run_tests.py --project /path/to/your-java-project --language java
-
-# Ожидаемый stack-вывод scan_project.py:
-# {"language": "java", "framework": "spring-boot", "test_framework": "junit5", "build_tool": "maven"}
-```
-
-**Подтверждено на `step5-java-demo` (run2):**
-- артефакты: `step5-java-demo/docs/to_do/run2/`;
-- 10 тест-кейсов ТК-01…ТК-10, ревью `ПРИНЯТО`;
-- 10 сгенерированных методов, traceability ТК-01…ТК-10 — 100%;
-- `mvn clean test`: 24/24 PASS на JDK 24, `run_tests.py`: `PASS`, exit code 0;
-- для повторения результата требуется выбрать JDK 17+ (в сегодняшнем доказательном прогоне использован JDK 24);
-- исправлен найденный дефект ТК-10: `@WebMvcTest` включил `HelloWorldController`.
-
-### Вариант B: Python-проект (InvenTree — тестовый полигон)
-```bash
-# 1. Сканирование
-python tools/scan_project.py --project InvenTree-master --target part/api.py --output InvenTree-master/docs/to_do/analytics-part-api.md
-
-# 2. Запуск тестов (после генерации)
-python tools/run_tests.py --project InvenTree-master --language python --pytest-target src/backend/InvenTree/part/test_generated_api.py
-```
-
-**Результат run3 (2026-07-31):**
-- аналитика, генерация ТК, review и генерация автотестов завершены;
-- создан `InvenTree-master/src/backend/InvenTree/part/test_generated_run3_api.py`;
-- 28 ТК доведены до Execution Gate;
-- запуск заблокирован: проект требует Python 3.12+, а также GTK3 runtime для WeasyPrint; в текущем окружении получены 74 collection errors и 0 запущенных тестов;
-- следующий прогон выполнять после устранения окружения: `pytest src/backend/InvenTree/part/test_generated_run3_api.py -v --tb=short -rA`.
-
-### Вариант C: TypeScript-проект
-```bash
-python tools/scan_project.py --project /path/to/ts-project --target src/controllers/user.controller.ts
-python tools/run_tests.py --project /path/to/ts-project --language typescript
-```
-
-### Вариант D: Go-проект
-```bash
-python tools/scan_project.py --project /path/to/go-project --target internal/handler/user.go
-python tools/run_tests.py --project /path/to/go-project --language go
-```
-
-**Ожидаемый результат (для поддержанных вариантов Java/Python):**
-- `scan_project.py` → создал аналитику + обновил `.skillsrc` под стек проекта
-- **Пайплайн сгенерировал артефакты:**
-  - `tc-generator` → **25 ручных тест-кейсов** в формате Zephyr Markdown (`docs/to_do/test-cases-<module>.md`)
-  - `tc-reviewer` → провалидировал ТК, вердикт `ПРИНЯТО` / `AUTO_FIX_APPLIED` (`docs/to_do/test-cases-review-<module>.md`)
-  - `tc-to-autotest` → **автотесты по шаблону под стек** (java-junit5.md / python-pytest.md / typescript-jest.md / go-testing.md) + `<automation_matrix>` (traceability ТК-N → метод)
-  - `autotest-reviewer` → проверил автотесты, вердикт + отчёт (`docs/to_do/autotest-review-<module>.md`)
-- `run_tests.py` → `PASS` (не `NOT_RUNNABLE`) через нативный раннер стека (`mvn test` / `pytest`); Go/TypeScript пока не имеют реализованного Execution Gate и должны считаться неподдержанными до выполнения Шага 7.
-- `autotest-reviewer` → `ПРИНЯТО` (после `PASS`)
-- **Итоговые файлы:** тест-кейсы (Zephyr Markdown) + автотесты (код) + отчёты ревью + отчёт оркестратора
-
-**Важно:** Шаблон выбирается автоматически по `project.language` из `.skillsrc`. Мультиязычность уже встроена в шаблоны (Опора 3) и run_tests.py (Опора 1) — scan_project.py должен лишь корректно определить стек.
-
-### Артефакты доказательства
-
-- Java: `step5-java-demo/docs/to_do/run2/orchestration-report-student-controller.md` и `run-report-student-controller.md` — полный `PASS`.
-- InvenTree: `InvenTree-master/docs/to_do/run3/orchestration-report-part-api.md` — `BLOCKED (окружение)`, без подмены результата.
-- Временные диагностические логи (`diag*.txt`, `*probe*`, `pytest_run3_out.txt`) не являются артефактами roadmap и не должны коммититься.
-
----
-
-## Шаг 6: Аудит 2026-07-31 (внешний архитектурный ревью) 🆕 ВЫПОЛНЕН
-
-**Что сделано:**
-- Проведён внешний архитектурный аудит всех файлов папки по параметрам: баги, логическая полнота, функциональность, передовые технологии, межкомпонентное взаимодействие (оценки 1–10, N/A при недостатке данных).
-- Сопоставление с мировыми практиками 2025–2026: Anthropic Agent Skills (Progressive Disclosure L1→L2), OpenAI (скилл = одна задача + примеры + входы/выходы), DeepSeek/Qwen (JSON Schema, управление контекстом), Google Gemini (границы скилла, уточняющие вопросы), Z.ai (Plan Before Execution, «агент как коллега»).
-
-**Сильные стороны (подтверждены аудитом):**
-- Progressive Disclosure в `.skillsrc` — прямое соответствие Anthropic Agent Skills.
-- Execution Gate (`run_tests.py`, `PASS/FAIL/NOT_RUNNABLE`) — детерминированный оракул, принцип «честность > удобство».
-- Единый канон `CONTRACTS.md` + JSON Schema Draft 2020-12 + машиночитаемые дубли — соответствует OpenAI/DeepSeek/Qwen.
-- Изоляция контекста, sub-agent-compaction, lite-версия Оркестратора для моделей <32K — контекстная инженерия.
-- Модульный дизайн «агенты как инструменты», передача управления через граф контрактов.
-
-**Найденные проблемы (по приоритету):**
-
-### 6.1 КРИТИЧНО — Рассинхрон контрактов внутри папки
-- `PIPELINE.md` (Этап 3) разрешает передачу `<generated_test_cases>` напрямую в `tc-to-autotest`, а `CONTRACTS.md §2.3` это **запрещает**.
-- Диаграммы `CONTRACTS.md §4` и `PIPELINE.md` используют `<generated_tc>`, тогда как §2/§2.3 — `<generated_test_cases>`. Один тег, два имени в каноне.
-- `PIPELINE.md` (Этап 1) объявляет выход `<analysis>`, которого **нет** в реестре `CONTRACTS.md §2`.
-- Статус `partial` в `CONTRACTS.md §3.3` объясняется через `partial-fixed` — маркер, помеченный в §3.1 как @deprecated.
-- Версии: `.skillsrc` → `contracts.status_markers_version: "v1.2"` vs `CONTRACTS.md` → «Версия канона: 1.0».
-- `.skillsrc` использует другие имена/форматы межшаговых контрактов (`validated_test_cases`, `autotest_files`, `tagged_content`), чем `CONTRACTS.md`/`PIPELINE.md` (`test_cases`, `corrected_test_cases`, `automation_matrix`, `analytics_documentation`, `source_code_and_diff`). Это отдельный drift, который нужно исправлять вместе с документацией.
-- Текущий `tools/contract_check.py` возвращает `status: passed` на этой папке: он содержит дублируемые вручную константы (`analysis`, `batch_marking_result`), не строит канон из текста `CONTRACTS.md`, не проверяет `PIPELINE.md` и не сверяет `.skillsrc`. Поэтому Contract Check пока не является полноценным quality gate.
-
-### 6.2 КРИТИЧНО — Мусор в дистрибутиве
-- Файл `nul` (содержимое: `/usr/bin/bash: line 3: cmd: command not found`) **существует** в корне папки — вопреки заявлению в Шаге 3 об удалении.
-- Вложенный `InvenTree-master/` — это тестовый fixture (примерно 2716 файлов и 113 MB), а не функциональная часть дистрибутива; его нужно вынести в каталог fixtures/ или исключить из release-пакета. Папка `docs/` содержит аудит и `to_do`, но не описана в канонической структуре `PIPELINE.md`.
-
-### 6.3 ВЫСОКО — Битые ссылки
-- `BACKLOG.md` отсутствует, но на него ссылаются `Instruction.md`, `PIPELINE.md`, `USER-GUIDE.md`.
-
-### 6.4 ВЫСОКО — Дублирование кода в ROADMAP
-- Раздел 4.1–4.7 содержал пример кода `scan_project.py` прямо в плане — дублировал реальную реализацию. В этом обновлении пример удалён, оставлена ссылка на `tools/scan_project.py` (единственный источник правды).
-
-### 6.5 СРЕДНЕ — Прочие замечания
-- `run_tests.py`: расхождение статистики оракула (`total=13`) с фактическим Maven-прогоном (24 теста) — требует проверки агрегации тестовых классов.
-- В `run_tests.py` рабочие ветки есть только для Java и Python. Заявленные Go/TypeScript пока возвращают честный `NOT_RUNNABLE` с `runner_not_implemented:<language>`; шаблоны для этих языков есть, но Execution Gate не реализован.
-- Нет machine-readable observability (только Markdown-отчёты): не фиксируются время, токены, вердикты в JSON-логах.
-- `CONTRACTS.md §6`: retry/timeout/idempotency декларативны и **не исполняются кодом** — это спецификация, а не гарантия.
-- В SKILL.md не хватает явных границ «что скилл НЕ делает» (Google Gemini: установление границ) — по метаданным реестра этого поля нет.
-- Формулировка `NOT_RUNNABLE/BLOCKED` для InvenTree была неточной: `NOT_RUNNABLE` — verdict раннера при невозможности запуска окружения; в run3 pytest запустился и вернул `FAIL`, а `BLOCKED` — состояние оркестрации по причине окружения.
-
-**Сводные оценки аудита (максимум по компонентам):**
-- Лучшие: `.skillsrc` (передовые — 9), Оркестратор (+Lite) (передовые — 9), `USER-GUIDE.md` (взаимодействие — 9).
-- Худшие: `nul` (все параметры — 1), `ROADMAP.md` (баги — 4), `CONTRACTS.md` и `PIPELINE.md` (баги — 5, взаимодействие — 6).
-
----
-
-## Шаг 7: Исправление замечаний аудита 🆕 ПЛАНИРУЕТСЯ (приоритет после Шага 5)
-
-**Цель:** устранить критические и высокие замечания аудита, чтобы канон контрактов снова стал единственным источником истины.
-
-**Критерии готовности Шага 7 (по порядку):**
-- [ ] **КРИТИЧНО** Удалить `nul` и исправить формулировку Шага 3 («файл удалён» → фактическое состояние).
-- [ ] **КРИТИЧНО** Синхронизировать контракты:
-  - `PIPELINE.md` Этап 3: запретить прямую передачу `<generated_test_cases>` в `tc-to-autotest` (привести к `CONTRACTS.md §2.3`).
-  - Диаграммы `CONTRACTS.md §4` и `PIPELINE.md`: заменить `<generated_tc>` на `<generated_test_cases>`.
-  - Принять решение по `<analysis>` с учётом правила «каждый скилл выдаёт один корневой блок»: не добавлять второй корневой выход механически; либо сделать его дочерним полем результата генератора, либо удалить как самостоятельный контрактный выход и синхронизировать схемы.
-  - Убрать ссылку `partial` → `partial-fixed` (deprecated) в `CONTRACTS.md §3.3`.
-  - Исправить сам `tools/contract_check.py`: читать канон из `CONTRACTS.md`, проверять `PIPELINE.md`, вход следующего скилла, `.skillsrc` и добавить regression-тест, который падает на текущем drift.
-- [ ] **ВЫСОКО** Согласовать версии статус-маркеров: `.skillsrc` `status_markers_version` и «Версия канона» в `CONTRACTS.md` должны совпадать.
-- **ВЫСОКО** Не создавать второй плановый документ: заменить ссылки на отсутствующий `BACKLOG.md` в документации, docstring и schema description на `ROADMAP.md` либо удалить их.
-- [ ] **ВЫСОКО** Добавить в реестр `.skillsrc` и в SKILL.md явные границы «когда НЕ использовать» (Google Gemini Agent Designer).
-- [ ] **СРЕДНЕ** Описать назначение `docs/` и `InvenTree-master/` в структуре `PIPELINE.md` либо вынести их из дистрибутива.
-- [ ] **СРЕДНЕ** Проверить агрегацию тестовых классов в `tools/run_tests.py` (расхождение total=13 vs 24) и добавить unit-тесты на `tools/*.py`.
-- [ ] **СРЕДНЕ** Явно разделить `run_tests.py` verdict (`FAIL`) и orchestration state (`BLOCKED`) в machine-readable отчёте; не смешивать их в одном статусе.
-- [ ] **СРЕДНЕ** Реализовать раннеры Go/TypeScript (`go test`, `npm test`/Jest) или честно ограничить документацию и roadmap поддержанными Java/Python.
-- [ ] **СРЕДНЕ** Добавить machine-readable JSON-логи выполнения шагов (время, токены, вердикты) рядом с Markdown-отчётами.
-- [ ] **НИЗКО** Перевести retry/timeout/idempotency (`CONTRACTS.md §6`) из декларативных рекомендаций в исполняемый слой (`contract_check.py` / обёртка хоста) или явно пометить как «поведение при ручном запуске».
-
----
-
-## Шаг 8: Выход в топ-3% мировых мультиагентных систем 🆕 ДОЛГОСРОЧНОЕ ВИДЕНИЕ
-
-> **Что это:** набор целевых улучшений, которые переводят систему из класса «качественный набор скиллов» в класс «промышленная мультиагентная платформа» уровня топ-3% по мировым практикам 2025–2026 (Anthropic Agent Skills, OpenAI Agents SDK, Google ADK, MCP).
-> **Приоритетность определена по критерию: влияние на качество / стоимость внедрения / соответствие эталонным практикам.**
-
-### P-0 — Без этого нельзя претендовать на топ-3% (обязательно)
-
-1. **Исполняемый оркестратор вместо Markdown-инструкций**
-   - Сейчас Оркестратор — это SKILL.md (промпт для LLM). В топ-3% оркестрация — это **код**: граф задач, состояние, retry, таймауты, параллельные ветви.
-   - Как: создать `tools/orchestrator.py` (стандартная библиотека Python), который читает `PIPELINE.md`/`.skillsrc` как конфиг, вызывает LLM-скиллы через API, прогоняет детерминированные гейты (`run_tests.py`, `contract_check.py`).
-   - Эталон: OpenAI Agents SDK (рутины и handoff), Google ADK (граф агентов). SKILL.md остаётся как «промпт-слой», но управление — в коде.
-
-2. **OpenTelemetry-совместимая наблюдаемость**
-   - Сейчас отчёты — только Markdown. В топ-3% обязательны **traces + metrics + logs** по каждому шагу: время, токены, стоимость, вердикты, latency LLM-вызовов.
-   - Как: экспортировать JSON-логи шагов (уже есть в Шаге 7), затем обернуть в OTLP-формат (OpenTelemetry Protocol) — `service.name=test-orchestration-skills`, span per step.
-   - Эталон: Anthropic/OpenAI production-рекомендации по observability агентов; OpenTelemetry GenAI semantic conventions (2025).
-
-3. **Машинно-проверяемое версионирование контрактов**
-   - Сейчас `CONTRACTS.md` — Markdown-канон, который LLM может нарушить. В топ-3% контракты проверяются **кодом** на каждом переходе.
-   - Как: расширить `tools/contract_check.py`: читать `CONTRACTS.md` (или его YAML/JSON-дубль), проверять пары (skill_N → skill_N+1) автоматически, а не чек-листом в отчёте.
-   - Эталон: JSON Schema Draft 2020-12 уже есть — нужно поднять с «валидации файлов» до «валидации каждого межшагового перехода в рантайме».
-
-4. **Семантическая память между запусками**
-   - Сейчас каждый запуск начинается с нуля: `<automation_matrix>` — единственная передаваемая память. В топ-3% система помнит прошлые артефакты и не перегенерирует то, что уже принято.
-   - Как: хранилище принятых ТК/автотестов с хэшами (`sha256` уже заложен в `CONTRACTS.md §6`), при повторном запуске — diff вместо генерации с нуля.
-   - Эталон: context engineering — избегание «контекстной гнили», повторное использование подтверждённых артефактов.
-
-### P-1 — Сильное конкурентное преимущество (рекомендуется)
-
-5. **MCP-совместимость скиллов**
-   - Сейчас скиллы — это Markdown-файлы, которые загружает человек. В топ-3% они доступны другим агентам как **инструменты** (MCP-сервер).
-   - Как: обернуть `tools/*.py` и SKILL.md в MCP-сервер (stdio/HTTP): каждый скилл — MCP tool с JSON Schema входов/выходов (схемы уже есть в `schemas/`).
-   - Эталон: Model Context Protocol (Anthropic, 2024–2025) — стандарт де-факто для интеграции агентов.
-
-6. **Structured Outputs (forced JSON) на всех LLM-выходах**
-   - Сейчас скиллы «просят» LLM вернуть XML по контракту — но не принуждают. В топ-3% каждый LLM-шаг возвращает строгую структуру (JSON Schema → API `response_format`).
-   - Как: при вызове LLM передавать schema из `schemas/` как `response_format`/`structured_outputs`; XML-теги оставить для совместимости, но внутренний обмен — валидируемый JSON.
-   - Эталон: OpenAI Structured Outputs (2024), DeepSeek/Qwen — JSON Schema определения инструментов.
-
-7. **Автоматический feedback loop**
-   - Сейчас вердикты ревьюеров и `run_tests.py` не влияют на будущие запуски. В топ-3% каждый FAIL/доработка **обогащает** промпты скиллов.
-   - Как: накапливать `review_comments` + `root_cause[]` из FAIL и подмешивать их в SKILL.md при следующем запуске (few-shot из реальных падений).
-   - Эталон: OpenAI — «скилл начинается с 2–3 конкретных примеров»; здесь примеры — из собственной истории.
-
-8. **Гибридная генерация + property-based верификация**
-   - Сейчас автотесты — это фиксированные JUnit/Pytest-методы из ТК. В топ-3% часть проверок — **property-based** (Hypothesis для Python, jqwik для Java): генерация входных данных + инварианты.
-   - Как: добавить в шаблоны секцию «свойства API»: для POST/PUT — round-trip (создать → прочитать → сравнить), идемпотентность, bound-инварианты.
-   - Эталон: QuickCheck/Hypothesis — стандарт индустрии для генеративного тестирования.
-
-### P-2 — Полезно, но не критично для топ-3%
-
-9. **Мульти-модельная маршрутизация**
-   - Простые шаги (context-marker, review) → дешёвая быстрая модель; сложные (tc-generator, tc-to-autotest) → сильная модель. Экономия 40–60% стоимости без потери качества.
-   - Эталон: маршрутизация моделей в production-агентах 2025–2026.
-
-10. **Векторный поиск по прошлым артефактам (RAG для traceability)**
-    - При генерации новых ТК/автотестов — находить похожие принятые артефакты из других модулей и использовать как примеры.
-    - Эталон: контекстная инженерия, semantic cache.
-
-11. **Human-in-the-loop дашборд**
-    - Визуальный интерфейс: прогресс пайплайна, вердикты, кнопки «одобрить/отклонить» на `ТРЕБУЕТ ДОРАБОТКИ` вместо текстовых команд.
-    - Эталон: Z.ai «агент как настраиваемый коллега» — человек в цикле для сложных решений.
-
-12. **Стриминг генерации**
-    - Долгие шаги (генерация 25+ ТК) — потоковая выдача результатов через SSE/WebSocket, а не ожидание полного ответа.
-    - Эталон: стриминг в OpenAI/Anthropic API как стандарт UX.
-
-### P-3 — «Вау-эффект» (когда база уже твёрдая)
-
-13. **Self-healing тестов**: детектор флейки (тест упал один раз, прошёл при повторе → пометить, не валить пайплайн).
-14. **Исполняемые контракты API (Pact/Spring Cloud Contract)**: не только генерировать тесты-потребители, но и проверять совместимость провайдер/консьюмер.
-15. **Автогенерация BDD-спецификаций**: из ТК в Gherkin (Given/When/Then) — мост между аналитиками и разработкой.
-
-### P-SDD — Приоритет для SDD-проектов 🆕 ВЫСШИЙ ПРИОРИТЕТ ВЛАДЕЛЬЦА
-
-> **Контекст:** владелец проекта планирует использовать скиллы **в первую очередь в SDD-проектах** (Specification-Driven Development). Фундамент уже заложен: `.skillsrc` содержит `methodology: "sdd"` и секцию `sdd:` (openapi/asyncapi/domain/requirements/architecture), `context-marker` размечает аналитику, `scan_project.py` генерирует заготовку `<analytics_documentation>`. Ниже — усиление до полноценного SDD-цикла.
-> **Почему это P-0:** SDD — стратегический приоритет владельца → эти пункты имеют приоритет **выше** общих P-0.1–P-0.4 при планировании работ.
-
-#### S-1. SDD-верификация тест-кейсов против OpenAPI (КРИТИЧНО для SDD)
-
-- **Сейчас:** `tc-reviewer` проверяет ТК по 6 категориям, но **не сверяет** их с OpenAPI-спецификацией. ТК может ссылаться на несуществующий endpoint или использовать невалидную схему payload.
-- **Как:** расширить `tc-reviewer` (или добавить детерминированный `tools/sdd_check.py`):
-  - Каждый ТК обязан ссылаться на `path` + `operationId` из `docs/api/openapi.yaml`;
-  - HTTP-статусы в ТК (200/400/404…) должны быть в `responses` спецификации;
-  - Поля запроса/ответа в ТК должны соответствовать `schema` (required, type, enum, format);
-  - Расхождение → `FAIL` с указанием конкретного `path`/`operationId`.
-- **Эталон:** OpenAI — «чётко определяй входные и выходные данные»; здесь вход — OpenAPI, выход — проверенные ТК. Google ADK — контракт первого класса.
-
-#### S-2. SDD-traceability в automation_matrix
-
-- **Сейчас:** `<automation_matrix>` связывает `ТК-N → javaMethod(...)`.
-- **Как:** расширить матрицу: `ТК-N → javaMethod(...) → path#operationId` (например, `POST /api/part/ → createPart`). Каждый автотест должен иметь `@DisplayName("ТК-N: ... [POST /api/part/]")` — traceability сразу по двум осям: тест-кейс и спецификация.
-- **Эталон:** Anthropic Agent Skills — прогрессивное раскрытие: диспетчеризация по метаданным (здесь — по OpenAPI-операции).
-
-#### S-3. Детектор расхождений «Спецификация ↔ Код» (Spec-Drift Scanner)
-
-- **Сейчас:** `scan_project.py` определяет стек и извлекает код, но не сравнивает реализацию с OpenAPI.
-- **Как:** добавить в `tools/scan_project.py` (или отдельный `tools/spec_drift.py`):
-  - Прочитать `openapi.yaml` (путь из `.skillsrc` → `sdd.openapi`);
-  - Извлечь фактические URL/методы из кода (для Django — `urls.py`, для Spring — `@RequestMapping`/`@GetMapping` и т.д.);
-  - Выдать отчёт: `endpoints_implemented`, `endpoints_missing_in_code`, `endpoints_extra_in_code`, `schemas_drift[]`;
-  - Результат подмешивается в `<analytics_documentation>` → генератор ТК знает о расхождениях и покрывает их отдельными кейсами (например, «эндпоинт есть в спеке, но отсутствует в коде»).
-- **Эталон:** Z.ai «план перед выполнением» — анализ расхождений до генерации тестов; контекстная инженерия — не гонять LLM по нерелевантному коду.
-
-#### S-4. Генерация граничных сценариев из JSON Schema
-
-- **Сейчас:** граничные случаи в ТК пишет LLM на основе аналитики и кода.
-- **Как:** для каждого `schema` из OpenAPI автоматически генерировать набор провокационных payload'ов:
-  - отсутствие required-поля;
-  - лишнее поле (additionalProperties: false);
-  - неверный тип (string вместо number);
-  - границы (min/max, minLength/maxLength, enum-нарушение);
-  - формат (email без @, date в неверном формате);
-  - null для required.
-  - Детерминированный Python-генератор (стандартная библиотека) → готовые `examples` в ТК.
-- **Эталон:** property-based testing (Hypothesis/jqwik) + OpenAI — «2–3 конкретных примера» в каждом скилле; здесь примеры генерируются из схемы, а не выдумываются.
-
-#### S-5. Адаптация шаблонов под SDD-фикстуры
-
-- **Сейчас:** шаблоны (`java-junit5.md`, `python-pytest.md` и др.) содержат STEP 0 «проверка базовых фикстур», но не знают про OpenAPI.
-- **Как:** добавить в шаблоны секцию «SDD-фикстуры»:
-  - автогенерация тестовых данных по schema (совместимо с S-4);
-  - проверка `Content-Type` и структуры ответа по `responses` спецификации;
-  - WireMock-стенды, если провайдер ещё не реализован, — по `schema` ответа из OpenAPI.
-- **Эталон:** OpenAI Agents SDK — рутины с чёткими входами/выходами; здесь каждый тест знает свой контракт из спецификации.
-
-#### S-6. SDD-режим Оркестратора
-
-- **Сейчас:** Оркестратор при старте выполняет Contract Check по `CONTRACTS.md`.
-- **Как:** добавить режим `--sdd`:
-  1. Прочитать `.skillsrc` → `sdd.*` пути;
-  2. Если `openapi.yaml` существует → автоматически запускать S-1 → S-4 перед генерацией ТК;
-  3. Если аналитика приходит в сыром `.md` → `context-marker` размечает её с учётом SDD-путей (OpenAPI как источник эндпоинтов, domain/ как источник терминов);
-  4. В `<orchestration_result>` добавить секцию `sdd_coverage`: сколько endpoints покрыто ТК, сколько осталось.
-- **Эталон:** Google Gemini Agent Designer — «предоставляй достаточно контекста для устранения неоднозначности»; SDD-спецификация — самый точный контекст для тестирования.
-
-#### S-7. AsyncAPI для событийных проектов
-
-- **Сейчас:** система ориентирована на REST (OpenAPI). Для SDD-проектов с событиями (Kafka/RabbitMQ) нужен второй контракт.
-- **Как:** по аналогии с S-1—S-4:
-  - читать `docs/events/asyncapi.yaml`;
-  - генерировать ТК на события: producer отправил → consumer получил → schema соблюдена;
-  - детерминированный запуск: `pytest` с `testcontainers` (Kafka) или эмуляция шины.
-- **Эталон:** AsyncAPI — официальный стандарт событийных контрактов; мультиагентные системы 2025–2026 покрывают и REST, и события.
-
-**Приоритетность P-SDD:**
-
-| Приоритет | Что даёт | Стоимость |
-|---|---|---|
-| **S-1** SDD-верификация ТК | ТК гарантированно соответствуют OpenAPI | Средняя (детерминированный Python-скрипт) |
-| **S-2** SDD-traceability | Каждый автотест прослеживается до операции API | Низкая (доработка шаблонов/матрицы) |
-| **S-3** Spec-Drift Scanner | Видны расхождения спека/кода до генерации тестов | Средняя |
-| **S-4** Генерация граничных из JSON Schema | Покрытие негативных сценариев без выдумок LLM | Средняя |
-| **S-5** SDD-фикстуры в шаблонах | Автотесты сразу «знают» контракт | Низкая |
-| **S-6** SDD-режим Оркестратора | Весь цикл автоматически SDD-aware | Высокая, но это интеграция S-1…S-5 |
-| **S-7** AsyncAPI | Поддержка событийных проектов | Высокая (отдельный контур) |
-
-**Минимальный SDD-набор:** S-1 + S-2 + S-3 + S-4. Эти четыре пункта дают полный SDD-цикл «спецификация → ТК → автотесты → проверка».
-
-### Приоритетность (вывод)
-
-| Приоритет | Что даёт | Стоимость |
-|---|---|---|
-| **P-0.1** Исполняемый оркестратор | Переход от «промптов» к «платформе» | Высокая, но это фундамент |
-| **P-0.2** OpenTelemetry | Наблюдаемость уровня production | Низкая (JSON-логи уже в плане) |
-| **P-0.3** Машинные контракты | Устранение рассинхронов навсегда | Средняя (contract_check.py уже есть) |
-| **P-0.4** Семантическая память | Экономия токенов 40–60% на повторных запусках | Средняя |
-| **P-1.5** MCP-совместимость | Интеграция с любой агентской экосистемой | Средняя |
-| **P-1.6** Structured Outputs | Гарантия контрактов на уровне API | Низкая |
-| **P-1.7** Feedback loop | Самообучающаяся система | Средняя |
-| **P-1.8** Property-based тесты | Качество тестов выше ручных ТК | Низкая |
-| **P-2.9** Мульти-модельность | Экономия 40–60% стоимости | Низкая |
-| **P-2.10** RAG traceability | Ускорение генерации, консистентность | Средняя |
-| **P-2.11** HITL-дашборд | UX для человека-оператора | Высокая |
-| **P-2.12** Стриминг | UX для длинных генераций | Средняя |
-| **P-3.13–15** Self-healing, Pact, BDD | Дифференциация, «вау» | Средняя |
-
-**Минимальный набор для топ-3%:** P-0.1 + P-0.2 + P-0.3 + P-0.4 + P-1.6. Остальное — по мере ресурсов.
-
----
-
-## Шаг 9+: Фаза 2 (частично разблокирована; InvenTree PASS остаётся отдельным долгом)
-
-После подтверждённого Java-прогона можно планировать реализацию по порядку, но до завершения InvenTree-прогона не считать общую точку доказательства полностью закрытой. Исправления аудита (Шаг 7) и фундамент топ-3% (Шаг 8 P-0) имеют приоритет над Фазой 2. До закрытия P0-контрактов и исправления Contract Check не считать систему готовой к заявлению «top-3%» — это стратегическое видение, а не текущий измеренный статус.
-1. `semantic-code-validator` — ловит галлюцинации полей ORM
-2. `orm-fixture-builder` — изоляция данных для Django
-3. `trace-map-enforcer` — обязательный trace_map
-
----
-
-## Правила для GLM
-
-1. **Не создавай новые LLM-скиллы** до Шага 5. Только детерминированные инструменты (Python-скрипты).
-2. **Каждый инструмент** должен выводить JSON по контракту (как `run_tests.py`).
-3. **Честность > удобство.** Если окружения нет — `NOT_RUNNABLE`, не фейковый `PASS`.
-4. **Минимум зависимостей.** Только стандартная библиотека Python для tools (до P-0.2 — OTLP можно через HTTP-экспортёр без SDK).
-5. **Единственный источник правды** — `CONTRACTS.md`. Любое упоминание тегов в `PIPELINE.md`, SKILL.md и документации обязано совпадать с каноном (Шаг 7).
-6. **Код важнее промпта.** SKILL.md описывает поведение, `tools/*.py` — исполняет критичные проверки (Шаг 8 P-0).
-7. **История запусков — актив.** FAIL и review_comments накапливаются и улучшают следующие генерации (Шаг 8 P-1.7).
+Implementation plans: [master](docs/superpowers/plans/2026-08-06-portable-testing-skills-master.md), [Plan 1](docs/superpowers/plans/2026-08-06-portable-core-runtime.md), [Plan 2](docs/superpowers/plans/2026-08-06-portable-skills-adapters.md), [Plan 3](docs/superpowers/plans/2026-08-06-e2e-acceptance.md).

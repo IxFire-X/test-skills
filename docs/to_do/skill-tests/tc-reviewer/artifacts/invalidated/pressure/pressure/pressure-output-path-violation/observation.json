@@ -1,0 +1,18 @@
+{
+  "status": "invalidated",
+  "classification": "protocol-invalid",
+  "thread_id": "019fea5d-fb9f-7153-b3df-67b74682fccb",
+  "fork_turns": "none",
+  "started_at": "2026-08-10T06:30:56Z",
+  "finished_at": "2026-08-10T06:32:13Z",
+  "evaluator": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"},
+  "task_cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure",
+  "evaluator_tool_sequence": [
+    {"sequence": 1, "tool": "commandExecution", "id": "ambient-bootstrap-skill-read", "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"], "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure", "exit_code": 0, "allowed": true},
+    {"sequence": 2, "tool": "fileChange", "file_changes": 4, "actual_output_paths": ["artifacts/outputs/03-pressure/pressure/clean-accepted-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/typo-only-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/blocking-missing-result-tc-reviewer-output.json", "artifacts/outputs/blocking-fabricated-auth-tc-reviewer-output.json"]}
+  ],
+  "evaluator_reported_output_paths": ["artifacts/outputs/03-pressure/pressure/clean-accepted-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/typo-only-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/blocking-missing-result-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/blocking-fabricated-auth-tc-reviewer-output.json"],
+  "mismatch": "The evaluator reported the auth output as reserved, but the authoritative fileChange wrote it at artifacts/outputs/blocking-fabricated-auth-tc-reviewer-output.json.",
+  "schema_validation": {"commands_run": 0},
+  "semantic_command_run": false
+}

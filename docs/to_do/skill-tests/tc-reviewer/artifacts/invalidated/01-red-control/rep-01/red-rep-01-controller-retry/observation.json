@@ -1,0 +1,17 @@
+{
+  "status": "protocol-invalid",
+  "classification": "unscored",
+  "reason": "The app-task controller retried the same read command after two Windows process-spawn failures. The campaign prohibits repairing or retrying a failed repetition.",
+  "reserved_outputs_written": false,
+  "validator_commands_run": false,
+  "semantic_command_run": false,
+  "stop_requested": true,
+  "available_timestamp": "2026-08-10T00:55:59.766Z",
+  "thread_id": "019fe929-dc7f-7ab1-9e14-93cfde17dcbf",
+  "evaluator": {
+    "name": "codex-app-luna-evaluator",
+    "host": "local",
+    "model": "gpt-5.6-luna/max"
+  },
+  "note": "Exact started_at and finished_at were not captured by the evaluator and are intentionally omitted."
+}

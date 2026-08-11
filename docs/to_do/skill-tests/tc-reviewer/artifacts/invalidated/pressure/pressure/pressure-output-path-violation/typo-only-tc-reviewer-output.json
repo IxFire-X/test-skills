@@ -1,0 +1,70 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-reviewer",
+  "artifacts": {
+    "validation_report": {
+      "verdict": "AUTO_FIX_APPLIED",
+      "reviewed_test_case_ids": [
+        "TC-TYPO-001"
+      ],
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "MECHANICAL_TYPO",
+          "message": "The title contains the unambiguous spelling error 'sesion'; the same supplied test case consistently uses 'session'.",
+          "evidence": [
+            "TC-TYPO-001.title=Delete an owned active sesion",
+            "TC-TYPO-001.preconditions[0]=Session SES-200 is active and owned by the caller.",
+            "TC-TYPO-001.test_data[0]=session_id=SES-200"
+          ],
+          "related_ids": [
+            "TC-TYPO-001"
+          ]
+        }
+      ],
+      "corrections": [
+        {
+          "id": "FIX-TC-TYPO-001-title",
+          "related_ids": [
+            "TC-TYPO-001"
+          ],
+          "description": "Replace 'sesion' with 'session' in the test-case title.",
+          "evidence": [
+            "TC-TYPO-001.title=Delete an owned active sesion",
+            "TC-TYPO-001.preconditions[0]=Session SES-200 is active and owned by the caller.",
+            "TC-TYPO-001.test_data[0]=session_id=SES-200"
+          ]
+        }
+      ]
+    },
+    "corrected_test_cases": [
+      {
+        "id": "TC-TYPO-001",
+        "requirement_ids": [
+          "REQ-SESSION-DELETE-001"
+        ],
+        "title": "Delete an owned active session",
+        "categories": [
+          "positive",
+          "functional"
+        ],
+        "priority": "MEDIUM",
+        "preconditions": [
+          "Session SES-200 is active and owned by the caller."
+        ],
+        "test_data": [
+          "session_id=SES-200"
+        ],
+        "steps": [
+          {
+            "order": 1,
+            "action": "Send DELETE /api/v1/sessions/SES-200.",
+            "expected_result": "HTTP 204 is returned and session SES-200 is invalidated."
+          }
+        ],
+        "expected_outcome": "HTTP 204 is returned and session SES-200 is invalidated."
+      }
+    ]
+  },
+  "warnings": []
+}

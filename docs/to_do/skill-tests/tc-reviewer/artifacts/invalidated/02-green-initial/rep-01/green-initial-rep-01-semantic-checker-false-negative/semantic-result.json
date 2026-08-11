@@ -1,0 +1,28 @@
+{
+  "artifact_sha256": {
+    "blocking-fabricated-auth": "275a28a7051fa72a19d1e917e5ef327bd290546db5a4747ef848c72ca71214c8",
+    "blocking-missing-result": "20014834533a7d8a2321786509dfc8b05efd8b1df890296fff60866f993c13b0",
+    "clean-accepted": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1",
+    "typo-only": "a337a14dc1d2cbc7a608a353e59f62b4219d6552e46ccb459d7c1e00e59a46b4"
+  },
+  "errors": [
+    "typo-only: finding must bind the spelling defect to title evidence",
+    "typo-only: correction must bind the same title spelling evidence",
+    "blocking-fabricated-auth: output invents role tokens ['authorized', 'or']"
+  ],
+  "reviewed_test_case_ids": {
+    "blocking-fabricated-auth": [
+      "TC-AUTH-001"
+    ],
+    "blocking-missing-result": [
+      "TC-MISSING-001"
+    ],
+    "clean-accepted": [
+      "TC-CLEAN-001"
+    ],
+    "typo-only": [
+      "TC-TYPO-001"
+    ]
+  },
+  "status": "fail"
+}

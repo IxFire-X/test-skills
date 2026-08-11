@@ -1,1 +1,24 @@
-{"artifact_type":"scorecard","skill_id":"tc-reviewer","phase":"red","status":"pending","rubric_ids":["deterministic-outcome","traceable-review","blocking-gap-preserved"],"results":{},"evidence_files":[],"all_passed":false,"no_gap":false,"no_edit_reason":null}
+{
+  "artifact_type": "scorecard",
+  "skill_id": "tc-reviewer",
+  "phase": "red",
+  "status": "complete",
+  "rubric_ids": [
+    "deterministic-outcome",
+    "traceable-review",
+    "blocking-gap-preserved"
+  ],
+  "results": {
+    "rep-01": {
+      "deterministic-outcome": true,
+      "traceable-review": false,
+      "blocking-gap-preserved": true
+    }
+  },
+  "evidence_files": [
+    "01-red-control-v3/rep-01.md"
+  ],
+  "all_passed": false,
+  "no_gap": false,
+  "no_edit_reason": null
+}

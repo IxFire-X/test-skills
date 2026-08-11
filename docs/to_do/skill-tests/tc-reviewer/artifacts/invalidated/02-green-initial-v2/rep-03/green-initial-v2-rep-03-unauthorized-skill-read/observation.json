@@ -1,0 +1,86 @@
+{
+  "status": "protocol-invalid",
+  "classification": "unscored",
+  "reason_codes": [
+    "unauthorized-command-executed",
+    "canonical-input-boundary-violated"
+  ],
+  "attempt_id": "green-initial-v2-rep-03-unauthorized-skill-read",
+  "archive_root": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read",
+  "thread_id": "019fe9a9-b756-7960-81aa-5d71ebae59b9",
+  "fork_turns": "none",
+  "started_at": "2026-08-10T03:14:02Z",
+  "finished_at": "2026-08-10T03:15:39Z",
+  "evaluator": {
+    "name": "codex-app-luna-evaluator",
+    "host": "local",
+    "model": "gpt-5.6-luna/max"
+  },
+  "task": "Isolated tc-reviewer initial-GREEN-v2 rep-03 with exact canonical inputs and four raw inputs embedded",
+  "controller_preflight": {
+    "id": "role-integrity-check",
+    "argv": [
+      "C:\\Program Files\\Git\\bin\\sh.exe",
+      "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+      "--check"
+    ],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "exit_code": 0
+  },
+  "controller_delivery_check": {
+    "id": "verify-delivery-hashes-and-output-collisions",
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "exit_code": 0,
+    "result": {
+      "bad_hashes": [],
+      "collisions": []
+    }
+  },
+  "evaluator_tool_sequence": [
+    {
+      "sequence": 1,
+      "tool": "shell_command",
+      "id": "unauthorized-skill-read",
+      "argv": [
+        "Get-Content",
+        "-LiteralPath",
+        "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"
+      ],
+      "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-rep-3",
+      "exit_code": 0,
+      "allowed": false
+    },
+    {
+      "sequence": 2,
+      "tool": "apply_patch",
+      "file_changes": 4,
+      "summary": "Wrote the four reserved evaluator outputs."
+    }
+  ],
+  "native_tool_calls": {
+    "apply_patch": 1,
+    "shell_commands": 1,
+    "validators": 0,
+    "semantic_checks": 0
+  },
+  "schema_validation": {
+    "commands_run": 0,
+    "all_valid": null
+  },
+  "semantic_result": {
+    "status": "not-run",
+    "exit_code": null,
+    "errors": []
+  },
+  "controller_response": {
+    "detection": "wait marker before acceptance",
+    "stop_sent": true,
+    "evaluator_confirmation": "shell commands=1"
+  },
+  "retry_or_repair": {
+    "retry_performed": false,
+    "repair_performed": false
+  },
+  "acceptance": "pending-fresh-sol-route-decision",
+  "summary": "The evaluator violated the allowed-action boundary and canonical-input boundary by executing the recorded external skill read. It then made exactly one apply_patch call that wrote the four reserved outputs. The controller detected the violation via a wait marker before acceptance and sent stop; the evaluator later truthfully confirmed shell commands=1. This attempt is unscored, with no retry, no repair, no validators, and no semantic check. The campaign ledger is intentionally not updated until a fresh Sol route decision."
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "autotest-reviewer",
+  "artifacts": {
+    "autotest_review": {
+      "verdict": "ПРИНЯТО",
+      "reviewed_file_ids": ["FILE-PART-CATEGORY-REAL-CHAIN"],
+      "reviewed_method_ids": ["METHOD-TC-0001","METHOD-TC-0002","METHOD-TC-0003","METHOD-TC-0004","METHOD-TC-0005","METHOD-TC-0006"],
+      "findings": [],
+      "corrections": []
+    }
+  },
+  "warnings": [
+    "Execution pending — the corrected project-native permission setup and all six assertions still require the isolated Django execution gate."
+  ]
+}

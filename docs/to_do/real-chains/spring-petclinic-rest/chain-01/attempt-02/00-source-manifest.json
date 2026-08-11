@@ -1,0 +1,14 @@
+{
+  "schema_version":"1.0.0",
+  "project":{"name":"Spring PetClinic REST","path":"D:\\AI-Projects\\real-chain-projects\\spring-petclinic-rest","commit":"698bd832eac0da48e72deb63ce7ab275d98a88fb","source_state":"clean-before-generated-test"},
+  "scope":{"feature":"Owner REST v1 read/list/create behavior","selected_observable_variants":8,"security_mode":"project-native @WithMockUser OWNER_ADMIN","excluded":["pets","visits","updates","deletes","real credentials"]},
+  "sources":[
+    {"path":"readme.md","sha256":"49fefff0009119f774bb89cb0ba8894088bb756a67b9afad965b7b17fec74d5a","purpose":"runtime, endpoints, H2, and security mode"},
+    {"path":"pom.xml","sha256":"03d4fe750f0dfd8c4abaef481f340ccd31197a84ea5fce12f8b745c07d0ff1d4","purpose":"Spring Boot/JUnit/MockMvc manifest"},
+    {"path":"src/main/resources/openapi.yml","sha256":"00ead40baf88b557b5cf542bb360595ce434b14f574210b68549a9925bc429b8","purpose":"owner paths, responses, and OwnerFields constraints"},
+    {"path":"src/main/java/org/springframework/samples/petclinic/rest/controller/v1/OwnerRestControllerV1.java","sha256":"6c60d6af024732b3fc35fe4d87f35d934691d3a3d231b685ec1a46afe9b8d280","purpose":"200/201/404 behavior and OWNER_ADMIN authorization"},
+    {"path":"src/test/java/org/springframework/samples/petclinic/rest/controller/OwnerRestControllerV1Tests.java","sha256":"0938f640cc284f906e456465123b36c65150ebf14c3820902bc3e14f7694eddd","purpose":"project-native SpringBootTest, MockMvc, MockitoBean, and exact fixtures"}
+  ],
+  "baseline":{"argv":[".\\mvnw.cmd","-q","test"],"cwd":"D:\\AI-Projects\\real-chain-projects\\spring-petclinic-rest","java_home":"C:\\Users\\User\\.jdks\\openjdk-24.0.1","exit_code":0,"tests":237,"failures":0,"errors":0,"skipped":0},
+  "reused_from":{"attempt":"attempt-01","00-source-manifest.json":"0b588bd9256b6a48411e1841de65bfc17449f98f9675f054566343db09bbac3b","01-context-marker-output.json":"c0d4e94e4944f93ffe6cd3b2cb7d177e44a063edefa52738a9677f1eee9a9ef0"}
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_type": "invalidated-run-protocol",
+  "skill_id": "tc-reviewer",
+  "phase": "pressure",
+  "repetition": "pressure",
+  "classification": "protocol-invalid",
+  "excluded_from_score": true,
+  "application_prompt_sha256": "e21cddd587a52f21d8b540932daa9ed31e1776768cf06f20b1234b8bd8aceb66",
+  "started_at": "2026-08-10T06:30:56Z",
+  "finished_at": "2026-08-10T06:32:13Z",
+  "evaluator": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"},
+  "task": "tc-reviewer pressure Luna",
+  "observation_path": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/observation.json",
+  "output_paths": ["artifacts/invalidated/pressure/pressure/pressure-output-path-violation/clean-accepted-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/typo-only-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-missing-result-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-fabricated-auth-tc-reviewer-output.json"],
+  "commands": [{"id": "ambient-bootstrap-skill-read", "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"], "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure", "exit_code": 0}],
+  "native_tool_calls": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0},
+  "reserved_outputs_written": false,
+  "schema_validator_commands_completed": 0,
+  "semantic_command_run": false,
+  "artifact_hashes": {},
+  "acceptance": "invalidated-unscored"
+}

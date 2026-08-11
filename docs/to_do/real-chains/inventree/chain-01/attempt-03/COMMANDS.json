@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0.0",
+  "commands": [
+    {
+      "index": 1,
+      "argv": ["Get-FileHash","-Algorithm","SHA256","-LiteralPath","src\\backend\\InvenTree\\part\\test_real_chain.py"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean",
+      "exit_code": 0,
+      "result": "f6717f77aa59b1ef528ab93b7d00370b8b533feaca7f01440ad14865f9e85973"
+    },
+    {
+      "index": 2,
+      "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe","tools\\validate_artifact.py","schemas\\tc-to-autotest-output.schema.json","docs\\to_do\\real-chains\\inventree\\chain-01\\attempt-03\\04-tc-to-autotest-output.json"],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+      "exit_code": 0,
+      "result": "valid"
+    },
+    {
+      "index": 3,
+      "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe","tools\\validate_artifact.py","schemas\\autotest-reviewer-output.schema.json","docs\\to_do\\real-chains\\inventree\\chain-01\\attempt-03\\05-autotest-reviewer-output.json"],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+      "exit_code": 0,
+      "result": "valid"
+    },
+    {
+      "index": 4,
+      "argv": ["D:\\AI-Projects\\InvenTree-master\\.venv\\Scripts\\python.exe","manage.py","test","part.test_real_chain.PartCategoryFilterRealChainTest","--keepdb","--exclude-tag","migration_test","--exclude-tag","performance_test","--verbosity","1"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean\\src\\backend\\InvenTree",
+      "exit_code": 0,
+      "result": "6 passed"
+    },
+    {
+      "index": 5,
+      "argv": ["D:\\AI-Projects\\InvenTree-master\\.venv\\Scripts\\python.exe","manage.py","test","part.test_api.PartCategoryAPITest","part.test_real_chain.PartCategoryFilterRealChainTest","--keepdb","--exclude-tag","migration_test","--exclude-tag","performance_test","--verbosity","1"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean\\src\\backend\\InvenTree",
+      "exit_code": 0,
+      "result": "17 passed"
+    },
+    {
+      "index": 6,
+      "argv": ["D:\\AI-Projects\\InvenTree-master\\.venv\\Scripts\\python.exe","manage.py","test","--keepdb","--exclude-tag","migration_test","--exclude-tag","performance_test","--verbosity","1"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean\\src\\backend\\InvenTree",
+      "exit_code": 1,
+      "result": "1471 total; 108 failures; 33 errors; 11 skipped; invalid local plugin/throttle environment"
+    },
+    {
+      "index": 7,
+      "argv": ["D:\\AI-Projects\\InvenTree-master\\.venv\\Scripts\\python.exe","manage.py","test","build","common","company","importer","machine","order","part","report","stock","users","plugin","InvenTree","generic","machine","web","--keepdb","--exclude-tag","migration_test","--exclude-tag","performance_test","--verbosity","1"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean\\src\\backend\\InvenTree",
+      "exit_code": 1,
+      "result": "1471 total; 1433 passed; 27 failures; 0 errors; 11 skipped"
+    },
+    {
+      "index": 8,
+      "argv": ["D:\\AI-Projects\\InvenTree-master\\.venv\\Scripts\\python.exe","-m","ruff","check","src\\backend\\InvenTree\\part\\test_real_chain.py"],
+      "cwd": "D:\\AI-Projects\\real-chain-projects\\inventree-clean",
+      "exit_code": 1,
+      "result": "No module named ruff"
+    }
+  ]
+}

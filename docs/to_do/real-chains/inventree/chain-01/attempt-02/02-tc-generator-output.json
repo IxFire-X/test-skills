@@ -1,0 +1,96 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-generator",
+  "artifacts": {
+    "generated_test_cases": {
+      "requirements": [
+        {"id":"REQ-0001","text":"GET api-part-category-list without filter parameters returns HTTP 200 with eight categories.","provenance":["src/backend/InvenTree/part/test_api.py:182","src/backend/InvenTree/part/test_api.py:191","src/backend/InvenTree/part/test_api.py:228"]},
+        {"id":"REQ-0002","text":"GET api-part-category-list with parent=1 and cascade=false returns HTTP 200 with three direct child categories.","provenance":["src/backend/InvenTree/part/api.py:169","src/backend/InvenTree/part/api.py:188","src/backend/InvenTree/part/test_api.py:192","src/backend/InvenTree/part/test_api.py:228"]},
+        {"id":"REQ-0003","text":"GET api-part-category-list with parent=1 and cascade=true returns HTTP 200 with five recursive child categories.","provenance":["src/backend/InvenTree/part/api.py:169","src/backend/InvenTree/part/api.py:181","src/backend/InvenTree/part/api.py:184","src/backend/InvenTree/part/test_api.py:193","src/backend/InvenTree/part/test_api.py:228"]},
+        {"id":"REQ-0004","text":"GET api-part-category-list with cascade=true and depth=0, without parent, returns HTTP 200 with two top-level categories.","provenance":["src/backend/InvenTree/part/api.py:108","src/backend/InvenTree/part/api.py:118","src/backend/InvenTree/part/api.py:121","src/backend/InvenTree/part/test_api.py:194","src/backend/InvenTree/part/test_api.py:228"]},
+        {"id":"REQ-0005","text":"GET api-part-category-list with parent=1, cascade=true, and depth=0 returns HTTP 200 with an empty category list.","provenance":["src/backend/InvenTree/part/api.py:178","src/backend/InvenTree/part/api.py:181","src/backend/InvenTree/part/api.py:190","src/backend/InvenTree/part/api.py:193","src/backend/InvenTree/part/test_api.py:207","src/backend/InvenTree/part/test_api.py:228"]},
+        {"id":"REQ-0006","text":"GET api-part-category-list with parent=1, cascade=true, and depth=2 returns HTTP 200 with five categories within the requested relative depth.","provenance":["src/backend/InvenTree/part/api.py:178","src/backend/InvenTree/part/api.py:181","src/backend/InvenTree/part/api.py:190","src/backend/InvenTree/part/api.py:193","src/backend/InvenTree/part/test_api.py:212","src/backend/InvenTree/part/test_api.py:228"]}
+      ],
+      "test_cases": [
+        {
+          "id":"TC-0001",
+          "requirement_ids":["REQ-0001"],
+          "title":"Unfiltered category list returns all fixture categories",
+          "categories":["positive","functional"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":[],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list without query parameters.","expected_result":"HTTP 200 and a response list containing exactly 8 categories."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 8 categories."
+        },
+        {
+          "id":"TC-0002",
+          "requirement_ids":["REQ-0002"],
+          "title":"Non-cascading parent filter returns direct children only",
+          "categories":["positive","functional"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":["parent: 1","cascade: false"],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list with parent=1 and cascade=false.","expected_result":"HTTP 200 and a response list containing exactly 3 direct child categories."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 3 categories."
+        },
+        {
+          "id":"TC-0003",
+          "requirement_ids":["REQ-0003"],
+          "title":"Cascading parent filter returns recursive children",
+          "categories":["positive","functional"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":["parent: 1","cascade: true"],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list with parent=1 and cascade=true.","expected_result":"HTTP 200 and a response list containing exactly 5 recursive child categories."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 5 categories."
+        },
+        {
+          "id":"TC-0004",
+          "requirement_ids":["REQ-0004"],
+          "title":"Root-relative depth zero returns top-level categories",
+          "categories":["positive","boundary"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":["cascade: true","depth: 0","parent: omitted"],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list with cascade=true and depth=0, omitting parent.","expected_result":"HTTP 200 and a response list containing exactly 2 top-level categories."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 2 categories."
+        },
+        {
+          "id":"TC-0005",
+          "requirement_ids":["REQ-0005"],
+          "title":"Parent-relative depth zero returns an empty list",
+          "categories":["positive","boundary"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":["parent: 1","cascade: true","depth: 0"],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list with parent=1, cascade=true, and depth=0.","expected_result":"HTTP 200 and an empty response list."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 0 categories."
+        },
+        {
+          "id":"TC-0006",
+          "requirement_ids":["REQ-0006"],
+          "title":"Parent-relative depth two includes the supported subtree",
+          "categories":["positive","boundary"],
+          "priority":"HIGH",
+          "preconditions":["Run inside InvenTreeAPITestCase with the category fixture loaded and project-native auto-login active."],
+          "test_data":["parent: 1","cascade: true","depth: 2"],
+          "steps":[{"order":1,"action":"GET the URL resolved from api-part-category-list with parent=1, cascade=true, and depth=2.","expected_result":"HTTP 200 and a response list containing exactly 5 categories within the requested relative depth."}],
+          "expected_outcome":"The authenticated request succeeds with HTTP 200 and exactly 5 categories."
+        }
+      ],
+      "coverage": [
+        {"requirement_id":"REQ-0001","test_case_ids":["TC-0001"]},
+        {"requirement_id":"REQ-0002","test_case_ids":["TC-0002"]},
+        {"requirement_id":"REQ-0003","test_case_ids":["TC-0003"]},
+        {"requirement_id":"REQ-0004","test_case_ids":["TC-0004"]},
+        {"requirement_id":"REQ-0005","test_case_ids":["TC-0005"]},
+        {"requirement_id":"REQ-0006","test_case_ids":["TC-0006"]}
+      ]
+    }
+  },
+  "warnings": [
+    "Authentication safety — generated automation must use InvenTreeAPITestCase auto-login and must not copy fixture credentials.",
+    "Bounded scope — this run covers six source-backed parent/cascade/depth variants and excludes starred and invalid-parameter behavior."
+  ]
+}

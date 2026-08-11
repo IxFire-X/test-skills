@@ -1,0 +1,49 @@
+{
+  "status": "scorable-gap",
+  "classification": "successful-red-control",
+  "thread_id": "019fe948-6397-7840-af03-82709ec0684f",
+  "started_at": "2026-08-10T01:27:44Z",
+  "finished_at": "2026-08-10T01:29:05Z",
+  "evaluator": {
+    "name": "codex-app-luna-evaluator",
+    "host": "local",
+    "model": "gpt-5.6-luna/max"
+  },
+  "controller_preflight": {
+    "id": "role-integrity-check",
+    "argv": [
+      "C:\\Program Files\\Git\\bin\\sh.exe",
+      "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+      "--check"
+    ],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "exit_code": 0
+  },
+  "native_tool_calls": {
+    "apply_patch": 1,
+    "shell_commands": 0,
+    "validators": 0,
+    "semantic_checks": 0
+  },
+  "shared_red_input": {
+    "path": "schemas/tc-reviewer-output.schema.json",
+    "sha256": "676035d151e2623308f007ff0b93026f0bb55bb3d1269a7a5ec7f6dee9d6e927"
+  },
+  "withheld": [
+    "skills/tc-reviewer/SKILL.md",
+    "skills/tc-reviewer/references/review-verdicts.md",
+    "docs/to_do/skill-tests/tc-reviewer/check_outputs.py",
+    "prior outputs/evidence",
+    "fixture-specific expected decisions"
+  ],
+  "schema_validation": {
+    "commands_run": 4,
+    "all_valid": true
+  },
+  "semantic_result": {
+    "status": "gap",
+    "exit_code": 0,
+    "error_count": 3
+  },
+  "summary": "The shared output schema removed the structural confound. The skill-absent evaluator produced four schema-valid outputs, but the semantic authority found two unsupported typo-evidence bindings and one incomplete missing-result diagnosis. No repetition was retried or repaired."
+}

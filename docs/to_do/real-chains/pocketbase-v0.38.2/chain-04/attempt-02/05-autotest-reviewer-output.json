@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "autotest-reviewer",
+  "artifacts": {
+    "autotest_review": {
+      "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+      "reviewed_file_ids": ["FILE-PB-RULES"],
+      "reviewed_method_ids": ["METHOD-PB-RULES"],
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "MISSING_DISPLAY_NAME",
+          "message": "The Go test has no Java @DisplayName annotations for TC-0001 through TC-0010.",
+          "evidence": ["apis/real_chain04_record_rules_test.go uses Go t.Run names instead of @DisplayName."],
+          "related_ids": ["FILE-PB-RULES","METHOD-PB-RULES","TC-0001","TC-0002","TC-0003","TC-0004","TC-0005","TC-0006","TC-0007","TC-0008","TC-0009","TC-0010"]
+        }
+      ],
+      "corrections": []
+    }
+  },
+  "warnings": ["The current reviewer rules define Java-only traceability and stack checks for a Go artifact."]
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": "2.1.0", "stage": "tc-reviewer",
+  "artifacts": {"validation_report": {
+    "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+    "reviewed_test_case_ids": ["TC-0001","TC-0002","TC-0003","TC-0004","TC-0005","TC-0006","TC-0007","TC-0008","TC-0009","TC-0010"],
+    "findings": [{"severity":"BLOCKING","code":"NONDETERMINISTIC_ORACLE","message":"The password-authentication case has no concrete observable expected result or status supported by its requirement.","evidence":["TC-0001.steps[0].expected_result=Successful password authentication response.","TC-0001.expected_outcome=Password authentication succeeds.","REQ-0001.text=Password authentication is exposed as POST /api/collections/{collection}/auth-with-password."],"related_ids":["REQ-0001","TC-0001"]}],
+    "corrections": []
+  }, "corrected_test_cases": []},
+  "warnings": ["Password-authentication credentials are intentionally unavailable to this review and cannot be copied from fixtures."]
+}

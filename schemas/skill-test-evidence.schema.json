@@ -34,8 +34,14 @@
                     "type": "string",
                     "minLength": 1
                 },
+                "pressure_prompt_by_phase": {
+                    "$ref": "#/$defs/tc_reviewer_pressure_prompt_by_phase"
+                },
                 "raw_input_allowlist": {
                     "$ref": "#/$defs/allowlist"
+                },
+                "raw_input_sha256": {
+                    "$ref": "#/$defs/tc_reviewer_raw_input_sha256"
                 },
                 "rubric_ids": {
                     "$ref": "#/$defs/rubric_ids"
@@ -45,6 +51,7 @@
                 },
                 "effective_red_repetitions": {
                     "enum": [
+                        1,
                         3,
                         5
                     ],
@@ -55,7 +62,7 @@
                 },
                 "output_paths": {
                     "type": "array",
-                    "minItems": 13,
+                    "minItems": 11,
                     "maxItems": 15,
                     "uniqueItems": true,
                     "items": {
@@ -70,6 +77,10 @@
                 "prompt_sha256": {
                     "$ref": "#/$defs/prompt_hashes"
                 },
+                "semantic_checker_authority": {
+                    "$ref": "#/$defs/tc_reviewer_v5_checker_authority"
+                },
+                "final_semantic_checker_authority": {"$ref": "#/$defs/tc_reviewer_final_v3_checker_authority"},
                 "skill_input_base": {
                     "const": "repository-root"
                 },
@@ -90,6 +101,10 @@
                 "effective_green_initial_phase": {
                     "$ref": "#/$defs/green_initial_phase"
                 },
+                "green_initial_phase_by_repetition": {
+                    "$ref": "#/$defs/tc_reviewer_mixed_green_initial_phases"
+                },
+                "final_phase_by_repetition": {"$ref": "#/$defs/tc_reviewer_mixed_final_phases"},
                 "effective_pressure_phase": {
                     "$ref": "#/$defs/pressure_phase"
                 },
@@ -102,12 +117,36 @@
             },
             "allOf": [
                 {
+                    "not": {
+                        "required": [
+                            "effective_green_initial_phase",
+                            "green_initial_phase_by_repetition"
+                        ]
+                    }
+                },
+                {
+                    "if": {
+                        "required": [
+                            "green_initial_phase_by_repetition"
+                        ]
+                    },
+                    "then": {
+                        "required": ["raw_input_sha256"],
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            }
+                        }
+                    }
+                },
+                {
                     "if": {
                         "properties": {
                             "skill_id": {
                                 "enum": [
                                     "context-marker",
-                                    "tc-generator"
+                                    "tc-generator",
+                                    "tc-reviewer"
                                 ]
                             },
                             "protocol_contract_version": {
@@ -176,6 +215,115 @@
                             ]
                         }
                     }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "effective_red_repetitions": {
+                                "const": 1
+                            }
+                        },
+                        "required": [
+                            "effective_red_repetitions"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            },
+                            "output_paths": {
+                                "minItems": 11,
+                                "maxItems": 11
+                            }
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "output_paths": {
+                                "minItems": 13
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            }
+                        },
+                        "required": [
+                            "skill_id"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "required_skill_inputs": {
+                                "minItems": 3,
+                                "contains": {
+                                    "properties": {
+                                        "path": {
+                                            "const": "schemas/tc-reviewer-output.schema.json"
+                                        }
+                                    },
+                                    "required": [
+                                        "path"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "else": {
+                        "not": {
+                            "properties": {
+                                "required_skill_inputs": {
+                                    "contains": {
+                                        "properties": {
+                                            "path": {
+                                                "const": "schemas/tc-reviewer-output.schema.json"
+                                            }
+                                        },
+                                        "required": [
+                                            "path"
+                                        ]
+                                    }
+                                }
+                            },
+                            "required": [
+                                "required_skill_inputs"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "allOf": [
+                            {"properties": {"skill_id": {"const": "tc-reviewer"}}, "required": ["skill_id"]},
+                            {"properties": {"green_initial_phase_by_repetition": {"$ref": "#/$defs/tc_reviewer_mixed_green_initial_phases"}}, "required": ["green_initial_phase_by_repetition"]}
+                        ]
+                    },
+                    "then": {
+                        "required": ["semantic_checker_authority"]
+                    }
+                },
+                {
+                    "if": {
+                        "allOf": [
+                            {"properties": {"skill_id": {"const": "tc-reviewer"}}, "required": ["skill_id"]},
+                            {"properties": {"effective_pressure_phase": {"const": "03-pressure-v2"}}, "required": ["effective_pressure_phase"]}
+                        ]
+                    },
+                    "then": {
+                        "required": ["pressure_prompt_by_phase"]
+                    }
+                },
+                {
+                    "if": {"allOf": [
+                        {"properties": {"skill_id": {"const": "tc-reviewer"}}, "required": ["skill_id"]},
+                        {"properties": {"final_phase_by_repetition": {"$ref": "#/$defs/tc_reviewer_mixed_final_phases"}}, "required": ["final_phase_by_repetition"]}
+                    ]},
+                    "then": {"required": ["final_semantic_checker_authority"], "properties": {"phase_prompt_sha256": {"required": ["05-green-final-v2"]}}}
                 }
             ]
         },
@@ -205,7 +353,8 @@
                     "enum": [
                         "red",
                         "green-initial",
-                        "green-final"
+                        "green-final",
+                        "pressure"
                     ]
                 },
                 "status": {
@@ -274,13 +423,51 @@
                 },
                 {
                     "if": {
-                        "properties": {
-                            "status": {
-                                "const": "complete"
+                        "allOf": [
+                            {
+                                "properties": {
+                                    "status": {
+                                        "const": "complete"
+                                    }
+                                },
+                                "required": [
+                                    "status"
+                                ]
+                            },
+                            {
+                                "not": {
+                                    "anyOf": [
+                                        {
+                                            "properties": {
+                                                "skill_id": {
+                                                    "const": "tc-reviewer"
+                                                },
+                                                "phase": {
+                                                    "const": "red"
+                                                }
+                                            },
+                                            "required": [
+                                                "skill_id",
+                                                "phase"
+                                            ]
+                                        },
+                                        {
+                                            "properties": {
+                                                "skill_id": {
+                                                    "const": "tc-reviewer"
+                                                },
+                                                "phase": {
+                                                    "const": "pressure"
+                                                }
+                                            },
+                                            "required": [
+                                                "skill_id",
+                                                "phase"
+                                            ]
+                                        }
+                                    ]
+                                }
                             }
-                        },
-                        "required": [
-                            "status"
                         ]
                     },
                     "then": {
@@ -297,7 +484,49 @@
                 },
                 {
                     "if": {
+                        "allOf": [
+                            {
+                                "properties": {
+                                    "phase": {
+                                        "const": "red"
+                                    },
+                                    "status": {
+                                        "const": "complete"
+                                    }
+                                },
+                                "required": [
+                                    "phase",
+                                    "status"
+                                ]
+                            },
+                            {
+                                "not": {
+                                    "properties": {
+                                        "skill_id": {
+                                            "const": "tc-reviewer"
+                                        }
+                                    },
+                                    "required": [
+                                        "skill_id"
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    "then": {
                         "properties": {
+                            "evidence_files": {
+                                "$ref": "#/$defs/red_evidence"
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            },
                             "phase": {
                                 "const": "red"
                             },
@@ -306,14 +535,18 @@
                             }
                         },
                         "required": [
+                            "skill_id",
                             "phase",
                             "status"
                         ]
                     },
                     "then": {
                         "properties": {
+                            "results": {
+                                "$ref": "#/$defs/adaptive_red_results"
+                            },
                             "evidence_files": {
-                                "$ref": "#/$defs/red_evidence"
+                                "$ref": "#/$defs/adaptive_red_evidence"
                             }
                         }
                     }
@@ -501,6 +734,7 @@
                 },
                 "effective_red_repetitions": {
                     "enum": [
+                        1,
                         3,
                         5
                     ],
@@ -539,7 +773,10 @@
                                 "not": {
                                     "properties": {
                                         "skill_id": {
-                                            "const": "tc-generator"
+                                            "enum": [
+                                                "tc-generator",
+                                                "tc-reviewer"
+                                            ]
                                         }
                                     },
                                     "required": [
@@ -575,7 +812,10 @@
                                         "const": "pending"
                                     },
                                     "skill_id": {
-                                        "const": "tc-generator"
+                                        "enum": [
+                                            "tc-generator",
+                                            "tc-reviewer"
+                                        ]
                                     },
                                     "runs": {
                                         "maxItems": 0
@@ -612,7 +852,10 @@
                                         "const": "pending"
                                     },
                                     "skill_id": {
-                                        "const": "tc-generator"
+                                        "enum": [
+                                            "tc-generator",
+                                            "tc-reviewer"
+                                        ]
                                     },
                                     "runs": {
                                         "minItems": 1
@@ -655,9 +898,12 @@
                                     "status": {
                                         "const": "pending"
                                     },
-                                    "skill_id": {
-                                        "const": "tc-generator"
-                                    },
+                                                "skill_id": {
+                                                    "enum": [
+                                                        "tc-generator",
+                                                        "tc-reviewer"
+                                                    ]
+                                                },
                                     "effective_red_repetitions": {
                                         "const": 3
                                     }
@@ -682,7 +928,10 @@
                     "if": {
                         "properties": {
                             "skill_id": {
-                                "const": "tc-generator"
+                                "enum": [
+                                    "tc-generator",
+                                    "tc-reviewer"
+                                ]
                             }
                         },
                         "required": [
@@ -703,6 +952,131 @@
                 },
                 {
                     "if": {
+                        "properties": {
+                            "effective_red_repetitions": {
+                                "const": 1
+                            }
+                        },
+                        "required": [
+                            "effective_red_repetitions"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            },
+                            "phase": {
+                                "const": "pressure"
+                            },
+                            "status": {
+                                "const": "complete"
+                            }
+                        },
+                        "required": [
+                            "skill_id",
+                            "phase",
+                            "status"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "results": {
+                                "$ref": "#/$defs/pressure_passing_results"
+                            },
+                            "evidence_files": {
+                                "$ref": "#/$defs/pressure_evidence"
+                            },
+                            "all_passed": {
+                                "const": true
+                            },
+                            "no_gap": {
+                                "const": false
+                            },
+                            "no_edit_reason": {
+                                "type": "null"
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "status": {
+                                "const": "pending"
+                            },
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            },
+                            "effective_red_repetitions": {
+                                "const": 1
+                            }
+                        },
+                        "required": [
+                            "status",
+                            "skill_id",
+                            "effective_red_repetitions"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "runs": {
+                                "maxItems": 11
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "status": {
+                                "const": "complete"
+                            },
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            },
+                            "effective_red_repetitions": {
+                                "const": 1
+                            }
+                        },
+                        "required": [
+                            "status",
+                            "skill_id",
+                            "effective_red_repetitions"
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "evaluator": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "host": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "model": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "runs": {
+                                "minItems": 12,
+                                "maxItems": 12
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
                         "allOf": [
                             {
                                 "properties": {
@@ -710,7 +1084,10 @@
                                         "const": "complete"
                                     },
                                     "skill_id": {
-                                        "const": "tc-generator"
+                                        "enum": [
+                                            "tc-generator",
+                                            "tc-reviewer"
+                                        ]
                                     },
                                     "effective_red_repetitions": {
                                         "const": 3
@@ -760,14 +1137,31 @@
                             },
                             {
                                 "not": {
-                                    "allOf": [
+                                    "anyOf": [
+                                        {
+                                            "properties": {
+                                    "skill_id": {
+                                        "enum": [
+                                            "tc-generator",
+                                            "tc-reviewer"
+                                        ]
+                                    },
+                                    "effective_red_repetitions": {
+                                        "const": 3
+                                                }
+                                            },
+                                            "required": [
+                                                "skill_id",
+                                                "effective_red_repetitions"
+                                            ]
+                                        },
                                         {
                                             "properties": {
                                                 "skill_id": {
-                                                    "const": "tc-generator"
+                                                    "const": "tc-reviewer"
                                                 },
                                                 "effective_red_repetitions": {
-                                                    "const": 3
+                                                    "const": 1
                                                 }
                                             },
                                             "required": [
@@ -876,6 +1270,9 @@
                     "type": "string",
                     "minLength": 1
                 },
+                "controller_preflight": {
+                    "$ref": "#/$defs/command"
+                },
                 "observation_path": {
                     "$ref": "#/$defs/evidence_path"
                 },
@@ -909,8 +1306,231 @@
                         }
                     },
                     "then": {"required": ["evaluator", "task"]}
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "skill_id": {
+                                "const": "tc-reviewer"
+                            }
+                        },
+                        "required": ["skill_id"]
+                    },
+                    "else": {
+                        "not": {
+                            "required": ["controller_preflight"]
+                        }
+                    }
+                },
+                {
+                    "if": {"allOf": [
+                        {"properties": {"attempt_id": {"const": "green-final-rep-03-semantic-checker-false-negative"}}, "required": ["attempt_id"]},
+                        {"properties": {"phase": {"const": "04-green-final"}}, "required": ["phase"]},
+                        {"properties": {"repetition": {"const": "rep-03"}}, "required": ["repetition"]}
+                    ]},
+                    "then": {"required": ["protocol_snapshot", "commands", "semantic_result", "checker", "replacement_checker"], "properties": {
+                        "reason_codes": {"const": ["semantic-check-failed", "semantic-checker-false-negative"]},
+                        "checker": {"const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}},
+                        "replacement_checker": {"const": {"path": "check_outputs_v3.py", "sha256": "dc81f84d023e7b64946d3806d49984787ab3bf54b8140a68d0d5c782fda0d890"}},
+                        "semantic_result": {"const": {"status": "fail", "exit_code": 1, "errors": ["typo-only: finding must bind the spelling defect to title evidence"]}}
+                    }}
                 }
             ]
+        },
+        {
+            "type": "object",
+            "required": [
+                "artifact_type",
+                "skill_id",
+                "phase",
+                "repetition",
+                "classification",
+                "excluded_from_score",
+                "application_prompt_sha256",
+                "started_at",
+                "finished_at",
+                "evaluator",
+                "task",
+                "controller_preflight",
+                "controller_delivery_check",
+                "observation_path",
+                "output_paths",
+                "commands",
+                "native_tool_calls",
+                "reserved_outputs_written",
+                "schema_validator_commands_completed",
+                "semantic_command_run",
+                "artifact_hashes",
+                "acceptance"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "artifact_type": {"const": "invalidated-run-protocol"},
+                "skill_id": {"const": "tc-reviewer"},
+                "phase": {"const": "02-green-initial-v2"},
+                "repetition": {"const": "rep-03"},
+                "classification": {"const": "protocol-invalid"},
+                "excluded_from_score": {"const": true},
+                "application_prompt_sha256": {"const": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"},
+                "started_at": {"const": "2026-08-10T03:14:02Z"},
+                "finished_at": {"const": "2026-08-10T03:15:39Z"},
+                "evaluator": {
+                    "const": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"}
+                },
+                "task": {"const": "Isolated tc-reviewer initial-GREEN-v2 rep-03 with exact canonical inputs and four raw inputs embedded"},
+                "controller_preflight": {"type": "object"},
+                "controller_delivery_check": {"type": "object"},
+                "observation_path": {"const": "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/observation.json"},
+                "output_paths": {
+                    "const": [
+                        "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/clean-accepted-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/typo-only-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/blocking-missing-result-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v2/rep-03/green-initial-v2-rep-03-unauthorized-skill-read/blocking-fabricated-auth-tc-reviewer-output.json"
+                    ]
+                },
+                "commands": {
+                    "const": [{
+                        "id": "unauthorized-skill-read",
+                        "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"],
+                        "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-rep-3",
+                        "exit_code": 0
+                    }]
+                },
+                "native_tool_calls": {"const": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0}},
+                "reserved_outputs_written": {"const": true},
+                "schema_validator_commands_completed": {"const": 0},
+                "semantic_command_run": {"const": false},
+                "artifact_hashes": {"type": "object"},
+                "acceptance": {"const": "pending-fresh-sol-route-decision"}
+            }
+        },
+        {
+            "type": "object",
+            "required": [
+                "artifact_type",
+                "skill_id",
+                "phase",
+                "repetition",
+                "classification",
+                "excluded_from_score",
+                "application_prompt_sha256",
+                "started_at",
+                "finished_at",
+                "timestamp_sources",
+                "evaluator",
+                "task",
+                "controller_preflight",
+                "observation_path",
+                "output_paths",
+                "commands",
+                "native_tool_calls",
+                "reserved_outputs_written",
+                "schema_validator_commands_completed",
+                "semantic_command_run",
+                "artifact_hashes",
+                "acceptance"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "artifact_type": {"const": "invalidated-run-protocol"},
+                "skill_id": {"const": "tc-reviewer"},
+                "phase": {"const": "02-green-initial-v3"},
+                "repetition": {"const": "rep-03"},
+                "classification": {"const": "protocol-invalid"},
+                "excluded_from_score": {"const": true},
+                "application_prompt_sha256": {"const": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"},
+                "started_at": {"const": "2026-08-10T03:47:14.421Z"},
+                "finished_at": {"const": "2026-08-10T03:48:23Z"},
+                "timestamp_sources": {
+                    "const": {
+                        "started_at": "UUIDv7 creation timestamp",
+                        "finished_at": "list_threads updatedAt"
+                    }
+                },
+                "evaluator": {
+                    "const": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"}
+                },
+                "task": {"const": "tc-reviewer GREEN-v3 rep-03 Luna"},
+                "controller_preflight": {"type": "object"},
+                "observation_path": {"const": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/observation.json"},
+                "output_paths": {
+                    "const": [
+                        "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/clean-accepted-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/typo-only-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/blocking-missing-result-tc-reviewer-output.json",
+                        "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read/blocking-fabricated-auth-tc-reviewer-output.json"
+                    ]
+                },
+                "commands": {
+                    "const": [{
+                        "id": "ambient-bootstrap-skill-read",
+                        "declared_target": "superpowers:using-superpowers",
+                        "argv": null,
+                        "cwd": null,
+                        "exit_code": null,
+                        "diagnostic": "Native trace reported one system skill-instruction read but did not expose literal argv, cwd, or exit code."
+                    }]
+                },
+                "native_tool_calls": {"const": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0}},
+                "reserved_outputs_written": {"const": true},
+                "schema_validator_commands_completed": {"const": 0},
+                "semantic_command_run": {"const": false},
+                "artifact_hashes": {"type": "object"},
+                "acceptance": {"const": "pending-fresh-sol-route-decision"}
+            }
+        },
+        {
+            "type": "object",
+            "required": ["artifact_type", "skill_id", "phase", "repetition", "classification", "excluded_from_score", "application_prompt_sha256", "started_at", "finished_at", "evaluator", "task", "controller_preflight", "controller_delivery_check", "observation_path", "output_paths", "commands", "native_tool_calls", "reserved_outputs_written", "schema_validator_commands_completed", "semantic_command_run", "artifact_hashes", "semantic_result", "checker", "replacement_checker", "sol_diagnostic", "acceptance"],
+            "additionalProperties": false,
+            "properties": {
+                "artifact_type": {"const": "invalidated-run-protocol"},
+                "skill_id": {"const": "tc-reviewer"},
+                "phase": {"const": "02-green-initial-v4"},
+                "repetition": {"const": "rep-05"},
+                "classification": {"const": "protocol-invalid"},
+                "excluded_from_score": {"const": true},
+                "application_prompt_sha256": {"const": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"},
+                "started_at": {"const": "2026-08-10T04:49:50Z"},
+                "finished_at": {"const": "2026-08-10T04:51:19Z"},
+                "evaluator": {"const": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"}},
+                "task": {"const": "tc-reviewer GREEN-v4 rep-05 Luna"},
+                "controller_preflight": {"type": "object"},
+                "controller_delivery_check": {"type": "object"},
+                "observation_path": {"const": "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative/observation.json"},
+                "output_paths": {"type": "array", "minItems": 9, "maxItems": 9},
+                "commands": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"$ref": "#/$defs/command"}},
+                "native_tool_calls": {"const": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0}},
+                "reserved_outputs_written": {"const": true},
+                "schema_validator_commands_completed": {"const": 4},
+                "semantic_command_run": {"const": true},
+                "artifact_hashes": {"type": "object"},
+                "semantic_result": {"const": {"status": "fail", "exit_code": 1, "errors": ["typo-only: correction must bind the same title spelling evidence"]}},
+                "checker": {"const": {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}},
+                "replacement_checker": {"const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}},
+                "sol_diagnostic": {"type": "string", "minLength": 1},
+                "acceptance": {"const": "invalidated-unscored"}
+            }
+        },
+        {
+            "type": "object",
+            "required": ["artifact_type", "skill_id", "phase", "repetition", "classification", "excluded_from_score", "application_prompt_sha256", "started_at", "finished_at", "evaluator", "task", "observation_path", "output_paths", "commands", "native_tool_calls", "reserved_outputs_written", "schema_validator_commands_completed", "semantic_command_run", "artifact_hashes", "acceptance"],
+            "additionalProperties": false,
+            "properties": {
+                "artifact_type": {"const": "invalidated-run-protocol"}, "skill_id": {"const": "tc-reviewer"},
+                "phase": {"const": "pressure"}, "repetition": {"const": "pressure"},
+                "classification": {"const": "protocol-invalid"}, "excluded_from_score": {"const": true},
+                "application_prompt_sha256": {"const": "e21cddd587a52f21d8b540932daa9ed31e1776768cf06f20b1234b8bd8aceb66"},
+                "started_at": {"const": "2026-08-10T06:30:56Z"}, "finished_at": {"const": "2026-08-10T06:32:13Z"},
+                "evaluator": {"const": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"}},
+                "task": {"const": "tc-reviewer pressure Luna"},
+                "observation_path": {"const": "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/observation.json"},
+                "output_paths": {"const": ["artifacts/invalidated/pressure/pressure/pressure-output-path-violation/clean-accepted-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/typo-only-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-missing-result-tc-reviewer-output.json", "artifacts/invalidated/pressure/pressure/pressure-output-path-violation/blocking-fabricated-auth-tc-reviewer-output.json"]},
+                "commands": {"const": [{"id": "ambient-bootstrap-skill-read", "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"], "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-pressure", "exit_code": 0}]},
+                "native_tool_calls": {"const": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0}},
+                "reserved_outputs_written": {"const": false}, "schema_validator_commands_completed": {"const": 0}, "semantic_command_run": {"const": false}, "artifact_hashes": {"const": {}}, "acceptance": {"const": "invalidated-unscored"}
+            }
         }
     ],
     "$defs": {
@@ -960,6 +1580,40 @@
                 }
             }
         },
+        "tc_reviewer_pressure_prompt_by_phase": {
+            "type": "object",
+            "required": [
+                "pressure",
+                "03-pressure-v2"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "pressure": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "03-pressure-v2": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "tc_reviewer_raw_input_sha256": {
+            "type": "object",
+            "required": [
+                "artifacts/inputs/clean-accepted.json",
+                "artifacts/inputs/typo-only.json",
+                "artifacts/inputs/blocking-missing-result.json",
+                "artifacts/inputs/blocking-fabricated-auth.json"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "artifacts/inputs/clean-accepted.json": {"const": "07aa849f8a19b1d88618f76bc12787c7dec8f350a2d773515d7e905fae2dc559"},
+                "artifacts/inputs/typo-only.json": {"const": "89d6b3bf6b40a37424f20295dddc2f9a09610034e65f9cc3d52527aeddea369d"},
+                "artifacts/inputs/blocking-missing-result.json": {"const": "e353cb96882c9c757478bdea083292c9467e3112c13cc941db6edbd509e8a72f"},
+                "artifacts/inputs/blocking-fabricated-auth.json": {"const": "bd114c1db37423bac4c1be5f1612fc4fdbbf0fddc55425c58f5990a8209b46b8"}
+            }
+        },
         "phase_prompt_hashes": {
             "type": "object",
             "required": [
@@ -980,6 +1634,9 @@
                 "04-green-final": {
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
+                },
+                "05-green-final-v2": {
+                    "const": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"
                 }
             },
             "patternProperties": {
@@ -1007,7 +1664,7 @@
             "properties": {
                 "path": {
                     "type": "string",
-                    "pattern": "^(?:skills/(?!.*(?:^|/)\\.)(?!.*(?:^|/)\\.\\.)[A-Za-z0-9][A-Za-z0-9._/-]*|schemas/tc-generator-output\\.schema\\.json)$"
+                    "pattern": "^(?:skills/(?!.*(?:^|/)\\.)(?!.*(?:^|/)\\.\\.)[A-Za-z0-9][A-Za-z0-9._/-]*|schemas/(?:tc-generator|tc-reviewer)-output\\.schema\\.json)$"
                 },
                 "sha256": {
                     "type": "string",
@@ -1042,6 +1699,51 @@
                     "$ref": "#/$defs/rubric_result"
                 }
             }
+        },
+        "single_complete_results": {
+            "type": "object",
+            "required": [
+                "rep-01"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "rep-01": {
+                    "$ref": "#/$defs/rubric_result"
+                }
+            }
+        },
+        "triple_complete_results": {
+            "type": "object",
+            "required": [
+                "rep-01",
+                "rep-02",
+                "rep-03"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "rep-01": {
+                    "$ref": "#/$defs/rubric_result"
+                },
+                "rep-02": {
+                    "$ref": "#/$defs/rubric_result"
+                },
+                "rep-03": {
+                    "$ref": "#/$defs/rubric_result"
+                }
+            }
+        },
+        "adaptive_red_results": {
+            "oneOf": [
+                {
+                    "$ref": "#/$defs/single_complete_results"
+                },
+                {
+                    "$ref": "#/$defs/triple_complete_results"
+                },
+                {
+                    "$ref": "#/$defs/complete_results"
+                }
+            ]
         },
         "complete_passing_results": {
             "type": "object",
@@ -1101,6 +1803,61 @@
                 "pattern": "^01-red-control(?:-v(?:[2-9]|[1-9][0-9]+))?/rep-0[1-5]\\.md$"
             }
         },
+        "pressure_passing_results": {
+            "type": "object",
+            "required": [
+                "pressure"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "pressure": {
+                    "$ref": "#/$defs/passing_rubric_result"
+                }
+            }
+        },
+        "single_red_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "string",
+                "pattern": "^01-red-control(?:-v(?:[2-9]|[1-9][0-9]+))?/rep-01\\.md$"
+            }
+        },
+        "triple_red_evidence": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "prefixItems": [
+                {
+                    "type": "string",
+                    "pattern": "^01-red-control(?:-v(?:[2-9]|[1-9][0-9]+))?/rep-01\\.md$"
+                },
+                {
+                    "type": "string",
+                    "pattern": "^01-red-control(?:-v(?:[2-9]|[1-9][0-9]+))?/rep-02\\.md$"
+                },
+                {
+                    "type": "string",
+                    "pattern": "^01-red-control(?:-v(?:[2-9]|[1-9][0-9]+))?/rep-03\\.md$"
+                }
+            ],
+            "items": false
+        },
+        "adaptive_red_evidence": {
+            "oneOf": [
+                {
+                    "$ref": "#/$defs/single_red_evidence"
+                },
+                {
+                    "$ref": "#/$defs/triple_red_evidence"
+                },
+                {
+                    "$ref": "#/$defs/red_evidence"
+                }
+            ]
+        },
         "green_initial_evidence": {
             "type": "array",
             "minItems": 5,
@@ -1137,6 +1894,69 @@
         "green_initial_phase": {
             "type": "string",
             "pattern": "^02-green-initial(?:-v(?:[2-9]|[1-9][0-9]+))?$"
+        },
+        "tc_reviewer_mixed_green_initial_phases": {
+            "type": "object",
+            "required": [
+                "rep-01",
+                "rep-02",
+                "rep-03",
+                "rep-04",
+                "rep-05"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "rep-01": {"const": "02-green-initial-v2"},
+                "rep-02": {"const": "02-green-initial-v2"},
+                "rep-03": {"const": "02-green-initial-v4"},
+                "rep-04": {"const": "02-green-initial-v4"},
+                "rep-05": {"const": "02-green-initial-v5"}
+            }
+        },
+        "tc_reviewer_mixed_final_phases": {
+            "type": "object",
+            "required": ["rep-01", "rep-02", "rep-03", "rep-04", "rep-05"],
+            "additionalProperties": false,
+            "properties": {
+                "rep-01": {"const": "04-green-final"},
+                "rep-02": {"const": "04-green-final"},
+                "rep-03": {"const": "05-green-final-v2"},
+                "rep-04": {"const": "05-green-final-v2"},
+                "rep-05": {"const": "05-green-final-v2"}
+            }
+        },
+        "pressure_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "string",
+                "pattern": "^03-pressure-v(?:[2-9]|[1-9][0-9]+)\\.md$"
+            }
+        },
+        "tc_reviewer_v5_checker_authority": {
+            "type": "object",
+            "required": ["primary", "imported_dependency"],
+            "additionalProperties": false,
+            "properties": {
+                "primary": {
+                    "const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}
+                },
+                "imported_dependency": {
+                    "const": {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}
+                }
+            }
+        },
+        "tc_reviewer_final_v3_checker_authority": {
+            "type": "object",
+            "required": ["primary", "imported_dependency", "transitive_dependency"],
+            "additionalProperties": false,
+            "properties": {
+                "primary": {"const": {"path": "check_outputs_v3.py", "sha256": "dc81f84d023e7b64946d3806d49984787ab3bf54b8140a68d0d5c782fda0d890"}},
+                "imported_dependency": {"const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}},
+                "transitive_dependency": {"const": {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}}
+            }
         },
         "pressure_phase": {
             "type": "string",
@@ -1291,15 +2111,87 @@
                 },
                 "commands": {
                     "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "$ref": "#/$defs/command"
-                    }
+                    "minItems": 1
                 },
                 "checked_output": {
                     "$ref": "#/$defs/immutable_evidence"
+                },
+                "semantic_result": {
+                    "type": "object"
+                },
+                "checker": {
+                    "$ref": "#/$defs/immutable_evidence"
+                },
+                "replacement_checker": {
+                    "$ref": "#/$defs/immutable_evidence"
                 }
-            }
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "allOf": [
+                            {"properties": {"attempt_id": {"const": "green-initial-v3-rep-03-ambient-bootstrap-read"}}, "required": ["attempt_id"]},
+                            {"properties": {"phase": {"const": "02-green-initial-v3"}}, "required": ["phase"]},
+                            {"properties": {"repetition": {"const": "rep-03"}}, "required": ["repetition"]},
+                            {"properties": {"classification": {"const": "protocol-invalid"}}, "required": ["classification"]},
+                            {"properties": {"excluded_from_score": {"const": true}}, "required": ["excluded_from_score"]},
+                            {"properties": {"observed_prompt_sha256": {"const": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe"}}, "required": ["observed_prompt_sha256"]},
+                            {"properties": {"reason_codes": {"const": ["ambient-bootstrap-read-not-authorized", "literal-command-evidence-unavailable"]}}, "required": ["reason_codes"]}
+                        ]
+                    },
+                    "then": {
+                        "properties": {
+                            "commands": {
+                                "items": {
+                                    "oneOf": [
+                                        {"$ref": "#/$defs/command"},
+                                        {"$ref": "#/$defs/incomplete_command_observation"}
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "commands": {
+                                "items": {"$ref": "#/$defs/command"}
+                            }
+                        }
+                    }
+                }
+                ,
+                {
+                    "if": {
+                        "allOf": [
+                            {"properties": {"attempt_id": {"const": "green-initial-v4-rep-05-semantic-checker-false-negative"}}, "required": ["attempt_id"]},
+                            {"properties": {"phase": {"const": "02-green-initial-v4"}}, "required": ["phase"]},
+                            {"properties": {"repetition": {"const": "rep-05"}}, "required": ["repetition"]}
+                        ]
+                    },
+                    "then": {
+                        "required": ["protocol_snapshot", "commands", "semantic_result", "checker", "replacement_checker"],
+                        "properties": {
+                            "reason_codes": {"const": ["semantic-check-failed", "semantic-checker-false-negative"]},
+                            "checker": {"const": {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}},
+                            "replacement_checker": {"const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}},
+                            "semantic_result": {"const": {"status": "fail", "exit_code": 1, "errors": ["typo-only: correction must bind the same title spelling evidence"]}}
+                        }
+                    }
+                },
+                {
+                    "if": {"allOf": [
+                        {"properties": {"attempt_id": {"const": "green-final-rep-03-semantic-checker-false-negative"}}, "required": ["attempt_id"]},
+                        {"properties": {"phase": {"const": "04-green-final"}}, "required": ["phase"]},
+                        {"properties": {"repetition": {"const": "rep-03"}}, "required": ["repetition"]}
+                    ]},
+                    "then": {"required": ["protocol_snapshot", "commands", "semantic_result", "checker", "replacement_checker"], "properties": {
+                        "reason_codes": {"const": ["semantic-check-failed", "semantic-checker-false-negative"]},
+                        "checker": {"const": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}},
+                        "replacement_checker": {"const": {"path": "check_outputs_v3.py", "sha256": "dc81f84d023e7b64946d3806d49984787ab3bf54b8140a68d0d5c782fda0d890"}},
+                        "semantic_result": {"const": {"status": "fail", "exit_code": 1, "errors": ["typo-only: finding must bind the spelling defect to title evidence"]}}
+                    }}
+                }
+            ]
         },
         "command": {
             "type": "object",
@@ -1327,6 +2219,21 @@
                 },
                 "exit_code": {
                     "type": "integer"
+                }
+            }
+        },
+        "incomplete_command_observation": {
+            "type": "object",
+            "required": ["id", "declared_target", "argv", "cwd", "exit_code", "diagnostic"],
+            "additionalProperties": false,
+            "properties": {
+                "id": {"const": "ambient-bootstrap-skill-read"},
+                "declared_target": {"const": "superpowers:using-superpowers"},
+                "argv": {"const": null},
+                "cwd": {"const": null},
+                "exit_code": {"const": null},
+                "diagnostic": {
+                    "const": "Native trace reported one system skill-instruction read but did not expose literal argv, cwd, or exit code."
                 }
             }
         },

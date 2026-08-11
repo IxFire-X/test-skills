@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "scope_note": "Exploratory read-only source inspection and runtime preflight are summarized in 00-source-manifest.json; this scored attempt ledger begins with artifact validation.",
+  "commands": [
+    {
+      "index": 1,
+      "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe","tools\\validate_artifact.py","schemas\\context-marker-output.schema.json","docs\\to_do\\real-chains\\inventree\\chain-01\\attempt-01\\01-context-marker-output.json"],
+      "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+      "exit_code": 1,
+      "result": "invalid: warning format"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-reviewer",
+  "warnings": [],
+  "artifacts": {
+    "validation_report": {
+      "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+      "reviewed_test_case_ids": [
+        "TC-AUTH-001"
+      ],
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "UNSUPPORTED_AUTHORIZATION",
+          "message": "The test case authenticates as warehouse_operator and expects approval success, but the supplied requirement authorizes only sales_manager; changing the role or expected behavior requires an explicit product authorization decision.",
+          "evidence": [
+            "REQ-AUTH-001.text=Only sales_manager may approve an order through POST /api/v1/orders/{order_id}/approve; a successful approval returns HTTP 200 with status APPROVED.",
+            "TC-AUTH-001.title=Warehouse operator approves an order",
+            "TC-AUTH-001.preconditions[0]=Authenticated as warehouse_operator.",
+            "TC-AUTH-001.steps[0].expected_result=HTTP 200 is returned with status APPROVED.",
+            "TC-AUTH-001.expected_outcome=HTTP 200 is returned with status APPROVED."
+          ],
+          "related_ids": [
+            "TC-AUTH-001",
+            "REQ-AUTH-001"
+          ]
+        }
+      ],
+      "corrections": []
+    },
+    "corrected_test_cases": []
+  }
+}

@@ -1,120 +1,112 @@
-# Инструкция по настройке (Instruction)
+# Настройка portable testing skills
 
-> **Как НАСТРОИТЬ скиллы в проекте + словарь тегов + CI/CD.** Как использовать (промпты, сценарии) — в `USER-GUIDE.md`. Канон тегов и статусов — `CONTRACTS.md` (единственный источник истины). План развития — `BACKLOG.md`.
+Это руководство описывает установку и детерминированный runtime. Пользовательские сценарии находятся в [USER-GUIDE.md](USER-GUIDE.md), canonical routing — в [CONTRACTS.md](CONTRACTS.md) и [PIPELINE.md](PIPELINE.md), дальнейшие работы — в [ROADMAP.md](ROADMAP.md).
 
----
+## Состав
 
-## 1. Что это за скиллы
+Пакет содержит шесть канонических skills:
 
-Набор из **6 AI-скиллов**: 4 тестовых (tc-generator, tc-reviewer, tc-to-autotest, autotest-reviewer) + context-marker (разметка контекста) + orchestrate (Оркестратор). Работают как **1 пайплайн**:
-
-```
-context-marker → tc-generator → tc-reviewer → tc-to-autotest → autotest-reviewer
-```
-
-Каждый скилл автономен, но максимум пользы — через `orchestrate`.
-
-## 2. Предварительные требования
-
-- AI-ассистент с загрузкой файлов и context window ≥ 64K токенов (для больших фич).
-- Входные данные (чем полнее, тем точнее):
-
-| Данные | Обязательность |
+| ID | Путь |
 |---|---|
-| Аналитика (описание фичи, AC, контракты API) | Желательно |
-| Исходный код / diff (контроллеры, DTO, миграции) | Желательно |
-| `.skillsrc` (манифест проекта) | Опционально (Оркестратор создаст через Quickstart) |
+| context-marker | skills/context-marker/SKILL.md |
+| tc-generator | skills/tc-generator/SKILL.md |
+| tc-reviewer | skills/tc-reviewer/SKILL.md |
+| tc-to-autotest | skills/tc-to-autotest/SKILL.md |
+| autotest-reviewer | skills/autotest-reviewer/SKILL.md |
+| orchestrate | skills/orchestrate/SKILL.md |
 
-Без данных скиллы перейдут в ручной режим с уточняющими вопросами.
+Единственный registry этих путей — contracts/pipeline.json. Package-level README, SKILL-LITE и templates не используются.
 
-## 3. Настройка
+## Требования
 
-### Шаг 1. Структура папок
+- Python 3.10+.
+- Зависимости из requirements-dev.txt для runtime validation и локальных тестов.
+- Для Java execution: project-local Maven/Gradle wrapper или доступный runner и подходящий JDK.
+- Для Python execution: project-native pytest environment.
+- Для Windows adapter: PowerShell 7 или Windows PowerShell.
 
-```
-test-orchestration-skills/
-├── Instruction.md, USER-GUIDE.md, PIPELINE.md, CONTRACTS.md, BACKLOG.md, .skillsrc
-├── Ручные тест-кейсы/            (tc-generator: SKILL.md, examples.md, README.md)
-├── Валидация тест-кейсов/        (tc-reviewer)
-├── Автоматизированные кейсы.../  (tc-to-autotest + templates/)
-├── Валидация автотестов/         (autotest-reviewer)
-├── Разметка контекста/           (context-marker)
-├── Оркестратор/                  (SKILL.md + SKILL-LITE.md)
-├── schemas/                      (JSON Schema выходов)
-└── shared/                       (общие утилиты)
-```
+Проверь среду:
 
-### Шаг 2. Загрузите `SKILL.md` в контекст AI
+~~~text
+python -m pip install -r requirements-dev.txt
+python tools/doctor.py --root .
+python tools/contract_check.py --root . --full
+~~~
 
-- **Claude (Web):** скрепка → загрузить `SKILL.md`.
-- **Claude (API):** передать в поле `system`.
-- **ChatGPT:** Custom Instructions / начало чата.
-- **Cursor / Windsurf / Cline:** положить `SKILL.md` в корень проекта.
+NOT_RUNNABLE означает недоступную capability, а не успешное выполнение.
 
-### Шаг 3. Манифест `.skillsrc`
+## Установка
 
-Создайте в корне проекта (образец — `./.skillsrc`), или скажите `Инициализируй проект` — Оркестратор заполнит автоматически. Минимум: `project.name`, `project.language`, `paths.source`, `paths.tests`, `test.framework`, `methodology`.
+### Прямое использование
 
-## 4. Словарь XML-тегов (краткая справка)
+Скопируй пакет целиком или загружай SKILL.md по путям из contracts/pipeline.json. Host-specific plugin не требуется.
 
-> Полный канон — `CONTRACTS.md` §2 (выходные), §3 (статусы). Здесь — только самое нужное для понимания входа/выхода.
+### Generic adapter
 
-**Основные входные:** `<analytics_documentation>`, `<source_code_and_diff>`, `<test_cases>`, `<corrected_test_cases>`, `<generated_test_cases>`, `<automation_matrix>`, `<autotest_code>`, `<raw_content>`, `<goal>`.
-**Основные выходные:** `<generated_test_cases>`, `<validation_report>`, `<corrected_test_cases>`, `<automation_matrix>`, `<automation_analysis>`, `<autotest_review>`, `<review_verdict>`, `<orchestration_result>`, `<run_tests_verdict>`.
+~~~text
+python adapters/generic/install_skills.py --source skills --destination <skill-directory>
+python adapters/generic/install_skills.py --source skills --destination <skill-directory> --dry-run
+~~~
 
-**Статус-маркеры:** `ПРИНЯТО` / `AUTO_FIX_APPLIED` / `ТРЕБУЕТ ДОРАБОТКИ` (ревьюеры); `completed` / `partial` / `failed` / `retry` (оркестратор).
-**Execution Gate (`<run_tests_verdict>`):** `PASS` / `FAIL` / `NOT_RUNNABLE` — детерминированный вердикт `tools/run_tests.py`. Финальный `ПРИНЯТО` невозможен без `PASS`.
+### Windows adapter
 
-**Правило переименования:** после `ПРИНЯТО` — `<generated_test_cases>` переименовывается в `<test_cases>` перед передачей в `tc-to-autotest` (см. `CONTRACTS.md` §2.3).
+~~~powershell
+pwsh -NoProfile -File adapters/windows/install.ps1 -SkillPackRoot . -Destination <skill-directory>
+pwsh -NoProfile -File adapters/windows/install.ps1 -SkillPackRoot . -Destination <skill-directory> -WhatIf
+~~~
 
-## 5. Интеграция в CI/CD (GitHub Actions)
+Оба adapter копируют только шесть канонических packages, сохраняют bytes и timestamps, не меняют contracts/pipeline.json и при повторной установке не трогают совпадающие файлы.
 
-```yaml
-name: Skills — Test Pipeline
-on:
-  pull_request:
-    paths: ['src/**', 'docs/analytics/**']
-jobs:
-  test-pipeline:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Prepare Context
-        run: |
-          find docs/analytics -name '*.md' -exec cat {} + > /tmp/analytics.md
-          git diff origin/${{ github.base_ref }}...HEAD -- src/ > /tmp/diff.patch
-      - name: Run Test Pipeline
-        env: { AI_API_KEY: ${{ secrets.AI_API_KEY }} }
-        run: |
-          {{YOUR_AI_CLI}} run \
-            --skill-file "Оркестратор/SKILL.md" \
-            --input-tag analytics_documentation "$(cat /tmp/analytics.md)" \
-            --input-tag source_code_and_diff "$(cat /tmp/diff.patch)" \
-            --pipeline test-pipeline \
-            --output-dir "outputs/${{ github.run_id }}"
-      - name: Upload Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: orchestration-report-${{ github.run_id }}
-          path: outputs/${{ github.run_id }}/
-      - name: Validate Schemas
-        if: always()
-        run: |
-          npm install -g ajv-cli
-          npx ajv validate -s schemas/tc-generator-output.schema.json -d outputs/${{ github.run_id }}/generated_test_cases.json || true
-          npx ajv validate -s schemas/autotest-reviewer-output.schema.json -d outputs/${{ github.run_id }}/autotest_review.json || true
-```
+## Project manifest
 
-**Источники тегов в CI:** `<analytics_documentation>` — `find docs/analytics -name '*.md'`; `<source_code_and_diff>` — `git diff origin/main...HEAD -- src/`; `<automation_matrix>` — артефакт предыдущего запуска.
+.skillsrc опционален. Если он существует, проверь его схемой schemas/skillsrc.schema.json. Он сообщает stack, test framework и project paths, но не разрешает менять production code, existing tests, configuration, lockfiles или dependencies.
 
-**Проверка статуса:**
-```bash
-STATUS=$(grep -oP '<status>\K[^<]+' outputs/<run_id>/orchestration-report-*.md)
-[ "$STATUS" = "completed" ] && echo "OK" || { echo "FAIL"; exit 1; }
-```
+При отсутствии manifest используй tools/scan_project.py только для read-only project discovery. Любой постоянный scan output размещай внутри docs/to_do/.
 
----
+## Машинные артефакты
 
-*См. также: `USER-GUIDE.md` (как использовать), `CONTRACTS.md` (канон тегов), `PIPELINE.md` (схема), `BACKLOG.md` (план развития).*
+Каждый LLM-stage возвращает JSON envelope версии 2.1.0 и валидируется своей schema из schemas/. Не передавай Markdown или CSV вместо JSON.
+
+После успешной валидации tc-generator всегда создай соседний CSV:
+
+~~~text
+python skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv>
+python skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv> --verify-only
+~~~
+
+CSV — lossless transport для просмотра и Jira Zephyr-ориентированного импорта. JSON остаётся downstream authority.
+
+## Execution и trace
+
+Только tools/run_tests.py может подтвердить исполнение:
+
+~~~text
+python tools/run_tests.py --project <isolated-project> --language <java|python> --automation-artifact <tc-to-autotest-output.json>
+~~~
+
+Затем построй и проверь trace:
+
+~~~text
+python tools/build_trace_document.py --requirements <context.json> --test-cases <cases.json> --automation-artifact <automation.json> --run-result <run-result.json> --output <trace-document.json>
+python tools/trace_check.py <trace-document.json> --require-execution
+python tools/trace_check.py <trace-document.json> --orchestrator-artifact <orchestrator-output.json> --require-execution
+~~~
+
+PASS возможен только при runner exit 0, method-level execution evidence и trace PASS.
+
+## Безопасность и CI
+
+- Не сохраняй credentials, tokens, cookies и environment secrets в prompts, JSON, CSV, generated source или evidence.
+- Не устанавливай dependencies и не меняй проект автоматически ради прохождения generated tests.
+- Сохраняй literal argv, absolute cwd, native exit и stdout каждого material command.
+- Останавливай pipeline на schema failure, reviewer rework, runner non-PASS или trace mismatch.
+- Предыдущий failed artifact не перезаписывай; новая попытка получает новый каталог.
+
+Минимальный CI gate:
+
+~~~text
+python tools/contract_check.py --root . --full
+python tools/render_contract_docs.py --root . --check
+python -m pytest tests -q
+python -m ruff check tools tests skills/tc-generator/scripts adapters/generic
+~~~

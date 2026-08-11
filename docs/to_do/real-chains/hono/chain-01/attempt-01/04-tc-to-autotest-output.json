@@ -1,0 +1,33 @@
+{
+  "schema_version":"2.1.0",
+  "stage":"tc-to-autotest",
+  "artifacts":{
+    "automation_matrix":[
+      {"test_case_id":"TC-0001","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0001"]},
+      {"test_case_id":"TC-0002","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0002"]},
+      {"test_case_id":"TC-0003","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0003"]},
+      {"test_case_id":"TC-0004","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0004"]},
+      {"test_case_id":"TC-0005","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0005"]},
+      {"test_case_id":"TC-0006","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0006"]},
+      {"test_case_id":"TC-0007","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0007"]},
+      {"test_case_id":"TC-0008","generated_file_ids":["FILE-HONO-BEARER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0008"]}
+    ],
+    "generated_test_files":[
+      {"id":"FILE-HONO-BEARER-REAL-CHAIN","path":"src/middleware/bearer-auth/real-chain.test.ts","language":"typescript","framework":"vitest+hono","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"}
+    ],
+    "generated_test_methods":[
+      {"id":"METHOD-TC-0001","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0001"],"requirement_ids":["REQ-0001"],"name":"TC-0001 authorizes the exact default bearer token","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0002","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0002"],"requirement_ids":["REQ-0002"],"name":"TC-0002 matches the default bearer prefix case-insensitively","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0003","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0003"],"requirement_ids":["REQ-0003"],"name":"TC-0003 rejects a request without the authentication header","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0004","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0004"],"requirement_ids":["REQ-0004"],"name":"TC-0004 rejects a malformed authorization scheme as a bad request","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0005","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0005"],"requirement_ids":["REQ-0005"],"name":"TC-0005 rejects an unconfigured bearer token","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0006","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0006"],"requirement_ids":["REQ-0006"],"name":"TC-0006 enforces the configured Bot prefix","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0007","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0007"],"requirement_ids":["REQ-0007"],"name":"TC-0007 uses a prefix-free token from the configured API-key header","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"},
+      {"id":"METHOD-TC-0008","file_id":"FILE-HONO-BEARER-REAL-CHAIN","test_case_ids":["TC-0008"],"requirement_ids":["REQ-0008"],"name":"TC-0008 delegates authorization to the asynchronous token verifier","content_digest":"sha256:412fb8bbe96cab528bec9aa3ffcbd72ed63d23186ddb87c5fbd966986650fee7"}
+    ]
+  },
+  "warnings":[
+    "Project-native setup — the generated file uses the repository's Hono request API, Vitest globals, TypeScript style, and pinned Bun dependency graph.",
+    "Project integrity — only the isolated generated test file is added; application source, existing tests, configuration, dependencies, and behavior are unchanged."
+  ]
+}

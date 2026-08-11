@@ -1,0 +1,29 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-reviewer",
+  "artifacts": {
+    "validation_report": {
+      "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+      "reviewed_test_case_ids": [
+        "TC-MISSING-001"
+      ],
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "MISSING_EXPECTED_RESULT",
+          "message": "The step expected_result and test-case expected_outcome are TBD, so the required behavior is not deterministic.",
+          "evidence": [
+            "TC-MISSING-001 step 1 expected_result is 'TBD'.",
+            "TC-MISSING-001 expected_outcome is 'TBD'."
+          ],
+          "related_ids": [
+            "TC-MISSING-001"
+          ]
+        }
+      ],
+      "corrections": []
+    },
+    "corrected_test_cases": []
+  },
+  "warnings": []
+}

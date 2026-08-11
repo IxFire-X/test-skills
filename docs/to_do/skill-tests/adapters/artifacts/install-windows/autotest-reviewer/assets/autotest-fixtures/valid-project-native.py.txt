@@ -1,0 +1,5 @@
+def test_tc_0001_reads_resource(authenticated_client):
+    """TC-0001: авторизованный пользователь получает ресурс."""
+    response = authenticated_client.get("/resources/1")
+    assert response.status_code == 200
+    assert response.json["id"] == 1

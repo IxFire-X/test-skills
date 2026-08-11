@@ -1,0 +1,9 @@
+{
+  "attempt": "attempt-02",
+  "stage": "autotest-reviewer",
+  "failure_class": "reviewer-portability-false-negative",
+  "verdict": "ТРЕБУЕТ ДОРАБОТКИ",
+  "reason": "The reviewer requires Java @DisplayName for a Go testing artifact and does not recognize TC IDs in t.Run subtests.",
+  "generated_file": "D:\\AI-Projects\\real-chain-projects\\pocketbase-v0.38.2\\apis\\real_chain04_record_rules_test.go",
+  "execution_gate_run": false
+}

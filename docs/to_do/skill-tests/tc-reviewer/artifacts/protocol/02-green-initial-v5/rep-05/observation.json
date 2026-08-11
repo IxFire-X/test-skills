@@ -1,0 +1,17 @@
+{
+  "status": "pass",
+  "classification": "successful-green-initial",
+  "thread_id": "019fea2f-de0e-7860-be2d-0057ab139cd8",
+  "fork_turns": "none",
+  "started_at": "2026-08-10T05:40:34Z",
+  "finished_at": "2026-08-10T05:42:05Z",
+  "evaluator": {"name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"},
+  "task": "tc-reviewer GREEN-v5 rep-05 Luna",
+  "task_cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v5-rep-5",
+  "controller_preflight": {"id": "role-integrity-check", "argv": ["C:\\Program Files\\Git\\bin\\sh.exe", "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh", "--check"], "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills", "exit_code": 0, "output": "CHECK PASSED"},
+  "controller_delivery_check": {"status": "accepted", "bindings": {"skills/tc-reviewer/SKILL.md": "62fa4c00972cd5ab5a0deb6d9bafe045c13519b4a91da5f1d6d50fe5ff775a18", "skills/tc-reviewer/references/review-verdicts.md": "8d01417f6ce67f4b0badecaf624b60459522dbaf15aa42c03d9d2d32abc1ff78", "schemas/tc-reviewer-output.schema.json": "676035d151e2623308f007ff0b93026f0bb55bb3d1269a7a5ec7f6dee9d6e927", "artifacts/protocol/02-green-initial-v5/rep-05/prompt.txt": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe", "check_outputs_v2.py": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b", "check_outputs.py": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}, "output_collisions": []},
+  "evaluator_tool_sequence": [{"sequence": 1, "tool": "commandExecution", "id": "ambient-bootstrap-skill-read", "argv": ["Get-Content", "-LiteralPath", "C:\\Users\\User\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers\\6.2.0\\skills\\using-superpowers\\SKILL.md"], "cwd": "C:\\Users\\User\\Documents\\Codex\\2026-08-10\\evaluator-tc-reviewer-initial-green-v5-rep-5", "exit_code": 0, "allowed": true}, {"sequence": 2, "tool": "fileChange", "file_changes": 4, "summary": "Wrote the four reserved evaluator outputs."}],
+  "schema_validation": {"commands_run": 4, "all_valid": true, "stdout": "{\"errors\":[],\"status\":\"valid\"}"},
+  "semantic_result": {"status": "pass", "errors": []},
+  "acceptance": "pending-fresh-sol-checkpoint"
+}

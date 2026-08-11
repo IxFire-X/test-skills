@@ -1,0 +1,14 @@
+{
+  "schema_version":"2.1.0",
+  "stage":"tc-reviewer",
+  "artifacts":{
+    "validation_report":{
+      "verdict":"ПРИНЯТО",
+      "reviewed_test_case_ids":["TC-0001","TC-0002","TC-0003","TC-0004","TC-0005","TC-0006","TC-0007","TC-0008"],
+      "findings":[],
+      "corrections":[]
+    },
+    "corrected_test_cases":[]
+  },
+  "warnings":[]
+}

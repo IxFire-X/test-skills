@@ -1,0 +1,10 @@
+{
+  "schema_version":"1.0.0",
+  "result":"PASS_WITH_PRE_EXECUTION_REVIEWER_CORRECTION",
+  "project":{"name":"Flask","commit":"8b4fd5d18611e63080b826ecfefe8659dba7d2e4"},
+  "generated_scope":{"test_cases":8,"generated_files":1,"generated_methods":8,"path":"tests/test_json_real_chain.py","sha256":"d9b4fb5efe23ac2c49cdf45545a80624e8f5e9720e303db4feddce18f8cad81a"},
+  "targeted_execution":{"argv":["D:\\AI-Projects\\.tools\\flask-real-chain-venv\\Scripts\\python.exe","-m","pytest","-q","tests/test_json_real_chain.py"],"cwd":"D:\\AI-Projects\\real-chain-projects\\flask","exit_code":0,"tests":8,"passed":8,"skipped":0,"failed":0},
+  "full_execution":{"argv":["D:\\AI-Projects\\.tools\\flask-real-chain-venv\\Scripts\\python.exe","-m","pytest","-q"],"cwd":"D:\\AI-Projects\\real-chain-projects\\flask","exit_code":0,"baseline":{"tests":491,"passed":491,"skipped":0,"failed":0},"after_generation":{"tests":499,"passed":499,"skipped":0,"failed":0},"delta":{"tests":8,"passed":8,"skipped":0,"failed":0}},
+  "project_integrity":{"production_files_changed":[],"existing_test_files_changed":[],"configuration_files_changed":[],"dependency_files_changed":[],"git_status":["?? tests/test_json_real_chain.py"],"test_environment":"D:\\AI-Projects\\.tools\\flask-real-chain-venv"},
+  "real_chain_findings":[{"stage":"tc-reviewer","code":"HARNESS_OBSERVABILITY_MISMATCH","test_case_id":"TC-0002","classification":"false-pass","resolution":"The generated test precondition was corrected before code generation to wrap the parsed scalar with jsonify. No requirement, expected parsed value or Flask source changed.","evidence":"03-parent-semantic-correction.json","follow_up":"Add a portable reviewer guard that expected response media/type oracles must be producible by the stated harness behavior."}]
+}

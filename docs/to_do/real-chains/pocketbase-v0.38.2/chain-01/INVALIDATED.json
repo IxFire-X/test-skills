@@ -1,0 +1,7 @@
+{
+  "status": "invalidated",
+  "excluded_from_acceptance": true,
+  "reason": "The first artifact apply_patch failed because the evidence directory did not exist; a later patch wrote four stage-shaped files after that first failure and before the controller stop was observed.",
+  "first_failed_operation": "apply_patch creating 00-source-manifest.json and stage artifacts",
+  "policy": "Do not validate, score, reuse, repair, or pass any chain-01 artifact downstream. Start a new chain directory with the evidence root pre-created."
+}

@@ -286,13 +286,9 @@ def _semantic_check(document: dict[str, object], require_execution: bool) -> tup
     unavailable = False
     if isinstance(execution, dict):
         unavailable = execution["verdict"] == "NOT_RUNNABLE"
-        run_ids: set[object] = set()
         evidence_keys: set[tuple[object, object]] = set()
         for index, evidence in enumerate(execution["evidence"]):
             run_id, method_id = evidence["run_id"], evidence["method_id"]
-            if run_id in run_ids:
-                _append(errors, "DUPLICATE_ID", f"/execution/evidence/{index}/run_id", f"duplicate execution run id: {run_id}")
-            run_ids.add(run_id)
             evidence_key = (run_id, method_id)
             if evidence_key in evidence_keys:
                 _append(errors, "DUPLICATE_MAPPING", f"/execution/evidence/{index}", f"duplicate execution evidence: {run_id}|{method_id}")

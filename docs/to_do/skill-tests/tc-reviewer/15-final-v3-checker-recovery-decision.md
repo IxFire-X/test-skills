@@ -1,0 +1,3 @@
+# FINAL rep-03 semantic-checker false-negative recovery
+
+`04-green-final/rep-03` remains immutable and unscored: all four validators passed, while frozen `check_outputs_v2.py --mode canonical` failed only because the typo finding also cited known `REQ-SESSION-DELETE-001`. `check_outputs.py` and `check_outputs_v2.py` are frozen. `check_outputs_v3.py` permits the required `TC-TYPO-001` plus only known identifiers and retains the title-evidence and corrected-case guards. Future FINAL reps 03–05 route to inert `05-green-final-v2`; the next action is read-only Fresh Sol scaffold acceptance, not evaluator execution or rep-04/05.

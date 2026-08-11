@@ -1,0 +1,33 @@
+{
+  "schema_version":"2.1.0",
+  "stage":"tc-to-autotest",
+  "artifacts":{
+    "automation_matrix":[
+      {"test_case_id":"TC-0001","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0001"]},
+      {"test_case_id":"TC-0002","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0002"]},
+      {"test_case_id":"TC-0003","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0003"]},
+      {"test_case_id":"TC-0004","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0004"]},
+      {"test_case_id":"TC-0005","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0005"]},
+      {"test_case_id":"TC-0006","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0006"]},
+      {"test_case_id":"TC-0007","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0007"]},
+      {"test_case_id":"TC-0008","generated_file_ids":["FILE-OWNER-REAL-CHAIN"],"generated_method_ids":["METHOD-TC-0008"]}
+    ],
+    "generated_test_files":[
+      {"id":"FILE-OWNER-REAL-CHAIN","path":"src/test/java/org/springframework/samples/petclinic/rest/controller/OwnerRestControllerRealChainTest.java","language":"java","framework":"junit5+spring-boot+mockmvc+mockito","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"}
+    ],
+    "generated_test_methods":[
+      {"id":"METHOD-TC-0001","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0001"],"requirement_ids":["REQ-0001"],"name":"tc0001ExistingOwnerIsReturned","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0002","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0002"],"requirement_ids":["REQ-0002"],"name":"tc0002MissingOwnerReturnsNotFound","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0003","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0003"],"requirement_ids":["REQ-0003"],"name":"tc0003LastNameFilterReturnsMatchingOwnersInOrder","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0004","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0004"],"requirement_ids":["REQ-0004"],"name":"tc0004EmptyLastNameFilterReturnsNotFound","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0005","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0005"],"requirement_ids":["REQ-0005"],"name":"tc0005UnfilteredListReturnsSuppliedOwnersInOrder","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0006","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0006"],"requirement_ids":["REQ-0006"],"name":"tc0006EmptyOwnerListReturnsNotFound","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0007","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0007"],"requirement_ids":["REQ-0007"],"name":"tc0007ValidOwnerIsCreated","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"},
+      {"id":"METHOD-TC-0008","file_id":"FILE-OWNER-REAL-CHAIN","test_case_ids":["TC-0008"],"requirement_ids":["REQ-0008"],"name":"tc0008OwnerWithoutFirstNameIsRejected","content_digest":"sha256:bdbe7a58d12fad7828c09d942ea60dc40790ca42f1a81ecc3b29344d7942827f"}
+    ]
+  },
+  "warnings":[
+    "Project-native setup — the generated class preserves SpringBootTest, ApplicationTestConfig, MockMvc standalone controller advice, MockitoBean ClinicService, and OWNER_ADMIN mock-user authorization.",
+    "Project integrity — only the isolated generated test file is added; application source, configuration, dependencies, and behavior are unchanged."
+  ]
+}

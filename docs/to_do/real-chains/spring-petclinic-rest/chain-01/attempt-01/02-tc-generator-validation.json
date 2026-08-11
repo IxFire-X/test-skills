@@ -1,0 +1,1 @@
+{"errors":[{"message":"'validation' is not one of ['positive', 'negative', 'boundary', 'authorization', 'security', 'concurrency', 'idempotency', 'observability', 'functional']","path":"/artifacts/generated_test_cases/test_cases/7/categories/1"}],"status":"invalid"}

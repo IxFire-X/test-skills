@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "stage": "tc-to-autotest",
+  "operation": "apply_patch generated test D:\\AI-Projects\\real-chain-projects\\pocketbase-v0.38.2\\apis\\real_chain02_record_rules_test.go",
+  "root_cause": "The generated test would persist a hardcoded authentication bearer token. The file-change safety guard rejected durable credential exposure.",
+  "action": "stopped_without_retry_or_bypass",
+  "pinned_commit": "3616b9d66769dcda95841c52b00c166246323333"
+}

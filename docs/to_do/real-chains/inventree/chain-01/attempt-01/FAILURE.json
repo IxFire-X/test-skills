@@ -1,0 +1,16 @@
+{
+  "status": "stopped",
+  "stage": "context-marker-schema-validation",
+  "classification": "executor-format-error",
+  "root_cause": "Both warning strings omitted the schema-required ' — ' separator.",
+  "failed_command": {
+    "argv": ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe","tools\\validate_artifact.py","schemas\\context-marker-output.schema.json","docs\\to_do\\real-chains\\inventree\\chain-01\\attempt-01\\01-context-marker-output.json"],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "exit_code": 1
+  },
+  "errors": [
+    "warnings[0] does not match ^.+ — .+$",
+    "warnings[1] does not match ^.+ — .+$"
+  ],
+  "retry_policy": "Preserve attempt-01; start attempt-02 with only warning formatting corrected."
+}

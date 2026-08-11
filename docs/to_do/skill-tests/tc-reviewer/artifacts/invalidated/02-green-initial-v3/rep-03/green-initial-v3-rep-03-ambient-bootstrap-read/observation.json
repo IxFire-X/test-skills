@@ -1,0 +1,76 @@
+{
+  "status": "protocol-invalid",
+  "classification": "unscored",
+  "reason_codes": [
+    "ambient-bootstrap-read-not-authorized",
+    "literal-command-evidence-unavailable"
+  ],
+  "attempt_id": "green-initial-v3-rep-03-ambient-bootstrap-read",
+  "archive_root": "artifacts/invalidated/02-green-initial-v3/rep-03/green-initial-v3-rep-03-ambient-bootstrap-read",
+  "thread_id": "019fe9c8-1f75-7240-960d-77dc0395ff01",
+  "fork_turns": "none",
+  "started_at": "2026-08-10T03:47:14.421Z",
+  "finished_at": "2026-08-10T03:48:23Z",
+  "timestamp_sources": {
+    "started_at": "UUIDv7 creation timestamp",
+    "finished_at": "list_threads updatedAt"
+  },
+  "evaluator": {
+    "name": "codex-app-luna-evaluator",
+    "host": "local",
+    "model": "gpt-5.6-luna/max"
+  },
+  "task": "tc-reviewer GREEN-v3 rep-03 Luna",
+  "controller_preflight": {
+    "id": "role-integrity-check",
+    "argv": [
+      "C:\\Program Files\\Git\\bin\\sh.exe",
+      "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+      "--check"
+    ],
+    "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
+    "attempts": [
+      {
+        "execution_context": "sandbox",
+        "error": "CreateProcessAsUserW failed: 5"
+      },
+      {
+        "execution_context": "escalated",
+        "exit_code": 0,
+        "output": "CHECK PASSED"
+      }
+    ],
+    "exit_code": 0
+  },
+  "repetition_commands": [
+    {
+      "id": "ambient-bootstrap-skill-read",
+      "declared_target": "superpowers:using-superpowers",
+      "argv": null,
+      "cwd": null,
+      "exit_code": null,
+      "diagnostic": "Native trace reported one system skill-instruction read but did not expose literal argv, cwd, or exit code."
+    }
+  ],
+  "native_tool_calls": {
+    "apply_patch": 1,
+    "shell_commands": 1,
+    "validators": 0,
+    "semantic_checks": 0
+  },
+  "schema_validation": {
+    "commands_run": 0,
+    "all_valid": null
+  },
+  "semantic_result": {
+    "status": "not-run",
+    "exit_code": null,
+    "errors": []
+  },
+  "retry_or_repair": {
+    "retry_performed": false,
+    "repair_performed": false
+  },
+  "acceptance": "pending-fresh-sol-route-decision",
+  "summary": "The evaluator reported exactly one mandatory superpowers:using-superpowers system-skill read before one completed file change. The required zero-command evaluator boundary was violated. Literal argv, cwd, and exit status were not exposed by the native trace, so this unscored archive records them as explicit unknowns. No validator or semantic check ran; no retry or repair occurred."
+}

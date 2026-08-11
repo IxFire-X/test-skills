@@ -1,0 +1,61 @@
+{
+  "status": "generated-feature-pass_full-suite-environment-fail",
+  "generated_file": {
+    "path": "D:\\AI-Projects\\real-chain-projects\\inventree-clean\\src\\backend\\InvenTree\\part\\test_real_chain.py",
+    "sha256": "f6717f77aa59b1ef528ab93b7d00370b8b533feaca7f01440ad14865f9e85973"
+  },
+  "gates": [
+    {
+      "name": "targeted-generated-class",
+      "status": "pass",
+      "tests": 6,
+      "passed": 6,
+      "failed": 0,
+      "exit_code": 0,
+      "duration_seconds": 45.5
+    },
+    {
+      "name": "part-category-regression",
+      "status": "pass",
+      "tests": 17,
+      "passed": 17,
+      "failed": 0,
+      "exit_code": 0,
+      "duration_seconds": 53.0
+    },
+    {
+      "name": "full-backend-first-environment",
+      "status": "invalid-environment-diagnostic",
+      "tests": 1471,
+      "failures": 108,
+      "errors": 33,
+      "skipped": 11,
+      "exit_code": 1,
+      "diagnostic": "Local config disabled plugins and enabled production throttling; this is not the official CI test environment."
+    },
+    {
+      "name": "full-backend-official-app-list-ci-flags",
+      "status": "environment-limited",
+      "tests": 1471,
+      "passed": 1433,
+      "failures": 27,
+      "errors": 0,
+      "skipped": 11,
+      "exit_code": 1,
+      "duration_seconds": 560.0,
+      "diagnostics": [
+        "Windows path assertions expect Unix-style config/... paths.",
+        "CI-built static and media assets are absent from the clean filtered clone.",
+        "A subprocess resolves the Windows python app alias rather than the active venv interpreter.",
+        "The preserved database carries state between full runs; one email cleanup assertion observed two records."
+      ]
+    },
+    {
+      "name": "ruff-generated-file",
+      "status": "not-available",
+      "exit_code": 1,
+      "diagnostic": "The existing InvenTree virtual environment does not contain the ruff module; no installation was attempted."
+    }
+  ],
+  "conclusion": "The full portable skill chain and generated feature tests pass. A project-wide green claim is not made because 27 unrelated environment/setup failures remain in the full backend suite."
+}

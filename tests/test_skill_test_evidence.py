@@ -27,19 +27,61 @@ UTC_Z_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 DEFAULT_FINAL_PHASE = "04-green-final"
 DEFAULT_RED_PHASE = "01-red-control"
 CONTEXT_MARKER_PROTOCOL_CONTRACT_VERSION = 1
-PROTOCOL_V1_SKILL_IDS = frozenset({"context-marker", "tc-generator"})
+PROTOCOL_V1_SKILL_IDS = frozenset({"context-marker", "tc-generator", "tc-reviewer"})
+TC_REVIEWER_FIXTURES = (
+    "clean-accepted",
+    "typo-only",
+    "blocking-missing-result",
+    "blocking-fabricated-auth",
+)
 PROTOCOL_V1_OUTPUT_CONTRACTS = {
     "context-marker": ("context-marker-output.schema.json", "context-marker-output.json"),
     "tc-generator": ("tc-generator-output.schema.json", "tc-generator-output.json"),
+    "tc-reviewer": ("tc-reviewer-output.schema.json", "clean-accepted-tc-reviewer-output.json"),
 }
+SKILL_INPUT_AMENDMENTS = Path(
+    "docs/to_do/skill-tests/portable-skill-input-amendments.json"
+)
 
 
 def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _assert_required_skill_inputs_are_current_or_explicitly_amended(root, scenario):
+    amendment_document = _read_json(root / SKILL_INPUT_AMENDMENTS)
+    amendment = amendment_document["amendments"].get(scenario["skill_id"])
+    amended_inputs = {
+        item["path"]: item for item in (amendment or {}).get("inputs", [])
+    }
+    changed_paths = set()
+
+    for recorded in scenario["required_skill_inputs"]:
+        source = root / recorded["path"]
+        current_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+        if current_sha256 == recorded["sha256"]:
+            continue
+        changed_paths.add(recorded["path"])
+        amended = amended_inputs[recorded["path"]]
+        assert amended["previous_sha256"] == recorded["sha256"]
+        assert amended["current_sha256"] == current_sha256
+
+    assert set(amended_inputs) == changed_paths
+    if amendment:
+        assert amendment["reason"]
+        assert amendment["status"]
+        assert all((root / path).exists() for path in amendment["verification_paths"])
+
+
 def _effective_final_phase(scenario):
     return scenario.get("effective_final_phase", DEFAULT_FINAL_PHASE)
+
+
+def _effective_final_phase_by_repetition(scenario):
+    phases = scenario.get("final_phase_by_repetition")
+    if phases is not None:
+        return phases
+    return {repetition: _effective_final_phase(scenario) for repetition in REPETITIONS}
 
 
 def _effective_red_phase(scenario):
@@ -54,14 +96,764 @@ def _effective_green_initial_phase(scenario):
     return scenario.get("effective_green_initial_phase", "02-green-initial")
 
 
+def _effective_green_initial_phase_by_repetition(scenario):
+    phases = scenario.get("green_initial_phase_by_repetition")
+    if phases is not None:
+        return phases
+    phase = _effective_green_initial_phase(scenario)
+    return {repetition: phase for repetition in REPETITIONS}
+
+
+def test_tc_reviewer_mixed_initial_green_routes_each_repetition_to_its_declared_phase(root):
+    """The scored v2/v4 prefix closes with the successful v5/rep-05 recovery run."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+
+    expected = {
+        "rep-01": "02-green-initial-v2",
+        "rep-02": "02-green-initial-v2",
+        "rep-03": "02-green-initial-v4",
+        "rep-04": "02-green-initial-v4",
+        "rep-05": "02-green-initial-v5",
+    }
+
+    assert _effective_green_initial_phase_by_repetition(scenario) == expected
+    assert "effective_green_initial_phase" not in scenario
+    assert scenario["output_paths"] == _expected_output_paths(
+        effective_final_phase=_effective_final_phase(scenario),
+        effective_red_phase=_effective_red_phase(scenario),
+        effective_green_initial_phase_by_repetition=expected,
+        effective_final_phase_by_repetition=_effective_final_phase_by_repetition(scenario),
+        effective_red_repetitions=_effective_red_repetitions(scenario),
+    )
+    assert _tc_generator_execution_order(
+        _effective_final_phase(scenario),
+        _effective_red_phase(scenario),
+        _effective_red_repetitions(scenario),
+        effective_green_initial_phase_by_repetition=expected,
+        effective_pressure_phase=_effective_pressure_phase(scenario),
+    )[:6] == [
+        ("01-red-control-v3", "rep-01"),
+        ("02-green-initial-v2", "rep-01"),
+        ("02-green-initial-v2", "rep-02"),
+        ("02-green-initial-v4", "rep-03"),
+        ("02-green-initial-v4", "rep-04"),
+        ("02-green-initial-v5", "rep-05"),
+    ]
+    assert [(run["phase"], run["repetition"]) for run in metadata["runs"]] == [
+        ("01-red-control-v3", "rep-01"),
+        ("02-green-initial-v2", "rep-01"),
+        ("02-green-initial-v2", "rep-02"),
+        ("02-green-initial-v4", "rep-03"),
+        ("02-green-initial-v4", "rep-04"),
+        ("02-green-initial-v5", "rep-05"),
+        ("03-pressure-v2", "pressure"),
+        ("04-green-final", "rep-01"),
+        ("04-green-final", "rep-02"),
+        ("05-green-final-v2", "rep-03"),
+    ]
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_tc_reviewer_v5_checker_authority_requires_the_frozen_v1_and_primary_v2_pair(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    validator = load_tool("validate_artifact").Draft202012Validator(
+        _read_json(root / "schemas/skill-test-evidence.schema.json")
+    )
+
+    assert scenario["semantic_checker_authority"] == {
+        "primary": {
+            "path": "check_outputs_v2.py",
+            "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b",
+        },
+        "imported_dependency": {
+            "path": "check_outputs.py",
+            "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec",
+        },
+    }
+    for mutate in (
+        lambda value: value.pop("imported_dependency"),
+        lambda value: value["primary"].update(path="check_outputs.py"),
+        lambda value: value["primary"].update(sha256="0" * 64),
+        lambda value: value["imported_dependency"].update(path="check_outputs_v2.py"),
+        lambda value: value["imported_dependency"].update(sha256="0" * 64),
+    ):
+        invalid = copy.deepcopy(scenario)
+        mutate(invalid["semantic_checker_authority"])
+        assert list(validator.iter_errors(invalid))
+
+
+def test_tc_reviewer_final_rep03_false_negative_archive_is_bound_and_mutation_rejected(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    validator = load_tool("validate_artifact").Draft202012Validator(
+        _read_json(root / "schemas/skill-test-evidence.schema.json")
+    )
+    attempt = next(item for item in metadata["invalidated_attempts"] if item["attempt_id"] == "green-final-rep-03-semantic-checker-false-negative")
+    assert scenario["final_phase_by_repetition"]["rep-03"] == "05-green-final-v2"
+    assert attempt["reason_codes"] == ["semantic-check-failed", "semantic-checker-false-negative"]
+    archive_root = campaign / "artifacts/invalidated/04-green-final/rep-03/green-final-rep-03-semantic-checker-false-negative"
+    live_output = campaign / "artifacts/outputs/04-green-final/rep-03"
+    live_protocol = campaign / "artifacts/protocol/04-green-final/rep-03"
+    for name in ["prompt.txt", "observation.json", "run-protocol.json", *(f"{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES), *(f"validation-{fixture}.json" for fixture in TC_REVIEWER_FIXTURES), "semantic-result.json"]:
+        source = live_protocol / name if name in {"prompt.txt", "observation.json", "run-protocol.json"} else live_output / name
+        assert archive_root.joinpath(name).read_bytes() == source.read_bytes()
+    assert [json.loads((archive_root / f"validation-{fixture}.json").read_text(encoding="utf-8")) for fixture in TC_REVIEWER_FIXTURES] == [{"errors": [], "status": "valid"}] * 4
+    assert json.loads((archive_root / "semantic-result.json").read_text(encoding="utf-8")) == {"errors": ["typo-only: finding must bind the spelling defect to title evidence"], "status": "fail"}
+    invalid = copy.deepcopy(metadata)
+    next(item for item in invalid["invalidated_attempts"] if item["attempt_id"] == attempt["attempt_id"])["replacement_checker"]["path"] = "check_outputs_v2.py"
+    assert list(validator.iter_errors(invalid))
+
+
+def _assert_tc_reviewer_predelegation_checker_binding(scenario, campaign, phase):
+    if phase == "05-green-final-v2":
+        authority = scenario["final_semantic_checker_authority"]
+        assert authority == {
+            "primary": {"path": "check_outputs_v3.py", "sha256": "dc81f84d023e7b64946d3806d49984787ab3bf54b8140a68d0d5c782fda0d890"},
+            "imported_dependency": {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"},
+            "transitive_dependency": {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"},
+        }
+        for binding in authority.values():
+            assert hashlib.sha256((campaign / binding["path"]).read_bytes()).hexdigest() == binding["sha256"]
+        _assert_tc_reviewer_raw_input_binding(scenario, campaign)
+        return campaign / "check_outputs_v3.py"
+    if (
+        scenario["skill_id"] != "tc-reviewer"
+        or scenario.get("green_initial_phase_by_repetition", {}).get("rep-05")
+        != "02-green-initial-v5"
+        or phase not in {"02-green-initial-v5", "pressure", "03-pressure-v2", "04-green-final"}
+    ):
+        return campaign / "check_outputs.py"
+    authority = scenario["semantic_checker_authority"]
+    assert authority == {
+        "primary": {
+            "path": "check_outputs_v2.py",
+            "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b",
+        },
+        "imported_dependency": {
+            "path": "check_outputs.py",
+            "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec",
+        },
+    }
+    for binding in authority.values():
+        path = campaign / binding["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == binding["sha256"]
+    _assert_tc_reviewer_raw_input_binding(scenario, campaign)
+    return campaign / authority["primary"]["path"]
+
+
+def _assert_tc_reviewer_raw_input_binding(scenario, campaign):
+    expected_paths = [f"artifacts/inputs/{fixture}.json" for fixture in TC_REVIEWER_FIXTURES]
+    assert scenario["raw_input_allowlist"] == expected_paths
+    actual_hashes = {
+        path: hashlib.sha256((campaign / path).read_bytes()).hexdigest()
+        for path in expected_paths
+    }
+    assert scenario["raw_input_sha256"] == actual_hashes
+
+
+def test_tc_reviewer_v5_predelegation_binding_hash_checks_the_primary_and_imported_pair(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    assert _assert_tc_reviewer_predelegation_checker_binding(
+        scenario, campaign, "02-green-initial-v5"
+    ) == campaign / "check_outputs_v2.py"
+    invalid = copy.deepcopy(scenario)
+    invalid["semantic_checker_authority"]["imported_dependency"]["sha256"] = "0" * 64
+    with pytest.raises(AssertionError):
+        _assert_tc_reviewer_predelegation_checker_binding(
+            invalid, campaign, "02-green-initial-v5"
+        )
+
+
+def test_tc_reviewer_v5_semantic_command_accepts_only_the_primary_v2_checker(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_v5_actual_commands(campaign)
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "02-green-initial-v5", "rep-05", commands
+    )
+    commands[-1]["argv"][1] = str((campaign / "check_outputs.py").resolve())
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, "02-green-initial-v5", "rep-05", commands
+        )
+
+
+def _tc_reviewer_v5_actual_commands(campaign):
+    commands = _captured_protocol_v1_final_commands(
+        campaign, "tc-reviewer", "02-green-initial-v5", "rep-05"
+    )[1:]
+    commands[-1]["argv"][1] = str((campaign / "check_outputs_v2.py").resolve())
+    commands.insert(
+        0,
+        {
+            "id": "ambient-bootstrap-skill-read",
+            "argv": [
+                "Get-Content",
+                "-LiteralPath",
+                r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+            ],
+            "cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v5-rep-5",
+            "exit_code": 0,
+        },
+    )
+    return commands
+
+
+def test_tc_reviewer_v5_actual_six_command_shape_accepts_only_the_exact_bootstrap(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_v5_actual_commands(campaign)
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "02-green-initial-v5", "rep-05", commands
+    )
+    for mutate in (
+        lambda values: values[0].update(cwd=r"C:\wrong-cwd"),
+        lambda values: values[-1]["argv"].__setitem__(1, str((campaign / "check_outputs.py").resolve())),
+        lambda values: values.pop(0),
+        lambda values: values.insert(1, copy.deepcopy(values[0])),
+    ):
+        invalid = copy.deepcopy(commands)
+        mutate(invalid)
+        with pytest.raises(AssertionError):
+            _assert_protocol_v1_final_command_capture(
+                scenario, campaign, "02-green-initial-v5", "rep-05", invalid
+            )
+
+
+def _tc_reviewer_pressure_actual_commands(campaign, phase="pressure"):
+    commands = _captured_protocol_v1_final_commands(
+        campaign, "tc-reviewer", "pressure", "pressure"
+    )[1:]
+    commands[-1]["argv"][1] = str((campaign / "check_outputs_v2.py").resolve())
+    if phase != "pressure":
+        for command in commands:
+            command["argv"] = [
+                argument.replace(
+                    r"\artifacts\outputs\03-pressure\pressure",
+                    rf"\artifacts\outputs\{phase}\pressure",
+                )
+                for argument in command["argv"]
+            ]
+    commands.insert(
+        0,
+        {
+            "id": "ambient-bootstrap-skill-read",
+            "argv": [
+                "Get-Content",
+                "-LiteralPath",
+                r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+            ],
+            "cwd": (
+                r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure"
+                if phase == "pressure"
+                else r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure-v2"
+            ),
+            "exit_code": 0,
+        },
+    )
+    return commands
+
+
+def _tc_reviewer_final_green_actual_commands(campaign, repetition, phase="04-green-final"):
+    commands = _captured_protocol_v1_final_commands(
+        campaign, "tc-reviewer", phase, repetition
+    )[1:]
+    for command in commands:
+        command["argv"][0] = r"D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe"
+    commands.insert(
+        0,
+        {
+            "id": "ambient-bootstrap-skill-read",
+            "argv": [
+                "Get-Content",
+                "-LiteralPath",
+                r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+            ],
+            "cwd": (rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-v2-rep-{int(repetition[-2:])}" if phase == "05-green-final-v2" else rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-rep-{int(repetition[-2:])}"),
+            "exit_code": 0,
+        },
+    )
+    return commands
+
+
+def test_tc_reviewer_final_v2_rep03_recovery_wrapper_is_exact_and_excludes_later_repetitions(root):
+    """Catches recovery FINAL commands escaping rep-03, its v3 checker, or four reserved targets."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    phase = "05-green-final-v2"
+    repetition = "rep-03"
+    commands = _tc_reviewer_final_green_actual_commands(campaign, repetition, phase)
+    targets = [command["argv"][-1] for command in commands[1:5]]
+    expected_targets = [
+        str((campaign / "artifacts/outputs" / phase / repetition / f"{fixture}-tc-reviewer-output.json").resolve())
+        for fixture in TC_REVIEWER_FIXTURES
+    ]
+
+    assert len(commands) == 6
+    assert commands[0] == {
+        "id": "ambient-bootstrap-skill-read",
+        "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+        ],
+        "cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-v2-rep-3",
+        "exit_code": 0,
+    }
+    assert targets == expected_targets
+    assert commands[-1]["argv"] == [
+        r"D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe",
+        str((campaign / "check_outputs_v3.py").resolve()),
+        "--input-dir",
+        str((campaign / "artifacts/inputs").resolve()),
+        "--output-dir",
+        str((campaign / "artifacts/outputs" / phase / repetition).resolve()),
+        "--mode",
+        "canonical",
+    ]
+    _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetition, commands)
+
+    for mutate in (
+        lambda values: values[0].update(cwd=r"C:\wrong-cwd"),
+        lambda values: values[-1]["argv"].__setitem__(1, str((campaign / "check_outputs_v2.py").resolve())),
+        lambda values: values[1]["argv"].__setitem__(-1, r"D:\escaped.json"),
+    ):
+        invalid = copy.deepcopy(commands)
+        mutate(invalid)
+        with pytest.raises(AssertionError):
+            _assert_protocol_v1_final_command_capture(
+                scenario, campaign, phase, repetition, invalid
+            )
+
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, "04-green-final", repetition, commands
+        )
+    for later_repetition in ("rep-04", "rep-05"):
+        later_commands = _replace_command_text(commands, "rep-03", later_repetition)
+        later_commands = _replace_command_text(
+            later_commands, "rep-3", f"rep-{int(later_repetition[-2:])}"
+        )
+        with pytest.raises(AssertionError):
+            _assert_protocol_v1_final_command_capture(
+                scenario, campaign, phase, later_repetition, later_commands
+            )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda values: values.pop(0),
+        lambda values: values.insert(1, copy.deepcopy(values[0])),
+        lambda values: values[0].update(cwd=r"C:\wrong-cwd"),
+        lambda values: values[-1]["argv"].__setitem__(1, str((Path(values[-1]["argv"][1]).parent / "check_outputs.py").resolve())),
+        lambda values: values[-1]["argv"].__setitem__(-1, "canonical"),
+        lambda values: values.__setitem__(slice(1, 3), [values[2], values[1]]),
+        lambda values: values.append(copy.deepcopy(values[-1])),
+    ],
+)
+def test_tc_reviewer_pressure_actual_six_command_shape_rejects_any_noncanonical_trace(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_pressure_actual_commands(campaign)
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "pressure", "pressure", commands
+    )
+    invalid = copy.deepcopy(commands)
+    mutate(invalid)
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, "pressure", "pressure", invalid
+        )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda observation: observation["evaluator_tool_sequence"].pop(0),
+        lambda observation: observation["evaluator_tool_sequence"].append(
+            copy.deepcopy(observation["evaluator_tool_sequence"][0])
+        ),
+        lambda observation: observation["evaluator_tool_sequence"][0].update(cwd=r"C:\wrong-cwd"),
+        lambda observation: observation["evaluator_tool_sequence"][1].update(file_changes=3),
+    ],
+)
+def test_tc_reviewer_pressure_observation_allows_only_bootstrap_and_four_file_change(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    commands = _tc_reviewer_pressure_actual_commands(campaign)
+    observation = {
+        "task_cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure",
+        "evaluator_tool_sequence": [
+            {
+                "sequence": 1,
+                "tool": "commandExecution",
+                "id": commands[0]["id"],
+                "argv": commands[0]["argv"],
+                "cwd": commands[0]["cwd"],
+                "exit_code": commands[0]["exit_code"],
+                "allowed": True,
+            },
+            {"sequence": 2, "tool": "fileChange", "file_changes": 4},
+        ],
+    }
+    protocol = {"commands": commands}
+
+    _assert_tc_reviewer_pressure_evaluator_observation(
+        observation, protocol, commands, campaign, "pressure"
+    )
+    invalid = copy.deepcopy(observation)
+    mutate(invalid)
+    with pytest.raises(AssertionError):
+        _assert_tc_reviewer_pressure_evaluator_observation(
+            invalid, protocol, commands, campaign, "pressure"
+        )
+
+
+def test_tc_reviewer_pressure_v2_scaffold_binds_cwd_targets_self_report_and_metadata_contract(root):
+    """Catches v2 reusing the archived cwd or accepting divergent output self-report."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    phase = scenario["effective_pressure_phase"]
+    commands = _tc_reviewer_pressure_actual_commands(campaign, phase)
+    targets = [command["argv"][-1] for command in commands[1:5]]
+    observation = {
+        "task_cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure-v2",
+        "evaluator_tool_sequence": [
+            {
+                "sequence": 1,
+                "tool": "commandExecution",
+                "id": commands[0]["id"],
+                "argv": commands[0]["argv"],
+                "cwd": commands[0]["cwd"],
+                "exit_code": commands[0]["exit_code"],
+                "allowed": True,
+            },
+            {
+                "sequence": 2,
+                "tool": "fileChange",
+                "file_changes": 4,
+                "actual_output_paths": targets,
+            },
+        ],
+        "evaluator_reported_output_paths": targets,
+    }
+
+    _assert_protocol_v1_final_command_capture(scenario, campaign, phase, "pressure", commands)
+    _assert_tc_reviewer_pressure_evaluator_observation(
+        observation, {"commands": commands}, commands, campaign, phase
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        ("missing map", lambda scenario, _metadata: scenario.pop("green_initial_phase_by_repetition")),
+        (
+            "swapped v2/v4 route",
+            lambda scenario, _metadata: scenario["green_initial_phase_by_repetition"].update(
+                {"rep-02": "02-green-initial-v4", "rep-03": "02-green-initial-v2"}
+            ),
+        ),
+        (
+            "v2 rep-03 scored",
+            lambda _scenario, metadata: metadata["runs"].append(
+                {**copy.deepcopy(metadata["runs"][-1]), "phase": "02-green-initial-v2", "repetition": "rep-03"}
+            ),
+        ),
+        (
+            "v4 rep-04 scored before its turn",
+            lambda _scenario, metadata: metadata["runs"].append(
+                {**copy.deepcopy(metadata["runs"][-1]), "repetition": "rep-04"}
+            ),
+        ),
+        ("missing invalidation", lambda _scenario, metadata: metadata["invalidated_attempts"].pop()),
+    ],
+)
+def test_tc_reviewer_mixed_initial_green_route_rejects_boundary_mutations(root, name, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+    mutate(scenario, metadata)
+
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def test_nullable_native_command_observation_is_scoped_to_the_exact_v3_attempt(root):
+    """Prevents a missing literal argv/cwd/exit from becoming generic invalidation evidence."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    protocol = _read_json(
+        campaign
+        / "artifacts/invalidated/02-green-initial-v3/rep-03/"
+        "green-initial-v3-rep-03-ambient-bootstrap-read/run-protocol.json"
+    )
+    schema = _read_json(root / "schemas/skill-test-evidence.schema.json")
+    validator = load_tool("validate_artifact").Draft202012Validator(schema)
+    nullable_command = copy.deepcopy(
+        next(
+            item for item in metadata["invalidated_attempts"]
+            if item["attempt_id"] == "green-initial-v3-rep-03-ambient-bootstrap-read"
+        )["commands"]
+    )
+    grafted = copy.deepcopy(metadata)
+    grafted["invalidated_attempts"][0]["commands"] = nullable_command
+
+    assert not list(validator.iter_errors(metadata))
+    assert not list(validator.iter_errors(protocol))
+    assert list(validator.iter_errors(grafted))
+
+
+def test_tc_reviewer_v4_rep03_captures_the_allowed_bootstrap_before_controller_checks(root):
+    """The v4 wrapper permits one exact native bootstrap without weakening other command records."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scenario = _read_json(campaign / "00-scenario.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+    run = next(
+        item for item in metadata["runs"]
+        if (item["phase"], item["repetition"]) == ("02-green-initial-v4", "rep-03")
+    )
+    protocol = _read_json(campaign / run["protocol_snapshot"]["path"])
+
+    assert run["commands"][0] == {
+        "id": "ambient-bootstrap-skill-read",
+        "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+        ],
+        "cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-3",
+        "exit_code": 0,
+    }
+    assert [command["id"] for command in run["commands"]] == [
+        "ambient-bootstrap-skill-read",
+        "validate-artifact-clean-accepted",
+        "validate-artifact-typo-only",
+        "validate-artifact-blocking-missing-result",
+        "validate-artifact-blocking-fabricated-auth",
+        "semantic-check",
+    ]
+    assert all(command["cwd"] == str(campaign) for command in run["commands"][1:])
+    assert protocol["commands"] == run["commands"]
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
+def _replace_command_text(value, source, replacement):
+    if isinstance(value, str):
+        return value.replace(source, replacement)
+    if isinstance(value, list):
+        return [_replace_command_text(item, source, replacement) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_command_text(item, source, replacement) for key, item in value.items()}
+    return value
+
+
+def _tc_reviewer_v4_commands_for_repetition(root, repetition):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    rep03 = next(
+        item for item in metadata["runs"]
+        if (item["phase"], item["repetition"]) == ("02-green-initial-v4", "rep-03")
+    )
+    commands = copy.deepcopy(rep03["commands"])
+    target_number = repetition[-2:].lstrip("0")
+    commands = _replace_command_text(commands, "rep-03", repetition)
+    return _replace_command_text(commands, "rep-3", f"rep-{target_number}")
+
+
+@pytest.mark.parametrize(
+    ("repetition", "evaluator_cwd"),
+    [
+        ("rep-03", r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-3"),
+        ("rep-04", r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-4"),
+        ("rep-05", r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-5"),
+    ],
+)
+def test_tc_reviewer_v4_bootstrap_command_helper_accepts_each_reserved_repetition(root, repetition, evaluator_cwd):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_v4_commands_for_repetition(root, repetition)
+
+    assert commands[0]["cwd"] == evaluator_cwd
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "02-green-initial-v4", repetition, commands
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda commands: commands[0].update(cwd=r"C:\wrong-cwd"),
+        lambda commands: commands[0]["argv"].__setitem__(0, "Read-Host"),
+        lambda commands: commands.insert(1, copy.deepcopy(commands[0])),
+    ],
+)
+def test_tc_reviewer_v4_bootstrap_command_helper_rejects_bootstrap_mutations(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_v4_commands_for_repetition(root, "rep-05")
+    mutate(commands)
+
+    with pytest.raises(AssertionError):
+        _assert_protocol_v1_final_command_capture(
+            scenario, campaign, "02-green-initial-v4", "rep-05", commands
+        )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda attempt: attempt.update(reason_codes=["canonical-input-boundary-violated"]),
+        lambda attempt: attempt["commands"][0]["argv"].__setitem__(0, "Read-Host"),
+        lambda attempt: attempt["commands"][0].update(cwd=r"C:\other-cwd"),
+        lambda attempt: attempt["commands"][0].update(exit_code=1),
+    ],
+)
+def test_tc_reviewer_mixed_initial_green_invalidation_rejects_command_mutations(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    attempt = copy.deepcopy(next(
+        item for item in metadata["invalidated_attempts"]
+        if item["attempt_id"] == "green-initial-v2-rep-03-unauthorized-skill-read"
+    ))
+    mutate(attempt)
+
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+
+
+def test_tc_reviewer_mixed_initial_green_invalidation_rejects_archive_and_protocol_command_mutations(tmp_path, root):
+    source = root / "docs/to_do/skill-tests/tc-reviewer"
+    campaign = tmp_path / "tc-reviewer"
+    shutil.copytree(source, campaign)
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    attempt = next(
+        item for item in metadata["invalidated_attempts"]
+        if item["attempt_id"] == "green-initial-v2-rep-03-unauthorized-skill-read"
+    )
+
+    archive_prompt = campaign / attempt["prompt_snapshot"]["path"]
+    archive_prompt.write_bytes(b"mutated archive prompt\n")
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+
+    archive_prompt.write_bytes((source / attempt["prompt_snapshot"]["path"]).read_bytes())
+    protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+    protocol["commands"][0]["id"] = "mutated-command"
+    with pytest.raises(AssertionError):
+        _assert_tc_generator_forward_invalidated_attempt(
+            attempt, campaign, scenario, protocol_override=protocol
+        )
+
+
+def test_legacy_single_initial_green_phase_still_has_a_uniform_repetition_map():
+    scenario = {"effective_green_initial_phase": "02-green-initial-v2"}
+
+    assert _effective_green_initial_phase_by_repetition(scenario) == {
+        repetition: "02-green-initial-v2" for repetition in REPETITIONS
+    }
+
+
+def test_mixed_green_map_is_exclusive_with_legacy_single_phase_and_legacy_v2_remains_schema_valid(root):
+    scenario = _read_json(root / "docs/to_do/skill-tests/tc-reviewer/00-scenario.json")
+    validate_artifact = load_tool("validate_artifact")
+    schema_path = root / "schemas/skill-test-evidence.schema.json"
+
+    both_routes = copy.deepcopy(scenario)
+    both_routes["effective_green_initial_phase"] = "02-green-initial-v2"
+    validator = validate_artifact.Draft202012Validator(_read_json(schema_path))
+    assert list(validator.iter_errors(both_routes))
+
+    legacy_v2 = copy.deepcopy(scenario)
+    legacy_v2.pop("green_initial_phase_by_repetition")
+    legacy_v2["effective_green_initial_phase"] = "02-green-initial-v2"
+    legacy_v2["output_paths"] = _expected_output_paths(
+        _effective_final_phase(legacy_v2),
+        _effective_red_phase(legacy_v2),
+        "02-green-initial-v2",
+        _effective_red_repetitions(legacy_v2),
+    )
+    _assert_schema_instance_valid(validate_artifact, schema_path, legacy_v2)
+
+
 def _effective_pressure_phase(scenario):
     return scenario.get("effective_pressure_phase", "pressure")
 
 
+def _resolved_pressure_prompt(scenario):
+    """Resolve the active pressure task without mutating legacy prompt evidence."""
+    prompts = scenario.get("pressure_prompt_by_phase")
+    if prompts is None:
+        return scenario["pressure_prompt"]
+    return prompts[_effective_pressure_phase(scenario)]
+
+
 def _expected_phase_prompt_sha256(scenario, phase):
     if phase == "pressure" or phase.startswith("03-pressure-v"):
+        if "pressure_prompt_by_phase" in scenario:
+            assert phase in scenario["pressure_prompt_by_phase"]
+            return hashlib.sha256(
+                scenario["pressure_prompt_by_phase"][phase].encode("utf-8")
+            ).hexdigest()
         return scenario.get("phase_prompt_sha256", {}).get(phase, scenario["prompt_sha256"]["pressure"])
     return scenario.get("phase_prompt_sha256", {}).get(phase, scenario["prompt_sha256"]["canonical"])
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda scenario: scenario.pop("pressure_prompt_by_phase"),
+        lambda scenario: scenario.update(effective_pressure_phase="03-pressure-v9"),
+        lambda scenario: scenario["pressure_prompt_by_phase"].update(
+            {"03-pressure-v2": scenario["pressure_prompt"]}
+        ),
+    ],
+)
+def test_tc_reviewer_pressure_phase_prompt_resolver_rejects_missing_unknown_or_mismatched_map(
+    root, mutate
+):
+    """Catches active pressure routes falling back to the legacy prompt bytes."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    active_phase = scenario["effective_pressure_phase"]
+    active_prompt = (campaign / "artifacts/protocol" / active_phase / "pressure/prompt.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert _resolved_pressure_prompt(scenario) == active_prompt
+    assert scenario["pressure_prompt_by_phase"]["pressure"] == scenario["pressure_prompt"]
+    assert scenario["prompt_sha256"]["pressure"] == scenario["phase_prompt_sha256"]["pressure"]
+    assert _expected_phase_prompt_sha256(scenario, active_phase) == scenario["phase_prompt_sha256"][active_phase]
+
+    invalid = copy.deepcopy(scenario)
+    mutate(invalid)
+    with pytest.raises((AssertionError, KeyError)):
+        assert hashlib.sha256(_resolved_pressure_prompt(invalid).encode("utf-8")).hexdigest() == invalid[
+            "phase_prompt_sha256"
+        ][_effective_pressure_phase(invalid)]
 
 
 def test_tc_generator_versioned_initial_green_uses_only_v3_scorecard_paths(root):
@@ -179,10 +971,23 @@ def test_context_marker_declared_historical_phase_hashes_bind_immutable_prompts(
             )
 
 
-def _expected_output_paths(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial", effective_red_repetitions=5):
+def _expected_output_paths(
+    effective_final_phase=DEFAULT_FINAL_PHASE,
+    effective_red_phase=DEFAULT_RED_PHASE,
+    effective_green_initial_phase="02-green-initial",
+    effective_red_repetitions=5,
+    effective_green_initial_phase_by_repetition=None,
+    effective_final_phase_by_repetition=None,
+):
+    green_paths = (
+        [f"artifacts/outputs/{effective_green_initial_phase_by_repetition[rep]}/{rep}" for rep in REPETITIONS]
+        if effective_green_initial_phase_by_repetition is not None
+        else [f"artifacts/outputs/{effective_green_initial_phase}/{rep}" for rep in REPETITIONS]
+    )
     return [
         *(f"artifacts/outputs/{effective_red_phase}/{rep}" for rep in REPETITIONS[:effective_red_repetitions]),
-        *(f"artifacts/outputs/{phase}/{rep}" for phase in (effective_green_initial_phase, effective_final_phase) for rep in REPETITIONS),
+        *green_paths,
+        *(f"artifacts/outputs/{(effective_final_phase_by_repetition or {}).get(rep, effective_final_phase)}/{rep}" for rep in REPETITIONS),
     ]
 
 
@@ -206,6 +1011,15 @@ def _protocol_v1_reserved_output(campaign, skill_id, phase, repetition):
     return campaign / "artifacts/outputs" / phase / repetition / output_name
 
 
+def _tc_reviewer_reserved_outputs(campaign, phase, repetition):
+    output_root = (
+        campaign / PRESSURE_OUTPUT_PATH
+        if phase == "pressure"
+        else campaign / "artifacts/outputs" / phase / ("pressure" if phase.startswith("03-pressure-v") else repetition)
+    )
+    return [output_root / f"{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES]
+
+
 def _tc_generator_semantic_mode(phase):
     if phase == DEFAULT_RED_PHASE or phase.startswith(f"{DEFAULT_RED_PHASE}-v"):
         return "red-control"
@@ -219,31 +1033,76 @@ def _tc_generator_semantic_mode(phase):
 def _captured_protocol_v1_final_commands(campaign, skill_id, phase, repetition):
     repository_root = _campaign_repository_root(campaign)
     schema_name, _output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[skill_id]
-    expected_output = _protocol_v1_reserved_output(campaign, skill_id, phase, repetition)
     python_executable = (
         str(Path(sys.executable).resolve())
-        if skill_id == "tc-generator"
+        if skill_id in {"tc-generator", "tc-reviewer"}
         else str((repository_root / "bin/python.exe").resolve())
     )
-    commands = [
-        {
-            "id": "evaluate",
-            "argv": [str((repository_root / "bin/evaluator.exe").resolve()), "--task", "skill-evaluation"],
-            "cwd": str(campaign.resolve()),
-            "exit_code": 0,
-        },
-        {
-            "id": "validate-artifact",
+    commands = [{
+        "id": "evaluate",
+        "argv": [str((repository_root / "bin/evaluator.exe").resolve()), "--task", "skill-evaluation"],
+        "cwd": str(campaign.resolve()),
+        "exit_code": 0,
+    }]
+    if skill_id == "tc-reviewer":
+        for fixture, expected_output in zip(
+            TC_REVIEWER_FIXTURES,
+            _tc_reviewer_reserved_outputs(campaign, phase, repetition),
+            strict=True,
+        ):
+            commands.append({
+                "id": f"validate-artifact-{fixture}",
+                "argv": [
+                    python_executable,
+                    str((repository_root / "tools/validate_artifact.py").resolve()),
+                    str((repository_root / "schemas" / schema_name).resolve()),
+                    str(expected_output.resolve()),
+                ],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 0,
+            })
+        output_dir = _tc_reviewer_reserved_outputs(campaign, phase, repetition)[0].parent
+        commands.append({
+            "id": "semantic-check",
             "argv": [
                 python_executable,
-                str((repository_root / "tools/validate_artifact.py").resolve()),
-                str((repository_root / "schemas" / schema_name).resolve()),
-                str(expected_output.resolve()),
+                str(
+                    (
+                        campaign
+                        / (
+                            "check_outputs_v3.py"
+                            if phase == "05-green-final-v2"
+                            else (
+                                "check_outputs_v2.py"
+                                if phase == "04-green-final"
+                                else "check_outputs.py"
+                            )
+                        )
+                    ).resolve()
+                ),
+                "--input-dir",
+                str((campaign / "artifacts/inputs").resolve()),
+                "--output-dir",
+                str(output_dir.resolve()),
+                "--mode",
+                _tc_generator_semantic_mode(phase),
             ],
             "cwd": str(campaign.resolve()),
             "exit_code": 0,
-        },
-    ]
+        })
+        return commands
+    expected_output = _protocol_v1_reserved_output(campaign, skill_id, phase, repetition)
+    commands.append({
+        "id": "validate-artifact",
+        "argv": [
+            python_executable,
+            str((repository_root / "tools/validate_artifact.py").resolve()),
+            str((repository_root / "schemas" / schema_name).resolve()),
+            str(expected_output.resolve()),
+        ],
+        "cwd": str(campaign.resolve()),
+        "exit_code": 0,
+    })
     if skill_id == "tc-generator":
         commands.append(
             {
@@ -271,7 +1130,92 @@ def _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetit
     if scenario["skill_id"] == "context-marker" and phase != _effective_final_phase(scenario):
         return
 
-    if scenario["skill_id"] == "tc-generator":
+    bootstrap_cwd = None
+    if (
+        scenario["skill_id"] == "tc-reviewer"
+        and phase == "02-green-initial-v4"
+        and repetition in {"rep-03", "rep-04", "rep-05"}
+    ):
+        evaluator_cwd_by_repetition = {
+            "rep-03": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-3",
+            "rep-04": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-4",
+            "rep-05": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v4-rep-5",
+        }
+        bootstrap_cwd = evaluator_cwd_by_repetition[repetition]
+    elif (
+        scenario["skill_id"] == "tc-reviewer"
+        and phase == "02-green-initial-v5"
+        and repetition == "rep-05"
+    ):
+        bootstrap_cwd = r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-v5-rep-5"
+    elif (
+        scenario["skill_id"] == "tc-reviewer"
+        and phase == "pressure"
+        and repetition == "pressure"
+    ):
+        bootstrap_cwd = r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure"
+    elif (
+        scenario["skill_id"] == "tc-reviewer"
+        and phase == "03-pressure-v2"
+        and repetition == "pressure"
+    ):
+        bootstrap_cwd = r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure-v2"
+    elif (
+        scenario["skill_id"] == "tc-reviewer"
+        and (
+            (phase == "04-green-final" and repetition in REPETITIONS)
+            or (phase == "05-green-final-v2" and repetition == "rep-03")
+        )
+    ):
+        bootstrap_cwd = (rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-v2-rep-{int(repetition[-2:])}" if phase == "05-green-final-v2" else rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-rep-{int(repetition[-2:])}")
+    if bootstrap_cwd is not None:
+        bootstrap = {
+            "id": "ambient-bootstrap-skill-read",
+            "argv": [
+                "Get-Content",
+                "-LiteralPath",
+                r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+            ],
+            "cwd": bootstrap_cwd,
+            "exit_code": 0,
+        }
+        assert commands[0] == bootstrap
+        controller_commands = commands[1:]
+        assert len(controller_commands) == 5
+        assert all(set(command) == {"id", "argv", "cwd", "exit_code"} for command in controller_commands)
+        assert all(command["exit_code"] == 0 and command["cwd"] == str(campaign.resolve()) for command in controller_commands)
+        expected_outputs = _tc_reviewer_reserved_outputs(campaign, phase, repetition)
+        repository_root = _campaign_repository_root(campaign)
+        executable = r"D:\AI-Projects\.tools\skill-audit-venv\Scripts\python.exe"
+        for fixture, command, expected_output in zip(
+            TC_REVIEWER_FIXTURES, controller_commands[:4], expected_outputs, strict=True
+        ):
+            assert command == {
+                "id": f"validate-artifact-{fixture}",
+                "argv": [
+                    executable,
+                    str((repository_root / "tools/validate_artifact.py").resolve()),
+                    str((repository_root / "schemas/tc-reviewer-output.schema.json").resolve()),
+                    str(expected_output.resolve()),
+                ],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 0,
+            }
+        assert controller_commands[-1] == {
+            "id": "semantic-check",
+            "argv": [
+                executable,
+                str(_assert_tc_reviewer_predelegation_checker_binding(scenario, campaign, phase).resolve()),
+                "--input-dir", str((campaign / "artifacts/inputs").resolve()),
+                "--output-dir", str(expected_outputs[0].parent.resolve()),
+                "--mode", _tc_generator_semantic_mode(phase),
+            ],
+            "cwd": str(campaign.resolve()),
+            "exit_code": 0,
+        }
+        return
+
+    if scenario["skill_id"] in {"tc-generator", "tc-reviewer"}:
         assert all(command["exit_code"] == 0 for command in commands)
 
     assert all(set(command) == {"id", "argv", "cwd", "exit_code"} for command in commands)
@@ -292,6 +1236,45 @@ def _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetit
         and Path(command["argv"][1]).is_absolute()
         and Path(command["argv"][1]).resolve() == canonical_validator_path
     ]
+    if scenario["skill_id"] == "tc-reviewer":
+        expected_outputs = _tc_reviewer_reserved_outputs(campaign, phase, repetition)
+        assert validator_positions == list(range(len(commands) - 5, len(commands) - 1))
+        schema_path = (_campaign_repository_root(campaign) / "schemas/tc-reviewer-output.schema.json").resolve()
+        executable = commands[validator_positions[0]]["argv"][0]
+        for fixture, index, expected_output in zip(
+            TC_REVIEWER_FIXTURES,
+            validator_positions,
+            expected_outputs,
+            strict=True,
+        ):
+            validator = commands[index]
+            assert validator == {
+                "id": f"validate-artifact-{fixture}",
+                "argv": [
+                    executable,
+                    str(canonical_validator_path),
+                    str(schema_path),
+                    str(expected_output.resolve()),
+                ],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 0,
+            }
+        assert commands[-1] == {
+            "id": "semantic-check",
+            "argv": [
+                executable,
+                str(_assert_tc_reviewer_predelegation_checker_binding(scenario, campaign, phase).resolve()),
+                "--input-dir",
+                str((campaign / "artifacts/inputs").resolve()),
+                "--output-dir",
+                str(expected_outputs[0].parent.resolve()),
+                "--mode",
+                _tc_generator_semantic_mode(phase),
+            ],
+            "cwd": str(campaign.resolve()),
+            "exit_code": 0,
+        }
+        return
     validator_index = len(commands) - 2 if scenario["skill_id"] == "tc-generator" else len(commands) - 1
     assert validator_positions == [validator_index]
     validator = commands[validator_index]
@@ -326,16 +1309,200 @@ def _assert_protocol_v1_final_command_capture(scenario, campaign, phase, repetit
         }
 
 
+def _assert_tc_reviewer_pressure_evaluator_observation(
+    observation, protocol, commands, campaign, phase
+):
+    bootstrap = commands[0]
+    expected_cwd = (
+        r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure"
+        if phase == "pressure"
+        else r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-pressure-v2"
+    )
+    assert observation["task_cwd"] == expected_cwd
+    assert len(observation["evaluator_tool_sequence"]) == 2
+    bootstrap_observation, output_change = observation["evaluator_tool_sequence"]
+    assert bootstrap_observation == {
+        "sequence": 1,
+        "tool": "commandExecution",
+        "id": bootstrap["id"],
+        "argv": bootstrap["argv"],
+        "cwd": bootstrap["cwd"],
+        "exit_code": bootstrap["exit_code"],
+        "allowed": True,
+    }
+    assert output_change["sequence"] == 2
+    assert output_change["tool"] == "fileChange"
+    assert output_change["file_changes"] == 4
+    if phase == "03-pressure-v2":
+        _assert_tc_reviewer_pressure_v2_file_change_targets(
+            output_change["actual_output_paths"],
+            observation["evaluator_reported_output_paths"],
+            campaign,
+        )
+    assert protocol["commands"] == commands
+
+
+def _assert_tc_reviewer_pressure_v2_file_change_targets(actual_paths, reported_paths, campaign):
+    _assert_tc_reviewer_file_change_targets(
+        actual_paths, reported_paths, campaign, "03-pressure-v2", "pressure"
+    )
+
+
+def _assert_tc_reviewer_file_change_targets(actual_paths, reported_paths, campaign, phase, repetition):
+    expected = [
+        str(path.resolve())
+        for path in _tc_reviewer_reserved_outputs(campaign, phase, repetition)
+    ]
+    assert len(actual_paths) == len(reported_paths) == len(expected) == 4
+    assert set(actual_paths) == set(reported_paths) == set(expected)
+
+
+def _assert_tc_reviewer_final_green_evaluator_observation(
+    observation, protocol, commands, campaign, repetition, phase="04-green-final"
+):
+    assert phase == "04-green-final" or (phase, repetition) == ("05-green-final-v2", "rep-03")
+    expected_cwd = (rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-v2-rep-{int(repetition[-2:])}" if phase == "05-green-final-v2" else rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-rep-{int(repetition[-2:])}")
+    assert observation["task_cwd"] == expected_cwd
+    assert observation["evaluator"] == {
+        "name": "codex-app-luna-evaluator",
+        "host": "local",
+        "model": "gpt-5.6-luna/max",
+    }
+    assert len(observation["evaluator_tool_sequence"]) == 2
+    bootstrap, output_change = observation["evaluator_tool_sequence"]
+    assert bootstrap == {
+        "sequence": 1,
+        "tool": "commandExecution",
+        "id": "ambient-bootstrap-skill-read",
+        "argv": [
+            "Get-Content",
+            "-LiteralPath",
+            r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+        ],
+        "cwd": expected_cwd,
+        "exit_code": 0,
+        "allowed": True,
+    }
+    assert output_change["sequence"] == 2
+    assert output_change["tool"] == "fileChange"
+    assert output_change["file_changes"] == 4
+    _assert_tc_reviewer_file_change_targets(
+        output_change["actual_output_paths"],
+        observation["evaluator_reported_output_paths"],
+        campaign,
+        phase,
+        repetition,
+    )
+    assert observation["native_tool_calls"] == {
+        "apply_patch": 1,
+        "shell_commands": 1,
+        "validators": 0,
+        "semantic_checks": 0,
+    }
+    assert protocol["commands"] == commands
+
+
+def _assert_tc_reviewer_pressure_archive_path_mismatch(actual_paths, reported_paths):
+    reserved = "artifacts/outputs/03-pressure/pressure"
+    assert actual_paths == [f"{reserved}/clean-accepted-tc-reviewer-output.json", f"{reserved}/typo-only-tc-reviewer-output.json", f"{reserved}/blocking-missing-result-tc-reviewer-output.json", "artifacts/outputs/blocking-fabricated-auth-tc-reviewer-output.json"]
+    assert reported_paths == [f"{reserved}/{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES]
+    assert actual_paths != reported_paths
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda actual, reported: actual.__setitem__(0, r"D:\\escaped.json"), lambda actual, reported: actual.pop(),
+    lambda actual, reported: actual.__setitem__(1, actual[0]), lambda actual, reported: actual.append(r"D:\\extra.json"),
+    lambda actual, reported: reported.__setitem__(3, r"D:\\self-report-mismatch.json"),
+])
+def test_tc_reviewer_pressure_recovery_requires_exact_targets_and_archive_mismatch(root, mutate):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    v2 = [str((campaign / "artifacts/outputs/03-pressure-v2/pressure" / f"{fixture}-tc-reviewer-output.json").resolve()) for fixture in TC_REVIEWER_FIXTURES]
+    _assert_tc_reviewer_pressure_v2_file_change_targets(v2, v2, campaign)
+    actual = ["artifacts/outputs/03-pressure/pressure/clean-accepted-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/typo-only-tc-reviewer-output.json", "artifacts/outputs/03-pressure/pressure/blocking-missing-result-tc-reviewer-output.json", "artifacts/outputs/blocking-fabricated-auth-tc-reviewer-output.json"]
+    reported = [f"artifacts/outputs/03-pressure/pressure/{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES]
+    _assert_tc_reviewer_pressure_archive_path_mismatch(actual, reported)
+    changed_actual, changed_reported = copy.deepcopy(v2), copy.deepcopy(v2)
+    mutate(changed_actual, changed_reported)
+    with pytest.raises(AssertionError):
+        _assert_tc_reviewer_pressure_v2_file_change_targets(changed_actual, changed_reported, campaign)
+
+
+def test_tc_reviewer_pressure_v2_scorecard_is_complete_and_excludes_unversioned_archive(root):
+    """Binds the accepted pressure scorecard only to the active v2 run and report."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in (*SCORECARD_PHASES, "pressure")
+    ]
+    pressure = scorecards[-1]
+
+    _assert_schema_valid(
+        load_tool("validate_artifact"),
+        root / "schemas/skill-test-evidence.schema.json",
+        campaign / "05-scorecards/pressure.json",
+    )
+    assert _effective_pressure_phase(scenario) == "03-pressure-v2"
+    assert pressure["results"] == {
+        "pressure": {rubric: True for rubric in scenario["rubric_ids"]}
+    }
+    assert pressure["evidence_files"] == ["03-pressure-v2.md"]
+    assert ("pressure", "pressure") not in {
+        (run["phase"], run["repetition"])
+        for run in metadata["runs"]
+    }
+    assert any(
+        attempt["phase"] == "pressure"
+        and attempt["repetition"] == "pressure"
+        and attempt["excluded_from_score"] is True
+        for attempt in metadata["invalidated_attempts"]
+    )
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+
 def _assert_schema_valid(validate_artifact, schema_path, document_path):
     assert validate_artifact.validate(str(schema_path), str(document_path))[0] == 0
 
 
-def _score_evidence_path(phase, repetition, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial"):
-    output_phase = effective_final_phase if phase == "green-final" else (effective_red_phase if phase == "red" else effective_green_initial_phase)
+def _score_evidence_path(
+    phase,
+    repetition,
+    effective_final_phase=DEFAULT_FINAL_PHASE,
+    effective_red_phase=DEFAULT_RED_PHASE,
+    effective_green_initial_phase="02-green-initial",
+    effective_green_initial_phase_by_repetition=None,
+    effective_final_phase_by_repetition=None,
+    effective_pressure_phase="pressure",
+):
+    if phase == "pressure":
+        return f"{effective_pressure_phase}.md"
+    output_phase = (
+        (effective_final_phase_by_repetition or {}).get(repetition, effective_final_phase)
+        if phase == "green-final"
+        else (
+            effective_red_phase
+            if phase == "red"
+            else (
+                effective_green_initial_phase_by_repetition[repetition]
+                if effective_green_initial_phase_by_repetition is not None
+                else effective_green_initial_phase
+            )
+        )
+    )
     return f"{output_phase}/{repetition}.md"
 
 
-def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_green_initial_phase="02-green-initial"):
+def _assert_scorecard_semantics(
+    scorecard,
+    effective_final_phase=DEFAULT_FINAL_PHASE,
+    effective_red_phase=DEFAULT_RED_PHASE,
+    effective_green_initial_phase="02-green-initial",
+    effective_red_repetitions=5,
+    effective_green_initial_phase_by_repetition=None,
+    effective_final_phase_by_repetition=None,
+    effective_pressure_phase="pressure",
+):
     if scorecard["status"] == "pending":
         assert scorecard["results"] == {}
         assert scorecard["evidence_files"] == []
@@ -344,14 +1511,27 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         assert scorecard["no_edit_reason"] is None
         return
 
-    assert set(scorecard["results"]) == set(REPETITIONS)
+    repetitions = (
+        ("pressure",)
+        if scorecard["phase"] == "pressure"
+        else (
+            REPETITIONS[:effective_red_repetitions]
+            if scorecard["phase"] == "red"
+            else REPETITIONS
+        )
+    )
+    assert set(scorecard["results"]) == set(repetitions)
     assert all(
         set(result) == set(scorecard["rubric_ids"])
         for result in scorecard["results"].values()
     )
     expected_evidence = {
-        _score_evidence_path(scorecard["phase"], repetition, effective_final_phase, effective_red_phase, effective_green_initial_phase)
-        for repetition in REPETITIONS
+        _score_evidence_path(
+            scorecard["phase"], repetition, effective_final_phase, effective_red_phase,
+            effective_green_initial_phase, effective_green_initial_phase_by_repetition,
+            effective_final_phase_by_repetition, effective_pressure_phase,
+        )
+        for repetition in repetitions
     }
     assert set(scorecard["evidence_files"]) == expected_evidence
     values = [
@@ -370,7 +1550,7 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
             assert scorecard["no_gap"] is True
             assert isinstance(scorecard["no_edit_reason"], str)
             assert scorecard["no_edit_reason"].strip()
-    elif scorecard["phase"] == "green-final":
+    elif scorecard["phase"] in {"green-final", "pressure"}:
         assert all(values)
         assert scorecard["all_passed"] is True
         assert scorecard["no_gap"] is False
@@ -380,20 +1560,54 @@ def _assert_scorecard_semantics(scorecard, effective_final_phase=DEFAULT_FINAL_P
         assert scorecard["no_edit_reason"] is None
 
 
-def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure"):
+def _complete_scorecard_required_keys(
+    phase, repetitions, effective_red_phase, effective_green_initial_phase_by_repetition,
+    effective_final_phase, effective_final_phase_by_repetition=None,
+):
+    return {
+        (
+            effective_red_phase if phase == "red" else (
+                effective_green_initial_phase_by_repetition[repetition]
+                if phase == "green-initial"
+                else (effective_final_phase_by_repetition or {}).get(repetition, effective_final_phase)
+            ),
+            repetition,
+        )
+        for repetition in repetitions
+    }
+
+
+def test_tc_reviewer_complete_final_scorecard_required_keys_follow_mixed_final_map():
+    mixed = {"rep-01": "04-green-final", "rep-02": "04-green-final", "rep-03": "05-green-final-v2", "rep-04": "05-green-final-v2", "rep-05": "05-green-final-v2"}
+    required = _complete_scorecard_required_keys("green-final", REPETITIONS, "01-red-control", {}, "04-green-final", mixed)
+    assert required == {(mixed[repetition], repetition) for repetition in REPETITIONS}
+    assert required != _complete_scorecard_required_keys("green-final", REPETITIONS, "01-red-control", {}, "04-green-final")
+
+
+def _expected_run_keys(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure", effective_green_initial_phase_by_repetition=None, effective_final_phase_by_repetition=None):
+    green_keys = (
+        {(effective_green_initial_phase_by_repetition[repetition], repetition) for repetition in REPETITIONS}
+        if effective_green_initial_phase_by_repetition is not None
+        else {(effective_green_initial_phase, repetition) for repetition in REPETITIONS}
+    )
     return {(effective_red_phase, repetition) for repetition in REPETITIONS[:effective_red_repetitions]} | {
-        (phase, repetition) for phase in (effective_green_initial_phase, effective_final_phase) for repetition in REPETITIONS
-    } | {
+        ((effective_final_phase_by_repetition or {}).get(repetition, effective_final_phase), repetition) for repetition in REPETITIONS
+    } | green_keys | {
         (effective_pressure_phase, "pressure")
     }
 
 
-def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure"):
+def _tc_generator_execution_order(effective_final_phase=DEFAULT_FINAL_PHASE, effective_red_phase=DEFAULT_RED_PHASE, effective_red_repetitions=5, effective_green_initial_phase="02-green-initial", effective_pressure_phase="pressure", effective_green_initial_phase_by_repetition=None, effective_final_phase_by_repetition=None):
+    green_order = (
+        [(effective_green_initial_phase_by_repetition[repetition], repetition) for repetition in REPETITIONS]
+        if effective_green_initial_phase_by_repetition is not None
+        else [(effective_green_initial_phase, repetition) for repetition in REPETITIONS]
+    )
     return [
         *( (effective_red_phase, repetition) for repetition in REPETITIONS[:effective_red_repetitions] ),
-        *( (effective_green_initial_phase, repetition) for repetition in REPETITIONS ),
+        *green_order,
         (effective_pressure_phase, "pressure"),
-        *( (effective_final_phase, repetition) for repetition in REPETITIONS ),
+        *( ((effective_final_phase_by_repetition or {}).get(repetition, effective_final_phase), repetition) for repetition in REPETITIONS ),
     ]
 
 
@@ -431,7 +1645,16 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
         if "protocol_snapshot" in attempt:
             evidence.append(attempt["protocol_snapshot"])
         if "checked_output" in attempt:
-            evidence.append(attempt["checked_output"])
+            tc_reviewer_archived_schema_output = (
+                scenario["skill_id"] == "tc-reviewer"
+                and attempt["phase"] == "01-red-control-v2"
+                and attempt["repetition"] == "rep-01"
+                and attempt["reason_codes"] == ["schema-validation-failed"]
+            )
+            if tc_reviewer_archived_schema_output:
+                assert attempt["checked_output"] == attempt["outputs"][0]
+            else:
+                evidence.append(attempt["checked_output"])
         assert len({item["path"] for item in evidence}) == len(evidence)
         for item in evidence:
             evidence_path = Path(item["path"])
@@ -449,11 +1672,327 @@ def _assert_invalidated_attempt_semantics(metadata, campaign, scenario, scored_k
             ), "evidence file collision"
             evidence_paths.add(resolved_evidence)
         assert attempt["observed_prompt_sha256"] == attempt["prompt_snapshot"]["sha256"]
-        if _uses_protocol_v1_literal_command_contract(scenario) and scenario["skill_id"] == "tc-generator":
+        if _uses_protocol_v1_literal_command_contract(scenario) and scenario["skill_id"] == "tc-generator" or (
+            _uses_protocol_v1_literal_command_contract(scenario)
+            and scenario["skill_id"] == "tc-reviewer"
+            and (
+                (
+                    attempt["phase"] == "01-red-control-v2"
+                    and attempt["repetition"] == "rep-01"
+                    and attempt["reason_codes"] == ["schema-validation-failed"]
+                )
+                or attempt["attempt_id"] == "green-initial-rep-01-semantic-checker-false-negative"
+                or attempt["attempt_id"] == "green-initial-v2-rep-03-unauthorized-skill-read"
+                or attempt["attempt_id"] == "green-initial-v3-rep-03-ambient-bootstrap-read"
+                or attempt["attempt_id"] == "green-initial-v4-rep-05-semantic-checker-false-negative"
+            )
+        ):
             _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
 
 
-def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario):
+def _assert_tc_generator_forward_invalidated_attempt(
+    attempt, campaign, scenario, protocol_override=None, observation_override=None
+):
+    tc_reviewer_v4_checker_false_negative = (
+        scenario["skill_id"] == "tc-reviewer"
+        and scenario.get("green_initial_phase_by_repetition", {}).get("rep-05")
+        == "02-green-initial-v5"
+        and attempt["attempt_id"] == "green-initial-v4-rep-05-semantic-checker-false-negative"
+    )
+    if tc_reviewer_v4_checker_false_negative:
+        archive_root = "artifacts/invalidated/02-green-initial-v4/rep-05/green-initial-v4-rep-05-semantic-checker-false-negative"
+        assert (attempt["phase"], attempt["repetition"]) == ("02-green-initial-v4", "rep-05")
+        assert attempt["reason_codes"] == ["semantic-check-failed", "semantic-checker-false-negative"]
+        assert attempt["checker"] == {"path": "check_outputs.py", "sha256": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec"}
+        assert attempt["replacement_checker"] == {"path": "check_outputs_v2.py", "sha256": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b"}
+        assert attempt["semantic_result"] == {"status": "fail", "exit_code": 1, "errors": ["typo-only: correction must bind the same title spelling evidence"]}
+        assert [command["id"] for command in attempt["commands"]] == ["ambient-bootstrap-skill-read", "validate-artifact-clean-accepted", "validate-artifact-typo-only", "validate-artifact-blocking-missing-result", "validate-artifact-blocking-fabricated-auth", "semantic-check"]
+        assert attempt["commands"][-1]["argv"][1] == str((campaign / "check_outputs.py").resolve())
+        protocol = protocol_override or _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        observation = observation_override or _read_json(campaign / attempt["observation"]["path"])
+        assert protocol["commands"] == observation["repetition_commands"] == attempt["commands"]
+        assert protocol["semantic_result"] == observation["semantic_result"] == attempt["semantic_result"]
+        assert protocol["checker"] == observation["checker"] == attempt["checker"]
+        assert protocol["replacement_checker"] == observation["replacement_checker"] == attempt["replacement_checker"]
+        for output in attempt["outputs"]:
+            archived = campaign / output["path"]
+            assert archived.read_bytes() == (campaign / "artifacts/outputs/02-green-initial-v4/rep-05" / archived.name).read_bytes()
+        return
+    tc_reviewer_v3_ambient_bootstrap_read = (
+        scenario["skill_id"] == "tc-reviewer"
+        and scenario.get("green_initial_phase_by_repetition") == {
+            "rep-01": "02-green-initial-v2",
+            "rep-02": "02-green-initial-v2",
+            "rep-03": "02-green-initial-v4",
+            "rep-04": "02-green-initial-v4",
+            "rep-05": "02-green-initial-v5",
+        }
+        and attempt["attempt_id"] == "green-initial-v3-rep-03-ambient-bootstrap-read"
+    )
+    if tc_reviewer_v3_ambient_bootstrap_read:
+        archive_root = (
+            "artifacts/invalidated/02-green-initial-v3/rep-03/"
+            "green-initial-v3-rep-03-ambient-bootstrap-read"
+        )
+        expected_command = {
+            "id": "ambient-bootstrap-skill-read",
+            "declared_target": "superpowers:using-superpowers",
+            "argv": None,
+            "cwd": None,
+            "exit_code": None,
+            "diagnostic": (
+                "Native trace reported one system skill-instruction read but did not expose "
+                "literal argv, cwd, or exit code."
+            ),
+        }
+        expected_outputs = [
+            f"{archive_root}/{fixture}-tc-reviewer-output.json"
+            for fixture in TC_REVIEWER_FIXTURES
+        ]
+        assert (attempt["phase"], attempt["repetition"]) == ("02-green-initial-v3", "rep-03")
+        assert attempt["reason_codes"] == [
+            "ambient-bootstrap-read-not-authorized",
+            "literal-command-evidence-unavailable",
+        ]
+        assert attempt["commands"] == [expected_command]
+        assert [output["path"] for output in attempt["outputs"]] == expected_outputs
+        for output in attempt["outputs"]:
+            archived = campaign / output["path"]
+            reserved = campaign / "artifacts/outputs/02-green-initial-v3/rep-03" / archived.name
+            assert archived.read_bytes() == reserved.read_bytes()
+            assert hashlib.sha256(archived.read_bytes()).hexdigest() == output["sha256"]
+        protocol = protocol_override or _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        observation = observation_override or _read_json(campaign / attempt["observation"]["path"])
+        assert protocol["commands"] == observation["repetition_commands"] == [expected_command]
+        assert protocol["native_tool_calls"] == observation["native_tool_calls"] == {
+            "apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0
+        }
+        assert protocol["schema_validator_commands_completed"] == 0
+        assert protocol["semantic_command_run"] is False
+        assert protocol["controller_preflight"] == observation["controller_preflight"]
+        assert protocol["timestamp_sources"] == observation["timestamp_sources"]
+        return
+    tc_reviewer_mixed_route_unauthorized_skill_read = (
+        scenario["skill_id"] == "tc-reviewer"
+        and scenario.get("green_initial_phase_by_repetition") == {
+            "rep-01": "02-green-initial-v2",
+            "rep-02": "02-green-initial-v2",
+            "rep-03": "02-green-initial-v4",
+            "rep-04": "02-green-initial-v4",
+            "rep-05": "02-green-initial-v5",
+        }
+        and attempt["attempt_id"] == "green-initial-v2-rep-03-unauthorized-skill-read"
+    )
+    if tc_reviewer_mixed_route_unauthorized_skill_read:
+        archive_root = (
+            "artifacts/invalidated/02-green-initial-v2/rep-03/"
+            "green-initial-v2-rep-03-unauthorized-skill-read"
+        )
+        expected_outputs = [
+            f"{archive_root}/{fixture}-tc-reviewer-output.json"
+            for fixture in TC_REVIEWER_FIXTURES
+        ]
+        expected_hashes = {
+            f"{archive_root}/prompt.txt": "c40e8330f28f8bec786dc5bcf93fbc51641d799bf78fe8a1de9b79665e5c9bfe",
+            f"{archive_root}/observation.json": "8dec676a3392dbe8d38a30a61d92e4b06141d67656f2cc0b35aead60a2a7c207",
+            f"{archive_root}/run-protocol.json": "a7e3c170289c4607f7e6fe3aba97d6f5df243e1bdd6b171de120fa0d39e7183b",
+            f"{archive_root}/clean-accepted-tc-reviewer-output.json": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1",
+            f"{archive_root}/typo-only-tc-reviewer-output.json": "b84b6e52d8896e8cf434a32b2dafef4102d5c8720957c23482ba2357e25c488a",
+            f"{archive_root}/blocking-missing-result-tc-reviewer-output.json": "f5034092994fe3ebbca878e9c64c26423ecbd6958fad1e1a52fee04be276ee64",
+            f"{archive_root}/blocking-fabricated-auth-tc-reviewer-output.json": "cad94586b65c91e947b6c8cf905a2f8b6da2fecc258c2c3ff68060d8cc84e4d6",
+        }
+        expected_evaluator = {
+            "name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"
+        }
+        expected_command = {
+            "id": "unauthorized-skill-read",
+            "argv": [
+                "Get-Content", "-LiteralPath",
+                r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+            ],
+            "cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-initial-green-rep-3",
+            "exit_code": 0,
+        }
+        assert set(attempt) == {
+            "attempt_id", "classification", "phase", "repetition", "reason_codes",
+            "excluded_from_score", "observed_prompt_sha256", "prompt_snapshot",
+            "raw_input_allowlist", "observation", "outputs", "started_at", "finished_at",
+            "evaluator", "task", "protocol_snapshot", "commands",
+        }
+        assert attempt["classification"] == "protocol-invalid"
+        assert (attempt["phase"], attempt["repetition"]) == ("02-green-initial-v2", "rep-03")
+        assert attempt["reason_codes"] == [
+            "unauthorized-command-executed", "canonical-input-boundary-violated"
+        ]
+        assert attempt["excluded_from_score"] is True
+        assert attempt["observed_prompt_sha256"] == expected_hashes[f"{archive_root}/prompt.txt"]
+        assert attempt["started_at"] == "2026-08-10T03:14:02Z"
+        assert attempt["finished_at"] == "2026-08-10T03:15:39Z"
+        assert attempt["evaluator"] == expected_evaluator
+        assert attempt["task"] == (
+            "Isolated tc-reviewer initial-GREEN-v2 rep-03 with exact canonical inputs and four raw inputs embedded"
+        )
+        assert attempt["prompt_snapshot"] == {
+            "path": f"{archive_root}/prompt.txt", "sha256": expected_hashes[f"{archive_root}/prompt.txt"]
+        }
+        assert attempt["observation"] == {
+            "path": f"{archive_root}/observation.json", "sha256": expected_hashes[f"{archive_root}/observation.json"]
+        }
+        assert attempt["protocol_snapshot"] == {
+            "path": f"{archive_root}/run-protocol.json", "sha256": expected_hashes[f"{archive_root}/run-protocol.json"]
+        }
+        assert [output["path"] for output in attempt["outputs"]] == expected_outputs
+        assert {output["path"]: output["sha256"] for output in attempt["outputs"]} == {
+            path: expected_hashes[path] for path in expected_outputs
+        }
+        assert attempt["commands"] == [expected_command]
+        for archived_path in [*expected_hashes]:
+            assert hashlib.sha256((campaign / archived_path).read_bytes()).hexdigest() == expected_hashes[archived_path]
+        for output_path in expected_outputs:
+            reserved_path = campaign / "artifacts/outputs/02-green-initial-v2/rep-03" / Path(output_path).name
+            assert (campaign / output_path).read_bytes() == reserved_path.read_bytes()
+        protocol = protocol_override or _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        observation = observation_override or _read_json(campaign / attempt["observation"]["path"])
+        assert observation["thread_id"] == "019fe9a9-b756-7960-81aa-5d71ebae59b9"
+        assert {
+            key: observation["evaluator_tool_sequence"][0][key]
+            for key in ("id", "argv", "cwd", "exit_code")
+        } == expected_command
+        assert protocol["commands"] == attempt["commands"]
+        assert protocol["output_paths"] == expected_outputs
+        assert protocol["observation_path"] == attempt["observation"]["path"]
+        for field in ("phase", "repetition", "application_prompt_sha256", "started_at", "finished_at", "evaluator", "task"):
+            expected = attempt["observed_prompt_sha256"] if field == "application_prompt_sha256" else attempt[field]
+            assert protocol[field] == expected
+        assert protocol["controller_preflight"] == observation["controller_preflight"]
+        assert protocol["controller_delivery_check"]["id"] == observation["controller_delivery_check"]["id"]
+        assert protocol["controller_delivery_check"]["result"] == observation["controller_delivery_check"]["result"]
+        assert protocol["native_tool_calls"] == observation["native_tool_calls"] == {
+            "apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0
+        }
+        assert protocol["schema_validator_commands_completed"] == 0
+        assert protocol["semantic_command_run"] is False
+        assert {command["id"] for command in attempt["commands"]}.isdisjoint({"semantic-check", *(
+            f"validate-artifact-{fixture}" for fixture in TC_REVIEWER_FIXTURES
+        )})
+        return
+    tc_reviewer_green_semantic_false_negative = (
+        scenario["skill_id"] == "tc-reviewer"
+        and (
+            scenario.get("effective_green_initial_phase") == "02-green-initial-v2"
+            or scenario.get("green_initial_phase_by_repetition") == {
+                "rep-01": "02-green-initial-v2",
+                "rep-02": "02-green-initial-v2",
+                "rep-03": "02-green-initial-v4",
+                "rep-04": "02-green-initial-v4",
+                "rep-05": "02-green-initial-v5",
+            }
+        )
+        and attempt["attempt_id"] == "green-initial-rep-01-semantic-checker-false-negative"
+    )
+    if tc_reviewer_green_semantic_false_negative:
+        archive_root = (
+            "artifacts/invalidated/02-green-initial/rep-01/"
+            "green-initial-rep-01-semantic-checker-false-negative"
+        )
+        repository_root = _campaign_repository_root(campaign)
+        cwd = str(campaign.resolve())
+        evaluator = {
+            "name": "codex-app-luna-evaluator", "host": "local", "model": "gpt-5.6-luna/max"
+        }
+        expected_preflight = {
+            "id": "role-integrity-check",
+            "argv": [
+                r"C:\Program Files\Git\bin\sh.exe",
+                "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+                "--check",
+            ],
+            "cwd": str(repository_root),
+            "exit_code": 0,
+        }
+        expected_reserved_paths = [
+            *(f"artifacts/outputs/02-green-initial/rep-01/{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES),
+            *(f"artifacts/outputs/02-green-initial/rep-01/validation-{fixture}.json" for fixture in TC_REVIEWER_FIXTURES),
+            "artifacts/outputs/02-green-initial/rep-01/semantic-result.json",
+        ]
+        expected_archive_paths = [
+            f"{archive_root}/{Path(path).name}" for path in expected_reserved_paths
+        ]
+        expected_commands = [
+            {
+                "id": f"validate-artifact-{fixture}",
+                "argv": [
+                    "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+                    str((repository_root / "tools/validate_artifact.py").resolve()),
+                    str((repository_root / "schemas/tc-reviewer-output.schema.json").resolve()),
+                    str((campaign / f"artifacts/outputs/02-green-initial/rep-01/{fixture}-tc-reviewer-output.json").resolve()),
+                ],
+                "cwd": cwd,
+                "exit_code": 0,
+            }
+            for fixture in TC_REVIEWER_FIXTURES
+        ]
+        expected_commands.append(
+            {
+                "id": "semantic-check",
+                "argv": [
+                    "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+                    str((campaign / "check_outputs.py").resolve()),
+                    "--input-dir", str((campaign / "artifacts/inputs").resolve()),
+                    "--output-dir", str((campaign / "artifacts/outputs/02-green-initial/rep-01").resolve()),
+                    "--mode", "canonical",
+                ],
+                "cwd": cwd,
+                "exit_code": 1,
+            }
+        )
+        assert attempt["classification"] == "protocol-invalid"
+        assert (attempt["phase"], attempt["repetition"]) == ("02-green-initial", "rep-01")
+        assert attempt["reason_codes"] == ["semantic-check-failed", "semantic-checker-false-negative"]
+        assert attempt["excluded_from_score"] is True
+        assert attempt["started_at"] == "2026-08-10T02:03:06Z"
+        assert attempt["finished_at"] == "2026-08-10T02:04:13Z"
+        assert attempt["evaluator"] == evaluator
+        assert attempt["task"] == "Isolated tc-reviewer initial-GREEN rep-01 with exact canonical inputs and four raw inputs embedded"
+        assert attempt["commands"] == expected_commands
+        assert [item["path"] for item in attempt["outputs"]] == expected_archive_paths
+        assert attempt["prompt_snapshot"]["path"] == f"{archive_root}/prompt.txt"
+        assert attempt["observation"]["path"] == f"{archive_root}/observation.json"
+        assert attempt["protocol_snapshot"]["path"] == f"{archive_root}/run-protocol.json"
+        for archive_path, reserved_path, evidence in zip(
+            expected_archive_paths, expected_reserved_paths, attempt["outputs"], strict=True
+        ):
+            archive = campaign / archive_path
+            reserved = campaign / reserved_path
+            assert archive.read_bytes() == reserved.read_bytes()
+            assert hashlib.sha256(archive.read_bytes()).hexdigest() == evidence["sha256"]
+        semantic = _read_json(campaign / f"{archive_root}/semantic-result.json")
+        assert semantic == {
+            "artifact_sha256": {
+                "blocking-fabricated-auth": "275a28a7051fa72a19d1e917e5ef327bd290546db5a4747ef848c72ca71214c8",
+                "blocking-missing-result": "20014834533a7d8a2321786509dfc8b05efd8b1df890296fff60866f993c13b0",
+                "clean-accepted": "9ceffcf825a82d64d35e6e3ad00078faac11d51ebf93478c5090ef5ebc56cbe1",
+                "typo-only": "a337a14dc1d2cbc7a608a353e59f62b4219d6552e46ccb459d7c1e00e59a46b4",
+            },
+            "errors": [
+                "typo-only: finding must bind the spelling defect to title evidence",
+                "typo-only: correction must bind the same title spelling evidence",
+                "blocking-fabricated-auth: output invents role tokens ['authorized', 'or']",
+            ],
+            "reviewed_test_case_ids": {
+                "blocking-fabricated-auth": ["TC-AUTH-001"],
+                "blocking-missing-result": ["TC-MISSING-001"],
+                "clean-accepted": ["TC-CLEAN-001"],
+                "typo-only": ["TC-TYPO-001"],
+            },
+            "status": "fail",
+        }
+        protocol = protocol_override or _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        observation = observation_override or _read_json(campaign / attempt["observation"]["path"])
+        assert protocol.get("controller_preflight") == observation.get("controller_preflight") == expected_preflight
+        assert protocol["output_paths"] == expected_reserved_paths
+        assert protocol["commands"] == attempt["commands"]
+        return
     pressure_report_inconsistency = (
         scenario.get("effective_pressure_phase") in {"03-pressure-v2", "03-pressure-v3", "03-pressure-v4"}
         and attempt["attempt_id"] == "pressure-command-report-inconsistent"
@@ -561,6 +2100,56 @@ def _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario
         assert protocol["commands"] == attempt["commands"]
         assert protocol["observation_path"] == attempt["observation"]["path"]
         assert protocol["output_paths"] == [attempt["outputs"][0]["path"]]
+        return
+    tc_reviewer_red_v2_schema_failure = (
+        scenario["skill_id"] == "tc-reviewer"
+        and attempt["phase"] == "01-red-control-v2"
+        and attempt["repetition"] == "rep-01"
+        and attempt["reason_codes"] == ["schema-validation-failed"]
+    )
+    if tc_reviewer_red_v2_schema_failure:
+        archive_root = (
+            "artifacts/invalidated/01-red-control-v2/rep-01/"
+            "red-v2-rep-01-schema-invalid"
+        )
+        repository_root = _campaign_repository_root(campaign)
+        expected_outputs = [
+            *(f"{archive_root}/{fixture}-tc-reviewer-output.json" for fixture in TC_REVIEWER_FIXTURES),
+            f"{archive_root}/validation-result.json",
+        ]
+        expected_clean_output = (
+            campaign
+            / "artifacts/outputs/01-red-control-v2/rep-01/"
+            "clean-accepted-tc-reviewer-output.json"
+        ).resolve()
+        assert [output["path"] for output in attempt["outputs"]] == expected_outputs
+        assert attempt["commands"] == [
+            {
+                "id": "validate-artifact-clean-accepted",
+                "argv": [
+                    "D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe",
+                    str((repository_root / "tools/validate_artifact.py").resolve()),
+                    str((repository_root / "schemas/tc-reviewer-output.schema.json").resolve()),
+                    str(expected_clean_output),
+                ],
+                "cwd": str(campaign.resolve()),
+                "exit_code": 1,
+            }
+        ]
+        assert "checked_output" in attempt
+        assert attempt["checked_output"]["path"] == expected_outputs[0]
+        assert attempt["checked_output"]["sha256"] == attempt["outputs"][0]["sha256"]
+        protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+        assert protocol["artifact_type"] == "invalidated-run-protocol"
+        assert protocol["skill_id"] == "tc-reviewer"
+        assert protocol["phase"] == attempt["phase"]
+        assert protocol["repetition"] == attempt["repetition"]
+        assert protocol["application_prompt_sha256"] == attempt["observed_prompt_sha256"]
+        assert protocol["evaluator"] == attempt["evaluator"]
+        assert protocol["task"] == attempt["task"]
+        assert protocol["observation_path"] == attempt["observation"]["path"]
+        assert protocol["commands"] == attempt["commands"]
+        assert protocol["output_paths"] == expected_outputs
         return
     schema_failure = (
         (
@@ -791,8 +2380,17 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     effective_red_phase = _effective_red_phase(scenario)
     effective_red_repetitions = _effective_red_repetitions(scenario)
     effective_green_initial_phase = _effective_green_initial_phase(scenario)
+    effective_green_initial_phase_by_repetition = _effective_green_initial_phase_by_repetition(scenario)
+    effective_final_phase_by_repetition = _effective_final_phase_by_repetition(scenario)
     effective_pressure_phase = _effective_pressure_phase(scenario)
-    assert scenario["output_paths"] == _expected_output_paths(effective_final_phase, effective_red_phase, effective_green_initial_phase, effective_red_repetitions)
+    assert scenario["output_paths"] == _expected_output_paths(
+        effective_final_phase,
+        effective_red_phase,
+        effective_green_initial_phase,
+        effective_red_repetitions,
+        effective_green_initial_phase_by_repetition,
+        effective_final_phase_by_repetition,
+    )
     for scorecard in scorecards:
         assert scorecard["skill_id"] == scenario["skill_id"]
         assert scorecard["rubric_ids"] == scenario["rubric_ids"]
@@ -802,7 +2400,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
                 for result in scorecard["results"].values()
             )
     if metadata["status"] == "pending" and (
-        metadata["skill_id"] != "tc-generator" or not metadata["runs"]
+        metadata["skill_id"] not in {"tc-generator", "tc-reviewer"} or not metadata["runs"]
     ):
         assert metadata["evaluator"] is None
         assert metadata["host"] is None
@@ -811,7 +2409,16 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert len(scorecards) == len(SCORECARD_PHASES)
         assert {scorecard["phase"] for scorecard in scorecards} == set(SCORECARD_PHASES)
         for scorecard in scorecards:
-            _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase, effective_green_initial_phase)
+            _assert_scorecard_semantics(
+                scorecard,
+                effective_final_phase,
+                effective_red_phase,
+                effective_green_initial_phase,
+                effective_red_repetitions,
+                effective_green_initial_phase_by_repetition,
+                effective_final_phase_by_repetition,
+                effective_pressure_phase,
+            )
             assert scorecard["status"] == "pending", "pending campaigns require pending scorecards"
         _assert_historical_run_semantics(metadata, campaign, scenario, effective_red_phase)
         _assert_invalidated_attempt_semantics(metadata, campaign, scenario, set(), _historical_evidence_paths(metadata, campaign))
@@ -821,15 +2428,23 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
     assert metadata["fork_turns"] == "none"
     run_keys_in_order = [(run["phase"], run["repetition"]) for run in metadata["runs"]]
     if metadata["status"] == "complete":
-        expected_keys = _expected_run_keys(effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase)
+        expected_keys = _expected_run_keys(
+            effective_final_phase, effective_red_phase, effective_red_repetitions,
+                effective_green_initial_phase, effective_pressure_phase,
+                effective_green_initial_phase_by_repetition,
+                effective_final_phase_by_repetition,
+        )
         assert len(metadata["runs"]) == len(expected_keys)
         scored_keys = expected_keys
         assert set(run_keys_in_order) == scored_keys
         assert len(set(run_keys_in_order)) == len(expected_keys)
     else:
-        assert metadata["skill_id"] == "tc-generator"
+        assert metadata["skill_id"] in {"tc-generator", "tc-reviewer"}
         expected_order = _tc_generator_execution_order(
-            effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase
+            effective_final_phase, effective_red_phase, effective_red_repetitions,
+                effective_green_initial_phase, effective_pressure_phase,
+                effective_green_initial_phase_by_repetition,
+                effective_final_phase_by_repetition,
         )
         assert 1 <= len(run_keys_in_order) < len(expected_order)
         assert run_keys_in_order == expected_order[:len(run_keys_in_order)]
@@ -845,12 +2460,16 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         if phase == "pressure" or phase.startswith("03-pressure-v"):
             assert repetition == "pressure"
             assert run["skill_present"] is True
-            assert run["prompt_sha256"] == scenario["prompt_sha256"]["pressure"]
+            assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
             required_output = "03-pressure.md" if phase == "pressure" else f"{phase}.md"
             output_prefix = "artifacts/outputs/03-pressure/pressure/" if phase == "pressure" else f"artifacts/outputs/{phase}/pressure/"
         else:
             assert repetition in REPETITIONS
-            assert phase in {effective_red_phase, effective_green_initial_phase, effective_final_phase}
+            assert phase in {
+                effective_red_phase,
+                effective_green_initial_phase_by_repetition[repetition],
+                effective_final_phase_by_repetition[repetition],
+            }
             assert run["skill_present"] is (phase != effective_red_phase)
             assert run["prompt_sha256"] == _expected_phase_prompt_sha256(scenario, phase)
             required_output = f"{phase}/{repetition}.md"
@@ -900,7 +2519,26 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         assert hashlib.sha256(prompt_bytes).hexdigest() == _expected_phase_prompt_sha256(scenario, phase)
         assert run["prompt_sha256"] == hashlib.sha256(prompt_bytes).hexdigest()
         protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
-        assert set(protocol) == {"artifact_type", "skill_id", "phase", "repetition", "application_prompt_sha256", "started_at", "finished_at", "evaluator", "task", "observation_path", "output_paths", "commands"}
+        protocol_fields = {
+            "artifact_type", "skill_id", "phase", "repetition",
+            "application_prompt_sha256", "started_at", "finished_at", "evaluator",
+            "task", "observation_path", "output_paths", "commands",
+        }
+        if "controller_preflight" in protocol:
+            assert scenario["skill_id"] == "tc-reviewer"
+            assert set(protocol) == protocol_fields | {"controller_preflight"}
+            assert protocol["controller_preflight"] == {
+                "id": "role-integrity-check",
+                "argv": [
+                    r"C:\Program Files\Git\bin\sh.exe",
+                    "C:/Users/User/.codex/plugins/cache/sol-advisor/sol-advisor/0.5.0/scripts/install-agents.sh",
+                    "--check",
+                ],
+                "cwd": str(_campaign_repository_root(campaign)),
+                "exit_code": 0,
+            }
+        else:
+            assert set(protocol) == protocol_fields
         assert protocol["artifact_type"] == "run-protocol"
         assert protocol["skill_id"] == scenario["skill_id"]
         assert protocol["phase"] == phase
@@ -916,7 +2554,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             scenario, campaign, phase, repetition, protocol["commands"]
         )
         assert protocol["observation_path"] == f"{protocol_root}observation.json"
-        if scenario["skill_id"] == "tc-generator":
+        if scenario["skill_id"] in {"tc-generator", "tc-reviewer"}:
             assert run["observation"]["path"] == protocol["observation_path"]
             observation_path = Path(run["observation"]["path"])
             assert not observation_path.is_absolute()
@@ -928,6 +2566,10 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
         else:
             observation = campaign / protocol["observation_path"]
         assert observation.is_file()
+        if scenario["skill_id"] == "tc-reviewer" and phase in {"pressure", "03-pressure-v2"}:
+            _assert_tc_reviewer_pressure_evaluator_observation(
+                _read_json(observation), protocol, run["commands"], campaign, phase
+            )
         assert observation.resolve() not in output_paths
         output_paths.add(observation.resolve())
 
@@ -943,45 +2585,168 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
             if attempt["phase"] != DEFAULT_RED_PHASE or not metadata.get("historical_runs")
         }
         if active_invalidated_keys:
-            terminal_short_red = {
-                (effective_red_phase, f"rep-{effective_red_repetitions + 1:02d}")
-            }
-            predelegation_initial = {("02-green-initial", "rep-01")}
-            archived_initial_schema = {
-                (attempt["phase"], "rep-01")
-                for attempt in metadata.get("invalidated_attempts", [])
-                if attempt["phase"].startswith("02-green-initial-v")
-                and attempt["phase"] != effective_green_initial_phase
-                and attempt["reason_codes"] == ["schema-validation-failed"]
-            }
-            pressure_inconsistency = {("pressure", "pressure")} if effective_pressure_phase in {"03-pressure-v2", "03-pressure-v3", "03-pressure-v4"} else set()
-            pressure_v2_spawn_failure = {("03-pressure-v2", "pressure")} if effective_pressure_phase in {"03-pressure-v3", "03-pressure-v4"} else set()
-            pressure_v3_fork_mismatch = {("03-pressure-v3", "pressure")} if effective_pressure_phase == "03-pressure-v4" else set()
-            if effective_red_repetitions == 3 and (
-                active_invalidated_keys == terminal_short_red
-                or active_invalidated_keys == terminal_short_red | predelegation_initial
-                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema
-                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency
-                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure
-                or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure | pressure_v3_fork_mismatch
-            ):
-                assert "effective_red_repetitions" in scenario
-            else:
+            tc_reviewer_red_v3_recovery = (
+                metadata["skill_id"] == "tc-reviewer"
+                and effective_red_phase == "01-red-control-v3"
+                and effective_red_repetitions == 1
+            )
+            if tc_reviewer_red_v3_recovery:
+                expected_recovery_chain = [
+                    (
+                        "01-red-control",
+                        "rep-01",
+                        [
+                            "controller-process-spawn-failed",
+                            "unauthorized-command-retry",
+                        ],
+                    ),
+                    (
+                        "01-red-control-v2",
+                        "rep-01",
+                        ["schema-validation-failed"],
+                    ),
+                ]
+                if (
+                    effective_green_initial_phase == "02-green-initial-v2"
+                    or effective_green_initial_phase_by_repetition == {
+                        "rep-01": "02-green-initial-v2",
+                        "rep-02": "02-green-initial-v2",
+                        "rep-03": "02-green-initial-v4",
+                        "rep-04": "02-green-initial-v4",
+                        "rep-05": "02-green-initial-v5",
+                    }
+                ):
+                    expected_recovery_chain.append(
+                        (
+                            "02-green-initial",
+                            "rep-01",
+                            ["semantic-check-failed", "semantic-checker-false-negative"],
+                        )
+                    )
+                if effective_green_initial_phase_by_repetition == {
+                    "rep-01": "02-green-initial-v2",
+                    "rep-02": "02-green-initial-v2",
+                    "rep-03": "02-green-initial-v4",
+                    "rep-04": "02-green-initial-v4",
+                    "rep-05": "02-green-initial-v5",
+                }:
+                    expected_recovery_chain.append(
+                        (
+                            "02-green-initial-v2",
+                            "rep-03",
+                            [
+                                "unauthorized-command-executed",
+                                "canonical-input-boundary-violated",
+                            ],
+                        )
+                    )
+                    expected_recovery_chain.append(
+                        (
+                            "02-green-initial-v4",
+                            "rep-05",
+                            ["semantic-check-failed", "semantic-checker-false-negative"],
+                        )
+                    )
+                    expected_recovery_chain.append(
+                        (
+                            "02-green-initial-v3",
+                            "rep-03",
+                            [
+                                "ambient-bootstrap-read-not-authorized",
+                                "literal-command-evidence-unavailable",
+                            ],
+                        )
+                    )
+                    if effective_pressure_phase == "03-pressure-v2":
+                        expected_recovery_chain.append(
+                            (
+                                "pressure",
+                                "pressure",
+                                [
+                                    "reserved-output-path-violation",
+                                    "evaluator-self-report-inconsistent",
+                                ],
+                            )
+                        )
+                    expected_recovery_chain.append(
+                        (
+                            "04-green-final",
+                            "rep-03",
+                            [
+                                "semantic-check-failed",
+                                "semantic-checker-false-negative",
+                            ],
+                        )
+                    )
+                assert [
+                    (attempt["phase"], attempt["repetition"], attempt["reason_codes"])
+                    for attempt in metadata.get("invalidated_attempts", [])
+                ] == expected_recovery_chain
                 assert active_invalidated_keys == {
-                    _tc_generator_execution_order(
-                    effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase
-                    )[len(metadata["runs"])]
+                    (phase, repetition)
+                    for phase, repetition, _reason_codes in expected_recovery_chain
                 }
+            else:
+                terminal_short_red = {
+                    (effective_red_phase, f"rep-{effective_red_repetitions + 1:02d}")
+                }
+                predelegation_initial = {("02-green-initial", "rep-01")}
+                archived_initial_schema = {
+                    (attempt["phase"], "rep-01")
+                    for attempt in metadata.get("invalidated_attempts", [])
+                    if attempt["phase"].startswith("02-green-initial-v")
+                    and attempt["phase"] != effective_green_initial_phase
+                    and attempt["reason_codes"] == ["schema-validation-failed"]
+                }
+                pressure_inconsistency = {("pressure", "pressure")} if effective_pressure_phase in {"03-pressure-v2", "03-pressure-v3", "03-pressure-v4"} else set()
+                pressure_v2_spawn_failure = {("03-pressure-v2", "pressure")} if effective_pressure_phase in {"03-pressure-v3", "03-pressure-v4"} else set()
+                pressure_v3_fork_mismatch = {("03-pressure-v3", "pressure")} if effective_pressure_phase == "03-pressure-v4" else set()
+                if effective_red_repetitions == 3 and (
+                    active_invalidated_keys == terminal_short_red
+                    or active_invalidated_keys == terminal_short_red | predelegation_initial
+                    or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema
+                    or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency
+                    or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure
+                    or active_invalidated_keys == terminal_short_red | predelegation_initial | archived_initial_schema | pressure_inconsistency | pressure_v2_spawn_failure | pressure_v3_fork_mismatch
+                ):
+                    assert "effective_red_repetitions" in scenario
+                else:
+                    assert active_invalidated_keys == {
+                        _tc_generator_execution_order(
+                        effective_final_phase, effective_red_phase, effective_red_repetitions, effective_green_initial_phase, effective_pressure_phase
+                        )[len(metadata["runs"])]
+                    }
 
     metadata_output_paths = {str(path.relative_to(campaign_root)).replace("\\", "/") for path in output_paths}
     for scorecard in scorecards:
-        _assert_scorecard_semantics(scorecard, effective_final_phase, effective_red_phase, effective_green_initial_phase)
+        _assert_scorecard_semantics(
+            scorecard,
+            effective_final_phase,
+            effective_red_phase,
+            effective_green_initial_phase,
+            effective_red_repetitions,
+            effective_green_initial_phase_by_repetition,
+            effective_final_phase_by_repetition,
+            effective_pressure_phase,
+        )
         if scorecard["status"] == "complete":
             if metadata["status"] == "pending":
-                required_phase = effective_red_phase if scorecard["phase"] == "red" else (effective_green_initial_phase if scorecard["phase"] == "green-initial" else effective_final_phase)
-                assert {
-                    (required_phase, repetition) for repetition in REPETITIONS
-                } <= scored_keys
+                if scorecard["phase"] == "pressure":
+                    assert {(effective_pressure_phase, "pressure")} <= scored_keys
+                else:
+                    required_repetitions = (
+                        REPETITIONS[:effective_red_repetitions]
+                        if scorecard["phase"] == "red"
+                        else REPETITIONS
+                    )
+                    assert _complete_scorecard_required_keys(
+                        scorecard["phase"],
+                        required_repetitions,
+                        effective_red_phase,
+                        effective_green_initial_phase_by_repetition,
+                        effective_final_phase,
+                        effective_final_phase_by_repetition,
+                    ) <= scored_keys
             for evidence_file in scorecard["evidence_files"]:
                 resolved_evidence = (campaign / evidence_file).resolve()
                 assert resolved_evidence.is_relative_to(campaign_root)
@@ -991,6 +2756,7 @@ def _assert_metadata_semantics(metadata, campaign, scenario, scorecards):
 
 def _complete_scorecard(scenario, phase="red"):
     result_value = phase != "red"
+    repetitions = REPETITIONS[:_effective_red_repetitions(scenario)] if phase == "red" else REPETITIONS
     return {
         "artifact_type": "scorecard",
         "skill_id": scenario["skill_id"],
@@ -999,11 +2765,11 @@ def _complete_scorecard(scenario, phase="red"):
         "rubric_ids": scenario["rubric_ids"],
         "results": {
             repetition: {rubric: result_value for rubric in scenario["rubric_ids"]}
-            for repetition in REPETITIONS
+            for repetition in repetitions
         },
         "evidence_files": [
             _score_evidence_path(phase, repetition, _effective_final_phase(scenario), _effective_red_phase(scenario))
-            for repetition in REPETITIONS
+            for repetition in repetitions
         ],
         "all_passed": result_value,
         "no_gap": False,
@@ -1013,8 +2779,17 @@ def _complete_scorecard(scenario, phase="red"):
 
 def _complete_metadata(scenario):
     runs = []
-    for phase in ("01-red-control", "02-green-initial", _effective_final_phase(scenario)):
-        for repetition in REPETITIONS:
+    for phase in (
+        _effective_red_phase(scenario),
+        _effective_green_initial_phase(scenario),
+        _effective_final_phase(scenario),
+    ):
+        repetitions = (
+            REPETITIONS[:_effective_red_repetitions(scenario)]
+            if phase == _effective_red_phase(scenario)
+            else REPETITIONS
+        )
+        for repetition in repetitions:
             runs.append(
                 {
                     "phase": phase,
@@ -1041,7 +2816,7 @@ def _complete_metadata(scenario):
             "commands": [{"id": "evaluate-pressure", "exit_code": 0}],
         }
     )
-    return {
+    metadata = {
         "artifact_type": "run-metadata",
         "skill_id": scenario["skill_id"],
         "status": "complete",
@@ -1051,6 +2826,9 @@ def _complete_metadata(scenario):
         "fork_turns": "none",
         "runs": runs,
     }
+    if _effective_red_repetitions(scenario) != 5:
+        metadata["effective_red_repetitions"] = _effective_red_repetitions(scenario)
+    return metadata
 
 
 @pytest.fixture
@@ -1092,18 +2870,25 @@ def complete_campaign(tmp_path, root):
             _uses_protocol_v1_literal_command_contract(scenario)
             and phase == _effective_final_phase(scenario)
         ):
-            _schema_name, output_name = PROTOCOL_V1_OUTPUT_CONTRACTS[scenario["skill_id"]]
-            validator_output_path = f"artifacts/outputs/{phase}/{repetition}/{output_name}"
-            validator_output_content = f"schema-bound {scenario['skill_id']} output\n".encode()
-            validator_output = campaign / validator_output_path
-            validator_output.parent.mkdir(parents=True, exist_ok=True)
-            validator_output.write_bytes(validator_output_content)
-            run["outputs"].append(
-                {
-                    "path": validator_output_path,
-                    "sha256": hashlib.sha256(validator_output_content).hexdigest(),
-                }
-            )
+            if scenario["skill_id"] == "tc-reviewer":
+                validator_outputs = _tc_reviewer_reserved_outputs(campaign, phase, repetition)
+            else:
+                validator_outputs = [
+                    _protocol_v1_reserved_output(campaign, scenario["skill_id"], phase, repetition)
+                ]
+            for validator_output in validator_outputs:
+                validator_output_content = (
+                    f"schema-bound {scenario['skill_id']} {validator_output.name} output\n".encode()
+                )
+                validator_output.parent.mkdir(parents=True, exist_ok=True)
+                validator_output.write_bytes(validator_output_content)
+                validator_output_path = str(validator_output.relative_to(campaign)).replace("\\", "/")
+                run["outputs"].append(
+                    {
+                        "path": validator_output_path,
+                        "sha256": hashlib.sha256(validator_output_content).hexdigest(),
+                    }
+                )
             run["commands"] = _captured_protocol_v1_final_commands(
                 campaign, scenario["skill_id"], phase, repetition
             )
@@ -1518,6 +3303,392 @@ def _assert_schema_instance_valid(validate_artifact, schema_path, document):
     assert not list(validator.iter_errors(document))
 
 
+def _tc_reviewer_one_red_schema_documents(effective_red_phase=DEFAULT_RED_PHASE):
+    phase_prompt_sha256 = {
+        "01-red-control": "a" * 64,
+        "02-green-initial": "a" * 64,
+        "pressure": "b" * 64,
+        "04-green-final": "a" * 64,
+    }
+    if effective_red_phase != DEFAULT_RED_PHASE:
+        phase_prompt_sha256[effective_red_phase] = "a" * 64
+
+    scenario = {
+        "artifact_type": "scenario",
+        "skill_id": "tc-reviewer",
+        "canonical_prompt": "review four fixtures",
+        "pressure_prompt": "preserve the blocking verdict",
+        "raw_input_allowlist": [
+            f"artifacts/inputs/{fixture}.json" for fixture in TC_REVIEWER_FIXTURES
+        ],
+        "rubric_ids": ["deterministic-outcome", "traceable-review", "blocking-gap-preserved"],
+        "repetitions": 5,
+        "effective_red_repetitions": 1,
+        "effective_red_phase": effective_red_phase,
+        "fork_turns": "none",
+        "output_paths": _expected_output_paths(
+            effective_red_phase=effective_red_phase,
+            effective_red_repetitions=1,
+        ),
+        "pressure_output_path": PRESSURE_OUTPUT_PATH,
+        "prompt_sha256": {"canonical": "a" * 64, "pressure": "b" * 64},
+        "skill_input_base": "repository-root",
+        "required_skill_inputs": [
+            {"path": "skills/tc-reviewer/SKILL.md", "sha256": "c" * 64},
+            {"path": "skills/tc-reviewer/references/review-verdicts.md", "sha256": "d" * 64},
+            {"path": "schemas/tc-reviewer-output.schema.json", "sha256": "e" * 64},
+        ],
+        "phase_prompt_sha256": phase_prompt_sha256,
+        "protocol_contract_version": 1,
+    }
+
+    def run(phase, repetition):
+        protocol_root = f"artifacts/protocol/{phase}/{repetition}"
+        output_path = (
+            "03-pressure.md" if phase == "pressure" else f"{phase}/{repetition}.md"
+        )
+        return {
+            "phase": phase,
+            "repetition": repetition,
+            "skill_present": phase != effective_red_phase,
+            "prompt_sha256": "b" * 64 if phase == "pressure" else "a" * 64,
+            "prompt_snapshot": {"path": f"{protocol_root}/prompt.txt", "sha256": "1" * 64},
+            "protocol_snapshot": {"path": f"{protocol_root}/run-protocol.json", "sha256": "2" * 64},
+            "observation": {"path": f"{protocol_root}/observation.json", "sha256": "3" * 64},
+            "raw_input_allowlist": scenario["raw_input_allowlist"],
+            "started_at": "2026-08-10T10:00:00Z",
+            "finished_at": "2026-08-10T10:00:01Z",
+            "outputs": [{"path": output_path, "sha256": "4" * 64}],
+            "commands": [{"id": "evaluate", "exit_code": 0}],
+        }
+
+    order = _tc_generator_execution_order(
+        effective_red_phase=effective_red_phase,
+        effective_red_repetitions=1,
+    )
+    metadata = {
+        "artifact_type": "run-metadata",
+        "skill_id": "tc-reviewer",
+        "status": "complete",
+        "evaluator": "terra-evaluator",
+        "host": "native-subagent-v2",
+        "model": "gpt-5.6-terra/high",
+        "fork_turns": "none",
+        "effective_red_repetitions": 1,
+        "runs": [run(phase, repetition) for phase, repetition in order],
+    }
+    scorecards = [_complete_scorecard(scenario, phase) for phase in SCORECARD_PHASES]
+    return scenario, metadata, scorecards
+
+
+def test_tc_reviewer_one_red_evidence_shape_is_strict(root):
+    validate_artifact = load_tool("validate_artifact")
+    schema_path = root / "schemas/skill-test-evidence.schema.json"
+    validator = validate_artifact.Draft202012Validator(_read_json(schema_path))
+    scenario, metadata, scorecards = _tc_reviewer_one_red_schema_documents()
+
+    assert not list(validator.iter_errors(scenario))
+    assert not list(validator.iter_errors(metadata))
+    assert all(not list(validator.iter_errors(scorecard)) for scorecard in scorecards)
+    _assert_scorecard_semantics(scorecards[0], effective_red_repetitions=1)
+
+    versioned_scenario, versioned_metadata, versioned_scorecards = (
+        _tc_reviewer_one_red_schema_documents("01-red-control-v3")
+    )
+    assert not list(validator.iter_errors(versioned_scenario))
+    assert not list(validator.iter_errors(versioned_metadata))
+    assert all(
+        not list(validator.iter_errors(scorecard))
+        for scorecard in versioned_scorecards
+    )
+    _assert_scorecard_semantics(
+        versioned_scorecards[0],
+        effective_red_phase="01-red-control-v3",
+        effective_red_repetitions=1,
+    )
+
+    wrong_effective_phase = copy.deepcopy(versioned_scorecards[0])
+    wrong_effective_phase["evidence_files"] = ["01-red-control/rep-01.md"]
+    assert not list(validator.iter_errors(wrong_effective_phase))
+    with pytest.raises(AssertionError):
+        _assert_scorecard_semantics(
+            wrong_effective_phase,
+            effective_red_phase="01-red-control-v3",
+            effective_red_repetitions=1,
+        )
+
+    scenario_three = copy.deepcopy(scenario)
+    scenario_three["effective_red_repetitions"] = 3
+    scenario_three["output_paths"] = _expected_output_paths(effective_red_repetitions=3)
+    metadata_three = copy.deepcopy(metadata)
+    metadata_three["effective_red_repetitions"] = 3
+    for number in (2, 3):
+        repetition = f"rep-{number:02d}"
+        extra = copy.deepcopy(metadata_three["runs"][0])
+        extra["repetition"] = repetition
+        protocol_root = f"artifacts/protocol/01-red-control/{repetition}"
+        extra["prompt_snapshot"]["path"] = f"{protocol_root}/prompt.txt"
+        extra["protocol_snapshot"]["path"] = f"{protocol_root}/run-protocol.json"
+        extra["observation"]["path"] = f"{protocol_root}/observation.json"
+        extra["outputs"][0]["path"] = f"01-red-control/{repetition}.md"
+        metadata_three["runs"].insert(number - 1, extra)
+    scorecards_three = [
+        _complete_scorecard(scenario_three, phase) for phase in SCORECARD_PHASES
+    ]
+    assert not list(validator.iter_errors(scenario_three))
+    assert not list(validator.iter_errors(metadata_three))
+    assert all(not list(validator.iter_errors(scorecard)) for scorecard in scorecards_three)
+    _assert_scorecard_semantics(scorecards_three[0], effective_red_repetitions=3)
+
+    versioned_scenario_three = copy.deepcopy(versioned_scenario)
+    versioned_scenario_three["effective_red_repetitions"] = 3
+    versioned_scenario_three["output_paths"] = _expected_output_paths(
+        effective_red_phase="01-red-control-v3",
+        effective_red_repetitions=3,
+    )
+    versioned_scorecards_three = [
+        _complete_scorecard(versioned_scenario_three, phase)
+        for phase in SCORECARD_PHASES
+    ]
+    assert not list(validator.iter_errors(versioned_scenario_three))
+    assert all(
+        not list(validator.iter_errors(scorecard))
+        for scorecard in versioned_scorecards_three
+    )
+    _assert_scorecard_semantics(
+        versioned_scorecards_three[0],
+        effective_red_phase="01-red-control-v3",
+        effective_red_repetitions=3,
+    )
+
+    out_of_order = copy.deepcopy(versioned_scorecards_three[0])
+    out_of_order["evidence_files"][0:2] = out_of_order["evidence_files"][1::-1]
+    assert list(validator.iter_errors(out_of_order))
+
+    invalid_count = copy.deepcopy(scenario)
+    invalid_count["effective_red_repetitions"] = 2
+    assert list(validator.iter_errors(invalid_count))
+
+    short_green = copy.deepcopy(scorecards[1])
+    short_green["results"].pop("rep-05")
+    short_green["evidence_files"].pop()
+    assert list(validator.iter_errors(short_green))
+
+    extra_run = copy.deepcopy(metadata)
+    extra_run["runs"].append(copy.deepcopy(extra_run["runs"][-1]))
+    assert list(validator.iter_errors(extra_run))
+
+
+def _tc_reviewer_v3_pending_recovery_campaign(root, tmp_path):
+    source_campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    repository_root = tmp_path / "repository"
+    campaign = repository_root / "docs/to_do/skill-tests/tc-reviewer"
+    shutil.copytree(source_campaign, campaign)
+    source_root = str(_campaign_repository_root(source_campaign))
+    copied_root = str(_campaign_repository_root(campaign))
+
+    def rebase(value):
+        if isinstance(value, str):
+            return value.replace(source_root, copied_root)
+        if isinstance(value, list):
+            return [rebase(item) for item in value]
+        if isinstance(value, dict):
+            return {key: rebase(item) for key, item in value.items()}
+        return value
+
+    scenario = _read_json(campaign / "00-scenario.json")
+    scenario.pop("green_initial_phase_by_repetition", None)
+    scenario.pop("final_phase_by_repetition", None)
+    scenario.pop("effective_pressure_phase", None)
+    scenario["output_paths"] = _expected_output_paths(
+        effective_red_phase="01-red-control-v3",
+        effective_red_repetitions=1,
+    )
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    metadata["invalidated_attempts"] = [
+        attempt
+        for attempt in metadata["invalidated_attempts"]
+        if (attempt["phase"], attempt["repetition"])
+        in {("01-red-control", "rep-01"), ("01-red-control-v2", "rep-01")}
+    ]
+    metadata = rebase(metadata)
+    for attempt in metadata["invalidated_attempts"]:
+        protocol_path = campaign / attempt["protocol_snapshot"]["path"]
+        protocol = rebase(_read_json(protocol_path))
+        protocol_path.write_text(json.dumps(protocol, indent=2) + "\n", encoding="utf-8")
+        attempt["protocol_snapshot"]["sha256"] = hashlib.sha256(
+            protocol_path.read_bytes()
+        ).hexdigest()
+
+    active_protocol_path = campaign / "artifacts/protocol/01-red-control-v3/rep-01/run-protocol.json"
+    active_protocol = rebase(_read_json(active_protocol_path))
+    active_protocol_path.write_text(
+        json.dumps(active_protocol, indent=2) + "\n", encoding="utf-8"
+    )
+
+    def evidence(path):
+        document = campaign / path
+        return {"path": path, "sha256": hashlib.sha256(document.read_bytes()).hexdigest()}
+
+    metadata.update(
+        evaluator=active_protocol["evaluator"]["name"],
+        host=active_protocol["evaluator"]["host"],
+        model=active_protocol["evaluator"]["model"],
+        runs=[
+            {
+                "phase": active_protocol["phase"],
+                "repetition": active_protocol["repetition"],
+                "skill_present": False,
+                "prompt_sha256": active_protocol["application_prompt_sha256"],
+                "prompt_snapshot": evidence(
+                    "artifacts/protocol/01-red-control-v3/rep-01/prompt.txt"
+                ),
+                "protocol_snapshot": evidence(
+                    "artifacts/protocol/01-red-control-v3/rep-01/run-protocol.json"
+                ),
+                "observation": evidence(active_protocol["observation_path"]),
+                "raw_input_allowlist": scenario["raw_input_allowlist"],
+                "started_at": active_protocol["started_at"],
+                "finished_at": active_protocol["finished_at"],
+                "outputs": [evidence(path) for path in active_protocol["output_paths"]],
+                "commands": active_protocol["commands"],
+            }
+        ],
+    )
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+    scorecards[1].update(
+        status="pending",
+        results={},
+        evidence_files=[],
+        all_passed=False,
+    )
+    return campaign, scenario, scorecards, metadata
+
+
+def test_tc_reviewer_v3_pending_recovery_chain_and_preflight_are_strict(root, tmp_path):
+    campaign, scenario, scorecards, metadata = _tc_reviewer_v3_pending_recovery_campaign(
+        root, tmp_path
+    )
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+
+    missing_chain = copy.deepcopy(metadata)
+    missing_chain["invalidated_attempts"].pop()
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(missing_chain, campaign, scenario, scorecards)
+
+    wrong_recovery_reason = copy.deepcopy(metadata)
+    wrong_recovery_reason["invalidated_attempts"][0]["reason_codes"] = [
+        "controller-process-spawn-failed"
+    ]
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(
+            wrong_recovery_reason, campaign, scenario, scorecards
+        )
+
+    wrong_schema_command = copy.deepcopy(metadata)
+    wrong_schema_command["invalidated_attempts"][1]["commands"][0]["id"] = (
+        "validate-artifact-typo-only"
+    )
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(
+            wrong_schema_command, campaign, scenario, scorecards
+        )
+
+    protocol_path = campaign / metadata["runs"][0]["protocol_snapshot"]["path"]
+    tampered_protocol = _read_json(protocol_path)
+    tampered_protocol["controller_preflight"]["exit_code"] = 1
+    protocol_path.write_text(
+        json.dumps(tampered_protocol, indent=2) + "\n", encoding="utf-8"
+    )
+    tampered_preflight = copy.deepcopy(metadata)
+    tampered_preflight["runs"][0]["protocol_snapshot"]["sha256"] = hashlib.sha256(
+        protocol_path.read_bytes()
+    ).hexdigest()
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(
+            tampered_preflight, campaign, scenario, scorecards
+        )
+
+
+def test_run_protocol_allows_controller_preflight_only_for_tc_reviewer(root):
+    """Keeps the documented controller ledger strict without widening other skills' protocols."""
+    schema = _read_json(root / "schemas/skill-test-evidence.schema.json")
+    validator = load_tool("validate_artifact").Draft202012Validator(schema)
+    protocol = _read_json(
+        root
+        / "docs/to_do/skill-tests/tc-reviewer/artifacts/protocol/01-red-control-v3/rep-01/run-protocol.json"
+    )
+
+    assert not list(validator.iter_errors(protocol))
+
+    legacy_protocol = copy.deepcopy(protocol)
+    legacy_protocol.pop("controller_preflight")
+    legacy_protocol["skill_id"] = "tc-generator"
+    assert not list(validator.iter_errors(legacy_protocol))
+
+    invalid_protocol = copy.deepcopy(protocol)
+    invalid_protocol["skill_id"] = "tc-generator"
+    assert list(validator.iter_errors(invalid_protocol))
+
+
+def test_tc_reviewer_green_v2_recovery_archive_is_strict(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    scorecards = [
+        _read_json(campaign / "05-scorecards" / f"{phase}.json")
+        for phase in SCORECARD_PHASES
+    ]
+    attempt = copy.deepcopy(next(
+        item for item in metadata["invalidated_attempts"]
+        if item["attempt_id"] == "green-initial-rep-01-semantic-checker-false-negative"
+    ))
+    protocol = _read_json(campaign / attempt["protocol_snapshot"]["path"])
+    observation = _read_json(campaign / attempt["observation"]["path"])
+
+    _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
+    _assert_tc_generator_forward_invalidated_attempt(attempt, campaign, scenario)
+    assert _effective_green_initial_phase_by_repetition(scenario)["rep-01"] == (
+        "02-green-initial-v2"
+    )
+    assert _effective_green_initial_phase_by_repetition(scenario)["rep-02"] == (
+        "02-green-initial-v2"
+    )
+    assert scenario["output_paths"][1:3] == [
+        "artifacts/outputs/02-green-initial-v2/rep-01",
+        "artifacts/outputs/02-green-initial-v2/rep-02",
+    ]
+
+    for mutate in (
+        lambda item, current_protocol, current_observation: current_protocol["controller_preflight"].update(exit_code=1),
+        lambda item, current_protocol, current_observation: current_protocol.pop("controller_preflight"),
+        lambda item, current_protocol, current_observation: item["commands"][0]["argv"].__setitem__(3, "D:\\wrong-output.json"),
+        lambda item, current_protocol, current_observation: item["commands"][0].update(cwd="D:\\wrong-cwd"),
+        lambda item, current_protocol, current_observation: item["commands"][-1].update(exit_code=0),
+        lambda item, current_protocol, current_observation: item.update(reason_codes=["semantic-check-failed"]),
+        lambda item, current_protocol, current_observation: item["outputs"][0].update(path="artifacts/invalidated/wrong.json"),
+    ):
+        invalid_attempt = copy.deepcopy(attempt)
+        invalid_protocol = copy.deepcopy(protocol)
+        invalid_observation = copy.deepcopy(observation)
+        mutate(invalid_attempt, invalid_protocol, invalid_observation)
+        with pytest.raises(AssertionError):
+            _assert_tc_generator_forward_invalidated_attempt(
+                invalid_attempt, campaign, scenario, invalid_protocol, invalid_observation
+            )
+
+    unversioned_rep02 = copy.deepcopy(metadata)
+    unversioned_rep02["runs"].append(copy.deepcopy(unversioned_rep02["runs"][0]))
+    unversioned_rep02["runs"][-1]["phase"] = "02-green-initial"
+    unversioned_rep02["runs"][-1]["repetition"] = "rep-02"
+    with pytest.raises(AssertionError):
+        _assert_metadata_semantics(unversioned_rep02, campaign, scenario, scorecards)
+
+
 def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
     """Catches missing immutable campaign scaffolds before any evaluator can write evidence."""
     contract = _read_json(root / "contracts/pipeline.json")
@@ -1527,7 +3698,9 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
     validate_artifact = load_tool("validate_artifact")
     campaign_root = root / "docs/to_do/skill-tests"
     assert campaign_root.is_dir()
-    assert {path.name for path in campaign_root.iterdir() if path.is_dir()} == set(SKILL_IDS)
+    assert {path.name for path in campaign_root.iterdir() if path.is_dir()} == set(SKILL_IDS) | {"adapters"}
+    adapters_root = campaign_root / "adapters"
+    assert {path.name for path in adapters_root.iterdir() if path.is_dir()} == {"artifacts"}
 
     for skill_id in SKILL_IDS:
         campaign = campaign_root / skill_id
@@ -1544,13 +3717,26 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
         assert scenario["fork_turns"] == "none"
         effective_final_phase = _effective_final_phase(scenario)
         assert scenario["output_paths"] == _expected_output_paths(
-            effective_final_phase, _effective_red_phase(scenario), _effective_green_initial_phase(scenario),
-            _effective_red_repetitions(scenario),
+            effective_final_phase=effective_final_phase,
+            effective_red_phase=_effective_red_phase(scenario),
+            effective_green_initial_phase=_effective_green_initial_phase(scenario),
+            effective_red_repetitions=_effective_red_repetitions(scenario),
+            effective_green_initial_phase_by_repetition=scenario.get(
+                "green_initial_phase_by_repetition"
+            ),
+            effective_final_phase_by_repetition=scenario.get(
+                "final_phase_by_repetition"
+            ),
         )
         expected_pressure_output_path = (
             f"artifacts/outputs/{_effective_pressure_phase(scenario)}/pressure"
-            if skill_id == "tc-generator" and _effective_pressure_phase(scenario) != "pressure"
+            if _effective_pressure_phase(scenario) != "pressure"
             else PRESSURE_OUTPUT_PATH
+        )
+        effective_pressure_report = (
+            f"{_effective_pressure_phase(scenario)}.md"
+            if _effective_pressure_phase(scenario) != "pressure"
+            else "03-pressure.md"
         )
         assert scenario["pressure_output_path"] == expected_pressure_output_path
         assert len(set(scenario["output_paths"])) == len(scenario["output_paths"])
@@ -1563,22 +3749,89 @@ def test_skill_test_scaffolds_are_complete_schema_valid_and_confined(root):
 
         for phase in (_effective_red_phase(scenario), _effective_green_initial_phase(scenario), effective_final_phase):
             for repetition in REPETITIONS:
-                assert (campaign / "artifacts/outputs" / phase / repetition / ".gitkeep").is_file()
+                output_scaffold = campaign / "artifacts/outputs" / phase / repetition / ".gitkeep"
+                recorded_final_repetition = (
+                    skill_id == "tc-reviewer"
+                    and phase == "04-green-final"
+                    and (phase, repetition) in {
+                        (run["phase"], run["repetition"])
+                        for run in metadata["runs"]
+                    }
+                )
+                assert output_scaffold.is_file() is not recorded_final_repetition
+                if recorded_final_repetition:
+                    assert not (
+                        campaign / f"artifacts/protocol/04-green-final/{repetition}/.gitkeep"
+                    ).exists()
                 if skill_id == "tc-generator" and phase == _effective_red_phase(scenario):
                     assert (campaign / phase / ".gitkeep").is_file()
                     assert (campaign / "artifacts/protocol" / phase / repetition / ".gitkeep").is_file()
-        assert (campaign / expected_pressure_output_path / ".gitkeep").is_file()
+        successful_pressure = skill_id == "tc-reviewer" and any(
+            (run["phase"], run["repetition"])
+            == (_effective_pressure_phase(scenario), "pressure")
+            for run in metadata["runs"]
+        )
+        pressure_scaffold = campaign / expected_pressure_output_path / ".gitkeep"
+        assert pressure_scaffold.is_file() is not successful_pressure
+        assert (campaign / effective_pressure_report).is_file()
+        if _effective_pressure_phase(scenario) != "pressure":
+            protocol_scaffold = (
+                campaign
+                / "artifacts/protocol"
+                / _effective_pressure_phase(scenario)
+                / "pressure/.gitkeep"
+            )
+            assert protocol_scaffold.is_file() is not successful_pressure
+            assert (
+                campaign
+                / "artifacts/protocol"
+                / _effective_pressure_phase(scenario)
+                / "pressure/prompt.txt"
+            ).is_file()
         scorecards = []
         for phase in SCORECARD_PHASES:
             scorecard_path = campaign / "05-scorecards" / f"{phase}.json"
             assert scorecard_path.is_file()
             _assert_schema_valid(validate_artifact, schema_path, scorecard_path)
             scorecard = _read_json(scorecard_path)
-            _assert_scorecard_semantics(scorecard, effective_final_phase, _effective_red_phase(scenario), _effective_green_initial_phase(scenario))
+            _assert_scorecard_semantics(
+                scorecard=scorecard,
+                effective_final_phase=effective_final_phase,
+                effective_red_phase=_effective_red_phase(scenario),
+                effective_green_initial_phase=_effective_green_initial_phase(scenario),
+                effective_red_repetitions=_effective_red_repetitions(scenario),
+                effective_green_initial_phase_by_repetition=scenario.get(
+                    "green_initial_phase_by_repetition"
+                ),
+                effective_final_phase_by_repetition=scenario.get(
+                    "final_phase_by_repetition"
+                ),
+                effective_pressure_phase=_effective_pressure_phase(scenario),
+            )
             scorecards.append(scorecard)
         assert len({scorecard["phase"] for scorecard in scorecards}) == 3
         _assert_metadata_semantics(metadata, campaign, scenario, scorecards)
         assert campaign.resolve().is_relative_to((root / "docs/to_do").resolve())
+
+
+def test_tc_reviewer_v2_pressure_scaffold_is_complete_and_uses_the_effective_paths(root):
+    """Catches tc-reviewer v2 reverting any reserved scaffold to unversioned pressure."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    phase = scenario["effective_pressure_phase"]
+    output_root = campaign / "artifacts/outputs" / phase / "pressure"
+    protocol_root = campaign / "artifacts/protocol" / phase / "pressure"
+
+    assert phase == "03-pressure-v2"
+    assert scenario["pressure_output_path"] == f"artifacts/outputs/{phase}/pressure"
+    assert (campaign / f"{phase}.md").is_file()
+    assert not (output_root / ".gitkeep").exists()
+    assert not (protocol_root / ".gitkeep").exists()
+    assert (protocol_root / "prompt.txt").is_file()
+    assert protocol_root.joinpath("prompt.txt").read_text(encoding="utf-8") == _resolved_pressure_prompt(
+        scenario
+    )
+    assert (campaign / f"{phase}.md").read_text(encoding="utf-8").startswith("# Pressure v2\n")
 
 
 def test_context_marker_v1_canonical_brief_binds_required_skill_inputs(root):
@@ -1598,10 +3851,12 @@ def test_context_marker_v1_canonical_brief_binds_required_skill_inputs(root):
     ]
     assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
     repository_root = _campaign_repository_root(campaign)
+    _assert_required_skill_inputs_are_current_or_explicitly_amended(
+        repository_root, scenario
+    )
     for item in scenario["required_skill_inputs"]:
         source = repository_root / item["path"]
         assert source.is_file()
-        assert item["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
         assert item["path"] in scenario["canonical_prompt"]
     assert "Read only artifacts/inputs/raw-content.json" not in scenario["canonical_prompt"]
 
@@ -1627,10 +3882,12 @@ def test_tc_generator_v1_canonical_brief_binds_pipeline_input_and_required_skill
     ]
     assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
     repository_root = _campaign_repository_root(campaign)
+    _assert_required_skill_inputs_are_current_or_explicitly_amended(
+        repository_root, scenario
+    )
     for item in scenario["required_skill_inputs"]:
         source = repository_root / item["path"]
         assert source.is_file()
-        assert item["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
         assert item["path"] in scenario["canonical_prompt"]
 
     fixture = campaign / "artifacts/inputs/context-marker-output.json"
@@ -1657,6 +3914,307 @@ def test_tc_generator_v1_canonical_brief_binds_pipeline_input_and_required_skill
         for requirement in envelope["artifacts"]["analytics_documentation"]["requirements"]
     )
     assert "warehouse_operator" in scenario["pressure_prompt"]
+
+
+def test_tc_reviewer_v1_canonical_brief_binds_four_inputs_and_delivery(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    validate_artifact = load_tool("validate_artifact")
+
+    assert _uses_protocol_v1_literal_command_contract(scenario)
+    assert scenario["effective_red_repetitions"] == 1
+    assert scenario["skill_input_base"] == "repository-root"
+    assert scenario["raw_input_allowlist"] == [
+        f"artifacts/inputs/{fixture}.json" for fixture in TC_REVIEWER_FIXTURES
+    ]
+    expected_paths = [
+        "skills/tc-reviewer/SKILL.md",
+        "skills/tc-reviewer/references/review-verdicts.md",
+        "schemas/tc-reviewer-output.schema.json",
+    ]
+    assert [item["path"] for item in scenario["required_skill_inputs"]] == expected_paths
+    _assert_required_skill_inputs_are_current_or_explicitly_amended(root, scenario)
+    for item in scenario["required_skill_inputs"]:
+        source = root / item["path"]
+        assert source.is_file()
+        assert item["path"] in scenario["canonical_prompt"]
+        assert item["path"] in scenario["pressure_prompt"]
+
+    prompt_contract = {
+        "01-red-control": "01-red-control.txt",
+        _effective_red_phase(scenario): "01-red-control.txt",
+        "02-green-initial": "canonical.txt",
+        "pressure": "pressure.txt",
+        "04-green-final": "canonical.txt",
+    }
+    for phase, filename in prompt_contract.items():
+        prompt = campaign / "artifacts/prompts" / filename
+        assert scenario["phase_prompt_sha256"][phase] == hashlib.sha256(prompt.read_bytes()).hexdigest()
+    assert scenario["canonical_prompt"].encode("utf-8") == (
+        campaign / "artifacts/prompts/canonical.txt"
+    ).read_bytes()
+    assert scenario["pressure_prompt"].encode("utf-8") == (
+        campaign / "artifacts/prompts/pressure.txt"
+    ).read_bytes()
+
+    assert all(
+        validate_artifact.validate(
+            str(root / "schemas/tc-generator-output.schema.json"),
+            str(campaign / raw_input),
+        )[0]
+        == 0
+        for raw_input in scenario["raw_input_allowlist"]
+    )
+    protocol = (campaign / "PROTOCOL.md").read_text(encoding="utf-8")
+    assert (
+        f"exactly one successful, scorable `{_effective_red_phase(scenario)}/rep-01`"
+        in protocol
+    )
+    assert "Native evaluator delegation" in protocol
+
+
+def test_tc_reviewer_v1_command_capture_binds_four_validators_then_semantic(root):
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_final_green_actual_commands(campaign, "rep-01")
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "04-green-final", "rep-01", commands
+    )
+    assert [command["id"] for command in commands[-5:]] == [
+        *(f"validate-artifact-{fixture}" for fixture in TC_REVIEWER_FIXTURES),
+        "semantic-check",
+    ]
+
+
+@pytest.mark.parametrize("repetition", REPETITIONS)
+def test_tc_reviewer_final_green_wrapper_is_literal_and_stops_after_its_six_commands(
+    root, repetition
+):
+    """Catches FINAL wrappers that use v1, omit the bootstrap, or permit extra evaluator work."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    commands = _tc_reviewer_final_green_actual_commands(campaign, repetition)
+    expected_targets = [
+        str(
+            (
+                campaign
+                / "artifacts"
+                / "outputs"
+                / "04-green-final"
+                / repetition
+                / f"{fixture}-tc-reviewer-output.json"
+            ).resolve()
+        )
+        for fixture in TC_REVIEWER_FIXTURES
+    ]
+    task_cwd = rf"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-rep-{int(repetition[-2:])}"
+    observation = {
+        "task_cwd": task_cwd,
+        "evaluator": {
+            "name": "codex-app-luna-evaluator",
+            "host": "local",
+            "model": "gpt-5.6-luna/max",
+        },
+        "evaluator_tool_sequence": [
+            {
+                "sequence": 1,
+                "tool": "commandExecution",
+                "id": "ambient-bootstrap-skill-read",
+                "argv": [
+                    "Get-Content",
+                    "-LiteralPath",
+                    r"C:\Users\User\.codex\plugins\cache\openai-curated-remote\superpowers\6.2.0\skills\using-superpowers\SKILL.md",
+                ],
+                "cwd": task_cwd,
+                "exit_code": 0,
+                "allowed": True,
+            },
+            {
+                "sequence": 2,
+                "tool": "fileChange",
+                "file_changes": 4,
+                "actual_output_paths": expected_targets,
+                "summary": "Wrote the four reserved evaluator outputs.",
+            },
+        ],
+        "evaluator_reported_output_paths": expected_targets,
+        "native_tool_calls": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0},
+    }
+
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, "04-green-final", repetition, commands
+    )
+    _assert_tc_reviewer_final_green_evaluator_observation(
+        observation, {"commands": commands}, commands, campaign, repetition
+    )
+    assert len(commands) == 6
+    assert commands[-1]["argv"][1] == str((campaign / "check_outputs_v2.py").resolve())
+    assert commands[-1]["argv"][-1] == "canonical"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda observation: observation.update(task_cwd=r"C:\wrong-cwd"),
+        lambda observation: observation["evaluator_tool_sequence"][1]["actual_output_paths"].pop(),
+        lambda observation: observation["evaluator_tool_sequence"][1]["actual_output_paths"].__setitem__(
+            0, r"D:\escaped.json"
+        ),
+        lambda observation: observation["evaluator_reported_output_paths"].__setitem__(
+            0, r"D:\self-report-mismatch.json"
+        ),
+    ],
+)
+def test_tc_reviewer_final_green_wrapper_rejects_per_rep_cwd_or_target_mutations(root, mutate):
+    """Catches missing, escaped, or mismatched FINAL fileChange targets for every repetition."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    repetition = "rep-03"
+    targets = [
+        str(
+            (
+                campaign
+                / "artifacts"
+                / "outputs"
+                / "04-green-final"
+                / repetition
+                / f"{fixture}-tc-reviewer-output.json"
+            ).resolve()
+        )
+        for fixture in TC_REVIEWER_FIXTURES
+    ]
+    observation = {
+        "task_cwd": r"C:\Users\User\Documents\Codex\2026-08-10\evaluator-tc-reviewer-final-green-rep-3",
+        "evaluator": {
+            "name": "codex-app-luna-evaluator",
+            "host": "local",
+            "model": "gpt-5.6-luna/max",
+        },
+        "evaluator_tool_sequence": [
+            {"sequence": 1, "tool": "commandExecution"},
+            {"sequence": 2, "tool": "fileChange", "file_changes": 4, "actual_output_paths": targets},
+        ],
+        "evaluator_reported_output_paths": copy.deepcopy(targets),
+        "native_tool_calls": {"apply_patch": 1, "shell_commands": 1, "validators": 0, "semantic_checks": 0},
+    }
+    mutate(observation)
+
+    with pytest.raises(AssertionError):
+        _assert_tc_reviewer_final_green_evaluator_observation(
+            observation, {"commands": []}, [], campaign, repetition
+        )
+
+
+def test_tc_reviewer_final_green_rep01_actual_record_preserves_its_trace(root):
+    """Catches a recorded FINAL rep-01 that misstates its actual trace after the gate advances."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    run = next(
+        item
+        for item in metadata["runs"]
+        if (item["phase"], item["repetition"]) == ("04-green-final", "rep-01")
+    )
+    protocol = _read_json(campaign / run["protocol_snapshot"]["path"])
+    observation = _read_json(campaign / run["observation"]["path"])
+
+    assert (run["phase"], run["repetition"]) == ("04-green-final", "rep-01")
+    assert metadata["status"] == "pending"
+    assert _read_json(campaign / "05-scorecards/green-final.json")["status"] == "pending"
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, run["phase"], run["repetition"], run["commands"]
+    )
+    _assert_tc_reviewer_final_green_evaluator_observation(
+        observation, protocol, run["commands"], campaign, run["repetition"]
+    )
+    assert observation["thread_id"] == "019feab5-a29b-7c02-b0f8-638232e329c4"
+    assert observation["controller_preparation"] == {
+        "first_attempt": {
+            "exit_code": 1,
+            "bad_hashes": [],
+            "collisions": [],
+            "errors": [
+                {
+                    "type": "FileNotFoundError",
+                    "path": "artifacts/protocol/04-green-final/rep-01/prompt.txt",
+                }
+            ],
+            "evaluator_started": False,
+            "outputs_created": False,
+        },
+        "second_attempt": {"exit_code": 0, "bad_hashes": [], "collisions": []},
+    }
+    assert observation["controller_delivery_check"]["bindings"] == {
+        **scenario["raw_input_sha256"],
+        "skills/tc-reviewer/SKILL.md": "62fa4c00972cd5ab5a0deb6d9bafe045c13519b4a91da5f1d6d50fe5ff775a18",
+        "skills/tc-reviewer/references/review-verdicts.md": "8d01417f6ce67f4b0badecaf624b60459522dbaf15aa42c03d9d2d32abc1ff78",
+        "schemas/tc-reviewer-output.schema.json": "676035d151e2623308f007ff0b93026f0bb55bb3d1269a7a5ec7f6dee9d6e927",
+        "artifacts/protocol/04-green-final/rep-01/prompt.txt": scenario["prompt_sha256"]["canonical"],
+        "check_outputs_v2.py": "7b39077be85a115d52ab7ad8d6f4cb4e11a09053dffe09a19e81708b42dc971b",
+        "check_outputs.py": "8757973e2cea5d479ee83e4e19a7a290f142de052624d04857aace828736e4ec",
+    }
+    for repetition in REPETITIONS[2:]:
+        assert (campaign / f"artifacts/outputs/04-green-final/{repetition}/.gitkeep").is_file()
+        assert (campaign / f"artifacts/protocol/04-green-final/{repetition}/.gitkeep").is_file()
+
+
+def test_tc_reviewer_final_green_rep02_actual_record_advances_only_to_rep03(root):
+    """Catches FINAL rep-02 evidence that authorizes rep-04/05 or diverges from its literal wrapper."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+    metadata = _read_json(campaign / "06-run-metadata.json")
+    run = next(
+        item
+        for item in metadata["runs"]
+        if (item["phase"], item["repetition"]) == ("04-green-final", "rep-02")
+    )
+    protocol = _read_json(campaign / run["protocol_snapshot"]["path"])
+    observation = _read_json(campaign / run["observation"]["path"])
+
+    assert [(item["phase"], item["repetition"]) for item in metadata["runs"][-3:]] == [
+        ("04-green-final", "rep-01"),
+        ("04-green-final", "rep-02"),
+        ("05-green-final-v2", "rep-03"),
+    ]
+    _assert_protocol_v1_final_command_capture(
+        scenario, campaign, run["phase"], run["repetition"], run["commands"]
+    )
+    _assert_tc_reviewer_final_green_evaluator_observation(
+        observation, protocol, run["commands"], campaign, run["repetition"]
+    )
+    assert observation["thread_id"] == "019feac3-d0d9-77f0-91f3-ef437cb5f63f"
+    assert observation["controller_delivery_check"]["output_collisions"] == []
+    assert set(observation["controller_delivery_check"]["bindings"]) == {
+        *scenario["raw_input_sha256"],
+        "skills/tc-reviewer/SKILL.md",
+        "skills/tc-reviewer/references/review-verdicts.md",
+        "schemas/tc-reviewer-output.schema.json",
+        "artifacts/protocol/04-green-final/rep-02/prompt.txt",
+        "check_outputs_v2.py",
+        "check_outputs.py",
+    }
+    assert not (campaign / "artifacts/outputs/05-green-final-v2/rep-03/.gitkeep").exists()
+    assert not (campaign / "artifacts/protocol/05-green-final-v2/rep-03/.gitkeep").exists()
+    for repetition in REPETITIONS[3:]:
+        assert (campaign / f"artifacts/outputs/04-green-final/{repetition}/.gitkeep").is_file()
+        assert (campaign / f"artifacts/protocol/04-green-final/{repetition}/.gitkeep").is_file()
+
+
+def test_tc_reviewer_raw_fixture_sha256_binding_rejects_missing_changed_and_reordered_inputs(root):
+    """Catches a predelegation contract that cannot prove it delivered the four immutable raw bytes."""
+    campaign = root / "docs/to_do/skill-tests/tc-reviewer"
+    scenario = _read_json(campaign / "00-scenario.json")
+
+    _assert_tc_reviewer_raw_input_binding(scenario, campaign)
+    for mutate in (
+        lambda value: value["raw_input_sha256"].pop("artifacts/inputs/clean-accepted.json"),
+        lambda value: value["raw_input_sha256"].update({"artifacts/inputs/typo-only.json": "0" * 64}),
+        lambda value: value["raw_input_allowlist"].__setitem__(slice(0, 2), value["raw_input_allowlist"][1::-1]),
+    ):
+        invalid = copy.deepcopy(scenario)
+        mutate(invalid)
+        with pytest.raises(AssertionError):
+            _assert_tc_reviewer_raw_input_binding(invalid, campaign)
 
 
 def test_tc_generator_v1_final_command_capture_binds_schema_and_reserved_output(root):

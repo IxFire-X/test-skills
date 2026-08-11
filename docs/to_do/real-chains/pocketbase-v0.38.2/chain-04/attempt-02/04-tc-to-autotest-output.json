@@ -1,0 +1,25 @@
+{
+  "schema_version": "2.1.0",
+  "stage": "tc-to-autotest",
+  "artifacts": {
+    "automation_matrix": [
+      {"test_case_id":"TC-0001","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0002","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0003","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0004","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0005","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0006","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0007","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0008","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0009","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]},
+      {"test_case_id":"TC-0010","generated_file_ids":["FILE-PB-RULES"],"generated_method_ids":["METHOD-PB-RULES"]}
+    ],
+    "generated_test_files": [
+      {"id":"FILE-PB-RULES","path":"apis/real_chain04_record_rules_test.go","language":"go","framework":"testing+tests.ApiScenario","content_digest":"sha256:ab0591dc91b8d1c2e4d4130114203be73ec117cf0453eb838b0c74619d304235"}
+    ],
+    "generated_test_methods": [
+      {"id":"METHOD-PB-RULES","file_id":"FILE-PB-RULES","test_case_ids":["TC-0001","TC-0002","TC-0003","TC-0004","TC-0005","TC-0006","TC-0007","TC-0008","TC-0009","TC-0010"],"requirement_ids":["REQ-0001","REQ-0002","REQ-0003","REQ-0004","REQ-0005","REQ-0006","REQ-0007","REQ-0008","REQ-0009","REQ-0010"],"name":"TestRealChain04RecordRules","content_digest":"sha256:ab0591dc91b8d1c2e4d4130114203be73ec117cf0453eb838b0c74619d304235"}
+    ]
+  },
+  "warnings": ["The local controller could not locate gofmt on PATH; no compilation or execution claim is made at this stage."]
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.1.0", "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {"requirements": [
+      {"id":"REQ-0001","text":"Password authentication is exposed as POST /api/collections/{collection}/auth-with-password.","provenance":["apis/record_auth.go:31"]},
+      {"id":"REQ-0002","text":"For a non-superuser, a non-empty ListRule is applied to the record-list query; a matching authenticated record can receive HTTP 200 list results.","provenance":["apis/record_crud.go:66","apis/record_crud_test.go:190"]},
+      {"id":"REQ-0003","text":"For a non-superuser, a non-empty ListRule filters out nonmatching records while the list response remains HTTP 200.","provenance":["apis/record_crud.go:66","apis/record_crud_test.go:163"]},
+      {"id":"REQ-0004","text":"For a non-superuser, a non-empty ViewRule is added to the record lookup; a record not found through that lookup produces HTTP 404.","provenance":["apis/record_crud.go:170","apis/record_crud.go:184"]},
+      {"id":"REQ-0005","text":"For a non-superuser, a non-empty CreateRule that does not match rejects record creation with HTTP 400.","provenance":["apis/record_crud.go:308","apis/record_crud.go:318"]},
+      {"id":"REQ-0006","text":"For a non-superuser, a non-empty UpdateRule is added to the record lookup; a record not found through that lookup produces HTTP 404.","provenance":["apis/record_crud.go:440","apis/record_crud.go:455"]},
+      {"id":"REQ-0007","text":"For a non-superuser, a non-empty DeleteRule is added to the record lookup; a record not found through that lookup produces HTTP 404.","provenance":["apis/record_crud.go:562","apis/record_crud.go:576"]},
+      {"id":"REQ-0008","text":"A permitted record creation returns HTTP 200.","provenance":["apis/record_crud.go:344"]},
+      {"id":"REQ-0009","text":"A permitted record update returns HTTP 200.","provenance":["apis/record_crud.go:501"]},
+      {"id":"REQ-0010","text":"A permitted record deletion returns HTTP 204.","provenance":["apis/record_crud.go:594"]}
+    ]},
+    "source_code_and_diff": {"sources": [
+      "apis/record_crud.go:24 — CRUD routes are GET list, GET view, POST create, PATCH update, and DELETE delete under /api/collections/{collection}/records.",
+      "apis/record_auth.go:31 — Password authentication route is POST /api/collections/{collection}/auth-with-password.",
+      "tests/api.go:16 — tests.ApiScenario is the project-native API test harness.",
+      "apis/record_crud_test.go:1 — Existing API tests use the apis_test package and tests.ApiScenario."
+    ]}
+  },
+  "warnings": ["apis/record_auth_with_password_test.go:13 — Existing password-auth fixtures contain credentials that this chain must not copy, persist, or emit; automation must use an already confirmed non-secret project-native runtime authentication path."]
+}
