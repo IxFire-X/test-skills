@@ -54,8 +54,8 @@ CSV нужен для переноса в Jira Zephyr и просмотра че
    `unchanged`.
 
    Затем загрузи `<project>/.skillsrc` и выбери exact module ID. Автоматически
-   выбирай только единственный module. Exact user-supplied relative path выбирает
-   содержащий его module root. Для текстового названия проверяй только объявленные
+   выбирай только единственный module. Для exact user-supplied relative feature
+   path выбери module, чей module root содержит этот path. Для текстового названия проверяй только объявленные
    `feature_sources` и source paths; выбери один module только при прямом
    совпадении requirement, route, symbol или path и запиши module ID и evidence
    в controller receipt. При нуле совпадений попроси path/module ID; при нескольких
@@ -94,8 +94,8 @@ CSV нужен для переноса в Jira Zephyr и просмотра че
 Сохраняй штатный код завершения каждой команды отдельно от стандартного вывода.
 Не составляй квитанции средства запуска или трассировки вручную.
 
-Discovery questions, answers и bootstrap receipts — controller evidence. Не
-передавай их evaluator-скиллам. Передавай выбранные requirements и source files
+Не включай discovery questions, answers и bootstrap receipts во входы
+evaluator-скиллов: это controller evidence. Передавай выбранные requirements и source files
 только как `raw_content` существующему `context-marker`; его schema-valid JSON
 остается динамическим контекстом фичи. Не создавай второй каталог фич, не добавляй
 business content в `.skillsrc` и не сохраняй его в bootstrap receipt.

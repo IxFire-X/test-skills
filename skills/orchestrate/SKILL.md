@@ -17,24 +17,24 @@ JSON-артефакты машинным источником истины, ср
 1. Полностью прочитай `contracts/pipeline.json` и [контракт оркестрации](references/orchestration-contract.md).
 2. Определяй пути скиллов только через `skill_files`; не используй псевдонимы, устаревшие каталоги или копии из плагинов.
 3. Выбери exact корень целевого проекта и каталог текущего запуска под `<project>/docs/to_do/<run>/`.
-4. До чтения первого stage skill выполни `<root>/tools/init_skillsrc.py --project <project> --write --output <attempt-dir>/00-skillsrc-init.json` и проверь его квитанцию точными командами из контракта.
+4. До чтения первого stage skill выполни bootstrap с output `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json` и проверь его квитанцию точными командами из контракта.
 5. При `needs_input` или `conflict` останови пайплайн до `context-marker`. Покажи только первый неразрешённый вопрос вместе с его options, evidence и impact; не задавай следующий вопрос одновременно.
-6. После ответа сохрани только выбранные option IDs в новой immutable attempt-папке как `skillsrc-answers.json` и заново выполни bootstrap с `--answers`. Не изменяй прежнюю attempt-папку или её квитанцию.
+6. После ответа сохрани только выбранные option IDs как `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-answers.json` и заново выполни bootstrap с output `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-init.json`. Не изменяй прежнюю attempt-папку или её квитанцию.
 7. Только при `created`, `updated` или `unchanged` загрузи `<project>/.skillsrc` и выбери exact module ID по контракту.
 8. При неоднозначном feature-to-module выборе останови пайплайн и запроси один выбор; не выбирай module по вероятности. Только после exact module selection переходи к `context-marker`.
 9. Прочитай только нужный текущему этапу `SKILL.md`, объявленные для него входы и схему.
 10. Осмотри проект без изменений. Не меняй файлы проекта, конфигурацию, зависимости и рабочий код ради тестов.
 11. Выбери изолированное место для новых файлов сгенерированных тестов.
 
-Discovery questions, answers и bootstrap-квитанции являются controller evidence,
-а не содержимым фичи: не передавай их evaluator-скиллам.
+Не включай discovery questions, answers и bootstrap-квитанции во входы
+evaluator-скиллов. Это controller evidence, а не содержимое фичи.
 
 ## Выбор модуля фичи
 
 Выбирай module ID только в следующем порядке:
 
 1. Выбери единственный module автоматически.
-2. Для exact user-supplied relative path выбери module, содержащий этот module root.
+2. Для exact user-supplied relative feature path выбери module, чей module root содержит этот path.
 3. Для текстового названия проверь только объявленные `feature_sources` и source paths.
 4. При одном module с прямым совпадением requirement, route, symbol или path выбери его и запиши module ID и evidence в controller receipt.
 5. При нуле совпадений попроси путь или module ID.
