@@ -8,6 +8,8 @@ import unittest
 from jsonschema import Draft202012Validator
 import yaml
 
+from tools.doctor import inspect_environment
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,6 +25,27 @@ def compact(text: str) -> str:
 
 
 class OrchestratorSkillsrcBootstrapTests(unittest.TestCase):
+    def test_public_docs_lead_with_automatic_initialization(self):
+        for relative in ("README.md", "USAGE.md", "HOW-IT-WORKS.md"):
+            text = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn("автомат", text.lower())
+            self.assertIn(".skillsrc", text)
+        self.assertNotIn(
+            "Скопируйте `.skillsrc.example`",
+            (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8"),
+        )
+
+    def test_doctor_requires_skillsrc_bootstrap_runtime(self):
+        report = inspect_environment(REPOSITORY_ROOT)
+        self.assertTrue(report["integrity"]["valid"])
+
+    def test_skillsrc_example_is_a_two_module_v3_manifest(self):
+        example = yaml.safe_load((REPOSITORY_ROOT / ".skillsrc.example").read_text(encoding="utf-8"))
+        schema = json.loads((REPOSITORY_ROOT / "schemas/skillsrc.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(example["version"], "3.0")
+        self.assertEqual([module["id"] for module in example["modules"]], ["backend", "frontend"])
+        self.assertFalse(list(Draft202012Validator(schema).iter_errors(example)))
+
     def test_operational_bootstrap_contract_is_ordered_and_isolates_controller_evidence(self):
         skill = (REPOSITORY_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
         reference = (REPOSITORY_ROOT / "skills/orchestrate/references/orchestration-contract.md").read_text(encoding="utf-8")

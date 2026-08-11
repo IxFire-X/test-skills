@@ -15,13 +15,30 @@ else:  # direct CLI execution
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
     root = root.resolve()
-    required_files = ("contracts/pipeline.json", "schemas/tc-to-autotest-output.schema.json", "tools/run_tests.py", "tools/scan_project.py")
+    required_files = (
+        "contracts/pipeline.json",
+        "schemas/tc-to-autotest-output.schema.json",
+        "schemas/skillsrc.schema.json",
+        "schemas/project-discovery-output.schema.json",
+        "schemas/skillsrc-init-output.schema.json",
+        "tools/run_tests.py",
+        "tools/scan_project.py",
+        "tools/skillsrc_manifest.py",
+        "tools/discover_project.py",
+        "tools/init_skillsrc.py",
+    )
     required_dirs = ("schemas", "tools", "contracts")
     missing_integrity = [item for item in required_files if not (root / item).is_file()]
     missing_integrity.extend(item for item in required_dirs if not (root / item).is_dir())
     if not root.is_dir():
         missing_integrity.insert(0, "root")
-    for relative, expected in (("contracts/pipeline.json", "pipeline"), ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json")):
+    for relative, expected in (
+        ("contracts/pipeline.json", "pipeline"),
+        ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json"),
+        ("schemas/skillsrc.schema.json", "schemas/skillsrc.schema.json"),
+        ("schemas/project-discovery-output.schema.json", "schemas/project-discovery-output.schema.json"),
+        ("schemas/skillsrc-init-output.schema.json", "schemas/skillsrc-init-output.schema.json"),
+    ):
         candidate = root / relative
         if not candidate.is_file():
             continue

@@ -24,6 +24,8 @@
 
 ```text
 требования и исходный код
+  -> automatic project discovery and .skillsrc initialization
+  -> module selection
   -> context-marker
   -> tc-generator -> CSV
   -> tc-reviewer
@@ -64,8 +66,21 @@ python tools/contract_check.py --root . --full
 через `.venv\Scripts\Activate.ps1`. Если команда `python` отсутствует, используйте
 `python3` во всех примерах.
 
-Скопируйте `.skillsrc.example` в корень целевого проекта как `.skillsrc` и
-замените примерные значения на фактический стек.
+При первой команде оркестратор автоматически сканирует структуру проекта и
+создаёт `.skillsrc`. Если критическое значение неоднозначно, он остановится и
+задаст один вопрос. Это v3-манифест с одним или несколькими `modules[]`;
+контекст фичи строится отдельно только после выбора exact module ID.
+
+Ручная инициализация нужна лишь для диагностики или CI:
+
+```bash
+python tools/init_skillsrc.py --project /path/to/project --write --output /path/to/project/docs/to_do/skillsrc-init.json
+```
+
+На Windows путь может выглядеть как `D:\\work\\project`, на Linux — как
+`/work/project`. `.skillsrc` описывает проект, но не даёт разрешения менять его
+исходный код, тесты, конфигурацию или зависимости. В v2-манифестах сохраняется
+совместимость; новые автоматически созданные манифесты имеют версию v3.
 
 Передайте AI-агенту:
 
