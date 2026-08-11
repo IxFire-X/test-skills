@@ -56,12 +56,13 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -
     if not isinstance(questions, list):
         raise InitError("discovery_invalid", "discovery questions are invalid")
     unresolved: list[dict[str, Any]] = []
-    known = set()
+    known: set[str] = set()
     selected: list[tuple[str, object]] = []
     for question in questions:
         if not isinstance(question, Mapping) or not isinstance(question.get("id"), str):
             raise InitError("discovery_invalid", "discovery question is invalid")
-        question_id = question["id"]; known.add(question_id)
+        question_id = question["id"]
+        known.add(question_id)
         options = {item.get("id"): item for item in question.get("options", []) if isinstance(item, Mapping) and isinstance(item.get("id"), str)}
         answer = answers.get(question_id)
         if answer is None:
@@ -69,6 +70,11 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -
         if answer not in options:
             raise InitError("answer_unknown", f"unknown option for {question_id}")
         selected.append((str(question.get("field")), options[answer].get("value")))
+    deferred = {key for key in answers if key not in known}
+    if any(not key.startswith(("replace:", "remove:", "migrate-")) for key in deferred):
+        raise InitError("answer_unknown", "answer does not match a current discovery question")
+    if unresolved and deferred:
+        raise InitError("answer_unknown", "reconciliation answer supplied before discovery is resolved")
     if unresolved:
         raise NeedsInput(unresolved)
     modules = copy.deepcopy(discovery.get("modules", []))
@@ -123,6 +129,11 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
     if existing.get("version") != "3.0":
         if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
             return {"status": "unchanged", "document": existing, "questions": []}
+        unsupported = _v2_unsupported_fields(existing)
+        if unsupported:
+            question = _question("migrate-v2-preservation", "version", "replace")
+            question["impact"] = "This v2 manifest contains fields without a lossless v3 representation"
+            return {"status": "conflict", "document": existing, "questions": [question]}
         migration = _question("migrate-v2-to-v3", "version", "replace")
         if set(answers) - {migration["id"]}:
             raise InitError("answer_unknown", "answer does not match a current reconciliation question")
@@ -186,18 +197,29 @@ def _set_document_path(modules: list[dict[str, Any]], path: list[str], value: An
     target[path[-1]] = copy.deepcopy(value)
 
 
-def _module_equivalent(old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
-    old = copy.deepcopy(dict(old)); new = copy.deepcopy(dict(new))
-    old.pop("detected_from", None); new.pop("detected_from", None)
-    return old == new
-
-
 def _v2_matches_detected(old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
     """V2 has no module envelope; retain it when its core stack agrees."""
     if old.get("id") != "root" or new.get("id") != "root" or old.get("root") != new.get("root"):
         return False
-    old_stack, new_stack = old.get("stack", {}), new.get("stack", {})
-    return all(old_stack.get(key) == new_stack.get(key) for key in ("language", "build_tool"))
+    for group in ("stack", "test", "paths", "feature_sources"):
+        old_group = old.get(group, {})
+        new_group = new.get(group, {})
+        if not isinstance(old_group, Mapping) or not isinstance(new_group, Mapping):
+            return False
+        if any(new_group.get(key) != value for key, value in old_group.items()):
+            return False
+    return True
+
+
+def _v2_unsupported_fields(document: Mapping[str, Any]) -> list[str]:
+    unsupported: list[str] = []
+    if "type" in document.get("project", {}):
+        unsupported.append("project.type")
+    for group, keys in (("paths", ("docs",)), ("test", ("api_client", "database")), ("sdd", ("asyncapi", "domain"))):
+        for key in keys:
+            if key in document.get(group, {}):
+                unsupported.append(f"{group}.{key}")
+    return unsupported
 
 
 def _payload(document: Mapping[str, Any]) -> bytes:
