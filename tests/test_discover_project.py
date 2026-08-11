@@ -163,11 +163,10 @@ class DiscoverProjectTests(unittest.TestCase):
             self.assertEqual(discover_project(root)["status"],"error")
         self.assertTrue(validate_report({"status":"ready","modules":[{"id":"root","stack":{}}],"questions":[]}))
 
-    def test_marker_evidence_accumulates_all_manifests(self):
+    def test_matching_framework_markers_resolve_to_one_framework(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp); (root/"pyproject.toml").write_text('[project]\ndependencies=["django","fastapi"]',encoding="utf-8"); (root/"requirements.txt").write_text("djangorestframework\n",encoding="utf-8")
-            django=next(o for o in discover_project(root)["questions"] if o["field"]=="modules.root.stack.framework" for o in o["options"] if o["id"]=="django")
-            self.assertEqual(django["evidence"],["pyproject.toml:marker.django","requirements.txt:marker.django"])
+            root=Path(temp); (root/"pyproject.toml").write_text('[project]\ndependencies=["django"]',encoding="utf-8"); (root/"requirements.txt").write_text("djangorestframework\n",encoding="utf-8")
+            self.assertEqual(discover_project(root)["modules"][0]["stack"]["framework"], "django")
 
     def test_invalid_nested_workspace_shapes_are_sanitized(self):
         for payload in ('{"workspaces":7}', '{"workspaces":{"packages":7}}', '{"workspaces":[7]}'):
@@ -250,3 +249,66 @@ class DiscoverProjectTests(unittest.TestCase):
             self.assertNotIn("build_tool", report["modules"][0]["stack"])
             (root / "package.json").write_text("{bad", encoding="utf-8")
             self.assertEqual(discover_project(root)["status"], "error")
+
+    def test_maven_requires_project_root_and_safe_direct_module_paths(self):
+        for content in (
+            "<not-project><modules><module>invented</module></modules></not-project>",
+            "<project><modules><module></module></modules></project>",
+            "<project><modules><module>../escape</module></modules></project>",
+            "<project><modules><module>C:drive-relative</module></modules></project>",
+            "<project><modules><module><nested>bad</nested></module></modules></project>",
+        ):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / "pom.xml").write_text(content, encoding="utf-8")
+                report = discover_project(root)
+                self.assertEqual(report["status"], "error")
+                self.assertEqual(report["modules"], [])
+                self.assertEqual(report["errors"], ["invalid manifest: pom.xml"])
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "service/src/main/java").mkdir(parents=True)
+            (root / "service/pom.xml").write_text("<m:project xmlns:m=\"urn:test\"/>", encoding="utf-8")
+            (root / "pom.xml").write_text(
+                "<m:project xmlns:m=\"urn:test\"><m:modules><m:module>service</m:module></m:modules></m:project>",
+                encoding="utf-8",
+            )
+            self.assertEqual([module["root"] for module in discover_project(root)["modules"]], ["service"])
+
+    def test_validate_report_requires_exact_bidirectional_critical_questions(self):
+        from tools.discover_project import validate_report
+
+        language = "modules.root.stack.language"
+        build_tool = "modules.root.stack.build_tool"
+        test_framework = "modules.root.test.framework"
+        unresolved = {build_tool, test_framework}
+        report = {
+            "status": "needs_input",
+            "modules": [{"id": "root", "stack": {"language": "java"}}],
+            "questions": [{"field": test_framework, "options": [{"id": "junit5"}, {"id": "testng"}]}],
+        }
+        self.assertTrue(validate_report(report, unresolved))
+
+        resolved_language = report | {"questions": [{"field": language, "options": [{"id": "java"}, {"id": "python"}]}]}
+        self.assertTrue(validate_report(resolved_language, set()))
+
+        nonsense = report | {"questions": [{"field": "modules.root.stack.framework", "options": [{"id": "x"}]}]}
+        self.assertTrue(validate_report(nonsense, {"modules.root.stack.framework"}))
+
+        duplicate = report | {"questions": report["questions"] * 2}
+        self.assertTrue(validate_report(duplicate, {test_framework}))
+
+        language_only = {
+            "status": "needs_input",
+            "modules": [{"id": "root", "stack": {}}],
+            "questions": [{"field": language, "options": [{"id": "java"}, {"id": "python"}]}],
+        }
+        self.assertFalse(validate_report(language_only, {language}))
+
+        build_tool_only = {
+            "status": "needs_input",
+            "modules": [{"id": "root", "stack": {"language": "java"}}],
+            "questions": [{"field": build_tool, "options": [{"id": "gradle"}, {"id": "maven"}]}],
+        }
+        self.assertFalse(validate_report(build_tool_only, {build_tool}))
