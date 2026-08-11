@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+from dataclasses import dataclass
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 from typing import Any, Mapping
@@ -39,6 +41,24 @@ class Conflict(InitError):
     def __init__(self, questions: list[dict[str, Any]]):
         super().__init__("conflict", "existing manifest requires an explicit decision")
         self.questions = questions
+
+
+class OutputConfinementError(InitError):
+    def __init__(self, message: str):
+        super().__init__("output_confined", message)
+
+
+@dataclass(frozen=True)
+class VerifiedOutputTarget:
+    project_root: Path
+    relative_parent: tuple[str, ...]
+    parent: Path
+    parent_identity: tuple[int, int, int | None]
+    name: str
+
+    @property
+    def destination(self) -> Path:
+        return self.parent / self.name
 
 
 def _set_field(module: dict[str, Any], field: str, value: object) -> None:
@@ -256,7 +276,7 @@ def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mappin
         if temporary.exists(): temporary.unlink()
 
 
-def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str) -> dict[str, Any]:
+def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str, exit_code: int | None = None) -> dict[str, Any]:
     operation = {"created": "create", "updated": "update"}.get(status)
     receipt = {
         "status": status,
@@ -269,7 +289,10 @@ def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any
         "errors": errors,
         "discovery_fingerprint": fingerprint,
     }
-    return _sanitize(receipt)
+    receipt = _sanitize(receipt)
+    if exit_code is not None:
+        receipt["_exit_code"] = exit_code
+    return receipt
 
 
 def _sanitize(value: Any) -> Any:
@@ -282,27 +305,45 @@ def _sanitize(value: Any) -> Any:
     return value
 
 
+def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in report.items() if not key.startswith("_")}
+
+
+def _input_exit_code(code: str) -> int:
+    return 2 if code in {"answer_unknown", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
+
+
+def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
+    if not destination.exists():
+        return []
+    try:
+        return normalize_skillsrc(load_skillsrc(destination))["modules"]
+    except (OSError, SkillsrcError, ValueError):
+        return []
+
+
 def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) -> dict[str, Any]:
     root = project_dir.resolve(); destination = root / ".skillsrc"; discovery = discover_project(root)
     fingerprint = str(discovery.get("fingerprint", hashlib.sha256(b"").hexdigest()))
     modules = list(discovery.get("modules", []))
-    if discovery.get("status") == "error": return _receipt("error", root, False, modules, [], list(discovery.get("errors", [])), fingerprint)
+    if discovery.get("status") == "error": return _receipt("error", root, False, modules, [], list(discovery.get("errors", [])), fingerprint, 1)
     try:
         proposed = compile_skillsrc(discovery, answers)
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:
-        return _receipt("error", root, False, modules, [], [error.code], fingerprint)
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
     original = destination.read_bytes() if destination.exists() else None
     try:
         existing = load_skillsrc(destination) if original is not None else None
     except (SkillsrcError, OSError) as error:
-        return _receipt("error", root, False, modules, [], [getattr(error, "code", "read_error")], fingerprint)
+        code = getattr(error, "code", "read_error")
+        return _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
     try:
         discovery_ids = {question["id"] for question in discovery.get("questions", [])}
         reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in answers.items() if key not in discovery_ids})
     except InitError as error:
-        return _receipt("error", root, False, modules, [], [error.code], fingerprint)
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
     actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
     if reconciled["status"] == "conflict": return _receipt("conflict", root, False, actual_modules, reconciled["questions"], [], fingerprint)
     if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
@@ -310,35 +351,111 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) 
     try:
         atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
     except Exception as error:
-        return _receipt("error", root, False, modules, [], [getattr(error, "code", "write_error")], fingerprint)
+        return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
     return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint)
 
 
-def _confined_output(root: Path, value: str) -> Path:
-    candidate = Path(value)
-    raw = str(candidate)
-    if raw.startswith("\\\\") or raw.startswith("\\\\?\\") or any(":" in part for part in candidate.parts[1:]):
-        raise ValueError("--output must be below exact docs/to_do")
-    resolved = candidate.resolve()
-    required = root.resolve() / "docs" / "to_do"
+def _output_relative(root: Path, value: str | Path) -> tuple[Path, tuple[str, ...]]:
+    raw = str(value)
+    if raw.startswith(("\\\\", "//", "\\\\?\\")):
+        raise OutputConfinementError("--output must be below exact docs/to_do")
+    project_root = root.resolve(strict=True)
+    candidate = Path(raw)
     try:
-        resolved.relative_to(required)
+        relative = candidate.relative_to(project_root) if candidate.is_absolute() else candidate
     except ValueError as error:
-        raise ValueError("--output must be below exact docs/to_do") from error
-    return resolved
+        raise OutputConfinementError("--output must be below exact docs/to_do") from error
+    parts = relative.parts
+    if len(parts) < 3 or parts[:2] != ("docs", "to_do") or any(part in {"", ".", ".."} or ":" in part for part in parts):
+        raise OutputConfinementError("--output must be below exact docs/to_do")
+    return project_root, tuple(parts)
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    details = os.stat(path, follow_symlinks=False)
+    attributes = getattr(details, "st_file_attributes", 0)
+    return stat.S_ISLNK(details.st_mode) or bool(attributes & 0x400)
+
+
+def _parent_identity(path: Path) -> tuple[int, int, int | None]:
+    details = os.stat(path, follow_symlinks=False)
+    return details.st_dev, details.st_ino, getattr(details, "st_file_attributes", None)
+
+
+def _remove_owned_temporary(project_root: Path, temporary: Path, identity: tuple[int, int, int | None]) -> None:
+    candidates = [temporary]
+    if not temporary.exists():
+        try:
+            candidates.extend(project_root.rglob(temporary.name))
+        except OSError:
+            return
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and _parent_identity(candidate) == identity:
+                candidate.unlink()
+                return
+        except OSError:
+            continue
+
+
+def _verified_output_target(root: Path, value: str | Path) -> VerifiedOutputTarget:
+    project_root, parts = _output_relative(root, value)
+    parent_parts = parts[:-1]
+    requested_parent = project_root.joinpath(*parent_parts)
+    requested_parent.mkdir(parents=True, exist_ok=True)
+    current = project_root
+    try:
+        for part in parent_parts:
+            current /= part
+            if _is_link_or_reparse(current):
+                raise OutputConfinementError("--output parent is a symlink or reparse point")
+        parent = requested_parent.resolve(strict=True)
+        required = (project_root / "docs" / "to_do").resolve(strict=True)
+        parent.relative_to(required)
+    except (OSError, ValueError) as error:
+        if isinstance(error, OutputConfinementError):
+            raise
+        raise OutputConfinementError("--output must be below exact docs/to_do") from error
+    return VerifiedOutputTarget(project_root, parent_parts, parent, _parent_identity(parent), parts[-1])
+
+
+def _verify_output_parent(record: VerifiedOutputTarget, temporary: Path) -> None:
+    requested_parent = record.project_root.joinpath(*record.relative_parent)
+    current = record.project_root
+    try:
+        for part in record.relative_parent:
+            current /= part
+            if _is_link_or_reparse(current):
+                raise OutputConfinementError("--output parent is a symlink or reparse point")
+        resolved = requested_parent.resolve(strict=True)
+        if not os.path.samefile(resolved, record.parent) or _parent_identity(resolved) != record.parent_identity:
+            raise OutputConfinementError("--output parent changed during receipt write")
+        if temporary.parent.resolve(strict=True) != record.parent or _parent_identity(temporary.parent) != record.parent_identity:
+            raise OutputConfinementError("receipt temporary parent changed during write")
+    except (OSError, ValueError) as error:
+        if isinstance(error, OutputConfinementError):
+            raise
+        raise OutputConfinementError("--output parent changed during receipt write") from error
+
+
+def _confined_output(root: Path, value: str) -> Path:
+    project_root, parts = _output_relative(root, value)
+    return project_root.joinpath(*parts)
 
 
 def _atomic_json(root: Path, path: Path, value: Mapping[str, Any]) -> None:
-    path = _confined_output(root, str(path))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path = _confined_output(root, str(path))
-    handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc-init.", suffix=".tmp", dir=path.parent); temporary = Path(temporary_name)
+    record = _verified_output_target(root, path)
+    handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc-init.", suffix=".tmp", dir=record.parent)
+    temporary = Path(temporary_name)
+    temporary_identity = _parent_identity(temporary)
     try:
         with os.fdopen(handle, "wb") as stream:
             stream.write(json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _verify_output_parent(record, temporary)
+        _verify_output_parent(record, temporary)
+        os.replace(temporary, record.destination)
     finally:
-        if temporary.exists(): temporary.unlink()
+        _remove_owned_temporary(record.project_root, temporary, temporary_identity)
 
 
 def main() -> int:
@@ -352,15 +469,16 @@ def main() -> int:
     except (OSError, json.JSONDecodeError, ValueError) as error:
         print(json.dumps({"status": "error", "errors": [str(error)]}, ensure_ascii=False)); return 2
     report = ensure_skillsrc(root, answers, args.write)
+    public_report = _public_report(report)
     if output:
         try:
-            _atomic_json(root, output, report)
-        except OSError as error:
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            _atomic_json(root, output, public_report)
+        except (OSError, ValueError) as error:
+            print(json.dumps(public_report, ensure_ascii=False, indent=2))
             print(json.dumps({"receipt_error": _sanitize(str(error))}, ensure_ascii=False), file=sys.stderr)
             return 1
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if report["status"] in {"needs_input", "conflict"} else 1
+    print(json.dumps(public_report, ensure_ascii=False, indent=2))
+    return 0 if public_report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if public_report["status"] in {"needs_input", "conflict"} else int(report.get("_exit_code", 1))
 
 
 if __name__ == "__main__": raise SystemExit(main())

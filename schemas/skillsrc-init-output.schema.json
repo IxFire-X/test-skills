@@ -43,10 +43,10 @@
     "discovery_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   },
   "allOf": [
-    {"if": {"properties": {"status": {"enum": ["created", "updated"]}}}, "then": {"properties": {"written": {"const": true}, "changes": {"minItems": 1}}}},
-    {"if": {"properties": {"status": {"const": "unchanged"}}}, "then": {"properties": {"written": {"const": false}, "changes": {"maxItems": 0}}}},
-    {"if": {"properties": {"status": {"enum": ["preview", "needs_input", "conflict", "error"]}}}, "then": {"properties": {"written": {"const": false}}}},
-    {"if": {"properties": {"status": {"enum": ["needs_input", "conflict"]}}}, "then": {"properties": {"questions": {"minItems": 1}}}},
-    {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"errors": {"minItems": 1}}}}
+    {"if": {"properties": {"status": {"enum": ["created", "updated"]}}}, "then": {"properties": {"written": {"const": true}, "changes": {"minItems": 1}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "unchanged"}}}, "then": {"properties": {"written": {"const": false}, "changes": {"maxItems": 0}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "preview"}}}, "then": {"properties": {"written": {"const": false}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"enum": ["needs_input", "conflict"]}}}, "then": {"properties": {"written": {"const": false}, "questions": {"minItems": 1}, "changes": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"written": {"const": false}, "errors": {"minItems": 1}, "questions": {"maxItems": 0}, "changes": {"maxItems": 0}}}}
   ]
 }

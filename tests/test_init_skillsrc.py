@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 from jsonschema import Draft202012Validator
 
+from tools import init_skillsrc
 from tools.init_skillsrc import _atomic_json, _confined_output, ensure_skillsrc
 
 
@@ -283,6 +284,121 @@ class InitSkillsrcTests(unittest.TestCase):
             schema = json.loads((Path(__file__).parents[1] / "schemas" / "skillsrc-init-output.schema.json").read_text(encoding="utf-8"))
             self.assertFalse(list(Draft202012Validator(schema).iter_errors(json.loads(output.read_text(encoding="utf-8")))))
 
+
+    def test_schema_enforces_each_status_array_contract(self):
+        """A status branch may not carry arrays from another status."""
+        schema = json.loads((Path(__file__).parents[1] / "schemas" / "skillsrc-init-output.schema.json").read_text(encoding="utf-8"))
+        validator = Draft202012Validator(schema)
+        base = {"skillsrc_path": ".skillsrc", "module_ids": ["root"], "questions": [], "changes": [], "warnings": [], "errors": [], "discovery_fingerprint": "a" * 64}
+        valid = [
+            {**base, "status": "created", "written": True, "changes": [{"operation": "create", "path": ".skillsrc"}]},
+            {**base, "status": "updated", "written": True, "changes": [{"operation": "update", "path": ".skillsrc"}]},
+            {**base, "status": "unchanged", "written": False},
+            {**base, "status": "preview", "written": False, "changes": [{"operation": "update", "path": ".skillsrc"}]},
+            {**base, "status": "needs_input", "written": False, "questions": [{"id": "q", "field": "f", "impact": "i", "options": [{"id": "python", "value": "python", "evidence": []}]}]},
+            {**base, "status": "conflict", "written": False, "questions": [{"id": "q", "field": "f", "impact": "i", "operation": "replace", "options": [{"id": "keep-existing", "value": "keep-existing", "evidence": []}]}]},
+            {**base, "status": "error", "written": False, "errors": ["read_error"]},
+        ]
+        for artifact in valid:
+            self.assertFalse(list(validator.iter_errors(artifact)), artifact["status"])
+        invalid = [
+            {**valid[0], "questions": valid[4]["questions"]}, {**valid[1], "errors": ["write_error"]},
+            {**valid[2], "questions": valid[4]["questions"]}, {**valid[3], "questions": valid[4]["questions"]},
+            {**valid[3], "errors": ["write_error"]}, {**valid[4], "changes": valid[1]["changes"]},
+            {**valid[4], "errors": ["write_error"]}, {**valid[5], "changes": valid[1]["changes"]},
+            {**valid[5], "errors": ["write_error"]}, {**valid[6], "questions": valid[4]["questions"]},
+            {**valid[6], "changes": valid[1]["changes"]},
+        ]
+        for artifact in invalid:
+            self.assertTrue(list(validator.iter_errors(artifact)), artifact["status"])
+
+    def test_temp_manifest_validation_failure_preserves_old_bytes_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            original = (root / ".skillsrc").read_bytes()
+            (root / "worker").mkdir(); (root / "worker" / "package.json").write_text("{}", encoding="utf-8")
+            real_load = init_skillsrc.load_skillsrc
+            def reject_temporary(path):
+                if str(path).endswith(".tmp"):
+                    raise init_skillsrc.InitError("temp_invalid", "temporary manifest failed validation")
+                return real_load(path)
+            with mock.patch("tools.init_skillsrc.load_skillsrc", side_effect=reject_temporary):
+                report = ensure_skillsrc(root, {}, write=True)
+            self.assertEqual(report["status"], "error")
+            self.assertEqual((root / ".skillsrc").read_bytes(), original)
+            self.assertEqual(list(root.glob(".skillsrc.*.tmp")), [])
+
+    def test_repeated_discovery_answer_update_is_byte_identical(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "package.json").write_text('{"devDependencies":{"jest":"1","mocha":"1"}}', encoding="utf-8")
+            answer = {"module:root:test.framework": "jest"}
+            self.assertEqual(ensure_skillsrc(root, answer, write=True)["status"], "created")
+            first = (root / ".skillsrc").read_bytes()
+            self.assertEqual(ensure_skillsrc(root, answer, write=True)["status"], "unchanged")
+            self.assertEqual((root / ".skillsrc").read_bytes(), first)
+
+    def test_framework_credential_never_reaches_conflict_or_cli_receipt(self):
+        credential = "https://user:secret@example.invalid/framework"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            obsolete = "- id: private\n  root: private\n  stack:\n    language: python\n    framework: " + credential + "\n  detected_from:\n  - pyproject.toml\n"
+            skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("modules:\n", "modules:\n" + obsolete), encoding="utf-8")
+            report = ensure_skillsrc(root, {}, write=True)
+            self.assertEqual(report["status"], "conflict")
+            self.assertNotIn("user:secret", json.dumps(report))
+            (root / "docs" / "to_do").mkdir(parents=True)
+            output = root / "docs" / "to_do" / "receipt.json"; script = Path(__file__).parents[1] / "tools" / "init_skillsrc.py"
+            process = subprocess.run([sys.executable, str(script), "--project", str(root), "--write", "--output", str(output)], capture_output=True, text=True)
+            self.assertEqual(process.returncode, 3)
+            self.assertNotIn("user:secret", process.stdout + output.read_text(encoding="utf-8"))
+
+    def test_main_reports_successful_manifest_when_receipt_write_fails_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); (root / "docs" / "to_do").mkdir(parents=True)
+            output = root / "docs" / "to_do" / "receipt.json"; stdout, stderr = __import__("io").StringIO(), __import__("io").StringIO()
+            with mock.patch.object(sys, "argv", ["init_skillsrc.py", "--project", str(root), "--write", "--output", str(output)]), mock.patch("tools.init_skillsrc._atomic_json", side_effect=ValueError("receipt parent changed")), mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
+                self.assertEqual(init_skillsrc.main(), 1)
+            self.assertTrue((root / ".skillsrc").exists())
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "created")
+            self.assertNotIn("Traceback", stdout.getvalue() + stderr.getvalue())
+
+    def test_cli_exit_categories_and_schema_invalid_existing_yaml(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); script = Path(__file__).parents[1] / "tools" / "init_skillsrc.py"
+            self.assertEqual(subprocess.run([sys.executable, str(script), "--project", str(root)], capture_output=True, text=True).returncode, 0)
+            bad_answers = root / "answers.json"; bad_answers.write_text("[]", encoding="utf-8")
+            self.assertEqual(subprocess.run([sys.executable, str(script), "--project", str(root), "--answers", str(bad_answers)], capture_output=True, text=True).returncode, 2)
+            bad = b'version: "3.0"\nproject: []\n'; (root / ".skillsrc").write_bytes(bad)
+            invalid_existing = subprocess.run([sys.executable, str(script), "--project", str(root), "--write"], capture_output=True, text=True)
+            self.assertEqual(invalid_existing.returncode, 2)
+            self.assertEqual((root / ".skillsrc").read_bytes(), bad)
+            self.assertNotIn("project: []", invalid_existing.stdout)
+        with tempfile.TemporaryDirectory() as temp:
+            conflict_root = Path(temp)
+            (conflict_root / "package.json").write_text('{"devDependencies":{"jest":"1","mocha":"1"}}', encoding="utf-8")
+            self.assertEqual(subprocess.run([sys.executable, str(script), "--project", str(conflict_root), "--write"], capture_output=True, text=True).returncode, 3)
+
+    def test_receipt_parent_identity_change_aborts_without_external_write(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); destination = root / "docs" / "to_do" / "receipt.json"; destination.parent.mkdir(parents=True)
+            external = Path(outside) / "receipt.json"
+            real_check = init_skillsrc._verify_output_parent
+            moved = root / "docs" / "old_to_do"
+            calls = 0
+            def replace_parent(record, temporary):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    record.parent.rename(moved); record.parent.mkdir()
+                return real_check(record, temporary)
+            with mock.patch("tools.init_skillsrc._verify_output_parent", side_effect=replace_parent):
+                with self.assertRaises(ValueError):
+                    _atomic_json(root, destination, {"status": "preview"})
+            self.assertFalse(destination.exists())
+            self.assertFalse(external.exists())
+            self.assertEqual(list(moved.glob(".skillsrc-init.*.tmp")), [])
 
 if __name__ == "__main__":
     unittest.main()
