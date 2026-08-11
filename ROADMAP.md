@@ -49,32 +49,38 @@ Host-neutral drop-in пакет из шести skills, который:
 
 ## Текущий gate
 
-Plan 2 Task 9: package/evidence acceptance audit.
+Plan 3 baseline завершён до уровня `PILOT_READY / FORMAL_ACCEPTANCE_INCOMPLETE`.
 
-Требуется:
+Подтверждено:
 
-1. шесть и только шесть canonical skill packages;
-2. никаких package README, SKILL-LITE или templates;
-3. все local Markdown links существуют;
-4. нет obsolete artifact aliases в authority declarations;
-5. все campaign scenario/metadata/scorecards schema-valid;
-6. adapters повторно копируют финальные current bytes;
-7. full pytest, Ruff, contract/render checks и quick validation проходят.
+1. Java `step5-java-demo`: 7 ТК, 7 методов, targeted 7/7, full 31/31, trace PASS;
+2. Python InvenTree feature slice: 6 ТК, 6 методов, targeted 6/6, paired 17/17, trace PASS;
+3. пустая subscription fixture: честный `NOT_RUNNABLE`;
+4. обязательный JSON+lossless CSV для manual test cases;
+5. semantic artifact review и шесть SHA-bound forward reports;
+6. full verification: 735 passed, 2 skipped; Ruff/contract/render/doctor/links/quick validations clean.
 
-Formal tc-reviewer FINAL и orchestrate evaluator scorecards остаются отдельным evidence debt; это нельзя скрывать как complete. Дорогие fresh-model проверки выполняются один раз в final acceptance, а не после каждой wording-правки.
+До полного design-spec acceptance остаются:
+
+1. свежая Python-цепочка с source-backed negative и authorization/denial cases;
+2. новый blind forward cycle без hidden conversation context;
+3. новый independent Sol review;
+4. formal tc-reviewer FINAL и orchestrate model-evaluator scorecards.
+
+TypeScript/Go остаются experimental; текущий PocketBase Go результат подтверждает статическую portability, но не runtime execution.
 
 ## Следом
 
-### Plan 3 E2E acceptance
+### Пилотный перенос
 
-- одна Java и одна Python execution-required chain в изолированных workspaces;
-- exact orchestrator cross-check;
-- проверка установленной adapter-копии, а не только source package;
-- понятный пошаговый human report рядом с JSON authorities.
+- запускать полную fail-closed цепочку на следующих реальных Java/Python проектах;
+- показывать JSON, CSV, reviewer verdict, generated source, runner output и trace на каждом шаге;
+- исправлять skills только по воспроизводимым chain failures;
+- никогда не менять production/config/dependencies проекта ради прохождения generated tests.
 
 ### Пользовательская проверка
 
-После package acceptance:
+После pilot-ready checkpoint:
 
 - запустить полную цепочку на проектах из AI SKILLS;
 - отдельно повторить InvenTree и step5-java-demo;
