@@ -1,0 +1,28 @@
+{
+  "verdict": "NOT_RUNNABLE",
+  "target": {
+    "language": "unknown",
+    "framework": "unknown",
+    "runner": "not_applicable",
+    "command": null
+  },
+  "environment": {
+    "status": "missing",
+    "interpreter": null,
+    "working_dir": "D:\\AI-Projects\\subscription-renewal-service",
+    "missing": [
+      "language_detection"
+    ]
+  },
+  "stats": null,
+  "failed_methods": null,
+  "root_cause": [
+    "Не удалось определить язык проекта: .skillsrc не найден или без project.language. Укажите --language явно или положите .skillsrc."
+  ],
+  "raw_output_excerpt": null,
+  "ran_at": "2026-08-11T11:56:58.876104+00:00",
+  "exit_code": null,
+  "run_id": null,
+  "execution_evidence": [],
+  "evidence_authoritative": false
+}

@@ -104,9 +104,9 @@
       "artifact_root": "docs/to_do/e2e/not-runnable",
       "evidence_root": "docs/to_do/e2e/not-runnable",
       "command_ledger": "docs/to_do/e2e/not-runnable/COMMANDS.json",
-      "state": "planned",
+      "state": "accepted-not-runnable",
       "mutation_policy": "fixture-read-only",
-      "project_regression_verdict": "PLANNED",
+      "project_regression_verdict": "NOT_RUNNABLE",
       "commands": [
         {
           "argv": [
@@ -115,12 +115,11 @@
             "--project",
             "D:\\AI-Projects\\subscription-renewal-service",
             "--target",
-            ".",
-            "--output",
-            "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\e2e\\not-runnable\\scan-result.json"
+            "."
           ],
           "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
-          "status": "planned"
+          "exit_code": 1,
+          "result": "status=error"
         },
         {
           "argv": [
@@ -130,7 +129,8 @@
             "D:\\AI-Projects\\subscription-renewal-service"
           ],
           "cwd": "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills",
-          "status": "planned"
+          "exit_code": 1,
+          "result": "NOT_RUNNABLE"
         }
       ]
     }
