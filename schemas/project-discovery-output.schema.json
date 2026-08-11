@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "schemas/project-discovery-output.schema.json", "type": "object",
+  "required": ["status", "project_name", "modules", "questions", "warnings", "errors", "fingerprint", "scanned_at"], "additionalProperties": false,
+  "properties": {
+    "status": {"enum": ["ready", "needs_input", "error"]}, "project_name": {"type": "string"},
+    "modules": {"type": "array", "items": {"$ref": "#/$defs/module"}}, "questions": {"type": "array", "items": {"$ref": "#/$defs/question"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}, "errors": {"type": "array", "items": {"type": "string"}},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "scanned_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "ready"}}}, "then": {"properties": {"modules": {"minItems": 1}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}}, {"if": {"properties": {"status": {"const": "needs_input"}}}, "then": {"properties": {"modules": {"minItems": 1}, "questions": {"minItems": 1}, "errors": {"maxItems": 0}}}}, {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"errors": {"minItems": 1}}}}],
+  "$defs": {
+    "module": {"type": "object", "required": ["id", "root", "stack", "detected_from"], "additionalProperties": false, "properties": {"id": {"type": "string"}, "root": {"type": "string"}, "stack": {"type": "object", "required": ["language"], "additionalProperties": false, "properties": {"language": {"enum": ["java", "python", "go", "typescript", "kotlin"]}, "framework": {"type": "string"}, "build_tool": {"type": "string"}}}, "paths": {"type": "object", "additionalProperties": false, "properties": {"source": {"$ref": "#/$defs/strings"}, "tests": {"$ref": "#/$defs/strings"}, "resources": {"$ref": "#/$defs/strings"}}}, "test": {"type": "object", "additionalProperties": false, "properties": {"framework": {"type": "string"}, "wrapper": {"type": "object", "additionalProperties": false, "properties": {"windows": {"type": "string"}, "linux": {"type": "string"}}}}}, "detected_from": {"$ref": "#/$defs/strings"}}},
+    "question": {"type": "object", "required": ["id", "field", "impact", "options"], "additionalProperties": false, "properties": {"id": {"type": "string"}, "field": {"type": "string"}, "impact": {"type": "string"}, "options": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["id", "value", "evidence"], "additionalProperties": false, "properties": {"id": {"type": "string"}, "value": {"type": "string"}, "evidence": {"$ref": "#/$defs/strings"}}}}}},
+    "strings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  }
+}
