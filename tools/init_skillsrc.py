@@ -467,6 +467,18 @@ def _close_directory_guard(guard: int) -> None:
         os.close(guard)
 
 
+def _open_posix_child_guard(parent_guard: int, name: str) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    guard = os.open(name, flags, dir_fd=parent_guard)
+    try:
+        if not stat.S_ISDIR(os.fstat(guard).st_mode):
+            raise OutputConfinementError("--output parent component is not a directory")
+    except Exception:
+        os.close(guard)
+        raise
+    return guard
+
+
 def _open_windows_replacement_handle(path: Path) -> int:
     import ctypes
     from ctypes import wintypes
@@ -547,12 +559,23 @@ def _verified_output_target(root: Path, value: str | Path) -> VerifiedOutputTarg
         guards.append(_open_directory_guard(current))
         for part in parent_parts:
             current /= part
-            try:
-                current.mkdir()
-            except FileExistsError:
-                pass
-            guards.append(_open_directory_guard(current))
+            if os.name == "nt":
+                try:
+                    current.mkdir()
+                except FileExistsError:
+                    pass
+                guards.append(_open_directory_guard(current))
+            else:
+                try:
+                    os.mkdir(part, dir_fd=guards[-1])
+                except FileExistsError:
+                    pass
+                guards.append(_open_posix_child_guard(guards[-1], part))
         parent = current.resolve(strict=True)
+        if os.name != "nt":
+            guarded = os.fstat(guards[-1])
+            if (guarded.st_dev, guarded.st_ino) != _parent_identity(parent)[:2]:
+                raise OutputConfinementError("--output parent changed during validation")
         required = (project_root / "docs" / "to_do").resolve(strict=True)
         parent.relative_to(required)
     except (OSError, ValueError) as error:
@@ -600,6 +623,17 @@ def _atomic_json_target(record: VerifiedOutputTarget, value: Mapping[str, Any]) 
             replacement_handle = _open_windows_replacement_handle(temporary)
         _verify_output_parent(record, temporary)
         _replace_output(record, temporary, replacement_handle)
+        if os.name != "nt":
+            try:
+                _verify_output_parent(record, temporary)
+            except OutputConfinementError:
+                try:
+                    written = os.stat(record.name, dir_fd=record.parent_guard, follow_symlinks=False)
+                    if (written.st_dev, written.st_ino) == temporary_identity[:2] and stat.S_ISREG(written.st_mode):
+                        os.unlink(record.name, dir_fd=record.parent_guard)
+                except FileNotFoundError:
+                    pass
+                raise
     finally:
         if replacement_handle is not None:
             _close_directory_guard(replacement_handle)

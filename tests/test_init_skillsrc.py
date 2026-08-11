@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -509,6 +510,59 @@ class InitSkillsrcTests(unittest.TestCase):
             self.assertNotIn("Traceback", process.stdout + process.stderr)
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["errors"], ["read_error"])
             self.assertTrue((root / ".skillsrc").is_dir())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX descriptor-relative traversal regression")
+    def test_posix_ancestor_swap_after_guard_does_not_create_external_child(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); docs = root / "docs"; docs.mkdir()
+            moved = root / "moved_docs"; external = Path(outside)
+            destination = docs / "to_do" / "receipt.json"
+            real_open_child = init_skillsrc._open_posix_child_guard
+
+            def open_child_then_swap(parent_guard, name):
+                guard = real_open_child(parent_guard, name)
+                if name == "docs":
+                    docs.rename(moved)
+                    docs.symlink_to(external, target_is_directory=True)
+                return guard
+
+            try:
+                with mock.patch("tools.init_skillsrc._open_posix_child_guard", side_effect=open_child_then_swap):
+                    with self.assertRaises(init_skillsrc.OutputConfinementError):
+                        _atomic_json(root, destination, {"status": "preview"})
+                self.assertFalse((external / "to_do").exists())
+                self.assertFalse((external / "receipt.json").exists())
+            finally:
+                if docs.is_symlink():
+                    docs.unlink()
+                if moved.exists() and not docs.exists():
+                    moved.rename(docs)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX descriptor-relative replace regression")
+    def test_posix_parent_swap_before_replace_rolls_back_guarded_receipt(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); destination = root / "docs" / "to_do" / "receipt.json"
+            destination.parent.mkdir(parents=True)
+            moved = root / "docs" / "moved_to_do"; external = Path(outside)
+            real_replace = init_skillsrc._replace_output
+
+            def swap_parent_then_replace(record, temporary, replacement_handle):
+                destination.parent.rename(moved)
+                destination.parent.symlink_to(external, target_is_directory=True)
+                return real_replace(record, temporary, replacement_handle)
+
+            try:
+                with mock.patch("tools.init_skillsrc._replace_output", side_effect=swap_parent_then_replace):
+                    with self.assertRaises(init_skillsrc.OutputConfinementError):
+                        _atomic_json(root, destination, {"status": "preview"})
+                self.assertFalse(destination.exists())
+                self.assertFalse((moved / "receipt.json").exists())
+                self.assertFalse((external / "receipt.json").exists())
+            finally:
+                if destination.parent.is_symlink():
+                    destination.parent.unlink()
+                if moved.exists() and not destination.parent.exists():
+                    moved.rename(destination.parent)
 
 if __name__ == "__main__":
     unittest.main()
