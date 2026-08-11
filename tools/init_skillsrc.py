@@ -55,10 +55,19 @@ class VerifiedOutputTarget:
     parent: Path
     parent_identity: tuple[int, int, int | None]
     name: str
+    guards: tuple[int, ...]
 
     @property
     def destination(self) -> Path:
         return self.parent / self.name
+
+    @property
+    def parent_guard(self) -> int:
+        return self.guards[-1]
+
+    def close(self) -> None:
+        for guard in reversed(self.guards):
+            _close_directory_guard(guard)
 
 
 def _set_field(module: dict[str, Any], field: str, value: object) -> None:
@@ -79,17 +88,22 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -
     known: set[str] = set()
     selected: list[tuple[str, object]] = []
     for question in questions:
-        if not isinstance(question, Mapping) or not isinstance(question.get("id"), str):
+        if not isinstance(question, Mapping) or not isinstance(question.get("id"), str) or not isinstance(question.get("field"), str):
             raise InitError("discovery_invalid", "discovery question is invalid")
         question_id = question["id"]
         known.add(question_id)
-        options = {item.get("id"): item for item in question.get("options", []) if isinstance(item, Mapping) and isinstance(item.get("id"), str)}
+        raw_options = question.get("options")
+        if not isinstance(raw_options, list) or not raw_options:
+            raise InitError("discovery_invalid", "discovery question options are invalid")
+        options = {item.get("id"): item for item in raw_options if isinstance(item, Mapping) and isinstance(item.get("id"), str) and "value" in item}
+        if len(options) != len(raw_options):
+            raise InitError("discovery_invalid", "discovery question option is invalid")
         answer = answers.get(question_id)
         if answer is None:
             unresolved.append(dict(question)); continue
         if answer not in options:
             raise InitError("answer_unknown", f"unknown option for {question_id}")
-        selected.append((str(question.get("field")), options[answer].get("value")))
+        selected.append((question["field"], options[answer]["value"]))
     deferred = {key for key in answers if key not in known}
     if any(not key.startswith(("replace:", "remove:", "migrate-")) for key in deferred):
         raise InitError("answer_unknown", "answer does not match a current discovery question")
@@ -100,7 +114,11 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -
     modules = copy.deepcopy(discovery.get("modules", []))
     if not isinstance(modules, list) or not modules:
         raise InitError("discovery_invalid", "discovery has no modules")
-    by_id = {module.get("id"): module for module in modules if isinstance(module, dict)}
+    if any(not isinstance(module, dict) or not isinstance(module.get("id"), str) for module in modules):
+        raise InitError("discovery_invalid", "discovery module is invalid")
+    by_id = {module["id"]: module for module in modules}
+    if len(by_id) != len(modules):
+        raise InitError("discovery_invalid", "discovery module ids are invalid")
     for field, value in selected:
         parts = field.split(".")
         if len(parts) < 4 or parts[1] not in by_id:
@@ -282,7 +300,7 @@ def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any
         "status": status,
         "skillsrc_path": ".skillsrc",
         "written": written,
-        "module_ids": [module["id"] for module in modules],
+        "module_ids": [module["id"] for module in modules if isinstance(module, Mapping) and isinstance(module.get("id"), str)],
         "questions": questions,
         "changes": [] if operation is None else [{"operation": operation, "path": ".skillsrc"}],
         "warnings": [],
@@ -310,7 +328,12 @@ def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _input_exit_code(code: str) -> int:
-    return 2 if code in {"answer_unknown", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
+    return 2 if code in {"answer_unknown", "discovery_invalid", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
+
+
+def _safe_fingerprint(value: Any) -> str:
+    candidate = str(value)
+    return candidate if re.fullmatch(r"[0-9a-f]{64}", candidate) else hashlib.sha256(b"").hexdigest()
 
 
 def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
@@ -323,28 +346,51 @@ def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
 
 
 def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) -> dict[str, Any]:
-    root = project_dir.resolve(); destination = root / ".skillsrc"; discovery = discover_project(root)
-    fingerprint = str(discovery.get("fingerprint", hashlib.sha256(b"").hexdigest()))
-    modules = list(discovery.get("modules", []))
-    if discovery.get("status") == "error": return _receipt("error", root, False, modules, [], list(discovery.get("errors", [])), fingerprint, 1)
+    root = project_dir.resolve(); destination = root / ".skillsrc"
+    try:
+        discovery = discover_project(root)
+    except (OSError, TypeError, ValueError, KeyError):
+        return _receipt("error", root, False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
+    if not isinstance(discovery, Mapping):
+        return _receipt("error", root, False, [], [], ["discovery_invalid"], hashlib.sha256(b"").hexdigest(), 2)
+    fingerprint = _safe_fingerprint(discovery.get("fingerprint"))
+    raw_modules = discovery.get("modules", [])
+    modules = list(raw_modules) if isinstance(raw_modules, list) else []
+    if discovery.get("status") == "error":
+        raw_errors = discovery.get("errors", [])
+        errors = [str(error) for error in raw_errors] if isinstance(raw_errors, list) and raw_errors else ["discovery_invalid"]
+        return _receipt("error", root, False, modules, [], errors, fingerprint, 2)
     try:
         proposed = compile_skillsrc(discovery, answers)
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:
         return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
-    original = destination.read_bytes() if destination.exists() else None
+    try:
+        if destination.exists():
+            if not destination.is_file():
+                raise OSError(".skillsrc is not a regular file")
+            original = destination.read_bytes()
+        else:
+            original = None
+    except OSError:
+        return _receipt("error", root, False, modules, [], ["read_error"], fingerprint, 2)
     try:
         existing = load_skillsrc(destination) if original is not None else None
-    except (SkillsrcError, OSError) as error:
+    except (SkillsrcError, OSError, TypeError, ValueError) as error:
         code = getattr(error, "code", "read_error")
         return _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
     try:
         discovery_ids = {question["id"] for question in discovery.get("questions", [])}
         reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in answers.items() if key not in discovery_ids})
-    except InitError as error:
+    except (InitError, SkillsrcError, TypeError, ValueError, KeyError) as error:
+        if not isinstance(error, InitError):
+            return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
         return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
-    actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
+    try:
+        actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
+    except (SkillsrcError, TypeError, ValueError, KeyError) as error:
+        return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
     if reconciled["status"] == "conflict": return _receipt("conflict", root, False, actual_modules, reconciled["questions"], [], fingerprint)
     if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
     if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
@@ -382,6 +428,100 @@ def _parent_identity(path: Path) -> tuple[int, int, int | None]:
     return details.st_dev, details.st_ino, getattr(details, "st_file_attributes", None)
 
 
+def _open_directory_guard(path: Path) -> int:
+    before = _parent_identity(path)
+    if _is_link_or_reparse(path):
+        raise OutputConfinementError("--output parent is a symlink or reparse point")
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        create_file = ctypes.windll.kernel32.CreateFileW
+        create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        create_file.restype = wintypes.HANDLE
+        handle = create_file(str(path), 0x100081, 0x1 | 0x2, None, 3, 0x02000000 | 0x00200000, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError()
+        guard = int(handle)
+    else:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        guard = os.open(path, flags)
+    try:
+        if _parent_identity(path) != before or _is_link_or_reparse(path):
+            raise OutputConfinementError("--output parent changed during validation")
+        if os.name != "nt":
+            details = os.fstat(guard)
+            if (details.st_dev, details.st_ino) != before[:2]:
+                raise OutputConfinementError("--output parent changed during validation")
+    except Exception:
+        _close_directory_guard(guard)
+        raise
+    return guard
+
+
+def _close_directory_guard(guard: int) -> None:
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.CloseHandle(guard)
+    else:
+        os.close(guard)
+
+
+def _open_windows_replacement_handle(path: Path) -> int:
+    import ctypes
+    from ctypes import wintypes
+
+    create_file = ctypes.windll.kernel32.CreateFileW
+    create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(str(path), 0x00010000, 0x1 | 0x2 | 0x4, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError()
+    return int(handle)
+
+
+def _replace_output(record: VerifiedOutputTarget, temporary: Path, replacement_handle: int | None) -> None:
+    if os.name != "nt":
+        os.replace(temporary.name, record.name, src_dir_fd=record.parent_guard, dst_dir_fd=record.parent_guard)
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    if replacement_handle is None:
+        raise OSError("missing replacement handle")
+
+    class FileRenameInfo(ctypes.Structure):
+        _fields_ = [
+            ("ReplaceIfExists", ctypes.c_ubyte),
+            ("RootDirectory", wintypes.HANDLE),
+            ("FileNameLength", wintypes.DWORD),
+            ("FileName", wintypes.WCHAR * 1),
+        ]
+
+    encoded_name = record.name.encode("utf-16-le")
+    size = FileRenameInfo.FileName.offset + len(encoded_name)
+    buffer = ctypes.create_string_buffer(size)
+    info = FileRenameInfo.from_buffer(buffer)
+    info.ReplaceIfExists = 1
+    info.RootDirectory = record.parent_guard
+    info.FileNameLength = len(encoded_name)
+    ctypes.memmove(ctypes.addressof(buffer) + FileRenameInfo.FileName.offset, encoded_name, len(encoded_name))
+    class IoStatusBlock(ctypes.Structure):
+        _fields_ = [("Status", ctypes.c_void_p), ("Information", ctypes.c_size_t)]
+
+    status_block = IoStatusBlock()
+    set_information = ctypes.windll.ntdll.NtSetInformationFile
+    set_information.argtypes = [wintypes.HANDLE, ctypes.POINTER(IoStatusBlock), wintypes.LPVOID, wintypes.ULONG, ctypes.c_int]
+    set_information.restype = wintypes.LONG
+    status = set_information(replacement_handle, ctypes.byref(status_block), buffer, size, 10)
+    if status != 0:
+        to_dos_error = ctypes.windll.ntdll.RtlNtStatusToDosError
+        to_dos_error.argtypes = [wintypes.LONG]
+        to_dos_error.restype = wintypes.ULONG
+        raise ctypes.WinError(to_dos_error(status))
+
+
 def _remove_owned_temporary(project_root: Path, temporary: Path, identity: tuple[int, int, int | None]) -> None:
     candidates = [temporary]
     if not temporary.exists():
@@ -401,22 +541,27 @@ def _remove_owned_temporary(project_root: Path, temporary: Path, identity: tuple
 def _verified_output_target(root: Path, value: str | Path) -> VerifiedOutputTarget:
     project_root, parts = _output_relative(root, value)
     parent_parts = parts[:-1]
-    requested_parent = project_root.joinpath(*parent_parts)
-    requested_parent.mkdir(parents=True, exist_ok=True)
     current = project_root
+    guards: list[int] = []
     try:
+        guards.append(_open_directory_guard(current))
         for part in parent_parts:
             current /= part
-            if _is_link_or_reparse(current):
-                raise OutputConfinementError("--output parent is a symlink or reparse point")
-        parent = requested_parent.resolve(strict=True)
+            try:
+                current.mkdir()
+            except FileExistsError:
+                pass
+            guards.append(_open_directory_guard(current))
+        parent = current.resolve(strict=True)
         required = (project_root / "docs" / "to_do").resolve(strict=True)
         parent.relative_to(required)
     except (OSError, ValueError) as error:
+        for guard in reversed(guards):
+            _close_directory_guard(guard)
         if isinstance(error, OutputConfinementError):
             raise
         raise OutputConfinementError("--output must be below exact docs/to_do") from error
-    return VerifiedOutputTarget(project_root, parent_parts, parent, _parent_identity(parent), parts[-1])
+    return VerifiedOutputTarget(project_root, parent_parts, parent, _parent_identity(parent), parts[-1], tuple(guards))
 
 
 def _verify_output_parent(record: VerifiedOutputTarget, temporary: Path) -> None:
@@ -443,40 +588,65 @@ def _confined_output(root: Path, value: str) -> Path:
     return project_root.joinpath(*parts)
 
 
-def _atomic_json(root: Path, path: Path, value: Mapping[str, Any]) -> None:
-    record = _verified_output_target(root, path)
+def _atomic_json_target(record: VerifiedOutputTarget, value: Mapping[str, Any]) -> None:
     handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc-init.", suffix=".tmp", dir=record.parent)
     temporary = Path(temporary_name)
     temporary_identity = _parent_identity(temporary)
+    replacement_handle: int | None = None
     try:
         with os.fdopen(handle, "wb") as stream:
             stream.write(json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
+        if os.name == "nt":
+            replacement_handle = _open_windows_replacement_handle(temporary)
         _verify_output_parent(record, temporary)
-        _verify_output_parent(record, temporary)
-        os.replace(temporary, record.destination)
+        _replace_output(record, temporary, replacement_handle)
     finally:
-        _remove_owned_temporary(record.project_root, temporary, temporary_identity)
+        if replacement_handle is not None:
+            _close_directory_guard(replacement_handle)
+        if os.name == "nt":
+            _remove_owned_temporary(record.project_root, temporary, temporary_identity)
+        else:
+            try:
+                os.unlink(temporary.name, dir_fd=record.parent_guard)
+            except FileNotFoundError:
+                pass
+
+
+def _atomic_json(root: Path, path: Path, value: Mapping[str, Any]) -> None:
+    record = _verified_output_target(root, path)
+    try:
+        _atomic_json_target(record, value)
+    finally:
+        record.close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--output")
     args = parser.parse_args(); root = Path(args.project)
+    output_target: VerifiedOutputTarget | None = None
     try:
         answers = {} if not args.answers else json.loads(Path(args.answers).read_text(encoding="utf-8"))
         if not isinstance(answers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in answers.items()): raise ValueError("answers must be a string mapping")
         if not root.is_dir(): raise ValueError("--project does not exist")
         output = _confined_output(root, args.output) if args.output else None
+        if output is not None:
+            output_target = _verified_output_target(root, output)
     except (OSError, json.JSONDecodeError, ValueError) as error:
-        print(json.dumps({"status": "error", "errors": [str(error)]}, ensure_ascii=False)); return 2
-    report = ensure_skillsrc(root, answers, args.write)
+        print(json.dumps({"status": "error", "errors": [_sanitize(str(error))]}, ensure_ascii=False)); return 2
+    try:
+        report = ensure_skillsrc(root, answers, args.write)
+    except (OSError, TypeError, ValueError, KeyError):
+        report = _receipt("error", root.resolve(), False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
     public_report = _public_report(report)
-    if output:
+    if output_target is not None:
         try:
-            _atomic_json(root, output, public_report)
+            _atomic_json(root, output_target.destination, public_report)
         except (OSError, ValueError) as error:
             print(json.dumps(public_report, ensure_ascii=False, indent=2))
             print(json.dumps({"receipt_error": _sanitize(str(error))}, ensure_ascii=False), file=sys.stderr)
+            output_target.close()
             return 1
+        output_target.close()
     print(json.dumps(public_report, ensure_ascii=False, indent=2))
     return 0 if public_report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if public_report["status"] in {"needs_input", "conflict"} else int(report.get("_exit_code", 1))
 

@@ -17,6 +17,29 @@ class InitSkillsrcTests(unittest.TestCase):
         (root / "pyproject.toml").write_text('[project]\nname="api"\ndependencies=["fastapi", "pytest"]\n', encoding="utf-8")
         (root / "src").mkdir(); (root / "tests").mkdir()
 
+    def _make_directory_link(self, link, target):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+            return
+        except OSError as symlink_error:
+            if sys.platform != "win32":
+                self.skipTest(f"directory symlinks unavailable: {symlink_error}")
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            self.skipTest(f"directory links unavailable: {result.stderr or result.stdout}")
+
+    def _remove_directory_link(self, link):
+        if not link.exists():
+            return
+        try:
+            link.unlink()
+        except OSError:
+            link.rmdir()
+
     def test_missing_manifest_is_created_and_second_run_is_unchanged(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); self._python_project(root)
@@ -202,7 +225,7 @@ class InitSkillsrcTests(unittest.TestCase):
             root = Path(temp); target = root / "docs" / "to_do" / "receipt.json"
             (root / "docs").mkdir(); target.parent.mkdir()
             target.write_text("old", encoding="utf-8")
-            with mock.patch("tools.init_skillsrc.os.replace", side_effect=OSError("denied")):
+            with mock.patch("tools.init_skillsrc._replace_output", side_effect=OSError("denied")):
                 with self.assertRaises(OSError): _atomic_json(root, target, {"status": "preview"})
             self.assertEqual(target.read_text(encoding="utf-8"), "old")
             try:
@@ -210,7 +233,7 @@ class InitSkillsrcTests(unittest.TestCase):
             except OSError:
                 return
             with self.assertRaises(ValueError):
-                _confined_output(root, str(target))
+                _atomic_json(root, target, {"status": "preview"})
 
     def test_v2_matching_module_stays_v2(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -380,7 +403,7 @@ class InitSkillsrcTests(unittest.TestCase):
             (conflict_root / "package.json").write_text('{"devDependencies":{"jest":"1","mocha":"1"}}', encoding="utf-8")
             self.assertEqual(subprocess.run([sys.executable, str(script), "--project", str(conflict_root), "--write"], capture_output=True, text=True).returncode, 3)
 
-    def test_receipt_parent_identity_change_aborts_without_external_write(self):
+    def test_receipt_parent_identity_change_is_blocked_without_external_write(self):
         with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
             root = Path(temp); destination = root / "docs" / "to_do" / "receipt.json"; destination.parent.mkdir(parents=True)
             external = Path(outside) / "receipt.json"
@@ -391,14 +414,101 @@ class InitSkillsrcTests(unittest.TestCase):
                 nonlocal calls
                 calls += 1
                 if calls == 1:
-                    record.parent.rename(moved); record.parent.mkdir()
+                    try:
+                        record.parent.rename(moved)
+                    except OSError:
+                        pass
+                    else:
+                        record.parent.mkdir()
                 return real_check(record, temporary)
             with mock.patch("tools.init_skillsrc._verify_output_parent", side_effect=replace_parent):
-                with self.assertRaises(ValueError):
-                    _atomic_json(root, destination, {"status": "preview"})
-            self.assertFalse(destination.exists())
+                _atomic_json(root, destination, {"status": "preview"})
+            self.assertTrue(destination.exists())
             self.assertFalse(external.exists())
-            self.assertEqual(list(moved.glob(".skillsrc-init.*.tmp")), [])
+            self.assertFalse(moved.exists())
+            self.assertEqual(list(destination.parent.glob(".skillsrc-init.*.tmp")), [])
+
+    def test_output_ancestor_link_with_missing_child_has_no_external_side_effect(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); self._python_project(root)
+            external = Path(outside); link = root / "docs"
+            self._make_directory_link(link, external)
+            try:
+                output = link / "to_do" / "receipt.json"
+                script = Path(__file__).parents[1] / "tools" / "init_skillsrc.py"
+                process = subprocess.run(
+                    [sys.executable, str(script), "--project", str(root), "--write", "--output", str(output)],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
+                self.assertFalse((root / ".skillsrc").exists())
+                self.assertFalse((external / "to_do").exists())
+                self.assertNotIn("Traceback", process.stdout + process.stderr)
+            finally:
+                self._remove_directory_link(link)
+
+    def test_receipt_parent_cannot_be_swapped_after_final_check_before_replace(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); destination = root / "docs" / "to_do" / "receipt.json"
+            destination.parent.mkdir(parents=True)
+            moved = root / "docs" / "moved_to_do"; external = Path(outside)
+            real_replace = init_skillsrc._replace_output
+            swapped = []
+
+            def swap_parent_then_replace(record, temporary, replacement_handle):
+                try:
+                    destination.parent.rename(moved)
+                except OSError:
+                    swapped.append(False)
+                else:
+                    self._make_directory_link(destination.parent, external)
+                    swapped.append(True)
+                return real_replace(record, temporary, replacement_handle)
+
+            try:
+                with mock.patch("tools.init_skillsrc._replace_output", side_effect=swap_parent_then_replace):
+                    _atomic_json(root, destination, {"status": "preview"})
+                self.assertEqual(swapped, [False])
+                self.assertEqual(json.loads(destination.read_text(encoding="utf-8")), {"status": "preview"})
+                self.assertFalse((external / "receipt.json").exists())
+            finally:
+                if destination.parent.is_symlink() or (destination.parent.exists() and moved.exists()):
+                    self._remove_directory_link(destination.parent)
+                if moved.exists() and not destination.parent.exists():
+                    moved.rename(destination.parent)
+
+    def test_malformed_discovery_manifest_exits_2_with_sanitized_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / "package.json").write_text('{"dependencies": {"private": "https://user:secret@example.invalid",', encoding="utf-8")
+            output = root / "docs" / "to_do" / "receipt.json"; output.parent.mkdir(parents=True)
+            script = Path(__file__).parents[1] / "tools" / "init_skillsrc.py"
+            process = subprocess.run(
+                [sys.executable, str(script), "--project", str(root), "--write", "--output", str(output)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
+            receipt_text = output.read_text(encoding="utf-8")
+            self.assertNotIn("user:secret", process.stdout + process.stderr + receipt_text)
+            self.assertNotIn("Traceback", process.stdout + process.stderr)
+            self.assertEqual(json.loads(receipt_text)["status"], "error")
+            self.assertFalse((root / ".skillsrc").exists())
+
+    def test_destination_read_failure_exits_2_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); (root / ".skillsrc").mkdir()
+            output = root / "docs" / "to_do" / "receipt.json"; output.parent.mkdir(parents=True)
+            script = Path(__file__).parents[1] / "tools" / "init_skillsrc.py"
+            process = subprocess.run(
+                [sys.executable, str(script), "--project", str(root), "--write", "--output", str(output)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
+            self.assertNotIn("Traceback", process.stdout + process.stderr)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["errors"], ["read_error"])
+            self.assertTrue((root / ".skillsrc").is_dir())
 
 if __name__ == "__main__":
     unittest.main()
