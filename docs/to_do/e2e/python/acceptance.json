@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "status": "ACCEPT",
+  "scope": "InvenTree PartCategory filter feature chain",
+  "source_revision": "ad8cb604e998a49e517ee4e4a1e3f4df8ebc5d8a",
+  "case_count": 6,
+  "method_count": 6,
+  "project_regression": {
+    "status": "ENVIRONMENT_LIMITED",
+    "targeted": "6/6",
+    "paired_feature_regression": "17/17",
+    "full": "1433 passed, 11 skipped, 27 unrelated environment/setup failures, 0 errors"
+  },
+  "method_evidence_basis": "The SHA-bound generated class contains exactly six non-parameterized test methods, and the targeted Django receipt for that exact class records 6 tests, 6 passed, and exit 0. ran_at is the persisted execution receipt modification timestamp because the original receipt did not store a start timestamp.",
+  "artifacts": [
+    {"role": "context", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-02/01-context-marker-output.json", "sha256": "a98769490d9a8898c0213620fcc07faa7a03214226f94b4d8263523395c699b7", "schema": "context-marker-output.schema.json"},
+    {"role": "test_cases", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-02/02-tc-generator-output.json", "sha256": "0c8f1f25274d2235c5bc3bf29dedef0cfcee8050d1453b3466cfb620d69a87f6", "schema": "tc-generator-output.schema.json"},
+    {"role": "manual_review", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-02/03-tc-reviewer-output.json", "sha256": "2c2c6c46f577da86c75e86c2a31804781e23f98128d18d8f1e073cff84d22ca3", "schema": "tc-reviewer-output.schema.json"},
+    {"role": "automation", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-03/04-tc-to-autotest-output.json", "sha256": "a214111304b43e90a1d7072c6e3d7f2b5b2cc5b1875bf0042726ad7d003d4a4b", "schema": "tc-to-autotest-output.schema.json"},
+    {"role": "autotest_review", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-03/05-autotest-reviewer-output.json", "sha256": "9a34204ffcd20c1b0c0e63e2bd8a7fd6ca3ad8fdd5c804b1883e91e824e4feb3", "schema": "autotest-reviewer-output.schema.json"},
+    {"role": "execution_receipt", "path": "docs/to_do/real-chains/inventree/chain-01/attempt-03/06-execution-result.json", "sha256": "b4f1d9e54fb394eb98f9cf9d148f43005fdd581e7ab407ed1d653e8b6296794b"},
+    {"role": "runner_result", "path": "docs/to_do/e2e/python/run-result.json", "sha256": "22fb77f854290450903083ef37713abe3e1fc9eefbcf0a94fdc0d942b78cbf22", "schema": "run-tests-output.schema.json"},
+    {"role": "trace", "path": "docs/to_do/e2e/python/trace-document.json", "sha256": "d52c42e5192758af4e07069dcc75290991363ad23b30ee8f8034769767e11646", "schema": "trace-document.schema.json"},
+    {"role": "csv", "path": "docs/to_do/e2e/python/test-cases.csv", "sha256": "2fb323f6567ce2fbf1ec8d22520fc85f0888e6662928b91ae2f4976505c5bf0f"},
+    {"role": "generated_source", "path": "docs/to_do/e2e/python/generated/test_real_chain.py", "sha256": "f6717f77aa59b1ef528ab93b7d00370b8b533feaca7f01440ad14865f9e85973"}
+  ]
+}

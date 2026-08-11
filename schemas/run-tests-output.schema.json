@@ -27,8 +27,8 @@
         },
         "runner": {
           "type": "string",
-          "enum": ["pytest", "invoke", "maven", "gradle", "npm", "yarn", "go", "not_applicable"],
-          "description": "Нативный раннер, которым запускались тесты. not_applicable — при NOT_RUNNABLE, когда запуск невозможен"
+          "enum": ["pytest", "django", "invoke", "maven", "gradle", "npm", "yarn", "go", "not_applicable"],
+          "description": "Нативный раннер, которым запускались тесты. django означает manage.py test / Django DiscoverRunner; not_applicable — при NOT_RUNNABLE, когда запуск невозможен"
         },
         "command": {
           "type": ["string", "null"],
