@@ -41,13 +41,28 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from jsonschema import Draft202012Validator
 
 if __package__:
     from .json_cli import JsonArgumentParser
+    from .skillsrc_manifest import (
+        SkillsrcError,
+        load_skillsrc,
+        normalize_skillsrc,
+        resolve_module_root,
+        select_module,
+    )
 else:  # direct CLI execution
     from json_cli import JsonArgumentParser
+    from skillsrc_manifest import (
+        SkillsrcError,
+        load_skillsrc,
+        normalize_skillsrc,
+        resolve_module_root,
+        select_module,
+    )
 
 # ---------------------------------------------------------------------------
 # Конфигурация стека
@@ -85,49 +100,20 @@ def is_windows() -> bool:
     return os.name == "nt"
 
 
-def detect_language_from_skillsrc(skillsrc_path: str) -> dict | None:
-    """
-    Простейший парсер .skillsrc (YAML-подобный, без внешних зависимостей).
-    Извлекает project.language / project.framework / test.framework / build_tool.
-    Возвращает dict с ключами language, framework, runner или None.
-    """
-    if not os.path.isfile(skillsrc_path):
-        return None
-
-    data = {"language": None, "framework": None, "test_framework": None, "build_tool": None}
-    current_section = None
-
-    try:
-        with open(skillsrc_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.rstrip("\n")
-                stripped = line.strip()
-                # комментарии и пустые строки
-                if not stripped or stripped.startswith("#"):
-                    continue
-                # секция верхнего уровня (без отступа, заканчивается двоеточием)
-                if not line.startswith((" ", "\t")) and stripped.endswith(":"):
-                    current_section = stripped[:-1]
-                    continue
-                # ключ: значение внутри секции
-                m = re.match(r'^\s*([A-Za-z_]+):\s*"?(.*?)"?\s*(?:#.*)?$', stripped)
-                if not m:
-                    continue
-                key, value = m.group(1).lower(), m.group(2).strip().strip('"').strip("'")
-                if current_section == "project" and key == "language":
-                    data["language"] = value
-                elif current_section == "project" and key == "framework":
-                    data["framework"] = value
-                elif current_section == "project" and key == "build_tool":
-                    data["build_tool"] = value
-                elif current_section == "test" and key == "framework":
-                    data["test_framework"] = value
-    except (OSError, UnicodeDecodeError):
-        return None
-
-    if not data["language"]:
-        return None
-    return data
+def resolve_execution_context(
+    project_root: Path,
+    skillsrc_path: Path,
+    module_id: str | None,
+    language_override: str | None,
+) -> tuple[Path, str, dict[str, Any]]:
+    """Resolve a selected manifest module into its confined execution context."""
+    document = normalize_skillsrc(load_skillsrc(skillsrc_path))
+    module = select_module(document, module_id)
+    execution_root = resolve_module_root(project_root, module)
+    detected_language = module["stack"]["language"]
+    if language_override and language_override != detected_language:
+        raise SkillsrcError("language_conflict", "--language conflicts with selected module")
+    return execution_root, language_override or detected_language, module
 
 
 # ---------------------------------------------------------------------------
@@ -920,8 +906,9 @@ def main() -> int:
         description="Детерминированный оракул исполнения автотестов (Опора 1). "
                     "Выводит JSON-вердикт PASS|FAIL|NOT_RUNNABLE по схеме schemas/run-tests-output.schema.json."
     )
-    parser.add_argument("--project", help="Путь к корню целевого проекта (с исходниками/тестами)")
+    parser.add_argument("--project", help="Корень репозитория; рабочая директория выбирается из module root .skillsrc")
     parser.add_argument("--skillsrc", help="Путь к .skillsrc — стек определяется из манифеста")
+    parser.add_argument("--module", help="ID модуля из .skillsrc версии 3")
     parser.add_argument("--language", choices=["python", "java", "go", "typescript", "kotlin"],
                         help="Язык тестов (если не указан — берётся из .skillsrc)")
     parser.add_argument("--pytest-target", help="Python: конкретный файл/директория pytest "
@@ -932,11 +919,53 @@ def main() -> int:
     args = parser.parse_args()
 
     # --- Определяем язык/проект ---
-    project_dir = args.project or os.getcwd()
-    skillsrc_path = args.skillsrc or os.path.join(project_dir, ".skillsrc")
+    project_root = Path(args.project or os.getcwd()).resolve()
+    skillsrc_path = Path(args.skillsrc or project_root / ".skillsrc")
+    project_dir = str(project_root)
     language = args.language
     bindings = None
     artifact_error = None
+    if skillsrc_path.is_file():
+        try:
+            execution_root, language, _module = resolve_execution_context(
+                project_root, skillsrc_path, args.module, language
+            )
+        except SkillsrcError as error:
+            missing = (
+                "module_selection"
+                if error.code in {"module_required", "module_unknown", "module_ambiguous"}
+                else "language_conflict"
+                if error.code == "language_conflict"
+                else "skillsrc_validation"
+            )
+            report = build_not_runnable(
+                {
+                    "status": "missing",
+                    "interpreter": None,
+                    "interpreter_path": None,
+                    "working_dir": str(project_root),
+                    "missing": [missing],
+                },
+                language or "unknown",
+                str(error),
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
+        project_dir = str(execution_root)
+    elif not language:
+        env = {
+            "status": "missing",
+            "interpreter": None,
+            "working_dir": str(project_root),
+            "missing": ["language_detection"],
+        }
+        report = build_not_runnable(
+            env, "unknown",
+            "Не удалось определить язык проекта: .skillsrc не найден. "
+            "Укажите --language явно или положите .skillsrc.",
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
     if args.automation_artifact:
         bindings, artifact_error = load_automation_artifact(args.automation_artifact, project_dir)
         if artifact_error:
@@ -944,26 +973,6 @@ def main() -> int:
                 {"status": "partial", "interpreter": None, "interpreter_path": None,
                  "working_dir": os.path.abspath(project_dir), "missing": ["automation_artifact"], "_framework": "unknown"},
                 language or "unknown", artifact_error,
-            )
-            print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 2
-
-    if not language:
-        detected = detect_language_from_skillsrc(skillsrc_path)
-        if detected and detected.get("language"):
-            language = detected["language"]
-        else:
-            # не смогли определить — честный NOT_RUNNABLE
-            env = {
-                "status": "missing",
-                "interpreter": None,
-                "working_dir": os.path.abspath(project_dir),
-                "missing": ["language_detection"],
-            }
-            report = build_not_runnable(
-                env, "unknown",
-                "Не удалось определить язык проекта: .skillsrc не найден или без project.language. "
-                "Укажите --language явно или положите .skillsrc.",
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 2
