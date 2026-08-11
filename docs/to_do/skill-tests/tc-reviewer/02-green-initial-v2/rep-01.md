@@ -55,3 +55,4 @@ The repetition's five captured commands, in order, all used cwd `D:\AI-Projects\
   ["D:\\AI-Projects\\.tools\\skill-audit-venv\\Scripts\\python.exe", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\check_outputs.py", "--input-dir", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\inputs", "--output-dir", "D:\\AI-Projects\\.worktrees\\portable-testing-skills\\test-orchestration-skills\\docs\\to_do\\skill-tests\\tc-reviewer\\artifacts\\outputs\\02-green-initial-v2\\rep-01", "--mode", "canonical"]
 ]
 ```
+

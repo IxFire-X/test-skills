@@ -23,3 +23,4 @@
 | `semantic-result.json` | `ed03b1881667b5488a1204dc31da57110a7f2ba28614f7c7f7a5a75e4b70a836` |
 
 The preflight and hash/collision delivery check are controller records only. Their literal argv, repository-root cwd, and exit `0` are recorded in `artifacts/protocol/02-green-initial-v2/rep-02/observation.json`. The repetition protocol records exactly four validator argv followed by the canonical semantic argv, all with campaign cwd and exit `0`.
+
