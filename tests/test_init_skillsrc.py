@@ -142,9 +142,18 @@ class InitSkillsrcTests(unittest.TestCase):
             self.assertEqual(skillsrc.read_bytes(), mismatch)
             unsupported = b'project:\n  name: api\n  language: python\n  build_tool: pip\n  type: microservice\n'
             skillsrc.write_bytes(unsupported)
-            report = ensure_skillsrc(root, {"migrate-v2-to-v3": "use-detected"}, write=True)
+            report = ensure_skillsrc(root, {}, write=True)
             self.assertEqual(report["status"], "conflict")
             self.assertEqual(skillsrc.read_bytes(), unsupported)
+
+    def test_matching_v2_rejects_stale_reconciliation_answer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root)
+            original = b'project:\n  name: api\n  language: python\n  build_tool: pip\n'
+            (root / ".skillsrc").write_bytes(original)
+            report = ensure_skillsrc(root, {"replace:stale": "use-detected"}, write=True)
+            self.assertEqual(report["status"], "error")
+            self.assertEqual((root / ".skillsrc").read_bytes(), original)
 
     def test_receipt_schema_rejects_invalid_status_arrays(self):
         schema = json.loads((Path(__file__).parents[1] / "schemas" / "skillsrc-init-output.schema.json").read_text(encoding="utf-8"))

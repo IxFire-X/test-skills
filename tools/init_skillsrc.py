@@ -131,8 +131,17 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
         if unsupported:
             question = _question("migrate-v2-preservation", "version", "replace")
             question["impact"] = "This v2 manifest contains fields without a lossless v3 representation"
+            question["options"] = [{"id": "keep-existing", "value": "keep-existing", "evidence": []}]
+            if set(answers) - {question["id"]}:
+                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+            if question["id"] in answers:
+                if answers[question["id"]] != "keep-existing":
+                    raise InitError("answer_unknown", "unknown preservation option")
+                return {"status": "unchanged", "document": existing, "questions": []}
             return {"status": "conflict", "document": existing, "questions": [question]}
         if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
+            if answers:
+                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
             return {"status": "unchanged", "document": existing, "questions": []}
         migration = _question("migrate-v2-to-v3", "version", "replace")
         if set(answers) - {migration["id"]}:
@@ -294,14 +303,15 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) 
         reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in answers.items() if key not in discovery_ids})
     except InitError as error:
         return _receipt("error", root, False, modules, [], [error.code], fingerprint)
-    if reconciled["status"] == "conflict": return _receipt("conflict", root, False, modules, reconciled["questions"], [], fingerprint)
-    if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, modules, [], [], fingerprint)
-    if not write: return _receipt("preview", root, False, modules, [], [], fingerprint)
+    actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
+    if reconciled["status"] == "conflict": return _receipt("conflict", root, False, actual_modules, reconciled["questions"], [], fingerprint)
+    if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
+    if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
     try:
         atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
     except Exception as error:
         return _receipt("error", root, False, modules, [], [getattr(error, "code", "write_error")], fingerprint)
-    return _receipt(reconciled["status"], root, True, modules, [], [], fingerprint)
+    return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint)
 
 
 def _confined_output(root: Path, value: str) -> Path:
