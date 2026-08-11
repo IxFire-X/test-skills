@@ -44,6 +44,10 @@ def _safe_parse(root: Path, manifests: Sequence[Path]) -> tuple[dict[Path,Any],l
         try:
             value=_parse(p)
             if p.name in {"package.json","pyproject.toml"} and not isinstance(value,dict): raise ValueError
+            if p.name=="package.json" and "workspaces" in value:
+                work=value["workspaces"]
+                refs=work.get("packages") if isinstance(work,dict) else work
+                if not isinstance(refs,list) or not all(isinstance(item,str) for item in refs): raise ValueError
             parsed[p]=value
         except (json.JSONDecodeError,tomllib.TOMLDecodeError,ET.ParseError,ValueError): errors.append(f"invalid manifest: {_rel(root,p)}")
     return parsed,errors
@@ -122,6 +126,13 @@ def project_fingerprint(root:Path,evidence_paths:Sequence[str])->str:
 def validate_report(report:dict[str,Any])->list[str]:
     errors=["duplicate option id" for q in report.get("questions",[]) if len({o["id"] for o in q["options"]})!=len(q["options"])]
     if report.get("status")=="ready" and any(not m.get("stack",{}).get("language") or not m.get("stack",{}).get("build_tool") for m in report.get("modules",[])): errors.append("ready report has unresolved critical field")
+    if report.get("status")=="needs_input":
+        modules={m.get("id"):m for m in report.get("modules",[])}; fields=[q.get("field") for q in report.get("questions",[])]
+        for mid,module in modules.items():
+            if not module.get("stack",{}).get("language") and fields.count(f"modules.{mid}.stack.language")!=1: errors.append("missing language question")
+        for field in fields:
+            parts=field.split(".");
+            if len(parts)<3 or parts[1] not in modules: errors.append("dangling question")
     return errors
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
 def discover_project(project_dir:Path)->dict[str,Any]:

@@ -169,6 +169,20 @@ class DiscoverProjectTests(unittest.TestCase):
             django=next(o for o in discover_project(root)["questions"] if o["field"]=="modules.root.stack.framework" for o in o["options"] if o["id"]=="django")
             self.assertEqual(django["evidence"],["pyproject.toml:marker.django","requirements.txt:marker.django"])
 
+    def test_invalid_nested_workspace_shapes_are_sanitized(self):
+        for payload in ('{"workspaces":7}', '{"workspaces":{"packages":7}}', '{"workspaces":[7]}'):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as temp:
+                root=Path(temp); (root/"package.json").write_text(payload,encoding="utf-8")
+                self.assertEqual(discover_project(root)["status"],"error")
+
+    def test_validate_report_enforces_bidirectional_questions(self):
+        from tools.discover_project import validate_report
+        base={"status":"needs_input","modules":[{"id":"root","stack":{}}]}
+        self.assertTrue(validate_report(base|{"questions":[]}))
+        valid=base|{"questions":[{"field":"modules.root.stack.language","options":[{"id":"java"},{"id":"python"}]}]}
+        self.assertFalse(validate_report(valid))
+        self.assertTrue(validate_report(valid|{"questions":valid["questions"]*2}))
+
     def test_fingerprint_changes_only_when_evidence_changes(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
