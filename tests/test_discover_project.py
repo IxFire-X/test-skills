@@ -73,7 +73,7 @@ class DiscoverProjectTests(unittest.TestCase):
             (root / "mvnw.cmd").write_text("", encoding="utf-8")
             (root / "gradlew").write_text("", encoding="utf-8")
             module = discover_project(root)["modules"][0]
-            self.assertEqual(module["test"]["wrapper"], {"windows": "mvnw.cmd", "linux": "gradlew"})
+            self.assertEqual(module["test"]["wrapper"], {"windows": "mvnw.cmd"})
 
     def test_secret_traversal_and_symlink_escape_never_enter_json(self):
         with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
@@ -150,6 +150,24 @@ class DiscoverProjectTests(unittest.TestCase):
             root = Path(temp); (root / "package.json").write_text('{"devDependencies":{"jest":"1","mocha":"1"}}', encoding="utf-8")
             options = discover_project(root)["questions"][0]["options"]
             self.assertEqual({e for o in options for e in o["evidence"]}, {"package.json:marker.jest", "package.json:marker.mocha"})
+
+    def test_wrapper_follows_resolved_build_tool(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); (root/"build.gradle").write_text("",encoding="utf-8"); (root/"mvnw.cmd").write_text("",encoding="utf-8"); (root/"gradlew.bat").write_text("",encoding="utf-8")
+            self.assertEqual(discover_project(root)["modules"][0]["test"]["wrapper"], {"windows":"gradlew.bat"})
+
+    def test_invalid_manifest_shapes_and_ready_unresolved_are_rejected(self):
+        from tools.discover_project import validate_report
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); (root/"package.json").write_text("[]",encoding="utf-8")
+            self.assertEqual(discover_project(root)["status"],"error")
+        self.assertTrue(validate_report({"status":"ready","modules":[{"id":"root","stack":{}}],"questions":[]}))
+
+    def test_marker_evidence_accumulates_all_manifests(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); (root/"pyproject.toml").write_text('[project]\ndependencies=["django","fastapi"]',encoding="utf-8"); (root/"requirements.txt").write_text("djangorestframework\n",encoding="utf-8")
+            django=next(o for o in discover_project(root)["questions"] if o["field"]=="modules.root.stack.framework" for o in o["options"] if o["id"]=="django")
+            self.assertEqual(django["evidence"],["pyproject.toml:marker.django","requirements.txt:marker.django"])
 
     def test_fingerprint_changes_only_when_evidence_changes(self):
         with tempfile.TemporaryDirectory() as temp:

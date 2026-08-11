@@ -41,8 +41,11 @@ def _refs(p: Path, data: Any) -> list[str]:
 def _safe_parse(root: Path, manifests: Sequence[Path]) -> tuple[dict[Path,Any],list[str]]:
     parsed={}; errors=[]
     for p in manifests:
-        try: parsed[p]=_parse(p)
-        except (json.JSONDecodeError,tomllib.TOMLDecodeError,ET.ParseError): errors.append(f"invalid manifest: {_rel(root,p)}")
+        try:
+            value=_parse(p)
+            if p.name in {"package.json","pyproject.toml"} and not isinstance(value,dict): raise ValueError
+            parsed[p]=value
+        except (json.JSONDecodeError,tomllib.TOMLDecodeError,ET.ParseError,ValueError): errors.append(f"invalid manifest: {_rel(root,p)}")
     return parsed,errors
 def _id(rel: str) -> str:
     if rel==".": return "root"
@@ -88,7 +91,11 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
         paths=_paths(root,base)
         if paths: module["paths"]=paths
         if lang:
-            fm,tm,_=MARKERS[lang]; text="\n".join(_read(p) for p in owned); vals={v:[f"{_rel(root,p)}:marker.{v}" for p in owned if needle in _read(p).lower()] for needle,v in fm if needle in text.lower()}
+            fm,tm,_=MARKERS[lang]; text="\n".join(_read(p) for p in owned); vals={}
+            for needle,v in fm:
+                hits=[f"{_rel(root,p)}:marker.{v}" for p in owned if needle in _read(p).lower()]
+                if hits: vals.setdefault(v,[]).extend(hits)
+            vals={v:sorted(set(hits)) for v,hits in vals.items()}
             if len(vals)==1: stack["framework"]=next(iter(vals))
             elif vals: qs.append(_question(mid,"stack.framework",vals))
             tv={v:[f"{_rel(root,p)}:marker.{v}" for p in owned if needle in _read(p).lower()] for needle,v in tm if needle in text.lower()}
@@ -98,7 +105,8 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
             elif tv:qs.append(_question(mid,"test.framework",tv))
             wrappers={}
             if len(tool_values)==1:
-                for platform,names in (("windows",("mvnw.cmd","gradlew.bat")),("linux",("mvnw","gradlew"))):
+                build=next(iter(tool_values)); choices=(("windows",("mvnw.cmd",) if build=="maven" else ("gradlew.bat",)),("linux",("mvnw",) if build=="maven" else ("gradlew",)))
+                for platform,names in choices:
                     for name in names:
                         if (base/name).is_file() and _ok(root,base/name): wrappers[platform]=name; break
             if wrappers:test["wrapper"]=wrappers
@@ -112,7 +120,9 @@ def project_fingerprint(root:Path,evidence_paths:Sequence[str])->str:
         if _ok(root,p) and p.is_file() and not p.is_symlink(): h.update(rel.encode());h.update(b"\0");h.update(p.read_bytes());h.update(b"\0")
     return h.hexdigest()
 def validate_report(report:dict[str,Any])->list[str]:
-    return ["duplicate option id" for q in report.get("questions",[]) if len({o["id"] for o in q["options"]})!=len(q["options"])]
+    errors=["duplicate option id" for q in report.get("questions",[]) if len({o["id"] for o in q["options"]})!=len(q["options"])]
+    if report.get("status")=="ready" and any(not m.get("stack",{}).get("language") or not m.get("stack",{}).get("build_tool") for m in report.get("modules",[])): errors.append("ready report has unresolved critical field")
+    return errors
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
 def discover_project(project_dir:Path)->dict[str,Any]:
     root=project_dir.resolve(); manifests=find_confined_manifests(root)
