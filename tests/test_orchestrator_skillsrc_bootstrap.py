@@ -44,7 +44,18 @@ class OrchestratorSkillsrcBootstrapTests(unittest.TestCase):
         schema = json.loads((REPOSITORY_ROOT / "schemas/skillsrc.schema.json").read_text(encoding="utf-8"))
         self.assertEqual(example["version"], "3.0")
         self.assertEqual([module["id"] for module in example["modules"]], ["backend", "frontend"])
+        self.assertEqual(example["modules"][0]["detected_from"], ["backend/pyproject.toml"])
+        self.assertEqual(example["modules"][1]["detected_from"], ["frontend/package.json"])
+        self.assertNotIn("wrapper", example["modules"][1]["test"])
         self.assertFalse(list(Draft202012Validator(schema).iter_errors(example)))
+
+    def test_public_execution_examples_select_the_manifest_module(self):
+        for relative in ("USAGE.md", "HOW-IT-WORKS.md"):
+            text = (REPOSITORY_ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn("--project <project>", text)
+            self.assertIn("--skillsrc <project>/.skillsrc", text)
+            self.assertIn("--module <module-id>", text)
+            self.assertIn("--automation-artifact", text)
 
     def test_operational_bootstrap_contract_is_ordered_and_isolates_controller_evidence(self):
         skill = (REPOSITORY_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")

@@ -140,7 +140,7 @@ feature context. Существующие v2-манифесты остаются
 - API-клиент;
 - пути к требованиям, OpenAPI и архитектуре.
 
-Пример:
+Пример v2 для совместимости со старыми манифестами:
 
 ```yaml
 version: "2.0"
@@ -663,7 +663,9 @@ SHA-256 связывает JSON с точными байтами файла. Е�
 
 ```bash
 python <skill-pack>/tools/run_tests.py \
-  --project <isolated-project> \
+  --project <project> \
+  --skillsrc <project>/.skillsrc \
+  --module <module-id> \
   --automation-artifact <run>/04-tc-to-autotest-output.json
 ```
 

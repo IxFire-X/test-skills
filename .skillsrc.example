@@ -23,7 +23,7 @@ modules:
       framework: "pytest"
     feature_sources:
       requirements: ["docs/requirements"]
-    detected_from: ["pyproject.toml"]
+    detected_from: ["backend/pyproject.toml"]
 
   - id: "frontend"
     root: "frontend"
@@ -35,9 +35,6 @@ modules:
       tests: ["tests"]
     test:
       framework: "jest"
-      wrapper:
-        windows: "npm.cmd test"
-        linux: "npm test"
     feature_sources:
       requirements: ["docs/requirements"]
-    detected_from: ["package.json"]
+    detected_from: ["frontend/package.json"]

@@ -290,8 +290,9 @@ JSON с:
 
 ```bash
 python <skill-pack>/tools/run_tests.py \
-  --project <isolated-project> \
-  --language <java|python> \
+  --project <project> \
+  --skillsrc <project>/.skillsrc \
+  --module <module-id> \
   --automation-artifact <run>/04-tc-to-autotest-output.json
 ```
 
