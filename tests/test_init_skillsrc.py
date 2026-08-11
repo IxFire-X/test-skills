@@ -122,6 +122,35 @@ class InitSkillsrcTests(unittest.TestCase):
             self.assertEqual(report["status"], "conflict")
             self.assertNotIn("secret", json.dumps(report))
 
+    def test_invalid_reconciliation_option_precedes_missing_question(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            text = skillsrc.read_text(encoding="utf-8").replace("language: python", "language: go")
+            text = text.replace("modules:\n", "modules:\n- id: obsolete\n  root: obsolete\n  stack:\n    language: python\n  detected_from:\n  - pyproject.toml\n")
+            skillsrc.write_text(text, encoding="utf-8")
+            report = ensure_skillsrc(root, {"replace:modules.root.stack.language": "bad"}, write=True)
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(report["errors"], ["answer_unknown"])
+
+    def test_v2_declared_framework_mismatch_and_unsupported_field_block_writes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root)
+            mismatch = b'project:\n  name: api\n  language: python\n  framework: django\n  build_tool: pip\n'
+            skillsrc = root / ".skillsrc"; skillsrc.write_bytes(mismatch)
+            self.assertEqual(ensure_skillsrc(root, {}, write=True)["status"], "conflict")
+            self.assertEqual(skillsrc.read_bytes(), mismatch)
+            unsupported = b'project:\n  name: api\n  language: python\n  build_tool: pip\n  type: microservice\n'
+            skillsrc.write_bytes(unsupported)
+            report = ensure_skillsrc(root, {"migrate-v2-to-v3": "use-detected"}, write=True)
+            self.assertEqual(report["status"], "conflict")
+            self.assertEqual(skillsrc.read_bytes(), unsupported)
+
+    def test_receipt_schema_rejects_invalid_status_arrays(self):
+        schema = json.loads((Path(__file__).parents[1] / "schemas" / "skillsrc-init-output.schema.json").read_text(encoding="utf-8"))
+        bad = {"status": "created", "skillsrc_path": ".skillsrc", "written": False, "module_ids": [], "questions": [], "changes": [], "warnings": [], "errors": [], "discovery_fingerprint": "0" * 64}
+        self.assertTrue(list(Draft202012Validator(schema).iter_errors(bad)))
+
     def test_v2_matching_module_stays_v2(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); self._python_project(root)

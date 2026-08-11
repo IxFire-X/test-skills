@@ -127,13 +127,13 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
     existing_modules = normalized["modules"]
     proposed_modules = proposed["modules"]
     if existing.get("version") != "3.0":
-        if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
-            return {"status": "unchanged", "document": existing, "questions": []}
         unsupported = _v2_unsupported_fields(existing)
         if unsupported:
             question = _question("migrate-v2-preservation", "version", "replace")
             question["impact"] = "This v2 manifest contains fields without a lossless v3 representation"
             return {"status": "conflict", "document": existing, "questions": [question]}
+        if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
+            return {"status": "unchanged", "document": existing, "questions": []}
         migration = _question("migrate-v2-to-v3", "version", "replace")
         if set(answers) - {migration["id"]}:
             raise InitError("answer_unknown", "answer does not match a current reconciliation question")
@@ -168,12 +168,13 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
     if questions:
         if set(answers) - {question["id"] for question in questions}:
             raise InitError("answer_unknown", "answer does not match a current reconciliation question")
+        for question in questions:
+            if question["id"] in answers and answers[question["id"]] not in {"keep-existing", "use-detected"}:
+                raise InitError("answer_unknown", f"unknown option for {question['id']}")
         unanswered = [q for q in questions if q["id"] not in answers]
         if unanswered:
             return {"status": "conflict", "document": existing, "questions": [_public_question(q) for q in questions]}
         for question in questions:
-            if answers[question["id"]] not in {"keep-existing", "use-detected"}:
-                raise InitError("answer_unknown", f"unknown option for {question['id']}")
             if answers[question["id"]] == "use-detected":
                 if question["operation"] == "remove":
                     output = [item for item in output if item["id"] != question["_module_id"]]
