@@ -13,6 +13,7 @@ MANIFEST_LANGUAGES = {
     "pom.xml": "java", "build.gradle": "java", "build.gradle.kts": "java",
     "package.json": "typescript", "go.mod": "go",
 }
+WORKSPACE_MANIFEST_NAMES = frozenset({"settings.gradle", "settings.gradle.kts", "go.work"})
 PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "Pipfile"]
 JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
 JS_MANIFESTS = ["package.json"]

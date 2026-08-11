@@ -51,87 +51,32 @@ from pathlib import Path
 
 if __package__:
     from .json_cli import JsonArgumentParser
-    from .stack_catalog import match_marker, normalize_build_tool
+    from .stack_catalog import (BUILD_TOOL_NORMALIZE, GO_FRAMEWORK_MARKERS, GO_MANIFESTS,
+        GO_TEST_MARKERS, JAVA_FRAMEWORK_MARKERS, JAVA_MANIFESTS, JAVA_TEST_MARKERS,
+        JS_FRAMEWORK_MARKERS, JS_MANIFESTS, JS_TEST_MARKERS, PYTHON_FRAMEWORK_MARKERS,
+        PYTHON_MANIFESTS, PYTHON_TEST_MARKERS, match_marker)
 else:  # direct CLI execution
     from json_cli import JsonArgumentParser
-    from stack_catalog import match_marker, normalize_build_tool
+    from stack_catalog import (BUILD_TOOL_NORMALIZE, GO_FRAMEWORK_MARKERS, GO_MANIFESTS,
+        GO_TEST_MARKERS, JAVA_FRAMEWORK_MARKERS, JAVA_MANIFESTS, JAVA_TEST_MARKERS,
+        JS_FRAMEWORK_MARKERS, JS_MANIFESTS, JS_TEST_MARKERS, PYTHON_FRAMEWORK_MARKERS,
+        PYTHON_MANIFESTS, PYTHON_TEST_MARKERS, match_marker)
 
 # ---------------------------------------------------------------------------
 # Конфигурация распознавания манифестов
 # ---------------------------------------------------------------------------
 
-# Имена файлов-манифестов сборки (ищутся рекурсивно относительно --project).
+# Имена файлов-манифестов и marker tables импортируются из stack_catalog.
 # Порядок важен: для одного проекта может быть несколько манифестов; выбираем
 # «ближайший» к target либо первый найденный.
-PYTHON_MANIFESTS = [
-    "pyproject.toml",          # современный стандарт (PEP 621)
-    "requirements.txt",        # классика pip
-    "requirements-dev.txt",    # dev-зависимости (часто тут pytest)
-    "setup.py",                # legacy
-    "Pipfile",                 # pipenv
-]
-JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
-JS_MANIFESTS = ["package.json"]
-GO_MANIFESTS = ["go.mod"]
 
 # Маркеры фреймворка приложения в манифестах зависимостей.
 # (подстрока в нижнем регистре → framework). Порядок = приоритет.
-PYTHON_FRAMEWORK_MARKERS = [
-    ("django", "django"),                    # Django + DRF (djangorestframework)
-    ("rest_framework", "django"),            # DRF alias
-    ("djangorestframework", "django"),
-    ("fastapi", "fastapi"),
-    ("flask", "flask"),
-    ("aiohttp", "aiohttp"),
-    ("tornado", "tornado"),
-]
-JAVA_FRAMEWORK_MARKERS = [
-    ("spring-boot-starter", "spring-boot"),
-    ("org.springframework.boot", "spring-boot"),
-    ("quarkus", "quarkus"),
-    ("micronaut", "micronaut"),
-]
-JS_FRAMEWORK_MARKERS = [
-    ("\"express\"", "express"),
-    ("\"next\"", "nextjs"),
-    ("\"nuxt\"", "nuxt"),
-    ("\"@nestjs/core\"", "nestjs"),
-    ("\"fastify\"", "fastify"),
-]
-GO_FRAMEWORK_MARKERS = [
-    ("github.com/gin-gonic/gin", "gin"),
-    ("github.com/labstack/echo", "echo"),
-    ("github.com/gofiber/fiber", "fiber"),
-    ("github.com/gorilla/mux", "gorilla-mux"),
-]
 
 # Маркеры тестового фреймворка (в dev-зависимостях).
-PYTHON_TEST_MARKERS = [
-    ("pytest", "pytest"),
-    ("nose", "nose"),
-]
-JAVA_TEST_MARKERS = [
-    ("junit-jupiter", "junit5"),
-    ("junit:junit", "junit4"),
-    ("org.testng", "testng"),
-]
-JS_TEST_MARKERS = [
-    ("\"jest\"", "jest"),
-    ("\"mocha\"", "mocha"),
-    ("\"vitest\"", "vitest"),
-]
-GO_TEST_MARKERS = []  # стандартный testing + go test — один вариант "go-testing"
 
 # Допустимые значения build_tool по skillsrc.schema.json (для записи в .skillsrc).
 # uv/conda и пр. маппятся в ближайшее валидное.
-BUILD_TOOL_NORMALIZE = {
-    "uv": "pip",
-    "conda": "pip",
-    "pipenv": "pip",
-    "setuptools": "pip",
-    "kotlin": "gradle",
-}
-
 
 # ---------------------------------------------------------------------------
 # 1. Парсер аргументов
