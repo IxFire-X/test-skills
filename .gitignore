@@ -1,0 +1,15 @@
+# Локальное окружение Python
+.venv/
+venv/
+
+# Кэши и результаты инструментов
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Локальный манифест целевого проекта
+.skillsrc
