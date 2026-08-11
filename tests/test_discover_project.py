@@ -253,6 +253,9 @@ class DiscoverProjectTests(unittest.TestCase):
     def test_maven_requires_project_root_and_safe_direct_module_paths(self):
         for content in (
             "<not-project><modules><module>invented</module></modules></not-project>",
+            "<project><modules><not-module>invented</not-module></modules></project>",
+            "<project><modules>before<module>service</module></modules></project>",
+            "<project><modules><module>service</module>after</modules></project>",
             "<project><modules><module></module></modules></project>",
             "<project><modules><module>../escape</module></modules></project>",
             "<project><modules><module>C:drive-relative</module></modules></project>",
@@ -312,3 +315,22 @@ class DiscoverProjectTests(unittest.TestCase):
             "questions": [{"field": build_tool, "options": [{"id": "gradle"}, {"id": "maven"}]}],
         }
         self.assertFalse(validate_report(build_tool_only, {build_tool}))
+
+    def test_public_ready_validation_requires_language_and_build_tool(self):
+        from tools.discover_project import validate_report
+
+        language_only = {
+            "status": "ready",
+            "modules": [{"id": "root", "stack": {"language": "python"}}],
+            "questions": [],
+        }
+        complete = {
+            "status": "ready",
+            "modules": [
+                {"id": "root", "stack": {"language": "python", "build_tool": "pip"}}
+            ],
+            "questions": [],
+        }
+
+        self.assertTrue(validate_report(language_only))
+        self.assertFalse(validate_report(complete))

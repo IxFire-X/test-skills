@@ -37,8 +37,10 @@ def _validate_maven(data: ET.Element) -> None:
     if _xml_name(data)!="project": raise ValueError
     for modules in data:
         if _xml_name(modules)!="modules": continue
+        if modules.text and not modules.text.isspace(): raise ValueError
         for module in modules:
-            if _xml_name(module)=="module" and (list(module) or not _safe_module_ref(module.text)): raise ValueError
+            if _xml_name(module)!="module" or list(module) or not _safe_module_ref(module.text): raise ValueError
+            if module.tail and not module.tail.isspace(): raise ValueError
 def find_confined_manifests(root: Path) -> list[Path]:
     found=[]
     for current, dirs, files in os.walk(root, followlinks=False):
@@ -151,7 +153,8 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
         if not isinstance(mid,str) or mid in modules: errors.append("duplicate module id")
         else: modules[mid]=module
     if unresolved_fields is None:
-        expected={f"modules.{mid}.stack.language" for mid,module in modules.items() if not module.get("stack",{}).get("language")}
+        required=("language","build_tool") if report.get("status")=="ready" else ("language",)
+        expected={f"modules.{mid}.stack.{field}" for mid,module in modules.items() for field in required if not isinstance(module.get("stack",{}).get(field),str) or not module["stack"][field].strip()}
     else: expected=set(unresolved_fields)
     for field in expected:
         if not any(field==f"modules.{mid}.{suffix}" for mid in modules for suffix in _QUESTION_SUFFIXES): errors.append("invalid unresolved field")
