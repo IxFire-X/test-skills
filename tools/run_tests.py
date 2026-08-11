@@ -930,6 +930,23 @@ def main() -> int:
             execution_root, language, _module = resolve_execution_context(
                 project_root, skillsrc_path, args.module, language
             )
+        except OSError:
+            if language:
+                pass
+            else:
+                env = {
+                    "status": "missing",
+                    "interpreter": None,
+                    "working_dir": str(project_root),
+                    "missing": ["language_detection"],
+                }
+                report = build_not_runnable(
+                    env, "unknown",
+                    "Не удалось прочитать .skillsrc для определения языка. "
+                    "Укажите --language явно или исправьте доступ к манифесту.",
+                )
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+                return 2
         except SkillsrcError as error:
             missing = (
                 "module_selection"
@@ -951,7 +968,8 @@ def main() -> int:
             )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 2
-        project_dir = str(execution_root)
+        else:
+            project_dir = str(execution_root)
     elif not language:
         env = {
             "status": "missing",
