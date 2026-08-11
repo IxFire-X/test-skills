@@ -36,37 +36,69 @@ CSV нужен для переноса в Jira Zephyr и просмотра че
 В фактическом журнале команд используй абсолютные пути и абсолютный рабочий
 каталог. В командах ниже `<root>` означает абсолютный корень пакета.
 
-1. Проверь артефакт этапа:
+1. До `context-marker` выбери exact project root и `<run>`, затем создай или
+обнови `.skillsrc` и сохрани immutable bootstrap receipt:
+
+   `python <root>/tools/init_skillsrc.py --project <project> --write --output <project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json`
+
+   `python <root>/tools/validate_artifact.py <root>/schemas/skillsrc-init-output.schema.json <project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json`
+
+   При `needs_input` или `conflict` останови pipeline, покажи ровно первый
+   unresolved question с options, evidence и impact и не задавай следующий
+   вопрос одновременно. Сохрани выбранные option IDs в новой immutable attempt:
+
+   `python <root>/tools/init_skillsrc.py --project <project> --write --answers <project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-answers.json --output <project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-init.json`
+
+   Проверь новую квитанцию той же командой `validate_artifact.py`, заменив
+   `attempt-01` на `attempt-02`. Продолжай только при `created`, `updated` или
+   `unchanged`.
+
+   Затем загрузи `<project>/.skillsrc` и выбери exact module ID. Автоматически
+   выбирай только единственный module. Exact user-supplied relative path выбирает
+   содержащий его module root. Для текстового названия проверяй только объявленные
+   `feature_sources` и source paths; выбери один module только при прямом
+   совпадении requirement, route, symbol или path и запиши module ID и evidence
+   в controller receipt. При нуле совпадений попроси path/module ID; при нескольких
+   покажи module IDs и evidence и запроси один выбор. Не переходи к
+   `context-marker` без exact module selection.
+
+2. Проверь артефакт этапа:
 
    `python <root>/tools/validate_artifact.py <root>/schemas/<stage>-output.schema.json <artifact.json>`
 
-2. После `tc-generator`:
+3. После `tc-generator`:
 
    `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv>`
 
    `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv> --verify-only`
 
-3. После принятой проверки автотестов:
+4. После принятой проверки автотестов:
 
-   `python <root>/tools/run_tests.py --project <isolated-project> --language <java|python> --automation-artifact <tc-to-autotest-output.json>`
+   `python <root>/tools/run_tests.py --project <project> --skillsrc <project>/.skillsrc --module <module-id> --automation-artifact <tc-to-autotest-output.json>`
 
    Сохрани стандартный вывод без изменений как JSON результата запуска и проверь
    его по `run-tests-output.schema.json`.
 
-4. Построй трассировку:
+5. Построй трассировку:
 
    `python <root>/tools/build_trace_document.py --requirements <context-marker-output.json> --test-cases <tc-generator-output.json> --automation-artifact <tc-to-autotest-output.json> --run-result <run-result.json> --output <trace-document.json>`
 
-5. Выполни аудит трассировки:
+6. Выполни аудит трассировки:
 
    `python <root>/tools/trace_check.py <trace-document.json> --require-execution`
 
-6. Собери `orchestrator-output.json` только из сохранённых фактов запуска и трассировки, проверь его по схеме и выполни перекрёстную проверку:
+7. Собери `orchestrator-output.json` только из сохранённых фактов запуска и трассировки, проверь его по схеме и выполни перекрёстную проверку:
 
    `python <root>/tools/trace_check.py <trace-document.json> --orchestrator-artifact <orchestrator-output.json> --require-execution`
 
 Сохраняй штатный код завершения каждой команды отдельно от стандартного вывода.
 Не составляй квитанции средства запуска или трассировки вручную.
+
+Discovery questions, answers и bootstrap receipts — controller evidence. Не
+передавай их evaluator-скиллам. Передавай выбранные requirements и source files
+только как `raw_content` существующему `context-marker`; его schema-valid JSON
+остается динамическим контекстом фичи. Не создавай второй каталог фич, не добавляй
+business content в `.skillsrc` и не сохраняй его в bootstrap receipt.
 
 ## Граница проекта
 
