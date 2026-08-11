@@ -78,6 +78,50 @@ class InitSkillsrcTests(unittest.TestCase):
             self.assertEqual(report["status"], "conflict")
             self.assertEqual((root / ".skillsrc").read_bytes(), before)
 
+    def test_reconciliation_use_detected_replaces_language(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("language: python", "language: go"), encoding="utf-8")
+            report = ensure_skillsrc(root, {"replace:modules.root.stack.language": "use-detected"}, write=True)
+            self.assertEqual(report["status"], "updated")
+            self.assertIn("language: python", skillsrc.read_text(encoding="utf-8"))
+
+    def test_keep_existing_conflict_still_adds_worker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("language: python", "language: go"), encoding="utf-8")
+            (root / "worker").mkdir(); (root / "worker" / "package.json").write_text("{}", encoding="utf-8")
+            report = ensure_skillsrc(root, {"replace:modules.root.stack.language": "keep-existing"}, write=True)
+            self.assertEqual(report["status"], "updated")
+            text = skillsrc.read_text(encoding="utf-8")
+            self.assertIn("language: go", text); self.assertIn("root--776f726b6572", text)
+
+    def test_removal_use_detected_removes_module_and_stale_answer_preserves_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            text = skillsrc.read_text(encoding="utf-8").replace("modules:\n", "modules:\n- id: obsolete\n  root: obsolete\n  stack:\n    language: python\n  detected_from:\n  - pyproject.toml\n")
+            skillsrc.write_text(text, encoding="utf-8")
+            conflict = ensure_skillsrc(root, {}, write=True); self.assertEqual(conflict["status"], "conflict")
+            answer = conflict["questions"][0]["id"]
+            self.assertEqual(ensure_skillsrc(root, {answer: "use-detected"}, write=True)["status"], "updated")
+            self.assertNotIn("obsolete", skillsrc.read_text(encoding="utf-8"))
+            before = skillsrc.read_bytes()
+            self.assertEqual(ensure_skillsrc(root, {"replace:stale": "use-detected"}, write=True)["status"], "error")
+            self.assertEqual(skillsrc.read_bytes(), before)
+
+    def test_secret_module_never_appears_in_conflict_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root); ensure_skillsrc(root, {}, write=True)
+            skillsrc = root / ".skillsrc"
+            text = skillsrc.read_text(encoding="utf-8").replace("modules:\n", "modules:\n- id: private\n  root: private\n  stack:\n    language: python\n  detected_from:\n  - pyproject.toml\n")
+            skillsrc.write_text(text, encoding="utf-8")
+            report = ensure_skillsrc(root, {}, write=True)
+            self.assertEqual(report["status"], "conflict")
+            self.assertNotIn("secret", json.dumps(report))
+
     def test_v2_matching_module_stays_v2(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); self._python_project(root)
@@ -96,6 +140,20 @@ class InitSkillsrcTests(unittest.TestCase):
             self.assertEqual(report["status"], "conflict")
             self.assertEqual(report["questions"][0]["id"], "migrate-v2-to-v3")
             self.assertEqual((root / ".skillsrc").read_bytes(), original)
+
+    def test_v2_migration_choices_preserve_extensions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root)
+            (root / "worker").mkdir(); (root / "worker" / "package.json").write_text("{}", encoding="utf-8")
+            original = b'project:\n  name: preserved\n  language: python\n  build_tool: pip\nmethodology: tdd\nresolution:\n  status_conflict: ask_user\n'
+            skillsrc = root / ".skillsrc"; skillsrc.write_bytes(original)
+            self.assertEqual(ensure_skillsrc(root, {"migrate-v2-to-v3": "keep-existing"}, write=True)["status"], "unchanged")
+            self.assertEqual(skillsrc.read_bytes(), original)
+            report = ensure_skillsrc(root, {"migrate-v2-to-v3": "use-detected"}, write=True)
+            self.assertEqual(report["status"], "updated")
+            migrated = skillsrc.read_text(encoding="utf-8")
+            self.assertIn("name: preserved", migrated); self.assertIn("methodology: tdd", migrated)
+            self.assertIn("status_conflict: ask_user", migrated); self.assertIn("root--776f726b6572", migrated)
 
     def test_fingerprint_drift_never_writes(self):
         with tempfile.TemporaryDirectory() as temp:
