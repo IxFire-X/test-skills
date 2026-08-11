@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 from jsonschema import Draft202012Validator
 
-from tools.init_skillsrc import ensure_skillsrc
+from tools.init_skillsrc import _atomic_json, _confined_output, ensure_skillsrc
 
 
 class InitSkillsrcTests(unittest.TestCase):
@@ -150,6 +150,57 @@ class InitSkillsrcTests(unittest.TestCase):
         schema = json.loads((Path(__file__).parents[1] / "schemas" / "skillsrc-init-output.schema.json").read_text(encoding="utf-8"))
         bad = {"status": "created", "skillsrc_path": ".skillsrc", "written": False, "module_ids": [], "questions": [], "changes": [], "warnings": [], "errors": [], "discovery_fingerprint": "0" * 64}
         self.assertTrue(list(Draft202012Validator(schema).iter_errors(bad)))
+
+    def test_workspace_evidence_fingerprint_create_and_membership_drift(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / "apps" / "leaf" / "src").mkdir(parents=True)
+            (root / "package.json").write_text('{"workspaces":["apps/*"]}', encoding="utf-8")
+            (root / "apps" / "leaf" / "package.json").write_text('{"name":"leaf"}', encoding="utf-8")
+            self.assertEqual(ensure_skillsrc(root, {}, write=True)["status"], "created")
+            (root / ".skillsrc").unlink()
+            original = __import__("tools.init_skillsrc", fromlist=["discover_project"]).discover_project
+            calls = 0
+            def mutate_then_report(path):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    (root / "package.json").write_text('{"workspaces":["changed/*"]}', encoding="utf-8")
+                return original(path)
+            with mock.patch("tools.init_skillsrc.discover_project", side_effect=mutate_then_report):
+                report = ensure_skillsrc(root, {}, write=True)
+            self.assertEqual(report["errors"], ["project_changed"])
+            self.assertFalse((root / ".skillsrc").exists())
+
+    def test_destination_sentinel_after_final_fingerprint_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self._python_project(root)
+            original = __import__("tools.init_skillsrc", fromlist=["discover_project"]).discover_project
+            calls = 0
+            def mutate_destination(path):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    (root / ".skillsrc").write_bytes(b"sentinel")
+                return original(path)
+            with mock.patch("tools.init_skillsrc.discover_project", side_effect=mutate_destination):
+                report = ensure_skillsrc(root, {}, write=True)
+            self.assertEqual(report["errors"], ["destination_changed"])
+            self.assertEqual((root / ".skillsrc").read_bytes(), b"sentinel")
+
+    def test_receipt_confinement_rejects_symlink_escape_and_replace_failure_preserves_target(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp); target = root / "docs" / "to_do" / "receipt.json"
+            (root / "docs").mkdir(); target.parent.mkdir()
+            target.write_text("old", encoding="utf-8")
+            with mock.patch("tools.init_skillsrc.os.replace", side_effect=OSError("denied")):
+                with self.assertRaises(OSError): _atomic_json(root, target, {"status": "preview"})
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+            try:
+                (root / "docs" / "to_do").rmdir(); (root / "docs" / "to_do").symlink_to(outside, target_is_directory=True)
+            except OSError:
+                return
+            with self.assertRaises(ValueError):
+                _confined_output(root, str(target))
 
     def test_v2_matching_module_stays_v2(self):
         with tempfile.TemporaryDirectory() as temp:
