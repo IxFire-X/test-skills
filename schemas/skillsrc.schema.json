@@ -2,24 +2,200 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/skillsrc.schema.json",
   "title": "Portable .skillsrc manifest",
-  "type": "object",
-  "required": ["project"], "additionalProperties": false,
-  "properties": {
-    "version": {"type": "string", "minLength": 1},
-    "project": {"type": "object", "required": ["name", "language"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "language": {"enum": ["java", "python", "go", "typescript", "kotlin"]}, "framework": {"type": "string", "minLength": 1}, "build_tool": {"enum": ["maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn"]}, "type": {"enum": ["platform-billing", "sdk-library", "microservice", "web-app", "cli-tool"]}}},
-    "paths": {"type": "object", "additionalProperties": false, "properties": {"source": {"type": "string"}, "tests": {"type": "string"}, "resources": {"type": "string"}, "docs": {"type": "string"}}},
-    "test": {"type": "object", "additionalProperties": false, "properties": {"framework": {"enum": ["junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing"]}, "api_client": {"type": "string"}, "database": {"type": "string"}}},
-    "methodology": {"enum": ["sdd", "tdd", "bdd", "mixed"]},
-    "sdd": {"type": "object", "additionalProperties": false, "properties": {"openapi": {"type": "string"}, "asyncapi": {"type": "string"}, "domain": {"type": "string"}, "requirements": {"type": "string"}, "architecture": {"type": "string"}}},
-    "resolution": {"type": "object", "additionalProperties": false, "properties": {"analytics_vs_code": {"enum": ["analytics_wins", "code_wins", "ask_user", "strict"]}, "status_conflict": {"enum": ["ask_user", "auto_promote", "auto_demote"]}, "skillsrc_vs_scan": {"enum": ["skillsrc_wins", "scan_wins", "ask_user", "merge"]}}},
-    "contracts": {"type": "object", "additionalProperties": false, "properties": {"status_markers_version": {"type": "string"}}},
+  "oneOf": [
+    {"$ref": "#/$defs/v2"},
+    {"$ref": "#/$defs/v3"}
+  ],
+  "$defs": {
+    "v2": {
+      "type": "object",
+      "required": ["project"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "string", "minLength": 1, "not": {"const": "3.0"}},
+        "project": {"$ref": "#/$defs/v2_project"},
+        "paths": {"$ref": "#/$defs/v2_paths"},
+        "test": {"$ref": "#/$defs/v2_test"},
+        "methodology": {"enum": ["sdd", "tdd", "bdd", "mixed"]},
+        "sdd": {"$ref": "#/$defs/v2_sdd"},
+        "resolution": {"$ref": "#/$defs/resolution"},
+        "contracts": {"$ref": "#/$defs/contracts"},
+        "skills_registry": {"$ref": "#/$defs/skills_registry"}
+      }
+    },
+    "v3": {
+      "type": "object",
+      "required": ["version", "project", "discovery", "modules"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"const": "3.0"},
+        "project": {"$ref": "#/$defs/v3_project"},
+        "discovery": {"$ref": "#/$defs/discovery"},
+        "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
+        "resolution": {"$ref": "#/$defs/resolution"},
+        "contracts": {"$ref": "#/$defs/contracts"},
+        "skills_registry": {"$ref": "#/$defs/skills_registry"}
+      }
+    },
+    "v2_project": {
+      "type": "object",
+      "required": ["name", "language"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "language": {"$ref": "#/$defs/language"},
+        "framework": {"type": "string", "minLength": 1},
+        "build_tool": {"$ref": "#/$defs/build_tool"},
+        "type": {"enum": ["platform-billing", "sdk-library", "microservice", "web-app", "cli-tool"]}
+      }
+    },
+    "v3_project": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "methodology": {"enum": ["sdd", "tdd", "bdd", "mixed"]}
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "required": ["on_missing", "conflict_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "on_missing": {"const": "automatic"},
+        "conflict_policy": {"const": "ask_user"}
+      }
+    },
+    "module": {
+      "type": "object",
+      "required": ["id", "root", "stack", "detected_from"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "root": {"type": "string", "minLength": 1},
+        "stack": {"$ref": "#/$defs/stack"},
+        "paths": {"$ref": "#/$defs/module_paths"},
+        "test": {"$ref": "#/$defs/module_test"},
+        "feature_sources": {"$ref": "#/$defs/feature_sources"},
+        "detected_from": {"$ref": "#/$defs/nonempty_unique_strings"}
+      }
+    },
+    "stack": {
+      "type": "object",
+      "required": ["language"],
+      "additionalProperties": false,
+      "properties": {
+        "language": {"$ref": "#/$defs/language"},
+        "framework": {"type": "string", "minLength": 1},
+        "build_tool": {"$ref": "#/$defs/build_tool"}
+      }
+    },
+    "v2_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {"type": "string"},
+        "tests": {"type": "string"},
+        "resources": {"type": "string"},
+        "docs": {"type": "string"}
+      }
+    },
+    "module_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {"$ref": "#/$defs/unique_nonempty_strings"},
+        "tests": {"$ref": "#/$defs/unique_nonempty_strings"},
+        "resources": {"$ref": "#/$defs/unique_nonempty_strings"}
+      }
+    },
+    "v2_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "framework": {"$ref": "#/$defs/test_framework"},
+        "api_client": {"type": "string"},
+        "database": {"type": "string"}
+      }
+    },
+    "module_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "framework": {"$ref": "#/$defs/test_framework"},
+        "wrapper": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "windows": {"type": "string", "minLength": 1},
+            "linux": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "v2_sdd": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "openapi": {"type": "string"},
+        "asyncapi": {"type": "string"},
+        "domain": {"type": "string"},
+        "requirements": {"type": "string"},
+        "architecture": {"type": "string"}
+      }
+    },
+    "feature_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirements": {"$ref": "#/$defs/unique_strings"},
+        "openapi": {"$ref": "#/$defs/unique_strings"},
+        "architecture": {"$ref": "#/$defs/unique_strings"},
+        "source": {"$ref": "#/$defs/unique_strings"}
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "analytics_vs_code": {"enum": ["analytics_wins", "code_wins", "ask_user", "strict"]},
+        "status_conflict": {"enum": ["ask_user", "auto_promote", "auto_demote"]},
+        "skillsrc_vs_scan": {"enum": ["skillsrc_wins", "scan_wins", "ask_user", "merge"]}
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status_markers_version": {"type": "string"}
+      }
+    },
     "skills_registry": {
       "type": "object",
       "description": "Documented extension point: skill IDs are manifest-defined.",
       "additionalProperties": {"$ref": "#/$defs/skill"}
-    }
-  },
-  "$defs": {
-    "skill": {"type": "object", "required": ["name", "path", "description"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1}, "skill_file": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1}, "tags": {"type": "array", "items": {"type": "string", "pattern": "^@[a-z-]+$"}}, "triggers": {"type": "array", "items": {"type": "string", "minLength": 1}}, "input_contract": {"type": "string", "minLength": 1}, "output_contract": {"type": "string", "minLength": 1}}}
+    },
+    "skill": {
+      "type": "object",
+      "required": ["name", "path", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "skill_file": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "tags": {"type": "array", "items": {"type": "string", "pattern": "^@[a-z-]+$"}},
+        "triggers": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "input_contract": {"type": "string", "minLength": 1},
+        "output_contract": {"type": "string", "minLength": 1}
+      }
+    },
+    "language": {"enum": ["java", "python", "go", "typescript", "kotlin"]},
+    "build_tool": {"enum": ["maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn"]},
+    "test_framework": {"enum": ["junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing"]},
+    "unique_strings": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "unique_nonempty_strings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "nonempty_unique_strings": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
   }
 }
