@@ -151,6 +151,19 @@ def _tree_bytes(project: Path, treeish: str, path: str) -> bytes | None:
     return _git(project, "cat-file", "-p", f"{treeish}:{path}")
 
 
+def _worktree_bytes(project: Path, path: str, *, required: bool = False) -> bytes | None:
+    """Read one frozen worktree file without exposing filesystem exceptions."""
+    candidate = project / Path(*path.split("/"))
+    try:
+        if not candidate.is_file():
+            if required:
+                raise _error("CHANGE_INPUT", "/changes", "A worktree rename destination could not be frozen.")
+            return None
+        return candidate.read_bytes()
+    except OSError:
+        raise _error("CHANGE_INPUT", "/changes", "Worktree source bytes could not be frozen.")
+
+
 def _row(kind: str, path: str | None, before: tuple[str, bytes] | None, after: tuple[str, bytes] | None, *, old_path: str | None = None, similarity: int | None = None) -> dict[str, Any]:
     text = all(side is None or _is_text(side[1]) for side in (before, after))
     if not text:
@@ -229,7 +242,7 @@ def _worktree(project: Path, base: str) -> Mapping[str, Any]:
     frozen: dict[str, bytes | None] = {}
     handled: set[str] = set()
     for path, (old_path, similarity) in sorted(rename_hints.items()):
-        before, after = _tree_bytes(project, base_commit, old_path), (project / Path(*path.split("/"))).read_bytes()
+        before, after = _tree_bytes(project, base_commit, old_path), _worktree_bytes(project, path, required=True)
         if before is not None and _tree_bytes(project, base_commit, path) is None:
             frozen[old_path], frozen[path] = None, after
             rows.append(_row("renamed", path, (old_path, before), (path, after), old_path=old_path, similarity=similarity))
@@ -238,8 +251,7 @@ def _worktree(project: Path, base: str) -> Mapping[str, Any]:
         if path in handled:
             continue
         before = _tree_bytes(project, base_commit, path)
-        disk = project / Path(*path.split("/"))
-        after = disk.read_bytes() if disk.is_file() else None
+        after = _worktree_bytes(project, path)
         frozen[path] = after
         if before is None and after is not None:
             rows.append(_row("added", path, None, (path, after)))
@@ -314,8 +326,10 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
             raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}", "Patch change row must use one closed variant.")
         for path_key in ("path", "old_path", "new_path"):
             if path_key in row:
+                if not isinstance(row[path_key], str):
+                    raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}/{path_key}", "Patch paths must be strings.")
                 try:
-                    _path(str(row[path_key]).encode("utf-8"))
+                    _path(row[path_key].encode("utf-8"))
                 except FlowError:
                     raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}/{path_key}", "Patch paths must be safe relative POSIX paths.")
         row_copy = dict(row); change_id = row_copy.pop("change_id", None)
@@ -325,7 +339,7 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
         before, after = row.get("before"), row.get("after")
         if row["kind"] == "added" and (before is not None or not isinstance(after, Mapping)) or row["kind"] == "deleted" and (after is not None or not isinstance(before, Mapping)) or row["kind"] in ("modified", "renamed") and (not isinstance(before, Mapping) or not isinstance(after, Mapping)):
             raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}", "Patch row side cardinality is invalid.")
-        if row["kind"] == "renamed" and (row["old_path"] == row["new_path"] or not isinstance(row["similarity_basis"], str)):
+        if row["kind"] == "renamed" and (row["old_path"] == row["new_path"] or not isinstance(row["similarity_basis"], str) or not row["similarity_basis"]):
             raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}", "Patch rename relation is invalid.")
         before_path, after_path = _row_paths(row)
         for side, side_path in ((before, before_path), (after, after_path)):

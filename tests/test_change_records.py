@@ -53,6 +53,41 @@ def _init_project(root: Path) -> tuple[Path, str]:
 
 
 class ChangeRecordTests(unittest.TestCase):
+    def test_patch_rejects_non_string_paths_and_empty_rename_basis(self) -> None:
+        """Coercing closed path fields or allowing empty rename evidence accepts malformed manifests."""
+        before, after = b"before\n", b"after\n"
+
+        def side(path: object, content: bytes) -> dict[str, object]:
+            digest = _digest(content)
+            return {"source_id": "SOURCE-" + hashlib.sha256(canonical_bytes({"path": path, "content_sha256": digest})).hexdigest(), "content_sha256": digest, "size_bytes": len(content), "text": True}
+
+        def manifest(row: dict[str, object]) -> dict[str, object]:
+            row["change_id"] = "CHANGE-" + hashlib.sha256(canonical_bytes(row)).hexdigest()
+            return {"schema_version": "1.0.0", "artifact": "patch-manifest", "repository_id": _digest(b"repo"), "base_snapshot_sha256": _digest(b"base"), "target_snapshot_sha256": _digest(b"target"), "changes": [row], "content_blobs": [{"content_sha256": _digest(before), "size_bytes": len(before), "controller_blob_id": "BLOB-before"}, {"content_sha256": _digest(after), "size_bytes": len(after), "controller_blob_id": "BLOB-after"}]}
+
+        candidates = [
+            manifest({"kind": "modified", "path": 7, "before": side(7, before), "after": side(7, after)}),
+            manifest({"kind": "renamed", "old_path": "before.py", "new_path": "after.py", "similarity_basis": "", "before": side("before.py", before), "after": side("after.py", after)}),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "patch.json"
+            for candidate in candidates:
+                path.write_text(json.dumps(candidate), encoding="utf-8")
+                with self.assertRaises(FlowError):
+                    acquire_change_input(Path(temporary), ChangeInputSpec(None, None, False, path), {"BLOB-before": before, "BLOB-after": after}.get)
+
+    def test_worktree_rename_read_failure_is_a_safe_flow_error(self) -> None:
+        """A vanished rename destination must not leak a raw filesystem error during acquisition."""
+        with tempfile.TemporaryDirectory() as temporary:
+            project, base = _init_project(Path(temporary))
+            _git(project, "mv", "renamed.txt", "worktree-name.txt")
+            with mock.patch.object(Path, "read_bytes", side_effect=FileNotFoundError(SECRET)):
+                with self.assertRaises(FlowError) as caught:
+                    acquire_change_input(project, ChangeInputSpec(base, None, True, None))
+            self.assertEqual("CHANGE_INPUT", caught.exception.code)
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertNotIn(SECRET, str(caught.exception))
+
     def test_worktree_snapshot_hides_immutable_private_bytes(self) -> None:
         """Exposing a mutable bytes map would let callers bypass later drift detection."""
         with tempfile.TemporaryDirectory() as temporary:
