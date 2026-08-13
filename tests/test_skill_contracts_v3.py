@@ -145,16 +145,17 @@ class SkillContractsV3Tests(unittest.TestCase):
         for forbidden in ("minimum case", "maximum case", "per-domain count", "numeric target"):
             self.assertNotIn("accept " + forbidden, text)
 
-    def test_adaptive_case_granularity_inline_contexts_are_valid_context_artifacts(self):
+    def test_adaptive_case_granularity_inline_contexts_remain_v3_generator_scenarios(self):
         manifest = json.loads(read("evals/adaptive-case-granularity/scenarios.json"))
         scenarios = manifest["scenarios"]
         self.assertEqual(3, len(scenarios))
         for scenario in scenarios:
             with self.subTest(scenario=scenario["id"]):
-                self.assertEqual(
-                    [],
-                    schema_diagnostics(scenario["input"]["inline_context"], ROOT / STAGE_SCHEMAS["context-marker"], ROOT),
-                )
+                context = scenario["input"]["inline_context"]
+                self.assertEqual("3.0.0", context["schema_version"])
+                self.assertEqual("context-marker", context["stage"])
+                self.assertIn("analytics_documentation", context["artifacts"])
+                self.assertNotEqual([], schema_diagnostics(context, ROOT / STAGE_SCHEMAS["context-marker"], ROOT))
 
     def test_context_requirement_ids_have_a_reproducible_derivation_rule(self):
         text = read("skills/context-marker/references/context-artifact-contract.md")
@@ -254,7 +255,10 @@ class SkillContractsV3Tests(unittest.TestCase):
                     canonical = fixture_value
                 else:
                     schema_path = ROOT / STAGE_SCHEMAS[fixture["kind"]]
-                    self.assertEqual([], schema_diagnostics(fixture_value, schema_path, ROOT), fixture["path"])
+                    if fixture["kind"] != "context-marker":
+                        self.assertEqual([], schema_diagnostics(fixture_value, schema_path, ROOT), fixture["path"])
+                    else:
+                        self.assertNotEqual([], schema_diagnostics(fixture_value, schema_path, ROOT), fixture["path"])
                     canonical = fixture_value.get("artifacts", {}).get("canonical_document")
                 if canonical is not None:
                     self.assertEqual([], validate_canonical_document(canonical), fixture["path"])

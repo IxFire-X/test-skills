@@ -5,11 +5,11 @@ description: Use when a V3 context artifact must become a canonical test-case do
 
 # Canonical test-case generation
 
-Consume valid V3 context and emit JSON-only `artifacts.canonical_document`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume only artifacts.managed_behavior_context. Reject raw_content, source_code_and_diff, technical_test_inventory, test source text, and technical_test_classification as generator inputs. Emit JSON-only `artifacts.canonical_document`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
 
 ## Procedure
 
-1. Validate the context envelope. Derive only supported requirements, capabilities, and technical details.
+1. Validate the managed behavior context. Derive only supported requirements and product behavior; technical test evidence cannot create a behavior or case.
 2. Derive case boundaries before assigning IDs. Use one case per independently executable scenario. Build its scenario key from setup/role, initial state, input partition/branch condition, primary action or cohesive dependent action chain, and terminal outcome. Split a branch only when it is independently executable; deduplicate overlapping evidence from the same control flow. Derive the count from those keys, never from a numeric target.
 3. Create one canonical document with stable IDs and physical ordering. A case projects as a Title, Goal, and Preconditions with arbitrary sequential steps; preparation is represented as steps.
 4. For every step, provide human action and expected result plus structured operation, typed inputs, previous-step output references, outputs, and assertions when automation is possible. Human expected result covers every machine assertion.

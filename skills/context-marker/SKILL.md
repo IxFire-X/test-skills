@@ -1,18 +1,18 @@
 ---
 name: context-marker
-description: Use when authorized requirements, code observations, or change notes must become a provenance-preserving V3 context artifact for the test pipeline.
+description: Use when authorized requirements and product observations must become a provenance-preserving V4 managed behavior context for the test pipeline.
 ---
 
 # Context marking
 
-Produce a V3 `context-marker` envelope. Read the executable [context contract](references/context-artifact-contract.md) and `schemas/context-marker-output.schema.json`; `tools.canonical_document` owns shared canonical definitions.
+Produce a V4 `context-marker` envelope. Read the executable [context contract](references/context-artifact-contract.md) and `schemas/context-marker-output.schema.json`; `tools.canonical_document` owns shared canonical definitions.
 
 ## Procedure
 
-1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
-2. Emit `artifacts.analytics_documentation.requirements` with `requirement_id`, `display_order`, `text`, and provenance. Use deterministic source ordering and IDs; preserve every supported fact without copying secrets.
-3. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
-4. Validate the V3 envelope with `tools/validate_artifact.py` and its schema before return.
+1. Read only authorized behavior sources. Не сканируй посторонние файлы. A technical test can supplement an observation but cannot originate a requirement.
+2. Emit unchanged canonical requirements in `artifacts.managed_behavior_context.requirements`, exact `authorized_behavior_sources_sha256`, closed `product_sources`, and parallel ordered `requirement_sources` links. Preserve every supported fact without copying secrets.
+3. Every product source must copy its authorized ID, path, and digest exactly; every requirement has nonempty ordered source IDs. Keep an unsupported claim out of the artifact rather than inventing behavior.
+4. Validate the V4 envelope with `tools/validate_artifact.py` and validate its exact source graph and current bytes with `tools/test_classification.py validate-context` before return.
 
 ## Stop conditions
 

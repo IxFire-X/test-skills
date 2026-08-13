@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "stages" / "v3"
+V4_FIXTURES = ROOT / "tests" / "fixtures" / "stages" / "v4"
 SCHEMAS = {
     "context": ROOT / "schemas" / "context-marker-output.schema.json",
     "generator": ROOT / "schemas" / "tc-generator-output.schema.json",
@@ -22,8 +23,8 @@ from tools.schema_validation import load_json_strict, schema_diagnostics  # noqa
 from tools.validate_artifact import validate  # noqa: E402
 
 
-def fixture(name: str) -> dict[str, object]:
-    return load_json_strict(FIXTURES / name)
+def fixture(name: str, version: str = "v3") -> dict[str, object]:
+    return load_json_strict((V4_FIXTURES if version == "v4" else FIXTURES) / name)
 
 
 def diagnostics(kind: str, artifact: dict[str, object]) -> list[dict[str, str]]:
@@ -34,43 +35,44 @@ class V3StageSchemaTests(unittest.TestCase):
     def assert_invalid(self, kind: str, artifact: dict[str, object], path: str) -> None:
         self.assertTrue(any(item["path"] == path for item in diagnostics(kind, artifact)))
 
-    def test_all_five_synthetic_fixtures_validate_through_schema_and_cli(self) -> None:
+    def test_all_stage_fixtures_validate_through_schema_and_cli(self) -> None:
         """A changed V3 envelope or shared ref must reject a complete valid carrier."""
         cases = (
-            ("context", "context-marker.json"),
-            ("generator", "tc-generator.json"),
-            ("reviewer", "tc-reviewer-accepted.json"),
-            ("reviewer", "tc-reviewer-auto-fix.json"),
-            ("reviewer", "tc-reviewer-rework.json"),
+            ("context", "context-marker.json", "v4"),
+            ("generator", "tc-generator.json", "v3"),
+            ("reviewer", "tc-reviewer-accepted.json", "v3"),
+            ("reviewer", "tc-reviewer-auto-fix.json", "v3"),
+            ("reviewer", "tc-reviewer-rework.json", "v3"),
         )
-        for kind, name in cases:
+        for kind, name, version in cases:
             with self.subTest(name=name):
-                self.assertEqual([], diagnostics(kind, fixture(name)))
-                exit_code, report = validate(str(SCHEMAS[kind]), str(FIXTURES / name))
+                fixture_root = V4_FIXTURES if version == "v4" else FIXTURES
+                self.assertEqual([], diagnostics(kind, fixture(name, version)))
+                exit_code, report = validate(str(SCHEMAS[kind]), str(fixture_root / name))
                 self.assertEqual((0, {"status": "valid", "errors": []}), (exit_code, report))
 
     def test_every_envelope_is_closed_at_root_and_artifact_level(self) -> None:
         """Missing or extra carrier fields must not be silently accepted by a stage."""
         cases = (
-            ("context", "context-marker.json", "analytics_documentation"),
-            ("generator", "tc-generator.json", "canonical_document"),
-            ("reviewer", "tc-reviewer-accepted.json", "validation_report"),
+            ("context", "context-marker.json", "managed_behavior_context", "v4"),
+            ("generator", "tc-generator.json", "canonical_document", "v3"),
+            ("reviewer", "tc-reviewer-accepted.json", "validation_report", "v3"),
         )
-        for kind, name, artifact_key in cases:
+        for kind, name, artifact_key, version in cases:
             with self.subTest(kind=kind, mutation="missing root"):
-                candidate = fixture(name)
+                candidate = fixture(name, version)
                 del candidate["warnings"]
                 self.assert_invalid(kind, candidate, "/warnings")
             with self.subTest(kind=kind, mutation="extra root"):
-                candidate = fixture(name)
+                candidate = fixture(name, version)
                 candidate["extra"] = True
                 self.assert_invalid(kind, candidate, "/extra")
             with self.subTest(kind=kind, mutation="missing artifact"):
-                candidate = fixture(name)
+                candidate = fixture(name, version)
                 del candidate["artifacts"][artifact_key]
                 self.assert_invalid(kind, candidate, f"/artifacts/{artifact_key}")
             with self.subTest(kind=kind, mutation="extra artifact"):
-                candidate = fixture(name)
+                candidate = fixture(name, version)
                 candidate["artifacts"]["extra"] = True
                 self.assert_invalid(kind, candidate, "/artifacts/extra")
 
@@ -84,8 +86,8 @@ class V3StageSchemaTests(unittest.TestCase):
         )
         for name, mutate in mutations:
             with self.subTest(name=name):
-                candidate = fixture("context-marker.json")
-                mutate(candidate["artifacts"]["analytics_documentation"]["requirements"][0])
+                candidate = fixture("context-marker.json", "v4")
+                mutate(candidate["artifacts"]["managed_behavior_context"]["requirements"][0])
                 self.assertNotEqual([], diagnostics("context", candidate))
 
     def test_generator_rejects_legacy_or_invalid_embedded_document_shapes(self) -> None:
@@ -157,9 +159,13 @@ class V3StageSchemaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             legacy = Path(temporary) / "legacy.json"
             legacy.write_text(json.dumps({"schema_version": "2.1.0"}), encoding="utf-8")
-            for kind, schema in SCHEMAS.items():
+            for kind, schema in tuple(SCHEMAS.items())[1:]:
                 with self.subTest(kind=kind):
                     self.assertEqual((1, expected), validate(str(schema), str(legacy)))
+            exit_code, report = validate(str(SCHEMAS["context"]), str(legacy))
+            self.assertEqual(1, exit_code)
+            self.assertEqual("invalid", report["status"])
+            self.assertNotIn("V2_1_BREAKING_CHANGE", [item.get("code") for item in report["errors"]])
 
     def test_unknown_v3_uses_schema_diagnostics_and_unreadable_json_remains_exit_two(self) -> None:
         """Only the known breaking version receives its special diagnostic."""

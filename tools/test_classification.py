@@ -533,6 +533,91 @@ def select_effective_technical_evidence(inventory: Mapping[str, Any], classifica
     return _freeze(result)
 
 
+def validate_managed_behavior_context(behavior_context: Mapping[str, Any], authorized_behavior_sources: Mapping[str, Any], test_inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
+    """Validate the closed managed-behavior provenance graph against snapshot and current bytes."""
+    if not isinstance(behavior_context, Mapping):
+        return (_diag("/artifacts/managed_behavior_context", "BEHAVIOR_CONTEXT", "Managed behavior context must be an object."),)
+    if not isinstance(authorized_behavior_sources, Mapping) or not isinstance(test_inventory, Mapping):
+        return (_diag("/input", "BEHAVIOR_INPUT", "Authorized sources and test inventory must be objects."),)
+    required = ("authorized_behavior_sources_sha256", "requirements", "product_sources", "requirement_sources")
+    if set(behavior_context) != set(required):
+        return (_diag("/artifacts/managed_behavior_context", "BEHAVIOR_CONTEXT", "Managed behavior context must use its closed V4 fields."),)
+    sources = authorized_behavior_sources.get("sources")
+    inventory_files = test_inventory.get("files")
+    requirements = behavior_context["requirements"]
+    product_sources = behavior_context["product_sources"]
+    requirement_sources = behavior_context["requirement_sources"]
+    if not isinstance(sources, list) or not isinstance(inventory_files, list) or not isinstance(requirements, list) or not isinstance(product_sources, list) or not isinstance(requirement_sources, list):
+        return (_diag("/artifacts/managed_behavior_context", "BEHAVIOR_CONTEXT", "Managed behavior context inputs must use array carriers."),)
+    if behavior_context["authorized_behavior_sources_sha256"] != _digest(authorized_behavior_sources):
+        return (_diag("/artifacts/managed_behavior_context/authorized_behavior_sources_sha256", "BEHAVIOR_AUTHORIZED_DIGEST", "Authorized behavior sources must match their exact snapshot digest."),)
+    authorized_by_id: dict[str, Mapping[str, Any]] = {}
+    for row in sources:
+        if not isinstance(row, Mapping) or not isinstance(row.get("source_id"), str) or row["source_id"] in authorized_by_id:
+            return (_diag("/authorized_behavior_sources/sources", "BEHAVIOR_AUTHORIZED_SOURCES", "Authorized source IDs must be unique closed rows."),)
+        authorized_by_id[row["source_id"]] = row
+    test_paths = {row.get("path") for row in inventory_files if isinstance(row, Mapping) and isinstance(row.get("path"), str)}
+    requirement_ids: list[str] = []
+    for index, row in enumerate(requirements):
+        if not isinstance(row, Mapping) or not isinstance(row.get("requirement_id"), str) or not _exact_int(row.get("display_order")):
+            return (_diag(f"/artifacts/managed_behavior_context/requirements/{index}", "BEHAVIOR_REQUIREMENTS", "Requirements must retain canonical IDs and exact display order."),)
+        requirement_ids.append(row["requirement_id"])
+    if not requirement_ids or len(requirement_ids) != len(set(requirement_ids)) or [row["display_order"] for row in requirements] != list(range(1, len(requirements) + 1)):
+        return (_diag("/artifacts/managed_behavior_context/requirements", "BEHAVIOR_REQUIREMENTS", "Requirements must retain unique canonical display order."),)
+    product_by_id: dict[str, Mapping[str, Any]] = {}
+    for index, row in enumerate(product_sources):
+        pointer = f"/artifacts/managed_behavior_context/product_sources/{index}"
+        if not isinstance(row, Mapping) or set(row) != {"source_id", "kind", "path", "content_digest", "summary"}:
+            return (_diag(pointer, "BEHAVIOR_PRODUCT_SOURCE", "Product source rows must use their closed V4 fields."),)
+        source_id = row.get("source_id")
+        if not isinstance(source_id, str) or source_id in product_by_id:
+            return (_diag(f"{pointer}/source_id", "BEHAVIOR_PRODUCT_SOURCE", "Product source IDs must be unique strings."),)
+        authorized = authorized_by_id.get(source_id)
+        if not isinstance(authorized, Mapping) or authorized.get("kind") != "product_file":
+            return (_diag(f"{pointer}/source_id", "BEHAVIOR_SOURCE_MATCH", "Product source must match an authorized product source."),)
+        if any(row.get(field) != authorized.get(field) for field in ("source_id", "kind", "path", "content_digest")):
+            return (_diag(pointer, "BEHAVIOR_SOURCE_MATCH", "Product source identity must exactly match the authorized snapshot."),)
+        path = row["path"]
+        if path in test_paths:
+            return (_diag(f"{pointer}/path", "BEHAVIOR_TEST_SOURCE_FORBIDDEN", "Test inventory paths cannot originate managed behavior."),)
+        if not isinstance(path, str) or Path(path).is_absolute() or ".." in PurePosixPath(path).parts:
+            return (_diag(f"{pointer}/path", "BEHAVIOR_SOURCE_PATH", "Product source paths must be safe project-relative paths."),)
+        try:
+            resolved = _confined(project_root, project_root / path, f"{pointer}/path")
+            actual = "sha256:" + hashlib.sha256(resolved.read_bytes()).hexdigest()
+        except TestClassificationError as error:
+            return error.diagnostics
+        except OSError:
+            return (_diag(f"{pointer}/path", "BEHAVIOR_SOURCE_READ", "Product source bytes could not be read."),)
+        if actual != row["content_digest"]:
+            return (_diag(f"{pointer}/content_digest", "BEHAVIOR_SOURCE_DRIFT", "Product source bytes no longer match the authorized digest."),)
+        product_by_id[source_id] = row
+    actual_requirement_ids: list[str] = []
+    for index, row in enumerate(requirement_sources):
+        pointer = f"/artifacts/managed_behavior_context/requirement_sources/{index}"
+        if not isinstance(row, Mapping) or set(row) != {"requirement_id", "source_ids"} or not isinstance(row.get("requirement_id"), str) or not isinstance(row.get("source_ids"), list):
+            return (_diag(pointer, "BEHAVIOR_REQUIREMENT_SOURCE", "Requirement source rows must use their closed V4 fields."),)
+        actual_requirement_ids.append(row["requirement_id"])
+        links = row["source_ids"]
+        if not links or any(not isinstance(source_id, str) for source_id in links) or len(links) != len(set(links)):
+            return (_diag(f"{pointer}/source_ids", "BEHAVIOR_REQUIREMENT_SOURCE_LINK", "Requirement source links must be nonempty unique source IDs."),)
+        if links != sorted(links):
+            return (_diag(f"{pointer}/source_ids", "BEHAVIOR_REQUIREMENT_SOURCE_ORDER", "Requirement source IDs must use canonical source ID order."),)
+        for link_index, source_id in enumerate(links):
+            authorized = authorized_by_id.get(source_id)
+            if authorized is None:
+                return (_diag(f"{pointer}/source_ids/{link_index}", "BEHAVIOR_REQUIREMENT_SOURCE_LINK", "Requirement source link is not authorized."),)
+            if authorized.get("kind") == "product_file":
+                if authorized.get("path") in test_paths:
+                    return (_diag(f"{pointer}/source_ids/{link_index}", "BEHAVIOR_TEST_SOURCE_FORBIDDEN", "Test inventory paths cannot originate managed behavior."),)
+                if source_id not in product_by_id:
+                    return (_diag(f"{pointer}/source_ids/{link_index}", "BEHAVIOR_PRODUCT_SOURCE_LINK", "Linked product sources must be present in product_sources."),)
+    if actual_requirement_ids != requirement_ids:
+        code = "BEHAVIOR_REQUIREMENT_SOURCE_COVERAGE" if set(actual_requirement_ids) != set(requirement_ids) or len(actual_requirement_ids) != len(requirement_ids) else "BEHAVIOR_REQUIREMENT_SOURCE_ORDER"
+        return (_diag("/artifacts/managed_behavior_context/requirement_sources", code, "Requirement source rows must equal requirements in canonical order."),)
+    return ()
+
+
 def _context_requirements(path: Path) -> Sequence[Mapping[str, Any]]:
     try:
         context = load_json_strict(path)
@@ -564,9 +649,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     select.add_argument("--review", required=True)
     select.add_argument("--context", required=True)
     select.add_argument("--output")
+    validate_context = commands.add_parser("validate-context")
+    validate_context.add_argument("--project", required=True)
+    validate_context.add_argument("--inventory", required=True)
+    validate_context.add_argument("--context", required=True)
     try:
         args = parser.parse_args(argv)
-        output = Path(args.output) if args.output else None
+        output = Path(args.output) if hasattr(args, "output") and args.output else None
         if output is not None and output.exists():
             raise _error("INVENTORY_OUTPUT_EXISTS" if args.command == "inventory" else "CLASSIFICATION_OUTPUT_EXISTS", "/output", "Output path already exists.")
         if args.command == "inventory":
@@ -580,6 +669,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             except (OSError, StrictJsonError) as error:
                 raise _error("CLASSIFICATION_INPUT", "/input", "Classification input artifact could not be read as strict JSON.") from error
             result = select_effective_technical_evidence(input_inventory, input_classification, input_review, _context_requirements(Path(args.context)), Path(args.project))
+        elif args.command == "validate-context":
+            try:
+                input_inventory = load_json_strict(Path(args.inventory))
+            except (OSError, StrictJsonError) as error:
+                raise _error("BEHAVIOR_CONTEXT", "/inventory", "Source inventory artifact could not be read as strict JSON.") from error
+            try:
+                context = load_json_strict(Path(args.context))
+            except (OSError, StrictJsonError) as error:
+                raise _error("BEHAVIOR_CONTEXT", "/context", "Context artifact could not be read as strict JSON.") from error
+            shape = _stage_shape(context, "context-marker-output.schema.json", "BEHAVIOR_CONTEXT")
+            if shape:
+                raise TestClassificationError(shape)
+            artifacts = input_inventory.get("artifacts") if isinstance(input_inventory, Mapping) else None
+            if not isinstance(artifacts, Mapping):
+                raise _error("BEHAVIOR_CONTEXT", "/inventory", "Inventory must provide authorized behavior sources.")
+            diagnostics = validate_managed_behavior_context(context["artifacts"]["managed_behavior_context"], artifacts["authorized_behavior_sources"], artifacts["technical_test_inventory"], Path(args.project))
+            if diagnostics:
+                raise TestClassificationError(diagnostics)
+            result = {"status": "valid", "diagnostics": []}
         else:  # argparse constrains this branch; retain a safe diagnostic for direct callers.
             raise _error("INVENTORY_ARGUMENT", "/command", "Unknown command.")
         payload = json.dumps(_plain(result), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
