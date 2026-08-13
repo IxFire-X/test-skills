@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/canonical-test-document.schema.json",
+  "title": "Canonical Test Document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document_id", "revision", "parent_sha256", "metadata", "operation_capabilities", "requirements", "test_cases"],
+  "properties": {
+    "document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$", "maxLength": 102},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+    "parent_sha256": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "operation_capabilities": {"type": "array", "items": {"$ref": "#/$defs/capability"}},
+    "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/requirement"}},
+    "test_cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/test_case"}}
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+    "id_suffix": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]+$"},
+    "json_value": {},
+    "custom_field_scalar": {"oneOf": [{"$ref": "#/$defs/nonempty"}, {"type": "number"}, {"type": "boolean"}]},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "rfc6901": {"type": "string", "pattern": "^(?:|/(?:[^~/]|~[01])*)*$"},
+    "type_descriptor": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "type"], "properties": {"kind": {"const": "json"}, "type": {"enum": ["null", "boolean", "integer", "number", "string", "array", "object"]}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "representation"], "properties": {"kind": {"const": "named"}, "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}, "representation": {"enum": ["null", "boolean", "integer", "number", "string", "array", "object"]}}}
+      ]
+    },
+    "metadata": {
+      "type": "object", "additionalProperties": false, "required": ["subject", "documentation", "project", "author", "date"],
+      "properties": {"subject": {"$ref": "#/$defs/subject"}, "documentation": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "project": {"$ref": "#/$defs/nonempty"}, "author": {"$ref": "#/$defs/nonempty"}, "date": {"type": "string", "format": "date"}}
+    },
+    "subject": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "method", "path"], "properties": {"kind": {"const": "http_endpoint"}, "method": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*$"}, "path": {"type": "string", "pattern": "^/"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"const": "generic"}, "name": {"$ref": "#/$defs/nonempty"}}}
+      ]
+    },
+    "capability_member": {
+      "type": "object", "additionalProperties": false, "required": ["name", "semantic_type"],
+      "properties": {"name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}}
+    },
+    "capability_argument": {
+      "type": "object", "additionalProperties": false, "required": ["name", "semantic_type", "required"],
+      "properties": {"name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "required": {"type": "boolean"}}
+    },
+    "capability": {
+      "type": "object", "additionalProperties": false, "required": ["capability_id", "adapter", "action", "arguments", "results", "provenance"],
+      "properties": {"capability_id": {"type": "string", "pattern": "^CAP-[A-Za-z0-9_.:-]+$"}, "adapter": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.:-]*$"}, "action": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.:-]*$"}, "arguments": {"type": "array", "items": {"$ref": "#/$defs/capability_argument"}}, "results": {"type": "array", "items": {"$ref": "#/$defs/capability_member"}}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}
+    },
+    "requirement": {
+      "type": "object", "additionalProperties": false, "required": ["requirement_id", "display_order", "text", "provenance"],
+      "properties": {"requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "text": {"$ref": "#/$defs/nonempty"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}
+    },
+    "management": {
+      "type": "object", "additionalProperties": false, "required": ["status", "folder", "components", "labels", "owner", "estimated_time", "external_keys", "external_links", "custom_fields"],
+      "properties": {
+        "status": {"type": ["string", "null"]}, "folder": {"type": ["string", "null"]}, "components": {"type": "array", "items": {"type": "string"}}, "labels": {"type": "array", "items": {"type": "string"}}, "owner": {"type": ["string", "null"]}, "estimated_time": {"type": ["string", "null"]},
+        "external_keys": {"type": "object", "additionalProperties": false, "properties": {"zephyr_scale": {"type": "string"}}},
+        "external_links": {"type": "object", "additionalProperties": false, "required": ["issues", "pages"], "properties": {"issues": {"type": "array", "items": {"type": "string"}}, "pages": {"type": "array", "items": {"type": "string"}}}},
+        "custom_fields": {"type": "object", "additionalProperties": {"oneOf": [{"$ref": "#/$defs/custom_field_scalar"}, {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/custom_field_scalar"}}]}}
+      }
+    },
+    "operation": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "binding_profile", "base_url_source", "method", "path"], "properties": {"kind": {"const": "http"}, "binding_profile": {"const": "http-binding-v1"}, "base_url_source": {"$ref": "#/$defs/base_url_source"}, "method": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*$"}, "path": {"type": "string", "pattern": "^/"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "capability_id"], "properties": {"kind": {"const": "project_action"}, "capability_id": {"type": "string", "pattern": "^CAP-[A-Za-z0-9_.:-]+$"}}}
+      ]
+    },
+    "base_url_source": {"type": "object", "additionalProperties": false, "required": ["kind", "name", "provenance"], "properties": {"kind": {"const": "environment"}, "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
+    "input_target": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["location", "name", "sensitive"], "properties": {"location": {"enum": ["path", "query", "header"]}, "name": {"$ref": "#/$defs/nonempty"}, "sensitive": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["location", "pointer", "sensitive"], "properties": {"location": {"const": "body"}, "pointer": {"$ref": "#/$defs/rfc6901"}, "sensitive": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["location", "name", "sensitive"], "properties": {"location": {"const": "arg"}, "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}, "sensitive": {"type": "boolean"}}}
+      ]
+    },
+    "value_source": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "literal"}, "value": {"$ref": "#/$defs/json_value"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "step_id", "output_id"], "properties": {"kind": {"const": "step_output"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"enum": ["fixture", "environment"]}, "name": {"$ref": "#/$defs/nonempty"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "handle", "safe_label"], "properties": {"kind": {"const": "secret_handle"}, "handle": {"$ref": "#/$defs/nonempty"}, "safe_label": {"$ref": "#/$defs/nonempty"}}}
+      ]
+    },
+    "input": {
+      "type": "object", "additionalProperties": false, "required": ["input_id", "display_order", "target", "source", "semantic_type"],
+      "properties": {"input_id": {"type": "string", "pattern": "^INPUT-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "target": {"$ref": "#/$defs/input_target"}, "source": {"$ref": "#/$defs/value_source"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}},
+      "allOf": [
+        {"if": {"properties": {"source": {"properties": {"kind": {"enum": ["fixture", "environment", "secret_handle"]}}, "required": ["kind"]}}, "required": ["source"]}, "then": {"required": ["type_provenance"]}, "else": {"not": {"required": ["type_provenance"]}}},
+        {"if": {"properties": {"source": {"properties": {"kind": {"const": "secret_handle"}}, "required": ["kind"]}}, "required": ["source"]}, "then": {"properties": {"target": {"properties": {"sensitive": {"const": true}}}}}, "else": {"properties": {"target": {"properties": {"sensitive": {"const": false}}}}}}
+      ]
+    },
+    "output_source": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "http_status"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"enum": ["http_header", "project_result"]}, "name": {"$ref": "#/$defs/nonempty"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "pointer"], "properties": {"kind": {"const": "http_body"}, "pointer": {"$ref": "#/$defs/rfc6901"}}}
+      ]
+    },
+    "output": {
+      "type": "object", "additionalProperties": false, "required": ["output_id", "display_order", "source", "semantic_type"],
+      "properties": {"output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}, "display_order": {"type": "integer", "minimum": 1}, "source": {"$ref": "#/$defs/output_source"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}},
+      "allOf": [{"if": {"properties": {"source": {"properties": {"kind": {"const": "http_body"}}, "required": ["kind"]}}, "required": ["source"]}, "then": {"required": ["type_provenance"]}, "else": {"not": {"required": ["type_provenance"]}}}]
+    },
+    "assertion_actual": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "http_status"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": {"kind": {"enum": ["http_header", "project_result"]}, "name": {"$ref": "#/$defs/nonempty"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "pointer", "semantic_type", "type_provenance"], "properties": {"kind": {"const": "http_body"}, "pointer": {"$ref": "#/$defs/rfc6901"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "step_id", "output_id"], "properties": {"kind": {"const": "step_output"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}}
+      ]
+    },
+    "assertion_expected": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "literal"}, "value": {"$ref": "#/$defs/json_value"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "step_id", "output_id"], "properties": {"kind": {"const": "step_output"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "output_id": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "semantic_type", "type_provenance"], "properties": {"kind": {"enum": ["fixture", "environment"]}, "name": {"$ref": "#/$defs/nonempty"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "handle", "safe_label", "semantic_type", "type_provenance"], "properties": {"kind": {"const": "secret_handle"}, "handle": {"$ref": "#/$defs/nonempty"}, "safe_label": {"$ref": "#/$defs/nonempty"}, "semantic_type": {"$ref": "#/$defs/type_descriptor"}, "type_provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "dialect", "pattern"], "properties": {"kind": {"const": "regex"}, "dialect": {"const": "portable-regex-v1"}, "pattern": {"$ref": "#/$defs/nonempty"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "uri", "sha256", "draft", "provenance"], "properties": {"kind": {"const": "schema_ref"}, "uri": {"$ref": "#/$defs/nonempty"}, "sha256": {"$ref": "#/$defs/digest"}, "draft": {"const": "2020-12"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}}
+      ]
+    },
+    "assertion": {
+      "type": "object", "additionalProperties": false, "required": ["assertion_id", "display_order", "actual", "operator"],
+      "properties": {"assertion_id": {"type": "string", "pattern": "^ASSERT-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "actual": {"$ref": "#/$defs/assertion_actual"}, "operator": {"enum": ["equals", "not_equals", "exists", "not_exists", "contains", "matches", "greater_than", "greater_or_equal", "less_than", "less_or_equal", "length_equals", "schema_matches"]}, "expected": {"$ref": "#/$defs/assertion_expected"}},
+      "allOf": [{"if": {"properties": {"operator": {"enum": ["exists", "not_exists"]}}, "required": ["operator"]}, "then": {"not": {"required": ["expected"]}}, "else": {"required": ["expected"]}}]
+    },
+    "expectation": {"type": "object", "additionalProperties": false, "required": ["expectation_id", "display_order", "text", "assertions"], "properties": {"expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "text": {"$ref": "#/$defs/nonempty"}, "assertions": {"type": "array", "items": {"$ref": "#/$defs/assertion"}}}},
+    "blocker": {
+      "type": "object", "additionalProperties": false, "required": ["blocker_id", "code", "field_path", "reason", "provenance"],
+      "properties": {"blocker_id": {"type": "string", "pattern": "^BLOCK-[A-Za-z0-9_.:-]+$"}, "code": {"enum": ["UNRESOLVED_OPERATION", "UNSUPPORTED_AUTOMATION_CAPABILITY", "UNRESOLVED_INPUT_BINDING", "UNRESOLVED_OUTPUT_BINDING", "UNRESOLVED_ASSERTION", "UNCONFIRMED_TYPE", "UNSUPPORTED_ASSERTION_DIALECT"]}, "field_path": {"type": "string", "pattern": "^/(?:operation|inputs|outputs|expectations/(?:0|[1-9][0-9]*)/assertions)$"}, "reason": {"$ref": "#/$defs/nonempty"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}
+    },
+    "step": {
+      "type": "object", "additionalProperties": false, "required": ["step_id", "display_order", "action", "manual_only", "manual_reason", "automation_blockers", "operation", "inputs", "outputs", "expectations"],
+      "properties": {"step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "action": {"$ref": "#/$defs/nonempty"}, "manual_only": {"type": "boolean"}, "manual_reason": {"type": ["string", "null"]}, "automation_blockers": {"type": "array", "items": {"$ref": "#/$defs/blocker"}}, "operation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/operation"}]}, "inputs": {"type": "array", "items": {"$ref": "#/$defs/input"}}, "outputs": {"type": "array", "items": {"$ref": "#/$defs/output"}}, "expectations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/expectation"}}},
+      "allOf": [
+        {"if": {"properties": {"manual_only": {"const": true}}, "required": ["manual_only"]}, "then": {"properties": {"manual_reason": {"$ref": "#/$defs/nonempty"}, "automation_blockers": {"maxItems": 0}, "expectations": {"items": {"properties": {"assertions": {"maxItems": 0}}}}}}},
+        {"if": {"properties": {"manual_only": {"const": false}, "automation_blockers": {"maxItems": 0}}, "required": ["manual_only", "automation_blockers"]}, "then": {"properties": {"manual_reason": {"const": null}, "operation": {"not": {"type": "null"}}, "expectations": {"items": {"properties": {"assertions": {"minItems": 1}}}}}}}
+      ]
+    },
+    "test_case": {
+      "type": "object", "additionalProperties": false, "required": ["case_id", "display_order", "requirement_ids", "title", "objective", "categories", "priority", "preconditions", "management", "steps"],
+      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}}, "title": {"$ref": "#/$defs/nonempty"}, "objective": {"$ref": "#/$defs/nonempty"}, "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]}}, "priority": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]}, "preconditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "management": {"$ref": "#/$defs/management"}, "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}}
+    }
+  }
+}

@@ -2,408 +2,72 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/tc-reviewer-output.schema.json",
   "type": "object",
-  "required": [
-    "schema_version",
-    "stage",
-    "artifacts",
-    "warnings"
-  ],
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {
-      "const": "2.1.0"
-    },
-    "stage": {
-      "const": "tc-reviewer"
-    },
-    "warnings": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
+    "schema_version": {"const": "3.0.0"},
+    "stage": {"const": "tc-reviewer"},
     "artifacts": {
       "type": "object",
-      "required": [
-        "validation_report",
-        "corrected_test_cases"
-      ],
+      "required": ["validation_report"],
       "additionalProperties": false,
       "properties": {
-        "validation_report": {
-          "$ref": "#/$defs/review"
-        },
-        "corrected_test_cases": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/test_case"
-          }
-        }
+        "validation_report": {"$ref": "#/$defs/review"},
+        "successor_document": {"$ref": "schemas/canonical-test-document.schema.json"}
       }
-    }
+    },
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
   "allOf": [
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "validation_report": {
-                "properties": {
-                  "verdict": {
-                    "const": "ПРИНЯТО"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "corrected_test_cases": {
-                "maxItems": 0
-              },
-              "validation_report": {
-                "properties": {
-                  "findings": {
-                    "maxItems": 0
-                  },
-                  "corrections": {
-                    "maxItems": 0
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ПРИНЯТО"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
+      "then": {"properties": {"artifacts": {"not": {"required": ["successor_document"]}, "properties": {"validation_report": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
     },
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "validation_report": {
-                "properties": {
-                  "verdict": {
-                    "const": "AUTO_FIX_APPLIED"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "corrected_test_cases": {
-                "minItems": 1
-              },
-              "validation_report": {
-                "properties": {
-                  "corrections": {
-                    "minItems": 1
-                  },
-                  "findings": {
-                    "not": {
-                      "contains": {
-                        "properties": {
-                          "severity": {
-                            "const": "BLOCKING"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
+      "then": {"properties": {"artifacts": {"required": ["successor_document"], "properties": {"validation_report": {"properties": {"corrections": {"minItems": 1}, "findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}}}}}}}}
     },
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "validation_report": {
-                "properties": {
-                  "verdict": {
-                    "const": "ТРЕБУЕТ ДОРАБОТКИ"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "corrected_test_cases": {
-                "maxItems": 0
-              },
-              "validation_report": {
-                "properties": {
-                  "findings": {
-                    "contains": {
-                      "properties": {
-                        "severity": {
-                          "const": "BLOCKING"
-                        }
-                      }
-                    }
-                  },
-                  "corrections": {
-                    "maxItems": 0
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ТРЕБУЕТ ДОРАБОТКИ"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
+      "then": {"properties": {"artifacts": {"not": {"required": ["successor_document"]}, "properties": {"validation_report": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}, "corrections": {"maxItems": 0}}}}}}}
     }
   ],
   "$defs": {
     "finding": {
-      "type": "object",
-      "required": [
-        "severity",
-        "code",
-        "message",
-        "evidence",
-        "related_ids"
-      ],
-      "additionalProperties": false,
+      "type": "object", "required": ["severity", "code", "message", "evidence", "related_ids"], "additionalProperties": false,
       "properties": {
-        "severity": {
-          "enum": [
-            "BLOCKING",
-            "WARNING",
-            "INFO"
-          ]
-        },
-        "code": {
-          "type": "string",
-          "minLength": 1
-        },
-        "message": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidence": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "related_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
+        "severity": {"enum": ["BLOCKING", "WARNING", "INFO"]},
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "related_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     },
     "correction": {
-      "type": "object",
-      "required": [
-        "id",
-        "related_ids",
-        "description",
-        "evidence"
-      ],
-      "additionalProperties": false,
+      "type": "object", "required": ["id", "related_ids", "description", "evidence"], "additionalProperties": false,
       "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^FIX-[A-Za-z0-9_.:-]+$"
-        },
-        "related_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "description": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidence": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
+        "id": {"type": "string", "pattern": "^FIX-[A-Za-z0-9_.:-]+$"},
+        "related_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "description": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "candidate": {
+      "type": "object", "required": ["document_id", "revision", "document_sha256"], "additionalProperties": false,
+      "properties": {
+        "document_id": {"type": "string", "pattern": "^TCDOC-[A-Za-z0-9_.:-]+$"},
+        "revision": {"type": "integer", "minimum": 1},
+        "document_sha256": {"$ref": "schemas/canonical-test-document.schema.json#/$defs/digest"}
       }
     },
     "review": {
-      "type": "object",
-      "required": [
-        "verdict",
-        "reviewed_test_case_ids",
-        "findings",
-        "corrections"
-      ],
-      "additionalProperties": false,
+      "type": "object", "required": ["verdict", "candidate", "reviewed_case_ids", "findings", "corrections"], "additionalProperties": false,
       "properties": {
-        "verdict": {
-          "enum": [
-            "ПРИНЯТО",
-            "AUTO_FIX_APPLIED",
-            "ТРЕБУЕТ ДОРАБОТКИ"
-          ]
-        },
-        "reviewed_test_case_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^TC-[A-Za-z0-9_.:-]+$"
-          }
-        },
-        "findings": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/finding"
-          }
-        },
-        "corrections": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/correction"
-          }
-        }
-      }
-    },
-    "test_case": {
-      "type": "object",
-      "required": [
-        "id",
-        "requirement_ids",
-        "title",
-        "categories",
-        "priority",
-        "preconditions",
-        "test_data",
-        "steps",
-        "expected_outcome"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^TC-[A-Za-z0-9_.:-]+$"
-        },
-        "requirement_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^REQ-[A-Za-z0-9_.:-]+$"
-          }
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "categories": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "enum": [
-              "positive",
-              "negative",
-              "boundary",
-              "authorization",
-              "security",
-              "concurrency",
-              "idempotency",
-              "observability",
-              "functional"
-            ]
-          }
-        },
-        "priority": {
-          "enum": [
-            "BLOCKER",
-            "CRITICAL",
-            "HIGH",
-            "MEDIUM",
-            "LOW"
-          ]
-        },
-        "preconditions": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "test_data": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "steps": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "order",
-              "action",
-              "expected_result"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "order": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "action": {
-                "type": "string",
-                "minLength": 1
-              },
-              "expected_result": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          }
-        },
-        "expected_outcome": {
-          "type": "string",
-          "minLength": 1
-        }
+        "verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]},
+        "candidate": {"$ref": "#/$defs/candidate"},
+        "reviewed_case_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}},
+        "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "corrections": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/correction"}}
       }
     }
   }

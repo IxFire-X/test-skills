@@ -1,0 +1,91 @@
+{
+  "document_id": "TCDOC-project-action-example",
+  "revision": 1,
+  "parent_sha256": null,
+  "metadata": {
+    "subject": {"kind": "generic", "name": "Confirmed project action"},
+    "documentation": ["https://example.invalid/project-action"],
+    "project": "EXAMPLE",
+    "author": "TEST_AUTHOR",
+    "date": "2026-08-12"
+  },
+  "operation_capabilities": [
+    {
+      "capability_id": "CAP-widget-read",
+      "adapter": "example.adapter",
+      "action": "read_widget",
+      "arguments": [],
+      "results": [
+        {"name": "widget_state", "semantic_type": {"kind": "json", "type": "string"}}
+      ],
+      "provenance": ["https://example.invalid/project-action#read-widget"]
+    }
+  ],
+  "requirements": [
+    {
+      "requirement_id": "REQ-project-action-example",
+      "display_order": 1,
+      "text": "Адаптер может прочитать состояние виджета.",
+      "provenance": ["https://example.invalid/project-action#requirement"]
+    }
+  ],
+  "test_cases": [
+    {
+      "case_id": "TC-project-action-example",
+      "display_order": 1,
+      "requirement_ids": ["REQ-project-action-example"],
+      "title": "Чтение состояния виджета через подтверждённый адаптер",
+      "objective": "Проверить результат project_action.",
+      "categories": ["functional"],
+      "priority": "MEDIUM",
+      "preconditions": [],
+      "management": {
+        "status": null,
+        "folder": null,
+        "components": [],
+        "labels": [],
+        "owner": null,
+        "estimated_time": null,
+        "external_keys": {},
+        "external_links": {"issues": [], "pages": []},
+        "custom_fields": {}
+      },
+      "steps": [
+        {
+          "step_id": "STEP-read-widget",
+          "display_order": 1,
+          "action": "Прочитать состояние виджета через project action.",
+          "manual_only": false,
+          "manual_reason": null,
+          "automation_blockers": [],
+          "operation": {"kind": "project_action", "capability_id": "CAP-widget-read"},
+          "inputs": [],
+          "outputs": [
+            {
+              "output_id": "widget_state",
+              "display_order": 1,
+              "source": {"kind": "project_result", "name": "widget_state"},
+              "semantic_type": {"kind": "json", "type": "string"}
+            }
+          ],
+          "expectations": [
+            {
+              "expectation_id": "EXP-widget-state",
+              "display_order": 1,
+              "text": "Адаптер возвращает готовое состояние виджета.",
+              "assertions": [
+                {
+                  "assertion_id": "ASSERT-widget-state",
+                  "display_order": 1,
+                  "actual": {"kind": "project_result", "name": "widget_state"},
+                  "operator": "equals",
+                  "expected": {"kind": "literal", "value": "ready"}
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

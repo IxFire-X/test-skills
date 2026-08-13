@@ -1,77 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/trace-document.schema.json",
-  "type": "object",
-  "required": [
-    "schema_version",
-    "requirements",
-    "test_cases",
-    "generated_files",
-    "methods",
-    "trace_map",
-    "execution_required",
-    "final_verdict"
-  ],
-  "additionalProperties": false,
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "stage", "source", "automation_status", "requirements", "test_cases", "steps", "expectations", "assertions", "files", "symbols", "implementation_relations", "manual_dispositions", "automation_diagnostics", "execution", "final_verdict"],
   "properties": {
-    "schema_version": {"const": "2.1.0"},
-    "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/requirement"}},
-    "test_cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/test_case"}},
-    "generated_files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/generated_file"}},
-    "methods": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/method"}},
-    "trace_map": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mapping"}},
-    "execution_required": {"type": "boolean"},
-    "execution": {"$ref": "#/$defs/execution"},
-    "final_verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}
+    "schema_version": {"const": "3.0.0"}, "stage": {"const": "trace"}, "source": {"$ref": "#/$defs/source"},
+    "automation_status": {"enum": ["GENERATED", "BLOCKED"]},
+    "requirements": {"type": "array", "items": {"$ref": "#/$defs/requirement"}}, "test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
+    "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}}, "expectations": {"type": "array", "items": {"$ref": "#/$defs/expectation"}},
+    "assertions": {"type": "array", "items": {"$ref": "#/$defs/assertion"}}, "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "symbols": {"type": "array", "items": {"$ref": "#/$defs/symbol"}}, "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
+    "manual_dispositions": {"type": "array", "items": {"$ref": "#/$defs/manual"}}, "automation_diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}},
+    "execution": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/execution"}]}, "final_verdict": {"enum": ["PASS", "PASS_WITH_MANUAL_REMAINDER", "MANUAL_ONLY", "BLOCKED", "FAIL", "NOT_RUNNABLE"]}
   },
   "$defs": {
-    "nonempty": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
-    "requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"},
-    "test_case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"},
-    "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
-    "method_id": {"type": "string", "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"},
-    "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"},
-    "portable_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*//)(?!.*(?:^|/)\\.(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\/$)(?!.*[\\x00-\\x1F\\x7F-\\x9F<>:\u0022|?*\\\\]).+$"},
-    "requirement": {
-      "type": "object", "required": ["id", "provenance"], "additionalProperties": false,
-      "properties": {"id": {"$ref": "#/$defs/requirement_id"}, "provenance": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/nonempty"}}}
-    },
-    "test_case": {
-      "type": "object", "required": ["id", "requirement_ids"], "additionalProperties": false,
-      "properties": {"id": {"$ref": "#/$defs/test_case_id"}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/requirement_id"}}}
-    },
-    "generated_file": {
-      "type": "object", "required": ["id", "path"], "additionalProperties": false,
-      "properties": {"id": {"$ref": "#/$defs/file_id"}, "path": {"$ref": "#/$defs/portable_path"}}
-    },
-    "method": {
-      "type": "object", "required": ["id", "file_id", "name", "test_case_ids", "requirement_ids"], "additionalProperties": false,
-      "properties": {
-        "id": {"$ref": "#/$defs/method_id"}, "file_id": {"$ref": "#/$defs/file_id"}, "name": {"$ref": "#/$defs/nonempty"},
-        "test_case_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/test_case_id"}},
-        "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/requirement_id"}}
-      }
-    },
-    "mapping": {
-      "type": "object", "required": ["requirement_id", "test_case_id", "file_id", "method_id"], "additionalProperties": false,
-      "properties": {"requirement_id": {"$ref": "#/$defs/requirement_id"}, "test_case_id": {"$ref": "#/$defs/test_case_id"}, "file_id": {"$ref": "#/$defs/file_id"}, "method_id": {"$ref": "#/$defs/method_id"}}
-    },
-    "evidence": {
-      "type": "object", "required": ["run_id", "method_id", "status"], "additionalProperties": false,
-      "properties": {"run_id": {"$ref": "#/$defs/run_id"}, "method_id": {"$ref": "#/$defs/method_id"}, "status": {"enum": ["passed", "failed", "error", "skipped"]}}
-    },
-    "allowed_skip": {
-      "type": "object", "required": ["method_id", "reason", "policy_ref"], "additionalProperties": false,
-      "properties": {"method_id": {"$ref": "#/$defs/method_id"}, "reason": {"$ref": "#/$defs/nonempty"}, "policy_ref": {"$ref": "#/$defs/nonempty"}}
-    },
-    "execution": {
-      "type": "object", "required": ["verdict", "reason", "evidence", "allowed_skips"], "additionalProperties": false,
-      "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "reason": {"$ref": "#/$defs/nonempty"}, "command": {"$ref": "#/$defs/nonempty"}, "runner": {"$ref": "#/$defs/nonempty"}, "exit_code": {"type": "integer"}, "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}, "allowed_skips": {"type": "array", "items": {"$ref": "#/$defs/allowed_skip"}}},
-      "allOf": [
-        {"if": {"properties": {"verdict": {"const": "PASS"}}}, "then": {"required": ["command", "runner", "exit_code"], "properties": {"exit_code": {"const": 0}}}},
-        {"if": {"properties": {"verdict": {"const": "FAIL"}}}, "then": {"required": ["command", "runner", "exit_code"], "properties": {"exit_code": {"not": {"const": 0}}}}},
-        {"if": {"properties": {"verdict": {"const": "NOT_RUNNABLE"}}}, "then": {"not": {"anyOf": [{"required": ["command"]}, {"required": ["runner"]}, {"required": ["exit_code"]}]}, "properties": {"evidence": {"maxItems": 0}, "allowed_skips": {"maxItems": 0}}}}
-      ]
-    }
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "id": {"type": "string", "minLength": 1},
+    "source": {"type": "object", "additionalProperties": false, "required": ["document_id", "revision", "source_digest"], "properties": {"document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$"}, "revision": {"type": "integer", "minimum": 1}, "source_digest": {"$ref": "#/$defs/digest"}}},
+    "requirement": {"type": "object", "additionalProperties": false, "required": ["requirement_id", "display_order"], "properties": {"requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}}},
+    "test_case": {"type": "object", "additionalProperties": false, "required": ["case_id", "display_order", "requirement_ids"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}}}},
+    "step": {"type": "object", "additionalProperties": false, "required": ["case_id", "step_id", "display_order", "manual_only", "blocker_ids"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "manual_only": {"type": "boolean"}, "blocker_ids": {"type": "array", "items": {"type": "string", "pattern": "^BLOCK-[A-Za-z0-9_.:-]+$"}}}},
+    "expectation": {"type": "object", "additionalProperties": false, "required": ["case_id", "step_id", "expectation_id", "display_order"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}}},
+    "assertion": {"type": "object", "additionalProperties": false, "required": ["case_id", "step_id", "expectation_id", "assertion_id", "display_order"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"}, "assertion_id": {"type": "string", "pattern": "^ASSERT-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}}},
+    "file": {"type": "object", "additionalProperties": false, "required": ["file_id", "path", "language", "framework", "file_digest"], "properties": {"file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "path": {"type": "string", "minLength": 1}, "language": {"enum": ["python", "java"]}, "framework": {"type": "string", "minLength": 1}, "file_digest": {"$ref": "#/$defs/digest"}}},
+    "locator": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["kind", "function_name"], "properties": {"kind": {"const": "python_module_function"}, "function_name": {"type": "string", "minLength": 1}}}, {"type": "object", "additionalProperties": false, "required": ["kind", "qualified_class_name", "method_name"], "properties": {"kind": {"const": "python_class_method"}, "qualified_class_name": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}}, {"type": "object", "additionalProperties": false, "required": ["kind", "class_fqn", "method_name"], "properties": {"kind": {"const": "java_class_method"}, "class_fqn": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}}]},
+    "symbol": {"type": "object", "additionalProperties": false, "required": ["file_id", "symbol_id", "locator"], "properties": {"file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"}, "locator": {"$ref": "#/$defs/locator"}}},
+    "operation_relation": {"type": "object", "additionalProperties": false, "required": ["kind", "case_id", "step_id", "file_id", "symbol_id"], "properties": {"kind": {"const": "operation"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"}}},
+    "assertion_relation": {"type": "object", "additionalProperties": false, "required": ["kind", "case_id", "step_id", "expectation_id", "assertion_id", "file_id", "symbol_id"], "properties": {"kind": {"const": "assertion"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"}, "assertion_id": {"type": "string", "pattern": "^ASSERT-[A-Za-z0-9_.:-]+$"}, "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"}}},
+    "manual": {"type": "object", "additionalProperties": false, "required": ["case_id", "step_id"], "properties": {"case_id": {"type": "string"}, "step_id": {"type": "string"}}}, "diagnostic": {"type": "object", "additionalProperties": false, "required": ["path", "code", "message"], "properties": {"path": {"type": "string"}, "code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}},
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["run_id", "source_digest", "file_id", "symbol_id", "file_digest", "status"], "properties": {"run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}, "source_digest": {"$ref": "#/$defs/digest"}, "file_id": {"type": "string"}, "symbol_id": {"type": "string"}, "file_digest": {"$ref": "#/$defs/digest"}, "status": {"enum": ["PASSED", "FAILED", "ERROR", "SKIPPED"]}}},
+    "execution": {"type": "object", "additionalProperties": false, "required": ["verdict", "run_id", "evidence_authoritative", "evidence"], "properties": {"verdict": {"enum": ["PASS", "FAIL", "NOT_RUNNABLE"]}, "run_id": {"type": ["string", "null"], "pattern": "^RUN-[A-Za-z0-9_.:-]+$"}, "evidence_authoritative": {"type": "boolean"}, "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}}, "allOf": [{"if": {"properties": {"run_id": {"type": "null"}}, "required": ["run_id"]}, "then": {"properties": {"verdict": {"const": "NOT_RUNNABLE"}, "evidence_authoritative": {"const": false}, "evidence": {"maxItems": 0}}}}, {"if": {"properties": {"verdict": {"const": "PASS"}}, "required": ["verdict"]}, "then": {"properties": {"run_id": {"type": "string"}, "evidence_authoritative": {"const": true}, "evidence": {"minItems": 1}}}}]}
   }
 }

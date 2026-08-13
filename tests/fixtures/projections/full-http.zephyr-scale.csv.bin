@@ -1,0 +1,8 @@
+﻿Key,Name,Status,Precondition,Objective,Folder,Priority,Component,Labels,Owner,Estimated Time,Coverage (Issues),Coverage (Pages),АС,Автоматизирован,Вид тестирования,Команда,Приоритет теста,Статус,Test Script (Step-by-Step) - Step,Test Script (Step-by-Step) - Test Data,Test Script (Step-by-Step) - Expected Result,Test Script (Plain Text),Test Script (BDD)
+ZEP-42,Получение существующего заказа,Open,"Первое условие.
+Второе условие.",Проверить код ответа при получении заказа.,Orders,High,"orders, api","http, smoke",owner,5m,"ISS-1, ISS-2","page-1, page-2",АС-1,true,"API, Regression",7,1.5,Ready,Отправить GET /orders/{order_id} для существующего заказа.,"path:order_id = ""order-1""",Сервис возвращает HTTP 200.,,
+,,,,,,,,,,,,,,,,,,,Собрать зависимые данные.,"path:payload = {""a"":""значение"",""z"":1}
+query:prior_status = status_code, полученный на шаге 1
+header:X-Fixture = fixture:fixture-name
+body:/token = env:TOKEN
+arg:secret = secret:payment-token",Данные собраны.,,

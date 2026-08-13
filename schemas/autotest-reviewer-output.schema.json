@@ -2,295 +2,81 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/autotest-reviewer-output.schema.json",
   "type": "object",
-  "required": [
-    "schema_version",
-    "stage",
-    "artifacts",
-    "warnings"
-  ],
   "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
   "properties": {
-    "schema_version": {
-      "const": "2.1.0"
-    },
-    "stage": {
-      "const": "autotest-reviewer"
-    },
-    "warnings": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
+    "schema_version": {"const": "3.0.0"},
+    "stage": {"const": "autotest-reviewer"},
     "artifacts": {
-      "type": "object",
-      "required": [
-        "autotest_review"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "autotest_review": {
-          "$ref": "#/$defs/review"
-        }
-      }
-    }
+      "type": "object", "additionalProperties": false,
+      "required": ["autotest_review"],
+      "properties": {"autotest_review": {"$ref": "#/$defs/review"}}
+    },
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
   "allOf": [
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "verdict": {
-                    "const": "ПРИНЯТО"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "findings": {
-                    "maxItems": 0
-                  },
-                  "corrections": {
-                    "maxItems": 0
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}},
+      "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
     },
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "verdict": {
-                    "const": "AUTO_FIX_APPLIED"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "corrections": {
-                    "minItems": 1
-                  },
-                  "findings": {
-                    "not": {
-                      "contains": {
-                        "properties": {
-                          "severity": {
-                            "const": "BLOCKING"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}},
+      "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"corrections": {"minItems": 1}, "findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}}}}}}}}}}
     },
     {
-      "if": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "verdict": {
-                    "const": "ТРЕБУЕТ ДОРАБОТКИ"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "artifacts": {
-            "properties": {
-              "autotest_review": {
-                "properties": {
-                  "findings": {
-                    "contains": {
-                      "properties": {
-                        "severity": {
-                          "const": "BLOCKING"
-                        }
-                      }
-                    }
-                  },
-                  "corrections": {
-                    "maxItems": 0
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      "if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ТРЕБУЕТ ДОРАБОТКИ"}}}}}}},
+      "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}}}, "corrections": {"maxItems": 0}}}}}}}
     }
   ],
   "$defs": {
-    "finding": {
-      "type": "object",
-      "required": [
-        "severity",
-        "code",
-        "message",
-        "evidence",
-        "related_ids"
-      ],
-      "additionalProperties": false,
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_id", "revision", "source_digest"],
       "properties": {
-        "severity": {
-          "enum": [
-            "BLOCKING",
-            "WARNING",
-            "INFO"
-          ]
-        },
-        "code": {
-          "type": "string",
-          "minLength": 1
-        },
-        "message": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidence": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "related_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
+        "document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$", "maxLength": 102},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "source_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "symbol_pair": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file_id", "symbol_id"],
+      "properties": {
+        "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
+        "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"}
+      }
+    },
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["severity", "code", "message", "evidence", "related_ids"],
+      "properties": {
+        "severity": {"enum": ["BLOCKING", "WARNING", "INFO"]},
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "related_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     },
     "correction": {
-      "type": "object",
-      "required": [
-        "id",
-        "related_ids",
-        "description",
-        "evidence"
-      ],
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "related_ids", "description", "evidence"],
       "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^FIX-[A-Za-z0-9_.:-]+$"
-        },
-        "related_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "description": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidence": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
+        "id": {"type": "string", "pattern": "^FIX-[A-Za-z0-9_.:-]+$"},
+        "related_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "description": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     },
     "review": {
-      "type": "object",
-      "required": [
-        "verdict",
-        "reviewed_file_ids",
-        "reviewed_method_ids",
-        "findings",
-        "corrections"
-      ],
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "verdict", "reviewed_symbol_pairs", "findings", "corrections"],
       "properties": {
-        "verdict": {
-          "enum": [
-            "ПРИНЯТО",
-            "AUTO_FIX_APPLIED",
-            "ТРЕБУЕТ ДОРАБОТКИ"
-          ]
-        },
-        "reviewed_file_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
-          }
-        },
-        "reviewed_method_ids": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"
-          }
-        },
-        "findings": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/finding"
-          }
-        },
-        "corrections": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/correction"
-          }
-        }
+        "source": {"$ref": "#/$defs/source"},
+        "verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]},
+        "reviewed_symbol_pairs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/symbol_pair"}},
+        "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "corrections": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/correction"}}
       }
     }
   }

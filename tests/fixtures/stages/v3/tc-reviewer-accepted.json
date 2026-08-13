@@ -1,0 +1,14 @@
+{
+  "schema_version": "3.0.0",
+  "stage": "tc-reviewer",
+  "artifacts": {
+    "validation_report": {
+      "verdict": "ПРИНЯТО",
+      "candidate": {"document_id": "TCDOC-manual-example", "revision": 1, "document_sha256": "sha256:1df0b8e5ab9ddf9f8ecb0b6ec866e01b5aa94b738933f63cf69f77561f819fde"},
+      "reviewed_case_ids": ["TC-manual-example"],
+      "findings": [],
+      "corrections": []
+    }
+  },
+  "warnings": []
+}

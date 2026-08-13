@@ -1,71 +1,33 @@
 {
   "$schema": "schemas/pipeline.schema.json",
-  "version": "1.0",
+  "version": "2.0",
   "pipeline": "test-pipeline",
   "core_skills": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"],
-  "skill_files": {
-    "context-marker": "skills/context-marker/SKILL.md",
-    "tc-generator": "skills/tc-generator/SKILL.md",
-    "tc-reviewer": "skills/tc-reviewer/SKILL.md",
-    "tc-to-autotest": "skills/tc-to-autotest/SKILL.md",
-    "autotest-reviewer": "skills/autotest-reviewer/SKILL.md",
-    "orchestrate": "skills/orchestrate/SKILL.md"
-  },
+  "skill_files": {"context-marker": "skills/context-marker/SKILL.md", "tc-generator": "skills/tc-generator/SKILL.md", "tc-reviewer": "skills/tc-reviewer/SKILL.md", "tc-to-autotest": "skills/tc-to-autotest/SKILL.md", "autotest-reviewer": "skills/autotest-reviewer/SKILL.md", "orchestrate": "skills/orchestrate/SKILL.md"},
   "artifacts": [
-    {"id": "raw_content", "description": "Unstructured supplied requirements or code context."},
-    {"id": "analytics_documentation", "description": "Normalized requirements with provenance."},
-    {"id": "source_code_and_diff", "description": "Read-only project context and supplied changes."},
-    {"id": "generated_test_cases", "description": "Manual test cases derived from requirements."},
-    {"id": "validation_report", "description": "Review result for manual test cases."},
-    {"id": "corrected_test_cases", "description": "Safe corrected manual test cases."},
-    {"id": "automation_matrix", "description": "Mapping from accepted cases to generated tests."},
-    {"id": "generated_test_files", "description": "Project-native generated test source files."},
-    {"id": "generated_test_methods", "description": "Traceable generated test methods."},
-    {"id": "autotest_review", "description": "Review result for generated automated tests."},
-    {"id": "run_tests_verdict", "description": "Deterministic execution evidence."},
-    {"id": "execution_evidence", "description": "Execution evidence for every generated test method."},
-    {"id": "trace_audit", "description": "Requirement-to-execution traceability evidence."}
+    {"id":"raw_content","description":"Unstructured supplied requirements or code context."}, {"id":"analytics_documentation","description":"Normalized requirements with provenance."}, {"id":"source_code_and_diff","description":"Read-only project context and supplied changes."}, {"id":"candidate_document","description":"Candidate bare canonical test document."}, {"id":"candidate_bundle_receipt","description":"Immutable candidate JSON, Markdown, and CSV receipt."}, {"id":"validation_report","description":"Reviewed candidate validation report."}, {"id":"successor_document","description":"Optional full reviewed successor canonical document."}, {"id":"successor_bundle_receipt","description":"Optional immutable successor bundle receipt."}, {"id":"effective_document","description":"One selected bare canonical document."}, {"id":"effective_bundle_receipt","description":"One selected immutable bundle receipt."}, {"id":"automation_artifact","description":"Atomic generated automation relations."}, {"id":"autotest_review","description":"Automated-test review result."}, {"id":"run_result","description":"Optional V3 execution result."}, {"id":"trace_document","description":"Atomic trace document."}, {"id":"trace_audit","description":"Trace validation result."}, {"id":"orchestrator_output","description":"Closed final orchestration artifact."}
   ],
   "steps": [
-    {"id": "context-marker", "kind": "skill", "accepts": ["raw_content"], "forwards": [], "produces": ["analytics_documentation", "source_code_and_diff"], "rejects": []},
-    {"id": "tc-generator", "kind": "skill", "accepts": ["analytics_documentation", "source_code_and_diff"], "forwards": ["analytics_documentation", "source_code_and_diff"], "produces": ["generated_test_cases"], "rejects": []},
-    {"id": "tc-reviewer", "kind": "skill", "accepts": ["generated_test_cases"], "forwards": ["generated_test_cases", "validation_report", "corrected_test_cases"], "produces": ["validation_report", "corrected_test_cases"], "rejects": []},
-    {"id": "tc-to-autotest", "kind": "skill", "accepts": ["validation_report", "generated_test_cases", "corrected_test_cases"], "forwards": ["validation_report", "generated_test_cases", "corrected_test_cases", "generated_test_files", "generated_test_methods"], "produces": ["automation_matrix", "generated_test_files", "generated_test_methods"], "rejects": []},
-    {"id": "autotest-reviewer", "kind": "skill", "accepts": ["generated_test_cases", "corrected_test_cases", "automation_matrix", "generated_test_files", "generated_test_methods"], "forwards": ["generated_test_files", "generated_test_methods"], "produces": ["autotest_review"], "rejects": []},
-    {"id": "run-tests", "kind": "tool", "accepts": ["generated_test_files", "generated_test_methods"], "forwards": ["generated_test_methods", "execution_evidence"], "produces": ["run_tests_verdict", "execution_evidence"], "rejects": []},
-    {"id": "trace-check", "kind": "tool", "accepts": ["analytics_documentation", "generated_test_cases", "generated_test_files", "generated_test_methods", "execution_evidence", "run_tests_verdict"], "forwards": [], "produces": ["trace_audit"], "rejects": []}
+    {"id":"context-marker","kind":"skill","accepts":["raw_content"],"forwards":[],"produces":["analytics_documentation","source_code_and_diff"],"rejects":[]},
+    {"id":"tc-generator","kind":"skill","accepts":["analytics_documentation","source_code_and_diff"],"forwards":["analytics_documentation","source_code_and_diff"],"produces":["candidate_document"],"rejects":[]},
+    {"id":"publish-candidate","kind":"tool","accepts":["candidate_document"],"forwards":["candidate_document"],"produces":["candidate_bundle_receipt"],"rejects":[]},
+    {"id":"tc-reviewer","kind":"skill","accepts":["candidate_document"],"forwards":["candidate_document"],"produces":["validation_report","successor_document"],"rejects":[]},
+    {"id":"revision-orchestrator","kind":"tool","accepts":["candidate_document","candidate_bundle_receipt","validation_report","successor_document"],"forwards":["candidate_bundle_receipt","validation_report"],"produces":["successor_bundle_receipt","effective_document","effective_bundle_receipt"],"rejects":[]},
+    {"id":"tc-to-autotest","kind":"skill","accepts":["effective_document","effective_bundle_receipt"],"forwards":["effective_document","effective_bundle_receipt"],"produces":["automation_artifact"],"rejects":[]},
+    {"id":"autotest-reviewer","kind":"skill","accepts":["effective_document","automation_artifact"],"forwards":["effective_document","automation_artifact"],"produces":["autotest_review"],"rejects":[]},
+    {"id":"run-tests","kind":"tool","accepts":["effective_document","automation_artifact","autotest_review"],"forwards":["effective_document","automation_artifact","autotest_review"],"produces":["run_result"],"rejects":[]},
+    {"id":"build-trace","kind":"tool","accepts":["effective_document","automation_artifact","run_result"],"forwards":["effective_document","automation_artifact","run_result"],"produces":["trace_document"],"rejects":[]},
+    {"id":"trace-check","kind":"tool","accepts":["trace_document"],"forwards":["trace_document"],"produces":["trace_audit"],"rejects":[]},
+    {"id":"finalize-orchestration","kind":"tool","accepts":["effective_document","effective_bundle_receipt","automation_artifact","autotest_review","run_result","trace_document","trace_audit"],"forwards":[],"produces":["orchestrator_output"],"rejects":[]}
   ],
-  "verdicts": {
-    "review": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"],
-    "execution": ["PASS", "FAIL", "NOT_RUNNABLE"],
-    "trace": ["PASS", "FAIL"]
-  },
+  "verdicts": {"review":["ПРИНЯТО","AUTO_FIX_APPLIED","ТРЕБУЕТ ДОРАБОТКИ"],"execution":["PASS","FAIL","NOT_RUNNABLE"],"trace":["PASS","FAIL"]},
   "transitions": [
-    {"from": "tc-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
-    {"from": "tc-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
-    {"from": "tc-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
-    {"from": "autotest-reviewer", "when": {"review_verdict": "ПРИНЯТО"}, "transform": "continue_with_original"},
-    {"from": "autotest-reviewer", "when": {"review_verdict": "AUTO_FIX_APPLIED"}, "transform": "continue_with_corrected"},
-    {"from": "autotest-reviewer", "when": {"review_verdict": "ТРЕБУЕТ ДОРАБОТКИ"}, "transform": "stop_rework"},
-    {"from": "run-tests", "when": {"execution_verdict": "PASS"}, "transform": "continue_trace_audit"},
-    {"from": "run-tests", "when": {"execution_verdict": "FAIL"}, "transform": "stop_failed"},
-    {"from": "run-tests", "when": {"execution_verdict": "NOT_RUNNABLE"}, "transform": "stop_not_runnable"},
-    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "PASS"}, "transform": "complete"},
-    {"from": "trace-check", "when": {"execution_verdict": "PASS", "trace_verdict": "FAIL"}, "transform": "stop_trace_failed"}
+    {"from":"tc-reviewer","when":{"review_verdict":"ПРИНЯТО"},"transform":"revision_orchestrator_selects_candidate"}, {"from":"tc-reviewer","when":{"review_verdict":"AUTO_FIX_APPLIED"},"transform":"revision_orchestrator_validates_publishes_selects_successor"}, {"from":"tc-reviewer","when":{"review_verdict":"ТРЕБУЕТ ДОРАБОТКИ"},"transform":"stop_rework"},
+    {"from":"autotest-reviewer","when":{"review_verdict":"ПРИНЯТО","automation_status":"BLOCKED"},"transform":"build_trace_without_run"}, {"from":"autotest-reviewer","when":{"review_verdict":"ПРИНЯТО","required_symbol_pairs":0},"transform":"build_trace_without_run"}, {"from":"autotest-reviewer","when":{"review_verdict":"ПРИНЯТО","required_symbol_pairs":"one_or_more"},"transform":"run_tests"}, {"from":"autotest-reviewer","when":{"review_verdict":"AUTO_FIX_APPLIED"},"transform":"regenerate_automation_and_review_again"}, {"from":"autotest-reviewer","when":{"review_verdict":"ТРЕБУЕТ ДОРАБОТКИ"},"transform":"stop_rework"},
+    {"from":"run-tests","when":{"execution_verdict":"PASS"},"transform":"build_trace_then_trace_check"}, {"from":"run-tests","when":{"execution_verdict":"FAIL"},"transform":"build_trace_then_trace_check"}, {"from":"run-tests","when":{"execution_verdict":"NOT_RUNNABLE"},"transform":"build_trace_then_trace_check"}, {"from":"trace-check","when":{"trace_verdict":"PASS"},"transform":"finalize_orchestration"}, {"from":"trace-check","when":{"trace_verdict":"FAIL"},"transform":"stop_invalid_trace"}
   ],
-  "capabilities": [
-    {"language": "java", "framework": "junit5", "generation": true, "review": true, "execution": true, "status": "supported"},
-    {"language": "python", "framework": "pytest", "generation": true, "review": true, "execution": true, "status": "supported"},
-    {"language": "typescript", "framework": "jest", "generation": false, "review": false, "execution": false, "status": "experimental"},
-    {"language": "go", "framework": "go-testing", "generation": false, "review": false, "execution": false, "status": "experimental"}
-  ],
-  "artifact_policy": {
-    "persistent_root": "docs/to_do",
-    "generated_test_source": "isolated workspace under docs/to_do unless explicitly requested"
-  },
-  "traceability": ["requirement", "test_case", "generated_file", "generated_method", "execution_evidence"],
-  "projections": {
-    "contracts": "CONTRACTS.md",
-    "pipeline": "PIPELINE.md"
-  }
+  "capabilities": [{"language":"java","framework":"junit5","generation":true,"review":true,"execution":true,"status":"supported"},{"language":"python","framework":"pytest","generation":true,"review":true,"execution":true,"status":"supported"},{"language":"typescript","framework":"jest","generation":false,"review":false,"execution":false,"status":"experimental"},{"language":"go","framework":"go-testing","generation":false,"review":false,"execution":false,"status":"experimental"}],
+  "artifact_policy": {"persistent_root":"docs/to_do","generated_test_source":"isolated workspace under docs/to_do unless explicitly requested"},
+  "traceability": ["requirement","case","step","expectation","assertion","file","symbol","current_run_evidence"],
+  "projections": {"contracts":"CONTRACTS.md","pipeline":"PIPELINE.md"}
 }

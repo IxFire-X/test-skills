@@ -12,6 +12,7 @@ if __package__:
 else:  # direct CLI execution
     from json_cli import JsonArgumentParser, emit_error
 
+
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
 
@@ -29,32 +30,64 @@ def _projection_errors(contract: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _cell(value: Any) -> str:
+    """Render a contract value as a stable Markdown-safe code cell."""
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "`" + text.replace("`", "\\`").replace("|", "\\|") + "`"
+
+
+def _list_cell(values: list[str]) -> str:
+    return ", ".join(_cell(value) for value in values) or "—"
+
+
 def render_pipeline(contract: dict[str, Any]) -> str:
-    rows = ["| Step | Accepts | Produces |", "|---|---|---|"]
+    lines = [
+        f"# Pipeline: {contract['pipeline']}",
+        "",
+        MARKER,
+        "",
+        f"Version: {_cell(contract['version'])}",
+        "",
+        "## Steps",
+        "",
+        "| Step | `kind` | `accepts` | `forwards` | `produces` |",
+        "|---|---|---|---|---|",
+    ]
     for step in contract["steps"]:
-        rows.append(f"| `{step['id']}` | {', '.join(step.get('accepts', []))} | {', '.join(step.get('produces', []))} |")
-    return "# Pipeline\n\nGenerated from `contracts/pipeline.json`. Do not edit manually.\n\n" + "\n".join(rows) + "\n"
+        lines.append(
+            "| {id} | {kind} | {accepts} | {forwards} | {produces} |".format(
+                id=_cell(step["id"]),
+                kind=_cell(step["kind"]),
+                accepts=_list_cell(step["accepts"]),
+                forwards=_list_cell(step["forwards"]),
+                produces=_list_cell(step["produces"]),
+            )
+        )
+    lines.extend(["", "## Transitions", "", "| From | Predicates | Transform |", "|---|---|---|"])
+    for transition in contract["transitions"]:
+        predicates = ", ".join(f"{_cell(key)} = {_cell(value)}" for key, value in transition["when"].items())
+        lines.append(f"| {_cell(transition['from'])} | {predicates or '—'} | {_cell(transition['transform'])} |")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def render_contracts(contract: dict[str, Any]) -> str:
     lines = ["# Contract Reference", "", MARKER, "", "## Artifacts", "", "| Artifact | Description |", "|---|---|"]
     for artifact in contract["artifacts"]:
-        lines.append(f"| `{artifact['id']}` | {artifact['description']} |")
+        lines.append(f"| {_cell(artifact['id'])} | {artifact['description']} |")
     lines.extend(["", "## Canonical skill files", "", "| Skill | Path |", "|---|---|"])
     for skill in contract["core_skills"]:
-        lines.append(f"| `{skill}` | `{contract['skill_files'][skill]}` |")
-    lines.extend(["", "## Review verdict branches", "", "| Reviewer | Verdict | Transform |", "|---|---|---|"])
+        lines.append(f"| {_cell(skill)} | {_cell(contract['skill_files'][skill])} |")
+    lines.extend(["", "## Verdict enums", "", "| Verdict type | Values |", "|---|---|"])
+    for verdict_type, values in contract["verdicts"].items():
+        lines.append(f"| {_cell(verdict_type)} | {_list_cell(values)} |")
+    lines.extend(["", "## Transitions", "", "| From | Predicates | Transform |", "|---|---|---|"])
     for transition in contract["transitions"]:
-        verdict = transition.get("when", {}).get("review_verdict")
-        if verdict:
-            lines.append(f"| `{transition['from']}` | `{verdict}` | `{transition['transform']}` |")
-    lines.extend(["", "## Execution and trace verdict branches", "", "| Stage | Execution verdict | Trace verdict | Transform |", "|---|---|---|---|"])
-    for transition in contract["transitions"]:
-        when = transition.get("when", {})
-        verdict = when.get("execution_verdict")
-        if verdict:
-            trace_verdict = when.get("trace_verdict", "")
-            lines.append(f"| `{transition['from']}` | `{verdict}` | {f'`{trace_verdict}`' if trace_verdict else ''} | `{transition['transform']}` |")
+        predicates = ", ".join(f"{_cell(key)} = {_cell(value)}" for key, value in transition["when"].items())
+        lines.append(f"| {_cell(transition['from'])} | {predicates or '—'} | {_cell(transition['transform'])} |")
     lines.extend(["", "## Language capabilities", "", "| Language | Framework | Generation | Review | Execution | Status |", "|---|---|---|---|---|---|"])
     for capability in contract["capabilities"]:
         lines.append(
@@ -62,7 +95,19 @@ def render_contracts(contract: dict[str, Any]) -> str:
                 **{key: str(value).lower() if isinstance(value, bool) else value for key, value in capability.items()}
             )
         )
-    lines.extend(["", "## Artifact policy", "", f"- Persistent artifacts: `{contract['artifact_policy']['persistent_root']}`", f"- Generated test source: {contract['artifact_policy']['generated_test_source']}", "", "## Traceability", "", " → ".join(f"`{item}`" for item in contract["traceability"]), ""])
+    policy = contract["artifact_policy"]
+    lines.extend([
+        "",
+        "## Artifact policy",
+        "",
+        f"- Persistent artifacts: {_cell(policy['persistent_root'])}",
+        f"- Generated test source: {policy['generated_test_source']}",
+        "",
+        "## Traceability",
+        "",
+        " -> ".join(contract["traceability"]),
+        "",
+    ])
     return "\n".join(lines)
 
 

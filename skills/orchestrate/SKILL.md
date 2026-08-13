@@ -1,88 +1,22 @@
 ---
 name: orchestrate
-description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация нескольких канонических скиллов тестирования.
+description: Use when a request needs coordinated V3 test-case selection, automation generation, execution evidence, and trace finalization across the testing pipeline.
 ---
 
-# Оркестрация тестового пайплайна
+# V3 test-pipeline orchestration
 
-## Принцип
+Follow Pipeline 2.0 in `contracts/pipeline.json` and the [orchestration contract](references/orchestration-contract.md). Resolve skill paths only through `skill_files`; do not use copies or aliases.
 
-Координируй только канонический маршрут из `contracts/pipeline.json`. Считай
-JSON-артефакты машинным источником истины, средство запуска — единственным
-доказательством выполнения, а Markdown, CSV и сгенерированный исходный код —
-только сопутствующими материалами.
+## Lifecycle
 
-## Обязательная подготовка
+1. Validate and publish candidate canonical JSON with `tools.publish_test_case_bundle` before review.
+2. Call `orchestrate_revision` from `tools.orchestrate_test_case_revision` with candidate, review, output directory, and CSV profile. Publish a valid full successor before selecting it; choose exactly one effective revision and effective digest.
+3. Pass only effective JSON/digest downstream. Generate and statically review automation; on reviewer auto-fix, regenerate then review again.
+4. Skip `tools.run_tests.py` only for BLOCKED or zero-pair manual branches. Build trace with `tools.build_trace_document`, call `validate_trace_document`, then call `tools.trace_check` for every terminal branch.
+5. Call `finalize_orchestration` to finalize exactly one status: `PASS`, `PASS_WITH_MANUAL_REMAINDER`, `MANUAL_ONLY`, `BLOCKED`, `FAIL`, or `NOT_RUNNABLE`.
 
-1. Полностью прочитай `contracts/pipeline.json` и [контракт оркестрации](references/orchestration-contract.md).
-2. Определяй пути скиллов только через `skill_files`; не используй псевдонимы, устаревшие каталоги или копии из плагинов.
-3. Прочитай только нужный текущему этапу `SKILL.md`, объявленные для него входы и схему.
-4. Осмотри проект без изменений. Не меняй файлы проекта, конфигурацию, зависимости и рабочий код ради тестов.
-5. Выбери отдельный каталог артефактов в `docs/to_do/` и изолированное место для новых файлов сгенерированных тестов.
+Markdown/CSV are immutable human projections: never parse them for automation, hand-author receipts, merge revisions, or treat manual/blocker states as PASS. Do not hand-build the terminal carrier. Keep generated tests isolated; do not change project code, dependencies, configuration, or secrets.
 
-## Канонический маршрут
+## Stop conditions
 
-Выполняй этапы строго последовательно:
-
-1. `context-marker`
-2. `tc-generator`
-3. экспорт JSON → CSV без потерь
-4. `tc-reviewer`
-5. `tc-to-autotest`
-6. `autotest-reviewer`
-7. `tools/run_tests.py`
-8. `tools/build_trace_document.py`
-9. `tools/trace_check.py --require-execution`
-10. `orchestrator-output.json` и повторный `trace_check.py --orchestrator-artifact`
-
-После каждого этапа с JSON сначала запускай `tools/validate_artifact.py` с его
-канонической схемой. При ненулевом коде завершения остановись до следующего этапа.
-
-После валидного `tc-generator-output.json` всегда создай соседний CSV через
-`skills/tc-generator/scripts/export_test_cases_csv.py`, затем проверь его с
-`--verify-only`. Последующим этапам передавай JSON, а не CSV.
-
-## Передача данных и изоляция
-
-- Передавай этапу только артефакты из его `accepts` или предыдущего `forwards` в контракте пайплайна и необходимые факты проекта, подтверждённые исходным кодом.
-- Не передавай внутренние рассуждения, ожидаемый ответ, оценочные карточки проверяющих или выводы прежних агентов.
-- Сохраняй без ослабления происхождение, ID требований, ID тест-кейсов, подготовку, роли, разрешения, аутентификацию, действие, данные и ожидаемый результат.
-- Считай сгенерированный исходный код сопутствующим артефактом. Машинным источником истины остаётся соответствующий JSON с путями и SHA-256.
-- Никогда не сохраняй учётные данные, токены, cookie и другие секреты в запрос, JSON, CSV, сгенерированный исходный код или доказательства.
-
-## Контрольные точки
-
-| Проверка | Продолжить | Остановиться |
-|---|---|---|
-| схема | валидатор завершился с кодом 0 | любой ненулевой код |
-| `tc-reviewer` | `ПРИНЯТО` с исходными тест-кейсами или `AUTO_FIX_APPLIED` с исправленными | `ТРЕБУЕТ ДОРАБОТКИ`, неизвестный вердикт |
-| `autotest-reviewer` | `ПРИНЯТО` или явно разрешённый контрактом исправленный результат | `ТРЕБУЕТ ДОРАБОТКИ`, неизвестный вердикт |
-| средство запуска | подтверждённый `PASS`, код завершения 0 | `FAIL`, `NOT_RUNNABLE`, ненулевой код |
-| трассировка | `PASS`, штатный код завершения 0, точная перекрёстная проверка артефакта оркестратора | `FAIL`, расхождение, ненулевой код |
-
-Для Java и Python `NOT_RUNNABLE` не является успехом. Для экспериментально
-поддерживаемого стека сохрани честный артефакт `NOT_RUNNABLE`, соответствующий
-схеме, но не объявляй цепочку принятой.
-
-## Ошибки и новые попытки
-
-- Не исправляй и не перезаписывай неудачный логический артефакт.
-- Сохрани сам артефакт, результат валидации, буквальные `argv`, рабочий каталог, код завершения и первопричину.
-- Запускай новую попытку только после фактического изменения входа, скилла или контракта контроллера. Старую попытку оставляй неизменяемой и не учитывай в оценке.
-- Повтор той же команды допустим только при сбое среды или транспорта до появления результата этапа; запиши обе попытки.
-- Если стек, подготовка, роль, разрешения, аутентификация или наблюдаемый ожидаемый результат не подтверждены источниками, запроси доработку вместо догадки.
-
-## Финальное принятие
-
-Объявляй для пайплайна `PASS`, только когда одновременно:
-
-- все JSON этапов прошли свои схемы;
-- проверяющий выбрал исходные или явно исправленные тест-кейсы как источник истины;
-- проверка автотестов принята;
-- `run_tests.py` вернул подтверждённый `PASS` с доказательствами на уровне методов;
-- документ трассировки прошёл `--require-execution`;
-- `orchestrator-output.json` прошёл схему и точную перекрёстную проверку трассировки;
-- рабочий код, конфигурация и зависимости проекта не менялись.
-
-Человекочитаемый отчёт разрешён, но он не заменяет ни одной JSON-квитанции.
-Минимальные проверяемые примеры находятся в `assets/orchestration-fixtures/`.
+Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. Stop on a failed lifecycle receipt, unselected effective revision, invalid trace, or a status/branch mismatch.

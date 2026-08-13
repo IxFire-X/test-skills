@@ -1,63 +1,19 @@
 {
-  "schema_version": "2.1.0",
-  "requirements": [
-    {
-      "id": "REQ-ORDER-001",
-      "provenance": [
-        "requirements/orders.md#creation"
-      ]
-    }
+  "schema_version": "3.0.0", "stage": "trace",
+  "source": {"document_id": "TCDOC-semantic-fixture", "revision": 1, "source_digest": "sha256:3f9060ca234b81ff18449a4ed327c62174a02597d0cd4152af49c1e4b0c63891"},
+  "automation_status": "GENERATED",
+  "requirements": [{"requirement_id": "REQ-semantic-fixture", "display_order": 1}],
+  "test_cases": [{"case_id": "TC-semantic-fixture", "display_order": 1, "requirement_ids": ["REQ-semantic-fixture"]}],
+  "steps": [{"case_id": "TC-semantic-fixture", "step_id": "STEP-1", "display_order": 1, "manual_only": false, "blocker_ids": []}],
+  "expectations": [{"case_id": "TC-semantic-fixture", "step_id": "STEP-1", "expectation_id": "EXP-1", "display_order": 1}],
+  "assertions": [{"case_id": "TC-semantic-fixture", "step_id": "STEP-1", "expectation_id": "EXP-1", "assertion_id": "ASSERT-1", "display_order": 1}],
+  "files": [{"file_id": "FILE-item", "path": "tests/test_item.py", "language": "python", "framework": "pytest", "file_digest": "sha256:ffe8ed29b352780a84852f8adf682fa6bc316b78a891d1b9f127231e895e829b"}],
+  "symbols": [{"file_id": "FILE-item", "symbol_id": "SYMBOL-item", "locator": {"kind": "python_module_function", "function_name": "test_item"}}],
+  "implementation_relations": [
+    {"kind": "operation", "case_id": "TC-semantic-fixture", "step_id": "STEP-1", "file_id": "FILE-item", "symbol_id": "SYMBOL-item"},
+    {"kind": "assertion", "case_id": "TC-semantic-fixture", "step_id": "STEP-1", "expectation_id": "EXP-1", "assertion_id": "ASSERT-1", "file_id": "FILE-item", "symbol_id": "SYMBOL-item"}
   ],
-  "test_cases": [
-    {
-      "id": "TC-ORDER-001",
-      "requirement_ids": [
-        "REQ-ORDER-001"
-      ]
-    }
-  ],
-  "generated_files": [
-    {
-      "id": "FILE-ORDER-001",
-      "path": "tests/generated/test_orders.py"
-    }
-  ],
-  "methods": [
-    {
-      "id": "METHOD-ORDER-001",
-      "file_id": "FILE-ORDER-001",
-      "name": "test_create_order",
-      "test_case_ids": [
-        "TC-ORDER-001"
-      ],
-      "requirement_ids": [
-        "REQ-ORDER-001"
-      ]
-    }
-  ],
-  "trace_map": [
-    {
-      "requirement_id": "REQ-ORDER-001",
-      "test_case_id": "TC-ORDER-001",
-      "file_id": "FILE-ORDER-001",
-      "method_id": "METHOD-ORDER-001"
-    }
-  ],
-  "execution_required": true,
-  "execution": {
-    "verdict": "PASS",
-    "reason": "generated test passed",
-    "command": "python -m pytest -q tests/generated/test_orders.py",
-    "runner": "pytest",
-    "exit_code": 0,
-    "evidence": [
-      {
-        "run_id": "RUN-ORDER-001",
-        "method_id": "METHOD-ORDER-001",
-        "status": "passed"
-      }
-    ],
-    "allowed_skips": []
-  },
+  "manual_dispositions": [], "automation_diagnostics": [],
+  "execution": {"verdict": "PASS", "run_id": "RUN-current", "evidence_authoritative": true, "evidence": [{"run_id": "RUN-current", "source_digest": "sha256:3f9060ca234b81ff18449a4ed327c62174a02597d0cd4152af49c1e4b0c63891", "file_id": "FILE-item", "symbol_id": "SYMBOL-item", "file_digest": "sha256:ffe8ed29b352780a84852f8adf682fa6bc316b78a891d1b9f127231e895e829b", "status": "PASSED"}]},
   "final_verdict": "PASS"
 }

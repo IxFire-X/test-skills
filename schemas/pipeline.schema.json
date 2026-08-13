@@ -1,126 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/pipeline.schema.json",
-  "title": "Portable Testing Skills Pipeline Contract",
   "type": "object",
+  "additionalProperties": false,
   "required": ["version", "pipeline", "core_skills", "skill_files", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections"],
   "properties": {
-    "$schema": {"type": "string"},
-    "version": {"type": "string", "minLength": 1},
+    "$schema": {"const": "schemas/pipeline.schema.json"},
+    "version": {"const": "2.0"},
     "pipeline": {"const": "test-pipeline"},
-    "core_skills": {"type": "array", "const": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]},
-    "skill_files": {
-      "type": "object",
-      "required": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"],
-      "properties": {
-        "context-marker": {"const": "skills/context-marker/SKILL.md"},
-        "tc-generator": {"const": "skills/tc-generator/SKILL.md"},
-        "tc-reviewer": {"const": "skills/tc-reviewer/SKILL.md"},
-        "tc-to-autotest": {"const": "skills/tc-to-autotest/SKILL.md"},
-        "autotest-reviewer": {"const": "skills/autotest-reviewer/SKILL.md"},
-        "orchestrate": {"const": "skills/orchestrate/SKILL.md"}
-      },
-      "additionalProperties": false
-    },
-    "artifacts": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["id", "description"],
-        "properties": {
-          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-          "description": {"type": "string", "minLength": 1}
-        },
-        "additionalProperties": false
-      }
-    },
-    "steps": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["id", "kind", "accepts", "forwards", "produces", "rejects"],
-        "properties": {
-          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-          "kind": {"type": "string", "enum": ["skill", "tool"]},
-          "accepts": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
-          "forwards": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
-          "produces": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
-          "rejects": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}}
-        },
-        "additionalProperties": false
-      }
-    },
-    "verdicts": {
-      "type": "object",
-      "required": ["review", "execution", "trace"],
-      "properties": {
-        "review": {"type": "array", "const": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]},
-        "execution": {"type": "array", "const": ["PASS", "FAIL", "NOT_RUNNABLE"]},
-        "trace": {"type": "array", "const": ["PASS", "FAIL"]}
-      },
-      "additionalProperties": false
-    },
-    "transitions": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["from", "when", "transform"],
-        "properties": {
-          "from": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-          "when": {
-            "type": "object",
-            "properties": {
-              "review_verdict": {"type": "string", "enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]},
-              "execution_verdict": {"type": "string", "enum": ["PASS", "FAIL", "NOT_RUNNABLE"]},
-              "trace_verdict": {"type": "string", "enum": ["PASS", "FAIL"]}
-            },
-            "anyOf": [{"required": ["review_verdict"]}, {"required": ["execution_verdict"]}],
-            "additionalProperties": false
-          },
-          "transform": {"type": "string"}
-        },
-        "additionalProperties": false
-      }
-    },
-    "capabilities": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["language", "framework", "generation", "review", "execution", "status"],
-        "properties": {
-          "language": {"type": "string", "enum": ["java", "python", "typescript", "go"]},
-          "framework": {"type": "string"},
-          "generation": {"type": "boolean"},
-          "review": {"type": "boolean"},
-          "execution": {"type": "boolean"},
-          "status": {"type": "string", "enum": ["supported", "experimental"]}
-        },
-        "additionalProperties": false
-      }
-    },
-    "artifact_policy": {
-      "type": "object",
-      "required": ["persistent_root", "generated_test_source"],
-      "properties": {
-        "persistent_root": {"const": "docs/to_do"},
-        "generated_test_source": {"const": "isolated workspace under docs/to_do unless explicitly requested"}
-      },
-      "additionalProperties": false
-    },
-    "traceability": {"type": "array", "const": ["requirement", "test_case", "generated_file", "generated_method", "execution_evidence"]},
-    "projections": {
-      "type": "object",
-      "required": ["contracts", "pipeline"],
-      "properties": {
-        "contracts": {"const": "CONTRACTS.md"},
-        "pipeline": {"const": "PIPELINE.md"}
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false
+    "core_skills": {"type": "array"},
+    "skill_files": {"type": "object"},
+    "artifacts": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "description"], "properties": {"id": {"type": "string"}, "description": {"type": "string"}}}},
+    "steps": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "accepts", "forwards", "produces", "rejects"], "properties": {"id": {"type": "string"}, "kind": {"enum": ["skill", "tool"]}, "accepts": {"type": "array"}, "forwards": {"type": "array"}, "produces": {"type": "array"}, "rejects": {"type": "array"}}}},
+    "verdicts": {"type": "object"},
+    "transitions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["from", "when", "transform"], "properties": {"from": {"type": "string"}, "when": {"type": "object"}, "transform": {"type": "string"}}}},
+    "capabilities": {"type": "array"},
+    "artifact_policy": {"type": "object"},
+    "traceability": {"type": "array"},
+    "projections": {"type": "object"}
+  }
 }

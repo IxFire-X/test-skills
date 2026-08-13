@@ -1,0 +1,345 @@
+{
+  "contract": "http-binding-v1",
+  "corpus_version": "1.0.0",
+  "kind": "response",
+  "value_encodings": {
+    "body_bytes": {
+      "encoding": "utf8|hex",
+      "meaning": "Raw entity bytes. utf8 data is a JSON string; hex data is lowercase hexadecimal. Empty entities use utf8 data \"\"."
+    },
+    "raw_response_encoding": {
+      "meaning": "Optional response-level field replacement used only to construct deliberately malformed raw response fields before validation. fields is an object of JSON values, not a host-language expression; each named value replaces the corresponding response member."
+    }
+  },
+  "cases": [
+    {
+      "case_id": "legacy-07-header-trimmed-case-insensitive",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["X-Id", " \tabc\t "]], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": "abc", "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-08-missing-header",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-09-body-null-is-value",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a\":null,\"items\":[7]}"}}},
+      "source": {"kind": "http_body", "pointer": "/a"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": null, "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-10-body-array-pointer",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"items\":[7]}"}}},
+      "source": {"kind": "http_body", "pointer": "/items/0"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": 7, "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-11-missing-body-pointer",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": "/none"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-12-status",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 201, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_status"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": 201, "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-13-duplicate-header",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["x-id", "a"], ["X-Id", "b"]], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "error", "code": "DUPLICATE_RESPONSE_HEADER", "path": "/headers/x-id", "message": "Response contains duplicate header fields.", "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-14-duplicate-json-key",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a\":1,\"a\":2}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "legacy-15-gzip-is-not-decoded",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "gzip"]], "body_bytes": {"encoding": "utf8", "data": "not-decoded"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "UNSUPPORTED_CONTENT_ENCODING", "path": "/headers/content-encoding", "message": "Response body content encoding must be identity.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-102-empty-entity-root-pointer",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-103-root-scalar-null",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "null"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "observation", "state": "VALUE", "value": null, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-103-root-scalar-true",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "true"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "observation", "state": "VALUE", "value": true, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-103-root-scalar-integer",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "1"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "observation", "state": "VALUE", "value": 1, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-103-root-scalar-string",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "\"x\""}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "observation", "state": "VALUE", "value": "x", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-104-escaped-pointer",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a/b\":{\"~x\":\"exact\"}}"}}},
+      "source": {"kind": "http_body", "pointer": "/a~1b/~0x"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": "exact", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-105-array-index-leading-zero-missing",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "[\"zero\"]"}}},
+      "source": {"kind": "http_body", "pointer": "/00"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-105-array-index-dash-missing",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "[\"zero\"]"}}},
+      "source": {"kind": "http_body", "pointer": "/-"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-105-array-index-out-of-range-missing",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "[\"zero\"]"}}},
+      "source": {"kind": "http_body", "pointer": "/1"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-105-traverse-scalar-missing",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a\":1}"}}},
+      "source": {"kind": "http_body", "pointer": "/a/b"},
+      "expected": {"kind": "observation", "state": "MISSING", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-106-pointer-missing-leading-slash",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": "not-root"},
+      "expected": {"kind": "error", "code": "INVALID_JSON_POINTER", "path": "/source/pointer", "message": "JSON Pointer must be root or start with '/'.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-106-pointer-invalid-escape",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": "/bad~2escape"},
+      "expected": {"kind": "error", "code": "INVALID_JSON_POINTER", "path": "/source/pointer", "message": "JSON Pointer has an invalid escape.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-107-header-outer-whitespace-only",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["x-id", " \t \t "]], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": "", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-108-three-mixed-case-duplicate-headers",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["X-Id", "a"], ["x-id", "b"], ["X-ID", "c"]], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "error", "code": "DUPLICATE_RESPONSE_HEADER", "path": "/headers/x-id", "message": "Response contains duplicate header fields.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-109-uppercase-header-source",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["x-id", "value"]], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "X-ID"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_SOURCE", "path": "/source/name", "message": "Header source name must be canonical lowercase RFC 9110 tchar.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-110-non-tchar-header-source",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}},
+      "source": {"kind": "http_header", "name": "bad name"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_SOURCE", "path": "/source/name", "message": "Header source name must be canonical lowercase RFC 9110 tchar.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-111-content-coding-absent",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"ok\":true}"}}},
+      "source": {"kind": "http_body", "pointer": "/ok"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": true, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-112-content-coding-identity-whitespace",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["Content-Encoding", " \tIdentity\t "]], "body_bytes": {"encoding": "utf8", "data": "{\"ok\":true}"}}},
+      "source": {"kind": "http_body", "pointer": "/ok"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": true, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-113-duplicate-content-coding",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "identity"], ["Content-Encoding", "identity"]], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "UNSUPPORTED_CONTENT_ENCODING", "path": "/headers/content-encoding", "message": "Response body content encoding must be identity.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-114-content-coding-identity-gzip",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "identity, gzip"]], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "UNSUPPORTED_CONTENT_ENCODING", "path": "/headers/content-encoding", "message": "Response body content encoding must be identity.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-114-content-coding-duplicate-identity-token",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "identity, identity"]], "body_bytes": {"encoding": "utf8", "data": "{}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "UNSUPPORTED_CONTENT_ENCODING", "path": "/headers/content-encoding", "message": "Response body content encoding must be identity.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-115-raw-gzip-hex",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "gzip"]], "body_bytes": {"encoding": "hex", "data": "1f8b0800000000000003"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "UNSUPPORTED_CONTENT_ENCODING", "path": "/headers/content-encoding", "message": "Response body content encoding must be identity.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-116-content-type-ignored",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-type", "text/plain"]], "body_bytes": {"encoding": "utf8", "data": "{\"ok\":true}"}}},
+      "source": {"kind": "http_body", "pointer": "/ok"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": true, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-117-invalid-utf8",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "hex", "data": "ff"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-118-utf8-bom",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "hex", "data": "efbbbf7b7d"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-119-malformed-json",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a\":"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-119-trailing-comma",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"a\":1,}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-120-duplicate-nested-json-key",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "{\"nested\":{\"a\":1,\"a\":2}}"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-121-json-nan",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "NaN"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-121-json-infinity",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "Infinity"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-121-json-negative-infinity",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "-Infinity"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-122-overflow-number",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": "1e9999"}}},
+      "source": {"kind": "http_body", "pointer": ""},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE_JSON", "path": "/body", "message": "Response body must be strict UTF-8 JSON.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-123-status-skips-gzip-body-decode",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 418, "ordered_headers": [["content-encoding", "gzip"]], "body_bytes": {"encoding": "hex", "data": "1f8b0800000000000003"}}},
+      "source": {"kind": "http_status"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": 418, "transport_calls": 1}
+    },
+    {
+      "case_id": "review-124-header-skips-gzip-body-decode",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [["content-encoding", "gzip"], ["x-id", "present"]], "body_bytes": {"encoding": "hex", "data": "1f8b0800000000000003"}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "observation", "state": "VALUE", "value": "present", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-125-status-boolean",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}, "raw_response_encoding": {"fields": {"status": true}}},
+      "source": {"kind": "http_status"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE", "path": "/status", "message": "Response status must be an integer.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-125-status-float",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}, "raw_response_encoding": {"fields": {"status": 200.0}}},
+      "source": {"kind": "http_status"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE", "path": "/status", "message": "Response status must be an integer.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-126-ordered-headers-list",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}, "raw_response_encoding": {"fields": {"ordered_headers": []}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE", "path": "/headers", "message": "Response ordered_headers must be a tuple of name/value pairs.", "transport_calls": 1}
+    },
+    {
+      "case_id": "review-126-ordered-headers-malformed-pair",
+      "request": {"method": "GET", "absolute_url": "https://api.example.test/response", "ordered_headers": [["accept-encoding", "identity"], ["user-agent", "test-skills-http-binding-v1"]], "body_bytes": null},
+      "transport": {"outcome": "response", "response": {"status": 200, "ordered_headers": [], "body_bytes": {"encoding": "utf8", "data": ""}}, "raw_response_encoding": {"fields": {"ordered_headers": [["x-id", 1]]}}},
+      "source": {"kind": "http_header", "name": "x-id"},
+      "expected": {"kind": "error", "code": "INVALID_RESPONSE", "path": "/headers", "message": "Response ordered_headers must be a tuple of name/value pairs.", "transport_calls": 1}
+    }
+  ]
+}

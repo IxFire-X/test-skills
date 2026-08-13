@@ -1,0 +1,24 @@
+{
+  "schema_version": "3.0.0",
+  "stage": "tc-to-autotest",
+  "artifacts": {
+    "automation_status": "BLOCKED",
+    "source": {
+      "document_id": "TCDOC-semantic-fixture",
+      "revision": 1,
+      "source_digest": "sha256:3f9060ca234b81ff18449a4ed327c62174a02597d0cd4152af49c1e4b0c63891"
+    },
+    "generated_files": [],
+    "generated_symbols": [],
+    "implementation_relations": [],
+    "manual_dispositions": [],
+    "diagnostics": [
+      {
+        "path": "/test_cases/0/steps/0/operation",
+        "code": "UNRESOLVED_OPERATION",
+        "message": "Operation contract is unavailable."
+      }
+    ]
+  },
+  "warnings": []
+}

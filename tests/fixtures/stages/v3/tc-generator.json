@@ -1,0 +1,24 @@
+{
+  "schema_version": "3.0.0",
+  "stage": "tc-generator",
+  "artifacts": {
+    "canonical_document": {
+      "document_id": "TCDOC-manual-example",
+      "revision": 1,
+      "parent_sha256": null,
+      "metadata": {"subject": {"kind": "generic", "name": "Documented manual workflow"}, "documentation": ["https://example.invalid/manual-workflow"], "project": "EXAMPLE", "author": "TEST_AUTHOR", "date": "2026-08-12"},
+      "operation_capabilities": [],
+      "requirements": [{"requirement_id": "REQ-manual-example", "display_order": 1, "text": "Оператор может выполнить документированный ручной сценарий.", "provenance": ["https://example.invalid/manual-workflow#requirement"]}],
+      "test_cases": [{
+        "case_id": "TC-manual-example", "display_order": 1, "requirement_ids": ["REQ-manual-example"],
+        "title": "Ручная проверка документированного сценария", "objective": "Подтвердить наблюдаемый результат ручного сценария.", "categories": ["functional"], "priority": "MEDIUM", "preconditions": ["Оператор открыл тестируемую форму."],
+        "management": {"status": null, "folder": null, "components": [], "labels": [], "owner": null, "estimated_time": null, "external_keys": {}, "external_links": {"issues": [], "pages": []}, "custom_fields": {}},
+        "steps": [{
+          "step_id": "STEP-manual-observation", "display_order": 1, "action": "Выполнить ручную проверку отображения результата.", "manual_only": true, "manual_reason": "Наблюдение требует физического устройства без доступного адаптера.", "automation_blockers": [], "operation": null, "inputs": [], "outputs": [],
+          "expectations": [{"expectation_id": "EXP-manual-observation", "display_order": 1, "text": "Результат отображается на физическом устройстве.", "assertions": []}]
+        }]
+      }]
+    }
+  },
+  "warnings": []
+}

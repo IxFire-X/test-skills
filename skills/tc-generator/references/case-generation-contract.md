@@ -1,118 +1,14 @@
-# Контракт генерации тест-кейсов
+# V3 case-generation contract
 
-Используй этот детерминированный контракт вместе со
-[схемой результата](../../../schemas/tc-generator-output.schema.json). Контракт
-переносим между проектами: извлекай предметные термины из переданного артефакта
-и не воспринимай приведённый ниже пример создания заказа как фиксированный словарь.
+The bare document validated by `tools.canonical_document` is canonical. `tools.test_case_projections` renders immutable Markdown and Zephyr CSV; `tools.publish_test_case_bundle` publishes the three-file revision bundle.
 
-## Входные данные и источники истины
+## Human and machine ownership
 
-- Принимай ровно один артефакт `context-marker-output` версии 2.1.0.
-- Скопируй `artifacts.analytics_documentation.requirements` в `artifacts.generated_test_cases.requirements` без изменения значений: сохрани каждый объект и порядок массива, включая `id`, `text` и `provenance`.
-- Выводи атомы тест-кейсов только из текста требований. Используй `artifacts.source_code_and_diff.sources` исключительно для технического уточнения, когда источник явно подтверждает метод, путь, статус, код, роль, ресурс, поле или границу, названные в требовании.
-- Никогда не додумывай отсутствующее значение. Если не хватает обязательного конкретного значения или проверяемого ожидаемого результата, не создавай такой атом. Скопируй входной `warnings` без изменений, чтобы пробелы раскрывались стабильно: не создавай, не переписывай, не удаляй и не дополняй предупреждения.
+For each case retain a human Title, Goal, and Preconditions. Its steps are in physical order and may be any necessary length. Each numbered step has:
 
-## Детерминированное выделение атомов
+1. **Action:** the human instruction.
+2. **Expected Result:** the human-observable result.
 
-Выделяй только явно заданные варианты поведения, каждый из которых можно проверить
-самостоятельно. Для каждого атома создавай отдельный тест-кейс; не объединяй их.
+The same step owns its operation, typed inputs, outputs, and assertions. An input may reference a previous-step output only. Every assertion is covered by the step's Expected Result. A manual-only step has its `manual_reason`; an automation-blocked step has exact canonical blockers. Preparation belongs in steps, not an undocumented side channel.
 
-1. Явно заданная успешная операция создаёт один позитивный тест-кейс основного сценария.
-2. Включительный числовой диапазон с явными нижней и верхней границами и явным отказом за их пределами создаёт четыре тест-кейса в таком порядке: принята нижняя граница, принята верхняя граница, отклонено ближайшее меньшее значение, отклонено ближайшее большее значение. Используй `lower - 1` и `upper + 1`, только если эти значения и результат отказа явно заданы либо механически следуют из целочисленного включительного диапазона и явного правила отказа вне него.
-3. Явный запрет для роли создаёт один тест-кейс отказа в авторизации.
-
-Расположи все тест-кейсы в порядке: основной позитивный сценарий, позитивные
-границы, негативные границы, затем авторизация. Нумеруй их как `TC-0001`,
-`TC-0002` и далее, используя четыре цифры. Каждый тест-кейс связан ровно с одним
-ID требования. Каждый элемент покрытия является точным обратным отображением:
-перечисли каждое скопированное требование один раз в исходном порядке и укажи
-ровно ID выведенных из него тест-кейсов. Не допускай неизвестных, повторяющихся,
-пропущенных или лишних связей.
-
-## Карта машинных полей
-
-Схема результата имеет приоритет. Используй следующие точные формы полей:
-
-| Расположение | Поле | Форма | Назначение |
-|---|---|---|---|
-| `artifacts.generated_test_cases.test_cases[]` | `requirement_ids` | непустой массив строк с ID требований | Требования, из которых выведен тест-кейс. Даже при одном ID поле остаётся массивом из одного элемента. |
-| `artifacts.generated_test_cases.coverage[]` | `requirement_id` | одна строка с ID требования | Одно скопированное требование, обратное отображение которого находится в `test_case_ids`. |
-
-Не записывай `test_cases[].requirement_id`: такого поля нет в схеме. Эта карта
-универсальна; пример создания заказа ниже лишь иллюстрирует контракт.
-
-Используй ровно один шаг действия с `order: 1`. Выбирай `priority: "HIGH"`, если
-явное требование не задаёт другой подтверждённый приоритет. Используй только
-следующие минимальные массивы категорий:
-
-| Атом | Категории |
-|---|---|
-| успешная операция | `positive`, `functional` |
-| принятая граница | `positive`, `boundary` |
-| отклонённая граница | `negative`, `boundary` |
-| отказ для роли | `negative`, `authorization` |
-
-## Правила представления
-
-Подставляй только извлечённые значения. Пусть `METHOD path` — явно заданная
-операция, `status CODE` — подтверждённый ожидаемый результат успеха или отказа,
-а `allowed_role`, `denied_role`, `resource`, `field`, `lower` и `upper` —
-извлечённые значения. Репрезентативное числовое значение успешного сценария
-равно `lower + 1`, только если оно безопасно и подтверждено.
-
-Строки в таблице ниже являются буквальными шаблонами результата и поэтому не
-переводятся:
-
-| Атом | Заголовок | Предусловия | Тестовые данные | Ожидаемый результат шага | Итоговый ожидаемый результат |
-|---|---|---|---|---|---|
-| основной сценарий | `<allowed_role> creates a valid <resource>` | `Authenticated as <allowed_role>.` | `<field>: <lower+1>` при наличии числового поля | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-| нижняя граница | `<field> <lower> is accepted` | `Authenticated as <allowed_role>.` | `<field>: <lower>` | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-| верхняя граница | `<field> <upper> is accepted` | `Authenticated as <allowed_role>.` | `<field>: <upper>` | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-| ниже границы | `<field> <below> is rejected` | `Authenticated as <allowed_role>.` | `<field>: <below>` | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-| выше границы | `<field> <above> is rejected` | `Authenticated as <allowed_role>.` | `<field>: <above>` | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-| отказ роли | `<denied_role> cannot create a <resource>` | `Authenticated as <denied_role>.` | подтверждённое репрезентативное значение запроса, например `<field>: <lower+1>` | `HTTP <status> <CODE>` | `HTTP <status> with code <CODE>.` |
-
-Установи `steps[0].action` в точное значение `<METHOD> <path>`. Не добавляй
-действия входа или аутентификации, подготовительное поведение, дополнительные
-поля запроса либо результаты, связанные с хранением, журналами, аудитом,
-платежами, запасами или посторонними техническими сбоями.
-
-## Нормативный пример соответствия: создание заказа
-
-Это производный пример, а не обязательная терминология предметной области. Если
-требования явно задают успешное создание заказа ролью `sales_manager`
-(`201 CREATED`), целочисленный диапазон `quantity` от `1` до `100` с отказом для
-`0` и `101` (`422 QUANTITY_OUT_OF_RANGE`), запрет для `viewer`
-(`403 FORBIDDEN`) и маршрут `POST /api/v1/orders`, выведи тест-кейсы в следующем
-точном порядке:
-
-1. `TC-0001`: `sales_manager creates a valid order`; `quantity: 2`; `HTTP 201 CREATED`; `HTTP 201 with code CREATED.`
-2. `TC-0002`: `quantity 1 is accepted`; `quantity: 1`; `HTTP 201 CREATED`; `HTTP 201 with code CREATED.`
-3. `TC-0003`: `quantity 100 is accepted`; `quantity: 100`; `HTTP 201 CREATED`; `HTTP 201 with code CREATED.`
-4. `TC-0004`: `quantity 0 is rejected`; `quantity: 0`; `HTTP 422 QUANTITY_OUT_OF_RANGE`; `HTTP 422 with code QUANTITY_OUT_OF_RANGE.`
-5. `TC-0005`: `quantity 101 is rejected`; `quantity: 101`; `HTTP 422 QUANTITY_OUT_OF_RANGE`; `HTTP 422 with code QUANTITY_OUT_OF_RANGE.`
-6. `TC-0006`: `viewer cannot create an order`; `quantity: 2`; `HTTP 403 FORBIDDEN`; `HTTP 403 with code FORBIDDEN.`
-
-Во всех шести тест-кейсах используется один шаг `POST /api/v1/orders`. Для
-тест-кейсов 1–5 предусловие равно `Authenticated as sales_manager.`, а для
-тест-кейса 6 — `Authenticated as viewer.`. Сохрани входное предупреждение об
-отсутствии политики авторизации для `warehouse_operator`; отдельный тест-кейс из
-него не создаётся.
-
-## CSV-копия
-
-После того как канонический JSON прошёл проверку схемы и смысла, запусти
-`scripts/export_test_cases_csv.py` и помести файл `.csv` рядом с ним. JSON
-остаётся источником истины; CSV предназначен для просмотра человеком и
-последующего сопоставления с полями импорта Jira Zephyr.
-
-Используй точный порядок столбцов: `test_case_id`, `requirement_links`, `title`,
-`priority`, `categories`, `preconditions`, `test_data`, `ordered_steps` и
-`expected_outcome`. Структурированные массивы и объекты записываются в ячейки CSV
-как канонический компактный JSON. Это позволяет без потерь сохранить запятые,
-Unicode, пустые массивы и полные упорядоченные объекты шагов.
-
-Экспортёр обязан прочитать созданный CSV и доказать эквивалентность JSON и CSV по
-числу строк, порядку тест-кейсов и каждому значению поля. Любое расхождение
-означает ошибку этапа. Никогда не редактируй CSV независимо и не используй его как
-вход для последующих этапов пайплайна.
+Never invent capability arguments, values, operations, assertions, roles, or environment facts. Validate before publication; a projection cannot repair invalid semantics.

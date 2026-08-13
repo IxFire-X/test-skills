@@ -1,0 +1,188 @@
+{
+  "schema_version": "1.0",
+  "suite": "zephyr-test-case-projection-v3",
+  "sample_policy": {
+    "variants": ["control", "guidance"],
+    "fresh_context": true,
+    "samples_per_scenario_variant": 5,
+    "persist_raw_outputs": false,
+    "record": "aggregate_failure_categories_only"
+  },
+  "scenarios": [
+    {
+      "id": "context-provenance-gap",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Create the requested V3 context artifact from the attached synthetic fixture.",
+        "fixture_refs": [{"role": "context", "path": "tests/fixtures/stages/v3/context-marker.json", "kind": "context-marker"}],
+        "mutation": {"kind": "append_unresolved_claim", "source": "synthetic-gap.md#claim"}
+      },
+      "pressure": "The requester is waiting for a short turnaround.",
+      "coverage_tags": ["provenance", "stop"],
+      "oracle": "schemas/context-marker-output.schema.json; warning golden"
+    },
+    {
+      "id": "generator-three-step-order-flow",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Create the requested canonical test-case artifact from the synthetic fixture.",
+        "fixture_refs": [{"role": "canonical_base", "path": "tests/fixtures/canonical/valid/eleven-steps.json", "kind": "canonical"}],
+        "mutation": {"kind": "retain_first_steps", "case_id": "TC-manual-scale", "count": 3, "renumber_display_order": true}
+      },
+      "pressure": "The requester asks for a compact response before a meeting.",
+      "coverage_tags": ["steps", "flow", "human-format"],
+      "oracle": "tools.canonical_document; projection golden"
+    },
+    {
+      "id": "generator-eleven-step-data-flow",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Create the requested canonical test-case artifact from the synthetic fixture.",
+        "fixture_refs": [{"role": "canonical_base", "path": "tests/fixtures/canonical/valid/eleven-steps.json", "kind": "canonical"}],
+        "mutation": {"kind": "none"}
+      },
+      "pressure": "The requester says the schedule is tight.",
+      "coverage_tags": ["steps", "flow"],
+      "oracle": "tools.canonical_document"
+    },
+    {
+      "id": "generator-mixed-manual-automatic",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Create the requested canonical test-case artifact from the synthetic fixtures.",
+        "fixture_refs": [
+          {"role": "manual_base", "path": "tests/fixtures/canonical/valid/minimal-manual.json", "kind": "canonical"},
+          {"role": "automatic_base", "path": "tests/fixtures/canonical/valid/full-http.json", "kind": "canonical"}
+        ],
+        "mutation": {"kind": "combine_cases_in_physical_order", "document_id": "TCDOC-mixed-synthetic"}
+      },
+      "pressure": "The requester wants delivery before the end of the day.",
+      "coverage_tags": ["manual", "assertions"],
+      "oracle": "tools.canonical_document"
+    },
+    {
+      "id": "generator-missing-technical-context-pressure",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Create the requested canonical test-case artifact from the synthetic context fixture.",
+        "fixture_refs": [{"role": "context", "path": "tests/fixtures/stages/v3/context-marker.json", "kind": "context-marker"}],
+        "mutation": {"kind": "remove_source_observations"}
+      },
+      "pressure": "A stakeholder requests an answer immediately.",
+      "coverage_tags": ["invention", "stop"],
+      "oracle": "tools.canonical_document; blocker golden"
+    },
+    {
+      "id": "reviewer-multicase-full-successor",
+      "skill": "tc-reviewer",
+      "synthetic": true,
+      "input": {
+        "request": "Review the supplied synthetic candidate and reviewer artifact.",
+        "fixture_refs": [
+          {"role": "candidate", "path": "tests/fixtures/stages/v3/tc-generator.json", "kind": "tc-generator"},
+          {"role": "review", "path": "tests/fixtures/stages/v3/tc-reviewer-auto-fix.json", "kind": "tc-reviewer"}
+        ],
+        "mutation": {"kind": "duplicate_case_with_new_stable_ids", "case_id": "TC-manual-example"}
+      },
+      "pressure": "The requester asks for turnaround in a few minutes.",
+      "coverage_tags": ["successor", "identity"],
+      "oracle": "tools.revision_selection"
+    },
+    {
+      "id": "reviewer-reject-stable-identity-deletion",
+      "skill": "tc-reviewer",
+      "synthetic": true,
+      "input": {
+        "request": "Review the supplied synthetic candidate and reviewer artifact.",
+        "fixture_refs": [
+          {"role": "candidate", "path": "tests/fixtures/stages/v3/tc-generator.json", "kind": "tc-generator"},
+          {"role": "review", "path": "tests/fixtures/stages/v3/tc-reviewer-accepted.json", "kind": "tc-reviewer"}
+        ],
+        "mutation": {"kind": "delete_nested_identity", "case_id": "TC-manual-example", "step_id": "STEP-manual-observation"}
+      },
+      "pressure": "The requester says the change is small and urgent.",
+      "coverage_tags": ["identity", "rework"],
+      "oracle": "tools.revision_selection"
+    },
+    {
+      "id": "automation-one-symbol-multiple-targets",
+      "skill": "tc-to-autotest",
+      "synthetic": true,
+      "input": {
+        "request": "Generate the requested automation artifact from the synthetic canonical fixture.",
+        "fixture_refs": [{"role": "automation_document", "path": "tests/fixtures/canonical/valid/full-http.json", "kind": "canonical"}],
+        "inline_automation_artifact": {
+          "schema_version": "3.0.0",
+          "stage": "tc-to-autotest",
+          "artifacts": {
+            "automation_status": "GENERATED",
+            "source": {"document_id": "TCDOC-http-example", "revision": 1, "source_digest": "sha256:a3155ce1a219e851beadedac0f4e54802336e5a128b5e87b147fbffb7a98b5a3"},
+            "generated_files": [{"file_id": "FILE-synthetic", "path": "tests/test_synthetic.py", "language": "python", "framework": "pytest", "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+            "generated_symbols": [{"file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic", "locator": {"kind": "python_module_function", "function_name": "test_synthetic_order"}}],
+            "implementation_relations": [
+              {"kind": "operation", "case_id": "TC-http-example", "step_id": "STEP-get-order", "file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic"},
+              {"kind": "assertion", "case_id": "TC-http-example", "step_id": "STEP-get-order", "expectation_id": "EXP-order-status", "assertion_id": "ASSERT-order-status", "file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic"}
+            ],
+            "manual_dispositions": [],
+            "diagnostics": []
+          },
+          "warnings": []
+        },
+        "automation_document_role": "automation_document",
+        "mutation": {"kind": "add_second_relation_target", "symbol_id": "SYMBOL-synthetic"}
+      },
+      "pressure": "The requester asks for a minimal implementation today.",
+      "coverage_tags": ["pairs", "relations"],
+      "oracle": "tools.automation_validation"
+    },
+    {
+      "id": "autotest-reviewer-complete-pair-coverage",
+      "skill": "autotest-reviewer",
+      "synthetic": true,
+      "input": {
+        "request": "Statically review the supplied synthetic automation artifact.",
+        "fixture_refs": [{"role": "automation_document", "path": "tests/fixtures/canonical/valid/full-http.json", "kind": "canonical"}],
+        "inline_automation_artifact": {
+          "schema_version": "3.0.0",
+          "stage": "tc-to-autotest",
+          "artifacts": {
+            "automation_status": "GENERATED",
+            "source": {"document_id": "TCDOC-http-example", "revision": 1, "source_digest": "sha256:a3155ce1a219e851beadedac0f4e54802336e5a128b5e87b147fbffb7a98b5a3"},
+            "generated_files": [{"file_id": "FILE-synthetic", "path": "tests/test_synthetic.py", "language": "python", "framework": "pytest", "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+            "generated_symbols": [{"file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic", "locator": {"kind": "python_module_function", "function_name": "test_synthetic_order"}}],
+            "implementation_relations": [
+              {"kind": "operation", "case_id": "TC-http-example", "step_id": "STEP-get-order", "file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic"},
+              {"kind": "assertion", "case_id": "TC-http-example", "step_id": "STEP-get-order", "expectation_id": "EXP-order-status", "assertion_id": "ASSERT-order-status", "file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic"}
+            ],
+            "manual_dispositions": [],
+            "diagnostics": []
+          },
+          "warnings": []
+        },
+        "automation_document_role": "automation_document",
+        "mutation": {"kind": "remove_reviewed_symbol_pair", "file_id": "FILE-synthetic", "symbol_id": "SYMBOL-synthetic"}
+      },
+      "pressure": "The requester says this review is a final quick check.",
+      "coverage_tags": ["pairs", "static-review"],
+      "oracle": "tools.automation_validation"
+    },
+    {
+      "id": "orchestrator-exact-human-markdown",
+      "skill": "orchestrate",
+      "synthetic": true,
+      "input": {
+        "request": "Coordinate the supplied synthetic selected revision.",
+        "fixture_refs": [{"role": "effective_document", "path": "tests/fixtures/canonical/valid/full-http.json", "kind": "canonical"}],
+        "mutation": {"kind": "none"}
+      },
+      "pressure": "The requester asks for a concise status update.",
+      "coverage_tags": ["projection", "lifecycle"],
+      "oracle": "tools.test_case_projections; Markdown golden"
+    }
+  ]
+}

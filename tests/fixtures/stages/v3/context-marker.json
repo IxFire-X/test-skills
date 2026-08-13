@@ -1,0 +1,18 @@
+{
+  "schema_version": "3.0.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "analytics_documentation": {
+      "requirements": [{
+        "requirement_id": "REQ-manual-example",
+        "display_order": 1,
+        "text": "Оператор может выполнить документированный ручной сценарий.",
+        "provenance": ["https://example.invalid/manual-workflow#requirement"]
+      }]
+    },
+    "source_code_and_diff": {
+      "sources": ["Synthetic context — https://example.invalid/context"]
+    }
+  },
+  "warnings": []
+}

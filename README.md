@@ -1,113 +1,99 @@
 # Test Skills
 
-Портативный AI-пайплайн для создания ручных тест-кейсов, независимого ревью,
-генерации проектно-нативных автотестов, их проверки, запуска и сквозной
-трассировки.
+Портативный AI-пайплайн для проектирования тест-кейсов, независимого ревью,
+проектно-нативной автоматизации, исполнения и проверяемой трассировки.
 
-Пакет не привязан к конкретному AI-клиенту или модели. Его может выполнять
-любой агент, который умеет читать локальные файлы, создавать JSON и исходный
-код, а также запускать Python-команды. Формат `SKILL.md` используется как
-переносимый контракт инструкций.
+## Модель V3
 
-## Что входит
+`bare canonical JSON` — единственный семантический источник истины. Один документ
+может содержать произвольное число последовательных шагов, stable IDs, ссылки на
+выходы более ранних шагов, человеческие ожидания, машинные assertions, причины
+manual-only и точные blockers. Schema и semantic validator проверяют его до
+публикации.
 
-| Компонент | Назначение |
-|---|---|
-| `context-marker` | Нормализует требования и сохраняет происхождение каждого факта |
-| `tc-generator` | Создаёт детерминированные тест-кейсы в JSON и CSV |
-| `tc-reviewer` | Проверяет полноту, смысл, роли, подготовку, данные и ожидаемые результаты |
-| `tc-to-autotest` | Создаёт новые автотесты в стиле целевого проекта |
-| `autotest-reviewer` | Независимо проверяет сгенерированный тестовый код |
-| `orchestrate` | Управляет порядком этапов, контрольными точками и остановками |
-
-Машинная цепочка:
+Из каждой валидной revision детерминированно публикуется неизменяемый bundle:
 
 ```text
-требования и исходный код
-  -> context-marker
-  -> tc-generator -> CSV
-  -> tc-reviewer
-  -> tc-to-autotest
-  -> autotest-reviewer
-  -> запуск тестов
-  -> проверка трассировки
-  -> итоговый артефакт оркестратора
+<document-id>.r<revision>.json
+<document-id>.r<revision>.md
+<document-id>.r<revision>.zephyr-scale.csv
 ```
 
-JSON является источником истины. CSV предназначен для просмотра и
-Jira Zephyr-ориентированного переноса. Сгенерированный исходный код является
-сопутствующим артефактом; факт выполнения подтверждает только средство запуска.
+Markdown и CSV — derived projections: они не редактируются отдельно и не читаются
+downstream. Candidate публикуется до review; полный valid `AUTO_FIX_APPLIED`
+successor публикуется отдельно. Одна `effective revision` и её receipt становятся
+единственным входом automation, runner и trace; оба bundle остаются audit evidence.
 
-## Поддержка
+Markdown показывает title, goal, preconditions и столько шагов, сколько нужно. У
+каждого шага есть `Action` и `Expected Result`; человекочитаемая таблица содержит
+ровно `№`, `Действие`, `Ожидаемый результат` и не имеет отдельной Test Data column.
 
-- Python 3.10+.
-- Windows и Linux; macOS должен работать через тот же POSIX-маршрут, но отдельно
-  не сертифицирован.
-- Полная генерация, проверка и выполнение: Java/JUnit 5 и Python/pytest.
-- TypeScript/Jest и Go/testing пока поддерживаются экспериментально и не могут
-  завершить формальный пайплайн со статусом `PASS`.
+Zephyr projection использует фиксированный профиль
+`zephyr-scale-step-row-24-v1`: 24 headers, одна строка на canonical step, case
+metadata только в первой строке, human-readable и formula-safe cells. Это намеренно
+неполная внешняя проекция и не может восстановить JSON. Workbook/export structure
+was observed, but a real tenant import round trip remains unverified.
+
+## Пайплайн
+
+```text
+requirements and allowed project context
+  -> context-marker
+  -> tc-generator (candidate bare canonical JSON)
+  -> publish candidate JSON/Markdown/Zephyr CSV bundle
+  -> tc-reviewer and effective revision selection
+  -> tc-to-autotest -> autotest-reviewer
+  -> optional runner -> build trace -> trace check -> finalization
+```
+
+Automation описывает generated files, pair-addressed symbols и atomic
+operation/assertion relations. Runtime identity — `(file_id, symbol_id)`; несколько
+пар для одной semantic target имеют AND-semantics. Global provider/adapter preflight
+проходит до запуска любого symbol, а static autotest review покрывает каждую
+required pair.
+
+Trace всегда строится и валидируется, включая BLOCKED, manual no-run, FAIL и
+NOT_RUNNABLE branches:
+
+```text
+requirement -> case -> step -> expectation -> assertion -> file -> symbol -> current-run evidence
+```
+
+Final statuses: `PASS`, `PASS_WITH_MANUAL_REMAINDER`, `MANUAL_ONLY`, `BLOCKED`,
+`FAIL`, `NOT_RUNNABLE`. Manual/blocked zero-pair branch пропускает только runner;
+он не выбрасывается из trace.
 
 ## Быстрый старт
 
-Клонируйте пакет отдельно от целевого проекта:
-
-```bash
+```powershell
 git clone https://github.com/IxFire-X/test-skills.git
 cd test-skills
 python -m venv .venv
 python -m pip install -r requirements.txt
-python tools/doctor.py --root .
-python tools/contract_check.py --root . --full
+python tools\doctor.py --root .
+python tools\contract_check.py --root . --full
 ```
 
-На Linux активируйте окружение через `source .venv/bin/activate`; на Windows —
-через `.venv\Scripts\Activate.ps1`. Если команда `python` отсутствует, используйте
-`python3` во всех примерах.
+Скопируйте `.skillsrc.example` в корень целевого проекта как `.skillsrc` и замените
+примерные значения. Он описывает стек и пути, но не разрешает изменения проекта.
+Артефакты запуска размещайте внутри `<project>/docs/to_do/`; рабочий код,
+существующие тесты, конфигурация, зависимости и lock files не изменяются.
 
-Скопируйте `.skillsrc.example` в корень целевого проекта как `.skillsrc` и
-замените примерные значения на фактический стек.
+Не передавайте учётные данные, токены, cookie, закрытые ключи или реальные пароли.
+Используйте только project-native fixtures, environment settings или opaque secret
+handles с safe labels.
 
-Передайте AI-агенту:
+Передайте AI-агенту путь `skills/orchestrate/SKILL.md`, корни пакета и проекта,
+явно разрешённые источники и новый каталог attempt. Подробнее: [USAGE.md](USAGE.md)
+и [HOW-IT-WORKS.md](HOW-IT-WORKS.md).
 
-```text
-Используй полный тестовый пайплайн из
-<skill-pack>/skills/orchestrate/SKILL.md.
+## Реестр контрактов
 
-Корень пакета скиллов: <skill-pack>
-Корень проекта: <project>
-Область проверки: <пути требований и явно разрешённого исходного кода>
-Артефакты: <project>/docs/to_do/test-pipeline/<run-id>
+`contracts/pipeline.json` — единственный machine registry маршрута и возможностей.
+`CONTRACTS.md` и `PIPELINE.md` — его generated projections; не редактируйте их
+вручную.
 
-Не изменяй рабочий исходный код, существующие тесты, конфигурацию,
-зависимости и файлы блокировки версий.
-```
+## V2.1 is unsupported
 
-Подробная инструкция: [USAGE.md](USAGE.md).
-
-## Структура поставки
-
-```text
-skills/             инструкции для AI, справочники, материалы и экспортёр CSV
-schemas/            JSON Schema Draft 2020-12
-contracts/          канонический реестр и маршрутизация
-tools/              валидатор, сканер, средство запуска и трассировка
-requirements.txt    зависимости Python времени выполнения
-CONTRACTS.md         человекочитаемая проекция контрактов артефактов
-PIPELINE.md          человекочитаемая проекция маршрута
-.skillsrc.example    пример манифеста целевого проекта
-USAGE.md             полная инструкция
-```
-
-`contracts/pipeline.json` — единственный машинный реестр путей, этапов,
-переходов и поддерживаемых возможностей. `CONTRACTS.md` и `PIPELINE.md`
-генерируются из него и не редактируются вручную.
-
-## Основные гарантии
-
-- источник и требования целевого проекта только читаются;
-- неподтверждённое поведение не додумывается;
-- рабочий код и существующие тесты не подгоняются под тест-кейсы;
-- учётные данные, токены, cookie и закрытые ключи не сохраняются;
-- любая ошибка схемы, проверки, запуска или трассировки останавливает последующие этапы;
-- неудачный артефакт сохраняется, а исправление получает новый каталог попытки;
-- итоговый `PASS` требует доказательств выполнения на уровне методов и полной трассировки.
+V2.1 artifacts explicitly reject with a breaking-change diagnostic. There is no
+automatic semantic migration and no mixed-version pipeline.

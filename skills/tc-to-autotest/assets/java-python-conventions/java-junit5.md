@@ -1,10 +1,7 @@
-# Необязательные соглашения Java/JUnit 5 для нового рабочего пространства
+# Java / JUnit 5 V3 convention
 
-Использовать только тогда, когда пользователь выбрал Java/JUnit 5, а в проекте нет существующего тестового шаблона.
+Use only after authorized discovery confirms Java and JUnit 5; do not add dependencies or replace project-native setup. Run global provider/adapter preflight before any test process or symbol.
 
-- JUnit 5, одно стабильное отображаемое имя с `TC-*` на исполнимый сценарий.
-- Явно выбрать один клиент (`MockMvc`, RestAssured или `WebTestClient`); не смешивать их без причины.
-- Передавать URL, параметры аутентификации и окружения через подтверждённую конфигурацию времени выполнения.
-- Не создавать `BaseApiTest`, DTO, WireMock или Testcontainers, если они не нужны входным кейсам.
-- Отражать каждый ожидаемый результат конкретной проверкой; не использовать `Thread.sleep` и общее изменяемое состояние.
-- Создавать только новые тестовые файлы и не менять рабочий код, конфигурацию или зависимости.
+Every generated symbol has identity `(file_id, symbol_id)` and a `java_class_method` locator. Emit atomic operation/assertion relations for each covered canonical target; required pairs are AND-combined.
+
+At the `http-binding-v1` boundary perform one transport attempt. Use no implicit redirects, no retries, no cookies, no auth, no default headers, and no decompression. Preserve ordered explicit headers and use only runtime secret handles. Do not claim execution from static generation.

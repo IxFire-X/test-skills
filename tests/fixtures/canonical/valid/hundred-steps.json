@@ -1,0 +1,1960 @@
+{
+  "document_id": "TCDOC-manual-100-steps",
+  "revision": 1,
+  "parent_sha256": null,
+  "metadata": {
+    "subject": {
+      "kind": "generic",
+      "name": "Synthetic manual scale fixture"
+    },
+    "documentation": [
+      "https://example.invalid/manual"
+    ],
+    "project": "EXAMPLE",
+    "author": "TEST_AUTHOR",
+    "date": "2026-08-12"
+  },
+  "operation_capabilities": [],
+  "requirements": [
+    {
+      "requirement_id": "REQ-manual-scale",
+      "display_order": 1,
+      "text": "The manual sequence is documented.",
+      "provenance": [
+        "https://example.invalid/manual#requirement"
+      ]
+    }
+  ],
+  "test_cases": [
+    {
+      "case_id": "TC-manual-scale",
+      "display_order": 1,
+      "requirement_ids": [
+        "REQ-manual-scale"
+      ],
+      "title": "Manual scale fixture",
+      "objective": "Verify arbitrary step count.",
+      "categories": [
+        "functional"
+      ],
+      "priority": "MEDIUM",
+      "preconditions": [],
+      "management": {
+        "status": null,
+        "folder": null,
+        "components": [],
+        "labels": [],
+        "owner": null,
+        "estimated_time": null,
+        "external_keys": {},
+        "external_links": {
+          "issues": [],
+          "pages": []
+        },
+        "custom_fields": {}
+      },
+      "steps": [
+        {
+          "step_id": "STEP-manual-1",
+          "display_order": 1,
+          "action": "Observe synthetic manual result 1.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-1",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-2",
+          "display_order": 2,
+          "action": "Observe synthetic manual result 2.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-2",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-3",
+          "display_order": 3,
+          "action": "Observe synthetic manual result 3.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-3",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-4",
+          "display_order": 4,
+          "action": "Observe synthetic manual result 4.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-4",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-5",
+          "display_order": 5,
+          "action": "Observe synthetic manual result 5.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-5",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-6",
+          "display_order": 6,
+          "action": "Observe synthetic manual result 6.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-6",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-7",
+          "display_order": 7,
+          "action": "Observe synthetic manual result 7.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-7",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-8",
+          "display_order": 8,
+          "action": "Observe synthetic manual result 8.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-8",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-9",
+          "display_order": 9,
+          "action": "Observe synthetic manual result 9.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-9",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-10",
+          "display_order": 10,
+          "action": "Observe synthetic manual result 10.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-10",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-11",
+          "display_order": 11,
+          "action": "Observe synthetic manual result 11.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-11",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-12",
+          "display_order": 12,
+          "action": "Observe synthetic manual result 12.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-12",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-13",
+          "display_order": 13,
+          "action": "Observe synthetic manual result 13.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-13",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-14",
+          "display_order": 14,
+          "action": "Observe synthetic manual result 14.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-14",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-15",
+          "display_order": 15,
+          "action": "Observe synthetic manual result 15.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-15",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-16",
+          "display_order": 16,
+          "action": "Observe synthetic manual result 16.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-16",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-17",
+          "display_order": 17,
+          "action": "Observe synthetic manual result 17.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-17",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-18",
+          "display_order": 18,
+          "action": "Observe synthetic manual result 18.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-18",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-19",
+          "display_order": 19,
+          "action": "Observe synthetic manual result 19.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-19",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-20",
+          "display_order": 20,
+          "action": "Observe synthetic manual result 20.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-20",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-21",
+          "display_order": 21,
+          "action": "Observe synthetic manual result 21.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-21",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-22",
+          "display_order": 22,
+          "action": "Observe synthetic manual result 22.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-22",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-23",
+          "display_order": 23,
+          "action": "Observe synthetic manual result 23.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-23",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-24",
+          "display_order": 24,
+          "action": "Observe synthetic manual result 24.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-24",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-25",
+          "display_order": 25,
+          "action": "Observe synthetic manual result 25.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-25",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-26",
+          "display_order": 26,
+          "action": "Observe synthetic manual result 26.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-26",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-27",
+          "display_order": 27,
+          "action": "Observe synthetic manual result 27.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-27",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-28",
+          "display_order": 28,
+          "action": "Observe synthetic manual result 28.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-28",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-29",
+          "display_order": 29,
+          "action": "Observe synthetic manual result 29.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-29",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-30",
+          "display_order": 30,
+          "action": "Observe synthetic manual result 30.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-30",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-31",
+          "display_order": 31,
+          "action": "Observe synthetic manual result 31.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-31",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-32",
+          "display_order": 32,
+          "action": "Observe synthetic manual result 32.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-32",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-33",
+          "display_order": 33,
+          "action": "Observe synthetic manual result 33.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-33",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-34",
+          "display_order": 34,
+          "action": "Observe synthetic manual result 34.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-34",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-35",
+          "display_order": 35,
+          "action": "Observe synthetic manual result 35.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-35",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-36",
+          "display_order": 36,
+          "action": "Observe synthetic manual result 36.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-36",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-37",
+          "display_order": 37,
+          "action": "Observe synthetic manual result 37.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-37",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-38",
+          "display_order": 38,
+          "action": "Observe synthetic manual result 38.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-38",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-39",
+          "display_order": 39,
+          "action": "Observe synthetic manual result 39.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-39",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-40",
+          "display_order": 40,
+          "action": "Observe synthetic manual result 40.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-40",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-41",
+          "display_order": 41,
+          "action": "Observe synthetic manual result 41.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-41",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-42",
+          "display_order": 42,
+          "action": "Observe synthetic manual result 42.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-42",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-43",
+          "display_order": 43,
+          "action": "Observe synthetic manual result 43.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-43",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-44",
+          "display_order": 44,
+          "action": "Observe synthetic manual result 44.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-44",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-45",
+          "display_order": 45,
+          "action": "Observe synthetic manual result 45.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-45",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-46",
+          "display_order": 46,
+          "action": "Observe synthetic manual result 46.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-46",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-47",
+          "display_order": 47,
+          "action": "Observe synthetic manual result 47.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-47",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-48",
+          "display_order": 48,
+          "action": "Observe synthetic manual result 48.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-48",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-49",
+          "display_order": 49,
+          "action": "Observe synthetic manual result 49.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-49",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-50",
+          "display_order": 50,
+          "action": "Observe synthetic manual result 50.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-50",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-51",
+          "display_order": 51,
+          "action": "Observe synthetic manual result 51.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-51",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-52",
+          "display_order": 52,
+          "action": "Observe synthetic manual result 52.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-52",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-53",
+          "display_order": 53,
+          "action": "Observe synthetic manual result 53.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-53",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-54",
+          "display_order": 54,
+          "action": "Observe synthetic manual result 54.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-54",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-55",
+          "display_order": 55,
+          "action": "Observe synthetic manual result 55.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-55",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-56",
+          "display_order": 56,
+          "action": "Observe synthetic manual result 56.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-56",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-57",
+          "display_order": 57,
+          "action": "Observe synthetic manual result 57.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-57",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-58",
+          "display_order": 58,
+          "action": "Observe synthetic manual result 58.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-58",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-59",
+          "display_order": 59,
+          "action": "Observe synthetic manual result 59.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-59",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-60",
+          "display_order": 60,
+          "action": "Observe synthetic manual result 60.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-60",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-61",
+          "display_order": 61,
+          "action": "Observe synthetic manual result 61.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-61",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-62",
+          "display_order": 62,
+          "action": "Observe synthetic manual result 62.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-62",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-63",
+          "display_order": 63,
+          "action": "Observe synthetic manual result 63.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-63",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-64",
+          "display_order": 64,
+          "action": "Observe synthetic manual result 64.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-64",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-65",
+          "display_order": 65,
+          "action": "Observe synthetic manual result 65.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-65",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-66",
+          "display_order": 66,
+          "action": "Observe synthetic manual result 66.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-66",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-67",
+          "display_order": 67,
+          "action": "Observe synthetic manual result 67.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-67",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-68",
+          "display_order": 68,
+          "action": "Observe synthetic manual result 68.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-68",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-69",
+          "display_order": 69,
+          "action": "Observe synthetic manual result 69.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-69",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-70",
+          "display_order": 70,
+          "action": "Observe synthetic manual result 70.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-70",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-71",
+          "display_order": 71,
+          "action": "Observe synthetic manual result 71.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-71",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-72",
+          "display_order": 72,
+          "action": "Observe synthetic manual result 72.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-72",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-73",
+          "display_order": 73,
+          "action": "Observe synthetic manual result 73.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-73",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-74",
+          "display_order": 74,
+          "action": "Observe synthetic manual result 74.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-74",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-75",
+          "display_order": 75,
+          "action": "Observe synthetic manual result 75.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-75",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-76",
+          "display_order": 76,
+          "action": "Observe synthetic manual result 76.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-76",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-77",
+          "display_order": 77,
+          "action": "Observe synthetic manual result 77.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-77",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-78",
+          "display_order": 78,
+          "action": "Observe synthetic manual result 78.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-78",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-79",
+          "display_order": 79,
+          "action": "Observe synthetic manual result 79.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-79",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-80",
+          "display_order": 80,
+          "action": "Observe synthetic manual result 80.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-80",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-81",
+          "display_order": 81,
+          "action": "Observe synthetic manual result 81.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-81",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-82",
+          "display_order": 82,
+          "action": "Observe synthetic manual result 82.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-82",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-83",
+          "display_order": 83,
+          "action": "Observe synthetic manual result 83.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-83",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-84",
+          "display_order": 84,
+          "action": "Observe synthetic manual result 84.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-84",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-85",
+          "display_order": 85,
+          "action": "Observe synthetic manual result 85.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-85",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-86",
+          "display_order": 86,
+          "action": "Observe synthetic manual result 86.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-86",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-87",
+          "display_order": 87,
+          "action": "Observe synthetic manual result 87.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-87",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-88",
+          "display_order": 88,
+          "action": "Observe synthetic manual result 88.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-88",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-89",
+          "display_order": 89,
+          "action": "Observe synthetic manual result 89.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-89",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-90",
+          "display_order": 90,
+          "action": "Observe synthetic manual result 90.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-90",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-91",
+          "display_order": 91,
+          "action": "Observe synthetic manual result 91.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-91",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-92",
+          "display_order": 92,
+          "action": "Observe synthetic manual result 92.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-92",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-93",
+          "display_order": 93,
+          "action": "Observe synthetic manual result 93.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-93",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-94",
+          "display_order": 94,
+          "action": "Observe synthetic manual result 94.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-94",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-95",
+          "display_order": 95,
+          "action": "Observe synthetic manual result 95.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-95",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-96",
+          "display_order": 96,
+          "action": "Observe synthetic manual result 96.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-96",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-97",
+          "display_order": 97,
+          "action": "Observe synthetic manual result 97.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-97",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-98",
+          "display_order": 98,
+          "action": "Observe synthetic manual result 98.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-98",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-99",
+          "display_order": 99,
+          "action": "Observe synthetic manual result 99.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-99",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "step_id": "STEP-manual-100",
+          "display_order": 100,
+          "action": "Observe synthetic manual result 100.",
+          "manual_only": true,
+          "manual_reason": "A physical observation has no available adapter.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "EXP-manual-100",
+              "display_order": 1,
+              "text": "The physical result is visible.",
+              "assertions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

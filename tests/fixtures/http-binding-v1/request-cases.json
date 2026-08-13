@@ -1,0 +1,7681 @@
+{
+  "contract": "http-binding-v1",
+  "corpus_version": "1.0.0",
+  "kind": "request",
+  "value_encodings": {
+    "nan": {
+      "adapter_interpretation": "A literal source value exactly equal to {\"$corpus_value\":\"nan\"} becomes IEEE-754 NaN immediately before request construction."
+    },
+    "positive_infinity": {
+      "adapter_interpretation": "A literal source value exactly equal to {\"$corpus_value\":\"positive_infinity\"} becomes IEEE-754 positive infinity immediately before request construction."
+    },
+    "negative_infinity": {
+      "adapter_interpretation": "A literal source value exactly equal to {\"$corpus_value\":\"negative_infinity\"} becomes IEEE-754 negative infinity immediately before request construction."
+    }
+  },
+  "cases": [
+    {
+      "case_id": "legacy-1-all-targets",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/v1/{account}/items/{account}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "account",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a/b %?"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "query",
+            "name": "z name",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": true
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "boolean"
+          }
+        },
+        {
+          "input_id": "INPUT-3",
+          "display_order": 3,
+          "target": {
+            "location": "query",
+            "name": "count",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-4",
+          "display_order": 4,
+          "target": {
+            "location": "header",
+            "name": "x-trace",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "one two"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-5",
+          "display_order": 5,
+          "target": {
+            "location": "body",
+            "pointer": "/items/0",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "a/b": "~value"
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "object"
+          }
+        },
+        {
+          "input_id": "INPUT-6",
+          "display_order": 6,
+          "target": {
+            "location": "body",
+            "pointer": "/items/name~1with~0escape",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": null
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "null"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test:8443"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test:8443/v1/a%2Fb%20%25%3F/items/a%2Fb%20%25%3F?z%20name=true&count=2",
+          "ordered_headers": [
+            [
+              "x-trace",
+              "one two"
+            ],
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"items\":{\"0\":{\"a/b\":\"~value\"},\"name/with~escape\":null}}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "legacy-2-no-body",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/fixed/%2F"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x-a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "v"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "http://127.0.0.1:80"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "http://127.0.0.1:80/fixed/%2F",
+          "ordered_headers": [
+            [
+              "x-a",
+              "v"
+            ],
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "legacy-3-root-array",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "PUT",
+        "path": "/arrays"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": [
+              true,
+              null,
+              "x"
+            ]
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "array"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "PUT",
+          "absolute_url": "https://api.example.test/arrays",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "[true,null,\"x\"]"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "legacy-4-origin-not-trimmed",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": " https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "legacy-5-dot",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{p}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "p",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "."
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_VALUE",
+        "path": "/inputs/0",
+        "message": "Rendered path must not contain dot segments.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "legacy-6-reserved",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "host",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r18-missing-profile",
+      "operation": {
+        "kind": "http",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_OPERATION_SHAPE",
+        "path": "/operation",
+        "message": "Operation must be the exact canonical HTTP object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r19-extra-operation",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x",
+        "extra": true
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_OPERATION_SHAPE",
+        "path": "/operation",
+        "message": "Operation must be the exact canonical HTTP object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r20-base-no-provenance",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base"
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL_SOURCE",
+        "path": "/base_url_source",
+        "message": "base_url_source must be the exact canonical object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r21-input-no-sensitive",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q"
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_INPUT_SHAPE",
+        "path": "/inputs/0",
+        "message": "Input must be an exact canonical object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r22-input-extra",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          },
+          "extra": true
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_INPUT_SHAPE",
+        "path": "/inputs/0",
+        "message": "Input must be an exact canonical object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r23-input-order",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 2,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_INPUT_SHAPE",
+        "path": "/inputs/0",
+        "message": "Input must be an exact canonical object.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r24-base-missing",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "PREFLIGHT_PROVIDER_MISSING",
+        "path": "/base_url_source/name",
+        "message": "Required provider value is missing.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r25-step-output",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{id}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "id",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "step_output",
+            "step_id": "STEP-prior",
+            "output_id": "id"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [
+        {
+          "step_id": "STEP-prior",
+          "output_id": "id",
+          "state": "VALUE",
+          "value": "ok"
+        }
+      ],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/ok",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r26-raw-response-not-request-alias",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r27-https",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r28-http",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "http://a"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "http://a/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r29-label63",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r30-host253",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r31-ipv4",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "http://0.0.0.0"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "http://0.0.0.0/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r32-ipv4max",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://255.255.255.255"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://255.255.255.255/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r33-port1",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test:1"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test:1/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r33-port65535",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test:65535"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test:65535/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r34-uppercase-scheme",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "HTTPS://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r35-uppercase-host",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://API.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r36-slash",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test/"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r36-path",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test/a"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r36-query",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test?q"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r36-fragment",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test#x"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r37-userinfo",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://u@api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r38-ipv6",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://[::1]"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r39-empty-host",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://:1"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r40-dot",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a."
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r40-empty-label",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a..b"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r41-leading-hyphen",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://-a"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r41-trailing-hyphen",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a-"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r42-label64",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r43-host254",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL DNS host is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r44-leading-zero",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://01.2.3.4"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r44-octet256",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://256.2.3.4"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r44-octet999",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://1.2.3.999"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-port0",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:0"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-port65536",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:65536"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-port01",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:01"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-portempty",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-portsigned",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:+1"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r45-portlong",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a:500000"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL host or port is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r46-leading-space",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": " https://a"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r46-trailing-space",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://a "
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r46-nonascii",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://é.a"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_BASE_URL",
+        "path": "/base_url_source/name",
+        "message": "Base URL must be an exact ASCII origin.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r47-unicode",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{p}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "p",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "é😀/%?# "
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/%C3%A9%F0%9F%98%80%2F%25%3F%23%20",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r48-repeated",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{p}/{p}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "p",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "v"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/v/v",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r49-pchar",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/a-._~!$&'()*+,;=:@/%2F"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/a-._~!$&'()*+,;=:@/%2F",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r50-low",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/%2f"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path contains an invalid literal character.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r50-short",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/%2"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path contains an invalid literal character.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r50-bare",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/%"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path contains an invalid literal character.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r50-gg",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/%GG"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path contains an invalid literal character.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-leading",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-query",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x?q"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-fragment",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x#q"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-space",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x y"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-tab",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x\ty"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-slash",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x\\y"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r51-unicode",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/é"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path template is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r52-unclosed",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path placeholder is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r52-close",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x}"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path placeholder is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r52-empty",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{}"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path placeholder is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r52-bad",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{0}"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Path placeholder is invalid.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r53-dot",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/."
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Literal dot path segments are forbidden.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r53-dotdot",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/.."
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_TEMPLATE",
+        "path": "/path",
+        "message": "Literal dot path segments are forbidden.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r54-missing",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{id}"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_BINDINGS",
+        "path": "/path",
+        "message": "Path placeholders must exactly match path input names.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r54-extra",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "id",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_BINDINGS",
+        "path": "/path",
+        "message": "Path placeholders must exactly match path input names.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r55-duplicate",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{id}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "id",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "path",
+            "name": "id",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "b"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "DUPLICATE_TARGET",
+        "path": "/inputs/1",
+        "message": "Input target is duplicated.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r56-dotdot",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/{id}"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "path",
+            "name": "id",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": ".."
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_PATH_VALUE",
+        "path": "/inputs/0",
+        "message": "Rendered path must not contain dot segments.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r57-scalars",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "n",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": null
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "null"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "query",
+            "name": "f",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": false
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "boolean"
+          }
+        },
+        {
+          "input_id": "INPUT-3",
+          "display_order": 3,
+          "target": {
+            "location": "query",
+            "name": "t",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": true
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "boolean"
+          }
+        },
+        {
+          "input_id": "INPUT-4",
+          "display_order": 4,
+          "target": {
+            "location": "query",
+            "name": "i",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": -2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-5",
+          "display_order": 5,
+          "target": {
+            "location": "query",
+            "name": "d",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1.5
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "number"
+          }
+        },
+        {
+          "input_id": "INPUT-6",
+          "display_order": 6,
+          "target": {
+            "location": "query",
+            "name": "e",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 100000000000000000000
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-7",
+          "display_order": 7,
+          "target": {
+            "location": "query",
+            "name": "u",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "é😀"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x?n=null&f=false&t=true&i=-2&d=1.5&e=100000000000000000000&u=%C3%A9%F0%9F%98%80",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r58-unicode-name",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "ключ name",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x y"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x?%D0%BA%D0%BB%D1%8E%D1%87%20name=x%20y",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r59-empty",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": ""
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x?q=",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r60-duplicate",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "b"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "DUPLICATE_TARGET",
+        "path": "/inputs/1",
+        "message": "Input target is duplicated.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r61-array",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": []
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "array"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "RUNTIME_TYPE_MISMATCH",
+        "path": "/inputs/0/source",
+        "message": "query target requires a JSON scalar value.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r61-object",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {}
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "object"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "RUNTIME_TYPE_MISMATCH",
+        "path": "/inputs/0/source",
+        "message": "query target requires a JSON scalar value.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r62-bool-integer",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": true
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "RUNTIME_TYPE_MISMATCH",
+        "path": "/inputs/0/source",
+        "message": "Resolved value does not match semantic_type.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r63-nan",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "$corpus_value": "nan"
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "number"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_VALUE",
+        "path": "/inputs/0/source/value",
+        "message": "JSON number must be finite.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r63-positive_infinity",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "$corpus_value": "positive_infinity"
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "number"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_VALUE",
+        "path": "/inputs/0/source/value",
+        "message": "JSON number must be finite.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r63-negative_infinity",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "query",
+            "name": "q",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "$corpus_value": "negative_infinity"
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "number"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_VALUE",
+        "path": "/inputs/0/source/value",
+        "message": "JSON number must be finite.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r64-no-query",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r65-tchar",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "!#$%&'*+.^_`|~0a-z-",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a b"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "!#$%&'*+.^_`|~0a-z-",
+              "a b"
+            ],
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r66-order",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x-z",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "z"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "header",
+            "name": "x-a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "x-z",
+              "z"
+            ],
+            [
+              "x-a",
+              "a"
+            ],
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r67-host",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "host",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r68-content-length",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "content-length",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r69-transfer-encoding",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "transfer-encoding",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r70-connection",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "connection",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r71-content-type",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "content-type",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r72-accept-encoding",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "accept-encoding",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r73-user-agent",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "user-agent",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r74-upper",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "X-a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r75-empty",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0,
+        "provider_calls": []
+      }
+    },
+    {
+      "case_id": "r75-space",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x y",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r75-colon",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x:y",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r75-unicode",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x-é",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_NAME",
+        "path": "/inputs/0/target/name",
+        "message": "Header name must be lowercase, non-reserved RFC 9110 tchar.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r76-cr",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a\rb"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r77-lf",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a\nb"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r78-tab",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a\tb"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r79-nul",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a\u0000b"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r80-del",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "ab"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r81-leading",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": " x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r81-trailing",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x "
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r82-unicode",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "é"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_HEADER_VALUE",
+        "path": "/inputs/0/source",
+        "message": "Header value must be ASCII without controls or outer space.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r83-duplicate",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "a"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "header",
+            "name": "x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "b"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "DUPLICATE_TARGET",
+        "path": "/inputs/1",
+        "message": "Input target is duplicated.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r84-body-content-type",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"a\":1}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r84-no-body-content-type-absent",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "GET",
+          "absolute_url": "https://api.example.test/x",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ]
+          ],
+          "body_bytes": null
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r85-null",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": null
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "null"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "null"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r86-true",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": true
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "boolean"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "true"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r87-number",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1.5
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "number"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "1.5"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r88-unicode",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "é"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "\"é\""
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r89-object",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "z": 1,
+              "a": 2
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "object"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"a\":2,\"z\":1}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r94-array",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": [
+              1,
+              2
+            ]
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "array"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "[1,2]"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r90-zero-key",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/0",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "x"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"0\":\"x\"}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r91-prefix",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a/b",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "body",
+            "pointer": "/a/c",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"a\":{\"b\":1,\"c\":2}}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r92-escapes",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a~1b/~0x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": true
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "boolean"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"a/b\":{\"~x\":true}}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r93-empty-key",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "v"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"\":\"v\"}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r94-array-leaf",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/items",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": [
+              1,
+              2
+            ]
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "array"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"items\":[1,2]}"
+          }
+        },
+        "transport_calls": 1
+      }
+    },
+    {
+      "case_id": "r95-root-overlap",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "OVERLAPPING_BODY_POINTER",
+        "path": "/inputs/1/target/pointer",
+        "message": "Body pointers may not overlap.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r96-equal",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "OVERLAPPING_BODY_POINTER",
+        "path": "/inputs/1/target/pointer",
+        "message": "Body pointers may not overlap.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r97-ancestor",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "body",
+            "pointer": "/a/b",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "OVERLAPPING_BODY_POINTER",
+        "path": "/inputs/1/target/pointer",
+        "message": "Body pointers may not overlap.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r97-descendant",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a/b",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        },
+        {
+          "input_id": "INPUT-2",
+          "display_order": 2,
+          "target": {
+            "location": "body",
+            "pointer": "/a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 2
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "OVERLAPPING_BODY_POINTER",
+        "path": "/inputs/1/target/pointer",
+        "message": "Body pointers may not overlap.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r98-no-slash",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "a",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_POINTER",
+        "path": "/inputs/0/target/pointer",
+        "message": "JSON Pointer must be root or start with '/'.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r99-bad",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a~2",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_POINTER",
+        "path": "/inputs/0/target/pointer",
+        "message": "JSON Pointer has an invalid escape.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r99-trailing",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/a~",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": 1
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "integer"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_POINTER",
+        "path": "/inputs/0/target/pointer",
+        "message": "JSON Pointer has an invalid escape.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r100-string",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "\ud800"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_VALUE",
+        "path": "/inputs/0/source/value",
+        "message": "String contains an unpaired surrogate.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r100-object",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "GET",
+        "path": "/x"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": {
+              "\ud800": "x"
+            }
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "object"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "error",
+        "code": "INVALID_JSON_VALUE",
+        "path": "/inputs/0/source/value",
+        "message": "String contains an unpaired surrogate.",
+        "transport_calls": 0
+      }
+    },
+    {
+      "case_id": "r101-utf8-no-bom-lf",
+      "operation": {
+        "kind": "http",
+        "binding_profile": "http-binding-v1",
+        "base_url_source": {
+          "kind": "environment",
+          "name": "base",
+          "provenance": [
+            "fixture:API_BASE_URL"
+          ]
+        },
+        "method": "POST",
+        "path": "/b"
+      },
+      "inputs": [
+        {
+          "input_id": "INPUT-1",
+          "display_order": 1,
+          "target": {
+            "location": "body",
+            "pointer": "/x",
+            "sensitive": false
+          },
+          "source": {
+            "kind": "literal",
+            "value": "é"
+          },
+          "semantic_type": {
+            "kind": "json",
+            "type": "string"
+          }
+        }
+      ],
+      "providers": [
+        {
+          "kind": "environment",
+          "key": "base",
+          "state": "VALUE",
+          "value": "https://api.example.test"
+        }
+      ],
+      "step_outputs": [],
+      "timeout_seconds": 1,
+      "transport": {
+        "outcome": "response",
+        "response": {
+          "status": 200,
+          "ordered_headers": [],
+          "body_bytes": null
+        }
+      },
+      "expected": {
+        "kind": "request",
+        "request": {
+          "method": "POST",
+          "absolute_url": "https://api.example.test/b",
+          "ordered_headers": [
+            [
+              "accept-encoding",
+              "identity"
+            ],
+            [
+              "user-agent",
+              "test-skills-http-binding-v1"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body_bytes": {
+            "encoding": "utf8",
+            "data": "{\"x\":\"é\"}"
+          }
+        },
+        "transport_calls": 1
+      }
+    }
+  ]
+}

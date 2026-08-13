@@ -1,0 +1,52 @@
+{
+  "schema_version": "3.0.0",
+  "stage": "tc-to-autotest",
+  "artifacts": {
+    "automation_status": "GENERATED",
+    "source": {
+      "document_id": "TCDOC-semantic-fixture",
+      "revision": 1,
+      "source_digest": "sha256:3f9060ca234b81ff18449a4ed327c62174a02597d0cd4152af49c1e4b0c63891"
+    },
+    "generated_files": [
+      {
+        "file_id": "FILE-orders",
+        "path": "tests/test_orders.py",
+        "language": "python",
+        "framework": "pytest",
+        "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "generated_symbols": [
+      {
+        "file_id": "FILE-orders",
+        "symbol_id": "SYMBOL-get-order",
+        "locator": {
+          "kind": "python_module_function",
+          "function_name": "test_get_order"
+        }
+      }
+    ],
+    "implementation_relations": [
+      {
+        "kind": "operation",
+        "case_id": "TC-semantic-fixture",
+        "step_id": "STEP-1",
+        "file_id": "FILE-orders",
+        "symbol_id": "SYMBOL-get-order"
+      },
+      {
+        "kind": "assertion",
+        "case_id": "TC-semantic-fixture",
+        "step_id": "STEP-1",
+        "expectation_id": "EXP-1",
+        "assertion_id": "ASSERT-1",
+        "file_id": "FILE-orders",
+        "symbol_id": "SYMBOL-get-order"
+      }
+    ],
+    "manual_dispositions": [],
+    "diagnostics": []
+  },
+  "warnings": []
+}

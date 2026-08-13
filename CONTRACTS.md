@@ -9,16 +9,19 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `raw_content` | Unstructured supplied requirements or code context. |
 | `analytics_documentation` | Normalized requirements with provenance. |
 | `source_code_and_diff` | Read-only project context and supplied changes. |
-| `generated_test_cases` | Manual test cases derived from requirements. |
-| `validation_report` | Review result for manual test cases. |
-| `corrected_test_cases` | Safe corrected manual test cases. |
-| `automation_matrix` | Mapping from accepted cases to generated tests. |
-| `generated_test_files` | Project-native generated test source files. |
-| `generated_test_methods` | Traceable generated test methods. |
-| `autotest_review` | Review result for generated automated tests. |
-| `run_tests_verdict` | Deterministic execution evidence. |
-| `execution_evidence` | Execution evidence for every generated test method. |
-| `trace_audit` | Requirement-to-execution traceability evidence. |
+| `candidate_document` | Candidate bare canonical test document. |
+| `candidate_bundle_receipt` | Immutable candidate JSON, Markdown, and CSV receipt. |
+| `validation_report` | Reviewed candidate validation report. |
+| `successor_document` | Optional full reviewed successor canonical document. |
+| `successor_bundle_receipt` | Optional immutable successor bundle receipt. |
+| `effective_document` | One selected bare canonical document. |
+| `effective_bundle_receipt` | One selected immutable bundle receipt. |
+| `automation_artifact` | Atomic generated automation relations. |
+| `autotest_review` | Automated-test review result. |
+| `run_result` | Optional V3 execution result. |
+| `trace_document` | Atomic trace document. |
+| `trace_audit` | Trace validation result. |
+| `orchestrator_output` | Closed final orchestration artifact. |
 
 ## Canonical skill files
 
@@ -31,26 +34,31 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `autotest-reviewer` | `skills/autotest-reviewer/SKILL.md` |
 | `orchestrate` | `skills/orchestrate/SKILL.md` |
 
-## Review verdict branches
+## Verdict enums
 
-| Reviewer | Verdict | Transform |
+| Verdict type | Values |
+|---|---|
+| `review` | `ПРИНЯТО`, `AUTO_FIX_APPLIED`, `ТРЕБУЕТ ДОРАБОТКИ` |
+| `execution` | `PASS`, `FAIL`, `NOT_RUNNABLE` |
+| `trace` | `PASS`, `FAIL` |
+
+## Transitions
+
+| From | Predicates | Transform |
 |---|---|---|
-| `tc-reviewer` | `ПРИНЯТО` | `continue_with_original` |
-| `tc-reviewer` | `AUTO_FIX_APPLIED` | `continue_with_corrected` |
-| `tc-reviewer` | `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
-| `autotest-reviewer` | `ПРИНЯТО` | `continue_with_original` |
-| `autotest-reviewer` | `AUTO_FIX_APPLIED` | `continue_with_corrected` |
-| `autotest-reviewer` | `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
-
-## Execution and trace verdict branches
-
-| Stage | Execution verdict | Trace verdict | Transform |
-|---|---|---|---|
-| `run-tests` | `PASS` |  | `continue_trace_audit` |
-| `run-tests` | `FAIL` |  | `stop_failed` |
-| `run-tests` | `NOT_RUNNABLE` |  | `stop_not_runnable` |
-| `trace-check` | `PASS` | `PASS` | `complete` |
-| `trace-check` | `PASS` | `FAIL` | `stop_trace_failed` |
+| `tc-reviewer` | `review_verdict` = `ПРИНЯТО` | `revision_orchestrator_selects_candidate` |
+| `tc-reviewer` | `review_verdict` = `AUTO_FIX_APPLIED` | `revision_orchestrator_validates_publishes_selects_successor` |
+| `tc-reviewer` | `review_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
+| `autotest-reviewer` | `review_verdict` = `ПРИНЯТО`, `automation_status` = `BLOCKED` | `build_trace_without_run` |
+| `autotest-reviewer` | `review_verdict` = `ПРИНЯТО`, `required_symbol_pairs` = `0` | `build_trace_without_run` |
+| `autotest-reviewer` | `review_verdict` = `ПРИНЯТО`, `required_symbol_pairs` = `one_or_more` | `run_tests` |
+| `autotest-reviewer` | `review_verdict` = `AUTO_FIX_APPLIED` | `regenerate_automation_and_review_again` |
+| `autotest-reviewer` | `review_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |
+| `run-tests` | `execution_verdict` = `PASS` | `build_trace_then_trace_check` |
+| `run-tests` | `execution_verdict` = `FAIL` | `build_trace_then_trace_check` |
+| `run-tests` | `execution_verdict` = `NOT_RUNNABLE` | `build_trace_then_trace_check` |
+| `trace-check` | `trace_verdict` = `PASS` | `finalize_orchestration` |
+| `trace-check` | `trace_verdict` = `FAIL` | `stop_invalid_trace` |
 
 ## Language capabilities
 
@@ -68,4 +76,4 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 ## Traceability
 
-`requirement` → `test_case` → `generated_file` → `generated_method` → `execution_evidence`
+requirement -> case -> step -> expectation -> assertion -> file -> symbol -> current_run_evidence
