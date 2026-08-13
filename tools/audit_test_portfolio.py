@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
 
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import StrictJsonError, load_json_strict
-from tools.test_classification import TestClassificationError, select_effective_technical_evidence
+from tools.test_classification import SuppliedInput, TestClassificationError, load_validated_behavior_context, select_effective_technical_evidence
 
 
 _SCOPES = ("unit", "integration", "e2e", "unknown")
@@ -70,19 +70,23 @@ def _write_create_only(output: Path, summary: Mapping[str, Any]) -> None:
         raise AuditError("AUDIT_OUTPUT", "/output", "Audit output could not be created.") from error
 
 
-def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], context: Mapping[str, Any], receipt: Mapping[str, Any], skillsrc: Path, canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
+def _supplied_inputs(values: Sequence[str]) -> tuple[SuppliedInput, ...]:
+    rows: list[SuppliedInput] = []
+    for value in values:
+        if "=" not in value:
+            raise AuditError("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied input must use SOURCE_ID=PATH.")
+        source_id, path = value.split("=", 1)
+        try:
+            rows.append(SuppliedInput(source_id, Path(path).read_bytes()))
+        except OSError as error:
+            raise AuditError("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied input file could not be read.") from error
+    return tuple(rows)
+
+
+def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], validated: Any, canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
     inventory_artifacts = inventory.get("artifacts")
-    context_artifacts = context.get("artifacts")
-    if not isinstance(inventory_artifacts, Mapping) or not isinstance(context_artifacts, Mapping):
+    if not isinstance(inventory_artifacts, Mapping):
         raise AuditError("AUDIT_INPUT", "/artifacts", "Audit artifacts must use their expected envelopes.")
-    if not isinstance(context_artifacts.get("managed_behavior_context"), Mapping):
-        raise AuditError("AUDIT_INPUT", "/artifacts", "Audit artifacts must provide the managed behavior context and source inventory.")
-    # Use the one public V5 seam; direct callers cannot select raw requirements.
-    # The CLI has already loaded strict values, so validate the seam's logic directly.
-    from tools.behavior_context_planning import validate_context_envelope
-    from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc, resolve_module_root, select_module
-    normalized = normalize_skillsrc(load_skillsrc(skillsrc)); module = dict(select_module(normalized, receipt["selected_module"])); module["_resolved_root"] = resolve_module_root(project.resolve(), module)
-    validated = validate_context_envelope(context, receipt, inventory_artifacts["authorized_behavior_sources"], inventory_artifacts["technical_test_inventory"], project, module)
     selected = select_effective_technical_evidence(inventory, classification, review, validated, project)
 
     canonical_diagnostics = validate_canonical_document(dict(canonical))
@@ -118,6 +122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase1.add_argument("--context", required=True)
     phase1.add_argument("--receipt", required=True)
     phase1.add_argument("--skillsrc", required=True)
+    phase1.add_argument("--module")
+    phase1.add_argument("--supplied-input", action="append", default=[])
     phase1.add_argument("--canonical-document", required=True)
     phase1.add_argument("--output", required=True)
     try:
@@ -127,13 +133,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         output = Path(args.output)
         if output.exists():
             raise AuditError("AUDIT_OUTPUT_EXISTS", "/output", "Output path already exists.")
+        inventory = _load(Path(args.inventory), "/inventory")
+        validated = load_validated_behavior_context(
+            Path(args.context), Path(args.receipt), inventory, Path(args.project), Path(args.skillsrc), args.module, _supplied_inputs(args.supplied_input),
+        )
         summary = _summary(
-            _load(Path(args.inventory), "/inventory"),
+            inventory,
             _load(Path(args.classification), "/classification"),
             _load(Path(args.review), "/review"),
-            _load(Path(args.context), "/context"),
-            _load(Path(args.receipt), "/receipt"),
-            Path(args.skillsrc),
+            validated,
             _load(Path(args.canonical_document), "/canonical-document"),
             Path(args.project),
         )

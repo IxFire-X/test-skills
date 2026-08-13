@@ -359,16 +359,18 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _parse_supplied(values: Sequence[str]) -> tuple[SuppliedInput, ...]:
+def _parse_supplied(values: Sequence[str], *, behavior_context: bool = False) -> tuple[SuppliedInput, ...]:
     parsed: list[SuppliedInput] = []
     for value in values:
         if "=" not in value:
-            raise _error("INVENTORY_ARGUMENT", "/supplied-input", "Supplied input must use SOURCE_ID=PATH.")
+            code = "BEHAVIOR_SUPPLIED_INPUT" if behavior_context else "INVENTORY_ARGUMENT"
+            raise _error(code, "/supplied-input", "Supplied input must use SOURCE_ID=PATH.")
         source_id, path = value.split("=", 1)
         try:
             parsed.append(SuppliedInput(source_id, Path(path).read_bytes()))
         except OSError as error:
-            raise _error("INVENTORY_READ_ERROR", "/supplied-input", "Supplied input file could not be read.") from error
+            code = "BEHAVIOR_SUPPLIED_INPUT" if behavior_context else "INVENTORY_READ_ERROR"
+            raise _error(code, "/supplied-input", "Supplied input file could not be read.") from error
     return tuple(parsed)
 
 
@@ -648,7 +650,7 @@ def validate_managed_behavior_context(behavior_context: Mapping[str, Any], autho
     return ()
 
 
-def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: Mapping[str, Any], project_root: Path, skillsrc_path: Path):
+def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: Mapping[str, Any], project_root: Path, skillsrc_path: Path, module_id: str | None = None, supplied_inputs: Sequence[SuppliedInput] = ()):
     """Public V5-only context seam shared by validation, selection, and audits."""
     try:
         context = load_json_strict(path)
@@ -661,21 +663,26 @@ def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: M
     if shape:
         raise TestClassificationError(shape)
     artifacts = inventory.get("artifacts")
-    if not isinstance(artifacts, Mapping):
+    if not isinstance(artifacts, Mapping) or not isinstance(artifacts.get("authorized_behavior_sources"), Mapping) or not isinstance(artifacts.get("technical_test_inventory"), Mapping):
         raise _error("BEHAVIOR_ACCOUNTING_SHAPE", "/inventory", "Inventory must provide source artifacts.")
     try:
-        from tools.behavior_context_planning import validate_context_envelope
+        from tools.behavior_context_planning import _validate_context_envelope
     except ImportError:
-        from behavior_context_planning import validate_context_envelope
+        from behavior_context_planning import _validate_context_envelope
     if skillsrc_path is None:
         raise _error("BEHAVIOR_RECEIPT", "/module", "Validated behavior context requires explicit skillsrc evidence.")
     try:
         normalized = normalize_skillsrc(load_skillsrc(skillsrc_path))
-        module = dict(select_module(normalized, receipt["selected_module"]))
+        module = dict(select_module(normalized, module_id))
         module["_resolved_root"] = resolve_module_root(project_root.resolve(), module)
-    except (SkillsrcError, KeyError, TypeError) as error:
+    except (SkillsrcError, TypeError) as error:
         raise _error("BEHAVIOR_RECEIPT", "/module", "Receipt module could not be selected from normalized skillsrc.") from error
-    return validate_context_envelope(context, receipt, artifacts["authorized_behavior_sources"], artifacts["technical_test_inventory"], project_root, module)
+    if any(not isinstance(row, SuppliedInput) or not isinstance(row.source_id, str) or not isinstance(row.content, bytes) for row in supplied_inputs):
+        raise _error("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied inputs must use immutable source-ID and byte rows.")
+    supplied_map = {row.source_id: row.content for row in supplied_inputs}
+    if len(supplied_map) != len(supplied_inputs):
+        raise _error("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied source IDs must be unique.")
+    return _validate_context_envelope(context, receipt, artifacts["authorized_behavior_sources"], artifacts["technical_test_inventory"], project_root, module, supplied_map)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -695,6 +702,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     select.add_argument("--context", required=True)
     select.add_argument("--receipt", required=True)
     select.add_argument("--skillsrc", required=True)
+    select.add_argument("--module")
+    select.add_argument("--supplied-input", action="append", default=[])
     select.add_argument("--output")
     validate_context = commands.add_parser("validate-context")
     validate_context.add_argument("--project", required=True)
@@ -702,6 +711,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     validate_context.add_argument("--context", required=True)
     validate_context.add_argument("--receipt", required=True)
     validate_context.add_argument("--skillsrc", required=True)
+    validate_context.add_argument("--module")
+    validate_context.add_argument("--supplied-input", action="append", default=[])
     plan = commands.add_parser("context-plan")
     plan.add_argument("--project", required=True); plan.add_argument("--skillsrc", required=True); plan.add_argument("--module"); plan.add_argument("--inventory", required=True); plan.add_argument("--supplied-input", action="append", default=[]); plan.add_argument("--output", required=True)
     receipt = commands.add_parser("context-receipt")
@@ -721,7 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 input_review = load_json_strict(Path(args.review))
             except (OSError, StrictJsonError) as error:
                 raise _error("CLASSIFICATION_INPUT", "/input", "Classification input artifact could not be read as strict JSON.") from error
-            validated = load_validated_behavior_context(Path(args.context), Path(args.receipt), input_inventory, Path(args.project), Path(args.skillsrc))
+            validated = load_validated_behavior_context(Path(args.context), Path(args.receipt), input_inventory, Path(args.project), Path(args.skillsrc), args.module, _parse_supplied(args.supplied_input, behavior_context=True))
             result = select_effective_technical_evidence(input_inventory, input_classification, input_review, validated, Path(args.project))
         elif args.command == "validate-context":
             try:
@@ -731,7 +742,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             shape = _stage_shape(input_inventory, "source-inventory-output.schema.json", "BEHAVIOR_INVENTORY")
             if shape:
                 raise TestClassificationError(shape)
-            load_validated_behavior_context(Path(args.context), Path(args.receipt), input_inventory, Path(args.project), Path(args.skillsrc))
+            load_validated_behavior_context(Path(args.context), Path(args.receipt), input_inventory, Path(args.project), Path(args.skillsrc), args.module, _parse_supplied(args.supplied_input, behavior_context=True))
             result = {"status": "valid", "diagnostics": []}
         elif args.command in {"context-plan", "context-receipt"}:
             try:
@@ -745,7 +756,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             normalized = normalize_skillsrc(load_skillsrc(Path(args.skillsrc)))
             module = dict(select_module(normalized, args.module))
             module["_resolved_root"] = resolve_module_root(Path(args.project).resolve(), module)
-            supplied = _parse_supplied(args.supplied_input)
+            supplied = _parse_supplied(args.supplied_input, behavior_context=True)
             supplied_map = {row.source_id: row.content for row in supplied}
             if len(supplied_map) != len(supplied): raise _error("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied source IDs must be unique.")
             if args.command == "context-plan":

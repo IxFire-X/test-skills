@@ -11,7 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tools.behavior_context_planning import build_context_plan, build_context_receipt, stable_fragment_id, validate_batch_result, validate_context_envelope
+import tools.behavior_context_planning as behavior_context_planning
+from tools.behavior_context_planning import build_context_plan, build_context_receipt, stable_fragment_id, validate_batch_result
 from tools.schema_validation import load_json_strict
 from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc, select_module
 from tools.test_classification import SuppliedInput, _digest, _plain, build_source_inventories, load_validated_behavior_context
@@ -32,14 +33,13 @@ class BehaviorSourceAccountingV5RedMatrix(unittest.TestCase):
             build_context_plan,
             build_context_receipt,
             validate_batch_result,
-            validate_context_envelope,
         )
 
         self.assertTrue(ValidatedBehaviorContext)
         self.assertTrue(build_context_plan)
         self.assertTrue(build_context_receipt)
         self.assertTrue(validate_batch_result)
-        self.assertTrue(validate_context_envelope)
+        self.assertFalse(hasattr(behavior_context_planning, "validate_context_envelope"))
 
 class PlannerReceiptV5Tests(unittest.TestCase):
     def setUp(self) -> None:
@@ -51,14 +51,160 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         self.module = dict(select_module(normalize_skillsrc(load_skillsrc(PROJECT / ".skillsrc")), None))
         self.plan = build_context_plan(PROJECT, self.module, self.inventory, self.supplied)
 
+    def load_public(self, context: dict | None = None, receipt: dict | None = None):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            context_path = temporary / "context.json"
+            receipt_path = temporary / "receipt.json"
+            context_path.write_text(json.dumps(self.context if context is None else context), encoding="utf-8")
+            receipt_path.write_text(json.dumps(self.receipt if receipt is None else receipt), encoding="utf-8")
+            return load_validated_behavior_context(
+                context_path, receipt_path, self.inventory, PROJECT, PROJECT / ".skillsrc",
+                supplied_inputs=(SuppliedInput("REQ-synthetic", self.supplied["REQ-synthetic"]),),
+            )
+
     def result_rows(self) -> list[dict]:
+        return self.results_for_plan(self.plan)
+
+    @staticmethod
+    def results_for_plan(plan: dict) -> list[dict]:
         rows = []
-        for index, batch in enumerate(self.plan["batches"], 1):
+        for batch in plan["batches"]:
             item = batch["items"][0]; start, end = item["accounted_range"]["start"], item["accounted_range"]["end"]
             fragment = {"actor":"user","operation":"observe","conditions":[],"outcomes":["result"],"anchor_byte":start,"evidence_ranges":[{"start":start,"end":end}]}
             fragment["fragment_id"] = stable_fragment_id(item, fragment)
-            rows.append({"schema_version":"1.0.0","plan_sha256":_digest(_plain(self.plan)),"batch_id":batch["batch_id"],"items":[{"item_id":item["item_id"],"outcome":"behavior_fragments","behavior_fragments":[fragment]}]})
+            rows.append({"schema_version":"1.0.0","plan_sha256":_digest(_plain(plan)),"batch_id":batch["batch_id"],"items":[{"item_id":item["item_id"],"outcome":"behavior_fragments","behavior_fragments":[fragment]}]})
         return rows
+
+    def test_over_budget_supplied_receipt_binds_real_plan_and_public_loader_revalidates_input(self) -> None:
+        """The receipt/load round trip must retain every real supplied-source range."""
+        payload = b"x" * 70000
+        inventory = copy.deepcopy(self.inventory)
+        authorized = inventory["artifacts"]["authorized_behavior_sources"]
+        authorized["sources"] = [{
+            "source_id": "REQ-synthetic",
+            "kind": "supplied_requirement",
+            "content_digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }]
+        inventory["artifacts"]["authorized_behavior_sources_sha256"] = _digest(authorized)
+        supplied = {"REQ-synthetic": payload}
+        plan = build_context_plan(PROJECT, self.module, inventory, supplied)
+        self.assertEqual(2, len(plan["batches"]))
+        receipt = _plain(build_context_receipt(PROJECT, self.module, inventory, plan, self.results_for_plan(plan), supplied))
+        self.assertEqual(_digest(_plain(plan)), receipt["context_plan_sha256"])
+
+        context = copy.deepcopy(self.context)
+        managed = context["artifacts"]["managed_behavior_context"]
+        managed["authorized_behavior_sources_sha256"] = _digest(authorized)
+        managed["product_sources"] = []
+        for row in managed["requirement_sources"]:
+            row["source_ids"] = ["REQ-synthetic"]
+        accounting = context["artifacts"]["behavior_source_accounting"]
+        accounting["authorized_behavior_sources_sha256"] = _digest(authorized)
+        accounting["context_receipt_sha256"] = _digest(receipt)
+        accounting["source_dispositions"] = accounting["source_dispositions"][:1]
+        accounting["behavior_fragment_groups"][0]["fragment_ids"] = [row["fragment_id"] for row in receipt["fragment_registry"]]
+
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            context_path = temporary / "context.json"
+            receipt_path = temporary / "receipt.json"
+            inventory_path = temporary / "inventory.json"
+            plan_path = temporary / "plan.json"
+            supplied_path = temporary / "controller-only-requirement.txt"
+            cli_receipt_path = temporary / "cli-receipt.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+            plan_path.write_text(json.dumps(_plain(plan)), encoding="utf-8")
+            supplied_path.write_bytes(payload)
+            command = [
+                sys.executable, str(ROOT / "tools" / "test_classification.py"), "context-receipt",
+                "--project", str(PROJECT), "--skillsrc", str(PROJECT / ".skillsrc"),
+                "--inventory", str(inventory_path), "--plan", str(plan_path),
+                "--supplied-input", f"REQ-synthetic={supplied_path}", "--output", str(cli_receipt_path),
+            ]
+            for index, result in enumerate(self.results_for_plan(plan), 1):
+                result_path = temporary / f"result-{index}.json"
+                result_path.write_text(json.dumps(result), encoding="utf-8")
+                command.extend(("--batch-result", str(result_path)))
+            completed = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            cli_receipt_text = cli_receipt_path.read_text(encoding="utf-8")
+            self.assertEqual(receipt, json.loads(cli_receipt_text))
+            self.assertNotIn(str(supplied_path), cli_receipt_text)
+            validated = load_validated_behavior_context(
+                context_path, receipt_path, inventory, PROJECT, PROJECT / ".skillsrc",
+                supplied_inputs=(SuppliedInput("REQ-synthetic", payload),),
+            )
+            self.assertEqual(("REQ-a", "REQ-b"), tuple(row["requirement_id"] for row in validated.requirements))
+            for supplied_inputs in (
+                (),
+                (SuppliedInput("REQ-synthetic", payload + b"drift"),),
+                (SuppliedInput("REQ-other", payload),),
+            ):
+                with self.subTest(supplied_inputs=supplied_inputs), self.assertRaises(Exception) as error:
+                    load_validated_behavior_context(
+                        context_path, receipt_path, inventory, PROJECT, PROJECT / ".skillsrc",
+                        supplied_inputs=supplied_inputs,
+                    )
+                self.assertEqual("BEHAVIOR_SUPPLIED_INPUT", error.exception.diagnostics[0]["code"])
+
+    def test_fabricated_same_id_module_mapping_cannot_enter_public_loader(self) -> None:
+        """A caller cannot replace the manifest-selected module with a coherent same-ID mapping."""
+        self.assertFalse(hasattr(behavior_context_planning, "validate_context_envelope"))
+        fabricated = dict(self.module)
+        fabricated["paths"] = {"source": ["other"]}
+        fabricated_plan = build_context_plan(PROJECT, fabricated, self.inventory, self.supplied)
+        fabricated_receipt = _plain(build_context_receipt(
+            PROJECT, fabricated, self.inventory, fabricated_plan, self.results_for_plan(fabricated_plan), self.supplied,
+        ))
+        context = copy.deepcopy(self.context)
+        accounting = context["artifacts"]["behavior_source_accounting"]
+        accounting["context_receipt_sha256"] = _digest(fabricated_receipt)
+        accounting["behavior_fragment_groups"][0]["fragment_ids"] = [row["fragment_id"] for row in fabricated_receipt["fragment_registry"]]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            context_path = temporary / "context.json"
+            receipt_path = temporary / "receipt.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            receipt_path.write_text(json.dumps(fabricated_receipt), encoding="utf-8")
+            with self.assertRaises(Exception) as error:
+                load_validated_behavior_context(
+                    context_path, receipt_path, self.inventory, PROJECT, PROJECT / ".skillsrc",
+                    supplied_inputs=(SuppliedInput("REQ-synthetic", self.supplied["REQ-synthetic"]),),
+                )
+            self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+
+    def test_public_loader_requires_supplied_arguments_only_for_supplied_rows(self) -> None:
+        inventory = copy.deepcopy(self.inventory)
+        authorized = inventory["artifacts"]["authorized_behavior_sources"]
+        authorized["sources"] = authorized["sources"][1:]
+        inventory["artifacts"]["authorized_behavior_sources_sha256"] = _digest(authorized)
+        plan = build_context_plan(PROJECT, self.module, inventory)
+        receipt = _plain(build_context_receipt(PROJECT, self.module, inventory, plan, self.results_for_plan(plan)))
+        context = copy.deepcopy(self.context)
+        managed = context["artifacts"]["managed_behavior_context"]
+        managed["authorized_behavior_sources_sha256"] = _digest(authorized)
+        for row in managed["requirement_sources"]:
+            row["source_ids"] = [authorized["sources"][0]["source_id"]]
+        accounting = context["artifacts"]["behavior_source_accounting"]
+        accounting["authorized_behavior_sources_sha256"] = _digest(authorized)
+        accounting["context_receipt_sha256"] = _digest(receipt)
+        accounting["source_dispositions"] = accounting["source_dispositions"][1:]
+        accounting["behavior_fragment_groups"][0]["fragment_ids"] = [row["fragment_id"] for row in receipt["fragment_registry"]]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            context_path, receipt_path = temporary / "context.json", temporary / "receipt.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8")
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            self.assertTrue(load_validated_behavior_context(context_path, receipt_path, inventory, PROJECT, PROJECT / ".skillsrc"))
+            with self.assertRaises(Exception) as error:
+                load_validated_behavior_context(
+                    context_path, receipt_path, inventory, PROJECT, PROJECT / ".skillsrc",
+                    supplied_inputs=(SuppliedInput("REQ-foreign", b"not authorized"),),
+                )
+            self.assertEqual("BEHAVIOR_SUPPLIED_INPUT", error.exception.diagnostics[0]["code"])
 
     def test_plan_has_exact_ranges_and_mechanical_domain_keys(self) -> None:
         rows = [item for batch in self.plan["batches"] for item in batch["items"]]
@@ -117,8 +263,6 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         self.assertEqual("BEHAVIOR_BATCH_RESULT", error.exception.diagnostics[0]["code"])
 
     def test_three_way_accounting_link_and_fragment_coverage_mutations_fail_immutably(self) -> None:
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]
-        technical = self.inventory["artifacts"]["technical_test_inventory"]
         for mutate in (
             lambda value: value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"][0]["fragment_ids"].pop(),
             lambda value: value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"][0].update({"fragment_ids":["FRAGMENT-" + "f" * 64]}),
@@ -126,25 +270,22 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         ):
             value = copy.deepcopy(self.context); mutate(value)
             with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
-                validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module)
+                self.load_public(value, self.receipt)
             diagnostic = error.exception.diagnostics[0]
             self.assertIn(diagnostic["code"], {"BEHAVIOR_ACCOUNTING_COVERAGE", "BEHAVIOR_ACCOUNTING_LINK"})
             with self.assertRaises(TypeError): diagnostic["code"] = "changed"
 
     def test_noncontiguous_group_membership_is_allowed_but_exact_coverage_is_required(self) -> None:
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]; technical = self.inventory["artifacts"]["technical_test_inventory"]
         value = copy.deepcopy(self.context)
         groups = value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"]
         fragments = groups[0]["fragment_ids"]
         groups[:] = [{"group_id":"GROUP-a","fragment_ids":[fragments[1]],"requirement_ids":["REQ-a","REQ-b"]},{"group_id":"GROUP-b","fragment_ids":[fragments[0]],"requirement_ids":["REQ-a","REQ-b"]}]
-        self.assertTrue(validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module))
+        self.assertTrue(self.load_public(value, self.receipt))
         groups.pop()
-        with self.assertRaises(Exception) as error: validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module)
+        with self.assertRaises(Exception) as error: self.load_public(value, self.receipt)
         self.assertEqual("BEHAVIOR_ACCOUNTING_COVERAGE", error.exception.diagnostics[0]["code"])
 
     def test_receipt_schema_and_spoofed_domain_are_rejected_at_shared_seam(self) -> None:
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]
-        technical = self.inventory["artifacts"]["technical_test_inventory"]
         for mutate in (
             lambda value: value.update({"spoof": True}),
             lambda value: value["source_outcomes"][1].update({"domain_key": "spoof"}),
@@ -154,38 +295,33 @@ class PlannerReceiptV5Tests(unittest.TestCase):
             context = copy.deepcopy(self.context)
             context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
             with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
-                validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
+                self.load_public(context, receipt)
             self.assertIn(error.exception.diagnostics[0]["code"], {"BEHAVIOR_RECEIPT", "BEHAVIOR_ACCOUNTING_SHAPE"})
 
     def test_public_plan_binding_rejects_spoofed_item_ownership(self) -> None:
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]; technical = self.inventory["artifacts"]["technical_test_inventory"]
         receipt = copy.deepcopy(self.receipt); receipt["fragment_registry"][0]["item_id"] = "ITEM-999999"
         context = copy.deepcopy(self.context); context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
         with self.assertRaises(Exception) as error:
-            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
+            self.load_public(context, receipt)
         self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
 
     def test_shared_seam_rejects_jointly_rebound_receipt_plan_digest(self) -> None:
         """A receipt cannot choose its own plan digest after context receipt rebinding."""
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]
-        technical = self.inventory["artifacts"]["technical_test_inventory"]
         receipt = copy.deepcopy(self.receipt)
         receipt["context_plan_sha256"] = "sha256:" + "a" * 64
         context = copy.deepcopy(self.context)
         context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
         with self.assertRaises(Exception) as error:
-            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
+            self.load_public(context, receipt)
         self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
 
     def test_shared_seam_requires_normalized_module_and_no_downstream_plan(self) -> None:
-        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]; technical = self.inventory["artifacts"]["technical_test_inventory"]
-        with self.assertRaises(TypeError):
-            validate_context_envelope(self.context, self.receipt, authorized, technical, PROJECT)
+        self.assertFalse(hasattr(behavior_context_planning, "validate_context_envelope"))
         for command in ("select", "validate-context"):
             completed = subprocess.run([sys.executable, str(ROOT / "tools" / "test_classification.py"), command, "--help"], text=True, capture_output=True)
-            self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout)
+            self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout); self.assertIn("--module", completed.stdout); self.assertIn("--supplied-input", completed.stdout)
         completed = subprocess.run([sys.executable, str(ROOT / "tools" / "audit_test_portfolio.py"), "phase1", "--help"], text=True, capture_output=True)
-        self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout)
+        self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout); self.assertIn("--module", completed.stdout); self.assertIn("--supplied-input", completed.stdout)
 
     def test_public_loader_uses_nested_module_root_and_rejects_wrong_receipt_module(self) -> None:
         """The public seam resolves a receipt module from its manifest, never a fallback."""
@@ -226,13 +362,13 @@ class PlannerReceiptV5Tests(unittest.TestCase):
             accounting["behavior_fragment_groups"][0]["fragment_ids"] = [row["fragment_id"] for row in receipt["fragment_registry"]]
             context_path, receipt_path = project / "context.json", project / "receipt.json"
             context_path.write_text(json.dumps(context), encoding="utf-8"); receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-            validated = load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc)
+            validated = load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc, "backend", (SuppliedInput("REQ-synthetic", supplied),))
             self.assertEqual(("REQ-a", "REQ-b"), tuple(row["requirement_id"] for row in validated.requirements))
             self.assertEqual("a/b", receipt["source_outcomes"][1]["domain_key"])
             receipt["selected_module"] = "wrong"; accounting["context_receipt_sha256"] = _digest(receipt)
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8"); context_path.write_text(json.dumps(context), encoding="utf-8")
             with self.assertRaises(Exception) as error:
-                load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc)
+                load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc, "backend", (SuppliedInput("REQ-synthetic", supplied),))
             self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
 
     def test_repeated_euro_read_overlap_never_exceeds_fixed_budget(self) -> None:
@@ -249,6 +385,36 @@ class PlannerReceiptV5Tests(unittest.TestCase):
             plan.write_text(json.dumps(_plain(self.plan)), encoding="utf-8"); bad.write_text("[]", encoding="utf-8")
             completed = subprocess.run([sys.executable, str(ROOT / "tools" / "test_classification.py"), "context-receipt", "--project", str(PROJECT), "--skillsrc", str(PROJECT / ".skillsrc"), "--inventory", str(V1 / "source-inventory.json"), "--plan", str(plan), "--batch-result", str(bad), "--supplied-input", f"REQ-synthetic={ROOT / 'tests' / 'fixtures' / 'test-classification' / 'requirement.txt'}", "--output", str(output)], text=True, capture_output=True)
             self.assertEqual(2, completed.returncode); self.assertIn("BEHAVIOR_BATCH_RESULT", completed.stderr); self.assertNotIn("Traceback", completed.stderr); self.assertFalse(output.exists())
+
+    def test_validate_context_cli_revalidates_supplied_paths_with_safe_errors(self) -> None:
+        requirement = ROOT / "tests" / "fixtures" / "test-classification" / "requirement.txt"
+        base = [
+            sys.executable, str(ROOT / "tools" / "test_classification.py"), "validate-context",
+            "--project", str(PROJECT), "--skillsrc", str(PROJECT / ".skillsrc"),
+            "--inventory", str(V1 / "source-inventory.json"), "--context", str(V5 / "context-marker.json"),
+            "--receipt", str(V5 / "receipt.json"),
+        ]
+        accepted = subprocess.run([*base, "--supplied-input", f"REQ-synthetic={requirement}"], text=True, capture_output=True)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            drift = temporary / "controller-input.txt"
+            drift.write_bytes(requirement.read_bytes() + b"drift")
+            for suffix, forbidden in (
+                ([], (str(requirement), "REQ-synthetic")),
+                (["--supplied-input", f"REQ-synthetic={drift}"], (str(drift), "REQ-synthetic")),
+                (["--supplied-input", f"REQ-other={requirement}"], (str(requirement), "REQ-other")),
+                (["--supplied-input", f"REQ-synthetic={temporary / 'missing.txt'}"], (str(temporary / "missing.txt"), "REQ-synthetic")),
+            ):
+                completed = subprocess.run([*base, *suffix], text=True, capture_output=True)
+                self.assertEqual(2, completed.returncode)
+                self.assertEqual("", completed.stdout)
+                self.assertNotIn("Traceback", completed.stderr)
+                diagnostic = json.loads(completed.stderr)
+                self.assertEqual(1, len(diagnostic["diagnostics"]))
+                self.assertEqual("BEHAVIOR_SUPPLIED_INPUT", diagnostic["diagnostics"][0]["code"])
+                for value in forbidden:
+                    self.assertNotIn(value, completed.stderr)
 
     def test_invalid_utf8_and_product_supplied_key_are_rejected(self) -> None:
         source = self.inventory["artifacts"]["authorized_behavior_sources"]["sources"][1]

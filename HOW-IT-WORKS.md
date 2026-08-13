@@ -31,6 +31,11 @@ accounting и immutable receipt; classifier
 `tc-generator` получает только `managed_behavior_context`, без raw test source,
 inventory или classification.
 
+Пути `SOURCE_ID=PATH` для `supplied_requirement` остаются controller evidence:
+контроллер повторяет их при planning, receipt, context validation, selection и audit,
+но не сохраняет в артефактах и не добавляет в Pipeline carriers. Если supplied rows
+нет, эти аргументы отсутствуют.
+
 ## Автоматическое discovery и границы проекта
 
 Оркестратору нужны корень skill pack, корень проекта, ограниченная feature scope,

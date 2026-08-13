@@ -34,7 +34,8 @@ class TestPortfolioAuditTests(unittest.TestCase):
         return [
             "phase1", "--project", str(PROJECT), "--inventory", str(inventory),
             "--classification", str(classification), "--review", str(review),
-            "--context", str(context), "--receipt", str(receipt), "--skillsrc", str(PROJECT / ".skillsrc"), "--canonical-document", str(canonical),
+            "--context", str(context), "--receipt", str(receipt), "--skillsrc", str(PROJECT / ".skillsrc"),
+            "--supplied-input", f"REQ-synthetic={ROOT / 'tests' / 'fixtures' / 'test-classification' / 'requirement.txt'}", "--canonical-document", str(canonical),
             "--output", str(output),
         ]
 
