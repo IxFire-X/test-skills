@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import traceback
 import unittest
 from unittest import mock
 from pathlib import Path, PurePosixPath
@@ -87,6 +88,10 @@ class ChangeRecordTests(unittest.TestCase):
             self.assertEqual("CHANGE_INPUT", caught.exception.code)
             self.assertIsNone(caught.exception.__cause__)
             self.assertNotIn(SECRET, str(caught.exception))
+            formatted = "".join(traceback.format_exception(caught.exception))
+            self.assertTrue(caught.exception.__suppress_context__)
+            self.assertNotIn("FileNotFoundError", formatted)
+            self.assertNotIn(SECRET, formatted)
 
     def test_worktree_snapshot_hides_immutable_private_bytes(self) -> None:
         """Exposing a mutable bytes map would let callers bypass later drift detection."""

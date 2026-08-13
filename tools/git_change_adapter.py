@@ -63,7 +63,7 @@ def _git(project: Path, *args: str) -> bytes:
     try:
         completed = subprocess.run(["git", *args], cwd=project, capture_output=True, check=False)
     except OSError:
-        raise _error("CHANGE_INPUT", "/project", "Git could not be executed for the project.")
+        raise _error("CHANGE_INPUT", "/project", "Git could not be executed for the project.") from None
     if completed.returncode:
         raise _error("CHANGE_INPUT", "/git", "Git could not resolve the requested closed input.")
     return completed.stdout
@@ -73,7 +73,7 @@ def _one_line(project: Path, *args: str) -> str:
     try:
         return _git(project, *args).decode("ascii").strip()
     except UnicodeDecodeError:
-        raise _error("CHANGE_INPUT", "/git", "Git returned an invalid object identity.")
+        raise _error("CHANGE_INPUT", "/git", "Git returned an invalid object identity.") from None
 
 
 def _digest(value: bytes) -> str:
@@ -107,7 +107,7 @@ def _path(raw: bytes) -> str:
     try:
         decoded = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise _error("CHANGE_INPUT", "/changes", "Git path is not UTF-8.")
+        raise _error("CHANGE_INPUT", "/changes", "Git path is not UTF-8.") from None
     if not decoded or decoded.startswith("/") or "\\" in decoded or any(part in ("", ".", "..") for part in decoded.split("/")):
         raise _error("CHANGE_SCOPE_SHAPE", "/changes", "Change paths must be safe relative POSIX paths.")
     return decoded
@@ -124,7 +124,7 @@ def _raw_changes(project: Path, base: str, head: str) -> list[tuple[str, str | N
         try:
             status = header.rsplit(b" ", 1)[1].decode("ascii")
         except (IndexError, UnicodeDecodeError):
-            raise _error("CHANGE_INPUT", "/git", "Git raw change metadata is malformed.")
+            raise _error("CHANGE_INPUT", "/git", "Git raw change metadata is malformed.") from None
         code = status[:1]
         similarity = int(status[1:]) if code in ("R", "C") and status[1:].isdigit() else None
         if code in ("R", "C"):
@@ -145,7 +145,7 @@ def _tree_bytes(project: Path, treeish: str, path: str) -> bytes | None:
     try:
         completed = subprocess.run(["git", "cat-file", "-e", f"{treeish}:{path}"], cwd=project, capture_output=True, check=False)
     except OSError:
-        raise _error("CHANGE_INPUT", "/git", "Git object bytes could not be read.")
+        raise _error("CHANGE_INPUT", "/git", "Git object bytes could not be read.") from None
     if completed.returncode:
         return None
     return _git(project, "cat-file", "-p", f"{treeish}:{path}")
@@ -161,7 +161,7 @@ def _worktree_bytes(project: Path, path: str, *, required: bool = False) -> byte
             return None
         return candidate.read_bytes()
     except OSError:
-        raise _error("CHANGE_INPUT", "/changes", "Worktree source bytes could not be frozen.")
+        raise _error("CHANGE_INPUT", "/changes", "Worktree source bytes could not be frozen.") from None
 
 
 def _row(kind: str, path: str | None, before: tuple[str, bytes] | None, after: tuple[str, bytes] | None, *, old_path: str | None = None, similarity: int | None = None) -> dict[str, Any]:
@@ -303,7 +303,7 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
     try:
         manifest = load_json_strict(path)
     except (OSError, StrictJsonError):
-        raise _error("CHANGE_INPUT", "/patch_manifest", "Patch manifest could not be read as strict JSON.")
+        raise _error("CHANGE_INPUT", "/patch_manifest", "Patch manifest could not be read as strict JSON.") from None
     if not isinstance(manifest, Mapping) or set(manifest) != _TOP or manifest.get("schema_version") != "1.0.0" or manifest.get("artifact") != "patch-manifest":
         raise _error("CHANGE_SCOPE_SHAPE", "/patch_manifest", "Patch manifest must use the closed V1 shape.")
     changes, blobs = manifest.get("changes"), manifest.get("content_blobs")
@@ -331,7 +331,7 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
                 try:
                     _path(row[path_key].encode("utf-8"))
                 except FlowError:
-                    raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}/{path_key}", "Patch paths must be safe relative POSIX paths.")
+                    raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}/{path_key}", "Patch paths must be safe relative POSIX paths.") from None
         row_copy = dict(row); change_id = row_copy.pop("change_id", None)
         if not isinstance(change_id, str) or change_id != "CHANGE-" + hashlib.sha256(canonical_bytes(row_copy)).hexdigest() or change_id in identifiers:
             raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}/change_id", "Patch change identifier does not bind its closed row.")
