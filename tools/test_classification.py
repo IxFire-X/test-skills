@@ -273,7 +273,8 @@ def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
                 payload = json.dumps(locator, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
                 symbols.append({"file_id": file_id, "symbol_id": "SYMBOL-" + hashlib.sha256(payload).hexdigest(), "locator": locator})
     files.sort(key=lambda row: row["path"])
-    symbols.sort(key=lambda row: (row["file_id"], json.dumps(row["locator"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)))
+    file_order = {row["file_id"]: index for index, row in enumerate(files)}
+    symbols.sort(key=lambda row: (file_order[row["file_id"]], json.dumps(row["locator"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)))
     return {"module_id": module["id"], "test_roots": [portable for _, portable in roots], "files": files, "symbols": symbols}
 
 
@@ -365,20 +366,24 @@ def _parse_supplied(values: Sequence[str]) -> tuple[SuppliedInput, ...]:
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _diag(path: str, code: str, message: str) -> dict[str, str]:
-    return {"path": path, "code": code, "message": message}
+def _diag(path: str, code: str, message: str) -> Mapping[str, str]:
+    return _freeze({"path": path, "code": code, "message": message})
 
 
 def _stage_shape(value: Any, schema: str, code: str) -> tuple[Mapping[str, str], ...]:
     diagnostics = schema_diagnostics(value, _SCHEMA_ROOT / "schemas" / schema, _SCHEMA_ROOT)
-    return tuple(_diag(row["path"], code, row["message"]) for row in diagnostics)
+    return tuple(_diag(row["path"], code, "Artifact does not satisfy its closed schema.") for row in diagnostics)
 
 
 def _exact_int(value: Any) -> bool:
     return type(value) is int
 
 
-def _inventory_diagnostics(inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
+def _locator_bytes(locator: Mapping[str, Any]) -> bytes:
+    return json.dumps(locator, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _inventory_diagnostics(inventory: Mapping[str, Any]) -> tuple[Mapping[str, str], ...]:
     artifacts = inventory["artifacts"]
     rows = artifacts["technical_test_inventory"]
     if artifacts["technical_test_inventory_sha256"] != _digest(rows):
@@ -396,10 +401,21 @@ def _inventory_diagnostics(inventory: Mapping[str, Any], project_root: Path) -> 
         return (_diag("/artifacts/technical_test_inventory/symbols", "INVENTORY_SYMBOL_PAIRS", "Inventory symbol pairs must be unique."),)
     if any(file_id not in set(file_ids) for file_id, _ in pairs):
         return (_diag("/artifacts/technical_test_inventory/symbols", "INVENTORY_SYMBOL_FILE", "Every symbol must belong to an inventory file."),)
+    file_order = {file_id: index for index, file_id in enumerate(file_ids)}
+    canonical_symbols = sorted(symbols, key=lambda row: (file_order[row["file_id"]], _locator_bytes(row["locator"])))
+    if symbols != canonical_symbols:
+        return (_diag("/artifacts/technical_test_inventory/symbols", "INVENTORY_SYMBOL_ORDER", "Inventory symbols must use physical file and canonical locator order."),)
     for index, row in enumerate(files):
         path = Path(row["path"])
         if path.is_absolute() or ".." in PurePosixPath(row["path"]).parts:
             return (_diag(f"/artifacts/technical_test_inventory/files/{index}/path", "INVENTORY_UNSAFE_PATH", "Inventory paths must be safe project-relative paths."),)
+    return ()
+
+
+def _inventory_file_diagnostics(inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
+    files = inventory["artifacts"]["technical_test_inventory"]["files"]
+    for index, row in enumerate(files):
+        path = Path(row["path"])
         try:
             resolved = _confined(project_root, project_root / path, f"/artifacts/technical_test_inventory/files/{index}/path")
             content = resolved.read_bytes()
@@ -423,7 +439,7 @@ def validate_technical_test_evidence(inventory: Mapping[str, Any], classificatio
         shape = _stage_shape(value, schema, code)
         if shape:
             return shape
-    diagnostics = _inventory_diagnostics(inventory, project_root)
+    diagnostics = _inventory_diagnostics(inventory)
     if diagnostics:
         return diagnostics
     inventory_rows = inventory["artifacts"]["technical_test_inventory"]
@@ -479,6 +495,9 @@ def validate_technical_test_evidence(inventory: Mapping[str, Any], classificatio
             if pair in seen_spans or (previous is not None and pair < previous):
                 return (_diag(f"{prefix}/provenance", "CLASSIFICATION_PROVENANCE", "Provenance spans must be unique and canonical by line range."),)
             seen_spans.add(pair); previous = pair
+    diagnostics = _inventory_file_diagnostics(inventory, project_root)
+    if diagnostics:
+        return diagnostics
     if review_rows["technical_test_inventory_sha256"] != inventory_digest:
         return (_diag("/artifacts/classification_review/technical_test_inventory_sha256", "CLASSIFICATION_REVIEW_INVENTORY_DIGEST", "Review must use the exact inventory digest."),)
     if review_rows["classification_sha256"] != _digest(candidate_rows):

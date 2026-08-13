@@ -166,6 +166,45 @@ class TechnicalTestClassificationTests(unittest.TestCase):
         self.assertIsInstance(raised.exception.diagnostics[0], MappingProxyType)
         with self.assertRaises(TypeError): raised.exception.diagnostics[0]["code"] = "MUTATED"
 
+    def test_public_diagnostics_are_recursively_immutable_and_never_echo_invalid_values(self) -> None:
+        candidate = self.classification()
+        candidate["artifacts"]["classification"]["TOPSECRET"] = "invalid"
+        rows = self.diagnostics(candidate, self.review(candidate))
+        self.assertIsInstance(rows[0], MappingProxyType)
+        with self.assertRaises(TypeError): rows[0]["message"] = "MUTATED"
+        self.assertNotIn("TOPSECRET", rows[0]["message"])
+
+    def test_self_consistent_noncanonical_inventory_symbol_order_is_rejected(self) -> None:
+        inventory = self.inventory()
+        symbols = inventory["artifacts"]["technical_test_inventory"]["symbols"]
+        symbols.reverse()
+        inventory["artifacts"]["technical_test_inventory_sha256"] = stable_digest(inventory["artifacts"]["technical_test_inventory"])
+        candidate = self.classification()
+        candidate_rows = candidate["artifacts"]["classification"]["classifications"]
+        candidate_rows.reverse()
+        candidate["artifacts"]["classification"]["technical_test_inventory_sha256"] = inventory["artifacts"]["technical_test_inventory_sha256"]
+        review = self.review(candidate)
+        review_rows = review["artifacts"]["classification_review"]
+        review_rows["technical_test_inventory_sha256"] = inventory["artifacts"]["technical_test_inventory_sha256"]
+        review_rows["reviewed_symbol_pairs"].reverse()
+        rows = validate_technical_test_evidence(inventory, candidate, review, self.requirements, self.root)
+        self.assertEqual(1, len(rows), rows)
+        self.assertEqual("INVENTORY_SYMBOL_ORDER", rows[0]["code"])
+        self.assertEqual("/artifacts/technical_test_inventory/symbols", rows[0]["path"])
+
+    def test_pair_and_provenance_errors_precede_file_drift(self) -> None:
+        candidate = self.classification()
+        candidate["artifacts"]["classification"]["classifications"].pop()
+        candidate["artifacts"]["classification"]["classifications"][0]["provenance"][0]["file_id"] = "FILE-" + "a" * 64
+        review = self.review(candidate)
+        target = self.root / "tests" / "test_sample.py"
+        original = target.read_bytes()
+        try:
+            target.write_bytes(original + b"\n# drift\n")
+            self.assert_diagnostic("CLASSIFICATION_PAIR_COVERAGE", "/artifacts/classification/classifications", candidate, review)
+        finally:
+            target.write_bytes(original)
+
     def test_legacy_envelopes_are_rejected_before_artifact_extraction(self) -> None:
         legacy = self.classification(); legacy["schema_version"] = "3.0.0"
         self.assert_diagnostic("CLASSIFICATION_SCHEMA", "/schema_version", legacy, self.review(legacy))
