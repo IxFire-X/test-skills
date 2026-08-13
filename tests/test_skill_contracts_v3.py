@@ -183,7 +183,7 @@ class SkillContractsV3Tests(unittest.TestCase):
                 self.assertTrue(scenario["synthetic"])
                 self.assertIn(scenario["skill"], {"test-classifier", "test-classifier-reviewer"})
                 self.assertTrue(scenario["input"]["request"])
-                self.assertTrue(scenario["input"]["inventory_snippet"])
+                self.assertTrue(scenario["input"].get("inventory_snippet") or scenario["input"].get("inventory_artifact"))
                 self.assertTrue(scenario["input"]["source_snippet"])
                 self.assertTrue(scenario["expected"])
                 self.assertFalse(scenario["expected"].get("case_creation", False))
@@ -195,6 +195,36 @@ class SkillContractsV3Tests(unittest.TestCase):
         for scenario in classifier:
             self.assertIn("scope_by_pair", scenario["expected"])
             self.assertIn("pair_coverage", scenario["expected"])
+        reviewer = next(item for item in manifest["scenarios"] if item["id"] == "reviewer-complete-ordered-pairs")
+        inventory_artifact = reviewer["input"]["inventory_artifact"]
+        classification_artifact = reviewer["input"]["classification_artifact"]
+        review_artifact = reviewer["input"]["review_artifact"]
+        for artifact, schema in (
+            (inventory_artifact, "schemas/source-inventory-output.schema.json"),
+            (classification_artifact, "schemas/test-classifier-output.schema.json"),
+            (review_artifact, "schemas/test-classifier-reviewer-output.schema.json"),
+        ):
+            self.assertEqual([], schema_diagnostics(artifact, ROOT / schema, ROOT))
+        inventory = inventory_artifact["artifacts"]["technical_test_inventory"]
+        classification = classification_artifact["artifacts"]["classification"]
+        review = review_artifact["artifacts"]["classification_review"]
+        digest = lambda value: "sha256:" + __import__("hashlib").sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(digest(inventory), inventory_artifact["artifacts"]["technical_test_inventory_sha256"])
+        self.assertEqual(digest(classification), review["classification_sha256"])
+        self.assertEqual(inventory_artifact["artifacts"]["technical_test_inventory_sha256"], classification["technical_test_inventory_sha256"])
+        expected_pairs = [{"file_id": row["file_id"], "symbol_id": row["symbol_id"]} for row in inventory["symbols"]]
+        self.assertEqual(expected_pairs, review["reviewed_symbol_pairs"])
+        self.assertEqual(expected_pairs, [{"file_id": row["file_id"], "symbol_id": row["symbol_id"]} for row in classification["classifications"]])
+        self.assertEqual("ПРИНЯТО", review["verdict"])
+        self.assertEqual([], review["findings"])
+        known_requirements = {row["requirement_id"] for row in reviewer["input"]["requirements"]}
+        for row in classification["classifications"]:
+            self.assertTrue(row["requirement_ids"])
+            self.assertTrue(set(row["requirement_ids"]).issubset(known_requirements))
+            self.assertTrue(row["provenance"])
+            self.assertTrue(row["rationale"])
         rubric = read("evals/test-classification/rubric.md").lower()
         for term in ("hard binary", "unit", "integration", "e2e", "unknown", "provenance", "rationale", "exact inventory and classification digests", "physical order", "never auto-fix", "does not create"):
             self.assertIn(term, rubric)
