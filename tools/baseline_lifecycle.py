@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
-from tools.flow_artifacts import FlowError, StoredArtifact, artifact_sha256, canonical_bytes
+from tools.flow_artifacts import FlowError, StoredArtifact, artifact_sha256, canonical_bytes, write_create_only
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
 
@@ -207,6 +207,119 @@ def _source(value: Any, path: str) -> Mapping[str, Any]:
     return source
 
 
+def _change_input(value: Any, repository: str, run_mode: str) -> Mapping[str, Any]:
+    path = "/prefix_ledger/change_input"
+    source = _mapping(value, path)
+    kind = source.get("input_kind")
+    shapes = {
+        "git_head": {"input_kind", "repository_id", "target"},
+        "git_range": {"input_kind", "repository_id", "base", "target"},
+        "git_worktree": {"input_kind", "repository_id", "base", "target_snapshot_sha256"},
+        "patch_manifest": {"input_kind", "repository_id", "base_snapshot_sha256", "target_snapshot_sha256"},
+    }
+    if kind not in shapes:
+        raise _error("FEATURE_FLOW_INPUT", path + "/input_kind", "Change input kind is outside the closed union.")
+    closed = _closed(source, shapes[kind], path)
+    if closed.get("repository_id") != repository:
+        raise _error("BASELINE_BINDING", path + "/repository_id", "Change input repository does not bind the prefix ledger.")
+    if (kind == "git_head" and run_mode != "FULL") or (kind == "git_range" and run_mode != "CHANGE_SET"):
+        raise _error("FEATURE_FLOW_INPUT", path + "/input_kind", "Change input kind is incompatible with run mode.")
+    if kind in {"git_head", "git_range"}:
+        target = _closed(closed.get("target"), {"commit", "tree"}, path + "/target")
+        _git_id(target.get("commit"), path + "/target/commit")
+        _git_id(target.get("tree"), path + "/target/tree")
+    if kind in {"git_range", "git_worktree"}:
+        base = _closed(closed.get("base"), {"commit", "tree"}, path + "/base")
+        _git_id(base.get("commit"), path + "/base/commit")
+        _git_id(base.get("tree"), path + "/base/tree")
+    for name in ("base_snapshot_sha256", "target_snapshot_sha256"):
+        if name in closed:
+            _digest(closed[name], path + "/" + name)
+    return closed
+
+
+def _sorted_unique_strings(value: Any, path: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value) or value != sorted(set(value)):
+        raise _error("FEATURE_FLOW_INPUT", path, "Values must be unique nonempty strings in strict sorted order.")
+    return value
+
+
+def _validate_prefix_evidence(
+    values: Mapping[str, Mapping[str, Any]], digests: Mapping[str, str | None],
+    repository: str, selected_module: str, run_mode: str,
+) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]]:
+    inventory_envelope = values["technical_test_inventory"]
+    sources_envelope = values["authorized_behavior_sources"]
+    if inventory_envelope != sources_envelope:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/authorized_behavior_sources", "Source inventory projections must come from one exact envelope.")
+    source_artifacts = _mapping(inventory_envelope.get("artifacts"), "/prefix_ledger/artifacts/technical_test_inventory/artifacts")
+    inventory = _mapping(source_artifacts.get("technical_test_inventory"), "/prefix_ledger/artifacts/technical_test_inventory/artifacts/technical_test_inventory")
+    authorized = _mapping(source_artifacts.get("authorized_behavior_sources"), "/prefix_ledger/artifacts/authorized_behavior_sources/artifacts/authorized_behavior_sources")
+    inventory_sha256 = artifact_sha256(inventory)
+    authorized_sha256 = artifact_sha256(authorized)
+    if source_artifacts.get("technical_test_inventory_sha256") != inventory_sha256 or source_artifacts.get("authorized_behavior_sources_sha256") != authorized_sha256:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_inventory", "Source inventory internal digests do not bind their bare artifacts.")
+
+    scope = _closed(values["change_scope_receipt"], {"schema_version", "artifact", "source", "payload_sha256"}, "/prefix_ledger/artifacts/change_scope_receipt")
+    scope_source = _closed(scope.get("source"), {"repository_id", "selected_module", "run_mode"}, "/prefix_ledger/artifacts/change_scope_receipt/source")
+    if scope.get("schema_version") != "1.0.0" or scope.get("artifact") != "change_scope_receipt" or scope_source != {"repository_id": repository, "selected_module": selected_module, "run_mode": run_mode}:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/change_scope_receipt", "Change-scope sidecar does not bind the run source.")
+    _digest(scope.get("payload_sha256"), "/prefix_ledger/artifacts/change_scope_receipt/payload_sha256")
+
+    receipt = values["behavior_context_receipt"]
+    _validate_schema(receipt, "behavior-context-receipt.schema.json", "/prefix_ledger/artifacts/behavior_context_receipt")
+    receipt_sha256 = artifact_sha256(receipt)
+    if receipt.get("selected_module") != selected_module or receipt.get("authorized_behavior_sources_sha256") != authorized_sha256:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt", "Behavior context receipt does not bind module and authorized sources.")
+    managed_envelope = values["managed_behavior_context"]
+    accounting_envelope = values["behavior_source_accounting"]
+    _validate_schema(managed_envelope, "context-marker-output.schema.json", "/prefix_ledger/artifacts/managed_behavior_context")
+    _validate_schema(accounting_envelope, "context-marker-output.schema.json", "/prefix_ledger/artifacts/behavior_source_accounting")
+    if managed_envelope != accounting_envelope:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting", "Managed context projections must come from one exact envelope.")
+    context_artifacts = _mapping(managed_envelope.get("artifacts"), "/prefix_ledger/artifacts/managed_behavior_context/artifacts")
+    managed = _mapping(context_artifacts.get("managed_behavior_context"), "/prefix_ledger/artifacts/managed_behavior_context/artifacts/managed_behavior_context")
+    accounting = _mapping(context_artifacts.get("behavior_source_accounting"), "/prefix_ledger/artifacts/behavior_source_accounting/artifacts/behavior_source_accounting")
+    if managed.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("context_receipt_sha256") != receipt_sha256:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context", "Context, accounting, receipt, and authorized-source digests disagree.")
+
+    changed = _closed(values["changed_behavior_context"], {"schema_version", "artifact", "source", "requirement_ids", "retired_requirement_ids"}, "/prefix_ledger/artifacts/changed_behavior_context")
+    changed_source = _closed(changed.get("source"), {"behavior_context_receipt_sha256"}, "/prefix_ledger/artifacts/changed_behavior_context/source")
+    if changed.get("schema_version") != "1.0.0" or changed.get("artifact") != "changed-behavior-context" or changed_source.get("behavior_context_receipt_sha256") != receipt_sha256:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "Changed context does not bind the behavior context receipt.")
+    requirement_ids = _sorted_unique_strings(changed.get("requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/requirement_ids")
+    retired_ids = _sorted_unique_strings(changed.get("retired_requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/retired_requirement_ids")
+    if set(requirement_ids) & set(retired_ids):
+        raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/changed_behavior_context", "Changed and retired requirement IDs must be disjoint.")
+
+    classification_envelope = values["technical_test_classification"]
+    classification = _mapping(classification_envelope["artifacts"]["classification"], "/prefix_ledger/artifacts/technical_test_classification/artifacts/classification")
+    classification_sha256 = artifact_sha256(classification)
+    if classification.get("technical_test_inventory_sha256") != inventory_sha256:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_classification", "Classification does not bind the bare technical inventory.")
+    expected_pairs = [(row.get("file_id"), row.get("symbol_id")) for row in inventory.get("symbols", [])]
+    classification_pairs = [(row.get("file_id"), row.get("symbol_id")) for row in classification.get("classifications", [])]
+    if classification_pairs != expected_pairs:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_classification", "Classification coverage does not equal inventory symbol order.")
+    review = _mapping(values["classification_review"]["artifacts"]["classification_review"], "/prefix_ledger/artifacts/classification_review/artifacts/classification_review")
+    review_sha256 = artifact_sha256(review)
+    review_pairs = [(row.get("file_id"), row.get("symbol_id")) for row in review.get("reviewed_symbol_pairs", [])]
+    if review.get("technical_test_inventory_sha256") != inventory_sha256 or review.get("classification_sha256") != classification_sha256 or review_pairs != expected_pairs:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/classification_review", "Classification review does not bind inventory, classification, and ordered pairs.")
+    evidence = values["effective_technical_evidence"]
+    evidence_without_digest = dict(evidence); evidence_digest = evidence_without_digest.pop("effective_technical_evidence_sha256", None)
+    if (
+        evidence.get("technical_test_inventory_sha256") != inventory_sha256
+        or evidence.get("technical_test_classification_sha256") != classification_sha256
+        or evidence.get("technical_test_review_sha256") != review_sha256
+        or evidence.get("files") != inventory.get("files") or evidence.get("symbols") != inventory.get("symbols")
+        or evidence.get("classifications") != classification.get("classifications")
+        or evidence_digest != artifact_sha256(evidence_without_digest)
+    ):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/effective_technical_evidence", "Effective technical evidence does not bind selected inventory, classification, and review.")
+    return inventory, classification, review
+
+
 def _validate_trace_audit(audit: Mapping[str, Any], trace: Mapping[str, Any]) -> str:
     top = _closed(audit, {"valid", "trace_audit", "errors", "warnings", "summary"}, "/tail_artifacts/trace_audit")
     nested = _closed(top.get("trace_audit"), {"verdict", "source_digest", "final_verdict", "required_symbol_pairs", "relation_count", "errors"}, "/tail_artifacts/trace_audit/trace_audit")
@@ -246,7 +359,7 @@ def build_terminal_run_receipt(
     repository = _digest(ledger.get("repository_id"), "/prefix_ledger/repository_id")
     if not isinstance(ledger.get("selected_module"), str) or not ledger["selected_module"] or ledger.get("run_mode") not in {"FULL", "CHANGE_SET"} or type(ledger.get("source_drift")) is not bool:
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger", "Prefix ledger run metadata is invalid.")
-    change_input = _mapping(ledger.get("change_input"), "/prefix_ledger/change_input")
+    change_input = _change_input(ledger.get("change_input"), repository, ledger["run_mode"])
     analytics = _digest(ledger.get("analytics_sha256"), "/prefix_ledger/analytics_sha256")
     fingerprints = _fingerprint_registries(ledger.get("fingerprints"))
     bindings = _closed(ledger.get("artifacts"), set(_PREFIX_KEYS), "/prefix_ledger/artifacts")
@@ -259,6 +372,10 @@ def build_terminal_run_receipt(
         schema = _SCHEMAS.get(name)
         if schema is not None:
             _validate_schema(value, schema, f"/prefix_ledger/artifacts/{name}")
+
+    _, _, classification_review = _validate_prefix_evidence(
+        prefix_values, artifact_digests, repository, ledger["selected_module"], ledger["run_mode"],
+    )
 
     if not isinstance(tail_artifacts, Mapping) or set(tail_artifacts) != set(_TAIL_KEYS):
         raise _error("FEATURE_FLOW_INPUT", "/tail_artifacts", "Tail artifacts must use the exact closed key set.")
@@ -278,11 +395,9 @@ def build_terminal_run_receipt(
         if schema is not None:
             _validate_schema(value, schema, f"/tail_artifacts/{name}")
 
-    classification = _mapping(prefix_values["classification_review"]["artifacts"]["classification_review"], "/prefix_ledger/artifacts/classification_review")
+    classification = classification_review
     classification_verdict = classification.get("verdict")
     findings = classification.get("findings")
-    if classification.get("technical_test_inventory_sha256") != artifact_digests["technical_test_inventory_sha256"] or classification.get("classification_sha256") != artifact_digests["technical_test_classification_sha256"]:
-        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/classification_review", "Classification review bindings do not agree with the ledger.")
     if not isinstance(findings, list) or (classification_verdict == "ПРИНЯТО") != (findings == []):
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/classification_review", "Classification verdict and findings disagree.")
 
@@ -407,6 +522,16 @@ def _object_tree(project: Path, commit: str) -> str:
     return _git(project, "rev-parse", "--verify", f"{commit}^{{tree}}")
 
 
+def _is_ancestor(project: Path, base: str, head: str) -> bool:
+    try:
+        completed = subprocess.run(["git", "merge-base", "--is-ancestor", base, head], cwd=project, capture_output=True, check=False)
+    except OSError:
+        raise _error("FEATURE_FLOW_INPUT", "/project", "Git ancestry proof is unavailable.") from None
+    if completed.returncode not in {0, 1}:
+        raise _error("FEATURE_FLOW_INPUT", "/project", "Git ancestry proof could not be established.")
+    return completed.returncode == 0
+
+
 def validate_baseline_receipt(
     receipt: Mapping[str, Any],
     project: Path,
@@ -458,12 +583,21 @@ def choose_run_mode(target: Mapping[str, Any], baseline: ValidatedBaseline | Non
     return "CHANGE_SET" if compatible else "FULL"
 
 
-def _install(root: Path, relative: PurePosixPath, value: Mapping[str, Any]) -> bool:
+def _install_link(root: Path, relative: PurePosixPath, value: Mapping[str, Any]) -> bool:
+    if not isinstance(relative, PurePosixPath) or relative.is_absolute() or not relative.parts or ".." in relative.parts or "\\" in str(relative):
+        raise _error("FLOW_ATOMIC_WRITE", "/storage", "Predecessor link path is not safe and relative.")
     payload = canonical_bytes(value)
-    target = root / Path(*relative.parts)
+    resolved_root = root.resolve()
+    target = (resolved_root / Path(*relative.parts)).resolve()
+    try:
+        target.relative_to(resolved_root)
+    except ValueError:
+        raise _error("FLOW_ATOMIC_WRITE", "/storage", "Predecessor link path escapes baseline storage.") from None
     temporary = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
+        if any(part.is_symlink() for part in (resolved_root, *target.parents)):
+            raise _error("FLOW_ATOMIC_WRITE", "/storage", "Predecessor link path may not traverse a symbolic link.")
         with temporary.open("xb") as handle:
             handle.write(payload)
             handle.flush()
@@ -582,6 +716,7 @@ def advance_baseline(
         try:
             exact = (
                 _object_tree(project, predecessor.target_commit) == predecessor.target_tree
+                and _is_ancestor(project, predecessor.target_commit, target_commit)
                 and _git(project, "status", "--porcelain=v1", "-z") == ""
                 and _git(project, "rev-parse", "HEAD") == target_commit
                 and _git(project, "rev-parse", "HEAD^{tree}") == target_tree
@@ -607,7 +742,7 @@ def advance_baseline(
     }
     _validate_schema(baseline, "feature-baseline-receipt.schema.json", "/successor_baseline_receipt")
     successor_digest = artifact_sha256(baseline)
-    _install(baseline_root, PurePosixPath("receipts") / f"{successor_digest[7:]}.json", baseline)
+    write_create_only(baseline_root, PurePosixPath("receipts") / f"{successor_digest[7:]}.json", baseline)
     if predecessor_digest is None:
         key = hashlib.sha256(canonical_bytes({"repository_id": repository, "selected_module": terminal["selected_module"]})).hexdigest()
         link_path = PurePosixPath("links/initial") / f"{key}.json"
@@ -618,7 +753,7 @@ def advance_baseline(
         "predecessor_baseline_sha256": predecessor_digest, "successor_baseline_sha256": successor_digest,
     }
     try:
-        created = _install(baseline_root, link_path, edge)
+        created = _install_link(baseline_root, link_path, edge)
     except FlowError as caught:
         if caught.code != "FLOW_CONFLICT":
             raise

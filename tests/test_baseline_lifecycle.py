@@ -213,7 +213,11 @@ def baseline_fingerprints() -> tuple[dict[str, Any], dict[str, str]]:
     return registries, projected
 
 
-def prefix_artifacts(document: dict[str, Any], classification_verdict: str, tc_verdict: str, candidate_document: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+def prefix_artifacts(
+    document: dict[str, Any], repository: str, run_mode: str,
+    classification_verdict: str, tc_verdict: str,
+    candidate_document: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     inventory = {"module_id": "root", "test_roots": [], "files": [], "symbols": []}
     sources = {"module_id": "root", "sources": []}
     source_envelope = {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
@@ -221,14 +225,17 @@ def prefix_artifacts(document: dict[str, Any], classification_verdict: str, tc_v
         "authorized_behavior_sources": sources, "authorized_behavior_sources_sha256": artifact_sha256(sources),
     }, "warnings": []}
     valid_schema(source_envelope, "source-inventory-output.schema.json")
+    inventory_sha256 = source_envelope["artifacts"]["technical_test_inventory_sha256"]
+    sources_sha256 = source_envelope["artifacts"]["authorized_behavior_sources_sha256"]
     classification = {"schema_version": "1.0.0", "stage": "test-classifier", "artifacts": {"classification": {
-        "technical_test_inventory_sha256": artifact_sha256(source_envelope), "classifications": [],
+        "technical_test_inventory_sha256": inventory_sha256, "classifications": [],
     }}, "warnings": []}
     valid_schema(classification, "test-classifier-output.schema.json")
+    classification_sha256 = artifact_sha256(classification["artifacts"]["classification"])
     finding = {"path": "/classifications", "code": "CLASSIFICATION_REWORK", "message": "Classification requires rework."}
     classification_review = {"schema_version": "1.0.0", "stage": "test-classifier-reviewer", "artifacts": {"classification_review": {
-        "technical_test_inventory_sha256": artifact_sha256(source_envelope),
-        "classification_sha256": artifact_sha256(classification), "reviewed_symbol_pairs": [],
+        "technical_test_inventory_sha256": inventory_sha256,
+        "classification_sha256": classification_sha256, "reviewed_symbol_pairs": [],
         "verdict": classification_verdict, "findings": [] if classification_verdict == "ПРИНЯТО" else [finding],
     }}, "warnings": []}
     valid_schema(classification_review, "test-classifier-reviewer-output.schema.json")
@@ -246,23 +253,59 @@ def prefix_artifacts(document: dict[str, Any], classification_verdict: str, tc_v
         report["corrections"] = [{"id": "FIX-test-case", "related_ids": [document["test_cases"][0]["case_id"]], "description": "Applied a test-case correction.", "evidence": ["artifact"]}]
         validation["artifacts"]["successor_document"] = copy.deepcopy(document)
     valid_schema(validation, "tc-reviewer-output.schema.json")
+    context_receipt = {
+        "schema_version": "1.0.0", "selected_module": "root",
+        "authorized_behavior_sources_sha256": sources_sha256,
+        "context_plan_sha256": digest("context-plan"), "batch_result_sha256s": [],
+        "fragment_registry": [], "source_outcomes": [],
+    }
+    valid_schema(context_receipt, "behavior-context-receipt.schema.json")
+    context_receipt_sha256 = artifact_sha256(context_receipt)
+    managed = {
+        "authorized_behavior_sources_sha256": sources_sha256,
+        "requirements": copy.deepcopy(document["requirements"]),
+        "product_sources": [],
+        "requirement_sources": [
+            {"requirement_id": row["requirement_id"], "source_ids": ["REQ-local"]}
+            for row in document["requirements"]
+        ],
+    }
+    accounting = {
+        "authorized_behavior_sources_sha256": sources_sha256,
+        "context_receipt_sha256": context_receipt_sha256,
+        "source_dispositions": [], "behavior_fragment_groups": [],
+    }
+    context = {"schema_version": "5.0.0", "stage": "context-marker", "artifacts": {
+        "managed_behavior_context": managed, "behavior_source_accounting": accounting,
+    }, "warnings": []}
+    valid_schema(context, "context-marker-output.schema.json")
     evidence = {
-        "technical_test_inventory_sha256": artifact_sha256(source_envelope),
-        "technical_test_classification_sha256": artifact_sha256(classification),
-        "technical_test_review_sha256": artifact_sha256(classification_review),
-        "effective_technical_evidence_sha256": digest("effective-evidence"),
+        "technical_test_inventory_sha256": inventory_sha256,
+        "technical_test_classification_sha256": classification_sha256,
+        "technical_test_review_sha256": artifact_sha256(classification_review["artifacts"]["classification_review"]),
         "files": [], "symbols": [], "classifications": [],
     }
+    evidence["effective_technical_evidence_sha256"] = artifact_sha256(evidence)
     valid_schema(evidence, "effective-technical-evidence.schema.json")
-    placeholder = lambda stage: {"schema_version": "1.0.0", "stage": stage, "artifacts": {}, "warnings": []}
+    change_scope = {
+        "schema_version": "1.0.0", "artifact": "change_scope_receipt",
+        "source": {"repository_id": repository, "selected_module": "root", "run_mode": run_mode},
+        "payload_sha256": digest("change-scope-payload"),
+    }
+    changed = {
+        "schema_version": "1.0.0", "artifact": "changed-behavior-context",
+        "source": {"behavior_context_receipt_sha256": context_receipt_sha256},
+        "requirement_ids": sorted(row["requirement_id"] for row in document["requirements"]),
+        "retired_requirement_ids": [],
+    }
     return {
         "technical_test_inventory": copy.deepcopy(source_envelope),
         "authorized_behavior_sources": copy.deepcopy(source_envelope),
-        "change_scope_receipt": placeholder("change-scope"),
-        "managed_behavior_context": placeholder("managed-context"),
-        "changed_behavior_context": placeholder("changed-context"),
-        "behavior_source_accounting": placeholder("source-accounting"),
-        "behavior_context_receipt": placeholder("context-receipt"),
+        "change_scope_receipt": change_scope,
+        "managed_behavior_context": copy.deepcopy(context),
+        "changed_behavior_context": changed,
+        "behavior_source_accounting": copy.deepcopy(context),
+        "behavior_context_receipt": context_receipt,
         "technical_test_classification": classification,
         "classification_review": classification_review,
         "effective_technical_evidence": evidence,
@@ -323,7 +366,7 @@ def build_run(
     accepted_review["artifacts"]["autotest_review"]["reviewed_symbol_pairs"] = pairs
     orchestration = thaw(finalize_orchestration(document, bundle_for(document), automation, accepted_review, run, trace))
     valid_schema(orchestration, "orchestrator-output.schema.json")
-    prefix_values = prefix_artifacts(document, classification_verdict, tc_verdict, candidate_document)
+    prefix_values = prefix_artifacts(document, repository, mode, classification_verdict, tc_verdict, candidate_document)
     stored_prefix = {name: write_create_only(run_root, PurePosixPath("artifacts/prefix") / f"{name}.json", value) for name, value in prefix_values.items()}
     tail_values: dict[str, dict[str, Any] | None] = {
         "effective_document": document,
@@ -337,13 +380,21 @@ def build_run(
     }
     tails = {name: None if value is None else stored_json(run_root, PurePosixPath("artifacts/tail") / f"{name}.json", value) for name, value in tail_values.items()}
     registries, projected = baseline_fingerprints()
-    change_input: dict[str, Any] = {
-        "input_kind": input_kind or ("git_head" if mode == "FULL" else "git_range"),
-        "repository_id": repository,
-        "target": {"commit": target_commit, "tree": target_tree},
-    }
-    if base is not None:
-        change_input["base"] = {"commit": base[0], "tree": base[1]}
+    kind = input_kind or ("git_head" if mode == "FULL" else "git_range")
+    if kind == "git_worktree":
+        base_identity = base or (target_commit, target_tree)
+        change_input = {"input_kind": kind, "repository_id": repository,
+                        "base": {"commit": base_identity[0], "tree": base_identity[1]},
+                        "target_snapshot_sha256": digest("worktree-snapshot")}
+    elif kind == "patch_manifest":
+        change_input = {"input_kind": kind, "repository_id": repository,
+                        "base_snapshot_sha256": digest("patch-base"),
+                        "target_snapshot_sha256": digest("patch-target")}
+    else:
+        change_input = {"input_kind": kind, "repository_id": repository,
+                        "target": {"commit": target_commit, "tree": target_tree}}
+        if base is not None:
+            change_input["base"] = {"commit": base[0], "tree": base[1]}
     ledger_value = {
         "schema_version": "1.0.0", "artifact": "prefix-ledger", "repository_id": repository,
         "selected_module": "root", "run_mode": mode, "change_input": change_input,
@@ -367,6 +418,17 @@ class BaselineLifecycleTests(unittest.TestCase):
             action()
         self.assertEqual(code, caught.exception.code)
         return caught.exception
+
+    def replace_prefix(self, run_root: Path, fixture: dict[str, Any], name: str, value: dict[str, Any]) -> None:
+        replacement = stored_json(run_root, PurePosixPath("mutated") / f"{name}.json", value)
+        ledger = copy.deepcopy(fixture["ledger_value"])
+        ledger["artifacts"][name] = {"path": replacement.path.relative_to(run_root).as_posix(), "sha256": replacement.sha256}
+        fixture["ledger"].path.unlink()
+        fixture["ledger"] = stored_json(run_root, PurePosixPath("manifest/prefix-ledger.json"), ledger)
+
+    def replace_ledger(self, run_root: Path, fixture: dict[str, Any], ledger: dict[str, Any]) -> None:
+        fixture["ledger"].path.unlink()
+        fixture["ledger"] = stored_json(run_root, PurePosixPath("manifest/prefix-ledger.json"), ledger)
 
     def test_terminal_accepts_pass_pass_with_remainder_and_manual_only_no_run(self) -> None:
         """Dropping any eligible branch, especially the valid nullable run branch, breaks terminal authority."""
@@ -430,6 +492,14 @@ class BaselineLifecycleTests(unittest.TestCase):
                 replacement = stored_json(run_root, PurePosixPath("mutated") / f"{name}.json", value)
                 ledger_value = copy.deepcopy(fixture["ledger_value"])
                 ledger_value["artifacts"][name] = {"path": replacement.path.relative_to(run_root).as_posix(), "sha256": replacement.sha256}
+                if kind == "classification_findings":
+                    evidence_binding = ledger_value["artifacts"]["effective_technical_evidence"]
+                    evidence = json.loads((run_root / Path(*PurePosixPath(evidence_binding["path"]).parts)).read_bytes())
+                    evidence["technical_test_review_sha256"] = artifact_sha256(value["artifacts"]["classification_review"])
+                    without_digest = dict(evidence); without_digest.pop("effective_technical_evidence_sha256")
+                    evidence["effective_technical_evidence_sha256"] = artifact_sha256(without_digest)
+                    evidence_replacement = stored_json(run_root, PurePosixPath("mutated/effective_technical_evidence.json"), evidence)
+                    ledger_value["artifacts"]["effective_technical_evidence"] = {"path": evidence_replacement.path.relative_to(run_root).as_posix(), "sha256": evidence_replacement.sha256}
                 fixture["ledger"].path.unlink()
                 fixture["ledger"] = stored_json(run_root, PurePosixPath("manifest/prefix-ledger.json"), ledger_value)
                 self.assert_flow_error("FEATURE_FLOW_INPUT", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
@@ -495,6 +565,49 @@ class BaselineLifecycleTests(unittest.TestCase):
             root = Path(temp); _, identity, head, tree = make_project(root); fixture = build_run(root / "run", identity, head, tree)
             bound = fixture["tails"]["automation_artifact"]; bound.path.write_bytes(bound.payload + b" ")
             self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_every_prefix_carrier_is_closed_and_cross_digest_bound(self) -> None:
+        """Placeholder context/scope carriers and internally forged effective evidence must never advance."""
+        mutations = {
+            "change_scope_receipt": lambda value: value.clear(),
+            "managed_behavior_context": lambda value: value["artifacts"].pop("managed_behavior_context"),
+            "changed_behavior_context": lambda value: value["source"].update({"behavior_context_receipt_sha256": digest("foreign")}),
+            "behavior_source_accounting": lambda value: value["artifacts"]["behavior_source_accounting"].update({"context_receipt_sha256": digest("foreign")}),
+            "behavior_context_receipt": lambda value: value.update({"selected_module": "foreign"}),
+            "effective_technical_evidence": lambda value: value.update({"technical_test_classification_sha256": digest("foreign")}),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+                fixture = build_run(run_root, identity, head, tree)
+                # The desired complete prefix must itself be accepted before its one-field mutation.
+                build_terminal_run_receipt(fixture["ledger"], fixture["tails"])
+                binding = fixture["ledger_value"]["artifacts"][name]
+                value = json.loads((run_root / Path(*PurePosixPath(binding["path"]).parts)).read_bytes())
+                mutate(value); self.replace_prefix(run_root, fixture, name, value)
+                self.assert_flow_error("FEATURE_FLOW_INPUT" if name in {"change_scope_receipt", "managed_behavior_context"} else "BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_change_input_is_a_closed_mode_bound_repository_union(self) -> None:
+        """Extra fields, hybrids, foreign repository IDs, and run-mode mismatches cannot enter terminal receipts."""
+        mutations = (
+            lambda value: value.update({"extra": True}),
+            lambda value: value.update({"base": {"commit": "a" * 40, "tree": "b" * 40}}),
+            lambda value: value.update({"repository_id": digest("foreign")}),
+            lambda value: value.update({"input_kind": "git_range"}),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+                fixture = build_run(run_root, identity, head, tree)
+                ledger = copy.deepcopy(fixture["ledger_value"]); mutate(ledger["change_input"])
+                self.replace_ledger(run_root, fixture, ledger)
+                self.assert_flow_error("BASELINE_BINDING" if index == 2 else "FEATURE_FLOW_INPUT", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, identity, head, tree = make_project(root)
+            fixture = build_run(root / "run", identity, head, tree)
+            terminal = thaw(build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+            terminal["change_input"]["extra"] = True
+            self.assertNotEqual([], schema_diagnostics(terminal, ROOT / "schemas/terminal-run-receipt.schema.json", ROOT))
 
     def test_fingerprint_registries_require_closed_sorted_unique_canonical_aggregation(self) -> None:
         """A label, duplicate, unsorted registry, unsafe path, or fifth fingerprint must not select code authority."""
@@ -582,7 +695,7 @@ class BaselineLifecycleTests(unittest.TestCase):
                 fixture = build_run(root / f"bad{index}", identity, head, head_tree, mode="CHANGE_SET", base=(bad_base, bad_tree))
                 self.assertEqual("INELIGIBLE", advance_baseline({"project": project, "baseline_root": root / f"bad-baselines{index}"}, persist_terminal(root / f"bad{index}", fixture), predecessor)["status"])
             missing = build_run(root / "missing", identity, head, head_tree, mode="CHANGE_SET")
-            self.assertEqual("INELIGIBLE", advance_baseline({"project": project, "baseline_root": root / "missing-baselines"}, persist_terminal(root / "missing", missing), predecessor)["status"])
+            self.assert_flow_error("FEATURE_FLOW_INPUT", lambda: persist_terminal(root / "missing", missing))
             nonexistent = build_run(root / "nonexistent", identity, "d" * 40, "c" * 40, mode="CHANGE_SET", base=(base, base_tree))
             self.assertEqual("INELIGIBLE", advance_baseline({"project": project, "baseline_root": root / "nonexistent-baselines"}, persist_terminal(root / "nonexistent", nonexistent), predecessor)["status"])
             loose = first["successor_baseline_receipt"]
@@ -592,6 +705,24 @@ class BaselineLifecycleTests(unittest.TestCase):
                 ledger["fingerprints"]["tool_bundle"] = {"files": files, "sha256": artifact_sha256({"files": files})}
             stale = build_run(root / "stale", identity, head, head_tree, mode="CHANGE_SET", base=(base, base_tree), ledger_mutator=stale_fingerprint)
             self.assertEqual("INELIGIBLE", advance_baseline({"project": project, "baseline_root": root / "stale-baselines"}, persist_terminal(root / "stale", stale), predecessor)["status"])
+
+    def test_change_set_rejects_same_repository_head_not_descended_from_predecessor(self) -> None:
+        """A committed sibling head in the same repository must not create a baseline receipt or link."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, root_commit, _ = make_project(root)
+            predecessor_commit, predecessor_tree = commit(project, "predecessor")
+            first = build_run(root / "first", identity, predecessor_commit, predecessor_tree)
+            advanced = advance_baseline({"project": project, "baseline_root": root / "baselines"}, persist_terminal(root / "first", first))
+            predecessor = validate_baseline_receipt(advanced["successor_baseline_receipt"], project, "root", first["projected"])
+            sibling = root / "sibling"
+            git(project, "worktree", "add", "-b", "unrelated-successor", str(sibling), root_commit)
+            sibling_commit, sibling_tree = commit(sibling, "sibling")
+            fixture = build_run(root / "sibling-run", identity, sibling_commit, sibling_tree, mode="CHANGE_SET", base=(predecessor_commit, predecessor_tree))
+            before = sorted(path.relative_to(root / "baselines").as_posix() for path in (root / "baselines").rglob("*") if path.is_file())
+            result = advance_baseline({"project": sibling, "baseline_root": root / "baselines"}, persist_terminal(root / "sibling-run", fixture), predecessor)
+            after = sorted(path.relative_to(root / "baselines").as_posix() for path in (root / "baselines").rglob("*") if path.is_file())
+            self.assertEqual("INELIGIBLE", result["status"])
+            self.assertEqual(before, after)
 
     def test_linked_worktree_identity_and_real_competing_successor_conflict(self) -> None:
         """Common Git identity must span worktrees while one predecessor rejects a distinct committed successor."""
@@ -624,6 +755,26 @@ class BaselineLifecycleTests(unittest.TestCase):
             for thread in threads: thread.join()
             self.assertEqual([], failures)
             self.assertCountEqual(["ADVANCED", "IDEMPOTENT"], statuses)
+
+    def test_baseline_persistence_rejects_symlinked_receipt_directory(self) -> None:
+        """Receipt persistence must inherit Task 1 confinement and symlink traversal rejection."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, head, tree = make_project(root)
+            fixture = build_run(root / "run", identity, head, tree); terminal = persist_terminal(root / "run", fixture)
+            baseline_root = root / "baselines"; outside = root / "outside"; baseline_root.mkdir(); outside.mkdir()
+            try:
+                (baseline_root / "receipts").symlink_to(outside, target_is_directory=True)
+            except OSError as error:
+                if sys.platform != "win32":
+                    self.skipTest(f"symlink creation unavailable: {error}")
+                junction = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(baseline_root / "receipts"), str(outside)],
+                    capture_output=True, check=False,
+                )
+                if junction.returncode:
+                    self.skipTest(f"symlink and junction creation unavailable: {error}")
+            self.assert_flow_error("FLOW_ATOMIC_WRITE", lambda: advance_baseline({"project": project, "baseline_root": baseline_root}, terminal))
+            self.assertEqual([], list(outside.iterdir()))
 
     def test_receipts_and_validated_baselines_are_recursively_immutable_and_safe(self) -> None:
         """Nested mutation and hostile diagnostic values must not alter accepted state or leak through tracebacks."""
