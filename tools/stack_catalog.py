@@ -17,6 +17,7 @@ MANIFEST_LANGUAGES = {
     "package.json": "typescript", "go.mod": "go",
 }
 WORKSPACE_MANIFEST_NAMES = frozenset({"settings.gradle", "settings.gradle.kts", "go.work"})
+DISCOVERY_SOURCE_ROOTS = ("src", "src/main/java", "src/main/kotlin")
 PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "Pipfile"]
 JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
 JS_MANIFESTS = ["package.json"]
@@ -51,7 +52,10 @@ def is_anchored_generated_build_path(path: Path, module_root: Path, source_roots
     Generated output is limited to a direct ``build`` child of a module or
     declared source root; deeper product domains named ``build`` remain valid.
     """
-    return any(path.is_relative_to(root / "build") for root in (module_root, *source_roots))
+    module_build_is_source = any(root.name == "build" and path.is_relative_to(root) for root in source_roots)
+    return (
+        not module_build_is_source and path.is_relative_to(module_root / "build")
+    ) or any(path.is_relative_to(root / "build") for root in source_roots)
 
 
 def is_supported_static_test_file(path: Path, language: str) -> bool:

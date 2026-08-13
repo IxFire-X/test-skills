@@ -42,9 +42,11 @@ def _validate_maven(data: ET.Element) -> None:
             if _xml_name(module)!="module" or list(module) or not _safe_module_ref(module.text): raise ValueError
             if module.tail and not module.tail.isspace(): raise ValueError
 def find_confined_manifests(root: Path) -> list[Path]:
-    found=[]
+    found=[]; module_roots=set()
     for current, dirs, files in os.walk(root, followlinks=False):
-        base=Path(current); dirs[:]=sorted(d for d in dirs if d not in IGNORED_DIR_NAMES and not (base/d).is_symlink())
+        base=Path(current)
+        if any(name in MANIFEST_LANGUAGES and not (base/name).is_symlink() for name in files): module_roots.add(base)
+        dirs[:]=sorted(d for d in dirs if d not in IGNORED_DIR_NAMES and not (base/d).is_symlink() and not any(is_anchored_generated_build_path(base/d,module_root,tuple(module_root/name for name in DISCOVERY_SOURCE_ROOTS)) for module_root in module_roots))
         found += [base/f for f in sorted(files) if f in MANIFEST_LANGUAGES or f in WORKSPACE_MANIFESTS if not (base/f).is_symlink() and _ok(root,base/f)]
     return sorted(found,key=lambda p:_rel(root,p))
 def _refs(p: Path, data: Any) -> list[str]:
@@ -87,7 +89,7 @@ def _colocated_tests(root:Path, base:Path, sources:Sequence[str], language:str)-
                 if not candidate.is_symlink() and candidate.is_file() and _ok(root,candidate) and is_supported_static_test_file(candidate,language): found.append(_rel(base,candidate))
     return sorted(set(found))
 def _paths(root:Path, base:Path, language:str|None=None)->dict[str,list[str]]:
-    sets={"source":("src","src/main/java","src/main/kotlin"),"tests":("tests","test","src/test/java","src/test/kotlin"),"resources":("resources","src/main/resources","src/test/resources")}; out={}
+    sets={"source":DISCOVERY_SOURCE_ROOTS,"tests":("tests","test","src/test/java","src/test/kotlin"),"resources":("resources","src/main/resources","src/test/resources")}; out={}
     for k,names in sets.items():
         vals=sorted(_rel(base,base/n) for n in names if (base/n).is_dir() and _ok(root,base/n))
         if k=="tests" and language in {"python","java"}: vals=sorted(set(vals+_colocated_tests(root,base,sets["source"],language)))

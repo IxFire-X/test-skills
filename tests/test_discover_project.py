@@ -233,6 +233,36 @@ class DiscoverProjectTests(unittest.TestCase):
 
             self.assertEqual(["src/backend/InvenTree/build/test_api.py"], tests)
 
+    def test_manifest_discovery_excludes_anchored_generated_builds_and_keeps_deeper_domain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for path in (
+                "pyproject.toml",
+                "build/pyproject.toml",
+                "src/build/pyproject.toml",
+                "nested/module/pyproject.toml",
+                "nested/module/build/pyproject.toml",
+                "nested/module/src/build/pyproject.toml",
+                "src/backend/InvenTree/build/pyproject.toml",
+            ):
+                manifest = root / path
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_text('[project]\nname="sample"\n', encoding="utf-8")
+
+            roots = [module["root"] for module in discover_project(root)["modules"]]
+
+            self.assertEqual([".", "nested/module", "src/backend/InvenTree/build"], roots)
+
+    def test_declared_source_root_named_build_is_not_generated_output(self):
+        from tools.stack_catalog import is_anchored_generated_build_path
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root = root / "build"
+
+            self.assertFalse(is_anchored_generated_build_path(source_root / "domain.py", root, (source_root,)))
+            self.assertTrue(is_anchored_generated_build_path(source_root / "build" / "generated.py", root, (source_root,)))
+
     def test_nested_module_paths_are_relative_to_its_own_root(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
