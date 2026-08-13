@@ -46,6 +46,7 @@ VERDICTS = {"classification":["ПРИНЯТО","ТРЕБУЕТ ДОРАБОТК�
 TRACEABILITY = ["requirement", "case", "step", "expectation", "assertion", "file", "symbol", "current_run_evidence"]
 FORBIDDEN = ("generated_test_cases", "corrected_test_cases", "automation_matrix", "generated_test_methods", "method_id", "run_tests_verdict", "execution_evidence")
 SCHEMAS = ("test-symbol-registry.schema.json", "source-inventory-output.schema.json", "test-classifier-output.schema.json", "test-classifier-reviewer-output.schema.json", "effective-technical-evidence.schema.json", "canonical-test-document.schema.json", "tc-reviewer-output.schema.json", "tc-to-autotest-output.schema.json", "autotest-reviewer-output.schema.json", "run-tests-output.schema.json", "trace-document.schema.json", "orchestrator-output.schema.json", "pipeline.schema.json")
+RUNTIME_TOOLS = ("tools/test_classification.py",)
 
 
 def _schema_errors(contract: dict[str, Any], root: Path) -> list[str]:
@@ -85,6 +86,9 @@ def _semantic_errors(contract: dict[str, Any], root: Path, check_drift: bool) ->
             value = json.loads(path.read_text(encoding="utf-8"))
             if value.get("$schema") != "https://json-schema.org/draft/2020-12/schema": errors.append(f"invalid schema: {name}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError): errors.append(f"missing schema: {name}")
+    for relative in RUNTIME_TOOLS:
+        if not (root / relative).is_file():
+            errors.append(f"missing runtime tool: {relative}")
     if check_drift:
         try:
             if __package__:

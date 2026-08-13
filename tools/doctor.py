@@ -39,6 +39,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "tools/skillsrc_manifest.py",
         "tools/discover_project.py",
         "tools/init_skillsrc.py",
+        "tools/test_classification.py",
         "skills/test-classifier/SKILL.md",
         "skills/test-classifier-reviewer/SKILL.md",
     )

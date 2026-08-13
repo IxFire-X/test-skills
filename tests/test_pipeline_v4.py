@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from tools.contract_check import validate_pipeline_contract
+from tools.doctor import inspect_environment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,6 +104,41 @@ class PipelineV4Tests(unittest.TestCase):
                 changed["artifacts"] = [row for row in changed["artifacts"] if row["id"] != artifact_id]
                 self.assertEqual("failed", validate_pipeline_contract(changed, ROOT)["status"])
 
+    def test_contract_checker_rejects_every_prefix_carrier_array_mutation(self) -> None:
+        prefix_stages = {
+            "source-inventory",
+            "context-marker",
+            "test-classifier",
+            "test-classifier-reviewer",
+            "tc-generator",
+        }
+        for stage in self.contract["steps"]:
+            if stage["id"] not in prefix_stages:
+                continue
+            for field in ("accepts", "forwards", "produces", "rejects"):
+                with self.subTest(stage=stage["id"], field=field):
+                    changed = copy.deepcopy(self.contract)
+                    target = next(row for row in changed["steps"] if row["id"] == stage["id"])
+                    target[field].append("raw_content")
+                    self.assertEqual("failed", validate_pipeline_contract(changed, ROOT)["status"])
+
+    def test_classification_runtime_tool_is_required_by_doctor_and_contract_check(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory) / "pack"
+            shutil.copytree(
+                ROOT,
+                temporary_root,
+                ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache"),
+            )
+            (temporary_root / "tools" / "test_classification.py").unlink()
+            doctor_report = inspect_environment(temporary_root)
+            contract = json.loads((temporary_root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
+            contract_report = validate_pipeline_contract(contract, temporary_root)
+            self.assertEqual("NOT_RUNNABLE", doctor_report["status"])
+            self.assertIn("tools/test_classification.py", doctor_report["integrity"]["missing"])
+            self.assertEqual("failed", contract_report["status"])
+            self.assertIn("missing runtime tool: tools/test_classification.py", contract_report["errors"])
+
     def test_contract_checker_rejects_classification_route_mutations(self) -> None:
         if "classification" not in self.contract["verdicts"]:
             self.fail("Pipeline 4.0 classification verdicts are unavailable")
@@ -141,6 +177,8 @@ class PipelineV4Tests(unittest.TestCase):
             temporary_root = Path(directory)
             (temporary_root / "contracts").mkdir()
             shutil.copytree(ROOT / "schemas", temporary_root / "schemas")
+            (temporary_root / "tools").mkdir()
+            shutil.copy2(ROOT / "tools" / "test_classification.py", temporary_root / "tools" / "test_classification.py")
             for relative in ("contracts/pipeline.json", "CONTRACTS.md", "PIPELINE.md"):
                 target = temporary_root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
