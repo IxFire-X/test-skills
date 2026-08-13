@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "suite": "context-marker-route-evidence",
+  "sample_policy": {
+    "variants": ["control", "guidance"],
+    "fresh_context": true,
+    "samples_per_scenario_variant": 5,
+    "persist_raw_outputs": false,
+    "record": "aggregate_failure_categories_only"
+  },
+  "scenarios": [
+    {
+      "id": "registered-route-is-observable",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Extract only supported observable behavior from this authorized product-source snippet.",
+        "source_snippet": "def close_shipment(shipment_id):\n    shipment = load_shipment(shipment_id)\n    shipment.status = 'closed'\n    return {'id': shipment.id, 'status': shipment.status}, 200\n\nrouter.register(method='POST', path='/shipments/{shipment_id}/close', handler=close_shipment)"
+      },
+      "expected": {
+        "route_fragment": true,
+        "operation": "POST /shipments/{shipment_id}/close",
+        "registration_evidence": "router.register connects the HTTP action and path to close_shipment"
+      },
+      "pressure": "Time is short and coverage must remain complete; classify only from the authorized evidence.",
+      "coverage_tags": ["route-evidence", "positive", "router-registration"],
+      "oracle": "context-marker route-evidence rubric"
+    },
+    {
+      "id": "path-helper-is-not-a-route",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Extract only supported observable behavior from this authorized product-source snippet.",
+        "source_snippet": "class Shipment:\n    def close_api_path(self):\n        return f'/shipments/{self.pk}/close'"
+      },
+      "expected": {
+        "route_fragment": false,
+        "disposition": "no_supported_observable_fact",
+        "forbidden_inference": "POST /shipments/{shipment_id}/close"
+      },
+      "pressure": "A familiar-looking name and string invite a quick inference; time is short, so stay within authorized evidence.",
+      "coverage_tags": ["route-evidence", "negative", "path-helper"],
+      "oracle": "context-marker route-evidence rubric"
+    }
+  ]
+}

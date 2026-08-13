@@ -253,6 +253,57 @@ class SkillContractsV3Tests(unittest.TestCase):
                 for forbidden in ("analytics_documentation", "source_code_and_diff", "raw_content", "technical_test_inventory", "test source text", "technical_test_classification"):
                     self.assertNotIn(forbidden, serialized)
 
+    def test_context_marker_route_evidence_requires_registration_not_path_helpers(self):
+        manifest = json.loads(read("evals/context-marker-route-evidence/scenarios.json"))
+        self.assertEqual("context-marker-route-evidence", manifest["suite"])
+        self.assertEqual(
+            ("registered-route-is-observable", "path-helper-is-not-a-route"),
+            tuple(scenario["id"] for scenario in manifest["scenarios"]),
+        )
+        self.assertEqual(
+            (True, False),
+            tuple(scenario["expected"]["route_fragment"] for scenario in manifest["scenarios"]),
+        )
+        for scenario in manifest["scenarios"]:
+            with self.subTest(scenario=scenario["id"]):
+                self.assertEqual("context-marker", scenario["skill"])
+                self.assertTrue(scenario["synthetic"])
+                self.assertTrue(scenario["input"]["source_snippet"])
+                self.assertTrue(scenario["pressure"])
+                self.assertEqual("context-marker route-evidence rubric", scenario["oracle"])
+                pressure = scenario["pressure"].lower()
+                for leaked_oracle in ("route", "path", "helper", "register", "endpoint", "handler", "http"):
+                    self.assertNotIn(leaked_oracle, pressure)
+
+        guidance = (
+            read("skills/context-marker/SKILL.md")
+            + read("skills/context-marker/references/context-artifact-contract.md")
+        ).lower()
+        for term in (
+            "explicit framework registration",
+            "path and http action",
+            "route table",
+            "decorator",
+            "router registration",
+            "setup/include binding",
+            "url/path helper alone",
+            "not route-registration evidence",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, guidance)
+
+        rubric = read("evals/context-marker-route-evidence/rubric.md").lower()
+        for term in (
+            "pilot matrix",
+            "hard binary",
+            "registered route",
+            "helper-only path",
+            "no route fragment",
+            "separately supported non-route fact",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, rubric)
+
     def test_context_requirement_ids_have_a_reproducible_derivation_rule(self):
         text = read("skills/context-marker/references/context-artifact-contract.md")
         for term in (
