@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/test-symbol-registry.schema.json",
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "file_id": {"type": "string", "pattern": "^FILE-[0-9a-f]{64}$"},
+    "symbol_id": {"type": "string", "pattern": "^SYMBOL-[0-9a-f]{64}$"},
+    "python_module_function": {"type": "object", "additionalProperties": false, "required": ["kind", "function_name"], "properties": {"kind": {"const": "python_module_function"}, "function_name": {"type": "string", "minLength": 1}}},
+    "python_class_method": {"type": "object", "additionalProperties": false, "required": ["kind", "qualified_class_name", "method_name"], "properties": {"kind": {"const": "python_class_method"}, "qualified_class_name": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}},
+    "java_class_method": {"type": "object", "additionalProperties": false, "required": ["kind", "class_fqn", "method_name"], "properties": {"kind": {"const": "java_class_method"}, "class_fqn": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}},
+    "locator": {"oneOf": [{"$ref": "#/$defs/python_module_function"}, {"$ref": "#/$defs/python_class_method"}, {"$ref": "#/$defs/java_class_method"}]},
+    "file": {"type": "object", "additionalProperties": false, "required": ["file_id", "path", "language", "framework", "content_digest"], "properties": {"file_id": {"$ref": "#/$defs/file_id"}, "path": {"type": "string", "minLength": 1}, "language": {"enum": ["python", "java"]}, "framework": {"type": "string", "minLength": 1}, "content_digest": {"$ref": "#/$defs/digest"}}},
+    "symbol": {"type": "object", "additionalProperties": false, "required": ["file_id", "symbol_id", "locator"], "properties": {"file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}, "locator": {"$ref": "#/$defs/locator"}}}
+  }
+}

@@ -1,0 +1,19 @@
+version: "3.0"
+project:
+  name: inventory-fixture
+discovery:
+  on_missing: automatic
+  conflict_policy: ask_user
+modules:
+  - id: backend
+    root: .
+    stack:
+      language: python
+      build_tool: pip
+    paths:
+      source:
+        - src
+      tests:
+        - tests
+    detected_from:
+      - pyproject.toml

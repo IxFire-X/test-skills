@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/source-inventory-output.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "stage": {"const": "source-inventory"},
+    "artifacts": {"type": "object", "additionalProperties": false, "required": ["technical_test_inventory", "technical_test_inventory_sha256", "authorized_behavior_sources", "authorized_behavior_sources_sha256"], "properties": {
+      "technical_test_inventory": {"$ref": "#/$defs/inventory"}, "technical_test_inventory_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"},
+      "authorized_behavior_sources": {"$ref": "#/$defs/sources"}, "authorized_behavior_sources_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}
+    }}, "warnings": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
+  },
+  "$defs": {
+    "inventory": {"type": "object", "additionalProperties": false, "required": ["module_id", "test_roots", "files", "symbols"], "properties": {"module_id": {"type": "string", "minLength": 1}, "test_roots": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "files": {"type": "array", "items": {"$ref": "test-symbol-registry.schema.json#/$defs/file"}}, "symbols": {"type": "array", "items": {"$ref": "test-symbol-registry.schema.json#/$defs/symbol"}}}},
+    "supplied": {"type": "object", "additionalProperties": false, "required": ["source_id", "kind", "content_digest"], "properties": {"source_id": {"type": "string", "minLength": 1}, "kind": {"const": "supplied_requirement"}, "content_digest": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}}},
+    "product": {"type": "object", "additionalProperties": false, "required": ["source_id", "kind", "path", "content_digest"], "properties": {"source_id": {"type": "string", "pattern": "^SOURCE-[0-9a-f]{64}$"}, "kind": {"const": "product_file"}, "path": {"type": "string", "minLength": 1}, "content_digest": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}}},
+    "sources": {"type": "object", "additionalProperties": false, "required": ["module_id", "sources"], "properties": {"module_id": {"type": "string", "minLength": 1}, "sources": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/supplied"}, {"$ref": "#/$defs/product"}]}}}}
+  }
+}
