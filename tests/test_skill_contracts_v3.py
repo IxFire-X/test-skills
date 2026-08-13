@@ -305,12 +305,25 @@ class SkillContractsV3Tests(unittest.TestCase):
         self.assertIn("def detail_url(self):", helper)
         self.assertIn('return f"/resources/{self.identifier}/"', helper)
         self.assertNotIn("django", helper)
+        helper_expected = by_id["url-helper-only"]["expected"]
+        self.assertFalse(helper_expected["route_fragment"])
+        self.assertEqual(
+            {"url_template": "/resources/{identifier}/"},
+            helper_expected["preserved_non_route_fact"],
+        )
+        self.assertNotIn("disposition", helper_expected)
+        self.assertNotIn("no_supported_observable_fact", json.dumps(helper_expected))
 
         local_register = by_id["local-register-name-no-provenance"]["input"]["source_snippet"]
         self.assertIn("def register(method, pattern, callback):", local_register)
         self.assertIn("def status_callback():", local_register)
         self.assertIn('registrations = [register("GET", "/status", status_callback)]', local_register)
         self.assertNotIn("import ", local_register)
+        local_register_expected = by_id["local-register-name-no-provenance"]["expected"]
+        self.assertFalse(local_register_expected["route_fragment"])
+        self.assertEqual({"status": "ok"}, local_register_expected["preserved_non_route_fact"])
+        self.assertNotIn("disposition", local_register_expected)
+        self.assertNotIn("no_supported_observable_fact", json.dumps(local_register_expected))
 
         no_target = by_id["framework-constructor-no-target"]["input"]["source_snippet"]
         self.assertIn("from django.urls import path", no_target)
@@ -357,6 +370,8 @@ class SkillContractsV3Tests(unittest.TestCase):
             "registered route",
             "helper-only path",
             "no route fragment",
+            "url-construction outcome remains a non-route fact",
+            "callback outcome remains a non-route fact",
             "separately supported non-route fact",
         ):
             with self.subTest(term=term):

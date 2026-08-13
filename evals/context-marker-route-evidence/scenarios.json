@@ -64,7 +64,7 @@
         "registration_sink": false,
         "bound_target": false,
         "route_fragment": false,
-        "disposition": "no_supported_observable_fact"
+        "preserved_non_route_fact": {"url_template": "/resources/{identifier}/"}
       },
       "pressure": "A familiar-looking name and string invite a quick inference; stay within the authorized evidence.",
       "coverage_tags": ["route-evidence", "negative", "url-helper"],
@@ -83,7 +83,7 @@
         "registration_sink": true,
         "bound_target": true,
         "route_fragment": false,
-        "disposition": "no_supported_observable_fact"
+        "preserved_non_route_fact": {"status": "ok"}
       },
       "pressure": "A convincing call shape invites a quick inference; classify only from the authorized evidence.",
       "coverage_tags": ["route-evidence", "negative", "local-name", "missing-provenance"],

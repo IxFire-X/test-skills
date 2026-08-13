@@ -18,6 +18,8 @@ Use hard binary gates. A sample passes only when every applicable gate passes:
 - A sink is a route table/config entry, returned mounted collection, decorator, or router registration. A URL/path helper is not a sink.
 - A direct fragment identifies the resolved handler, view, or viewset. An include fragment identifies delegation to the included resolver and does not relabel it as direct dispatch.
 - An HTTP verb appears only when authorized evidence explicitly states or binds it. The direct and include positive pilots therefore contain no inferred verb.
+- In the URL-helper negative pilot, no route fragment is emitted, while the URL-construction outcome remains a non-route fact: `{"url_template": "/resources/{identifier}/"}`.
+- In the local `register` negative pilot, no route fragment is emitted, while the callback outcome remains a non-route fact: `{"status": "ok"}`.
 - Rejecting an unsupported route does not erase a separately supported non-route fact; such a fact remains eligible under the ordinary observable-fact contract.
 
 Score control and guidance variants independently. Record aggregate failure categories only; never persist raw outputs. A repeated bypass fails the scenario: successful samples do not average it away. Behavior evaluation is `UNVERIFIED — harness unavailable` until a real fresh-context harness produces the policy's samples.
