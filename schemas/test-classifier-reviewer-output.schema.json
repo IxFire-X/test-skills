@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/test-classifier-reviewer-output.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "stage": {"const": "test-classifier-reviewer"},
+    "artifacts": {"type": "object", "additionalProperties": false, "required": ["classification_review"], "properties": {"classification_review": {"$ref": "#/$defs/review"}}},
+    "warnings": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
+  },
+  "$defs": {
+    "pair": {"type": "object", "additionalProperties": false, "required": ["file_id", "symbol_id"], "properties": {"file_id": {"$ref": "test-symbol-registry.schema.json#/$defs/file_id"}, "symbol_id": {"$ref": "test-symbol-registry.schema.json#/$defs/symbol_id"}}},
+    "finding": {"type": "object", "additionalProperties": false, "required": ["path", "code", "message"], "properties": {"path": {"type": "string", "minLength": 1}, "code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}, "file_id": {"$ref": "test-symbol-registry.schema.json#/$defs/file_id"}, "symbol_id": {"$ref": "test-symbol-registry.schema.json#/$defs/symbol_id"}}, "allOf": [{"if": {"required": ["file_id"]}, "then": {"required": ["symbol_id"]}}, {"if": {"required": ["symbol_id"]}, "then": {"required": ["file_id"]}}]},
+    "review": {"type": "object", "additionalProperties": false, "required": ["technical_test_inventory_sha256", "classification_sha256", "reviewed_symbol_pairs", "verdict", "findings"], "properties": {
+      "technical_test_inventory_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}, "classification_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"},
+      "reviewed_symbol_pairs": {"type": "array", "items": {"$ref": "#/$defs/pair"}}, "verdict": {"enum": ["ПРИНЯТО", "ТРЕБУЕТ ДОРАБОТКИ"]}, "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}}
+    }}
+  }
+}

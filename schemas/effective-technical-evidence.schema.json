@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/effective-technical-evidence.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["technical_test_inventory_sha256", "technical_test_classification_sha256", "technical_test_review_sha256", "effective_technical_evidence_sha256", "files", "symbols", "classifications"],
+  "properties": {
+    "technical_test_inventory_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}, "technical_test_classification_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}, "technical_test_review_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"}, "effective_technical_evidence_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"},
+    "files": {"type": "array", "items": {"$ref": "test-symbol-registry.schema.json#/$defs/file"}}, "symbols": {"type": "array", "items": {"$ref": "test-symbol-registry.schema.json#/$defs/symbol"}},
+    "classifications": {"type": "array", "items": {"$ref": "test-classifier-output.schema.json#/$defs/row"}}
+  }
+}

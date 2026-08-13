@@ -23,6 +23,14 @@ try:
 except ImportError:  # pragma: no cover - package import is covered by tests
     from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc, resolve_module_root, select_module
 
+try:
+    if __package__:
+        from .schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
+    else:
+        from schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
+except ImportError:  # pragma: no cover - direct script execution is covered by smoke tests
+    from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
+
 
 _TEXT_SUFFIXES = {".py", ".java", ".kt", ".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml", ".sql", ".graphql", ".proto", ".feature", ".html", ".css"}
 _EXCLUDED_SEGMENTS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", ".venv", "venv", "node_modules", "dist", "build", "target", "out", "vendor"}
@@ -354,6 +362,173 @@ def _parse_supplied(values: Sequence[str]) -> tuple[SuppliedInput, ...]:
     return tuple(parsed)
 
 
+_SCHEMA_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _diag(path: str, code: str, message: str) -> dict[str, str]:
+    return {"path": path, "code": code, "message": message}
+
+
+def _stage_shape(value: Any, schema: str, code: str) -> tuple[Mapping[str, str], ...]:
+    diagnostics = schema_diagnostics(value, _SCHEMA_ROOT / "schemas" / schema, _SCHEMA_ROOT)
+    return tuple(_diag(row["path"], code, row["message"]) for row in diagnostics)
+
+
+def _exact_int(value: Any) -> bool:
+    return type(value) is int
+
+
+def _inventory_diagnostics(inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
+    artifacts = inventory["artifacts"]
+    rows = artifacts["technical_test_inventory"]
+    if artifacts["technical_test_inventory_sha256"] != _digest(rows):
+        return (_diag("/artifacts/technical_test_inventory_sha256", "INVENTORY_DIGEST", "technical_test_inventory_sha256 must identify the bare inventory."),)
+    files = rows["files"]
+    symbols = rows["symbols"]
+    paths = [row["path"] for row in files]
+    if len(paths) != len(set(paths)) or paths != sorted(paths):
+        return (_diag("/artifacts/technical_test_inventory/files", "INVENTORY_FILE_ORDER", "Inventory files must have unique canonical paths."),)
+    file_ids = [row["file_id"] for row in files]
+    if len(file_ids) != len(set(file_ids)):
+        return (_diag("/artifacts/technical_test_inventory/files", "INVENTORY_FILE_IDS", "Inventory file IDs must be unique."),)
+    pairs = [(row["file_id"], row["symbol_id"]) for row in symbols]
+    if len(pairs) != len(set(pairs)):
+        return (_diag("/artifacts/technical_test_inventory/symbols", "INVENTORY_SYMBOL_PAIRS", "Inventory symbol pairs must be unique."),)
+    if any(file_id not in set(file_ids) for file_id, _ in pairs):
+        return (_diag("/artifacts/technical_test_inventory/symbols", "INVENTORY_SYMBOL_FILE", "Every symbol must belong to an inventory file."),)
+    for index, row in enumerate(files):
+        path = Path(row["path"])
+        if path.is_absolute() or ".." in PurePosixPath(row["path"]).parts:
+            return (_diag(f"/artifacts/technical_test_inventory/files/{index}/path", "INVENTORY_UNSAFE_PATH", "Inventory paths must be safe project-relative paths."),)
+        try:
+            resolved = _confined(project_root, project_root / path, f"/artifacts/technical_test_inventory/files/{index}/path")
+            content = resolved.read_bytes()
+        except TestClassificationError as error:
+            return error.diagnostics
+        except OSError:
+            return (_diag(f"/artifacts/technical_test_inventory/files/{index}/path", "CLASSIFICATION_FILE_READ", "Inventory file could not be read."),)
+        actual = "sha256:" + hashlib.sha256(content).hexdigest()
+        if actual != row["content_digest"]:
+            return (_diag(f"/artifacts/technical_test_inventory/files/{index}/content_digest", "CLASSIFICATION_FILE_DRIFT", "Inventory file bytes no longer match the snapshot digest."),)
+    return ()
+
+
+def validate_technical_test_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path) -> tuple[Mapping[str, str], ...]:
+    """Validate closed test classifications and independent-review evidence without judging scope semantics."""
+    for value, schema, code in (
+        (inventory, "source-inventory-output.schema.json", "INVENTORY_SCHEMA"),
+        (classification, "test-classifier-output.schema.json", "CLASSIFICATION_SCHEMA"),
+        (classification_review, "test-classifier-reviewer-output.schema.json", "CLASSIFICATION_REVIEW_SCHEMA"),
+    ):
+        shape = _stage_shape(value, schema, code)
+        if shape:
+            return shape
+    diagnostics = _inventory_diagnostics(inventory, project_root)
+    if diagnostics:
+        return diagnostics
+    inventory_rows = inventory["artifacts"]["technical_test_inventory"]
+    candidate_rows = classification["artifacts"]["classification"]
+    review_rows = classification_review["artifacts"]["classification_review"]
+    inventory_digest = inventory["artifacts"]["technical_test_inventory_sha256"]
+    if candidate_rows["technical_test_inventory_sha256"] != inventory_digest:
+        return (_diag("/artifacts/classification/technical_test_inventory_sha256", "CLASSIFICATION_INVENTORY_DIGEST", "Classification must use the exact inventory digest."),)
+    expected_pairs = tuple((row["file_id"], row["symbol_id"]) for row in inventory_rows["symbols"])
+    actual_pairs = tuple((row["file_id"], row["symbol_id"]) for row in candidate_rows["classifications"])
+    if actual_pairs != expected_pairs:
+        return (_diag("/artifacts/classification/classifications", "CLASSIFICATION_PAIR_COVERAGE", "Classifications must equal inventory symbol pairs in canonical order."),)
+    requirement_rows = tuple(requirements)
+    if any(not isinstance(row, Mapping) or not isinstance(row.get("requirement_id"), str) or not _exact_int(row.get("display_order")) for row in requirement_rows):
+        return (_diag("/requirements", "CLASSIFICATION_REQUIREMENTS", "Requirements must have string IDs and exact integer display_order values."),)
+    ordered_requirements = [row["requirement_id"] for row in requirement_rows]
+    if len(ordered_requirements) != len(set(ordered_requirements)) or [row["display_order"] for row in requirement_rows] != list(range(1, len(requirement_rows) + 1)):
+        return (_diag("/requirements", "CLASSIFICATION_REQUIREMENTS", "Requirements must have unique IDs in canonical display order."),)
+    files = {row["file_id"]: row for row in inventory_rows["files"]}
+    for index, row in enumerate(candidate_rows["classifications"]):
+        prefix = f"/artifacts/classification/classifications/{index}"
+        links = row["requirement_ids"]
+        if len(links) != len(set(links)):
+            return (_diag(f"{prefix}/requirement_ids", "CLASSIFICATION_REQUIREMENT_LINK", "Requirement links must be unique."),)
+        for link_index, requirement_id in enumerate(links):
+            if requirement_id not in ordered_requirements:
+                return (_diag(f"{prefix}/requirement_ids/{link_index}", "CLASSIFICATION_REQUIREMENT_LINK", "Requirement link is not present in the supplied requirements."),)
+        if links != [requirement_id for requirement_id in ordered_requirements if requirement_id in links]:
+            return (_diag(f"{prefix}/requirement_ids", "CLASSIFICATION_REQUIREMENT_ORDER", "Requirement links must follow requirement display order."),)
+        spans = row["provenance"]
+        previous: tuple[int, int] | None = None
+        seen_spans: set[tuple[int, int]] = set()
+        line_count: int | None = None
+        for span_index, span in enumerate(spans):
+            span_path = f"{prefix}/provenance/{span_index}"
+            if span["file_id"] != row["file_id"]:
+                return (_diag(f"{span_path}/file_id", "CLASSIFICATION_PROVENANCE", "Provenance must remain in the classified inventory file."),)
+            start, end = span["start_line"], span["end_line"]
+            if not _exact_int(start):
+                return (_diag(f"{span_path}/start_line", "CLASSIFICATION_PROVENANCE", "Provenance start_line must be an exact positive integer."),)
+            if not _exact_int(end):
+                return (_diag(f"{span_path}/end_line", "CLASSIFICATION_PROVENANCE", "Provenance end_line must be an exact positive integer."),)
+            if line_count is None:
+                try:
+                    line_count = len((project_root / files[row["file_id"]]["path"]).read_text(encoding="utf-8").splitlines())
+                except (OSError, UnicodeDecodeError):
+                    return (_diag(f"{prefix}/provenance", "CLASSIFICATION_PROVENANCE", "Provenance source file could not be read as UTF-8."),)
+            pair = (start, end)
+            if start < 1 or end < start:
+                return (_diag(span_path if end < start else f"{span_path}/start_line", "CLASSIFICATION_PROVENANCE", "Provenance spans must be positive with start_line no later than end_line."),)
+            if end > line_count:
+                return (_diag(f"{span_path}/end_line", "CLASSIFICATION_PROVENANCE", "Provenance span exceeds the current physical file."),)
+            if pair in seen_spans or (previous is not None and pair < previous):
+                return (_diag(f"{prefix}/provenance", "CLASSIFICATION_PROVENANCE", "Provenance spans must be unique and canonical by line range."),)
+            seen_spans.add(pair); previous = pair
+    if review_rows["technical_test_inventory_sha256"] != inventory_digest:
+        return (_diag("/artifacts/classification_review/technical_test_inventory_sha256", "CLASSIFICATION_REVIEW_INVENTORY_DIGEST", "Review must use the exact inventory digest."),)
+    if review_rows["classification_sha256"] != _digest(candidate_rows):
+        return (_diag("/artifacts/classification_review/classification_sha256", "CLASSIFICATION_REVIEW_DIGEST", "Review must identify the bare candidate classification."),)
+    reviewed_pairs = tuple((row["file_id"], row["symbol_id"]) for row in review_rows["reviewed_symbol_pairs"])
+    if reviewed_pairs != expected_pairs:
+        return (_diag("/artifacts/classification_review/reviewed_symbol_pairs", "CLASSIFICATION_REVIEW_COVERAGE", "Reviewed pairs must equal inventory symbol pairs in canonical order."),)
+    accepted = review_rows["verdict"] == "ПРИНЯТО"
+    if (accepted and review_rows["findings"]) or (not accepted and not review_rows["findings"]):
+        return (_diag("/artifacts/classification_review/findings", "CLASSIFICATION_REVIEW_VERDICT", "Review findings must match the review verdict."),)
+    return ()
+
+
+def select_effective_technical_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path) -> Mapping[str, Any]:
+    """Return the accepted immutable technical-evidence carrier, or immutable diagnostics."""
+    diagnostics = validate_technical_test_evidence(inventory, classification, classification_review, requirements, project_root)
+    if diagnostics:
+        raise TestClassificationError(diagnostics)
+    review = classification_review["artifacts"]["classification_review"]
+    if review["verdict"] != "ПРИНЯТО":
+        raise _error("CLASSIFICATION_REVIEW_NOT_ACCEPTED", "/artifacts/classification_review/verdict", "Only an accepted independent review can select technical evidence.")
+    technical_inventory = inventory["artifacts"]["technical_test_inventory"]
+    candidate = classification["artifacts"]["classification"]
+    result: dict[str, Any] = {
+        "technical_test_inventory_sha256": inventory["artifacts"]["technical_test_inventory_sha256"],
+        "technical_test_classification_sha256": _digest(candidate),
+        "technical_test_review_sha256": _digest(review),
+        "files": _plain(technical_inventory["files"]),
+        "symbols": _plain(technical_inventory["symbols"]),
+        "classifications": _plain(candidate["classifications"]),
+    }
+    result["effective_technical_evidence_sha256"] = _digest(result)
+    return _freeze(result)
+
+
+def _context_requirements(path: Path) -> Sequence[Mapping[str, Any]]:
+    try:
+        context = load_json_strict(path)
+    except (OSError, StrictJsonError) as error:
+        raise _error("CLASSIFICATION_CONTEXT", "/context", "Context artifact could not be read as strict JSON.") from error
+    if not isinstance(context, Mapping) or context.get("schema_version") != "4.0.0" or context.get("stage") != "context-marker":
+        raise _error("CLASSIFICATION_CONTEXT", "/schema_version", "Context must be the V4 context-marker envelope.")
+    artifacts = context.get("artifacts")
+    managed = artifacts.get("managed_behavior_context") if isinstance(artifacts, Mapping) else None
+    requirements = managed.get("requirements") if isinstance(managed, Mapping) else None
+    if not isinstance(requirements, list):
+        raise _error("CLASSIFICATION_CONTEXT", "/artifacts/managed_behavior_context/requirements", "V4 context must provide managed behavior requirements.")
+    return requirements
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="test_classification.py")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -363,15 +538,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     inventory.add_argument("--module")
     inventory.add_argument("--supplied-input", action="append", default=[])
     inventory.add_argument("--output")
+    select = commands.add_parser("select")
+    select.add_argument("--project", required=True)
+    select.add_argument("--inventory", required=True)
+    select.add_argument("--classification", required=True)
+    select.add_argument("--review", required=True)
+    select.add_argument("--context", required=True)
+    select.add_argument("--output")
     try:
         args = parser.parse_args(argv)
-        if args.command != "inventory":
-            raise _error("INVENTORY_ARGUMENT", "/command", "Unknown command.")
         output = Path(args.output) if args.output else None
         if output is not None and output.exists():
-            raise _error("INVENTORY_OUTPUT_EXISTS", "/output", "Output path already exists.")
-        value = build_source_inventories(Path(args.project), load_skillsrc(Path(args.skillsrc)), args.module, _parse_supplied(args.supplied_input))
-        payload = json.dumps(_plain(_artifact(value)), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            raise _error("INVENTORY_OUTPUT_EXISTS" if args.command == "inventory" else "CLASSIFICATION_OUTPUT_EXISTS", "/output", "Output path already exists.")
+        if args.command == "inventory":
+            value = build_source_inventories(Path(args.project), load_skillsrc(Path(args.skillsrc)), args.module, _parse_supplied(args.supplied_input))
+            result = _artifact(value)
+        elif args.command == "select":
+            try:
+                input_inventory = load_json_strict(Path(args.inventory))
+                input_classification = load_json_strict(Path(args.classification))
+                input_review = load_json_strict(Path(args.review))
+            except (OSError, StrictJsonError) as error:
+                raise _error("CLASSIFICATION_INPUT", "/input", "Classification input artifact could not be read as strict JSON.") from error
+            result = select_effective_technical_evidence(input_inventory, input_classification, input_review, _context_requirements(Path(args.context)), Path(args.project))
+        else:  # argparse constrains this branch; retain a safe diagnostic for direct callers.
+            raise _error("INVENTORY_ARGUMENT", "/command", "Unknown command.")
+        payload = json.dumps(_plain(result), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
         if output is None:
             print(payload)
         else:

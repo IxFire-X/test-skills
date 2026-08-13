@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/test-classifier-output.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "stage": {"const": "test-classifier"},
+    "artifacts": {"type": "object", "additionalProperties": false, "required": ["classification"], "properties": {"classification": {"$ref": "#/$defs/classification"}}},
+    "warnings": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
+  },
+  "$defs": {
+    "classification": {"type": "object", "additionalProperties": false, "required": ["technical_test_inventory_sha256", "classifications"], "properties": {
+      "technical_test_inventory_sha256": {"$ref": "test-symbol-registry.schema.json#/$defs/digest"},
+      "classifications": {"type": "array", "items": {"$ref": "#/$defs/row"}}
+    }},
+    "span": {"type": "object", "additionalProperties": false, "required": ["file_id", "start_line", "end_line"], "properties": {
+      "file_id": {"$ref": "test-symbol-registry.schema.json#/$defs/file_id"},
+      "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}
+    }},
+    "row": {"type": "object", "additionalProperties": false, "required": ["file_id", "symbol_id", "test_scope", "requirement_ids", "provenance", "rationale"], "properties": {
+      "file_id": {"$ref": "test-symbol-registry.schema.json#/$defs/file_id"}, "symbol_id": {"$ref": "test-symbol-registry.schema.json#/$defs/symbol_id"},
+      "test_scope": {"enum": ["unit", "integration", "e2e", "unknown"]},
+      "requirement_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+      "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/span"}},
+      "rationale": {"type": "string", "minLength": 1}
+    }}
+  }
+}
