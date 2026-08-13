@@ -30,11 +30,11 @@ def stable_digest(value: object) -> str:
 class TestPortfolioAuditTests(unittest.TestCase):
     """The audit must compose existing validators without owning their joins."""
 
-    def args(self, output: Path, *, inventory: Path = V1 / "source-inventory.json", classification: Path = V1 / "test-classifier.json", review: Path = V1 / "test-classifier-reviewer-accepted.json", context: Path = V5 / "context-marker.json", receipt: Path = V5 / "receipt.json", plan: Path = V5 / "plan.json", canonical: Path = CANONICAL) -> list[str]:
+    def args(self, output: Path, *, inventory: Path = V1 / "source-inventory.json", classification: Path = V1 / "test-classifier.json", review: Path = V1 / "test-classifier-reviewer-accepted.json", context: Path = V5 / "context-marker.json", receipt: Path = V5 / "receipt.json", canonical: Path = CANONICAL) -> list[str]:
         return [
             "phase1", "--project", str(PROJECT), "--inventory", str(inventory),
             "--classification", str(classification), "--review", str(review),
-            "--context", str(context), "--receipt", str(receipt), "--plan", str(plan), "--skillsrc", str(PROJECT / ".skillsrc"), "--canonical-document", str(canonical),
+            "--context", str(context), "--receipt", str(receipt), "--skillsrc", str(PROJECT / ".skillsrc"), "--canonical-document", str(canonical),
             "--output", str(output),
         ]
 

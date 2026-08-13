@@ -219,10 +219,27 @@ def build_context_receipt(project: Path, module: Mapping[str, Any], inventory: M
     if len({row["fragment_id"] for row in registry}) != len(registry): raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "Fragment IDs must be unique.")
     for source in authorized["sources"]:
         outcomes.append({"source_id": source["source_id"], "domain_key": derive_domain_key(source, module, project), "outcome": "behavior_fragments" if source["source_id"] in source_has_fragments else "no_supported_observable_fact"})
-    return _freeze({"schema_version": "1.0.0", "selected_module": authorized["module_id"], "authorized_behavior_sources_sha256": expected_digest, "context_plan_sha256": _digest(_plain(plan)), "batch_result_sha256s": [_digest(_plain(result_by_batch[batch["batch_id"]])) for batch in plan["batches"]], "fragment_registry": registry, "source_outcomes": outcomes})
+    # The run plan may include controller-only supplied bytes. Downstream does
+    # not receive those bytes or the plan, so bind this receipt to the closed
+    # projection it can regenerate from the inventory and current product files.
+    authoritative = _authoritative_receipt_plan(project, module, authorized)
+    return _freeze({"schema_version": "1.0.0", "selected_module": authorized["module_id"], "authorized_behavior_sources_sha256": expected_digest, "context_plan_sha256": _digest(_plain(authoritative)), "batch_result_sha256s": [_digest(_plain(result_by_batch[batch["batch_id"]])) for batch in plan["batches"]], "fragment_registry": registry, "source_outcomes": outcomes})
 
 
-def validate_context_envelope(context: Mapping[str, Any], receipt: Mapping[str, Any], authorized: Mapping[str, Any], test_inventory: Mapping[str, Any], project: Path, module: Mapping[str, Any] | None = None, plan: Mapping[str, Any] | None = None) -> ValidatedBehaviorContext:
+def _authoritative_receipt_plan(project: Path, module: Mapping[str, Any], authorized: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Regenerate the downstream plan from current authorized bytes; never route plan evidence."""
+    items: list[dict[str, Any]] = []
+    for source in authorized["sources"]:
+        if source["kind"] == "supplied_requirement":
+            ranges = [(0, 0, 0, 0)]
+        else:
+            ranges = _ranges(_bytes(source, project, {}))
+        for start, end, read_start, read_end in ranges:
+            items.append({"item_id": f"ITEM-{len(items)+1:06d}", "source_id": source["source_id"], "domain_key": derive_domain_key(source, module, project), "accounted_range": {"start": start, "end": end}, "read_range": {"start": read_start, "end": read_end}})
+    return _freeze({"schema_version":"1.0.0","selected_module":authorized["module_id"],"authorized_behavior_sources_sha256":_digest(_plain(authorized)),"batches":[{"batch_id":f"BATCH-{index:06d}","items":[item]} for index,item in enumerate(items,1)]})
+
+
+def validate_context_envelope(context: Mapping[str, Any], receipt: Mapping[str, Any], authorized: Mapping[str, Any], test_inventory: Mapping[str, Any], project: Path, module: Mapping[str, Any]) -> ValidatedBehaviorContext:
     try:
         from tools.test_classification import validate_managed_behavior_context
     except ImportError:
@@ -272,26 +289,23 @@ def validate_context_envelope(context: Mapping[str, Any], receipt: Mapping[str, 
     for source in sources:
         if source.get("kind") == "product_file":
             _bytes(source, project, {})
-    if module is None and plan is not None:
-        raise _fail("BEHAVIOR_RECEIPT", "/module", "Validated behavior context requires a normalized selected module.")
-    if module is not None and module.get("id") != authorized.get("module_id"):
+    if not isinstance(module, Mapping) or module.get("id") != authorized.get("module_id"):
         raise _fail("BEHAVIOR_RECEIPT", "/module", "Selected module must equal the authorized inventory module.")
-    domain_module = module or {"paths": {"source": [str(row.get("path", "")).split("/", 1)[0] for row in sources if row.get("kind") == "product_file"]}}
+    domain_module = module
     for source_id, source in source_by_id.items():
-        if outcome_by_id[source_id].get("domain_key") != derive_domain_key(source, domain_module):
+        if outcome_by_id[source_id].get("domain_key") != derive_domain_key(source, domain_module, project):
             raise _fail("BEHAVIOR_RECEIPT", "/source_outcomes", "Receipt domain keys must be mechanically recomputed.")
     for fragment in registry:
         if fragment.get("source_id") not in source_by_id or not isinstance(fragment.get("item_id"), str) or outcome_by_id[fragment["source_id"]].get("outcome") != "behavior_fragments":
             raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "Receipt fragments must have authorized source ownership and represented outcomes.")
-    if plan is not None:
-        plan_shape = schema_diagnostics(_plain(plan), _ROOT / "schemas" / "behavior-context-plan.schema.json", _ROOT)
-        if plan_shape or receipt.get("context_plan_sha256") != _digest(_plain(plan)) or plan.get("selected_module") != module.get("id"):
-            raise _fail("BEHAVIOR_RECEIPT", "/context_plan_sha256", "Receipt must bind the exact closed selected-module plan.")
-        plan_items = {item["item_id"]: item for batch in plan["batches"] for item in batch["items"]}
-        for fragment in registry:
-            item = plan_items.get(fragment["item_id"])
-            if item is None or item["source_id"] != fragment["source_id"]:
-                raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "Receipt fragment ownership must equal the mechanically bound plan item.")
+    plan = _authoritative_receipt_plan(project, module, authorized)
+    if receipt.get("context_plan_sha256") != _digest(_plain(plan)):
+        raise _fail("BEHAVIOR_RECEIPT", "/context_plan_sha256", "Receipt must bind the exact closed selected-module plan.")
+    plan_items = {item["item_id"]: item for batch in plan["batches"] for item in batch["items"]}
+    for fragment in registry:
+        item = plan_items.get(fragment["item_id"])
+        if item is None or item["source_id"] != fragment["source_id"]:
+            raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "Receipt fragment ownership must equal the mechanically bound plan item.")
     grouped_ids: list[str] = []
     group_requirements: dict[str, set[str]] = {source_id: set() for source_id in ids}
     for group_index, group in enumerate(groups):

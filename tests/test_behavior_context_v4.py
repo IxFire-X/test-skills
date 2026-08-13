@@ -66,7 +66,8 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
             [],
             schema_diagnostics(self.context_envelope, ROOT / "schemas" / "context-marker-output.schema.json", ROOT),
         )
-        value = validate_context_envelope(self.context_envelope, self.receipt, self.authorized_sources(), self.inventory_with_unit_symbols(1), self.root)
+        module = {"id":"backend","paths":{"source":["src"]},"_resolved_root":self.root}
+        value = validate_context_envelope(self.context_envelope, self.receipt, self.authorized_sources(), self.inventory_with_unit_symbols(1), self.root, module)
         self.assertEqual(["REQ-a", "REQ-b"], [row["requirement_id"] for row in value.requirements])
 
     def test_test_only_fact_cannot_originate_requirement(self) -> None:
@@ -152,7 +153,7 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
             code = main([
                 "validate-context", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"),
-                "--context", str(ROOT / "tests" / "fixtures" / "stages" / "v3" / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--skillsrc", str(self.root / ".skillsrc"), "--plan", str(V5 / "plan.json"),
+                "--context", str(ROOT / "tests" / "fixtures" / "stages" / "v3" / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--skillsrc", str(self.root / ".skillsrc"),
             ])
         self.assertEqual(2, code)
         self.assertIn("BEHAVIOR_ACCOUNTING_SHAPE", stderr.getvalue())
@@ -174,7 +175,7 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
             inventory_path = Path(temporary) / "inventory.json"
             inventory_path.write_text(json.dumps(malformed), encoding="utf-8")
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
-                code = main(["validate-context", "--project", str(self.root), "--inventory", str(inventory_path), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--skillsrc", str(self.root / ".skillsrc"), "--plan", str(V5 / "plan.json")])
+                code = main(["validate-context", "--project", str(self.root), "--inventory", str(inventory_path), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--skillsrc", str(self.root / ".skillsrc")])
         self.assertEqual(2, code)
         self.assertIn("BEHAVIOR_INVENTORY", stderr.getvalue())
         self.assertNotIn("do-not-leak", stderr.getvalue())

@@ -14,7 +14,7 @@ from pathlib import Path
 from tools.behavior_context_planning import build_context_plan, build_context_receipt, stable_fragment_id, validate_batch_result, validate_context_envelope
 from tools.schema_validation import load_json_strict
 from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc, select_module
-from tools.test_classification import _digest, _plain
+from tools.test_classification import SuppliedInput, _digest, _plain, build_source_inventories, load_validated_behavior_context
 from tools.test_classification import select_effective_technical_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,21 +40,6 @@ class BehaviorSourceAccountingV5RedMatrix(unittest.TestCase):
         self.assertTrue(build_context_receipt)
         self.assertTrue(validate_batch_result)
         self.assertTrue(validate_context_envelope)
-
-    def test_matrix_rows_are_explicit(self) -> None:
-        # Each row names the production change that must invalidate it.
-        rows = {
-            "accounting": "remove V5 sibling accounting validation",
-            "selection": "restore raw requirements selector",
-            "plan_ranges": "remove exact accounted/read range checks",
-            "supplied": "accept missing or foreign supplied input",
-            "batch": "accept incomplete or out-of-range batch results",
-            "receipt": "remove receipt/disposition/fragment binding",
-            "pipeline": "restore a V4 carrier array",
-            "skill": "allow a batch to be skipped or generator sidecar input",
-        }
-        self.assertEqual(8, len(rows))
-
 
 class PlannerReceiptV5Tests(unittest.TestCase):
     def setUp(self) -> None:
@@ -141,7 +126,7 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         ):
             value = copy.deepcopy(self.context); mutate(value)
             with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
-                validate_context_envelope(value, self.receipt, authorized, technical, PROJECT)
+                validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module)
             diagnostic = error.exception.diagnostics[0]
             self.assertIn(diagnostic["code"], {"BEHAVIOR_ACCOUNTING_COVERAGE", "BEHAVIOR_ACCOUNTING_LINK"})
             with self.assertRaises(TypeError): diagnostic["code"] = "changed"
@@ -152,9 +137,9 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         groups = value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"]
         fragments = groups[0]["fragment_ids"]
         groups[:] = [{"group_id":"GROUP-a","fragment_ids":[fragments[1]],"requirement_ids":["REQ-a","REQ-b"]},{"group_id":"GROUP-b","fragment_ids":[fragments[0]],"requirement_ids":["REQ-a","REQ-b"]}]
-        self.assertTrue(validate_context_envelope(value, self.receipt, authorized, technical, PROJECT))
+        self.assertTrue(validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module))
         groups.pop()
-        with self.assertRaises(Exception) as error: validate_context_envelope(value, self.receipt, authorized, technical, PROJECT)
+        with self.assertRaises(Exception) as error: validate_context_envelope(value, self.receipt, authorized, technical, PROJECT, self.module)
         self.assertEqual("BEHAVIOR_ACCOUNTING_COVERAGE", error.exception.diagnostics[0]["code"])
 
     def test_receipt_schema_and_spoofed_domain_are_rejected_at_shared_seam(self) -> None:
@@ -169,7 +154,7 @@ class PlannerReceiptV5Tests(unittest.TestCase):
             context = copy.deepcopy(self.context)
             context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
             with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
-                validate_context_envelope(context, receipt, authorized, technical, PROJECT)
+                validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
             self.assertIn(error.exception.diagnostics[0]["code"], {"BEHAVIOR_RECEIPT", "BEHAVIOR_ACCOUNTING_SHAPE"})
 
     def test_public_plan_binding_rejects_spoofed_item_ownership(self) -> None:
@@ -177,8 +162,78 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         receipt = copy.deepcopy(self.receipt); receipt["fragment_registry"][0]["item_id"] = "ITEM-999999"
         context = copy.deepcopy(self.context); context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
         with self.assertRaises(Exception) as error:
-            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module, self.fixture_plan)
+            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
         self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+
+    def test_shared_seam_rejects_jointly_rebound_receipt_plan_digest(self) -> None:
+        """A receipt cannot choose its own plan digest after context receipt rebinding."""
+        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]
+        technical = self.inventory["artifacts"]["technical_test_inventory"]
+        receipt = copy.deepcopy(self.receipt)
+        receipt["context_plan_sha256"] = "sha256:" + "a" * 64
+        context = copy.deepcopy(self.context)
+        context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
+        with self.assertRaises(Exception) as error:
+            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module)
+        self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+
+    def test_shared_seam_requires_normalized_module_and_no_downstream_plan(self) -> None:
+        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]; technical = self.inventory["artifacts"]["technical_test_inventory"]
+        with self.assertRaises(TypeError):
+            validate_context_envelope(self.context, self.receipt, authorized, technical, PROJECT)
+        for command in ("select", "validate-context"):
+            completed = subprocess.run([sys.executable, str(ROOT / "tools" / "test_classification.py"), command, "--help"], text=True, capture_output=True)
+            self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout)
+        completed = subprocess.run([sys.executable, str(ROOT / "tools" / "audit_test_portfolio.py"), "phase1", "--help"], text=True, capture_output=True)
+        self.assertEqual(0, completed.returncode); self.assertNotIn("--plan", completed.stdout)
+
+    def test_public_loader_uses_nested_module_root_and_rejects_wrong_receipt_module(self) -> None:
+        """The public seam resolves a receipt module from its manifest, never a fallback."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            source = project / "component" / "src" / "feature" / "deep" / "a" / "b" / "service.py"
+            source.parent.mkdir(parents=True)
+            source.write_bytes((PROJECT / "src" / "service.py").read_bytes())
+            tests = project / "component" / "tests"; tests.mkdir()
+            (tests / "test_sample.py").write_bytes((PROJECT / "tests" / "test_sample.py").read_bytes())
+            skillsrc = project / ".skillsrc"
+            manifest = (PROJECT / ".skillsrc").read_text(encoding="utf-8")
+            manifest = manifest.replace("root: .", "root: component").replace("        - src\n      tests:", "        - src\n        - src/feature/deep\n      tests:")
+            skillsrc.write_text(manifest, encoding="utf-8")
+            supplied = (ROOT / "tests" / "fixtures" / "test-classification" / "requirement.txt").read_bytes()
+            generated = build_source_inventories(project, load_skillsrc(skillsrc), "backend", (SuppliedInput("REQ-synthetic", supplied),))
+            inventory = {"stage": "source-inventory", "artifacts": {"authorized_behavior_sources": _plain(generated.authorized_behavior_sources), "technical_test_inventory": _plain(generated.technical_test_inventory)}}
+            module = dict(select_module(normalize_skillsrc(load_skillsrc(skillsrc)), "backend")); module["_resolved_root"] = project / "component"
+            plan = build_context_plan(project, module, inventory, {"REQ-synthetic": supplied})
+            results = []
+            for batch in plan["batches"]:
+                item = batch["items"][0]; start, end = item["accounted_range"]["start"], item["accounted_range"]["end"]
+                fragment = {"actor":"user","operation":"observe","conditions":[],"outcomes":["result"],"anchor_byte":start,"evidence_ranges":[{"start":start,"end":end}]}
+                fragment["fragment_id"] = stable_fragment_id(item, fragment)
+                results.append({"schema_version":"1.0.0","plan_sha256":_digest(_plain(plan)),"batch_id":batch["batch_id"],"items":[{"item_id":item["item_id"],"outcome":"behavior_fragments","behavior_fragments":[fragment]}]})
+            receipt = _plain(build_context_receipt(project, module, inventory, plan, results, {"REQ-synthetic": supplied}))
+            context = copy.deepcopy(self.context)
+            authorized = inventory["artifacts"]["authorized_behavior_sources"]
+            product = next(row for row in authorized["sources"] if row["kind"] == "product_file")
+            context["artifacts"]["managed_behavior_context"]["authorized_behavior_sources_sha256"] = _digest(authorized)
+            context["artifacts"]["managed_behavior_context"]["product_sources"][0].update({**product, "summary":"nested source"})
+            for row in context["artifacts"]["managed_behavior_context"]["requirement_sources"]:
+                row["source_ids"] = ["REQ-synthetic", product["source_id"]]
+            accounting = context["artifacts"]["behavior_source_accounting"]
+            accounting["authorized_behavior_sources_sha256"] = _digest(authorized)
+            accounting["context_receipt_sha256"] = _digest(receipt)
+            for row, source_row in zip(accounting["source_dispositions"], authorized["sources"]): row["source_id"] = source_row["source_id"]
+            accounting["behavior_fragment_groups"][0]["fragment_ids"] = [row["fragment_id"] for row in receipt["fragment_registry"]]
+            context_path, receipt_path = project / "context.json", project / "receipt.json"
+            context_path.write_text(json.dumps(context), encoding="utf-8"); receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            validated = load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc)
+            self.assertEqual(("REQ-a", "REQ-b"), tuple(row["requirement_id"] for row in validated.requirements))
+            self.assertEqual("a/b", receipt["source_outcomes"][1]["domain_key"])
+            receipt["selected_module"] = "wrong"; accounting["context_receipt_sha256"] = _digest(receipt)
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8"); context_path.write_text(json.dumps(context), encoding="utf-8")
+            with self.assertRaises(Exception) as error:
+                load_validated_behavior_context(context_path, receipt_path, inventory, project, skillsrc)
+            self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
 
     def test_repeated_euro_read_overlap_never_exceeds_fixed_budget(self) -> None:
         from tools.behavior_context_planning import _ranges
