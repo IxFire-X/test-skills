@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,7 +18,7 @@ CANONICAL = ROOT / "tests" / "fixtures" / "canonical" / "valid" / "full-http.jso
 PROJECT = ROOT / "tests" / "fixtures" / "test-classification" / "project"
 sys.path.insert(0, str(ROOT))
 
-from tools.audit_test_portfolio import main  # noqa: E402
+from tools.audit_test_portfolio import AuditError, main  # noqa: E402
 from tools.schema_validation import load_json_strict  # noqa: E402
 
 
@@ -148,6 +149,31 @@ class TestPortfolioAuditTests(unittest.TestCase):
             self.assertEqual("error", error["status"])
             self.assertEqual("AUDIT_INPUT", error["diagnostics"][0]["code"])
             self.assertNotIn("TOPSECRET", stderr)
+
+    def test_direct_script_returns_one_safe_json_error_without_traceback_or_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            malformed = temporary / "malformed.json"
+            malformed.write_text('{"TOPSECRET":"must not appear"', encoding="utf-8")
+            output = temporary / "summary.json"
+            completed = subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "audit_test_portfolio.py"), *self.args(output, inventory=malformed)],
+                cwd=temporary,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(2, completed.returncode)
+            self.assertEqual("", completed.stdout)
+            self.assertFalse(output.exists())
+            self.assertNotIn("Traceback", completed.stderr)
+            self.assertNotIn("TOPSECRET", completed.stderr)
+            self.assertEqual("AUDIT_INPUT", json.loads(completed.stderr)["diagnostics"][0]["code"])
+
+    def test_audit_error_diagnostics_are_immutable(self) -> None:
+        error = AuditError("AUDIT_INPUT", "/input", "Audit input artifacts are invalid.")
+        with self.assertRaises(TypeError):
+            error.diagnostics[0]["code"] = "MUTATED"
 
 
 if __name__ == "__main__":
