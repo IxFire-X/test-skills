@@ -28,7 +28,15 @@ workspace для новых автотестов. `.skillsrc` только оп�
 framework, build tool и paths; он не даёт права менять проект. Его форма описана в
 `schemas/skillsrc.schema.json`.
 
-При отсутствии `.skillsrc` агент может read-only исследовать проект:
+При отсутствии `.skillsrc` оркестратор сначала read-only исследует проект и
+автоматически создаёт v3 manifest через `tools/init_skillsrc.py`. Если scanner
+обнаружил критическую неоднозначность, receipt содержит один вопрос; ответ с
+выбранным option ID сохраняется в новом immutable attempt. Старый receipt не
+перезаписывается. В монорепозитории после инициализации обязательно выбирается
+exact module ID, и только его confined root, язык и paths идут в feature context и
+runner.
+
+Отдельный read-only осмотр остаётся доступен:
 
 ```bash
 python <skill-pack>/tools/scan_project.py --project <project> --target <feature>
@@ -119,8 +127,14 @@ Final statuses exactly: `PASS`, `PASS_WITH_MANUAL_REMAINDER`, `MANUAL_ONLY`,
 ## Команды и финализация
 
 Рабочие module-form commands, включая publish, selection, runner и trace, приведены
-в [USAGE.md](USAGE.md). Module execution требуется для publisher, потому что direct
-script form не разрешает его package imports из repository root. Finalization remains
+в [USAGE.md](USAGE.md). Runner получает exact selected module context:
+
+```bash
+python <root>/tools/run_tests.py --project <project> --skillsrc <project>/.skillsrc --module <module-id> --canonical-document <effective-document.json> --automation-artifact <tc-to-autotest-output.json>
+```
+
+Module execution требуется для publisher, потому что direct script form не разрешает
+его package imports из repository root. Finalization remains
 a Python seam: `orchestrate_revision(...)`,
 `validate_trace_document(trace, document, automation, run_result=None)` и
 `finalize_orchestration(...)`. Нет finalization CLI и нет trace-check

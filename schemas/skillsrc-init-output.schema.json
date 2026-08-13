@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/skillsrc-init-output.schema.json",
+  "title": "skillsrc initialization receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "skillsrc_path", "written", "module_ids", "questions", "changes", "warnings", "errors", "discovery_fingerprint"],
+  "properties": {
+    "status": {"enum": ["preview", "created", "updated", "unchanged", "needs_input", "conflict", "error"]},
+    "skillsrc_path": {"const": ".skillsrc"},
+    "written": {"type": "boolean"},
+    "module_ids": {"type": "array", "items": {"type": "string"}},
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "field", "impact", "options"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "field": {"type": "string", "minLength": 1},
+          "impact": {"type": "string"},
+          "operation": {"enum": ["remove", "replace"]},
+          "options": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "value", "evidence"],
+              "properties": {
+                "id": {"enum": ["keep-existing", "use-detected", "java", "python", "go", "typescript", "kotlin", "maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn", "junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing"]},
+                "value": {"type": "string"},
+                "evidence": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    "changes": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["operation", "path"], "properties": {"operation": {"enum": ["create", "update", "remove", "replace", "keep"]}, "path": {"type": "string", "minLength": 1}}}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "discovery_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"enum": ["created", "updated"]}}}, "then": {"properties": {"written": {"const": true}, "changes": {"minItems": 1}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "unchanged"}}}, "then": {"properties": {"written": {"const": false}, "changes": {"maxItems": 0}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "preview"}}}, "then": {"properties": {"written": {"const": false}, "questions": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"enum": ["needs_input", "conflict"]}}}, "then": {"properties": {"written": {"const": false}, "questions": {"minItems": 1}, "changes": {"maxItems": 0}, "errors": {"maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"written": {"const": false}, "errors": {"minItems": 1}, "questions": {"maxItems": 0}, "changes": {"maxItems": 0}}}}
+  ]
+}

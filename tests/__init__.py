@@ -1,1 +1,1 @@
-"""Tests for the repository-local artifact contracts."""
+"""Tests for repository-local artifact contracts and project tools."""

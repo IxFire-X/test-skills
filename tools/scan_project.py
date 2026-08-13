@@ -51,85 +51,32 @@ from pathlib import Path
 
 if __package__:
     from .json_cli import JsonArgumentParser
+    from .stack_catalog import (BUILD_TOOL_NORMALIZE, GO_FRAMEWORK_MARKERS, GO_MANIFESTS,
+        GO_TEST_MARKERS, JAVA_FRAMEWORK_MARKERS, JAVA_MANIFESTS, JAVA_TEST_MARKERS,
+        JS_FRAMEWORK_MARKERS, JS_MANIFESTS, JS_TEST_MARKERS, PYTHON_FRAMEWORK_MARKERS,
+        PYTHON_MANIFESTS, PYTHON_TEST_MARKERS, match_marker)
 else:  # direct CLI execution
     from json_cli import JsonArgumentParser
+    from stack_catalog import (BUILD_TOOL_NORMALIZE, GO_FRAMEWORK_MARKERS, GO_MANIFESTS,
+        GO_TEST_MARKERS, JAVA_FRAMEWORK_MARKERS, JAVA_MANIFESTS, JAVA_TEST_MARKERS,
+        JS_FRAMEWORK_MARKERS, JS_MANIFESTS, JS_TEST_MARKERS, PYTHON_FRAMEWORK_MARKERS,
+        PYTHON_MANIFESTS, PYTHON_TEST_MARKERS, match_marker)
 
 # ---------------------------------------------------------------------------
 # Конфигурация распознавания манифестов
 # ---------------------------------------------------------------------------
 
-# Имена файлов-манифестов сборки (ищутся рекурсивно относительно --project).
+# Имена файлов-манифестов и marker tables импортируются из stack_catalog.
 # Порядок важен: для одного проекта может быть несколько манифестов; выбираем
 # «ближайший» к target либо первый найденный.
-PYTHON_MANIFESTS = [
-    "pyproject.toml",          # современный стандарт (PEP 621)
-    "requirements.txt",        # классика pip
-    "requirements-dev.txt",    # dev-зависимости (часто тут pytest)
-    "setup.py",                # legacy
-    "Pipfile",                 # pipenv
-]
-JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
-JS_MANIFESTS = ["package.json"]
-GO_MANIFESTS = ["go.mod"]
 
 # Маркеры фреймворка приложения в манифестах зависимостей.
 # (подстрока в нижнем регистре → framework). Порядок = приоритет.
-PYTHON_FRAMEWORK_MARKERS = [
-    ("django", "django"),                    # Django + DRF (djangorestframework)
-    ("rest_framework", "django"),            # DRF alias
-    ("djangorestframework", "django"),
-    ("fastapi", "fastapi"),
-    ("flask", "flask"),
-    ("aiohttp", "aiohttp"),
-    ("tornado", "tornado"),
-]
-JAVA_FRAMEWORK_MARKERS = [
-    ("spring-boot-starter", "spring-boot"),
-    ("org.springframework.boot", "spring-boot"),
-    ("quarkus", "quarkus"),
-    ("micronaut", "micronaut"),
-]
-JS_FRAMEWORK_MARKERS = [
-    ("\"express\"", "express"),
-    ("\"next\"", "nextjs"),
-    ("\"nuxt\"", "nuxt"),
-    ("\"@nestjs/core\"", "nestjs"),
-    ("\"fastify\"", "fastify"),
-]
-GO_FRAMEWORK_MARKERS = [
-    ("github.com/gin-gonic/gin", "gin"),
-    ("github.com/labstack/echo", "echo"),
-    ("github.com/gofiber/fiber", "fiber"),
-    ("github.com/gorilla/mux", "gorilla-mux"),
-]
 
 # Маркеры тестового фреймворка (в dev-зависимостях).
-PYTHON_TEST_MARKERS = [
-    ("pytest", "pytest"),
-    ("nose", "nose"),
-]
-JAVA_TEST_MARKERS = [
-    ("junit-jupiter", "junit5"),
-    ("junit:junit", "junit4"),
-    ("org.testng", "testng"),
-]
-JS_TEST_MARKERS = [
-    ("\"jest\"", "jest"),
-    ("\"mocha\"", "mocha"),
-    ("\"vitest\"", "vitest"),
-]
-GO_TEST_MARKERS = []  # стандартный testing + go test — один вариант "go-testing"
 
 # Допустимые значения build_tool по skillsrc.schema.json (для записи в .skillsrc).
 # uv/conda и пр. маппятся в ближайшее валидное.
-BUILD_TOOL_NORMALIZE = {
-    "uv": "pip",
-    "conda": "pip",
-    "pipenv": "pip",
-    "setuptools": "pip",
-    "kotlin": "gradle",
-}
-
 
 # ---------------------------------------------------------------------------
 # 1. Парсер аргументов
@@ -224,11 +171,7 @@ def _extract_dep_names(text: str) -> set[str]:
 
 def _match_markers(names_or_text: str, markers: list[tuple[str, str]]) -> str | None:
     """Возвращает framework по первому совпавшему маркеру (по подстроке)."""
-    low = names_or_text.lower()
-    for needle, framework in markers:
-        if needle in low:
-            return framework
-    return None
+    return match_marker(names_or_text, markers)
 
 
 def detect_stack(project_dir: str, target_rel: str) -> dict:
@@ -857,126 +800,6 @@ def _guess_module(target_rel: str) -> str:
     if len(parts) >= 2:
         return parts[-2]
     return os.path.splitext(parts[0])[0] if parts else "unknown"
-
-
-# ---------------------------------------------------------------------------
-# 6. Обновление .skillsrc внутри --project
-# ---------------------------------------------------------------------------
-
-# Минимальный шаблон при создании нового .skillsrc.
-_SKILLSRC_TEMPLATE = """\
-# ============================================================
-# .skillsrc — манифест проекта для мультиагентной системы
-# Версия: 2.0
-# Создан tools/scan_project.py (Опора 2). Заполняется по манифестам сборки.
-# ============================================================
-
-version: "2.0"
-
-project:
-  name: "{name}"
-  language: "{language}"
-  framework: "{framework}"
-  build_tool: "{build_tool}"
-
-paths:
-  source: "{source}"
-  tests: "{tests}"
-
-test:
-  framework: "{test_framework}"
-"""
-
-
-def update_skillsrc(project_dir: str, stack: dict) -> tuple[bool, str]:
-    """
-    Создаёт или обновляет .skillsrc ВНУТРИ --project.
-    Корневой .skillsrc скилл-пака (если --project = репозиторий скиллов) НЕ трогается:
-    оперируем только по пути os.path.join(project_dir, '.skillsrc').
-    Возвращает (updated, path).
-    """
-    skillsrc_path = os.path.join(project_dir, ".skillsrc")
-    language = stack.get("language") or "unknown"
-    framework = stack.get("framework") or "unknown"
-    build_tool = BUILD_TOOL_NORMALIZE.get(stack.get("build_tool"), stack.get("build_tool")) or "unknown"
-    test_framework = stack.get("test_framework") or "unknown"
-    project_name = os.path.basename(os.path.abspath(project_dir.rstrip("/\\")))
-    source_path, tests_path = _guess_paths(project_dir, language)
-
-    if os.path.isfile(skillsrc_path):
-        # Обновляем только стек-поля, остальное сохраняем.
-        text = _read_text(skillsrc_path) or ""
-        updated = _patch_skillsrc_fields(
-            text, language, framework, build_tool, test_framework
-        )
-        try:
-            with open(skillsrc_path, "w", encoding="utf-8") as f:
-                f.write(updated)
-            return True, skillsrc_path
-        except OSError:
-            return False, skillsrc_path
-
-    # Создаём минимальный .skillsrc
-    content = _SKILLSRC_TEMPLATE.format(
-        name=project_name, language=language, framework=framework,
-        build_tool=build_tool, source=source_path, tests=tests_path,
-        test_framework=test_framework,
-    )
-    try:
-        with open(skillsrc_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        return True, skillsrc_path
-    except OSError:
-        return False, skillsrc_path
-
-
-def _guess_paths(project_dir: str, language: str) -> tuple[str, str]:
-    """Эвристика путей source/tests по языку и наличию типичных директорий."""
-    defaults = {
-        "python": ("src", "tests"),
-        "java": ("src/main/java", "src/test/java"),
-        "typescript": ("src", "test"),
-        "go": (".", "."),
-    }
-    base = defaults.get(language, ("src", "tests"))
-    # если в проекте есть src/backend (как у InvenTree) — учтём
-    if os.path.isdir(os.path.join(project_dir, "src", "backend")):
-        return ("src/backend", "src/backend/InvenTree/test")
-    return base
-
-
-def _patch_skillsrc_fields(text: str, language: str, framework: str,
-                           build_tool: str, test_framework: str) -> str:
-    """
-    Точечно обновляет стек-поля в существующем .skillsrc, не ломая остальное.
-    Секции: project.language, project.framework, project.build_tool, test.framework.
-    """
-    # (section, key, value) — паттерн заменяет значение строки «key: ...».
-    def _repl(section: str, key: str, value: str) -> str:
-        nonlocal text
-        # ищем секцию и строку ключа внутри неё
-        pattern = re.compile(
-            r"(^|\n)([ \t]*)" + re.escape(section) + r":[^\n]*\n"
-            r"((?:[ \t]+[^\n]*\n)*)",
-            re.MULTILINE,
-        )
-        m = pattern.search(text)
-        if not m:
-            return
-        block = m.group(3)
-        key_re = re.compile(r"^([ \t]*)" + re.escape(key) + r":.*$", re.MULTILINE)
-        new_block, n = key_re.subn(
-            lambda km: f"{km.group(1)}{key}: \"{value}\"  # обновлено scan_project.py",
-            block, count=1,
-        )
-        if n:
-            text = text[:m.start(3)] + new_block + text[m.end(3):]
-
-    _repl("project", "language", language)
-    _repl("project", "framework", framework)
-    _repl("project", "build_tool", build_tool)
-    _repl("test", "framework", test_framework)
-    return text
 
 
 # ---------------------------------------------------------------------------

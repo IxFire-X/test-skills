@@ -1,32 +1,40 @@
-# Скопируйте файл в корень целевого проекта как .skillsrc и замените значения.
-version: "2.0"
+# Обычно этот файл создаёт tools/init_skillsrc.py.
+# Редактируйте подтверждённые значения; при конфликте следующий запуск покажет diff.
+version: "3.0"
 
 project:
-  name: "my-service"
-  language: "python"
-  framework: "fastapi"
-  build_tool: "poetry"
-  type: "microservice"
+  name: "example-workspace"
+  methodology: "sdd"
 
-paths:
-  source: "src"
-  tests: "tests"
-  resources: "resources"
-  docs: "docs"
+discovery:
+  on_missing: "automatic"
+  conflict_policy: "ask_user"
 
-test:
-  framework: "pytest"
-  api_client: "httpx"
-  database: "postgresql"
+modules:
+  - id: "backend"
+    root: "backend"
+    stack:
+      language: "python"
+      build_tool: "pip"
+    paths:
+      source: ["src"]
+      tests: ["tests"]
+    test:
+      framework: "pytest"
+    feature_sources:
+      requirements: ["docs/requirements"]
+    detected_from: ["backend/pyproject.toml"]
 
-methodology: "sdd"
-
-sdd:
-  openapi: "docs/api/openapi.yaml"
-  requirements: "docs/requirements"
-  architecture: "docs/architecture"
-
-resolution:
-  analytics_vs_code: "analytics_wins"
-  status_conflict: "ask_user"
-  skillsrc_vs_scan: "scan_wins"
+  - id: "frontend"
+    root: "frontend"
+    stack:
+      language: "typescript"
+      build_tool: "npm"
+    paths:
+      source: ["src"]
+      tests: ["tests"]
+    test:
+      framework: "jest"
+    feature_sources:
+      requirements: ["docs/requirements"]
+    detected_from: ["frontend/package.json"]

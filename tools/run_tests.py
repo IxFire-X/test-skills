@@ -21,11 +21,25 @@ from typing import Any, Literal, Mapping, Sequence
 
 if __package__:
     from .json_cli import JsonArgumentParser
+    from .skillsrc_manifest import (
+        SkillsrcError,
+        load_skillsrc,
+        normalize_skillsrc,
+        resolve_module_root,
+        select_module,
+    )
 else:
     _bootstrap_root = str(Path(__file__).resolve().parents[1])
     if _bootstrap_root not in sys.path:
         sys.path.insert(0, _bootstrap_root)
     from json_cli import JsonArgumentParser
+    from skillsrc_manifest import (
+        SkillsrcError,
+        load_skillsrc,
+        normalize_skillsrc,
+        resolve_module_root,
+        select_module,
+    )
 
 _ROOT = Path(__file__).resolve().parents[1]
 _AUTOMATION_SCHEMA = _ROOT / "schemas" / "tc-to-autotest-output.schema.json"
@@ -39,6 +53,22 @@ class RunnerCompatibility:
     bindings: Mapping[tuple[str, str], Mapping[str, Any]]
     verified_file_digests: Mapping[str, str]
     diagnostics: tuple[Mapping[str, str], ...]
+
+
+def resolve_execution_context(
+    project_root: Path,
+    skillsrc_path: Path,
+    module_id: str | None,
+    language_override: str | None,
+) -> tuple[Path, str, dict[str, Any]]:
+    """Resolve one manifest module into a project-confined execution context."""
+    document = normalize_skillsrc(load_skillsrc(skillsrc_path))
+    module = select_module(document, module_id)
+    execution_root = resolve_module_root(project_root, module)
+    detected_language = module["stack"]["language"]
+    if language_override and language_override != detected_language:
+        raise SkillsrcError("language_conflict", "--language conflicts with selected module")
+    return execution_root, language_override or detected_language, module
 
 
 class RunnerInputError(ValueError):
@@ -356,15 +386,66 @@ def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_d
 
 def main() -> int:
     parser = JsonArgumentParser(description="V3 deterministic generated-test runner.")
-    parser.add_argument("--project", required=True); parser.add_argument("--language", choices=["python", "java"], required=True)
-    parser.add_argument("--canonical-document", required=True); parser.add_argument("--automation-artifact", required=True)
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--skillsrc", help="Path to .skillsrc; defaults to <project>/.skillsrc when present.")
+    parser.add_argument("--module", help="Module ID from a version 3 .skillsrc manifest.")
+    parser.add_argument("--language", choices=["python", "java"])
+    parser.add_argument("--canonical-document", required=True)
+    parser.add_argument("--automation-artifact", required=True)
     args = parser.parse_args()
     try:
         from tools.canonical_document import load_canonical_document
-        report = run_tests_v3(Path(args.project), args.language, load_canonical_document(Path(args.canonical_document)), load_automation_artifact(Path(args.automation_artifact)))
-        print(json.dumps(report, ensure_ascii=False, separators=(",", ":"))); return {"PASS": 0, "FAIL": 1, "NOT_RUNNABLE": 2}[report["verdict"]]
+
+        project_root = Path(args.project).resolve()
+        execution_root = project_root
+        language = args.language
+        skillsrc_path = Path(args.skillsrc).resolve() if args.skillsrc else project_root / ".skillsrc"
+        if skillsrc_path.is_file():
+            execution_root, language, _ = resolve_execution_context(
+                project_root,
+                skillsrc_path,
+                args.module,
+                language,
+            )
+        elif args.skillsrc is not None or args.module is not None:
+            raise SkillsrcError(
+                "skillsrc_required",
+                "explicit module selection requires an available .skillsrc",
+            )
+        elif language is None:
+            raise SkillsrcError(
+                "language_required",
+                "--language is required when .skillsrc is unavailable",
+            )
+        if language not in {"python", "java"}:
+            raise SkillsrcError(
+                "language_unsupported",
+                "selected module language is unsupported by the V3 runner",
+            )
+
+        report = run_tests_v3(
+            execution_root,
+            language,
+            load_canonical_document(Path(args.canonical_document)),
+            load_automation_artifact(Path(args.automation_artifact)),
+        )
+        print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        return {"PASS": 0, "FAIL": 1, "NOT_RUNNABLE": 2}[report["verdict"]]
     except Exception as error:
-        print(json.dumps({"error": {"code": getattr(error, "code", "RUNNER_INPUT"), "message": "Runner input is invalid."}}, ensure_ascii=False, separators=(",", ":"))); return 2
+        print(
+            json.dumps(
+                {
+                    "error": {
+                        "code": getattr(error, "code", "RUNNER_INPUT"),
+                        "message": "Runner input is invalid.",
+                    }
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return 2
 
 
-if __name__ == "__main__": sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

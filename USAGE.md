@@ -7,12 +7,20 @@
 форма — `schemas/skillsrc.schema.json`. Этот манифест не разрешает менять рабочий
 исходный код, существующие тесты, конфигурацию, зависимости или lock files.
 
-Если `.skillsrc` отсутствует, проект можно read-only обследовать:
+Если `.skillsrc` отсутствует, оркестратор сначала read-only обследует проект и
+автоматически создаёт v3 manifest. При неоднозначности он сохраняет receipt,
+показывает один вопрос и принимает только выбранный option ID в новом immutable
+attempt. В монорепозитории после этого обязательно выбирается exact module ID; его
+confined root, язык и пути образуют execution context.
+
+Ручной запуск нужен только для диагностики или CI:
 
 ```bash
-python <skill-pack>/tools/scan_project.py --project <project> --target <feature-relative-path>
+python <skill-pack>/tools/init_skillsrc.py --project <project> --write --output <project>/docs/to_do/skillsrc-init.json
 ```
 
+Для отдельного read-only осмотра доступен
+`tools/scan_project.py --project <project> --target <feature-relative-path>`.
 Постоянный `--output` для scanner допустим только в точном `docs/to_do`. Каждый
 логический запуск использует новый каталог внутри
 `<project>/docs/to_do/test-pipeline/<feature>/<attempt>/`; не перезаписывайте
@@ -92,8 +100,9 @@ and autotest review statically covers every required pair.
 
 ```powershell
 python -m tools.run_tests `
-  --project <isolated-project> `
-  --language <python|java> `
+  --project <project> `
+  --skillsrc <project>/.skillsrc `
+  --module <module-id> `
   --canonical-document <effective-bare.json> `
   --automation-artifact <automation.json>
 
@@ -106,7 +115,8 @@ python -m tools.build_trace_document `
 python -m tools.trace_check <trace.json> --require-execution
 ```
 
-Only `--run-result` is omitted for a valid BLOCKED/manual no-run branch. Keep
+The selected module supplies the language; an explicit `--language` override must
+match it. Only `--run-result` is omitted for a valid BLOCKED/manual no-run branch. Keep
 `--require-execution` on every terminal trace check: it enforces the branch’s exact
 execution obligation and accepts null execution only for the applicable no-run
 semantics. There is no finalization CLI and no trace-check orchestrator-artifact flag.
