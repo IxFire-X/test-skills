@@ -1,11 +1,11 @@
 ---
 name: orchestrate
-description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация Pipeline 4.0.
+description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация Pipeline 5.0.
 ---
 
-# Оркестрация тестового пайплайна Pipeline 4.0
+# Оркестрация тестового пайплайна Pipeline 5.0
 
-Следуй Pipeline 4.0 из `contracts/pipeline.json` и [контракту оркестрации](references/orchestration-contract.md). Определяй пути скиллов только через `skill_files`; не используй копии или псевдонимы.
+Следуй Pipeline 5.0 из `contracts/pipeline.json` и [контракту оркестрации](references/orchestration-contract.md). Context Marker создаёт `managed_behavior_context`, `behavior_source_accounting` и `behavior_context_receipt`; классификатор принимает эти три носителя, а генератор принимает и пересылает только `managed_behavior_context`. Определяй пути скиллов только через `skill_files`; не используй копии или псевдонимы.
 
 ## Обязательная подготовка
 
@@ -35,7 +35,7 @@ description: Использовать, когда запрос содержит 
 
 ## Lifecycle
 
-1. Сначала построй `technical_test_inventory` и `authorized_behavior_sources`; затем `context-marker` создаёт только `managed_behavior_context`. Независимо классифицируй и проверь каждый test symbol; accepted `effective_technical_evidence` сохрани рядом с attempt, но не передавай в V3 automation, trace или final carriers. Только `managed_behavior_context` передай в `tc-generator` для candidate bare canonical JSON.
+1. Сначала построй `technical_test_inventory` и `authorized_behavior_sources`; затем `context-marker` создаёт `managed_behavior_context`, `behavior_source_accounting` и `behavior_context_receipt`. Перед классификацией передай три V5 carrier; независимо классифицируй и проверь каждый test symbol. Accepted `effective_technical_evidence` сохрани рядом с attempt, но не передавай в V3 automation, trace или final carriers. Только `managed_behavior_context` передай в `tc-generator` для candidate bare canonical JSON.
 2. Publish candidate: проверь candidate schema+semantics и опубликуй immutable JSON/Markdown/Zephyr CSV bundle до review.
 3. Вызови `orchestrate_revision` из `tools.orchestrate_test_case_revision`: publish a valid full successor до выбора; downstream передавай ровно одну effective revision и effective digest.
 4. Сгенерируй и статически проверь automation. При `AUTO_FIX_APPLIED` от autotest reviewer выполни regeneration и review заново.

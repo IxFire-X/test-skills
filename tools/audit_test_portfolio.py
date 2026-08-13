@@ -81,7 +81,7 @@ def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], re
     # The CLI has already loaded strict values, so validate the seam's logic directly.
     from tools.behavior_context_planning import validate_context_envelope
     validated = validate_context_envelope(context, receipt, inventory_artifacts["authorized_behavior_sources"], inventory_artifacts["technical_test_inventory"], project)
-    selected = select_effective_technical_evidence(inventory, classification, review, validated.requirements, project)
+    selected = select_effective_technical_evidence(inventory, classification, review, validated, project)
 
     canonical_diagnostics = validate_canonical_document(dict(canonical))
     if canonical_diagnostics:

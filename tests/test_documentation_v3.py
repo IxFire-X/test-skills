@@ -63,7 +63,7 @@ class DocumentationV3Tests(unittest.TestCase):
             "BLOCKED",
             "NOT_RUNNABLE",
             "tenant import round trip remains unverified",
-            "Pipeline 4.0",
+            "Pipeline 5.0",
             "managed_behavior_context",
             "test-classifier",
             "effective_technical_evidence",

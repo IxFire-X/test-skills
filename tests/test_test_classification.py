@@ -24,6 +24,7 @@ from tools.test_classification import (  # noqa: E402
     select_effective_technical_evidence,
     validate_technical_test_evidence,
 )
+from tools.behavior_context_planning import ValidatedBehaviorContext  # noqa: E402
 
 
 def stable_digest(value: object) -> str:
@@ -41,6 +42,9 @@ class TechnicalTestClassificationTests(unittest.TestCase):
 
     def inventory(self) -> dict:
         return copy.deepcopy(load_json_strict(V1 / "source-inventory.json"))
+
+    def context(self) -> ValidatedBehaviorContext:
+        return ValidatedBehaviorContext(tuple(self.requirements), "sha256:" + "0" * 64, "sha256:" + "0" * 64)
 
     def classification(self, scope: str = "integration") -> dict:
         result = copy.deepcopy(load_json_strict(V1 / "test-classifier.json"))
@@ -77,14 +81,14 @@ class TechnicalTestClassificationTests(unittest.TestCase):
                 candidate = self.classification(scope)
                 review = self.review(candidate)
                 self.assertEqual((), self.diagnostics(candidate, review))
-                selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.requirements, self.root)
+                selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.context(), self.root)
                 self.assertEqual([scope, scope], [row["test_scope"] for row in selected["classifications"]])
 
     def test_unknown_is_valid_but_cannot_be_upgraded(self) -> None:
         candidate = self.classification(scope="unknown")
         review = self.review(candidate)
         self.assertEqual((), self.diagnostics(candidate, review))
-        selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.requirements, self.root)
+        selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.context(), self.root)
         self.assertEqual("unknown", selected["classifications"][0]["test_scope"])
 
     def test_classification_pairs_must_exactly_match_canonical_inventory_order(self) -> None:
@@ -158,12 +162,12 @@ class TechnicalTestClassificationTests(unittest.TestCase):
 
     def test_result_and_error_diagnostics_are_recursively_immutable(self) -> None:
         candidate = self.classification(); review = self.review(candidate)
-        selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.requirements, self.root)
+        selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.context(), self.root)
         self.assertIsInstance(selected, MappingProxyType)
         with self.assertRaises(TypeError): selected["files"][0]["path"] = "mutated.py"
         malformed = self.classification(); malformed["artifacts"]["classification"]["classifications"].pop()
         with self.assertRaises(TestClassificationError) as raised:
-            select_effective_technical_evidence(self.inventory(), malformed, self.review(malformed), self.requirements, self.root)
+            select_effective_technical_evidence(self.inventory(), malformed, self.review(malformed), self.context(), self.root)
         self.assertIsInstance(raised.exception.diagnostics[0], MappingProxyType)
         with self.assertRaises(TypeError): raised.exception.diagnostics[0]["code"] = "MUTATED"
 

@@ -1,4 +1,4 @@
-# Использование Test Skills Pipeline 4.0
+# Использование Test Skills Pipeline 5.0
 
 ## Подключение и границы
 

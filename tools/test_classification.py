@@ -69,6 +69,12 @@ class TestClassificationError(ValueError):
         return self._diagnostics
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Keep direct command usage errors inside the same safe diagnostics carrier."""
+    def error(self, message: str) -> None:
+        raise _error("BEHAVIOR_PLAN", "/arguments", "Command arguments are invalid.")
+
+
 class _FrozenList(tuple):
     """An immutable JSON array that retains ordinary list equality for callers."""
     def __eq__(self, other: object) -> bool:
@@ -514,7 +520,7 @@ def validate_technical_test_evidence(inventory: Mapping[str, Any], classificatio
     return ()
 
 
-def select_effective_technical_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path) -> Mapping[str, Any]:
+def _select_effective_technical_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path) -> Mapping[str, Any]:
     """Return the accepted immutable technical-evidence carrier, or immutable diagnostics."""
     diagnostics = validate_technical_test_evidence(inventory, classification, classification_review, requirements, project_root)
     if diagnostics:
@@ -534,6 +540,17 @@ def select_effective_technical_evidence(inventory: Mapping[str, Any], classifica
     }
     result["effective_technical_evidence_sha256"] = _digest(result)
     return _freeze(result)
+
+
+def select_effective_technical_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], context: Any, project_root: Path) -> Mapping[str, Any]:
+    """Public selection gate: only the complete validated V5 context may supply requirements."""
+    try:
+        from tools.behavior_context_planning import ValidatedBehaviorContext
+    except ImportError:
+        from behavior_context_planning import ValidatedBehaviorContext
+    if not isinstance(context, ValidatedBehaviorContext):
+        raise TypeError("select_effective_technical_evidence requires ValidatedBehaviorContext")
+    return _select_effective_technical_evidence(inventory, classification, classification_review, context.requirements, project_root)
 
 
 def validate_managed_behavior_context(behavior_context: Mapping[str, Any], authorized_behavior_sources: Mapping[str, Any], test_inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
@@ -654,7 +671,7 @@ def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: M
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="test_classification.py")
+    parser = _SafeArgumentParser(prog="test_classification.py")
     commands = parser.add_subparsers(dest="command", required=True)
     inventory = commands.add_parser("inventory")
     inventory.add_argument("--project", required=True)
@@ -695,7 +712,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             except (OSError, StrictJsonError) as error:
                 raise _error("CLASSIFICATION_INPUT", "/input", "Classification input artifact could not be read as strict JSON.") from error
             validated = load_validated_behavior_context(Path(args.context), Path(args.receipt), input_inventory, Path(args.project))
-            result = select_effective_technical_evidence(input_inventory, input_classification, input_review, validated.requirements, Path(args.project))
+            result = select_effective_technical_evidence(input_inventory, input_classification, input_review, validated, Path(args.project))
         elif args.command == "validate-context":
             try:
                 input_inventory = load_json_strict(Path(args.inventory))

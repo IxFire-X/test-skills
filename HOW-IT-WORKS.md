@@ -1,4 +1,4 @@
-# Как работает полный тестовый пайплайн Pipeline 4.0
+# Как работает полный тестовый пайплайн Pipeline 5.0
 
 ## Главная идея
 
@@ -9,7 +9,7 @@
 ```text
 allowed requirements and read-only project context
   -> source-inventory: technical test inventory + authorized behavior sources
-  -> context-marker: managed behavior context
+  -> context-marker: managed behavior context + source accounting + receipt
   -> test-classifier -> test-classifier-reviewer: persisted technical evidence sidecar
   -> tc-generator: candidate bare canonical JSON from managed behavior context only
   -> publish immutable JSON/Markdown/CSV bundle
@@ -23,7 +23,8 @@ allowed requirements and read-only project context
 reviewer должен работать в fresh context и не видеть hidden reasoning генератора.
 
 `source-inventory` механически создаёт snapshots test files/symbols и authorized
-behavior sources. `context-marker` выделяет managed behavior context, а classifier
+behavior sources. `context-marker` выделяет managed behavior context, complete source
+accounting и immutable receipt; classifier
 и independent reviewer классифицируют полный inventory. Accepted
 `effective_technical_evidence` остаётся persisted sidecar attempt: в Phase 1 оно
 никогда не передаётся в V3 automation, trace или finalization. Structural guard:
