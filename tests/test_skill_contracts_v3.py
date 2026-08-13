@@ -234,16 +234,16 @@ class SkillContractsV3Tests(unittest.TestCase):
                 completed = subprocess.run(["python", str(quick_validate), directory], cwd=ROOT, text=True, capture_output=True)
                 self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
 
-    def test_adaptive_case_granularity_inline_contexts_are_closed_v4_generator_inputs(self):
+    def test_adaptive_case_granularity_inline_contexts_are_closed_v5_generator_inputs(self):
         manifest = json.loads(read("evals/adaptive-case-granularity/scenarios.json"))
         scenarios = manifest["scenarios"]
         self.assertEqual(3, len(scenarios))
         for scenario in scenarios:
             with self.subTest(scenario=scenario["id"]):
                 context = scenario["input"]["inline_context"]
-                self.assertEqual("4.0.0", context["schema_version"])
+                self.assertEqual("5.0.0", context["schema_version"])
                 self.assertEqual("context-marker", context["stage"])
-                self.assertEqual({"managed_behavior_context"}, set(context["artifacts"]))
+                self.assertEqual({"managed_behavior_context", "behavior_source_accounting"}, set(context["artifacts"]))
                 self.assertEqual([], schema_diagnostics(context, ROOT / STAGE_SCHEMAS["context-marker"], ROOT))
                 serialized = json.dumps(context, ensure_ascii=False, sort_keys=True)
                 for forbidden in ("analytics_documentation", "source_code_and_diff", "raw_content", "technical_test_inventory", "test source text", "technical_test_classification"):

@@ -14,9 +14,9 @@
       "skill": "tc-generator",
       "synthetic": true,
       "input": {
-        "request": "Generate the canonical test-case document from this inline V4 managed behavior context artifact.",
+        "request": "Generate the canonical test-case document from this inline V5 managed behavior context artifact.",
         "inline_context": {
-          "schema_version": "4.0.0",
+          "schema_version": "5.0.0",
           "stage": "context-marker",
           "artifacts": {
             "managed_behavior_context": {
@@ -34,7 +34,8 @@
                 "requirement_id": "REQ-0001",
                 "source_ids": ["REQ-synthetic-one-behavior-twenty-assertions"]
               }]
-            }
+            },
+            "behavior_source_accounting": {"authorized_behavior_sources_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","context_receipt_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","source_dispositions":[{"source_id":"REQ-synthetic-one-behavior-twenty-assertions","disposition":"represented","requirement_ids":["REQ-0001"]}],"behavior_fragment_groups":[{"group_id":"GROUP-synthetic","fragment_ids":["FRAGMENT-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"requirement_ids":["REQ-0001"]}]}
           },
           "warnings": []
         }
@@ -53,9 +54,9 @@
       "skill": "tc-generator",
       "synthetic": true,
       "input": {
-        "request": "Generate the canonical test-case document from this inline V4 managed behavior context artifact.",
+        "request": "Generate the canonical test-case document from this inline V5 managed behavior context artifact.",
         "inline_context": {
-          "schema_version": "4.0.0",
+          "schema_version": "5.0.0",
           "stage": "context-marker",
           "artifacts": {
             "managed_behavior_context": {
@@ -73,7 +74,8 @@
                 "requirement_id": "REQ-0001",
                 "source_ids": ["REQ-synthetic-two-independently-executable-branches"]
               }]
-            }
+            },
+            "behavior_source_accounting": {"authorized_behavior_sources_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","context_receipt_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","source_dispositions":[{"source_id":"REQ-synthetic-two-independently-executable-branches","disposition":"represented","requirement_ids":["REQ-0001"]}],"behavior_fragment_groups":[{"group_id":"GROUP-synthetic","fragment_ids":["FRAGMENT-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"requirement_ids":["REQ-0001"]}]}
           },
           "warnings": []
         }
@@ -94,9 +96,9 @@
       "skill": "tc-generator",
       "synthetic": true,
       "input": {
-        "request": "Generate the canonical test-case document from this inline V4 managed behavior context artifact.",
+        "request": "Generate the canonical test-case document from this inline V5 managed behavior context artifact.",
         "inline_context": {
-          "schema_version": "4.0.0",
+          "schema_version": "5.0.0",
           "stage": "context-marker",
           "artifacts": {
             "managed_behavior_context": {
@@ -114,7 +116,8 @@
                 "requirement_id": "REQ-0001",
                 "source_ids": ["REQ-synthetic-deduplicate-one-control-flow-evidence"]
               }]
-            }
+            },
+            "behavior_source_accounting": {"authorized_behavior_sources_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","context_receipt_sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000","source_dispositions":[{"source_id":"REQ-synthetic-deduplicate-one-control-flow-evidence","disposition":"represented","requirement_ids":["REQ-0001"]}],"behavior_fragment_groups":[{"group_id":"GROUP-synthetic","fragment_ids":["FRAGMENT-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"requirement_ids":["REQ-0001"]}]}
           },
           "warnings": []
         }

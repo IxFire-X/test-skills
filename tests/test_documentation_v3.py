@@ -120,7 +120,7 @@ class DocumentationV3Tests(unittest.TestCase):
         pipeline = render_pipeline(self.contract)
         contracts = render_contracts(self.contract)
         self.assertIn("test-pipeline", pipeline)
-        self.assertIn("4.0", pipeline)
+        self.assertIn("5.0", pipeline)
         for step in self.contract["steps"]:
             self.assertIn(f"`{step['id']}`", pipeline)
             self.assertIn(f"`{step['kind']}`", pipeline)

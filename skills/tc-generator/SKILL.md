@@ -5,7 +5,7 @@ description: Use when a V3 context artifact must become a canonical test-case do
 
 # Canonical test-case generation
 
-Consume only artifacts.managed_behavior_context. Reject raw_content, source_code_and_diff, technical_test_inventory, test source text, and technical_test_classification as generator inputs. Emit JSON-only `artifacts.canonical_document`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume only artifacts.managed_behavior_context. Reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence as generator inputs. Emit JSON-only `artifacts.canonical_document`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
 
 ## Procedure
 

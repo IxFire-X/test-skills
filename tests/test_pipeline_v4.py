@@ -39,7 +39,7 @@ class PipelineV4Tests(unittest.TestCase):
             ("trace-check", "tool"),
             ("finalize-orchestration", "tool"),
         ]
-        self.assertEqual("4.0", self.contract["version"])
+        self.assertEqual("5.0", self.contract["version"])
         self.assertEqual(expected_stages, [(row["id"], row["kind"]) for row in self.contract["steps"]])
 
     def test_generator_accepts_only_managed_behavior_context(self) -> None:
@@ -62,17 +62,17 @@ class PipelineV4Tests(unittest.TestCase):
             "context-marker": {
                 "accepts": ["raw_content", "technical_test_inventory", "authorized_behavior_sources"],
                 "forwards": ["technical_test_inventory", "authorized_behavior_sources"],
-                "produces": ["managed_behavior_context"],
+                "produces": ["managed_behavior_context", "behavior_source_accounting", "behavior_context_receipt"],
                 "rejects": [],
             },
             "test-classifier": {
-                "accepts": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context"],
-                "forwards": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context"],
+                "accepts": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context", "behavior_source_accounting", "behavior_context_receipt"],
+                "forwards": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context", "behavior_source_accounting", "behavior_context_receipt"],
                 "produces": ["technical_test_classification"],
                 "rejects": [],
             },
             "test-classifier-reviewer": {
-                "accepts": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context", "technical_test_classification"],
+                "accepts": ["technical_test_inventory", "authorized_behavior_sources", "managed_behavior_context", "behavior_source_accounting", "behavior_context_receipt", "technical_test_classification"],
                 "forwards": ["managed_behavior_context"],
                 "produces": ["classification_review", "effective_technical_evidence"],
                 "rejects": [],
@@ -81,7 +81,7 @@ class PipelineV4Tests(unittest.TestCase):
                 "accepts": ["managed_behavior_context"],
                 "forwards": ["managed_behavior_context"],
                 "produces": ["candidate_document"],
-                "rejects": [],
+                "rejects": ["raw_content", "technical_test_inventory", "authorized_behavior_sources", "behavior_source_accounting", "behavior_context_receipt", "technical_test_classification", "classification_review", "effective_technical_evidence"],
             },
         }
         stage_by_id = {row["id"]: row for row in self.contract["steps"]}
@@ -95,6 +95,8 @@ class PipelineV4Tests(unittest.TestCase):
             "technical_test_inventory",
             "authorized_behavior_sources",
             "managed_behavior_context",
+            "behavior_source_accounting",
+            "behavior_context_receipt",
             "technical_test_classification",
             "classification_review",
             "effective_technical_evidence",
@@ -179,6 +181,7 @@ class PipelineV4Tests(unittest.TestCase):
             shutil.copytree(ROOT / "schemas", temporary_root / "schemas")
             (temporary_root / "tools").mkdir()
             shutil.copy2(ROOT / "tools" / "test_classification.py", temporary_root / "tools" / "test_classification.py")
+            shutil.copy2(ROOT / "tools" / "behavior_context_planning.py", temporary_root / "tools" / "behavior_context_planning.py")
             for relative in ("contracts/pipeline.json", "CONTRACTS.md", "PIPELINE.md"):
                 target = temporary_root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)

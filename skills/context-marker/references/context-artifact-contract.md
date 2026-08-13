@@ -1,6 +1,6 @@
 # V4 managed behavior context artifact contract
 
-`schemas/context-marker-output.schema.json`, `tools.canonical_document`, and `tools.test_classification.validate_managed_behavior_context` are executable truth. Emit `schema_version: "4.0.0"`, `stage: "context-marker"`, one closed `managed_behavior_context` branch, and no warnings.
+`schemas/context-marker-output.schema.json`, `tools.behavior_context_planning.validate_context_envelope`, and `tools.test_classification.load_validated_behavior_context` are executable truth. Emit `schema_version: "5.0.0"`, `stage: "context-marker"`, closed sibling `managed_behavior_context` and `behavior_source_accounting` branches, and no warnings. The accounting sidecar binds the immutable receipt, gives every authorized source one terminal disposition, and groups every receipt fragment exactly once.
 
 Each requirement has a stable `requirement_id`, physical `display_order`, supported `text`, and ordered `provenance`. Derive ordering and IDs only from authorized evidence; source-local identifiers remain provenance. Preserve safe observable facts (status, response field, event, state), but never a credential or raw secret.
 

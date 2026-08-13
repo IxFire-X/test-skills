@@ -1,52 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "schemas/context-marker-output.schema.json",
-  "title": "Managed V4 context-marker artifact envelope",
-  "type": "object",
-  "required": ["schema_version", "stage", "artifacts", "warnings"],
-  "additionalProperties": false,
-  "properties": {
-    "schema_version": {"const": "4.0.0"},
-    "stage": {"const": "context-marker"},
-    "artifacts": {
-      "type": "object",
-      "required": ["managed_behavior_context"],
-      "additionalProperties": false,
-      "properties": {"managed_behavior_context": {"$ref": "#/$defs/managed_behavior_context"}}
-    },
-    "warnings": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
-  },
-  "$defs": {
-    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "nonempty": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
-    "product_source": {
-      "type": "object", "additionalProperties": false,
-      "required": ["source_id", "kind", "path", "content_digest", "summary"],
-      "properties": {
-        "source_id": {"type": "string", "pattern": "^SOURCE-[0-9a-f]{64}$"},
-        "kind": {"const": "product_file"},
-        "path": {"$ref": "#/$defs/nonempty"},
-        "content_digest": {"$ref": "#/$defs/digest"},
-        "summary": {"$ref": "#/$defs/nonempty"}
-      }
-    },
-    "requirement_source": {
-      "type": "object", "additionalProperties": false,
-      "required": ["requirement_id", "source_ids"],
-      "properties": {
-        "requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"},
-        "source_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
-      }
-    },
-    "managed_behavior_context": {
-      "type": "object", "additionalProperties": false,
-      "required": ["authorized_behavior_sources_sha256", "requirements", "product_sources", "requirement_sources"],
-      "properties": {
-        "authorized_behavior_sources_sha256": {"$ref": "#/$defs/digest"},
-        "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "schemas/canonical-test-document.schema.json#/$defs/requirement"}},
-        "product_sources": {"type": "array", "items": {"$ref": "#/$defs/product_source"}},
-        "requirement_sources": {"type": "array", "items": {"$ref": "#/$defs/requirement_source"}}
-      }
-    }
-  }
+  "$schema":"https://json-schema.org/draft/2020-12/schema", "$id":"schemas/context-marker-output.schema.json", "title":"Managed V5 context-marker artifact envelope", "type":"object", "additionalProperties":false,
+  "required":["schema_version","stage","artifacts","warnings"],
+  "properties":{"schema_version":{"const":"5.0.0"},"stage":{"const":"context-marker"},"warnings":{"type":"array","maxItems":0,"items":{"type":"string"}},"artifacts":{"type":"object","additionalProperties":false,"required":["managed_behavior_context","behavior_source_accounting"],"properties":{"managed_behavior_context":{"$ref":"#/$defs/managed"},"behavior_source_accounting":{"$ref":"#/$defs/accounting"}}}},
+  "$defs":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"managed":{"type":"object","additionalProperties":false,"required":["authorized_behavior_sources_sha256","requirements","product_sources","requirement_sources"],"properties":{"authorized_behavior_sources_sha256":{"$ref":"#/$defs/digest"},"requirements":{"type":"array","minItems":1,"items":{"$ref":"schemas/canonical-test-document.schema.json#/$defs/requirement"}},"product_sources":{"type":"array","items":{"$ref":"#/$defs/product"}},"requirement_sources":{"type":"array","items":{"$ref":"#/$defs/requirement-source"}}}},"product":{"type":"object","additionalProperties":false,"required":["source_id","kind","path","content_digest","summary"],"properties":{"source_id":{"type":"string"},"kind":{"const":"product_file"},"path":{"type":"string","minLength":1},"content_digest":{"$ref":"#/$defs/digest"},"summary":{"type":"string","minLength":1}}},"requirement-source":{"type":"object","additionalProperties":false,"required":["requirement_id","source_ids"],"properties":{"requirement_id":{"type":"string"},"source_ids":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}}}},"accounting":{"type":"object","additionalProperties":false,"required":["authorized_behavior_sources_sha256","context_receipt_sha256","source_dispositions","behavior_fragment_groups"],"properties":{"authorized_behavior_sources_sha256":{"$ref":"#/$defs/digest"},"context_receipt_sha256":{"$ref":"#/$defs/digest"},"source_dispositions":{"type":"array","items":{"oneOf":[{"$ref":"#/$defs/represented"},{"$ref":"#/$defs/excluded"}]}},"behavior_fragment_groups":{"type":"array","items":{"$ref":"#/$defs/group"}}}},"represented":{"type":"object","additionalProperties":false,"required":["source_id","disposition","requirement_ids"],"properties":{"source_id":{"type":"string"},"disposition":{"const":"represented"},"requirement_ids":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}}}},"excluded":{"type":"object","additionalProperties":false,"required":["source_id","disposition","reason"],"properties":{"source_id":{"type":"string"},"disposition":{"const":"no_supported_observable_fact"},"reason":{"const":"no_supported_actor_operation_or_outcome_after_full_review"}}},"group":{"type":"object","additionalProperties":false,"required":["group_id","fragment_ids","requirement_ids"],"properties":{"group_id":{"type":"string","minLength":1},"fragment_ids":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","pattern":"^FRAGMENT-[0-9a-f]{64}$"}},"requirement_ids":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}}}}}
 }

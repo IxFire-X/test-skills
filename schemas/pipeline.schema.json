@@ -6,7 +6,7 @@
   "required": ["version", "pipeline", "core_skills", "skill_files", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections"],
   "properties": {
     "$schema": {"const": "schemas/pipeline.schema.json"},
-    "version": {"const": "4.0"},
+    "version": {"const": "5.0"},
     "pipeline": {"const": "test-pipeline"},
     "core_skills": {"type": "array"},
     "skill_files": {"type": "object"},

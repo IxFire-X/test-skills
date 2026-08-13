@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 V1 = ROOT / "tests" / "fixtures" / "stages" / "v1"
-V4 = ROOT / "tests" / "fixtures" / "stages" / "v4"
+V5 = ROOT / "tests" / "fixtures" / "stages" / "v5"
 CANONICAL = ROOT / "tests" / "fixtures" / "canonical" / "valid" / "full-http.json"
 PROJECT = ROOT / "tests" / "fixtures" / "test-classification" / "project"
 sys.path.insert(0, str(ROOT))
@@ -30,11 +30,11 @@ def stable_digest(value: object) -> str:
 class TestPortfolioAuditTests(unittest.TestCase):
     """The audit must compose existing validators without owning their joins."""
 
-    def args(self, output: Path, *, inventory: Path = V1 / "source-inventory.json", classification: Path = V1 / "test-classifier.json", review: Path = V1 / "test-classifier-reviewer-accepted.json", context: Path = V4 / "context-marker.json", canonical: Path = CANONICAL) -> list[str]:
+    def args(self, output: Path, *, inventory: Path = V1 / "source-inventory.json", classification: Path = V1 / "test-classifier.json", review: Path = V1 / "test-classifier-reviewer-accepted.json", context: Path = V5 / "context-marker.json", receipt: Path = V5 / "receipt.json", canonical: Path = CANONICAL) -> list[str]:
         return [
             "phase1", "--project", str(PROJECT), "--inventory", str(inventory),
             "--classification", str(classification), "--review", str(review),
-            "--context", str(context), "--canonical-document", str(canonical),
+            "--context", str(context), "--receipt", str(receipt), "--canonical-document", str(canonical),
             "--output", str(output),
         ]
 
@@ -87,7 +87,7 @@ class TestPortfolioAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             inventory = load_json_strict(V1 / "source-inventory.json")
-            context = load_json_strict(V4 / "context-marker.json")
+            context = load_json_strict(V5 / "context-marker.json")
             sources = inventory["artifacts"]["authorized_behavior_sources"]
             test_source = {
                 "source_id": "SOURCE-test-file",

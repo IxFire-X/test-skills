@@ -14,6 +14,7 @@ from types import MappingProxyType
 
 ROOT = Path(__file__).resolve().parents[1]
 V1 = ROOT / "tests" / "fixtures" / "stages" / "v1"
+V5 = ROOT / "tests" / "fixtures" / "stages" / "v5"
 sys.path.insert(0, str(ROOT))
 
 from tools.schema_validation import load_json_strict  # noqa: E402
@@ -210,27 +211,25 @@ class TechnicalTestClassificationTests(unittest.TestCase):
         self.assert_diagnostic("CLASSIFICATION_SCHEMA", "/schema_version", legacy, self.review(legacy))
 
     def test_cli_select_is_create_only_and_rework_creates_no_carrier(self) -> None:
-        context = {"schema_version": "4.0.0", "stage": "context-marker", "warnings": [], "artifacts": {"managed_behavior_context": {"requirements": list(self.requirements)}}}
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            context_path = temporary / "context.json"; context_path.write_text(json.dumps(context), encoding="utf-8")
             output = temporary / "effective.json"
-            args = ["select", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"), "--classification", str(V1 / "test-classifier.json"), "--review", str(V1 / "test-classifier-reviewer-accepted.json"), "--context", str(context_path), "--output", str(output)]
+            args = ["select", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"), "--classification", str(V1 / "test-classifier.json"), "--review", str(V1 / "test-classifier-reviewer-accepted.json"), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--output", str(output)]
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(0, main(args))
                 self.assertEqual(2, main(args))
             self.assertTrue(output.exists())
             rework_output = temporary / "rework.json"
             rework_args = list(args)
-            rework_args[8] = str(V1 / "test-classifier-reviewer-rework.json")
-            rework_args[12] = str(rework_output)
+            rework_args[rework_args.index("--review") + 1] = str(V1 / "test-classifier-reviewer-rework.json")
+            rework_args[rework_args.index("--output") + 1] = str(rework_output)
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(2, main(rework_args))
             self.assertFalse(rework_output.exists())
             legacy_context = temporary / "legacy.json"; legacy_context.write_text(json.dumps({"schema_version": "3.0.0", "stage": "context-marker", "warnings": [], "artifacts": {}}), encoding="utf-8")
             legacy_args = list(args)
-            legacy_args[10] = str(legacy_context)
-            legacy_args[12] = str(temporary / "legacy-effective.json")
+            legacy_args[legacy_args.index("--context") + 1] = str(legacy_context)
+            legacy_args[legacy_args.index("--output") + 1] = str(temporary / "legacy-effective.json")
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
                 self.assertEqual(2, main(legacy_args))
-            self.assertIn("CLASSIFICATION_CONTEXT", stderr.getvalue())
+            self.assertIn("BEHAVIOR_ACCOUNTING_SHAPE", stderr.getvalue())

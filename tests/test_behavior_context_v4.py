@@ -14,10 +14,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 V1 = ROOT / "tests" / "fixtures" / "stages" / "v1"
 V4 = ROOT / "tests" / "fixtures" / "stages" / "v4"
+V5 = ROOT / "tests" / "fixtures" / "stages" / "v5"
 sys.path.insert(0, str(ROOT))
 
 from tools.schema_validation import load_json_strict, schema_diagnostics  # noqa: E402
 from tools.test_classification import main, validate_managed_behavior_context  # noqa: E402
+from tools.behavior_context_planning import validate_context_envelope  # noqa: E402
 
 
 def digest(value: object) -> str:
@@ -29,7 +31,8 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = ROOT / "tests" / "fixtures" / "test-classification" / "project"
         self.inventory_envelope = load_json_strict(V1 / "source-inventory.json")
-        self.context_envelope = load_json_strict(V4 / "context-marker.json")
+        self.context_envelope = load_json_strict(V5 / "context-marker.json")
+        self.receipt = load_json_strict(V5 / "receipt.json")
 
     def behavior_context(self, source_id: str) -> dict[str, object]:
         context = copy.deepcopy(self.context_envelope["artifacts"]["managed_behavior_context"])
@@ -58,12 +61,13 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
             self.root,
         )
 
-    def test_checked_in_v4_fixture_is_schema_and_semantically_valid(self) -> None:
+    def test_checked_in_v5_fixture_is_schema_and_semantically_valid(self) -> None:
         self.assertEqual(
             [],
             schema_diagnostics(self.context_envelope, ROOT / "schemas" / "context-marker-output.schema.json", ROOT),
         )
-        self.assertEqual((), self.validate(self.behavior_context("SOURCE-fd794e4081e27177d36a68cf917f712c6981d175c3bf3d45f890367a92645c75")))
+        value = validate_context_envelope(self.context_envelope, self.receipt, self.authorized_sources(), self.inventory_with_unit_symbols(1), self.root)
+        self.assertEqual(["REQ-a", "REQ-b"], [row["requirement_id"] for row in value.requirements])
 
     def test_test_only_fact_cannot_originate_requirement(self) -> None:
         context = self.behavior_context(source_id="SOURCE-test-file")
@@ -140,7 +144,7 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
         text = (ROOT / "skills" / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Consume only artifacts.managed_behavior_context.", text)
         self.assertIn(
-            "Reject raw_content, source_code_and_diff, technical_test_inventory, test source text, and technical_test_classification as generator inputs.",
+            "Reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence as generator inputs.",
             text,
         )
 
@@ -148,10 +152,10 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
             code = main([
                 "validate-context", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"),
-                "--context", str(ROOT / "tests" / "fixtures" / "stages" / "v3" / "context-marker.json"),
+                "--context", str(ROOT / "tests" / "fixtures" / "stages" / "v3" / "context-marker.json"), "--receipt", str(V5 / "receipt.json"),
             ])
         self.assertEqual(2, code)
-        self.assertIn("BEHAVIOR_CONTEXT", stderr.getvalue())
+        self.assertIn("BEHAVIOR_ACCOUNTING_SHAPE", stderr.getvalue())
 
     def test_public_validator_rejects_recomputed_unauthorized_source_kind(self) -> None:
         context = self.behavior_context("SOURCE-fd794e4081e27177d36a68cf917f712c6981d175c3bf3d45f890367a92645c75")
@@ -170,7 +174,7 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
             inventory_path = Path(temporary) / "inventory.json"
             inventory_path.write_text(json.dumps(malformed), encoding="utf-8")
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
-                code = main(["validate-context", "--project", str(self.root), "--inventory", str(inventory_path), "--context", str(V4 / "context-marker.json")])
+                code = main(["validate-context", "--project", str(self.root), "--inventory", str(inventory_path), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json")])
         self.assertEqual(2, code)
         self.assertIn("BEHAVIOR_INVENTORY", stderr.getvalue())
         self.assertNotIn("do-not-leak", stderr.getvalue())

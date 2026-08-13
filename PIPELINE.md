@@ -2,16 +2,16 @@
 
 Generated from `contracts/pipeline.json`. Do not edit manually.
 
-Version: `4.0`
+Version: `5.0`
 
 ## Steps
 
 | Step | `kind` | `accepts` | `forwards` | `produces` |
 |---|---|---|---|---|
 | `source-inventory` | `tool` | `raw_content` | `raw_content` | `technical_test_inventory`, `authorized_behavior_sources` |
-| `context-marker` | `skill` | `raw_content`, `technical_test_inventory`, `authorized_behavior_sources` | `technical_test_inventory`, `authorized_behavior_sources` | `managed_behavior_context` |
-| `test-classifier` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context` | `technical_test_classification` |
-| `test-classifier-reviewer` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `technical_test_classification` | `managed_behavior_context` | `classification_review`, `effective_technical_evidence` |
+| `context-marker` | `skill` | `raw_content`, `technical_test_inventory`, `authorized_behavior_sources` | `technical_test_inventory`, `authorized_behavior_sources` | `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt` |
+| `test-classifier` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt` | `technical_test_classification` |
+| `test-classifier-reviewer` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt`, `technical_test_classification` | `managed_behavior_context` | `classification_review`, `effective_technical_evidence` |
 | `tc-generator` | `skill` | `managed_behavior_context` | `managed_behavior_context` | `candidate_document` |
 | `publish-candidate` | `tool` | `candidate_document` | `candidate_document` | `candidate_bundle_receipt` |
 | `tc-reviewer` | `skill` | `candidate_document` | `candidate_document` | `validation_report`, `successor_document` |

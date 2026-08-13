@@ -1,0 +1,127 @@
+"""Finite V5 behavior-source-accounting regression matrix."""
+
+from __future__ import annotations
+
+import unittest
+import copy
+import hashlib
+import json
+import tempfile
+from pathlib import Path
+
+from tools.behavior_context_planning import build_context_plan, build_context_receipt, validate_batch_result, validate_context_envelope
+from tools.schema_validation import load_json_strict
+from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc, select_module
+from tools.test_classification import _digest, _plain
+
+ROOT = Path(__file__).resolve().parents[1]
+V1 = ROOT / "tests" / "fixtures" / "stages" / "v1"
+V5 = ROOT / "tests" / "fixtures" / "stages" / "v5"
+PROJECT = ROOT / "tests" / "fixtures" / "test-classification" / "project"
+
+
+class BehaviorSourceAccountingV5RedMatrix(unittest.TestCase):
+    """The production seam is deliberately imported only after this RED file exists."""
+
+    def test_public_protocol_surface_exists(self) -> None:
+        from tools.behavior_context_planning import (  # noqa: PLC0415
+            ValidatedBehaviorContext,
+            build_context_plan,
+            build_context_receipt,
+            validate_batch_result,
+            validate_context_envelope,
+        )
+
+        self.assertTrue(ValidatedBehaviorContext)
+        self.assertTrue(build_context_plan)
+        self.assertTrue(build_context_receipt)
+        self.assertTrue(validate_batch_result)
+        self.assertTrue(validate_context_envelope)
+
+    def test_matrix_rows_are_explicit(self) -> None:
+        # Each row names the production change that must invalidate it.
+        rows = {
+            "accounting": "remove V5 sibling accounting validation",
+            "selection": "restore raw requirements selector",
+            "plan_ranges": "remove exact accounted/read range checks",
+            "supplied": "accept missing or foreign supplied input",
+            "batch": "accept incomplete or out-of-range batch results",
+            "receipt": "remove receipt/disposition/fragment binding",
+            "pipeline": "restore a V4 carrier array",
+            "skill": "allow a batch to be skipped or generator sidecar input",
+        }
+        self.assertEqual(8, len(rows))
+
+
+class PlannerReceiptV5Tests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.inventory = load_json_strict(V1 / "source-inventory.json")
+        self.context = load_json_strict(V5 / "context-marker.json")
+        self.receipt = load_json_strict(V5 / "receipt.json")
+        self.supplied = {"REQ-synthetic": (ROOT / "tests" / "fixtures" / "test-classification" / "requirement.txt").read_bytes()}
+        self.module = dict(select_module(normalize_skillsrc(load_skillsrc(PROJECT / ".skillsrc")), None))
+        self.plan = build_context_plan(PROJECT, self.module, self.inventory, self.supplied)
+
+    def result_rows(self) -> list[dict]:
+        rows = []
+        for index, batch in enumerate(self.plan["batches"], 1):
+            item = batch["items"][0]; start, end = item["accounted_range"]["start"], item["accounted_range"]["end"]
+            rows.append({"schema_version":"1.0.0","plan_sha256":_digest(_plain(self.plan)),"batch_id":batch["batch_id"],"items":[{"item_id":item["item_id"],"outcome":"behavior_fragments","behavior_fragments":[{"fragment_id":"FRAGMENT-" + f"{index:064x}","actor":"user","operation":"observe","conditions":[],"outcomes":["result"],"anchor_byte":start,"evidence_ranges":[{"start":start,"end":end}]}]}]})
+        return rows
+
+    def test_plan_has_exact_ranges_and_mechanical_domain_keys(self) -> None:
+        rows = [item for batch in self.plan["batches"] for item in batch["items"]]
+        self.assertEqual(["_supplied", "_root"], [row["domain_key"] for row in rows])
+        self.assertEqual([(0, 39), (0, 41)], [(row["accounted_range"]["start"], row["accounted_range"]["end"]) for row in rows])
+        self.assertEqual([(0, 39), (0, 41)], [(row["read_range"]["start"], row["read_range"]["end"]) for row in rows])
+        with self.assertRaises(TypeError):
+            self.plan["batches"] = ()
+
+    def test_supplied_input_missing_duplicate_and_foreign_are_rejected(self) -> None:
+        cases = ({}, {"foreign": b"x"}, {"REQ-synthetic": b""})
+        for supplied in cases:
+            with self.subTest(supplied=supplied):
+                with self.assertRaises(Exception) as error:
+                    build_context_plan(PROJECT, self.module, self.inventory, supplied)
+                self.assertIn(error.exception.diagnostics[0]["code"], {"BEHAVIOR_SUPPLIED_INPUT"})
+
+    def test_batch_result_requires_exact_binding_anchor_and_evidence_ranges(self) -> None:
+        valid = self.result_rows()[0]
+        self.assertEqual((), validate_batch_result(self.plan, valid))
+        cases = []
+        wrong = copy.deepcopy(valid); wrong["plan_sha256"] = "sha256:" + "a" * 64; cases.append(wrong)
+        wrong = copy.deepcopy(valid); wrong["items"][0]["item_id"] = "ITEM-999999"; cases.append(wrong)
+        wrong = copy.deepcopy(valid); wrong["items"][0]["behavior_fragments"][0]["anchor_byte"] = valid["items"][0]["behavior_fragments"][0]["evidence_ranges"][0]["end"]; cases.append(wrong)
+        for value in cases:
+            with self.subTest(value=value): self.assertEqual("BEHAVIOR_BATCH_RESULT", validate_batch_result(self.plan, value)[0]["code"])
+
+    def test_receipt_requires_one_result_per_batch_and_closed_fragments(self) -> None:
+        rows = self.result_rows()
+        receipt = build_context_receipt(PROJECT, self.module, self.inventory, self.plan, rows, self.supplied)
+        self.assertEqual(2, len(receipt["fragment_registry"]))
+        with self.assertRaises(Exception) as error:
+            build_context_receipt(PROJECT, self.module, self.inventory, self.plan, rows[:1], self.supplied)
+        self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+        duplicate = copy.deepcopy(rows); duplicate[1]["items"][0]["behavior_fragments"][0]["fragment_id"] = duplicate[0]["items"][0]["behavior_fragments"][0]["fragment_id"]
+        with self.assertRaises(Exception) as error:
+            build_context_receipt(PROJECT, self.module, self.inventory, self.plan, duplicate, self.supplied)
+        self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+
+    def test_three_way_accounting_link_and_fragment_coverage_mutations_fail_immutably(self) -> None:
+        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]
+        technical = self.inventory["artifacts"]["technical_test_inventory"]
+        for mutate in (
+            lambda value: value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"][0]["fragment_ids"].pop(),
+            lambda value: value["artifacts"]["behavior_source_accounting"]["behavior_fragment_groups"][0].update({"fragment_ids":["FRAGMENT-" + "f" * 64]}),
+            lambda value: value["artifacts"]["behavior_source_accounting"]["source_dispositions"][0].update({"requirement_ids":["REQ-a"]}),
+        ):
+            value = copy.deepcopy(self.context); mutate(value)
+            with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
+                validate_context_envelope(value, self.receipt, authorized, technical, PROJECT)
+            diagnostic = error.exception.diagnostics[0]
+            self.assertIn(diagnostic["code"], {"BEHAVIOR_ACCOUNTING_COVERAGE", "BEHAVIOR_ACCOUNTING_LINK"})
+            with self.assertRaises(TypeError): diagnostic["code"] = "changed"
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,6 +10,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `technical_test_inventory` | Closed mechanical inventory of supported test files and symbols. |
 | `authorized_behavior_sources` | Closed snapshot of supplied requirements and eligible product sources. |
 | `managed_behavior_context` | Authorized behavior context isolated from technical test evidence. |
+| `behavior_source_accounting` | Complete source-accounting sidecar; never enters generation. |
+| `behavior_context_receipt` | Immutable planned-batch receipt; never enters generation. |
 | `technical_test_classification` | Candidate scope classification for every inventoried test symbol. |
 | `classification_review` | Independent completeness review of the technical classification. |
 | `effective_technical_evidence` | Accepted classification sidecar retained outside the V3 downstream route. |

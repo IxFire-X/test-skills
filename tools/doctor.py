@@ -67,7 +67,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if expected == "pipeline":
-                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "4.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
+                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "5.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
             else:
                 valid = data.get("$id") == expected and data.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
             if not valid:

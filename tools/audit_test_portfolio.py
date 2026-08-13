@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
 
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import StrictJsonError, load_json_strict
-from tools.test_classification import TestClassificationError, select_effective_technical_evidence, validate_managed_behavior_context
+from tools.test_classification import TestClassificationError, select_effective_technical_evidence
 
 
 _SCOPES = ("unit", "integration", "e2e", "unknown")
@@ -70,23 +70,18 @@ def _write_create_only(output: Path, summary: Mapping[str, Any]) -> None:
         raise AuditError("AUDIT_OUTPUT", "/output", "Audit output could not be created.") from error
 
 
-def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], context: Mapping[str, Any], canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
+def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], context: Mapping[str, Any], receipt: Mapping[str, Any], canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
     inventory_artifacts = inventory.get("artifacts")
     context_artifacts = context.get("artifacts")
     if not isinstance(inventory_artifacts, Mapping) or not isinstance(context_artifacts, Mapping):
         raise AuditError("AUDIT_INPUT", "/artifacts", "Audit artifacts must use their expected envelopes.")
-    authorized_sources = inventory_artifacts.get("authorized_behavior_sources")
-    test_inventory = inventory_artifacts.get("technical_test_inventory")
-    behavior_context = context_artifacts.get("managed_behavior_context")
-    if not isinstance(authorized_sources, Mapping) or not isinstance(test_inventory, Mapping) or not isinstance(behavior_context, Mapping):
+    if not isinstance(context_artifacts.get("managed_behavior_context"), Mapping):
         raise AuditError("AUDIT_INPUT", "/artifacts", "Audit artifacts must provide the managed behavior context and source inventory.")
-
-    context_diagnostics = validate_managed_behavior_context(behavior_context, authorized_sources, test_inventory, project)
-    if context_diagnostics:
-        raise TestClassificationError(context_diagnostics)
-
-    requirements = behavior_context["requirements"]
-    selected = select_effective_technical_evidence(inventory, classification, review, requirements, project)
+    # Use the one public V5 seam; direct callers cannot select raw requirements.
+    # The CLI has already loaded strict values, so validate the seam's logic directly.
+    from tools.behavior_context_planning import validate_context_envelope
+    validated = validate_context_envelope(context, receipt, inventory_artifacts["authorized_behavior_sources"], inventory_artifacts["technical_test_inventory"], project)
+    selected = select_effective_technical_evidence(inventory, classification, review, validated.requirements, project)
 
     canonical_diagnostics = validate_canonical_document(dict(canonical))
     if canonical_diagnostics:
@@ -119,6 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase1.add_argument("--classification", required=True)
     phase1.add_argument("--review", required=True)
     phase1.add_argument("--context", required=True)
+    phase1.add_argument("--receipt", required=True)
     phase1.add_argument("--canonical-document", required=True)
     phase1.add_argument("--output", required=True)
     try:
@@ -133,6 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _load(Path(args.classification), "/classification"),
             _load(Path(args.review), "/review"),
             _load(Path(args.context), "/context"),
+            _load(Path(args.receipt), "/receipt"),
             _load(Path(args.canonical_document), "/canonical-document"),
             Path(args.project),
         )
