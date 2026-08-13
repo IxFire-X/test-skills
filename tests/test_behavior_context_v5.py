@@ -7,6 +7,8 @@ import copy
 import hashlib
 import json
 import tempfile
+import subprocess
+import sys
 from pathlib import Path
 
 from tools.behavior_context_planning import build_context_plan, build_context_receipt, stable_fragment_id, validate_batch_result, validate_context_envelope
@@ -59,6 +61,7 @@ class PlannerReceiptV5Tests(unittest.TestCase):
         self.inventory = load_json_strict(V1 / "source-inventory.json")
         self.context = load_json_strict(V5 / "context-marker.json")
         self.receipt = load_json_strict(V5 / "receipt.json")
+        self.fixture_plan = load_json_strict(V5 / "plan.json")
         self.supplied = {"REQ-synthetic": (ROOT / "tests" / "fixtures" / "test-classification" / "requirement.txt").read_bytes()}
         self.module = dict(select_module(normalize_skillsrc(load_skillsrc(PROJECT / ".skillsrc")), None))
         self.plan = build_context_plan(PROJECT, self.module, self.inventory, self.supplied)
@@ -168,6 +171,29 @@ class PlannerReceiptV5Tests(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(Exception) as error:
                 validate_context_envelope(context, receipt, authorized, technical, PROJECT)
             self.assertIn(error.exception.diagnostics[0]["code"], {"BEHAVIOR_RECEIPT", "BEHAVIOR_ACCOUNTING_SHAPE"})
+
+    def test_public_plan_binding_rejects_spoofed_item_ownership(self) -> None:
+        authorized = self.inventory["artifacts"]["authorized_behavior_sources"]; technical = self.inventory["artifacts"]["technical_test_inventory"]
+        receipt = copy.deepcopy(self.receipt); receipt["fragment_registry"][0]["item_id"] = "ITEM-999999"
+        context = copy.deepcopy(self.context); context["artifacts"]["behavior_source_accounting"]["context_receipt_sha256"] = _digest(receipt)
+        with self.assertRaises(Exception) as error:
+            validate_context_envelope(context, receipt, authorized, technical, PROJECT, self.module, self.fixture_plan)
+        self.assertEqual("BEHAVIOR_RECEIPT", error.exception.diagnostics[0]["code"])
+
+    def test_repeated_euro_read_overlap_never_exceeds_fixed_budget(self) -> None:
+        from tools.behavior_context_planning import _ranges
+        payload = "€".encode("utf-8") * 30000
+        for start, end, read_start, read_end in _ranges(payload):
+            self.assertLessEqual(start - read_start, 16384)
+            self.assertLessEqual(read_end - end, 16384)
+            payload[read_start:read_end].decode("utf-8")
+
+    def test_context_receipt_cli_rejects_array_result_safely_without_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory); plan = temporary / "plan.json"; bad = temporary / "bad.json"; output = temporary / "receipt.json"
+            plan.write_text(json.dumps(_plain(self.plan)), encoding="utf-8"); bad.write_text("[]", encoding="utf-8")
+            completed = subprocess.run([sys.executable, str(ROOT / "tools" / "test_classification.py"), "context-receipt", "--project", str(PROJECT), "--skillsrc", str(PROJECT / ".skillsrc"), "--inventory", str(V1 / "source-inventory.json"), "--plan", str(plan), "--batch-result", str(bad), "--supplied-input", f"REQ-synthetic={ROOT / 'tests' / 'fixtures' / 'test-classification' / 'requirement.txt'}", "--output", str(output)], text=True, capture_output=True)
+            self.assertEqual(2, completed.returncode); self.assertIn("BEHAVIOR_BATCH_RESULT", completed.stderr); self.assertNotIn("Traceback", completed.stderr); self.assertFalse(output.exists())
 
     def test_invalid_utf8_and_product_supplied_key_are_rejected(self) -> None:
         source = self.inventory["artifacts"]["authorized_behavior_sources"]["sources"][1]

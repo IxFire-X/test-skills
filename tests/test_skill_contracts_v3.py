@@ -103,6 +103,10 @@ class SkillContractsV3Tests(unittest.TestCase):
                 for stop_term in ("v2.1", "invention", "validator", "schema", "secret", "authorized"):
                     self.assertIn(stop_term, text)
 
+    def test_orchestration_reference_has_exact_pipeline5_classifier_carriers(self):
+        text = read("skills/orchestrate/references/orchestration-contract.md")
+        self.assertIn("`technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt`", text)
+
     def test_guidance_has_no_legacy_semantic_model_or_one_step_limit(self):
         corpus = "\n".join(read(path) for path in OWNED_GUIDANCE).lower()
         for token in FORBIDDEN:

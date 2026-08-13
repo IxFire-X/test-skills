@@ -70,7 +70,7 @@ def _write_create_only(output: Path, summary: Mapping[str, Any]) -> None:
         raise AuditError("AUDIT_OUTPUT", "/output", "Audit output could not be created.") from error
 
 
-def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], context: Mapping[str, Any], receipt: Mapping[str, Any], canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
+def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], context: Mapping[str, Any], receipt: Mapping[str, Any], plan: Mapping[str, Any], skillsrc: Path, canonical: Mapping[str, Any], project: Path) -> dict[str, Any]:
     inventory_artifacts = inventory.get("artifacts")
     context_artifacts = context.get("artifacts")
     if not isinstance(inventory_artifacts, Mapping) or not isinstance(context_artifacts, Mapping):
@@ -80,7 +80,9 @@ def _summary(inventory: Mapping[str, Any], classification: Mapping[str, Any], re
     # Use the one public V5 seam; direct callers cannot select raw requirements.
     # The CLI has already loaded strict values, so validate the seam's logic directly.
     from tools.behavior_context_planning import validate_context_envelope
-    validated = validate_context_envelope(context, receipt, inventory_artifacts["authorized_behavior_sources"], inventory_artifacts["technical_test_inventory"], project)
+    from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc, resolve_module_root, select_module
+    normalized = normalize_skillsrc(load_skillsrc(skillsrc)); module = dict(select_module(normalized, receipt["selected_module"])); module["_resolved_root"] = resolve_module_root(project.resolve(), module)
+    validated = validate_context_envelope(context, receipt, inventory_artifacts["authorized_behavior_sources"], inventory_artifacts["technical_test_inventory"], project, module, plan)
     selected = select_effective_technical_evidence(inventory, classification, review, validated, project)
 
     canonical_diagnostics = validate_canonical_document(dict(canonical))
@@ -115,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase1.add_argument("--review", required=True)
     phase1.add_argument("--context", required=True)
     phase1.add_argument("--receipt", required=True)
+    phase1.add_argument("--plan", required=True)
+    phase1.add_argument("--skillsrc", required=True)
     phase1.add_argument("--canonical-document", required=True)
     phase1.add_argument("--output", required=True)
     try:
@@ -130,6 +134,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             _load(Path(args.review), "/review"),
             _load(Path(args.context), "/context"),
             _load(Path(args.receipt), "/receipt"),
+            _load(Path(args.plan), "/plan"),
+            Path(args.skillsrc),
             _load(Path(args.canonical_document), "/canonical-document"),
             Path(args.project),
         )

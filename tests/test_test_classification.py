@@ -218,7 +218,7 @@ class TechnicalTestClassificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             output = temporary / "effective.json"
-            args = ["select", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"), "--classification", str(V1 / "test-classifier.json"), "--review", str(V1 / "test-classifier-reviewer-accepted.json"), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--output", str(output)]
+            args = ["select", "--project", str(self.root), "--inventory", str(V1 / "source-inventory.json"), "--classification", str(V1 / "test-classifier.json"), "--review", str(V1 / "test-classifier-reviewer-accepted.json"), "--context", str(V5 / "context-marker.json"), "--receipt", str(V5 / "receipt.json"), "--skillsrc", str(self.root / ".skillsrc"), "--plan", str(V5 / "plan.json"), "--output", str(output)]
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(0, main(args))
                 self.assertEqual(2, main(args))
