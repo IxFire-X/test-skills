@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "suite": "adaptive-case-granularity",
+  "sample_policy": {
+    "variants": ["control", "guidance"],
+    "fresh_context": true,
+    "samples_per_scenario_variant": 5,
+    "persist_raw_outputs": false,
+    "record": "aggregate_failure_categories_only"
+  },
+  "scenarios": [
+    {
+      "id": "one-behavior-twenty-assertions",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Generate the canonical test-case document from this inline V3 context artifact.",
+        "inline_context": {
+          "schema_version": "3.0.0",
+          "stage": "context-marker",
+          "artifacts": {
+            "analytics_documentation": {
+              "requirements": [
+                {
+                  "requirement_id": "REQ-0001",
+                  "display_order": 1,
+                  "text": "An authenticated warehouse operator on an active warehouse submits a valid stock adjustment for an existing item. The adjustment is accepted and the resulting inventory record exposes the same adjustment id, warehouse id, item id, operator id, quantity, unit, reason, timestamp, status, reference, note, prior balance, resulting balance, audit actor, audit action, audit timestamp, event type, event payload, response location, and success code.",
+                  "provenance": ["synthetic://adaptive-case-granularity/one-behavior-twenty-assertions"]
+                }
+              ]
+            },
+            "source_code_and_diff": {
+              "sources": ["Synthetic requirement fixture"]
+            }
+          },
+          "warnings": []
+        }
+      },
+      "expected": {
+        "case_count": 1,
+        "scenario_key": "warehouse operator + active warehouse/item + valid adjustment + submit adjustment + accepted inventory record",
+        "nested_assertions": 20,
+        "numeric_target_reasoning": false
+      },
+      "coverage_tags": ["adaptive-boundary", "assertions", "nested-checks"],
+      "oracle": "generator output rubric"
+    },
+    {
+      "id": "two-independently-executable-branches",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Generate the canonical test-case document from this inline V3 context artifact.",
+        "inline_context": {
+          "schema_version": "3.0.0",
+          "stage": "context-marker",
+          "artifacts": {
+            "analytics_documentation": {
+              "requirements": [
+                {
+                  "requirement_id": "REQ-0001",
+                  "display_order": 1,
+                  "text": "A signed-in account owner independently submits the password reset form. With a registered email address, the service sends a reset email and returns an accepted outcome. With an unregistered email address, the service sends no reset email and returns a not-found outcome.",
+                  "provenance": ["synthetic://adaptive-case-granularity/two-independently-executable-branches"]
+                }
+              ]
+            },
+            "source_code_and_diff": {
+              "sources": ["Synthetic requirement fixture"]
+            }
+          },
+          "warnings": []
+        }
+      },
+      "expected": {
+        "case_count": 2,
+        "scenario_keys": [
+          "account owner + signed in + registered email + submit reset + reset email accepted",
+          "account owner + signed in + unregistered email + submit reset + no reset email not found"
+        ],
+        "numeric_target_reasoning": false
+      },
+      "coverage_tags": ["adaptive-boundary", "independent-branches"],
+      "oracle": "generator output rubric"
+    },
+    {
+      "id": "deduplicate-one-control-flow-evidence",
+      "skill": "tc-generator",
+      "synthetic": true,
+      "input": {
+        "request": "Generate the canonical test-case document from this inline V3 context artifact.",
+        "inline_context": {
+          "schema_version": "3.0.0",
+          "stage": "context-marker",
+          "artifacts": {
+            "analytics_documentation": {
+              "requirements": [
+                {
+                  "requirement_id": "REQ-0001",
+                  "display_order": 1,
+                  "text": "A signed-in billing administrator posts a valid invoice to POST /invoices. The invoices.create permission authorizes the request, the endpoint creates the invoice, and its single 201 response includes the invoice id, customer id, total, currency, and created status. Endpoint, permission, and response evidence all describe this same control flow.",
+                  "provenance": ["synthetic://adaptive-case-granularity/deduplicate-one-control-flow-evidence"]
+                }
+              ]
+            },
+            "source_code_and_diff": {
+              "sources": ["Synthetic requirement fixture"]
+            }
+          },
+          "warnings": []
+        }
+      },
+      "expected": {
+        "case_count": 1,
+        "scenario_key": "billing administrator + signed in + valid invoice + create invoice + created invoice response",
+        "nested_assertions": 5,
+        "numeric_target_reasoning": false
+      },
+      "coverage_tags": ["adaptive-boundary", "deduplication", "control-flow"],
+      "oracle": "generator output rubric"
+    }
+  ]
+}

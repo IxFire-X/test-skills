@@ -113,6 +113,38 @@ class SkillContractsV3Tests(unittest.TestCase):
         for term in ("arbitrary", "sequential steps", "previous-step", "human action", "expected result", "goal", "preconditions", "assertion", "blocker", "manual_reason", "json-only", "projection"):
             self.assertIn(term, text)
 
+    def test_generator_uses_adaptive_scenario_keys(self):
+        text = read("skills/tc-generator/SKILL.md").lower() + read(
+            "skills/tc-generator/references/case-generation-contract.md"
+        ).lower()
+        for term in (
+            "one case per independently executable scenario",
+            "scenario key",
+            "setup/role",
+            "initial state",
+            "input partition/branch condition",
+            "primary action",
+            "terminal outcome",
+            "cohesive dependent action chain",
+            "coverage-only",
+            "exactly once",
+            "numeric target",
+            "assertion is not a case",
+            "coverage record is not a case",
+        ):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+        self.assertRegex(text, r"split.+independently executable")
+        self.assertRegex(text, r"deduplicat.+same control flow")
+        self.assertRegex(text, r"no (?:minimum|maximum|cap|quota|per-domain count)")
+
+    def test_generator_does_not_count_assertions_or_accept_numeric_targets(self):
+        text = (read("skills/tc-generator/SKILL.md") + read("skills/tc-generator/references/case-generation-contract.md")).lower()
+        for phrase in ("an assertion is not a case", "a coverage record is not a case", "input partition/branch condition"):
+            self.assertIn(phrase, text)
+        for forbidden in ("minimum case", "maximum case", "per-domain count", "numeric target"):
+            self.assertNotIn("accept " + forbidden, text)
+
     def test_context_requirement_ids_have_a_reproducible_derivation_rule(self):
         text = read("skills/context-marker/references/context-artifact-contract.md")
         for term in (

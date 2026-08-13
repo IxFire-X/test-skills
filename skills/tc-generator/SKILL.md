@@ -10,10 +10,11 @@ Consume valid V3 context and emit JSON-only `artifacts.canonical_document`. Read
 ## Procedure
 
 1. Validate the context envelope. Derive only supported requirements, capabilities, and technical details.
-2. Create one canonical document with stable IDs and physical ordering. A case projects as a Title, Goal, and Preconditions with arbitrary sequential steps; preparation is represented as steps.
-3. For every step, provide human action and expected result plus structured operation, typed inputs, previous-step output references, outputs, and assertions when automation is possible. Human expected result covers every machine assertion.
-4. For a manual or blocked step, use its exact canonical manual/blocker branch and reason; do not turn a project-generation obstacle into invented behavior.
-5. Validate the bare document through `tools.canonical_document`, wrap it in the V3 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The pipeline later derives immutable Markdown and Zephyr CSV projections from the selected revision.
+2. Derive case boundaries before assigning IDs. Use one case per independently executable scenario. Build its scenario key from setup/role, initial state, input partition/branch condition, primary action or cohesive dependent action chain, and terminal outcome. Split a branch only when it is independently executable; deduplicate overlapping evidence from the same control flow. Derive the count from those keys, never from a numeric target.
+3. Create one canonical document with stable IDs and physical ordering. A case projects as a Title, Goal, and Preconditions with arbitrary sequential steps; preparation is represented as steps.
+4. For every step, provide human action and expected result plus structured operation, typed inputs, previous-step output references, outputs, and assertions when automation is possible. Human expected result covers every machine assertion.
+5. For a manual or blocked step, use its exact canonical manual/blocker branch and reason; do not turn a project-generation obstacle into invented behavior.
+6. Validate the bare document through `tools.canonical_document`, wrap it in the V3 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The pipeline later derives immutable Markdown and Zephyr CSV projections from the selected revision.
 
 ## Projection rule
 

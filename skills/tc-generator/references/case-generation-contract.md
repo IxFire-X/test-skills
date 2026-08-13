@@ -2,6 +2,15 @@
 
 The bare document validated by `tools.canonical_document` is canonical. `tools.test_case_projections` renders immutable Markdown and Zephyr CSV; `tools.publish_test_case_bundle` publishes the three-file revision bundle.
 
+## Adaptive case boundary
+
+Use one case per independently executable scenario. Its scenario key is the evidence-backed combination of setup/role, initial state, input partition/branch condition, primary action or cohesive dependent action chain, and terminal outcome.
+
+- Split when another branch is independently executable or changes any scenario-key component and can pass or fail on its own.
+- Keep dependent preparation, actions, observations, and outputs in one multi-step case. An assertion is not a case. A coverage record is not a case. Endpoint calls, response fields, permission checks, validation paths, state observations, routes, modules, capabilities, and source symbols remain evidence or nested checks when they belong to the same control flow.
+- Deduplicate overlapping evidence from the same control flow. Map every independently executable behavior exactly once: to one case, or to one coverage-only record with an evidence-backed reason when no honest executable scenario can be formed.
+- Derive case count from the distinct scenario keys. Accept or invent no minimum, maximum, cap, quota, per-domain count, or numeric target.
+
 ## Human and machine ownership
 
 For each case retain a human Title, Goal, and Preconditions. Its steps are in physical order and may be any necessary length. Each numbered step has:
