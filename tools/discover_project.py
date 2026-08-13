@@ -75,12 +75,13 @@ def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
     return {"id":f"module:{mid}:{field}","field":f"modules.{mid}.{field}","impact":"Определяет шаблон генерации и средство запуска тестов","options":[{"id":v,"value":v,"evidence":sorted(values[v])} for v in sorted(values)]}
 def _colocated_tests(root:Path, base:Path, sources:Sequence[str], language:str)->list[str]:
     found=[]
+    source_roots=tuple(base/name for name in sources)
     for name in sources:
         source=base/name
         if not source.is_dir() or source.is_symlink() or not _ok(root,source): continue
         for current,dirs,files in os.walk(source,followlinks=False):
             current_path=Path(current)
-            dirs[:]=sorted(directory for directory in dirs if directory not in IGNORED_DIR_NAMES and not (current_path/directory).is_symlink() and _ok(root,current_path/directory))
+            dirs[:]=sorted(directory for directory in dirs if directory not in IGNORED_DIR_NAMES and not is_anchored_generated_build_path(current_path/directory,base,source_roots) and not (current_path/directory).is_symlink() and _ok(root,current_path/directory))
             for filename in sorted(files):
                 candidate=current_path/filename
                 if not candidate.is_symlink() and candidate.is_file() and _ok(root,candidate) and is_supported_static_test_file(candidate,language): found.append(_rel(base,candidate))

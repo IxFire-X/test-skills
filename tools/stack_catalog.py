@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 IGNORED_DIR_NAMES = frozenset({
     ".git", ".idea", ".tools", ".venv", "venv", "__pycache__",
-    "node_modules", "target", "build", "dist", ".pytest_cache", ".ruff_cache", ".secrets",
+    "node_modules", "target", "dist", ".pytest_cache", ".ruff_cache", ".secrets",
 })
 
 MANIFEST_LANGUAGES = {
@@ -42,6 +43,15 @@ def manifest_language(name: str) -> str | None:
 
 def normalize_build_tool(value: str) -> str:
     return BUILD_TOOL_NORMALIZE.get(value, value)
+
+
+def is_anchored_generated_build_path(path: Path, module_root: Path, source_roots: Sequence[Path]) -> bool:
+    """Return whether *path* is within a generated ``build`` directory.
+
+    Generated output is limited to a direct ``build`` child of a module or
+    declared source root; deeper product domains named ``build`` remain valid.
+    """
+    return any(path.is_relative_to(root / "build") for root in (module_root, *source_roots))
 
 
 def is_supported_static_test_file(path: Path, language: str) -> bool:

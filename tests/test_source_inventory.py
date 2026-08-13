@@ -91,6 +91,27 @@ import pytest
             self.assertEqual([{"kind": "python_module_function", "function_name": "test_api"}], [dict(row["locator"]) for row in result.technical_test_inventory["symbols"]])
             self.assertIn("src/service.py", [row["path"] for row in result.authorized_behavior_sources["sources"]])
 
+    def test_discovery_and_inventory_share_anchored_generated_build_policy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src/backend/InvenTree/build").mkdir(parents=True)
+            (root / "pyproject.toml").write_text('[project]\nname="sample"\n', encoding="utf-8")
+            (root / "src/backend/InvenTree/build/service.py").write_text("def service(): pass\n", encoding="utf-8")
+            (root / "src/backend/InvenTree/build/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+            (root / "src/build").mkdir()
+            (root / "src/build/generated.py").write_text("generated = True\n", encoding="utf-8")
+            (root / "src/build/test_generated.py").write_text("def test_generated(): pass\n", encoding="utf-8")
+
+            discovery = discover_project(root)
+            self.assertEqual(["src/backend/InvenTree/build/test_api.py"], discovery["modules"][0]["paths"]["tests"])
+            result = build_source_inventories(root, compile_skillsrc(discovery, {}), "root", ())
+
+            self.assertEqual(["src/backend/InvenTree/build/test_api.py"], [row["path"] for row in result.technical_test_inventory["files"]])
+            sources = [row["path"] for row in result.authorized_behavior_sources["sources"]]
+            self.assertIn("src/backend/InvenTree/build/service.py", sources)
+            self.assertNotIn("src/backend/InvenTree/build/test_api.py", sources)
+            self.assertNotIn("src/build/generated.py", sources)
+
     def test_python_module_async_class_and_parametrized_functions_use_closed_locators(self):
         self.write("tests/test_sample.py", """\
 import pytest

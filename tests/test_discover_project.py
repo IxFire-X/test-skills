@@ -220,6 +220,19 @@ class DiscoverProjectTests(unittest.TestCase):
             (root / "src/pkg/other_test.py").write_text("def test_other(): pass\n", encoding="utf-8")
             self.assertNotEqual(first["fingerprint"], discover_project(root)["fingerprint"])
 
+    def test_discovers_deeper_build_domain_tests_but_not_anchored_generated_build_tests(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "pyproject.toml").write_text('[project]\nname="sample"\n', encoding="utf-8")
+            (root / "src/backend/InvenTree/build").mkdir(parents=True)
+            (root / "src/backend/InvenTree/build/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+            (root / "src/build").mkdir()
+            (root / "src/build/test_generated.py").write_text("def test_generated(): pass\n", encoding="utf-8")
+
+            tests = discover_project(root)["modules"][0]["paths"]["tests"]
+
+            self.assertEqual(["src/backend/InvenTree/build/test_api.py"], tests)
+
     def test_nested_module_paths_are_relative_to_its_own_root(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

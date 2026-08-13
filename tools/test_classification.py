@@ -33,15 +33,15 @@ except ImportError:  # pragma: no cover - direct script execution is covered by 
 
 try:
     if __package__:
-        from .stack_catalog import is_supported_static_test_file
+        from .stack_catalog import is_anchored_generated_build_path, is_supported_static_test_file
     else:
-        from stack_catalog import is_supported_static_test_file
+        from stack_catalog import is_anchored_generated_build_path, is_supported_static_test_file
 except ImportError:  # pragma: no cover - package import is covered by tests
-    from tools.stack_catalog import is_supported_static_test_file
+    from tools.stack_catalog import is_anchored_generated_build_path, is_supported_static_test_file
 
 
 _TEXT_SUFFIXES = {".py", ".java", ".kt", ".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml", ".sql", ".graphql", ".proto", ".feature", ".html", ".css"}
-_EXCLUDED_SEGMENTS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", ".venv", "venv", "node_modules", "dist", "build", "target", "out", "vendor"}
+_EXCLUDED_SEGMENTS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", ".venv", "venv", "node_modules", "dist", "target", "out", "vendor"}
 _SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".crt"}
 
 
@@ -279,11 +279,12 @@ def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     return {"module_id": module["id"], "test_roots": [portable for _, portable in roots], "files": files, "symbols": symbols}
 
 
-def _excluded_product(path: Path, portable: str, test_paths: set[str], test_roots: Sequence[Path]) -> bool:
+def _excluded_product(path: Path, portable: str, test_paths: set[str], test_roots: Sequence[Path], module_root: Path, source_roots: Sequence[Path]) -> bool:
     lowered = path.name.lower()
     return (
         portable in test_paths or any(path.is_relative_to(root) for root in test_roots)
         or is_supported_static_test_file(path, "python") or is_supported_static_test_file(path, "java")
+        or is_anchored_generated_build_path(path, module_root, source_roots)
         or path.suffix.lower() not in _TEXT_SUFFIXES or lowered == ".env" or lowered.startswith(".env.")
         or path.suffix.lower() in _SECRET_SUFFIXES or bool(set(PurePosixPath(portable).parts) & _EXCLUDED_SEGMENTS)
     )
@@ -304,6 +305,7 @@ def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory
     paths = module.get("paths", {})
     values = [*paths.get("source", ()), *(value for group in module.get("feature_sources", {}).values() for value in group)]
     roots = _declared_roots(module["_resolved_root"], project_root, values, "/behavior_sources")
+    source_roots = [root for root, _ in _declared_roots(module["_resolved_root"], project_root, paths.get("source", ()), "/paths/source")]
     test_roots = [root for root, _ in _declared_roots(module["_resolved_root"], project_root, paths.get("tests", ()), "/paths/tests")]
     test_paths = {row["path"] for row in inventory["files"]}
     seen_files: set[Path] = set()
@@ -314,7 +316,7 @@ def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory
                 continue
             seen_files.add(path)
             portable = _portable_path(project_root, path)
-            if _excluded_product(path, portable, test_paths, test_roots):
+            if _excluded_product(path, portable, test_paths, test_roots, module["_resolved_root"], source_roots):
                 continue
             try:
                 content = path.read_bytes()
