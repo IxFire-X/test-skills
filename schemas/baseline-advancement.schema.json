@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/baseline-advancement.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact", "status", "predecessor_baseline_sha256", "successor_baseline_sha256", "successor_baseline_receipt"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact": {"const": "baseline-advancement"},
+    "status": {"enum": ["ADVANCED", "IDEMPOTENT", "INELIGIBLE", "PROVISIONAL", "BASELINE_CONFLICT"]},
+    "predecessor_baseline_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "successor_baseline_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "successor_baseline_receipt": {"oneOf": [{"type": "null"}, {"$ref": "feature-baseline-receipt.schema.json"}]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"enum": ["ADVANCED", "IDEMPOTENT"]}}, "required": ["status"]},
+      "then": {"properties": {"successor_baseline_sha256": {"$ref": "#/$defs/digest"}, "successor_baseline_receipt": {"$ref": "feature-baseline-receipt.schema.json"}}}
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["INELIGIBLE", "PROVISIONAL", "BASELINE_CONFLICT"]}}, "required": ["status"]},
+      "then": {"properties": {"successor_baseline_sha256": {"type": "null"}, "successor_baseline_receipt": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullable_digest": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

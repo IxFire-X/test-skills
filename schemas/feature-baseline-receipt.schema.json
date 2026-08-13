@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/feature-baseline-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact", "predecessor_baseline_sha256", "run_mode", "repository_id", "target_commit", "target_tree", "selected_module", "analytics_sha256", "artifacts", "fingerprints"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact": {"const": "feature-baseline-receipt"},
+    "predecessor_baseline_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "run_mode": {"enum": ["FULL", "CHANGE_SET"]},
+    "repository_id": {"$ref": "#/$defs/digest"},
+    "target_commit": {"$ref": "#/$defs/git_object"},
+    "target_tree": {"$ref": "#/$defs/git_object"},
+    "selected_module": {"type": "string", "minLength": 1},
+    "analytics_sha256": {"$ref": "#/$defs/digest"},
+    "artifacts": {"$ref": "#/$defs/artifacts"},
+    "fingerprints": {"$ref": "#/$defs/fingerprints"}
+  },
+  "allOf": [
+    {"if": {"properties": {"run_mode": {"const": "FULL"}}, "required": ["run_mode"]}, "then": {"properties": {"predecessor_baseline_sha256": {"type": "null"}}}},
+    {"if": {"properties": {"run_mode": {"const": "CHANGE_SET"}}, "required": ["run_mode"]}, "then": {"properties": {"predecessor_baseline_sha256": {"$ref": "#/$defs/digest"}}}}
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullable_digest": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_object": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "fingerprints": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pipeline_contract_sha256", "policy_bundle_sha256", "tool_bundle_sha256", "schema_bundle_sha256"],
+      "properties": {
+        "pipeline_contract_sha256": {"$ref": "#/$defs/digest"},
+        "policy_bundle_sha256": {"$ref": "#/$defs/digest"},
+        "tool_bundle_sha256": {"$ref": "#/$defs/digest"},
+        "schema_bundle_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "artifacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["technical_test_inventory_sha256", "authorized_behavior_sources_sha256", "managed_behavior_context_sha256", "behavior_source_accounting_sha256", "behavior_context_receipt_sha256", "effective_technical_evidence_sha256", "effective_document_sha256", "effective_bundle_receipt_sha256", "trace_document_sha256", "trace_audit_sha256", "orchestrator_output_sha256", "terminal_run_receipt_sha256"],
+      "properties": {
+        "technical_test_inventory_sha256": {"$ref": "#/$defs/digest"},
+        "authorized_behavior_sources_sha256": {"$ref": "#/$defs/digest"},
+        "managed_behavior_context_sha256": {"$ref": "#/$defs/digest"},
+        "behavior_source_accounting_sha256": {"$ref": "#/$defs/digest"},
+        "behavior_context_receipt_sha256": {"$ref": "#/$defs/digest"},
+        "effective_technical_evidence_sha256": {"$ref": "#/$defs/digest"},
+        "effective_document_sha256": {"$ref": "#/$defs/digest"},
+        "effective_bundle_receipt_sha256": {"$ref": "#/$defs/digest"},
+        "trace_document_sha256": {"$ref": "#/$defs/digest"},
+        "trace_audit_sha256": {"$ref": "#/$defs/digest"},
+        "orchestrator_output_sha256": {"$ref": "#/$defs/digest"},
+        "terminal_run_receipt_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}
