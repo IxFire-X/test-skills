@@ -197,6 +197,18 @@ def _matching_brace(text: str, opening: int) -> int | None:
     return None
 
 
+def _java_brace_depth(text: str, opening: int, position: int) -> int:
+    if position < opening:
+        return -1
+    depth = 0
+    for char in text[opening:position]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depth
+
+
 def _java_locators(text: str, path: str) -> list[dict[str, str]]:
     masked = _mask_java_noncode(text)
     package = re.search(r"^\s*package\s+([\w$]+(?:\.[\w$]+)*)\s*;", masked, re.MULTILINE)
@@ -207,22 +219,15 @@ def _java_locators(text: str, path: str) -> list[dict[str, str]]:
     end = _matching_brace(masked, declaration.end() - 1)
     if end is None:
         raise _error("INVENTORY_PARSE_ERROR", path, "Supported Java test file could not be parsed.")
-    body = list(masked[declaration.end():end])
-    nested = re.compile(r"\b(?:class|interface|enum|record)\s+[A-Za-z_$][\w$]*\b[^\{]*\{")
-    search_at = 0
-    while (match := nested.search("".join(body), search_at)) is not None:
-        nested_end = _matching_brace("".join(body), match.end() - 1)
-        if nested_end is None:
-            raise _error("INVENTORY_PARSE_ERROR", path, "Supported Java test file could not be parsed.")
-        body[match.start():nested_end + 1] = " " * (nested_end + 1 - match.start())
-        search_at = nested_end + 1
-    direct_body = "".join(body)
     annotation = r"@(?:[\w$.]+\.)?(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b(?:\s*\([^)]*\))?"
     method = r"(?:public|protected|private)?\s*(?:static\s+)?[\w$<>\[\]., ?]+\s+([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*(?:throws[^\{]+)?\{"
     extra_annotation = r"\s*@(?:[\w$.]+)(?:\s*\([^)]*\))?"
-    found = list(re.finditer(annotation + r"(?:" + extra_annotation + r")*\s*" + method, direct_body, re.MULTILINE))
-    if not found and "@" in direct_body and "{" not in direct_body:
+    found = list(re.finditer(annotation + r"(?:" + extra_annotation + r")*\s*" + method, masked, re.MULTILINE))
+    if not found and "@" in masked and "{" not in masked:
         raise _error("INVENTORY_PARSE_ERROR", path, "Supported Java test file could not be parsed.")
+    opening = declaration.end() - 1
+    if any(match.start() > end or _java_brace_depth(masked, opening, match.start()) != 1 for match in found):
+        raise _error("INVENTORY_UNSUPPORTED_LOCATOR", path, "Java test ownership is not representable by the closed locator.")
     class_fqn = (package.group(1) + "." if package else "") + declaration.group(1)
     names = [match.group(2) for match in found]
     if len(names) != len(set(names)):
@@ -264,10 +269,11 @@ def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     return {"module_id": module["id"], "test_roots": [portable for _, portable in roots], "files": files, "symbols": symbols}
 
 
-def _excluded_product(path: Path, portable: str, test_paths: set[str]) -> bool:
+def _excluded_product(path: Path, portable: str, test_paths: set[str], test_roots: Sequence[Path]) -> bool:
     lowered = path.name.lower()
     return (
-        portable in test_paths or _is_supported_test_file(path, "python") or _is_supported_test_file(path, "java")
+        portable in test_paths or any(path.is_relative_to(root) for root in test_roots)
+        or _is_supported_test_file(path, "python") or _is_supported_test_file(path, "java")
         or path.suffix.lower() not in _TEXT_SUFFIXES or lowered == ".env" or lowered.startswith(".env.")
         or path.suffix.lower() in _SECRET_SUFFIXES or bool(set(PurePosixPath(portable).parts) & _EXCLUDED_SEGMENTS)
     )
@@ -288,6 +294,7 @@ def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory
     paths = module.get("paths", {})
     values = [*paths.get("source", ()), *(value for group in module.get("feature_sources", {}).values() for value in group)]
     roots = _declared_roots(module["_resolved_root"], project_root, values, "/behavior_sources")
+    test_roots = [root for root, _ in _declared_roots(module["_resolved_root"], project_root, paths.get("tests", ()), "/paths/tests")]
     test_paths = {row["path"] for row in inventory["files"]}
     seen_files: set[Path] = set()
     products: list[dict[str, str]] = []
@@ -297,7 +304,7 @@ def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory
                 continue
             seen_files.add(path)
             portable = _portable_path(project_root, path)
-            if _excluded_product(path, portable, test_paths):
+            if _excluded_product(path, portable, test_paths, test_roots):
                 continue
             try:
                 content = path.read_bytes()

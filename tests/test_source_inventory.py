@@ -117,14 +117,27 @@ class SampleTest {
             {"kind": "java_class_method", "class_fqn": "example.SampleTest", "method_name": "second"},
         ], [dict(row["locator"]) for row in result.technical_test_inventory["symbols"]])
 
-    def test_java_top_level_helper_is_excluded_from_file_stem_test_class(self):
+    def test_annotated_non_file_stem_java_owner_is_unrepresentable(self):
         self.write("tests/SampleTest.java", """\
 package example;
 class SampleTest { @Test void included() {} }
 class Helper { @Test void excluded() {} }
 """)
-        result = build_source_inventories(self.root, self.skillsrc(language="java"), "backend", ())
-        self.assertEqual([{"kind": "java_class_method", "class_fqn": "example.SampleTest", "method_name": "included"}], [dict(row["locator"]) for row in result.technical_test_inventory["symbols"]])
+        with self.assertRaises(TestClassificationError) as raised:
+            build_source_inventories(self.root, self.skillsrc(language="java"), "backend", ())
+        self.assertEqual("INVENTORY_UNSUPPORTED_LOCATOR", raised.exception.diagnostics[0]["code"])
+        self.assertEqual("tests/SampleTest.java", raised.exception.diagnostics[0]["path"])
+
+    def test_annotated_nested_java_owner_is_unrepresentable(self):
+        self.write("tests/SampleTest.java", """\
+class SampleTest {
+  class Nested { @Test void nested() {} }
+}
+""")
+        with self.assertRaises(TestClassificationError) as raised:
+            build_source_inventories(self.root, self.skillsrc(language="java"), "backend", ())
+        self.assertEqual("INVENTORY_UNSUPPORTED_LOCATOR", raised.exception.diagnostics[0]["code"])
+        self.assertEqual("tests/SampleTest.java", raised.exception.diagnostics[0]["path"])
 
     def test_java_test_with_an_additional_annotation_is_not_omitted(self):
         self.write("tests/SampleTest.java", """\
@@ -198,6 +211,12 @@ class SampleTest {
         self.write("src/build/generated.py", "generated")
         self.write("src/test_ignored.py", "def test_nope(): pass")
         result = build_source_inventories(self.root, self.skillsrc(), "backend", ())
+        self.assertEqual(["docs/feature.md", "src/service.py"], [row["path"] for row in result.authorized_behavior_sources["sources"]])
+
+    def test_declared_test_root_is_excluded_when_it_overlaps_source_roots(self):
+        self.write("tests/helper.py", "def fixture_helper(): pass\n")
+        self.write("tests/fixtures/example.txt", "test-only fixture\n")
+        result = build_source_inventories(self.root, self.skillsrc(source_roots=("src", "tests")), "backend", ())
         self.assertEqual(["docs/feature.md", "src/service.py"], [row["path"] for row in result.authorized_behavior_sources["sources"]])
 
     def test_exact_ids_digests_and_canonical_order_are_hand_derived(self):
