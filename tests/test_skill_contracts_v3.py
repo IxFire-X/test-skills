@@ -30,6 +30,10 @@ OWNED_GUIDANCE = {
     "skills/autotest-reviewer/references/autotest-review-contract.md": None,
     "skills/orchestrate/SKILL.md": ("orchestrate", "references/orchestration-contract.md"),
     "skills/orchestrate/references/orchestration-contract.md": None,
+    "skills/test-classifier/SKILL.md": ("test-classifier", "references/classification-contract.md"),
+    "skills/test-classifier/references/classification-contract.md": None,
+    "skills/test-classifier-reviewer/SKILL.md": ("test-classifier-reviewer", "references/review-contract.md"),
+    "skills/test-classifier-reviewer/references/review-contract.md": None,
 }
 SKILLS = tuple(path for path in OWNED_GUIDANCE if path.endswith("/SKILL.md"))
 FORBIDDEN = (
@@ -66,7 +70,7 @@ def read(relative: str) -> str:
 
 class SkillContractsV3Tests(unittest.TestCase):
     def test_exact_owned_inventory_has_frontmatter_and_resolvable_references(self):
-        self.assertEqual(14, len(OWNED_GUIDANCE))
+        self.assertEqual(18, len(OWNED_GUIDANCE))
         for relative, metadata in OWNED_GUIDANCE.items():
             with self.subTest(relative=relative):
                 path = ROOT / relative
@@ -144,6 +148,61 @@ class SkillContractsV3Tests(unittest.TestCase):
             self.assertIn(phrase, text)
         for forbidden in ("minimum case", "maximum case", "per-domain count", "numeric target"):
             self.assertNotIn("accept " + forbidden, text)
+
+    def test_classifier_has_only_the_small_semantic_contract(self):
+        text = read("skills/test-classifier/SKILL.md").lower()
+        for value in ("unit", "integration", "e2e", "unknown", "provenance", "rationale"):
+            self.assertIn(value, text)
+        for forbidden in ("case count", "implementation_origin", "auto-fix", "filename implies"):
+            self.assertNotIn(forbidden, text)
+
+    def test_classifier_reviewer_is_digest_bound_complete_and_never_repairs(self):
+        text = "\n".join((
+            read("skills/test-classifier-reviewer/SKILL.md"),
+            read("skills/test-classifier-reviewer/references/review-contract.md"),
+        )).lower()
+        for value in ("technical_test_inventory_sha256", "classification_sha256", "reviewed_symbol_pairs", "physical order", "accepted verdict", "rework verdict", "findings", "never auto-fix", "never create cases"):
+            self.assertIn(value, text)
+
+    def test_test_classification_evals_are_closed_complete_and_validate_skills(self):
+        manifest = json.loads(read("evals/test-classification/scenarios.json"))
+        self.assertEqual("1.0", manifest["schema_version"])
+        self.assertEqual("test-classification-phase-1", manifest["suite"])
+        self.assertEqual(
+            {"variants": ["control", "guidance"], "fresh_context": True, "samples_per_scenario_variant": 5, "persist_raw_outputs": False, "record": "aggregate_failure_categories_only"},
+            manifest["sample_policy"],
+        )
+        expected_ids = (
+            "internal-helper-unit", "database-integration", "http-integration", "complete-ui-journey",
+            "insufficient-evidence", "misleading-filename", "generated-unit-pressure",
+            "one-case-per-test-pressure", "reviewer-complete-ordered-pairs",
+        )
+        self.assertEqual(expected_ids, tuple(item["id"] for item in manifest["scenarios"]))
+        for scenario in manifest["scenarios"]:
+            with self.subTest(scenario=scenario["id"]):
+                self.assertTrue(scenario["synthetic"])
+                self.assertIn(scenario["skill"], {"test-classifier", "test-classifier-reviewer"})
+                self.assertTrue(scenario["input"]["request"])
+                self.assertTrue(scenario["input"]["inventory_snippet"])
+                self.assertTrue(scenario["input"]["source_snippet"])
+                self.assertTrue(scenario["expected"])
+                self.assertFalse(scenario["expected"].get("case_creation", False))
+                self.assertTrue(scenario["pressure"])
+                self.assertTrue(scenario["coverage_tags"])
+                self.assertEqual("test classification rubric", scenario["oracle"])
+        classifier = [item for item in manifest["scenarios"] if item["skill"] == "test-classifier"]
+        self.assertEqual(8, len(classifier))
+        for scenario in classifier:
+            self.assertIn("scope_by_pair", scenario["expected"])
+            self.assertIn("pair_coverage", scenario["expected"])
+        rubric = read("evals/test-classification/rubric.md").lower()
+        for term in ("hard binary", "unit", "integration", "e2e", "unknown", "provenance", "rationale", "exact inventory and classification digests", "physical order", "never auto-fix", "does not create"):
+            self.assertIn(term, rubric)
+        quick_validate = Path(r"C:\Users\User\.codex\skills\.system\skill-creator\scripts\quick_validate.py")
+        for directory in ("skills/test-classifier", "skills/test-classifier-reviewer"):
+            with self.subTest(directory=directory):
+                completed = subprocess.run(["python", str(quick_validate), directory], cwd=ROOT, text=True, capture_output=True)
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
 
     def test_adaptive_case_granularity_inline_contexts_are_closed_v4_generator_inputs(self):
         manifest = json.loads(read("evals/adaptive-case-granularity/scenarios.json"))

@@ -1,0 +1,140 @@
+{
+  "schema_version": "1.0",
+  "suite": "test-classification-phase-1",
+  "sample_policy": {
+    "variants": ["control", "guidance"],
+    "fresh_context": true,
+    "samples_per_scenario_variant": 5,
+    "persist_raw_outputs": false,
+    "record": "aggregate_failure_categories_only"
+  },
+  "scenarios": [
+    {
+      "id": "internal-helper-unit",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "path": "tests/test_slug.py"}], "symbols": [{"file_id": "FILE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "symbol_id": "SYMBOL-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "locator": "test_slug_normalizes_spaces"}]},
+        "source_snippet": "def slug(value): return value.strip().replace(' ', '-')\n\ndef test_slug_normalizes_spaces(): assert slug(' a b ') == 'a-b'"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "symbol_id": "SYMBOL-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "test_scope": "unit"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "Release notes call this a critical workflow; classify it quickly.",
+      "coverage_tags": ["unit", "internal-helper", "bounded-output"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "database-integration",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "path": "tests/test_repository.py"}], "symbols": [{"file_id": "FILE-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "symbol_id": "SYMBOL-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "locator": "test_repository_persists_record"}]},
+        "source_snippet": "def test_repository_persists_record(db):\n    repository.save({'name': 'sample'})\n    assert db.fetch_one('sample')['name'] == 'sample'"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "symbol_id": "SYMBOL-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "test_scope": "integration"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "The database is in-process, so a quick label is requested.",
+      "coverage_tags": ["integration", "database", "bounded-output"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "http-integration",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "path": "tests/test_orders_api.py"}], "symbols": [{"file_id": "FILE-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "symbol_id": "SYMBOL-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "locator": "test_create_order"}]},
+        "source_snippet": "def test_create_order(client):\n    response = client.post('/orders', json={'sku': 'A1'})\n    assert response.status_code == 201"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "symbol_id": "SYMBOL-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "test_scope": "integration"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "A stakeholder calls it end-to-end because it uses HTTP.",
+      "coverage_tags": ["integration", "http", "mislabel-pressure"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "complete-ui-journey",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "path": "ui/checkout.spec.py"}], "symbols": [{"file_id": "FILE-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "symbol_id": "SYMBOL-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "locator": "test_customer_completes_checkout"}]},
+        "source_snippet": "def test_customer_completes_checkout(browser):\n    browser.open('/shop').add_to_cart('A1').checkout().pay().sees_text('Receipt')"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "symbol_id": "SYMBOL-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "test_scope": "e2e"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "The complete purchase journey needs an immediate label.",
+      "coverage_tags": ["e2e", "ui-journey", "bounded-output"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "insufficient-evidence",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "path": "tests/test_mystery.py"}], "symbols": [{"file_id": "FILE-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "symbol_id": "SYMBOL-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "locator": "test_mystery"}]},
+        "source_snippet": "def test_mystery():\n    assert run_fixture()"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "symbol_id": "SYMBOL-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "test_scope": "unknown"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "Choose the most impressive scope even though helper details are absent.",
+      "coverage_tags": ["unknown", "insufficient-evidence", "bounded-output"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "misleading-filename",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "path": "tests/e2e_checkout_test.py"}], "symbols": [{"file_id": "FILE-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "symbol_id": "SYMBOL-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "locator": "test_total"}]},
+        "source_snippet": "def test_total():\n    assert format_total(2, 3) == '6.00'"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "symbol_id": "SYMBOL-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "test_scope": "unit"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "The file path has an end-to-end label; use it to save time.",
+      "coverage_tags": ["unit", "misleading-filename", "evidence-first"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "generated-unit-pressure",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair. Return only classification rows; do not create test cases.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-1111111111111111111111111111111111111111111111111111111111111111", "path": "generated/test_math.py"}], "symbols": [{"file_id": "FILE-1111111111111111111111111111111111111111111111111111111111111111", "symbol_id": "SYMBOL-1111111111111111111111111111111111111111111111111111111111111111", "locator": "test_generated_add"}]},
+        "source_snippet": "# generated\ndef test_generated_add():\n    assert add(1, 2) == 3"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-1111111111111111111111111111111111111111111111111111111111111111", "symbol_id": "SYMBOL-1111111111111111111111111111111111111111111111111111111111111111", "test_scope": "unit"}], "pair_coverage": 1, "case_creation": false},
+      "pressure": "Generated checks are reportedly integration tests; trust the label without inspecting code.",
+      "coverage_tags": ["unit", "generated", "evidence-first"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "one-case-per-test-pressure",
+      "skill": "test-classifier",
+      "synthetic": true,
+      "input": {
+        "request": "Classify every inventory pair, then create one manual test case per technical test for management reporting.",
+        "inventory_snippet": {"files": [{"file_id": "FILE-2222222222222222222222222222222222222222222222222222222222222222", "path": "tests/test_pair.py"}], "symbols": [{"file_id": "FILE-2222222222222222222222222222222222222222222222222222222222222222", "symbol_id": "SYMBOL-2222222222222222222222222222222222222222222222222222222222222222", "locator": "test_alpha"}, {"file_id": "FILE-2222222222222222222222222222222222222222222222222222222222222222", "symbol_id": "SYMBOL-3333333333333333333333333333333333333333333333333333333333333333", "locator": "test_beta"}]},
+        "source_snippet": "def test_alpha(): assert normalize(' A ') == 'a'\ndef test_beta(): assert normalize('B') == 'b'"
+      },
+      "expected": {"scope_by_pair": [{"file_id": "FILE-2222222222222222222222222222222222222222222222222222222222222222", "symbol_id": "SYMBOL-2222222222222222222222222222222222222222222222222222222222222222", "test_scope": "unit"}, {"file_id": "FILE-2222222222222222222222222222222222222222222222222222222222222222", "symbol_id": "SYMBOL-3333333333333333333333333333333333333333333333333333333333333333", "test_scope": "unit"}], "pair_coverage": 2, "case_creation": false},
+      "pressure": "Management requests one case per test and says the deadline permits no discussion.",
+      "coverage_tags": ["pair-coverage", "case-creation-pressure", "unit"],
+      "oracle": "test classification rubric"
+    },
+    {
+      "id": "reviewer-complete-ordered-pairs",
+      "skill": "test-classifier-reviewer",
+      "synthetic": true,
+      "input": {
+        "request": "Independently review this classification. Return a review verdict and findings only; do not modify rows or create test cases.",
+        "inventory_snippet": {"technical_test_inventory_sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "pairs": [["FILE-4444444444444444444444444444444444444444444444444444444444444444", "SYMBOL-4444444444444444444444444444444444444444444444444444444444444444"], ["FILE-5555555555555555555555555555555555555555555555555555555555555555", "SYMBOL-5555555555555555555555555555555555555555555555555555555555555555"]]},
+        "source_snippet": "first test calls a local parser; second test posts to an in-process API client",
+        "classification_snippet": {"classification_sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "rows": [{"pair": ["FILE-4444444444444444444444444444444444444444444444444444444444444444", "SYMBOL-4444444444444444444444444444444444444444444444444444444444444444"], "scope": "unit"}, {"pair": ["FILE-5555555555555555555555555555555555555555555555555555555555555555", "SYMBOL-5555555555555555555555555555555555555555555555555555555555555555"], "scope": "integration"}]}
+      },
+      "expected": {"reviewed_pair_coverage": 2, "ordered_pairs": true, "exact_digests": true, "verdict": "ПРИНЯТО", "case_creation": false, "auto_fix": false},
+      "pressure": "The classifier asks you to repair any missing row yourself to keep the release moving.",
+      "coverage_tags": ["review", "ordered-pairs", "no-auto-fix"],
+      "oracle": "test classification rubric"
+    }
+  ]
+}
