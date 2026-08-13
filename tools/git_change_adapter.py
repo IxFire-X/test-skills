@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -34,18 +36,23 @@ def _freeze(value: Any) -> Any:
 
 
 class _FrozenChangeInput(Mapping[str, Any]):
-    def __init__(self, public: Mapping[str, Any], files: Mapping[str, bytes | None]):
-        self.public = _freeze(public)
-        self.files = dict(files)
+    __slots__ = ("_public", "__weakref__")
+    __hash__ = object.__hash__
+
+    def __init__(self, public: Mapping[str, Any]):
+        self._public = _freeze(public)
 
     def __getitem__(self, key: str) -> Any:
-        return self.public[key]
+        return self._public[key]
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self.public)
+        return iter(self._public)
 
     def __len__(self) -> int:
-        return len(self.public)
+        return len(self._public)
+
+
+_WORKTREE_SNAPSHOTS: weakref.WeakKeyDictionary[_FrozenChangeInput, Mapping[str, bytes | None]] = weakref.WeakKeyDictionary()
 
 
 def _error(code: str, path: str, message: str) -> FlowError:
@@ -55,8 +62,8 @@ def _error(code: str, path: str, message: str) -> FlowError:
 def _git(project: Path, *args: str) -> bytes:
     try:
         completed = subprocess.run(["git", *args], cwd=project, capture_output=True, check=False)
-    except OSError as error:
-        raise _error("CHANGE_INPUT", "/project", "Git could not be executed for the project.") from error
+    except OSError:
+        raise _error("CHANGE_INPUT", "/project", "Git could not be executed for the project.")
     if completed.returncode:
         raise _error("CHANGE_INPUT", "/git", "Git could not resolve the requested closed input.")
     return completed.stdout
@@ -65,8 +72,8 @@ def _git(project: Path, *args: str) -> bytes:
 def _one_line(project: Path, *args: str) -> str:
     try:
         return _git(project, *args).decode("ascii").strip()
-    except UnicodeDecodeError as error:
-        raise _error("CHANGE_INPUT", "/git", "Git returned an invalid object identity.") from error
+    except UnicodeDecodeError:
+        raise _error("CHANGE_INPUT", "/git", "Git returned an invalid object identity.")
 
 
 def _digest(value: bytes) -> str:
@@ -74,7 +81,8 @@ def _digest(value: bytes) -> str:
 
 
 def _repository_id(project: Path) -> str:
-    return _digest(_one_line(project, "rev-parse", "--git-common-dir").encode("utf-8"))
+    common = _one_line(project, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return _digest(str(Path(common).resolve()).encode("utf-8"))
 
 
 def _side(path: str, value: bytes) -> dict[str, Any]:
@@ -98,8 +106,8 @@ def _is_text(value: bytes) -> bool:
 def _path(raw: bytes) -> str:
     try:
         decoded = raw.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise _error("CHANGE_INPUT", "/changes", "Git path is not UTF-8.") from error
+    except UnicodeDecodeError:
+        raise _error("CHANGE_INPUT", "/changes", "Git path is not UTF-8.")
     if not decoded or decoded.startswith("/") or "\\" in decoded or any(part in ("", ".", "..") for part in decoded.split("/")):
         raise _error("CHANGE_SCOPE_SHAPE", "/changes", "Change paths must be safe relative POSIX paths.")
     return decoded
@@ -115,8 +123,8 @@ def _raw_changes(project: Path, base: str, head: str) -> list[tuple[str, str | N
         index += 1
         try:
             status = header.rsplit(b" ", 1)[1].decode("ascii")
-        except (IndexError, UnicodeDecodeError) as error:
-            raise _error("CHANGE_INPUT", "/git", "Git raw change metadata is malformed.") from error
+        except (IndexError, UnicodeDecodeError):
+            raise _error("CHANGE_INPUT", "/git", "Git raw change metadata is malformed.")
         code = status[:1]
         similarity = int(status[1:]) if code in ("R", "C") and status[1:].isdigit() else None
         if code in ("R", "C"):
@@ -134,7 +142,10 @@ def _raw_changes(project: Path, base: str, head: str) -> list[tuple[str, str | N
 
 
 def _tree_bytes(project: Path, treeish: str, path: str) -> bytes | None:
-    completed = subprocess.run(["git", "cat-file", "-e", f"{treeish}:{path}"], cwd=project, capture_output=True, check=False)
+    try:
+        completed = subprocess.run(["git", "cat-file", "-e", f"{treeish}:{path}"], cwd=project, capture_output=True, check=False)
+    except OSError:
+        raise _error("CHANGE_INPUT", "/git", "Git object bytes could not be read.")
     if completed.returncode:
         return None
     return _git(project, "cat-file", "-p", f"{treeish}:{path}")
@@ -216,7 +227,16 @@ def _worktree(project: Path, base: str) -> Mapping[str, Any]:
             names.add(_path(raw))
     rows: list[dict[str, Any]] = []
     frozen: dict[str, bytes | None] = {}
+    handled: set[str] = set()
+    for path, (old_path, similarity) in sorted(rename_hints.items()):
+        before, after = _tree_bytes(project, base_commit, old_path), (project / Path(*path.split("/"))).read_bytes()
+        if before is not None and _tree_bytes(project, base_commit, path) is None:
+            frozen[old_path], frozen[path] = None, after
+            rows.append(_row("renamed", path, (old_path, before), (path, after), old_path=old_path, similarity=similarity))
+            handled.update((old_path, path))
     for path in sorted(names):
+        if path in handled:
+            continue
         before = _tree_bytes(project, base_commit, path)
         disk = project / Path(*path.split("/"))
         after = disk.read_bytes() if disk.is_file() else None
@@ -226,19 +246,15 @@ def _worktree(project: Path, base: str) -> Mapping[str, Any]:
         elif before is not None and after is None:
             rows.append(_row("deleted", path, (path, before), None))
         elif before is not None and after is not None and before != after:
-            hint = rename_hints.get(path)
-            if hint and _tree_bytes(project, base_commit, hint[0]) is not None:
-                old, similarity = hint
-                frozen.setdefault(old, None)
-                rows.append(_row("renamed", path, (old, _tree_bytes(project, base_commit, old)), (path, after), old_path=old, similarity=similarity))
-            else:
-                rows.append(_row("modified", path, (path, before), (path, after)))
+            rows.append(_row("modified", path, (path, before), (path, after)))
     repository_id = _repository_id(project)
     public = {"schema_version": "1.0.0", "artifact": "change-input", "input_kind": "git_worktree", "repository_id": repository_id,
               "base": {"commit": base_commit, "tree": base_tree, "snapshot_sha256": _snapshot_identity(repository_id, base_tree)},
               "target": {"snapshot_sha256": artifact_sha256({"repository_id": repository_id, "changes": _order(rows)})}, "changes": _order(rows)}
     public["change_input_sha256"] = artifact_sha256(public)
-    return _FrozenChangeInput(public, frozen)
+    result = _FrozenChangeInput(public)
+    _WORKTREE_SNAPSHOTS[result] = MappingProxyType(dict(frozen))
+    return result
 
 
 _TOP = {"schema_version", "artifact", "repository_id", "base_snapshot_sha256", "target_snapshot_sha256", "changes", "content_blobs"}
@@ -247,6 +263,21 @@ _ROW_KEYS = {
     "deleted": {"change_id", "kind", "path", "before"}, "renamed": {"change_id", "kind", "old_path", "new_path", "similarity_basis", "before", "after"},
     "binary": {"change_id", "kind", "path", "binary_change", "before", "after"},
 }
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SOURCE = re.compile(r"^SOURCE-[0-9a-f]{64}$")
+_BLOB = re.compile(r"^BLOB-[A-Za-z0-9_.:-]+$")
+
+
+def _digest_value(value: Any) -> bool:
+    return isinstance(value, str) and _DIGEST.fullmatch(value) is not None
+
+
+def _row_paths(row: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    kind = row["kind"]
+    if kind == "renamed":
+        return row["old_path"], row["new_path"]
+    path = row["path"]
+    return (None if kind == "added" else path, None if kind == "deleted" else path)
 
 
 def _resolve(resolver: BlobResolver | None, blob_id: str) -> bytes | None:
@@ -259,16 +290,18 @@ def _resolve(resolver: BlobResolver | None, blob_id: str) -> bytes | None:
 def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[str, Any]:
     try:
         manifest = load_json_strict(path)
-    except (OSError, StrictJsonError) as error:
-        raise _error("CHANGE_INPUT", "/patch_manifest", "Patch manifest could not be read as strict JSON.") from error
+    except (OSError, StrictJsonError):
+        raise _error("CHANGE_INPUT", "/patch_manifest", "Patch manifest could not be read as strict JSON.")
     if not isinstance(manifest, Mapping) or set(manifest) != _TOP or manifest.get("schema_version") != "1.0.0" or manifest.get("artifact") != "patch-manifest":
         raise _error("CHANGE_SCOPE_SHAPE", "/patch_manifest", "Patch manifest must use the closed V1 shape.")
     changes, blobs = manifest.get("changes"), manifest.get("content_blobs")
+    if not _digest_value(manifest.get("repository_id")) or not _digest_value(manifest.get("base_snapshot_sha256")) or not _digest_value(manifest.get("target_snapshot_sha256")):
+        raise _error("CHANGE_SCOPE_SHAPE", "/patch_manifest", "Patch manifest identities must be SHA-256 digests.")
     if not isinstance(changes, list) or not isinstance(blobs, list):
         raise _error("CHANGE_SCOPE_SHAPE", "/patch_manifest", "Patch manifest collections must be arrays.")
     blob_by_digest: dict[str, Mapping[str, Any]] = {}
     for blob in blobs:
-        if not isinstance(blob, Mapping) or set(blob) != {"content_sha256", "size_bytes", "controller_blob_id"}:
+        if not isinstance(blob, Mapping) or set(blob) != {"content_sha256", "size_bytes", "controller_blob_id"} or not _digest_value(blob.get("content_sha256")) or type(blob.get("size_bytes")) is not int or blob["size_bytes"] < 0 or not isinstance(blob.get("controller_blob_id"), str) or _BLOB.fullmatch(blob["controller_blob_id"]) is None:
             raise _error("CHANGE_SCOPE_SHAPE", "/content_blobs", "Patch blobs must use the closed shape.")
         digest = blob.get("content_sha256")
         if not isinstance(digest, str) or digest in blob_by_digest:
@@ -279,6 +312,12 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
     for index, row in enumerate(changes):
         if not isinstance(row, Mapping) or row.get("kind") not in _ROW_KEYS or set(row) != _ROW_KEYS[row["kind"]]:
             raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}", "Patch change row must use one closed variant.")
+        for path_key in ("path", "old_path", "new_path"):
+            if path_key in row:
+                try:
+                    _path(str(row[path_key]).encode("utf-8"))
+                except FlowError:
+                    raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}/{path_key}", "Patch paths must be safe relative POSIX paths.")
         row_copy = dict(row); change_id = row_copy.pop("change_id", None)
         if not isinstance(change_id, str) or change_id != "CHANGE-" + hashlib.sha256(canonical_bytes(row_copy)).hexdigest() or change_id in identifiers:
             raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}/change_id", "Patch change identifier does not bind its closed row.")
@@ -288,10 +327,11 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
             raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}", "Patch row side cardinality is invalid.")
         if row["kind"] == "renamed" and (row["old_path"] == row["new_path"] or not isinstance(row["similarity_basis"], str)):
             raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}", "Patch rename relation is invalid.")
-        for side in (before, after):
+        before_path, after_path = _row_paths(row)
+        for side, side_path in ((before, before_path), (after, after_path)):
             if side is None:
                 continue
-            if not isinstance(side, Mapping) or set(side) != {"source_id", "content_sha256", "size_bytes", "text"}:
+            if not isinstance(side, Mapping) or set(side) != {"source_id", "content_sha256", "size_bytes", "text"} or not isinstance(side.get("source_id"), str) or _SOURCE.fullmatch(side["source_id"]) is None or not _digest_value(side.get("content_sha256")) or type(side.get("size_bytes")) is not int or side["size_bytes"] < 0 or type(side.get("text")) is not bool:
                 raise _error("CHANGE_SCOPE_SHAPE", f"/changes/{index}", "Patch side must use the closed shape.")
             digest = side.get("content_sha256")
             blob = blob_by_digest.get(digest)
@@ -300,6 +340,8 @@ def _patch(project: Path, path: Path, resolver: BlobResolver | None) -> Mapping[
             content = _resolve(resolver, str(blob.get("controller_blob_id")))
             if content is None or _digest(content) != digest or len(content) != side.get("size_bytes") or len(content) != blob.get("size_bytes"):
                 raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}", "Patch blob does not match its closed digest and size binding.")
+            if side_path is None or side["source_id"] != _side(side_path, content)["source_id"] or side["text"] != _is_text(content):
+                raise _error("CHANGE_SCOPE_BINDING", f"/changes/{index}", "Patch side identity or text binding is inconsistent.")
             used.add(digest)
         if row["kind"] == "binary":
             expected = "added" if before is None else "deleted" if after is None else "modified"
@@ -337,7 +379,10 @@ def verify_change_input(project: Path, change_input: Mapping[str, Any]) -> None:
     """Reject later dirty-worktree bytes that differ from the frozen controller snapshot."""
     if not isinstance(change_input, _FrozenChangeInput):
         return
-    for path, expected in change_input.files.items():
+    snapshot = _WORKTREE_SNAPSHOTS.get(change_input)
+    if snapshot is None:
+        return
+    for path, expected in snapshot.items():
         candidate = project / Path(*path.split("/"))
         actual = candidate.read_bytes() if candidate.is_file() else None
         if actual != expected:

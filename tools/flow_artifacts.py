@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -36,8 +37,8 @@ def canonical_bytes(value: Mapping[str, Any]) -> bytes:
     """Return compact, deterministic UTF-8 JSON with no transport markers."""
     try:
         return json.dumps(_json_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    except (TypeError, ValueError) as error:
-        raise FlowError("FLOW_SAFE_TEXT", "", "Artifact must be finite JSON data.") from error
+    except (TypeError, ValueError):
+        raise FlowError("FLOW_SAFE_TEXT", "", "Artifact must be finite JSON data.")
 
 
 def _json_value(value: Any) -> Any:
@@ -83,29 +84,36 @@ def write_create_only(run_root: Path, relative_path: PurePosixPath, value: Mappi
     target = (root / Path(*relative_path.parts)).resolve()
     try:
         target.relative_to(root)
-    except ValueError as error:
-        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact path escapes the run root.") from error
+    except ValueError:
+        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact path escapes the run root.")
+    temporary = target.parent / f".{target.name}.{uuid.uuid4().hex}.tmp"
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         if any(part.is_symlink() for part in (root, *target.parents)):
             raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact path may not traverse a symbolic link.")
-        with target.open("xb") as handle:
+        with temporary.open("xb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+        os.link(temporary, target)
     except FileExistsError:
         try:
             existing = target.read_bytes()
-        except OSError as error:
-            raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Existing artifact could not be read back.") from error
+        except OSError:
+            raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Existing artifact could not be read back.")
         if existing != payload:
             raise FlowError("FLOW_CONFLICT", "/relative_path", "A different immutable artifact already exists.")
-    except OSError as error:
-        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact could not be created.") from error
+    except OSError:
+        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact could not be created.")
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
     try:
         readback = target.read_bytes()
-    except OSError as error:
-        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact could not be read back.") from error
+    except OSError:
+        raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact could not be read back.")
     if readback != payload:
         raise FlowError("FLOW_ATOMIC_WRITE", "/relative_path", "Artifact readback did not match the validated bytes.")
     return StoredArtifact(path=target, payload=readback, sha256="sha256:" + hashlib.sha256(readback).hexdigest())
