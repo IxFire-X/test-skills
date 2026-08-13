@@ -53,4 +53,3 @@ The discovery fingerprint includes the ordered discovered path names as structur
 4. Unsupported `tests.py`, symlink escapes, ignored directories, and non-test product files are absent from `paths.tests`.
 5. Adding or removing a supported co-located path changes the discovery fingerprint.
 6. Existing discovery, init-skillsrc, source-inventory, bootstrap, doctor, and Pipeline 4.0 tests remain green.
-

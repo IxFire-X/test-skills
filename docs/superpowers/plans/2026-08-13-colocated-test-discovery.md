@@ -92,4 +92,3 @@ git commit -m "fix: discover co-located technical tests"
 ```
 
 Stage `tests/test_init_skillsrc.py` only when it contains an actual required regression.
-
