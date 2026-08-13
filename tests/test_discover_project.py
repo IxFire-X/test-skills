@@ -192,6 +192,48 @@ class DiscoverProjectTests(unittest.TestCase):
             manifest.write_text('[project]\nname="two"\n', encoding="utf-8")
             self.assertNotEqual(first, project_fingerprint(root, ["pyproject.toml"]))
 
+    def test_discovers_supported_colocated_python_tests_without_unsafe_or_unsupported_rows(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp)
+            (root / "pyproject.toml").write_text('[project]\nname="sample"\n', encoding="utf-8")
+            (root / "src/pkg").mkdir(parents=True)
+            (root / "src/service.py").write_text("def service(): pass\n", encoding="utf-8")
+            (root / "src/pkg/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+            (root / "src/pkg/tests.py").write_text("def test_unsupported(): pass\n", encoding="utf-8")
+            (root / "src/.venv").mkdir()
+            (root / "src/.venv/test_ignored.py").write_text("def test_ignored(): pass\n", encoding="utf-8")
+            escaped = root / "src/pkg/test_escaped.py"
+            try:
+                escaped.symlink_to(Path(outside) / "test_escaped.py")
+            except OSError:
+                escaped = None
+
+            first = discover_project(root)
+            module = first["modules"][0]
+            self.assertEqual(["src"], module["paths"]["source"])
+            self.assertEqual(["src/pkg/test_api.py"], module["paths"]["tests"])
+            self.assertNotIn("src/pkg/tests.py", module["paths"]["tests"])
+            self.assertNotIn("src/.venv/test_ignored.py", module["paths"]["tests"])
+            if escaped is not None:
+                self.assertNotIn("src/pkg/test_escaped.py", module["paths"]["tests"])
+
+            (root / "src/pkg/other_test.py").write_text("def test_other(): pass\n", encoding="utf-8")
+            self.assertNotEqual(first["fingerprint"], discover_project(root)["fingerprint"])
+
+    def test_nested_module_paths_are_relative_to_its_own_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "nested/leaf"
+            (base / "src/pkg").mkdir(parents=True)
+            (base / "tests").mkdir()
+            (base / "pyproject.toml").write_text('[project]\nname="leaf"\n', encoding="utf-8")
+            (base / "src/pkg/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+
+            module = discover_project(root)["modules"][0]
+            self.assertEqual("nested/leaf", module["root"])
+            self.assertEqual(["src"], module["paths"]["source"])
+            self.assertEqual(["src/pkg/test_api.py", "tests"], module["paths"]["tests"])
+
     def test_report_is_deterministic_except_timestamp(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

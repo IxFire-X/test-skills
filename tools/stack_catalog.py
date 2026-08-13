@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 IGNORED_DIR_NAMES = frozenset({
     ".git", ".idea", ".tools", ".venv", "venv", "__pycache__",
     "node_modules", "target", "build", "dist", ".pytest_cache", ".ruff_cache",
@@ -40,3 +42,13 @@ def manifest_language(name: str) -> str | None:
 
 def normalize_build_tool(value: str) -> str:
     return BUILD_TOOL_NORMALIZE.get(value, value)
+
+
+def is_supported_static_test_file(path: Path, language: str) -> bool:
+    """Return whether *path* has a Phase-1 supported static-test filename."""
+    name = path.name
+    if language == "python":
+        return path.suffix == ".py" and (name.startswith("test_") or name.endswith("_test.py"))
+    if language == "java":
+        return path.suffix == ".java" and (name.endswith("Test.java") or name.endswith("Tests.java") or name.endswith("TestCase.java"))
+    return False

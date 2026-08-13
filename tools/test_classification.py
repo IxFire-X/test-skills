@@ -31,6 +31,14 @@ try:
 except ImportError:  # pragma: no cover - direct script execution is covered by smoke tests
     from tools.schema_validation import StrictJsonError, load_json_strict, schema_diagnostics
 
+try:
+    if __package__:
+        from .stack_catalog import is_supported_static_test_file
+    else:
+        from stack_catalog import is_supported_static_test_file
+except ImportError:  # pragma: no cover - package import is covered by tests
+    from tools.stack_catalog import is_supported_static_test_file
+
 
 _TEXT_SUFFIXES = {".py", ".java", ".kt", ".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml", ".sql", ".graphql", ".proto", ".feature", ".html", ".css"}
 _EXCLUDED_SEGMENTS = {".git", ".hg", ".svn", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", ".venv", "venv", "node_modules", "dist", "build", "target", "out", "vendor"}
@@ -129,13 +137,6 @@ def _iter_files(root: Path, project_root: Path, pointer: str) -> list[Path]:
             if candidate.is_file() and not candidate.is_symlink():
                 result.append(candidate.resolve())
     return sorted(result, key=lambda item: _portable_path(project_root, item))
-
-
-def _is_supported_test_file(path: Path, language: str) -> bool:
-    name = path.name
-    if language == "python":
-        return path.suffix == ".py" and (name.startswith("test_") or name.endswith("_test.py"))
-    return path.suffix == ".java" and (name.endswith("Test.java") or name.endswith("Tests.java") or name.endswith("TestCase.java"))
 
 
 def _python_testcase(node: ast.ClassDef) -> bool:
@@ -255,7 +256,7 @@ def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     framework = module.get("test", {}).get("framework") or ("pytest" if language == "python" else "junit5")
     for root, _ in roots:
         for path in _iter_files(root, project_root, "/paths/tests"):
-            if path in seen_files or not _is_supported_test_file(path, language):
+            if path in seen_files or not is_supported_static_test_file(path, language):
                 continue
             seen_files.add(path)
             portable = _portable_path(project_root, path)
@@ -282,7 +283,7 @@ def _excluded_product(path: Path, portable: str, test_paths: set[str], test_root
     lowered = path.name.lower()
     return (
         portable in test_paths or any(path.is_relative_to(root) for root in test_roots)
-        or _is_supported_test_file(path, "python") or _is_supported_test_file(path, "java")
+        or is_supported_static_test_file(path, "python") or is_supported_static_test_file(path, "java")
         or path.suffix.lower() not in _TEXT_SUFFIXES or lowered == ".env" or lowered.startswith(".env.")
         or path.suffix.lower() in _SECRET_SUFFIXES or bool(set(PurePosixPath(portable).parts) & _EXCLUDED_SEGMENTS)
     )

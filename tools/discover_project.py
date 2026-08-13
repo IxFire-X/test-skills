@@ -73,10 +73,23 @@ def _id(rel: str) -> str:
     return "root--"+"--".join(part.encode("utf-8").hex() for part in rel.split("/"))
 def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
     return {"id":f"module:{mid}:{field}","field":f"modules.{mid}.{field}","impact":"Определяет шаблон генерации и средство запуска тестов","options":[{"id":v,"value":v,"evidence":sorted(values[v])} for v in sorted(values)]}
-def _paths(root:Path, base:Path)->dict[str,list[str]]:
+def _colocated_tests(root:Path, base:Path, sources:Sequence[str], language:str)->list[str]:
+    found=[]
+    for name in sources:
+        source=base/name
+        if not source.is_dir() or source.is_symlink() or not _ok(root,source): continue
+        for current,dirs,files in os.walk(source,followlinks=False):
+            current_path=Path(current)
+            dirs[:]=sorted(directory for directory in dirs if directory not in IGNORED_DIR_NAMES and not (current_path/directory).is_symlink() and _ok(root,current_path/directory))
+            for filename in sorted(files):
+                candidate=current_path/filename
+                if not candidate.is_symlink() and candidate.is_file() and _ok(root,candidate) and is_supported_static_test_file(candidate,language): found.append(_rel(base,candidate))
+    return sorted(set(found))
+def _paths(root:Path, base:Path, language:str|None=None)->dict[str,list[str]]:
     sets={"source":("src","src/main/java","src/main/kotlin"),"tests":("tests","test","src/test/java","src/test/kotlin"),"resources":("resources","src/main/resources","src/test/resources")}; out={}
     for k,names in sets.items():
-        vals=sorted(_rel(root,base/n) for n in names if (base/n).is_dir() and _ok(root,base/n))
+        vals=sorted(_rel(base,base/n) for n in names if (base/n).is_dir() and _ok(root,base/n))
+        if k=="tests" and language in {"python","java"}: vals=sorted(set(vals+_colocated_tests(root,base,sets["source"],language)))
         if vals: out[k]=vals
     return out
 def _has_code(root:Path,p:Path)->bool: return bool(_paths(root,p))
@@ -111,7 +124,7 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
         elif tool_values:
             field=f"modules.{mid}.stack.build_tool"; qs.append(_question(mid,"stack.build_tool",tool_values)); unresolved.add(field)
         module={"id":mid,"root":rel,"stack":stack,"detected_from":sorted(_rel(root,p) for p in owned)}
-        paths=_paths(root,base)
+        paths=_paths(root,base,lang)
         if paths: module["paths"]=paths
         if lang:
             fm,tm,_=MARKERS[lang]; text="\n".join(_read(p) for p in owned); vals={}
@@ -136,12 +149,15 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
             if test:module["test"]=test
         modules.append(module)
     return modules,qs,[],errors,unresolved
-def project_fingerprint(root:Path,evidence_paths:Sequence[str])->str:
+def project_fingerprint(root:Path,evidence_paths:Sequence[str], discovered_paths:Sequence[str]=())->str:
     root=root.resolve(); h=hashlib.sha256()
     for rel in sorted(set(evidence_paths)):
         p=root/rel
         if _ok(root,p) and p.is_file() and not p.is_symlink(): h.update(rel.encode());h.update(b"\0");h.update(p.read_bytes());h.update(b"\0")
+    for path in sorted(set(discovered_paths)): h.update(b"path\0");h.update(path.encode());h.update(b"\0")
     return h.hexdigest()
+def _discovered_path_names(modules:Sequence[dict[str,Any]])->list[str]:
+    return [f"{module['root']}\0{group}\0{path}" for module in modules for group,paths in sorted(module.get("paths",{}).items()) for path in paths]
 _QUESTION_SUFFIXES=("stack.language","stack.build_tool","test.framework")
 def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)->list[str]:
     questions=report.get("questions",[])
@@ -176,10 +192,10 @@ def build_report(status,project_name,modules,questions,warnings,errors,fingerpri
 def discover_project(project_dir:Path)->dict[str,Any]:
     root=project_dir.resolve(); manifests=find_confined_manifests(root)
     if not manifests:return build_report("error",root.name,[],[],[],["build manifests were not found"])
-    modules,qs,warnings,errors,unresolved=analyze_module_roots(root,manifests); evidence=[_rel(root,p) for p in manifests]
-    if errors:return build_report("error",root.name,[],[],warnings,sorted(errors),project_fingerprint(root,evidence))
-    if not modules:return build_report("error",root.name,[],[],warnings,["runnable modules were not found"],project_fingerprint(root,evidence))
-    report=build_report("needs_input" if qs else "ready",root.name,sorted(modules,key=lambda m:(m["root"],m["id"])),sorted(qs,key=lambda q:q["id"]),warnings,[],project_fingerprint(root,evidence)); semantic=validate_report(report,unresolved)
+    modules,qs,warnings,errors,unresolved=analyze_module_roots(root,manifests); evidence=[_rel(root,p) for p in manifests]; discovered=_discovered_path_names(modules)
+    if errors:return build_report("error",root.name,[],[],warnings,sorted(errors),project_fingerprint(root,evidence,discovered))
+    if not modules:return build_report("error",root.name,[],[],warnings,["runnable modules were not found"],project_fingerprint(root,evidence,discovered))
+    report=build_report("needs_input" if qs else "ready",root.name,sorted(modules,key=lambda m:(m["root"],m["id"])),sorted(qs,key=lambda q:q["id"]),warnings,[],project_fingerprint(root,evidence,discovered)); semantic=validate_report(report,unresolved)
     if semantic: return build_report("error",root.name,[],[],warnings,semantic,report["fingerprint"])
     return report
 def main()->int:

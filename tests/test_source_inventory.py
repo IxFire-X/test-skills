@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.discover_project import discover_project
+from tools.init_skillsrc import compile_skillsrc
 from tools.test_classification import (
     SuppliedInput,
     TestClassificationError,
@@ -69,6 +71,21 @@ import pytest
         value = build_source_inventories(self.root, self.skillsrc(test_roots=()), "backend", ())
         self.assertEqual([], value.technical_test_inventory["files"])
         self.assertEqual([], value.technical_test_inventory["symbols"])
+
+    def test_discovery_manifest_includes_colocated_test_and_retains_sibling_product_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src/pkg").mkdir(parents=True)
+            (root / "pyproject.toml").write_text('[project]\nname="sample"\n', encoding="utf-8")
+            (root / "src/service.py").write_text("def service(): pass\n", encoding="utf-8")
+            (root / "src/pkg/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+
+            skillsrc = compile_skillsrc(discover_project(root), {})
+            result = build_source_inventories(root, skillsrc, "root", ())
+
+            self.assertEqual(["src/pkg/test_api.py"], [row["path"] for row in result.technical_test_inventory["files"]])
+            self.assertEqual([{"kind": "python_module_function", "function_name": "test_api"}], [dict(row["locator"]) for row in result.technical_test_inventory["symbols"]])
+            self.assertIn("src/service.py", [row["path"] for row in result.authorized_behavior_sources["sources"]])
 
     def test_python_module_async_class_and_parametrized_functions_use_closed_locators(self):
         self.write("tests/test_sample.py", """\
