@@ -219,7 +219,7 @@ Relations express why evidence must be read; they do not assert that behavior ch
 
 ### Change-aware behavior plan and result
 
-The V1 behavior plan/result protocol is current-side only. It remains valid solely for unchanged current sources in a `FULL` run. Every `CHANGE_SET` source, including an added source, uses the closed change-aware Plan V2 and Batch Result V2; a deleted, before-side, modified, or renamed row can never be represented by V1.
+The V1 behavior plan/result protocol represents only the complete current-side source snapshot of a `FULL` run. Every `CHANGE_SET` source, including an added source, uses the closed change-aware Plan V2 and Batch Result V2; a deleted, before-side, modified, or renamed row can never be represented by V1.
 
 Each Plan V2 item contains:
 
@@ -357,7 +357,25 @@ Each scoped planned batch follows exactly:
 candidate -> false-claim audit -> omission audit -> atomic promotion
 ```
 
-The candidate wraps the existing V1 batch-result payload and binds scope receipt, plan, batch, generation, parent candidate, and triggering `REWORK` audits. Generation 1 has no parent. Later generations may descend only from the immediately preceding rejected generation.
+The closed candidate envelope binds run mode, scope receipt, plan, batch, generation, parent candidate, triggering `REWORK` audits, and exactly one nested result:
+
+```json
+{
+  "schema_version": "1.0.0",
+  "artifact": "semantic-batch-candidate",
+  "run_mode": "CHANGE_SET",
+  "scope_receipt_sha256": "sha256:...",
+  "plan_sha256": "sha256:...",
+  "batch_id": "BATCH-000001",
+  "generation": 1,
+  "parent_candidate_sha256": null,
+  "triggering_audit_sha256s": [],
+  "result_schema_version": "2.0.0",
+  "result": {}
+}
+```
+
+`run_mode:"FULL"` requires `result_schema_version:"1.0.0"` and `result` must satisfy exactly Batch Result V1. `run_mode:"CHANGE_SET"` requires `result_schema_version:"2.0.0"` and `result` must satisfy exactly change-aware Batch Result V2. Cross-mode payloads, a mismatched declared/embedded version, or a hybrid object fail before audit. Generation 1 has no parent. Later generations may descend only from the immediately preceding rejected generation and must retain the same run mode and result version.
 
 The false-claim audit checks unsupported or inflated actor, operation, condition, outcome, evidence, and route claims. A route still requires framework provenance, registration sink, and bound target. The omission audit independently checks material supported facts lost by the candidate, especially `no_supported_observable_fact`, deletions, boundary-spanning facts, README contracts, and runtime configuration.
 
@@ -369,12 +387,14 @@ Each audit reads exact authorized source ranges plus the candidate, but not prod
 {
   "schema_version": "1.0.0",
   "artifact": "semantic-batch-promotion",
+  "run_mode": "CHANGE_SET",
   "scope_receipt_sha256": "sha256:...",
   "plan_sha256": "sha256:...",
   "batch_id": "BATCH-000001",
   "generation": 1,
   "candidate_sha256": "sha256:...",
-  "batch_result_sha256": "sha256:...",
+  "result_schema_version": "2.0.0",
+  "result_sha256": "sha256:...",
   "audit_sha256s": {
     "false_claim": "sha256:...",
     "omission": "sha256:..."
@@ -384,7 +404,7 @@ Each audit reads exact authorized source ranges plus the candidate, but not prod
 }
 ```
 
-Direct authoritative batch-result writes are forbidden. Receipt construction accepts promotion artifacts, never loose V1 batch results.
+Promotion revalidates the candidate's exact mode/result conjunction and binds the canonical nested result digest. Receipt construction revalidates it again: a FULL receipt accepts only promotions of V1 results, and a CHANGE_SET receipt accepts only promotions of V2 results. Direct or loose authoritative writes of either V1 or V2 results are forbidden; neither result schema is itself authority without the candidate, two accepting audits, and promotion.
 
 ## Review assurance
 
@@ -415,7 +435,7 @@ The baseline receipt contains the complete promoted source outcome and fragment 
   "fragment_registry": [],
   "source_outcomes": [],
   "changed_requirement_ids": [],
-  "retired_requirement_ids": [],
+  "retired_requirements": [],
   "assurance": {
     "review_mode": "SEQUENTIAL",
     "independent_promotion_count": 0,
@@ -427,9 +447,9 @@ The baseline receipt contains the complete promoted source outcome and fragment 
 
 `unchanged_source_bindings` proves exact baseline/current content-digest equality. Added and changed sources derive only from promoted current candidates. Deleted sources retain baseline evidence as tombstones until semantic review proves which requirement links survive elsewhere. A rename is not automatically a delete-plus-add behavior change.
 
-The composed full managed context preserves IDs for semantically unchanged requirements. A requirement is retired only when promoted current evidence and reviewed deletion impact prove it no longer exists; removal of one supporting file is insufficient when another source still supports it.
+Every `retired_requirements` row is the exact closed requirement tombstone later used by the document delta: `{object_kind:"requirement", object_id, baseline_object_sha256, reason, support_evidence}`. Its support evidence must prove `NO_SURVIVING_SOURCE_SUPPORT`, list zero surviving source IDs, and bind one or more promoted retirement fragment IDs. `changed_behavior_context` copies those rows byte-for-byte. The composed full managed context preserves IDs for semantically unchanged requirements. A requirement is retired only when promoted current evidence and reviewed deletion impact prove it no longer exists; removal of one supporting file is insufficient when another source still supports it.
 
-The generator receives only a validated `changed_behavior_context` projection containing new, changed, and retired requirement identities plus necessary stable context links. It never receives raw project source, raw diff, analytics body, source/test inventory, scope ledger, promotion ledger, technical test text, or accounting sidecar. An empty semantic delta generates zero new cases.
+The generator receives only a validated `changed_behavior_context` projection containing new and changed requirements, digest-bound requirement tombstones, and necessary stable context links. It never receives raw project source, raw diff, analytics body, source/test inventory, scope ledger, promotion ledger, technical test text, or accounting sidecar. An empty semantic delta generates zero new cases.
 
 ### Canonical Document Delta V1
 
@@ -449,10 +469,39 @@ On `FULL`, `tc-generator` emits a complete `candidate_document` under the existi
   },
   "metadata": {},
   "operation_capabilities": {
-    "reused_ids": [], "added": [], "modified": [], "retired_ids": []
+    "reused_ids": [],
+    "added": [],
+    "modified": [],
+    "retired": [
+      {
+        "object_kind": "operation_capability",
+        "object_id": "CAP-retired",
+        "baseline_object_sha256": "sha256:...",
+        "reason": "CAPABILITY_NO_LONGER_REFERENCED",
+        "support_evidence": {
+          "status": "DEPENDENTS_RETIRED",
+          "surviving_object_ids": []
+        }
+      }
+    ]
   },
   "requirements": {
-    "reused_ids": [], "added": [], "modified": [], "retired_ids": []
+    "reused_ids": [],
+    "added": [],
+    "modified": [],
+    "retired": [
+      {
+        "object_kind": "requirement",
+        "object_id": "REQ-retired",
+        "baseline_object_sha256": "sha256:...",
+        "reason": "REQUIREMENT_NO_LONGER_OBSERVABLE",
+        "support_evidence": {
+          "status": "NO_SURVIVING_SOURCE_SUPPORT",
+          "surviving_source_ids": [],
+          "retirement_fragment_ids": ["FRAGMENT-..."]
+        }
+      }
+    ]
   },
   "test_cases": {
     "reused_ids": [],
@@ -466,18 +515,25 @@ On `FULL`, `tc-generator` emits a complete `candidate_document` under the existi
     ],
     "retired": [
       {
-        "case_id": "TC-retired",
-        "baseline_case_sha256": "sha256:...",
-        "reason": "REQUIREMENT_RETIRED"
+        "object_kind": "test_case",
+        "object_id": "TC-retired",
+        "baseline_object_sha256": "sha256:...",
+        "reason": "CASE_REQUIREMENTS_RETIRED",
+        "support_evidence": {
+          "status": "DEPENDENTS_RETIRED",
+          "surviving_object_ids": []
+        }
       }
     ]
   }
 }
 ```
 
-`metadata` is the complete target canonical metadata. `added` entries are complete canonical objects. `modified` capability and requirement entries use the same `{id, baseline_object_sha256, replacement}` shape as cases, with the appropriate ID name; every replacement is a complete canonical object with the same identity. `retired_ids` are existing identities; case retirements are explicit tombstones with closed reason `REQUIREMENT_RETIRED|SCENARIO_MERGED|SCENARIO_NO_LONGER_OBSERVABLE`.
+`metadata` is the complete target canonical metadata. `added` entries are complete canonical objects. `modified` capability and requirement entries use the same `{id, baseline_object_sha256, replacement}` shape as cases, with the appropriate ID name; every replacement is a complete canonical object with the same identity.
 
-For each collection, every baseline identity appears exactly once across `reused`, `modified`, and `retired`; every added identity is absent from baseline; sets are disjoint; no foreign, duplicate, colliding, or missing identity is permitted. Reused objects are copied byte-for-byte. Added and replacement objects are schema-valid and reference only target requirements/capabilities. Physical output order is canonical: retained baseline objects keep baseline relative order with replacements in their original slots; retired objects disappear; added objects follow in their delta order after deterministic scenario-key/requirement ordering. The applier then rewrites every `display_order` to the resulting physical order and validates all cross-references.
+Every retirement in all three collections is a closed tombstone row with `object_kind`, `object_id`, exact canonical baseline-object digest, a reason closed for that kind, and closed support evidence. Capability reasons are `CAPABILITY_NO_LONGER_REFERENCED|CAPABILITY_REPLACED`; requirement reasons are `REQUIREMENT_NO_LONGER_OBSERVABLE|REQUIREMENT_MERGED`; case reasons are `CASE_REQUIREMENTS_RETIRED|CASE_MERGED|CASE_NO_LONGER_OBSERVABLE`. Requirements alone require `{status:"NO_SURVIVING_SOURCE_SUPPORT", surviving_source_ids:[], retirement_fragment_ids:[...]}` with at least one promoted retirement fragment. A requirement with any surviving current support cannot be retired. Capabilities and cases require `{status:"DEPENDENTS_RETIRED", surviving_object_ids:[]}`; any surviving target reference blocks retirement. No bare retirement ID is valid in the behavior receipt, changed context, or document delta.
+
+For each collection, every baseline identity appears exactly once across `reused`, `modified`, and tombstone-backed `retired`; every added identity is absent from baseline; sets are disjoint; no foreign, duplicate, colliding, or missing identity is permitted. The applier recomputes every tombstone's baseline object digest, reason/support compatibility, retirement fragment binding, and absence of surviving references before removal. Reused objects are copied byte-for-byte. Added and replacement objects are schema-valid and reference only target requirements/capabilities. Physical output order is canonical: retained baseline objects keep baseline relative order with replacements in their original slots; tombstoned objects disappear; added objects follow in their delta order after deterministic scenario-key/requirement ordering. The applier then rewrites every `display_order` to the resulting physical order and validates all cross-references.
 
 The deterministic seam is:
 
@@ -637,6 +693,7 @@ All direct CLI failures use safe `{path, code, message}`, exit 2, and no traceba
 | `CHANGE_SIDE_BINDING` | Before/after digest, source identity, side, or target snapshot differs. |
 | `BATCH_PROMOTION_SHAPE` | Candidate, audit, or promotion shape is invalid. |
 | `BATCH_PROMOTION_BINDING` | Plan, scope, batch, item, candidate, or audit binding differs. |
+| `BATCH_PROMOTION_MODE` | FULL/V1 or CHANGE_SET/V2 mode-result conjunction is violated. |
 | `BATCH_PROMOTION_ORDER` | Audit or generation order is invalid. |
 | `BATCH_PROMOTION_REWORK` | Rejected generation was promoted or chain is incomplete. |
 | `PROMOTION_ASSURANCE` | Independent assurance is fabricated or unverifiable. |
@@ -692,31 +749,32 @@ Implementation begins with these public-interface failures:
 10. `test_full_test_inventory_with_only_impacted_scope_pairs` — tests never originate requirements.
 11. `test_scope_requires_both_audits_on_same_generation` — one acceptance never promotes.
 12. `test_scope_rework_requires_immediate_successor_generation` — no majority or late rehabilitation.
-13. `test_v1_batch_protocol_is_full_current_side_only` — every CHANGE_SET row requires V2.
-14. `test_change_plan_v2_side_identity_range_and_order` — before/after coverage and source IDs are exact.
-15. `test_change_result_v2_effect_requires_correct_evidence_sides` — added/modified/retired locator rules hold.
-16. `test_deleted_behavior_requires_promoted_tombstone` — no fabricated current bytes.
-17. `test_modified_and_renamed_noop_compare_both_sides` — lexical/path changes do not imply behavior change.
-18. `test_batch_false_claim_audit_catches_known_false_routes` — attempt-02 regression stays RED without audit.
-19. `test_batch_omission_audit_catches_readme_config_and_false_no_fact` — attempt-03 regression stays RED without audit.
-20. `test_batch_requires_both_audits_on_same_generation` — any rework prevents promotion.
-21. `test_receipt_rejects_loose_or_unpromoted_batch_results` — direct authoritative writes remain impossible.
-22. `test_assurance_defaults_sequential_and_rejects_fabrication` — only trusted distinct fresh contexts yield independent.
-23. `test_composite_receipt_rejects_promotion_and_unchanged_drift` — missing/duplicate/foreign rows fail.
-24. `test_delta_schema_closes_source_baseline_revision_and_collections` — unknown or unbound fields fail.
-25. `test_apply_delta_partitions_every_baseline_identity_once` — foreign/missing/duplicate/collision cases fail.
-26. `test_apply_delta_reuses_ids_and_materializes_full_document` — replacements are complete, ordered, and cross-valid.
-27. `test_apply_delta_retirements_are_explicit_tombstones` — retirement reason and baseline object digest are mandatory.
-28. `test_zero_op_delta_returns_exact_baseline_without_publication` — no new revision, bundle, review, or case.
-29. `test_nonzero_delta_revision_parent_and_review_flow` — complete candidate precedes publisher/reviewer; correction is a full successor.
-30. `test_pipeline6_exact_carrier_complements_and_branches` — changed context crosses both classifier stages; no impossible product or forbidden carrier reaches generation/tail.
-31. `test_baseline_advances_only_eligible_terminal_acceptance` — provisional, FAIL, NOT_RUNNABLE, BLOCKED, and REWORK never advance.
-32. `test_baseline_receipt_binds_complete_artifacts_and_fingerprints` — all inventory/context/classification/document/trace/final digests are exact.
-33. `test_baseline_successor_atomic_compare_and_readback` — identical concurrency is idempotent; competing target trees conflict.
-34. `test_resume_ignores_temporary_files_and_returns_exact_action` — stale leases/gaps/branches cannot become state.
-35. `test_safe_artifacts_and_diagnostics_do_not_echo_seeded_secret` — raw source/diff/prompt/reasoning remain absent.
-36. `test_attempt04_fixed_24_control_pilot_blocks_any_mismatch` — all 12 categories pass the portable floor.
-37. `test_pipeline6_versions_docs_doctor_renderer_and_legacy_rejection` — Pipeline 5/V5/Receipt V1 remain historical rejection rows and the full Pipeline 6 suite passes.
+13. `test_full_candidate_requires_exact_v1_result` — FULL rejects V2, hybrids, and declared/embedded version mismatch.
+14. `test_change_set_candidate_requires_exact_v2_result` — CHANGE_SET rejects V1, hybrids, and declared/embedded version mismatch.
+15. `test_change_plan_v2_side_identity_range_and_order` — before/after coverage and source IDs are exact.
+16. `test_change_result_v2_effect_requires_correct_evidence_sides` — added/modified/retired locator rules hold.
+17. `test_deleted_behavior_requires_promoted_tombstone` — no fabricated current bytes.
+18. `test_modified_and_renamed_noop_compare_both_sides` — lexical/path changes do not imply behavior change.
+19. `test_batch_false_claim_audit_catches_known_false_routes` — attempt-02 regression stays RED without audit.
+20. `test_batch_omission_audit_catches_readme_config_and_false_no_fact` — attempt-03 regression stays RED without audit.
+21. `test_batch_requires_both_audits_on_same_generation` — any rework prevents promotion.
+22. `test_receipt_rejects_loose_v1_and_v2_results` — direct writes and unpromoted results of either version are impossible.
+23. `test_assurance_defaults_sequential_and_rejects_fabrication` — only trusted distinct fresh contexts yield independent.
+24. `test_composite_receipt_rejects_promotion_and_unchanged_drift` — missing/duplicate/foreign rows fail.
+25. `test_delta_schema_closes_source_baseline_revision_and_collections` — unknown or unbound fields fail.
+26. `test_apply_delta_partitions_every_baseline_identity_once` — foreign/missing/duplicate/collision cases fail.
+27. `test_apply_delta_reuses_ids_and_materializes_full_document` — replacements are complete, ordered, and cross-valid.
+28. `test_every_capability_requirement_and_case_retirement_is_tombstoned` — kind, ID, baseline digest, closed reason, and support evidence are mandatory; bare IDs fail.
+29. `test_zero_op_delta_returns_exact_baseline_without_publication` — no new revision, bundle, review, or case.
+30. `test_nonzero_delta_revision_parent_and_review_flow` — complete candidate precedes publisher/reviewer; correction is a full successor.
+31. `test_pipeline6_exact_carrier_complements_and_branches` — changed context crosses both classifier stages; no impossible product or forbidden carrier reaches generation/tail.
+32. `test_baseline_advances_only_eligible_terminal_acceptance` — provisional, FAIL, NOT_RUNNABLE, BLOCKED, and REWORK never advance.
+33. `test_baseline_receipt_binds_complete_artifacts_and_fingerprints` — all inventory/context/classification/document/trace/final digests are exact.
+34. `test_baseline_successor_atomic_compare_and_readback` — identical concurrency is idempotent; competing target trees conflict.
+35. `test_resume_ignores_temporary_files_and_returns_exact_action` — stale leases/gaps/branches cannot become state.
+36. `test_safe_artifacts_and_diagnostics_do_not_echo_seeded_secret` — raw source/diff/prompt/reasoning remain absent.
+37. `test_attempt04_fixed_24_control_pilot_blocks_any_mismatch` — all 12 categories pass the portable floor.
+38. `test_pipeline6_versions_docs_doctor_renderer_and_legacy_rejection` — Pipeline 5/V5/Receipt V1 remain historical rejection rows and the full Pipeline 6 suite passes.
 
 Tests cross the external `feature_flow` interface. Focused internal module tests cover only invariants not observable through a practical façade scenario.
 
@@ -731,7 +789,7 @@ Migration is one-way and shadowed before authority changes:
 5. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after all RED, compatibility, and shadow gates pass;
 6. start InvenTree attempt-04 from a new root; never import or wrap attempt-02/03 batch results as promoted evidence.
 
-Historical V1 plans and V1 batch-result payloads remain valid only for current-side FULL candidate rows. Historical V1 receipts and unreviewed results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate sides, audits, deltas, terminal receipts, or baselines.
+Historical V1 plans and V1 batch-result payloads remain valid only as nested FULL candidates. V2 plans/results are valid only as nested CHANGE_SET candidates. Neither version is directly authoritative. Historical V1 receipts and all loose or unreviewed V1/V2 results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate modes, sides, audits, promotions, tombstones, deltas, terminal receipts, or baselines.
 
 ## Costs and risks
 
