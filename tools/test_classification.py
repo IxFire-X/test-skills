@@ -549,6 +549,16 @@ def validate_managed_behavior_context(behavior_context: Mapping[str, Any], autho
     requirement_sources = behavior_context["requirement_sources"]
     if not isinstance(sources, list) or not isinstance(inventory_files, list) or not isinstance(requirements, list) or not isinstance(product_sources, list) or not isinstance(requirement_sources, list):
         return (_diag("/artifacts/managed_behavior_context", "BEHAVIOR_CONTEXT", "Managed behavior context inputs must use array carriers."),)
+    if set(authorized_behavior_sources) != {"module_id", "sources"} or not isinstance(authorized_behavior_sources.get("module_id"), str):
+        return (_diag("/authorized_behavior_sources", "BEHAVIOR_AUTHORIZED_SOURCES", "Authorized sources must use their closed inventory shape."),)
+    for index, source in enumerate(sources):
+        pointer = f"/authorized_behavior_sources/sources/{index}"
+        if not isinstance(source, Mapping):
+            return (_diag(pointer, "BEHAVIOR_AUTHORIZED_SOURCES", "Authorized sources must use closed inventory rows."),)
+        kind = source.get("kind")
+        expected = {"source_id", "kind", "content_digest"} if kind == "supplied_requirement" else {"source_id", "kind", "path", "content_digest"} if kind == "product_file" else None
+        if expected is None or set(source) != expected or not isinstance(source.get("source_id"), str) or not isinstance(source.get("content_digest"), str):
+            return (_diag(pointer, "BEHAVIOR_AUTHORIZED_SOURCES", "Authorized sources must use supported closed inventory kinds."),)
     if behavior_context["authorized_behavior_sources_sha256"] != _digest(authorized_behavior_sources):
         return (_diag("/artifacts/managed_behavior_context/authorized_behavior_sources_sha256", "BEHAVIOR_AUTHORIZED_DIGEST", "Authorized behavior sources must match their exact snapshot digest."),)
     authorized_by_id: dict[str, Mapping[str, Any]] = {}
@@ -678,6 +688,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 context = load_json_strict(Path(args.context))
             except (OSError, StrictJsonError) as error:
                 raise _error("BEHAVIOR_CONTEXT", "/context", "Context artifact could not be read as strict JSON.") from error
+            shape = _stage_shape(input_inventory, "source-inventory-output.schema.json", "BEHAVIOR_INVENTORY")
+            if shape:
+                raise TestClassificationError(shape)
             shape = _stage_shape(context, "context-marker-output.schema.json", "BEHAVIOR_CONTEXT")
             if shape:
                 raise TestClassificationError(shape)

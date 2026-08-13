@@ -145,17 +145,20 @@ class SkillContractsV3Tests(unittest.TestCase):
         for forbidden in ("minimum case", "maximum case", "per-domain count", "numeric target"):
             self.assertNotIn("accept " + forbidden, text)
 
-    def test_adaptive_case_granularity_inline_contexts_remain_v3_generator_scenarios(self):
+    def test_adaptive_case_granularity_inline_contexts_are_closed_v4_generator_inputs(self):
         manifest = json.loads(read("evals/adaptive-case-granularity/scenarios.json"))
         scenarios = manifest["scenarios"]
         self.assertEqual(3, len(scenarios))
         for scenario in scenarios:
             with self.subTest(scenario=scenario["id"]):
                 context = scenario["input"]["inline_context"]
-                self.assertEqual("3.0.0", context["schema_version"])
+                self.assertEqual("4.0.0", context["schema_version"])
                 self.assertEqual("context-marker", context["stage"])
-                self.assertIn("analytics_documentation", context["artifacts"])
-                self.assertNotEqual([], schema_diagnostics(context, ROOT / STAGE_SCHEMAS["context-marker"], ROOT))
+                self.assertEqual({"managed_behavior_context"}, set(context["artifacts"]))
+                self.assertEqual([], schema_diagnostics(context, ROOT / STAGE_SCHEMAS["context-marker"], ROOT))
+                serialized = json.dumps(context, ensure_ascii=False, sort_keys=True)
+                for forbidden in ("analytics_documentation", "source_code_and_diff", "raw_content", "technical_test_inventory", "test source text", "technical_test_classification"):
+                    self.assertNotIn(forbidden, serialized)
 
     def test_context_requirement_ids_have_a_reproducible_derivation_rule(self):
         text = read("skills/context-marker/references/context-artifact-contract.md")

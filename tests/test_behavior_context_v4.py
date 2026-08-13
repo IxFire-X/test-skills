@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -151,6 +152,29 @@ class ManagedBehaviorContextV4Tests(unittest.TestCase):
             ])
         self.assertEqual(2, code)
         self.assertIn("BEHAVIOR_CONTEXT", stderr.getvalue())
+
+    def test_public_validator_rejects_recomputed_unauthorized_source_kind(self) -> None:
+        context = self.behavior_context("SOURCE-fd794e4081e27177d36a68cf917f712c6981d175c3bf3d45f890367a92645c75")
+        sources = self.authorized_sources()
+        sources["sources"].append({"source_id": "SOURCE-" + "a" * 64, "kind": "technical_test", "content_digest": "sha256:" + "a" * 64})
+        context["authorized_behavior_sources_sha256"] = digest(sources)
+        diagnostics = validate_managed_behavior_context(context, sources, self.inventory_with_unit_symbols(1), self.root)
+        self.assertEqual("BEHAVIOR_AUTHORIZED_SOURCES", diagnostics[0]["code"])
+        with self.assertRaises(TypeError):
+            diagnostics[0]["code"] = "changed"
+
+    def test_validate_context_cli_rejects_malformed_inventory_envelope_without_raw_value(self) -> None:
+        malformed = copy.deepcopy(self.inventory_envelope)
+        malformed["artifacts"]["authorized_behavior_sources"]["sources"].append({"source_id": "SOURCE-" + "a" * 64, "kind": "technical_test", "content_digest": "sha256:" + "a" * 64, "raw_value": "do-not-leak"})
+        with tempfile.TemporaryDirectory() as temporary:
+            inventory_path = Path(temporary) / "inventory.json"
+            inventory_path.write_text(json.dumps(malformed), encoding="utf-8")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as stderr:
+                code = main(["validate-context", "--project", str(self.root), "--inventory", str(inventory_path), "--context", str(V4 / "context-marker.json")])
+        self.assertEqual(2, code)
+        self.assertIn("BEHAVIOR_INVENTORY", stderr.getvalue())
+        self.assertNotIn("do-not-leak", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
 
 
 if __name__ == "__main__":
