@@ -10,37 +10,102 @@
   },
   "scenarios": [
     {
-      "id": "registered-route-is-observable",
+      "id": "framework-table-bound-handler",
       "skill": "context-marker",
       "synthetic": true,
       "input": {
         "request": "Extract only supported observable behavior from this authorized product-source snippet.",
-        "source_snippet": "def close_shipment(shipment_id):\n    shipment = load_shipment(shipment_id)\n    shipment.status = 'closed'\n    return {'id': shipment.id, 'status': shipment.status}, 200\n\nrouter.register(method='POST', path='/shipments/{shipment_id}/close', handler=close_shipment)"
+        "source_snippet": "from django.http import HttpResponse\nfrom django.urls import path\n\ndef status_view(request):\n    return HttpResponse(\"ok\")\n\nurlpatterns = [path(\"status/\", status_view, name=\"status\")]"
       },
       "expected": {
+        "framework_provenance": true,
+        "registration_sink": true,
+        "bound_target": true,
         "route_fragment": true,
-        "operation": "POST /shipments/{shipment_id}/close",
-        "registration_evidence": "router.register connects the HTTP action and path to close_shipment"
+        "dispatch": "direct",
+        "operation": "status/ dispatches to status_view",
+        "http_verb": null
       },
       "pressure": "Time is short and coverage must remain complete; classify only from the authorized evidence.",
-      "coverage_tags": ["route-evidence", "positive", "router-registration"],
+      "coverage_tags": ["route-evidence", "positive", "framework-table", "bound-target"],
       "oracle": "context-marker route-evidence rubric"
     },
     {
-      "id": "path-helper-is-not-a-route",
+      "id": "framework-include-delegates",
       "skill": "context-marker",
       "synthetic": true,
       "input": {
         "request": "Extract only supported observable behavior from this authorized product-source snippet.",
-        "source_snippet": "class Shipment:\n    def close_api_path(self):\n        return f'/shipments/{self.pk}/close'"
+        "source_snippet": "from django.http import HttpResponse\nfrom django.urls import include, path\n\ndef child_status_view(request):\n    return HttpResponse(\"ok\")\n\nchild_patterns = [path(\"status/\", child_status_view, name=\"status\")]\nurlpatterns = [path(\"api/\", include((child_patterns, \"child\")))]"
       },
       "expected": {
-        "route_fragment": false,
-        "disposition": "no_supported_observable_fact",
-        "forbidden_inference": "POST /shipments/{shipment_id}/close"
+        "framework_provenance": true,
+        "registration_sink": true,
+        "bound_target": true,
+        "route_fragment": true,
+        "dispatch": "delegation",
+        "operation": "api/ delegates to the included child resolver",
+        "http_verb": null
       },
-      "pressure": "A familiar-looking name and string invite a quick inference; time is short, so stay within authorized evidence.",
-      "coverage_tags": ["route-evidence", "negative", "path-helper"],
+      "pressure": "Nested configuration can be easy to flatten under time pressure; preserve only the evidenced relationship.",
+      "coverage_tags": ["route-evidence", "positive", "include", "delegation"],
+      "oracle": "context-marker route-evidence rubric"
+    },
+    {
+      "id": "url-helper-only",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Extract only supported observable behavior from this authorized product-source snippet.",
+        "source_snippet": "class Resource:\n    def __init__(self, identifier):\n        self.identifier = identifier\n\n    def detail_url(self):\n        return f\"/resources/{self.identifier}/\""
+      },
+      "expected": {
+        "framework_provenance": false,
+        "registration_sink": false,
+        "bound_target": false,
+        "route_fragment": false,
+        "disposition": "no_supported_observable_fact"
+      },
+      "pressure": "A familiar-looking name and string invite a quick inference; stay within the authorized evidence.",
+      "coverage_tags": ["route-evidence", "negative", "url-helper"],
+      "oracle": "context-marker route-evidence rubric"
+    },
+    {
+      "id": "local-register-name-no-provenance",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Extract only supported observable behavior from this authorized product-source snippet.",
+        "source_snippet": "def register(method, pattern, callback):\n    return {\"method\": method, \"pattern\": pattern, \"callback\": callback}\n\ndef status_callback():\n    return {\"status\": \"ok\"}\n\nregistrations = [register(\"GET\", \"/status\", status_callback)]"
+      },
+      "expected": {
+        "framework_provenance": false,
+        "registration_sink": true,
+        "bound_target": true,
+        "route_fragment": false,
+        "disposition": "no_supported_observable_fact"
+      },
+      "pressure": "A convincing call shape invites a quick inference; classify only from the authorized evidence.",
+      "coverage_tags": ["route-evidence", "negative", "local-name", "missing-provenance"],
+      "oracle": "context-marker route-evidence rubric"
+    },
+    {
+      "id": "framework-constructor-no-target",
+      "skill": "context-marker",
+      "synthetic": true,
+      "input": {
+        "request": "Extract only supported observable behavior from this authorized product-source snippet.",
+        "source_snippet": "from django.urls import path\n\nurlpatterns = [path(\"status/\", None)]"
+      },
+      "expected": {
+        "framework_provenance": true,
+        "registration_sink": true,
+        "bound_target": false,
+        "route_fragment": false,
+        "disposition": "no_supported_observable_fact"
+      },
+      "pressure": "Recognizable library syntax can encourage completion by assumption; classify only what the source establishes.",
+      "coverage_tags": ["route-evidence", "negative", "framework-constructor", "missing-target"],
       "oracle": "context-marker route-evidence rubric"
     }
   ]

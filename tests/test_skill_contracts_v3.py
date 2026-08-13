@@ -257,18 +257,71 @@ class SkillContractsV3Tests(unittest.TestCase):
         manifest = json.loads(read("evals/context-marker-route-evidence/scenarios.json"))
         self.assertEqual("context-marker-route-evidence", manifest["suite"])
         self.assertEqual(
-            ("registered-route-is-observable", "path-helper-is-not-a-route"),
+            (
+                "framework-table-bound-handler",
+                "framework-include-delegates",
+                "url-helper-only",
+                "local-register-name-no-provenance",
+                "framework-constructor-no-target",
+            ),
             tuple(scenario["id"] for scenario in manifest["scenarios"]),
         )
         self.assertEqual(
-            (True, False),
-            tuple(scenario["expected"]["route_fragment"] for scenario in manifest["scenarios"]),
+            (
+                (True, True, True, True),
+                (True, True, True, True),
+                (False, False, False, False),
+                (False, True, True, False),
+                (True, True, False, False),
+            ),
+            tuple(
+                (
+                    scenario["expected"]["framework_provenance"],
+                    scenario["expected"]["registration_sink"],
+                    scenario["expected"]["bound_target"],
+                    scenario["expected"]["route_fragment"],
+                )
+                for scenario in manifest["scenarios"]
+            ),
         )
+        by_id = {scenario["id"]: scenario for scenario in manifest["scenarios"]}
+        direct = by_id["framework-table-bound-handler"]["input"]["source_snippet"]
+        self.assertIn("from django.http import HttpResponse", direct)
+        self.assertIn("from django.urls import path", direct)
+        self.assertIn("def status_view(request):", direct)
+        self.assertIn('urlpatterns = [path("status/", status_view, name="status")]', direct)
+        self.assertEqual("direct", by_id["framework-table-bound-handler"]["expected"]["dispatch"])
+        self.assertIsNone(by_id["framework-table-bound-handler"]["expected"]["http_verb"])
+
+        delegated = by_id["framework-include-delegates"]["input"]["source_snippet"]
+        self.assertIn("from django.urls import include, path", delegated)
+        self.assertIn("child_patterns = [path(", delegated)
+        self.assertIn("include((child_patterns, \"child\"))", delegated)
+        self.assertEqual("delegation", by_id["framework-include-delegates"]["expected"]["dispatch"])
+        self.assertIsNone(by_id["framework-include-delegates"]["expected"]["http_verb"])
+
+        helper = by_id["url-helper-only"]["input"]["source_snippet"]
+        self.assertIn("class Resource:", helper)
+        self.assertIn("def detail_url(self):", helper)
+        self.assertIn('return f"/resources/{self.identifier}/"', helper)
+        self.assertNotIn("django", helper)
+
+        local_register = by_id["local-register-name-no-provenance"]["input"]["source_snippet"]
+        self.assertIn("def register(method, pattern, callback):", local_register)
+        self.assertIn("def status_callback():", local_register)
+        self.assertIn('registrations = [register("GET", "/status", status_callback)]', local_register)
+        self.assertNotIn("import ", local_register)
+
+        no_target = by_id["framework-constructor-no-target"]["input"]["source_snippet"]
+        self.assertIn("from django.urls import path", no_target)
+        self.assertIn('urlpatterns = [path("status/", None)]', no_target)
+
         for scenario in manifest["scenarios"]:
             with self.subTest(scenario=scenario["id"]):
                 self.assertEqual("context-marker", scenario["skill"])
                 self.assertTrue(scenario["synthetic"])
                 self.assertTrue(scenario["input"]["source_snippet"])
+                compile(scenario["input"]["source_snippet"], scenario["id"], "exec")
                 self.assertTrue(scenario["pressure"])
                 self.assertEqual("context-marker route-evidence rubric", scenario["oracle"])
                 pressure = scenario["pressure"].lower()
@@ -280,14 +333,19 @@ class SkillContractsV3Tests(unittest.TestCase):
             + read("skills/context-marker/references/context-artifact-contract.md")
         ).lower()
         for term in (
-            "explicit framework registration",
-            "path and http action",
+            "route = framework provenance and registration sink and bound target",
+            "imported or qualified",
+            "known framework",
             "route table",
+            "returned mounted collection",
             "decorator",
             "router registration",
-            "setup/include binding",
-            "url/path helper alone",
-            "not route-registration evidence",
+            "identified handler",
+            "included resolver",
+            "cited evidence_ranges jointly establish all three gates",
+            "direct dispatch only when the target resolves",
+            "include binding is delegation",
+            "emit an http verb only when",
         ):
             with self.subTest(term=term):
                 self.assertIn(term, guidance)
