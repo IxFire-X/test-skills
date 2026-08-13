@@ -145,6 +145,17 @@ class SkillContractsV3Tests(unittest.TestCase):
         for forbidden in ("minimum case", "maximum case", "per-domain count", "numeric target"):
             self.assertNotIn("accept " + forbidden, text)
 
+    def test_adaptive_case_granularity_inline_contexts_are_valid_context_artifacts(self):
+        manifest = json.loads(read("evals/adaptive-case-granularity/scenarios.json"))
+        scenarios = manifest["scenarios"]
+        self.assertEqual(3, len(scenarios))
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario["id"]):
+                self.assertEqual(
+                    [],
+                    schema_diagnostics(scenario["input"]["inline_context"], ROOT / STAGE_SCHEMAS["context-marker"], ROOT),
+                )
+
     def test_context_requirement_ids_have_a_reproducible_derivation_rule(self):
         text = read("skills/context-marker/references/context-artifact-contract.md")
         for term in (
