@@ -7,8 +7,12 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | Artifact | Description |
 |---|---|
 | `raw_content` | Unstructured supplied requirements or code context. |
-| `analytics_documentation` | Normalized requirements with provenance. |
-| `source_code_and_diff` | Read-only project context and supplied changes. |
+| `technical_test_inventory` | Closed mechanical inventory of supported test files and symbols. |
+| `authorized_behavior_sources` | Closed snapshot of supplied requirements and eligible product sources. |
+| `managed_behavior_context` | Authorized behavior context isolated from technical test evidence. |
+| `technical_test_classification` | Candidate scope classification for every inventoried test symbol. |
+| `classification_review` | Independent completeness review of the technical classification. |
+| `effective_technical_evidence` | Accepted classification sidecar retained outside the V3 downstream route. |
 | `candidate_document` | Candidate bare canonical test document. |
 | `candidate_bundle_receipt` | Immutable candidate JSON, Markdown, and CSV receipt. |
 | `validation_report` | Reviewed candidate validation report. |
@@ -28,6 +32,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | Skill | Path |
 |---|---|
 | `context-marker` | `skills/context-marker/SKILL.md` |
+| `test-classifier` | `skills/test-classifier/SKILL.md` |
+| `test-classifier-reviewer` | `skills/test-classifier-reviewer/SKILL.md` |
 | `tc-generator` | `skills/tc-generator/SKILL.md` |
 | `tc-reviewer` | `skills/tc-reviewer/SKILL.md` |
 | `tc-to-autotest` | `skills/tc-to-autotest/SKILL.md` |
@@ -38,6 +44,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 | Verdict type | Values |
 |---|---|
+| `classification` | `ПРИНЯТО`, `ТРЕБУЕТ ДОРАБОТКИ` |
 | `review` | `ПРИНЯТО`, `AUTO_FIX_APPLIED`, `ТРЕБУЕТ ДОРАБОТКИ` |
 | `execution` | `PASS`, `FAIL`, `NOT_RUNNABLE` |
 | `trace` | `PASS`, `FAIL` |
@@ -46,6 +53,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 | From | Predicates | Transform |
 |---|---|---|
+| `test-classifier-reviewer` | `classification_verdict` = `ПРИНЯТО` | `select_effective_technical_evidence` |
+| `test-classifier-reviewer` | `classification_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_classification_rework` |
 | `tc-reviewer` | `review_verdict` = `ПРИНЯТО` | `revision_orchestrator_selects_candidate` |
 | `tc-reviewer` | `review_verdict` = `AUTO_FIX_APPLIED` | `revision_orchestrator_validates_publishes_selects_successor` |
 | `tc-reviewer` | `review_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |

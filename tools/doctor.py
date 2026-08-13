@@ -17,6 +17,11 @@ def inspect_environment(root: Path) -> dict[str, object]:
     root = root.resolve()
     required_files = (
         "contracts/pipeline.json",
+        "schemas/test-symbol-registry.schema.json",
+        "schemas/source-inventory-output.schema.json",
+        "schemas/test-classifier-output.schema.json",
+        "schemas/test-classifier-reviewer-output.schema.json",
+        "schemas/effective-technical-evidence.schema.json",
         "schemas/canonical-test-document.schema.json",
         "schemas/tc-reviewer-output.schema.json",
         "schemas/tc-to-autotest-output.schema.json",
@@ -34,6 +39,8 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "tools/skillsrc_manifest.py",
         "tools/discover_project.py",
         "tools/init_skillsrc.py",
+        "skills/test-classifier/SKILL.md",
+        "skills/test-classifier-reviewer/SKILL.md",
     )
     required_dirs = ("schemas", "tools", "contracts")
     missing_integrity = [item for item in required_files if not (root / item).is_file()]
@@ -43,6 +50,11 @@ def inspect_environment(root: Path) -> dict[str, object]:
     for relative, expected in (
         ("contracts/pipeline.json", "pipeline"),
         ("schemas/orchestrator-output.schema.json", "schemas/orchestrator-output.schema.json"),
+        ("schemas/test-symbol-registry.schema.json", "schemas/test-symbol-registry.schema.json"),
+        ("schemas/source-inventory-output.schema.json", "schemas/source-inventory-output.schema.json"),
+        ("schemas/test-classifier-output.schema.json", "schemas/test-classifier-output.schema.json"),
+        ("schemas/test-classifier-reviewer-output.schema.json", "schemas/test-classifier-reviewer-output.schema.json"),
+        ("schemas/effective-technical-evidence.schema.json", "schemas/effective-technical-evidence.schema.json"),
         ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json"),
         ("schemas/skillsrc.schema.json", "schemas/skillsrc.schema.json"),
         ("schemas/project-discovery-output.schema.json", "schemas/project-discovery-output.schema.json"),
@@ -54,7 +66,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if expected == "pipeline":
-                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "2.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
+                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "4.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
             else:
                 valid = data.get("$id") == expected and data.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
             if not valid:

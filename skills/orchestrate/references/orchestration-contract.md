@@ -1,4 +1,4 @@
-# Контракт оркестрации Pipeline 2.0
+# Контракт оркестрации Pipeline 4.0
 
 ## Источники истины
 
@@ -22,7 +22,7 @@
 
    Затем загрузи `<project>/.skillsrc` и выбери exact module ID. Автоматически выбирай только единственный module. Для exact relative feature path выбирай содержащий его module root; для текста проверяй только `feature_sources` и source paths. При нуле совпадений запроси path/module ID, при нескольких — покажи IDs/evidence и запроси один выбор. Не переходи к `context-marker` без exact module selection.
 
-2. Выполни `context-marker` и `tc-generator`. Проверь bare canonical JSON schema+semantic facade и вызови publisher; не создавай CSV отдельным legacy exporter.
+2. Выполни `source-inventory`, затем `context-marker` с raw content и обоими inventories. Передай `technical_test_inventory`, `authorized_behavior_sources` и `managed_behavior_context` в `test-classifier`, затем передай candidate classification независимому `test-classifier-reviewer`. При `ПРИНЯТО` сохрани `effective_technical_evidence` как sidecar attempt; при `ТРЕБУЕТ ДОРАБОТКИ` остановись и верни findings классификатору. Не передавай classification/effective technical evidence в V3 automation, trace или final carriers. Передай только `managed_behavior_context` в `tc-generator`, проверь bare canonical JSON schema+semantic facade и вызови publisher; не создавай CSV отдельным legacy exporter.
 
 3. Вызови `orchestrate_revision(candidate, review_artifact, output_dir, csv_profile, ...)`. Candidate публикуется до review; valid full successor — до selection. Передай downstream только effective JSON/digest.
 
@@ -42,7 +42,7 @@
 
 ## Route и terminal branches
 
-`context-marker -> tc-generator -> candidate publication -> tc-reviewer/effective selection -> tc-to-autotest -> autotest-reviewer -> optional runner -> trace -> finalization`.
+`source-inventory -> context-marker -> test-classifier -> test-classifier-reviewer -> tc-generator -> candidate publication -> tc-reviewer/effective selection -> tc-to-autotest -> autotest-reviewer -> optional runner -> trace -> finalization`.
 
 Markdown/CSV никогда не являются downstream input. Runtime identity — exact pair `(file_id, symbol_id)`; несколько pairs для target имеют AND semantics. Trace строится для PASS, manual remainder, MANUAL_ONLY, BLOCKED, FAIL и NOT_RUNNABLE.
 

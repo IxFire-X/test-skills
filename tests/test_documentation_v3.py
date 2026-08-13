@@ -48,7 +48,7 @@ class DocumentationV3Tests(unittest.TestCase):
             result.stdout.splitlines(),
         )
 
-    def test_each_public_guide_describes_the_v3_model(self) -> None:
+    def test_each_public_guide_describes_the_pipeline_v4_model_and_v3_tail(self) -> None:
         required = (
             "bare canonical JSON",
             "Действие",
@@ -63,6 +63,10 @@ class DocumentationV3Tests(unittest.TestCase):
             "BLOCKED",
             "NOT_RUNNABLE",
             "tenant import round trip remains unverified",
+            "Pipeline 4.0",
+            "managed_behavior_context",
+            "test-classifier",
+            "effective_technical_evidence",
         )
         for name, text in self.docs.items():
             with self.subTest(document=name):
@@ -116,7 +120,7 @@ class DocumentationV3Tests(unittest.TestCase):
         pipeline = render_pipeline(self.contract)
         contracts = render_contracts(self.contract)
         self.assertIn("test-pipeline", pipeline)
-        self.assertIn("2.0", pipeline)
+        self.assertIn("4.0", pipeline)
         for step in self.contract["steps"]:
             self.assertIn(f"`{step['id']}`", pipeline)
             self.assertIn(f"`{step['kind']}`", pipeline)

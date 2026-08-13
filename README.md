@@ -3,7 +3,7 @@
 Портативный AI-пайплайн для проектирования тест-кейсов, независимого ревью,
 проектно-нативной автоматизации, исполнения и проверяемой трассировки.
 
-## Модель V3
+## Модель Pipeline 4.0 и V3 tail
 
 `bare canonical JSON` — единственный семантический источник истины. Один документ
 может содержать произвольное число последовательных шагов, stable IDs, ссылки на
@@ -38,13 +38,22 @@ was observed, but a real tenant import round trip remains unverified.
 
 ```text
 requirements and allowed project context
-  -> context-marker
-  -> tc-generator (candidate bare canonical JSON)
+  -> source-inventory (technical test inventory + authorized behavior sources)
+  -> context-marker (managed behavior context)
+  -> test-classifier -> test-classifier-reviewer (persisted technical evidence sidecar)
+  -> tc-generator (candidate bare canonical JSON; managed behavior context only)
   -> publish candidate JSON/Markdown/Zephyr CSV bundle
   -> tc-reviewer and effective revision selection
   -> tc-to-autotest -> autotest-reviewer
   -> optional runner -> build trace -> trace check -> finalization
 ```
+
+`source-inventory` сохраняет `technical_test_inventory` и
+`authorized_behavior_sources`. `context-marker` создаёт
+`managed_behavior_context`; `test-classifier` и
+`test-classifier-reviewer` сохраняют принятое `effective_technical_evidence` только
+как sidecar attempt. В V3 automation, trace и finalization это техническое evidence
+не передаётся; `tc-generator` получает только `managed_behavior_context`.
 
 Automation описывает generated files, pair-addressed symbols и atomic
 operation/assertion relations. Runtime identity — `(file_id, symbol_id)`; несколько

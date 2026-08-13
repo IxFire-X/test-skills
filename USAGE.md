@@ -1,4 +1,4 @@
-# Использование Test Skills V3
+# Использование Test Skills Pipeline 4.0
 
 ## Подключение и границы
 
@@ -35,6 +35,13 @@ python tools\contract_check.py --root . --full
 ```
 
 ## Артефакты и публикация
+
+Перед генерацией `source-inventory` строит закрытые `technical_test_inventory` и
+`authorized_behavior_sources`. `context-marker` получает raw content и оба
+snapshots, но передаёт генератору только `managed_behavior_context`.
+`test-classifier` и независимый `test-classifier-reviewer` покрывают каждый
+инвентаризированный symbol; принятое `effective_technical_evidence` сохраняется
+рядом с attempt и не становится входом V3 automation, trace или finalization.
 
 `bare canonical JSON` — источник истины. Он хранит requirements, cases и
 произвольное число ordered steps с human actions/results, typed data flow,

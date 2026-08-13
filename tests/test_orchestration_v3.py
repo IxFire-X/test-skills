@@ -147,8 +147,8 @@ class OrchestrationV3Tests(unittest.TestCase):
         with self.assertRaises(OrchestrationError):
             finalize_orchestration(document, receipt, automation, review, run, trace)
 
-    def test_contract_checker_rejects_exact_v3_route_and_step_mutations(self) -> None:
-        # Break caught: an exact V3 branch or stage carrier silently drifts while IDs still exist.
+    def test_contract_checker_rejects_exact_pipeline_v4_route_and_step_mutations(self) -> None:
+        # Break caught: a Pipeline 4.0 route, V3 tail branch, or stage carrier silently drifts while IDs still exist.
         from tools.contract_check import validate_pipeline_contract
 
         root = Path(__file__).resolve().parents[1]

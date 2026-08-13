@@ -2,14 +2,17 @@
 
 Generated from `contracts/pipeline.json`. Do not edit manually.
 
-Version: `2.0`
+Version: `4.0`
 
 ## Steps
 
 | Step | `kind` | `accepts` | `forwards` | `produces` |
 |---|---|---|---|---|
-| `context-marker` | `skill` | `raw_content` | — | `analytics_documentation`, `source_code_and_diff` |
-| `tc-generator` | `skill` | `analytics_documentation`, `source_code_and_diff` | `analytics_documentation`, `source_code_and_diff` | `candidate_document` |
+| `source-inventory` | `tool` | `raw_content` | `raw_content` | `technical_test_inventory`, `authorized_behavior_sources` |
+| `context-marker` | `skill` | `raw_content`, `technical_test_inventory`, `authorized_behavior_sources` | `technical_test_inventory`, `authorized_behavior_sources` | `managed_behavior_context` |
+| `test-classifier` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context` | `technical_test_classification` |
+| `test-classifier-reviewer` | `skill` | `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `technical_test_classification` | `managed_behavior_context` | `classification_review`, `effective_technical_evidence` |
+| `tc-generator` | `skill` | `managed_behavior_context` | `managed_behavior_context` | `candidate_document` |
 | `publish-candidate` | `tool` | `candidate_document` | `candidate_document` | `candidate_bundle_receipt` |
 | `tc-reviewer` | `skill` | `candidate_document` | `candidate_document` | `validation_report`, `successor_document` |
 | `revision-orchestrator` | `tool` | `candidate_document`, `candidate_bundle_receipt`, `validation_report`, `successor_document` | `candidate_bundle_receipt`, `validation_report` | `successor_bundle_receipt`, `effective_document`, `effective_bundle_receipt` |
@@ -24,6 +27,8 @@ Version: `2.0`
 
 | From | Predicates | Transform |
 |---|---|---|
+| `test-classifier-reviewer` | `classification_verdict` = `ПРИНЯТО` | `select_effective_technical_evidence` |
+| `test-classifier-reviewer` | `classification_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_classification_rework` |
 | `tc-reviewer` | `review_verdict` = `ПРИНЯТО` | `revision_orchestrator_selects_candidate` |
 | `tc-reviewer` | `review_verdict` = `AUTO_FIX_APPLIED` | `revision_orchestrator_validates_publishes_selects_successor` |
 | `tc-reviewer` | `review_verdict` = `ТРЕБУЕТ ДОРАБОТКИ` | `stop_rework` |

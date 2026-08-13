@@ -1,4 +1,4 @@
-# Как работает полный тестовый пайплайн V3
+# Как работает полный тестовый пайплайн Pipeline 4.0
 
 ## Главная идея
 
@@ -8,8 +8,10 @@
 
 ```text
 allowed requirements and read-only project context
-  -> context-marker
-  -> tc-generator: candidate bare canonical JSON
+  -> source-inventory: technical test inventory + authorized behavior sources
+  -> context-marker: managed behavior context
+  -> test-classifier -> test-classifier-reviewer: persisted technical evidence sidecar
+  -> tc-generator: candidate bare canonical JSON from managed behavior context only
   -> publish immutable JSON/Markdown/CSV bundle
   -> tc-reviewer and effective revision selection
   -> tc-to-autotest -> autotest-reviewer
@@ -19,6 +21,14 @@ allowed requirements and read-only project context
 Внешний контроллер читает нужный `SKILL.md`, reference, schema, вход текущего
 этапа и путь результата, затем запускает validator и проверяет exit code. Независимый
 reviewer должен работать в fresh context и не видеть hidden reasoning генератора.
+
+`source-inventory` механически создаёт snapshots test files/symbols и authorized
+behavior sources. `context-marker` выделяет managed behavior context, а classifier
+и independent reviewer классифицируют полный inventory. Accepted
+`effective_technical_evidence` остаётся persisted sidecar attempt: в Phase 1 оно
+никогда не передаётся в V3 automation, trace или finalization. Structural guard:
+`tc-generator` получает только `managed_behavior_context`, без raw test source,
+inventory или classification.
 
 ## Автоматическое discovery и границы проекта
 
