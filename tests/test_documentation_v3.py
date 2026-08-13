@@ -30,6 +30,24 @@ class DocumentationV3Tests(unittest.TestCase):
             {path.name for path in (*PUBLIC_DOCS, *GENERATED_DOCS)},
         )
 
+    def test_projection_byte_goldens_are_checkout_stable(self) -> None:
+        """Removing binary attributes would let autocrlf corrupt locked bytes."""
+        paths = (
+            "tests/fixtures/projections/full-http.markdown.bin",
+            "tests/fixtures/projections/full-http.zephyr-scale.csv.bin",
+        )
+        result = subprocess.run(
+            ["git", "check-attr", "text", "--", *paths],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(
+            [f"{path}: text: unset" for path in paths],
+            result.stdout.splitlines(),
+        )
+
     def test_each_public_guide_describes_the_v3_model(self) -> None:
         required = (
             "bare canonical JSON",
