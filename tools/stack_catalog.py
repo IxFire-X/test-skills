@@ -6,7 +6,7 @@ from pathlib import Path
 
 IGNORED_DIR_NAMES = frozenset({
     ".git", ".idea", ".tools", ".venv", "venv", "__pycache__",
-    "node_modules", "target", "build", "dist", ".pytest_cache", ".ruff_cache",
+    "node_modules", "target", "build", "dist", ".pytest_cache", ".ruff_cache", ".secrets",
 })
 
 MANIFEST_LANGUAGES = {

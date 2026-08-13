@@ -79,8 +79,12 @@ import pytest
             (root / "pyproject.toml").write_text('[project]\nname="sample"\n', encoding="utf-8")
             (root / "src/service.py").write_text("def service(): pass\n", encoding="utf-8")
             (root / "src/pkg/test_api.py").write_text("def test_api(): pass\n", encoding="utf-8")
+            (root / "src/.secrets").mkdir()
+            (root / "src/.secrets/test_secret.py").write_text("def test_secret(): pass\n", encoding="utf-8")
 
-            skillsrc = compile_skillsrc(discover_project(root), {})
+            discovery = discover_project(root)
+            self.assertEqual(["src/pkg/test_api.py"], discovery["modules"][0]["paths"]["tests"])
+            skillsrc = compile_skillsrc(discovery, {})
             result = build_source_inventories(root, skillsrc, "root", ())
 
             self.assertEqual(["src/pkg/test_api.py"], [row["path"] for row in result.technical_test_inventory["files"]])
