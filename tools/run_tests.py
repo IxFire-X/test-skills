@@ -365,7 +365,7 @@ def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_d
         if not interpreter or run_subprocess([interpreter, "-c", "import pytest"], project)[0] != 0: return _report("NOT_RUNNABLE", project, language, source, [_diag("/environment", "RUNNER_ENVIRONMENT", "Python runtime or pytest is unavailable.")])
         with tempfile.TemporaryDirectory(prefix="run-tests-v3-") as temporary:
             xml = Path(temporary) / "junit.xml"; targets = [str(row["path"].relative_to(project)) + "::" + row["node"] for _, row in sorted(compatibility.bindings.items())]
-            code, _, _ = run_subprocess([interpreter, "-m", "pytest", "-q", "--junitxml", str(xml), *targets], project); evidence = _records(xml, compatibility, run_id, source)
+            code, _, _ = run_subprocess([interpreter, "-m", "pytest", "-q", "--rootdir", str(project), "--junitxml", str(xml), *targets], project); evidence = _records(xml, compatibility, run_id, source)
         runner = "pytest"
     else:
         interpreter, executable = _java_runner(project)

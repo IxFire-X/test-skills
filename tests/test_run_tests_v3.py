@@ -281,6 +281,34 @@ class RunTestsV3Tests(unittest.TestCase):
             self.assertEqual(["PASSED", "PASSED", "FAILED"], [row["status"] for row in report["execution_evidence"]])
             self.assertEqual([], schema_diagnostics(report, ROOT / "schemas" / "run-tests-output.schema.json", ROOT))
 
+    def test_python_runner_sets_selected_project_as_pytest_rootdir(self) -> None:
+        """JUnit classnames must stay relative to the selected module root."""
+        from tools.run_tests import run_tests_v3
+
+        document = canonical_document()
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "tests").mkdir()
+            content = b"def test_one():\n    assert True\n"
+            (project / "tests" / "test_one.py").write_bytes(content)
+            artifact = artifact_for(
+                document,
+                [{"file_id": "FILE-one", "path": "tests/test_one.py", "language": "python", "framework": "pytest", "content_digest": digest(content)}],
+                [{"file_id": "FILE-one", "symbol_id": "SYMBOL-one", "locator": {"kind": "python_module_function", "function_name": "test_one"}}],
+            )
+            resolver = FixedResolver({("environment", "API_BASE_URL"): "https://api.example"})
+            with mock.patch("tools.run_tests._python", return_value=sys.executable), mock.patch(
+                "tools.run_tests.run_subprocess", side_effect=[(0, "", ""), (0, "", "")]
+            ) as runner:
+                run_tests_v3(project, "python", document, artifact, resolver, ReadyRegistry())
+
+        command = runner.call_args_list[1].args[0]
+        self.assertEqual(
+            [sys.executable, "-m", "pytest", "-q", "--rootdir", str(project.resolve())],
+            command[:6],
+        )
+        self.assertEqual("--junitxml", command[6])
+
     def test_blocked_and_manual_artifacts_reject_direct_execution_without_a_report(self) -> None:
         """Treating blocked/manual work as NOT_RUNNABLE evidence would fabricate an execution attempt."""
         from tools.run_tests import RunnerInputError, run_tests_v3
