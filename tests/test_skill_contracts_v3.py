@@ -92,7 +92,7 @@ class SkillContractsV3Tests(unittest.TestCase):
             "skills/tc-reviewer/SKILL.md": ("canonical_document", "revision_selection", "tc-reviewer-output.schema.json"),
             "skills/tc-to-autotest/SKILL.md": ("canonical_document", "automation_validation", "execution_preflight"),
             "skills/autotest-reviewer/SKILL.md": ("canonical_document", "automation_validation", "autotest-reviewer-output.schema.json"),
-            "skills/orchestrate/SKILL.md": ("Pipeline 2.0", "orchestrate_test_case_revision", "build_trace_document", "trace_check"),
+            "skills/orchestrate/SKILL.md": ("Pipeline 4.0", "orchestrate_test_case_revision", "build_trace_document", "trace_check"),
         }
         for relative, terms in required_tools.items():
             with self.subTest(relative=relative):
