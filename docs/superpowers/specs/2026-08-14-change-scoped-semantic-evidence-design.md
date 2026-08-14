@@ -75,7 +75,7 @@ The caller performs the requested LLM task, submits the closed artifact with `--
 
 ### Two internal deep modules
 
-`change_scope` owns baseline binding, Git/patch acquisition, metadata comparison, impact closure, scope review, and a promoted scope receipt:
+`baseline_lifecycle` owns baseline validation and the only conversion of full predecessor evidence into a scope capability. `change_scope` owns Git/patch acquisition, metadata comparison, impact closure, scope review, and a promoted scope receipt:
 
 ```python
 start_scope(inputs) -> ScopeSnapshot
@@ -92,6 +92,42 @@ advance_promotion(snapshot, controller=None) -> PromotionAction
 ```
 
 These are internal interfaces used only by the façade and focused tests. Their implementations may share the existing source inventory, planning, current-byte, stable-fragment, and validated-context helpers. No orchestrator may reconstruct their joins.
+
+### Validated `ScopePredecessor` capability
+
+`baseline_lifecycle` exposes one internal factory:
+
+```python
+bind_scope_predecessor(
+    baseline: ValidatedBaseline,
+    predecessor_source_inventory_envelope,
+    predecessor_context_v5_envelope,
+    predecessor_behavior_context_receipt,
+) -> ScopePredecessor
+```
+
+The factory is called by `feature_flow` after it has read immutable predecessor artifacts. It first validates the exact full source-inventory envelope, the exact V5 context-marker envelope, and the exact behavior-context receipt against the artifact digests carried by the already validated Baseline Receipt. The binding chain is exact: `ValidatedBaseline.receipt_sha256` identifies the Baseline Receipt; its `authorized_behavior_sources_sha256`, `managed_behavior_context_sha256`, `behavior_source_accounting_sha256`, and `behavior_context_receipt_sha256` identify the full predecessor carriers; the source envelope's internal authorized-source digest, both V5 context projections' authorized-source digests, the accounting receipt digest, and the receipt's authorized-source digest must agree. The full source envelope and V5 context envelope each satisfy their closed local schema before any projection is made.
+
+The factory then reuses the baseline module's pure stored-context relation validator; it does not copy a second partial validator into `change_scope`. That validator must prove the complete V5 joins for authorized source order and uniqueness, requirement display order and source links, product projections, represented and no-fact dispositions, fragment registry ownership, fragment-group coverage, and receipt source outcomes. It returns a recursively immutable, opaque `ScopePredecessor` containing only:
+
+- validated baseline identity: baseline receipt digest, repository identity, target commit, target tree, and selected module;
+- the ordered authorized source identity slots required for before-side joins (`source_id`, kind, canonical path, and content digest); and
+- ordered baseline requirement IDs.
+
+The capability has no public constructor, serializer, JSON projection, digest, or deserialization route. Its concrete type and any trust guard are private to `baseline_lifecycle`; only the factory can create it. It contains no raw source bytes, raw diff, full envelope, V5 receipt, fragment, group, outcome, planner item, prompt, or reasoning. `change_scope` may consume its internal read-only slots but may neither recover nor request the discarded carriers.
+
+`ScopeInputs` is exactly:
+
+```python
+ScopeInputs(
+    project_root, run_mode, selected_module, analytics_sha256, change_input,
+    current_source_inventory, current_test_inventory, predecessor, relations=(),
+)
+```
+
+It has no `baseline`, `baseline_source_inventory_envelope`, or `baseline_context_envelope` field. `FULL` requires `predecessor is None` and no change input. `CHANGE_SET` requires an exact `ScopePredecessor`; its selected module and repository must equal the inputs, and its target commit/tree and derived base snapshot must equal the closed change input's base. A foreign object, a forged look-alike, a missing capability, or any mismatch is rejected before candidate creation. Scope snapshots and candidates retain only safe identity metadata, public change-record metadata/digests, inventories, relation IDs/locators, source IDs, and requirement IDs; they never retain raw source/diff bytes, predecessor envelopes, receipts, fragments, groups, outcomes, or planner content.
+
+Failure to validate or bind a predecessor is `BASELINE_BINDING` internally. At the façade mode-selection boundary it is treated exactly as an unavailable compatible baseline and returns `RUN_FULL_BASELINE`; it never starts a partial `CHANGE_SET`. This introduces no catalog, version registry, persisted capability, or new artifact family.
 
 ## Run modes
 
@@ -111,7 +147,7 @@ A supplied diff on the first run is recorded as an input digest but never narrow
 
 ### Subsequent `CHANGE_SET`
 
-Incremental execution requires an exact Pipeline 6 baseline whose module, `.skillsrc` identity, source-inventory contract, repository identity, base tree, full context, and receipt digests all validate. Otherwise the façade automatically returns `RUN_FULL_BASELINE`.
+Incremental execution requires an exact Pipeline 6 baseline and a `ScopePredecessor` minted from its full source, V5 context, and behavior-context receipt evidence. Module, `.skillsrc` identity, source-inventory contract, repository identity, base tree, full context, and receipt digests must all validate. Otherwise the façade automatically returns `RUN_FULL_BASELINE`.
 
 A change set is one closed variant:
 
@@ -136,6 +172,8 @@ symbol -> file -> deterministic domain -> selected module -> FULL refresh
 Widen when rename identity, binary meaning, deletion impact, cross-file binding, generated/config behavior, or dependency closure cannot be proved at the narrower level. Missing, stale, foreign, incompatible, or partially readable baseline evidence immediately selects `FULL`; the user is not asked to tune scope.
 
 ## Change scope
+
+`change_scope` accepts only the capability above for predecessor authority. It does not accept or read predecessor source/context/receipt envelopes, behavior fragments, accounting groups, source outcomes, or planner data. Its before-side joins use the capability's ordered slots; its candidate and receipt bind the capability's baseline receipt digest, never an independently supplied predecessor digest.
 
 ### Mechanical change records
 
@@ -284,7 +322,7 @@ A deleted source with supported baseline behavior emits promoted retired tombsto
 }
 ```
 
-All arrays are canonically ordered and exact. `included_test_symbols` always comes from a freshly rebuilt complete technical test inventory. It identifies impacted technical evidence only. Existing or changed tests never originate product requirements or canonical cases.
+All arrays are canonically ordered and exact. `included_test_symbols` always comes from a freshly rebuilt complete technical test inventory. It identifies impacted technical evidence only. Existing or changed tests never originate product requirements or canonical cases. The candidate is a public safe projection: it may contain IDs, content digests, paths, locators, reasons, and change metadata, but never raw source/diff bytes, full predecessor carriers, V5 receipt content, fragment/group/outcome data, planner items, prompts, responses, or reasoning.
 
 ### Scope semantic audits
 
@@ -712,6 +750,8 @@ All direct CLI failures use safe `{path, code, message}`, exit 2, and no traceba
 
 Diagnostic precedence is drift/baseline eligibility, shape, binding/fingerprint, identity/order/state, audit, assurance, coverage, persistence.
 
+For predecessor capability construction, invalid full carrier shape is reported as `BASELINE_BINDING` after safe local-schema diagnostics are contained; foreign, stale, incomplete, or forged carriers and forged capabilities use the same code. `feature_flow` converts these mode-selection failures to `RUN_FULL_BASELINE`; it does not expose the rejected carrier or downgrade the error into an incremental warning.
+
 ## Attempt-04 pilot
 
 Attempts 02 and 03 remain immutable terminal `REWORK` evidence. Attempt-04 starts under a new create-only root only after implementation verification.
@@ -775,6 +815,9 @@ Implementation begins with these public-interface failures:
 36. `test_safe_artifacts_and_diagnostics_do_not_echo_seeded_secret` — raw source/diff/prompt/reasoning remain absent.
 37. `test_attempt04_fixed_24_control_pilot_blocks_any_mismatch` — all 12 categories pass the portable floor.
 38. `test_pipeline6_versions_docs_doctor_renderer_and_legacy_rejection` — Pipeline 5/V5/Receipt V1 remain historical rejection rows and the full Pipeline 6 suite passes.
+39. `test_scope_predecessor_is_baseline_minted_and_opaque` — only `bind_scope_predecessor` can create a recursively immutable capability; it exposes exactly baseline identity, ordered source slots, and ordered requirement IDs, with no JSON projection or raw predecessor carrier.
+40. `test_scope_predecessor_revalidates_full_v5_receipt_joins` — foreign/digest-matched, incomplete, represented/no-fact, fragment/group/outcome, or requirement/product/source-link mismatch rejects before `CHANGE_SET` candidate creation and makes the façade select `RUN_FULL_BASELINE`.
+41. `test_scope_inputs_require_exact_predecessor_capability` — `FULL` accepts only `None`; `CHANGE_SET` rejects a missing, forged, module/repository/base-mismatched, or raw-envelope predecessor and snapshots/candidates retain no raw source/diff/receipt/fragment/planner content.
 
 Tests cross the external `feature_flow` interface. Focused internal module tests cover only invariants not observable through a practical façade scenario.
 
@@ -789,7 +832,7 @@ Migration is one-way and shadowed before authority changes:
 5. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after all RED, compatibility, and shadow gates pass;
 6. start InvenTree attempt-04 from a new root; never import or wrap attempt-02/03 batch results as promoted evidence.
 
-Historical V1 plans and V1 batch-result payloads remain valid only as nested FULL candidates. V2 plans/results are valid only as nested CHANGE_SET candidates. Neither version is directly authoritative. Historical V1 receipts and all loose or unreviewed V1/V2 results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate modes, sides, audits, promotions, tombstones, deltas, terminal receipts, or baselines.
+Before each CHANGE_SET shadow, the façade must mint `ScopePredecessor` from readback of the exact predecessor full source envelope, V5 context envelope, and behavior-context receipt. Historical loose envelopes, receipts, or a reserialized capability cannot cross this seam. Historical V1 plans and V1 batch-result payloads remain valid only as nested FULL candidates. V2 plans/results are valid only as nested CHANGE_SET candidates. Neither version is directly authoritative. Historical V1 receipts and all loose or unreviewed V1/V2 results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate modes, sides, capabilities, audits, promotions, tombstones, deltas, terminal receipts, or baselines.
 
 ## Costs and risks
 
