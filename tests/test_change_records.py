@@ -246,6 +246,15 @@ class ChangeRecordTests(unittest.TestCase):
             with self.assertRaisesRegex(FlowError, "CHANGE_SOURCE_DRIFT"):
                 verify_change_input(project, frozen)
 
+    def test_reconstructed_worktree_public_mapping_has_no_snapshot_authority(self) -> None:
+        """A JSON-shaped copy cannot silently bypass frozen worktree drift proof."""
+        with tempfile.TemporaryDirectory() as temporary:
+            project, base = _init_project(Path(temporary))
+            (project / "modified.txt").write_text("changed\n", encoding="utf-8")
+            frozen = acquire_change_input(project, ChangeInputSpec(base=base, head=None, worktree=True, patch_manifest=None))
+            with self.assertRaisesRegex(FlowError, "CHANGE_SCOPE_BINDING"):
+                verify_change_input(project, dict(frozen))
+
     def test_safe_artifacts_and_diagnostics_do_not_echo_seeded_secret(self) -> None:
         """Persisting source or diagnostic echo would disclose controller-only change evidence."""
         with tempfile.TemporaryDirectory() as temporary:

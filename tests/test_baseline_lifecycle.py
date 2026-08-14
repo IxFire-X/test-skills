@@ -21,6 +21,8 @@ from tests.fixture_factory import canonical_document  # noqa: E402
 from tools.baseline_lifecycle import (  # noqa: E402
     ValidatedBaseline,
     advance_baseline,
+    bind_scope_predecessor,
+    scope_predecessor_projection,
     build_terminal_run_receipt,
     choose_run_mode,
     validate_baseline_receipt,
@@ -897,6 +899,21 @@ class BaselineLifecycleTests(unittest.TestCase):
             error = self.assert_flow_error("FEATURE_FLOW_INPUT", lambda: build_terminal_run_receipt({"seed": seeded}, fixture["tails"]))  # type: ignore[arg-type]
             rendered = "".join(traceback.format_exception(error))
             self.assertNotIn(seeded, rendered)
+
+    def test_issued_scope_predecessor_binds_real_stored_baseline_envelopes(self) -> None:
+        """Task 3 must consume the same envelope hashes Task 2 persisted, not inner digests."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, head, tree = make_project(root)
+            fixture = build_run(root / "run", identity, head, tree)
+            advanced = advance_baseline({"project": project, "baseline_root": root / "baselines"}, persist_terminal(root / "run", fixture))
+            baseline = validate_baseline_receipt(advanced["successor_baseline_receipt"], project, "root", fixture["projected"])
+            def read(name: str) -> dict[str, Any]:
+                binding = fixture["ledger_value"]["artifacts"][name]
+                return json.loads((root / "run" / Path(*PurePosixPath(binding["path"]).parts)).read_bytes())
+            predecessor = bind_scope_predecessor(
+                baseline, read("technical_test_inventory"), read("managed_behavior_context"), read("behavior_context_receipt"),
+            )
+            self.assertEqual(baseline.receipt_sha256, scope_predecessor_projection(predecessor)["receipt_sha256"])
 
 
 if __name__ == "__main__":

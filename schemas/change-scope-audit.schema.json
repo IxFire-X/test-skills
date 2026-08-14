@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/change-scope-audit.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact", "candidate_sha256", "audit_kind", "verdict", "findings"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "artifact": {"const": "change-scope-audit"},
+    "candidate_sha256": {"$ref": "#/$defs/digest"}, "audit_kind": {"enum": ["false_inclusion", "omission"]},
+    "verdict": {"enum": ["ACCEPT", "REWORK"]}, "findings": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/finding"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"verdict": {"const": "ACCEPT"}}}, "then": {"properties": {"findings": {"maxItems": 0}}}, "else": {"properties": {"findings": {"minItems": 1}}}},
+    {"if": {"properties": {"audit_kind": {"const": "false_inclusion"}}}, "then": {"properties": {"findings": {"items": {"allOf": [{"properties": {"code": {"enum": ["IMPACT_SOURCE_UNRELATED", "IMPACT_LEXICAL_COINCIDENCE", "IMPACT_TEST_ONLY_ORIGIN", "IMPACT_WIDENING_UNNECESSARY"]}}, "required": ["code"]}, {"properties": {"candidate_pointer": {"pattern": "^/included_sources/(0|[1-9][0-9]*)$"}}, "required": ["candidate_pointer"]}]}}}}},
+    {"if": {"properties": {"audit_kind": {"const": "omission"}}}, "then": {"properties": {"findings": {"items": {"allOf": [{"properties": {"code": {"enum": ["IMPACT_SOURCE_OMITTED", "IMPACT_TRANSITIVE_OMITTED", "IMPACT_DELETION_EFFECT_OMITTED", "IMPACT_RENAME_EFFECT_OMITTED", "IMPACT_PUBLIC_CONTRACT_OMITTED", "IMPACT_RUNTIME_CONFIG_OMITTED", "IMPACT_ROUTE_BINDING_OMITTED", "IMPACT_CLOSURE_INCOMPLETE"]}}, "required": ["code"]}, {"if": {"properties": {"code": {"const": "IMPACT_SOURCE_OMITTED"}}, "required": ["code"]}, "then": {"properties": {"candidate_pointer": {"const": "/included_sources"}}}, "else": {"properties": {"candidate_pointer": {"pattern": "^/included_sources/(0|[1-9][0-9]*)$"}}, "required": ["candidate_pointer"]}}]}}}}}
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "safe_text": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001F\\u007F]+$"},
+    "locator": {"type": "object", "additionalProperties": false, "required": ["content_sha256", "start_byte", "end_byte"], "properties": {"content_sha256": {"$ref": "#/$defs/digest"}, "start_byte": {"type": "integer", "minimum": 0}, "end_byte": {"type": "integer", "minimum": 1}}},
+    "finding": {"type": "object", "additionalProperties": false, "required": ["finding_id", "code", "candidate_pointer", "source_id", "evidence_locator", "summary"], "properties": {"finding_id": {"type": "string", "pattern": "^FINDING-[0-9a-f]{64}$"}, "code": {"$ref": "#/$defs/safe_text"}, "candidate_pointer": {"type": "string", "pattern": "^/[^\\u0000-\\u001F\\u007F]*$"}, "source_id": {"$ref": "#/$defs/safe_text"}, "evidence_locator": {"$ref": "#/$defs/locator"}, "summary": {"$ref": "#/$defs/safe_text"}}}
+  }
+}

@@ -391,11 +391,15 @@ def acquire_change_input(project: Path, spec: ChangeInputSpec, blob_resolver: Bl
 
 def verify_change_input(project: Path, change_input: Mapping[str, Any]) -> None:
     """Reject later dirty-worktree bytes that differ from the frozen controller snapshot."""
-    if not isinstance(change_input, _FrozenChangeInput):
+    if not isinstance(change_input, Mapping):
+        raise _error("CHANGE_SCOPE_BINDING", "/change_input", "A closed change input mapping is required.")
+    if change_input.get("input_kind") != "git_worktree":
         return
+    if not isinstance(change_input, _FrozenChangeInput):
+        raise _error("CHANGE_SCOPE_BINDING", "/change_input", "Worktree input requires its private frozen snapshot authority.")
     snapshot = _WORKTREE_SNAPSHOTS.get(change_input)
     if snapshot is None:
-        return
+        raise _error("CHANGE_SCOPE_BINDING", "/change_input", "Worktree input is not an issued frozen carrier.")
     for path, expected in snapshot.items():
         candidate = project / Path(*path.split("/"))
         actual = candidate.read_bytes() if candidate.is_file() else None

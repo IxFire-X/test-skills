@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import uuid
+import weakref
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -263,6 +264,14 @@ def _validate_stored_context_relations(
     source_ids = [row.get("source_id") if isinstance(row, Mapping) else None for row in sources]
     if any(not isinstance(value, str) or not value for value in source_ids) or len(source_ids) != len(set(source_ids)):
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/authorized_behavior_sources", "Authorized source IDs must be unique nonempty strings.")
+    for index, source in enumerate(sources):
+        if not isinstance(source, Mapping):
+            raise _error("BASELINE_BINDING", f"/prefix_ledger/artifacts/authorized_behavior_sources/sources/{index}", "Authorized source must be an object.")
+        if source.get("kind") == "product_file":
+            try:
+                _safe_relative(source.get("path"), f"/prefix_ledger/artifacts/authorized_behavior_sources/sources/{index}/path")
+            except FlowError:
+                raise _error("BASELINE_BINDING", f"/prefix_ledger/artifacts/authorized_behavior_sources/sources/{index}/path", "Authorized product path must be safe.") from None
     source_by_id = {row["source_id"]: row for row in sources}
     requirement_ids = [row.get("requirement_id") if isinstance(row, Mapping) else None for row in requirements]
     display_orders = [row.get("display_order") if isinstance(row, Mapping) else None for row in requirements]
@@ -606,7 +615,7 @@ def build_terminal_run_receipt(
     return _freeze(receipt)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ValidatedBaseline:
     repository_id: str
     target_commit: str
@@ -619,6 +628,77 @@ class ValidatedBaseline:
     fingerprints: Mapping[str, str]
     receipt_sha256: str
     receipt: Mapping[str, Any]
+
+
+_VALIDATED_BASELINES: weakref.WeakKeyDictionary[ValidatedBaseline, object] = weakref.WeakKeyDictionary()
+
+
+class ScopePredecessor:
+    """Opaque, immutable projection of a fully validated predecessor."""
+    __slots__ = ("__weakref__",)
+
+    def __init__(self) -> None:
+        raise TypeError("ScopePredecessor is issued only by bind_scope_predecessor.")
+
+
+_SCOPE_PREDECESSORS: weakref.WeakKeyDictionary[ScopePredecessor, Mapping[str, Any]] = weakref.WeakKeyDictionary()
+
+
+def bind_scope_predecessor(
+    baseline: ValidatedBaseline, source_inventory_envelope: Mapping[str, Any],
+    context_envelope: Mapping[str, Any], behavior_context_receipt: Mapping[str, Any],
+) -> ScopePredecessor:
+    """Issue the narrow predecessor capability after rechecking stored joins."""
+    if not isinstance(baseline, ValidatedBaseline) or baseline not in _VALIDATED_BASELINES:
+        raise _error("BASELINE_BINDING", "/baseline", "A genuinely validated baseline is required.")
+    try:
+        if artifact_sha256(baseline.receipt) != baseline.receipt_sha256:
+            raise ValueError
+        artifacts = _closed(baseline.receipt.get("artifacts"), set(_BASELINE_ARTIFACT_KEYS), "/receipt/artifacts", "BASELINE_BINDING")
+        _validate_schema(source_inventory_envelope, "source-inventory-output.schema.json", "/predecessor/source_inventory")
+        _validate_schema(context_envelope, "context-marker-output.schema.json", "/predecessor/context")
+        _validate_schema(behavior_context_receipt, "behavior-context-receipt.schema.json", "/predecessor/receipt")
+        source_artifacts = _mapping(source_inventory_envelope.get("artifacts"), "/predecessor/source_inventory/artifacts")
+        context_artifacts = _mapping(context_envelope.get("artifacts"), "/predecessor/context/artifacts")
+        authorized = _mapping(source_artifacts.get("authorized_behavior_sources"), "/predecessor/sources")
+        inventory = _mapping(source_artifacts.get("technical_test_inventory"), "/predecessor/inventory")
+        managed = _mapping(context_artifacts.get("managed_behavior_context"), "/predecessor/managed")
+        accounting = _mapping(context_artifacts.get("behavior_source_accounting"), "/predecessor/accounting")
+        authorized_digest, inventory_digest = artifact_sha256(authorized), artifact_sha256(inventory)
+        source_envelope_digest, context_envelope_digest = artifact_sha256(source_inventory_envelope), artifact_sha256(context_envelope)
+        if (source_artifacts.get("authorized_behavior_sources_sha256") != authorized_digest
+            or source_artifacts.get("technical_test_inventory_sha256") != inventory_digest
+            or artifacts["authorized_behavior_sources_sha256"] != source_envelope_digest
+            or artifacts["technical_test_inventory_sha256"] != source_envelope_digest
+            or artifacts["managed_behavior_context_sha256"] != context_envelope_digest
+            or artifacts["behavior_source_accounting_sha256"] != context_envelope_digest
+            or artifacts["behavior_context_receipt_sha256"] != artifact_sha256(behavior_context_receipt)
+            or behavior_context_receipt.get("selected_module") != baseline.selected_module
+            or behavior_context_receipt.get("authorized_behavior_sources_sha256") != authorized_digest
+            or authorized.get("module_id") != baseline.selected_module or inventory.get("module_id") != baseline.selected_module
+            or managed.get("authorized_behavior_sources_sha256") != authorized_digest
+            or accounting.get("authorized_behavior_sources_sha256") != authorized_digest
+            or accounting.get("context_receipt_sha256") != artifact_sha256(behavior_context_receipt)):
+            raise ValueError
+        _validate_stored_context_relations(managed, accounting, behavior_context_receipt, authorized, inventory)
+    except (FlowError, ValueError, TypeError, KeyError):
+        raise _error("BASELINE_BINDING", "/predecessor", "Predecessor carriers do not bind validated baseline authority.") from None
+    result = object.__new__(ScopePredecessor)
+    _SCOPE_PREDECESSORS[result] = _freeze({
+        "receipt_sha256": baseline.receipt_sha256, "repository_id": baseline.repository_id,
+        "target_commit": baseline.target_commit, "target_tree": baseline.target_tree,
+        "selected_module": baseline.selected_module,
+        "sources": tuple(_freeze(_plain(row)) for row in authorized["sources"]),
+        "requirement_ids": tuple(row["requirement_id"] for row in managed["requirements"]),
+    })
+    return result
+
+
+def scope_predecessor_projection(predecessor: ScopePredecessor) -> Mapping[str, Any]:
+    """Return only the safe data needed by downstream change scoping."""
+    if not isinstance(predecessor, ScopePredecessor) or predecessor not in _SCOPE_PREDECESSORS:
+        raise _error("BASELINE_BINDING", "/predecessor", "An issued scope predecessor is required.")
+    return _SCOPE_PREDECESSORS[predecessor]
 
 
 def _git(project: Path, *args: str) -> str:
@@ -680,12 +760,14 @@ def validate_baseline_receipt(
     if stored_fingerprints != current_fingerprints:
         raise _error("BASELINE_FINGERPRINT", "/receipt/fingerprints", "Baseline fingerprints are incompatible.")
     frozen = _freeze(_plain(value))
-    return ValidatedBaseline(
+    result = ValidatedBaseline(
         repository, commit, tree, selected_module,
         artifacts["technical_test_inventory_sha256"], artifacts["managed_behavior_context_sha256"],
         artifacts["effective_document_sha256"], artifacts["effective_bundle_receipt_sha256"],
         _freeze(stored_fingerprints), artifact_sha256(value), frozen,
     )
+    _VALIDATED_BASELINES[result] = object()
+    return result
 
 
 def choose_run_mode(target: Mapping[str, Any], baseline: ValidatedBaseline | None = None) -> Literal["FULL", "CHANGE_SET"]:

@@ -1,0 +1,1 @@
+{"relations":[{"relation_kind":"IMPORT_RELATION","from_source_id":"SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","to_source_id":"SOURCE-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","evidence_locator":{"content_sha256":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","start_byte":0,"end_byte":1}}]}
