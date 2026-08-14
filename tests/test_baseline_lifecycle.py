@@ -219,7 +219,9 @@ def prefix_artifacts(
     candidate_document: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     inventory = {"module_id": "root", "test_roots": [], "files": [], "symbols": []}
-    sources = {"module_id": "root", "sources": []}
+    sources = {"module_id": "root", "sources": [{
+        "source_id": "REQ-local", "kind": "supplied_requirement", "content_digest": digest("REQ-local"),
+    }]}
     source_envelope = {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
         "technical_test_inventory": inventory, "technical_test_inventory_sha256": artifact_sha256(inventory),
         "authorized_behavior_sources": sources, "authorized_behavior_sources_sha256": artifact_sha256(sources),
@@ -256,8 +258,9 @@ def prefix_artifacts(
     context_receipt = {
         "schema_version": "1.0.0", "selected_module": "root",
         "authorized_behavior_sources_sha256": sources_sha256,
-        "context_plan_sha256": digest("context-plan"), "batch_result_sha256s": [],
-        "fragment_registry": [], "source_outcomes": [],
+        "context_plan_sha256": digest("context-plan"), "batch_result_sha256s": [digest("context-batch")],
+        "fragment_registry": [{"fragment_id": "FRAGMENT-" + "1" * 64, "source_id": "REQ-local", "item_id": "ITEM-000001"}],
+        "source_outcomes": [{"source_id": "REQ-local", "domain_key": "_supplied", "outcome": "behavior_fragments"}],
     }
     valid_schema(context_receipt, "behavior-context-receipt.schema.json")
     context_receipt_sha256 = artifact_sha256(context_receipt)
@@ -273,7 +276,14 @@ def prefix_artifacts(
     accounting = {
         "authorized_behavior_sources_sha256": sources_sha256,
         "context_receipt_sha256": context_receipt_sha256,
-        "source_dispositions": [], "behavior_fragment_groups": [],
+        "source_dispositions": [{
+            "source_id": "REQ-local", "disposition": "represented",
+            "requirement_ids": [row["requirement_id"] for row in document["requirements"]],
+        }],
+        "behavior_fragment_groups": [{
+            "group_id": "GROUP-local", "fragment_ids": ["FRAGMENT-" + "1" * 64],
+            "requirement_ids": [row["requirement_id"] for row in document["requirements"]],
+        }],
     }
     context = {"schema_version": "5.0.0", "stage": "context-marker", "artifacts": {
         "managed_behavior_context": managed, "behavior_source_accounting": accounting,
@@ -429,6 +439,103 @@ class BaselineLifecycleTests(unittest.TestCase):
     def replace_ledger(self, run_root: Path, fixture: dict[str, Any], ledger: dict[str, Any]) -> None:
         fixture["ledger"].path.unlink()
         fixture["ledger"] = stored_json(run_root, PurePosixPath("manifest/prefix-ledger.json"), ledger)
+
+    def rewrite_prefix_graph(
+        self, run_root: Path, fixture: dict[str, Any], mutate: Callable[[dict[str, dict[str, Any]]], None],
+    ) -> None:
+        values: dict[str, dict[str, Any]] = {}
+        for name, binding in fixture["ledger_value"]["artifacts"].items():
+            path = run_root / Path(*PurePosixPath(binding["path"]).parts)
+            values[name] = json.loads(path.read_bytes())
+        mutate(values)
+        values["authorized_behavior_sources"] = copy.deepcopy(values["technical_test_inventory"])
+        source_artifacts = values["technical_test_inventory"]["artifacts"]
+        source_artifacts["technical_test_inventory_sha256"] = artifact_sha256(source_artifacts["technical_test_inventory"])
+        source_artifacts["authorized_behavior_sources_sha256"] = artifact_sha256(source_artifacts["authorized_behavior_sources"])
+        values["authorized_behavior_sources"] = copy.deepcopy(values["technical_test_inventory"])
+        inventory_sha256 = source_artifacts["technical_test_inventory_sha256"]
+        authorized_sha256 = source_artifacts["authorized_behavior_sources_sha256"]
+        receipt = values["behavior_context_receipt"]
+        receipt["authorized_behavior_sources_sha256"] = authorized_sha256
+        receipt_sha256 = artifact_sha256(receipt)
+        context = values["managed_behavior_context"]
+        context["artifacts"]["managed_behavior_context"]["authorized_behavior_sources_sha256"] = authorized_sha256
+        accounting = context["artifacts"]["behavior_source_accounting"]
+        accounting["authorized_behavior_sources_sha256"] = authorized_sha256
+        accounting["context_receipt_sha256"] = receipt_sha256
+        values["behavior_source_accounting"] = copy.deepcopy(context)
+        values["changed_behavior_context"]["source"]["behavior_context_receipt_sha256"] = receipt_sha256
+        classification = values["technical_test_classification"]["artifacts"]["classification"]
+        classification["technical_test_inventory_sha256"] = inventory_sha256
+        classification_sha256 = artifact_sha256(classification)
+        review = values["classification_review"]["artifacts"]["classification_review"]
+        review["technical_test_inventory_sha256"] = inventory_sha256
+        review["classification_sha256"] = classification_sha256
+        evidence = values["effective_technical_evidence"]
+        evidence["technical_test_inventory_sha256"] = inventory_sha256
+        evidence["technical_test_classification_sha256"] = classification_sha256
+        evidence["technical_test_review_sha256"] = artifact_sha256(review)
+        evidence.pop("effective_technical_evidence_sha256", None)
+        evidence["effective_technical_evidence_sha256"] = artifact_sha256(evidence)
+        ledger = copy.deepcopy(fixture["ledger_value"])
+        for name, value in values.items():
+            replacement = stored_json(run_root, PurePosixPath("rebound") / f"{name}.json", value)
+            ledger["artifacts"][name] = {"path": replacement.path.relative_to(run_root).as_posix(), "sha256": replacement.sha256}
+        self.replace_ledger(run_root, fixture, ledger)
+
+    def test_terminal_binds_source_inventory_modules_to_selected_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            def mutate(values: dict[str, dict[str, Any]]) -> None:
+                artifacts = values["technical_test_inventory"]["artifacts"]
+                artifacts["technical_test_inventory"]["module_id"] = "foreign"
+                artifacts["authorized_behavior_sources"]["module_id"] = "foreign"
+            self.rewrite_prefix_graph(run_root, fixture, mutate)
+            self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_terminal_rejects_unauthorized_requirement_source_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            def mutate(values: dict[str, dict[str, Any]]) -> None:
+                managed = values["managed_behavior_context"]["artifacts"]["managed_behavior_context"]
+                managed["requirement_sources"][0]["source_ids"] = ["REQ-foreign"]
+            self.rewrite_prefix_graph(run_root, fixture, mutate)
+            self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_terminal_requires_complete_accounting_dispositions_and_outcomes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            def mutate(values: dict[str, dict[str, Any]]) -> None:
+                values["managed_behavior_context"]["artifacts"]["behavior_source_accounting"]["source_dispositions"] = []
+                values["behavior_context_receipt"]["source_outcomes"] = []
+            self.rewrite_prefix_graph(run_root, fixture, mutate)
+            self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_terminal_rejects_inconsistent_accounting_and_receipt_projections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            def mutate(values: dict[str, dict[str, Any]]) -> None:
+                values["behavior_context_receipt"]["source_outcomes"][0]["outcome"] = "no_supported_observable_fact"
+            self.rewrite_prefix_graph(run_root, fixture, mutate)
+            self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+
+    def test_advance_revalidates_embedded_change_input_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            terminal = thaw(build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
+            terminal["change_input"]["repository_id"] = digest("foreign")
+            stored = stored_json(run_root, PurePosixPath("receipts/forged-terminal.json"), terminal)
+            baseline_root = root / "baselines"
+            self.assert_flow_error(
+                "BASELINE_BINDING",
+                lambda: advance_baseline({"project": project, "baseline_root": baseline_root}, stored),
+            )
+            self.assertFalse(baseline_root.exists())
 
     def test_terminal_accepts_pass_pass_with_remainder_and_manual_only_no_run(self) -> None:
         """Dropping any eligible branch, especially the valid nullable run branch, breaks terminal authority."""

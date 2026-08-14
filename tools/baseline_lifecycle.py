@@ -244,6 +244,127 @@ def _sorted_unique_strings(value: Any, path: str) -> list[str]:
     return value
 
 
+def _validate_stored_context_relations(
+    managed: Mapping[str, Any], accounting: Mapping[str, Any], receipt: Mapping[str, Any],
+    authorized: Mapping[str, Any], inventory: Mapping[str, Any],
+) -> None:
+    """Recheck pure joins between canonical stored V5 context carriers.
+
+    Current bytes, plan derivation, and supplied-input contents remain upstream
+    receipt authority because terminal construction has none of those inputs.
+    """
+    sources = authorized.get("sources")
+    inventory_files = inventory.get("files")
+    requirements = managed.get("requirements")
+    requirement_sources = managed.get("requirement_sources")
+    product_sources = managed.get("product_sources")
+    if not all(isinstance(value, list) for value in (sources, inventory_files, requirements, requirement_sources, product_sources)):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context", "Stored behavior-context arrays are invalid.")
+    source_ids = [row.get("source_id") if isinstance(row, Mapping) else None for row in sources]
+    if any(not isinstance(value, str) or not value for value in source_ids) or len(source_ids) != len(set(source_ids)):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/authorized_behavior_sources", "Authorized source IDs must be unique nonempty strings.")
+    source_by_id = {row["source_id"]: row for row in sources}
+    requirement_ids = [row.get("requirement_id") if isinstance(row, Mapping) else None for row in requirements]
+    display_orders = [row.get("display_order") if isinstance(row, Mapping) else None for row in requirements]
+    if (
+        not requirement_ids or any(not isinstance(value, str) or not value for value in requirement_ids)
+        or len(requirement_ids) != len(set(requirement_ids))
+        or any(type(value) is not int for value in display_orders)
+        or display_orders != list(range(1, len(requirements) + 1))
+    ):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context/requirements", "Managed requirements must retain unique IDs and exact canonical display order.")
+    linked_requirement_ids = [row.get("requirement_id") if isinstance(row, Mapping) else None for row in requirement_sources]
+    if linked_requirement_ids != requirement_ids:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context/requirement_sources", "Requirement-source rows must cover requirements in canonical order.")
+    inverse: dict[str, list[str]] = {source_id: [] for source_id in source_ids}
+    for index, row in enumerate(requirement_sources):
+        links = row.get("source_ids") if isinstance(row, Mapping) else None
+        if not isinstance(links, list) or not links or links != sorted(set(links)) or any(source_id not in source_by_id for source_id in links):
+            raise _error("BASELINE_BINDING", f"/prefix_ledger/artifacts/managed_behavior_context/requirement_sources/{index}/source_ids", "Requirement sources must be authorized unique IDs in canonical order.")
+        for source_id in links:
+            inverse[source_id].append(row["requirement_id"])
+
+    test_paths = {row.get("path") for row in inventory_files if isinstance(row, Mapping)}
+    product_by_id: dict[str, Mapping[str, Any]] = {}
+    for index, row in enumerate(product_sources):
+        source_id = row.get("source_id") if isinstance(row, Mapping) else None
+        source = source_by_id.get(source_id)
+        if (
+            not isinstance(row, Mapping) or source_id in product_by_id or not isinstance(source, Mapping)
+            or source.get("kind") != "product_file"
+            or any(row.get(field) != source.get(field) for field in ("source_id", "kind", "path", "content_digest"))
+            or not isinstance(row.get("path"), str) or not row["path"] or "\\" in row["path"]
+            or PurePosixPath(row["path"]).is_absolute() or ".." in PurePosixPath(row["path"]).parts
+            or row.get("path") in test_paths
+        ):
+            raise _error("BASELINE_BINDING", f"/prefix_ledger/artifacts/managed_behavior_context/product_sources/{index}", "Managed product sources must exactly project authorized non-test sources.")
+        product_by_id[source_id] = row
+    for source_id, linked in inverse.items():
+        if linked and source_by_id[source_id].get("kind") == "product_file" and source_id not in product_by_id:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context/product_sources", "Every linked product source must have a managed projection.")
+
+    dispositions = accounting.get("source_dispositions")
+    outcomes = receipt.get("source_outcomes")
+    registry = receipt.get("fragment_registry")
+    groups = accounting.get("behavior_fragment_groups")
+    if not all(isinstance(value, list) for value in (dispositions, outcomes, registry, groups)):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting", "Stored accounting and receipt arrays are invalid.")
+    if [row.get("source_id") if isinstance(row, Mapping) else None for row in dispositions] != source_ids:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "Dispositions must exactly cover authorized sources in inventory order.")
+    if [row.get("source_id") if isinstance(row, Mapping) else None for row in outcomes] != source_ids:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/source_outcomes", "Receipt outcomes must exactly cover authorized sources in inventory order.")
+    outcome_by_id = {row["source_id"]: row for row in outcomes}
+    registry_by_id: dict[str, Mapping[str, Any]] = {}
+    registry_by_source: dict[str, list[str]] = {source_id: [] for source_id in source_ids}
+    for row in registry:
+        fragment_id = row.get("fragment_id") if isinstance(row, Mapping) else None
+        source_id = row.get("source_id") if isinstance(row, Mapping) else None
+        if fragment_id in registry_by_id or source_id not in source_by_id or outcome_by_id[source_id].get("outcome") != "behavior_fragments":
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/fragment_registry", "Receipt fragments must be unique and owned by represented authorized sources.")
+        registry_by_id[fragment_id] = row
+        registry_by_source[source_id].append(fragment_id)
+    grouped_ids: list[str] = []
+    group_requirements: dict[str, set[str]] = {source_id: set() for source_id in source_ids}
+    for group in groups:
+        fragments = group.get("fragment_ids") if isinstance(group, Mapping) else None
+        linked = group.get("requirement_ids") if isinstance(group, Mapping) else None
+        if (
+            not isinstance(fragments, list) or not fragments or len(fragments) != len(set(fragments))
+            or not isinstance(linked, list) or not linked
+            or linked != [requirement_id for requirement_id in requirement_ids if requirement_id in linked]
+        ):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/behavior_fragment_groups", "Fragment groups must use unique receipt fragments and canonical requirements.")
+        grouped_ids.extend(fragments)
+        for fragment_id in fragments:
+            fragment = registry_by_id.get(fragment_id)
+            if fragment is None:
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/behavior_fragment_groups", "Accounting groups cannot reference foreign receipt fragments.")
+            group_requirements[fragment["source_id"]].update(linked)
+    if len(grouped_ids) != len(set(grouped_ids)) or set(grouped_ids) != set(registry_by_id):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/behavior_fragment_groups", "Accounting groups must cover every receipt fragment exactly once.")
+    for source_id, source, disposition in zip(source_ids, sources, dispositions):
+        linked = inverse[source_id]
+        outcome = outcome_by_id[source_id].get("outcome")
+        if disposition.get("disposition") == "represented":
+            if (
+                set(disposition) != {"source_id", "disposition", "requirement_ids"}
+                or disposition.get("requirement_ids") != linked or not linked
+                or set(linked) != group_requirements[source_id] or outcome != "behavior_fragments"
+                or not registry_by_source[source_id]
+            ):
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "Represented dispositions must equal inverse requirement, fragment-group, and receipt outcome joins.")
+        elif disposition.get("disposition") == "no_supported_observable_fact":
+            if (
+                set(disposition) != {"source_id", "disposition", "reason"} or linked
+                or group_requirements[source_id] or registry_by_source[source_id]
+                or source.get("kind") != "product_file" or source_id in product_by_id
+                or outcome != "no_supported_observable_fact"
+            ):
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "No-fact dispositions must have no managed, requirement, fragment, or represented-outcome projection.")
+        else:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "Accounting dispositions must use a supported closed variant.")
+
+
 def _validate_prefix_evidence(
     values: Mapping[str, Mapping[str, Any]], digests: Mapping[str, str | None],
     repository: str, selected_module: str, run_mode: str,
@@ -259,6 +380,8 @@ def _validate_prefix_evidence(
     authorized_sha256 = artifact_sha256(authorized)
     if source_artifacts.get("technical_test_inventory_sha256") != inventory_sha256 or source_artifacts.get("authorized_behavior_sources_sha256") != authorized_sha256:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_inventory", "Source inventory internal digests do not bind their bare artifacts.")
+    if inventory.get("module_id") != selected_module or authorized.get("module_id") != selected_module:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_inventory", "Source inventories must bind the selected module.")
 
     scope = _closed(values["change_scope_receipt"], {"schema_version", "artifact", "source", "payload_sha256"}, "/prefix_ledger/artifacts/change_scope_receipt")
     scope_source = _closed(scope.get("source"), {"repository_id", "selected_module", "run_mode"}, "/prefix_ledger/artifacts/change_scope_receipt/source")
@@ -282,6 +405,7 @@ def _validate_prefix_evidence(
     accounting = _mapping(context_artifacts.get("behavior_source_accounting"), "/prefix_ledger/artifacts/behavior_source_accounting/artifacts/behavior_source_accounting")
     if managed.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("context_receipt_sha256") != receipt_sha256:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context", "Context, accounting, receipt, and authorized-source digests disagree.")
+    _validate_stored_context_relations(managed, accounting, receipt, authorized, inventory)
 
     changed = _closed(values["changed_behavior_context"], {"schema_version", "artifact", "source", "requirement_ids", "retired_requirement_ids"}, "/prefix_ledger/artifacts/changed_behavior_context")
     changed_source = _closed(changed.get("source"), {"behavior_context_receipt_sha256"}, "/prefix_ledger/artifacts/changed_behavior_context/source")
@@ -666,7 +790,8 @@ def advance_baseline(
     baseline_root = run_value.get("baseline_root")
     if not isinstance(project, Path) or not isinstance(baseline_root, Path):
         raise _error("FEATURE_FLOW_INPUT", "/run", "Run must contain Path project and baseline_root values.")
-    change = _mapping(terminal.get("change_input"), "/terminal_receipt/change_input")
+    terminal_repository = _digest(terminal.get("repository_id"), "/terminal_receipt/repository_id")
+    change = _change_input(terminal.get("change_input"), terminal_repository, terminal.get("run_mode"))
     input_kind = change.get("input_kind")
     if input_kind in {"git_worktree", "patch_manifest"}:
         return _advancement("PROVISIONAL", predecessor_digest)
