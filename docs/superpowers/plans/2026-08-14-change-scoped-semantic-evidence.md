@@ -120,8 +120,9 @@ git commit -m "feat: bind closed feature change inputs"
 - Create: `tests/test_baseline_lifecycle.py`
 **Interfaces:**
 - Consumes: `StoredArtifact`, `artifact_sha256`, and create-only readback from Task 1.
-- Produces: `build_terminal_run_receipt(prefix_manifest, tail_artifacts) -> Mapping[str, Any]`, `validate_baseline_receipt(receipt, project, selected_module, fingerprints) -> ValidatedBaseline`, `choose_run_mode(target, baseline=None) -> Literal["FULL", "CHANGE_SET"]`, and `advance_baseline(run, terminal_receipt, predecessor=None) -> Mapping[str, Any]`.
+- Produces: `build_terminal_run_receipt(prefix_manifest, tail_artifacts) -> Mapping[str, Any]`, `validate_baseline_receipt(receipt, project, selected_module, fingerprints) -> ValidatedBaseline`, `bind_scope_predecessor(baseline: ValidatedBaseline, predecessor_source_inventory_envelope: Mapping[str, Any], predecessor_context_v5_envelope: Mapping[str, Any], predecessor_behavior_context_receipt: Mapping[str, Any]) -> ScopePredecessor`, `choose_run_mode(target, baseline=None) -> Literal["FULL", "CHANGE_SET"]`, and `advance_baseline(run, terminal_receipt, predecessor=None) -> Mapping[str, Any]`.
 - `ValidatedBaseline` exposes exact repository, commit/tree, module, inventory/context/document/bundle digests, fingerprints, and its canonical receipt digest; it never exposes a mutable latest pointer.
+- `bind_scope_predecessor` is the only predecessor projection. It validates the exact full source-inventory envelope, V5 context envelope, and behavior-context receipt against the Baseline Receipt's artifact digests; reuses `_validate_stored_context_relations` for the complete V5 graph; and returns a recursively immutable opaque capability containing only baseline identity, ordered authorized source identity slots, and ordered requirement IDs. It has no public constructor, JSON projection, standalone artifact digest, persistence, or deserialization route.
 - [ ] **Step 1: Write baseline eligibility and lineage RED tests**
 ```python
 def test_initial_full_requires_exact_committed_tree():
@@ -136,6 +137,10 @@ def test_baseline_receipt_binds_complete_artifacts_and_fingerprints():
     """All required prefix, classification, document, bundle, trace, final, tool, policy, schema, and pipeline digests are exact."""
 def test_baseline_successor_atomic_compare_and_readback():
     """Identical successors are idempotent and competing target trees return BASELINE_CONFLICT."""
+def test_scope_predecessor_revalidates_full_v5_receipt_joins():
+    """Exact source/context/receipt digests and every V5 source, requirement, product, represented/no-fact, fragment, group, and outcome join bind before projection."""
+def test_scope_predecessor_is_baseline_minted_and_opaque():
+    """Only the lifecycle factory returns recursively immutable identity slots; forged, reserialized, or raw-carrier look-alikes fail."""
 ```
 - [ ] **Step 2: Run RED**
 Run `python -m unittest tests.test_baseline_lifecycle -v`.
@@ -146,7 +151,7 @@ Use these exact eligibility statuses:
 ELIGIBLE_FINAL_STATUSES = frozenset({"PASS", "PASS_WITH_MANUAL_REMAINDER", "MANUAL_ONLY"})
 INELIGIBLE_FINAL_STATUSES = frozenset({"FAIL", "NOT_RUNNABLE", "BLOCKED"})
 ```
-Compute ordered fingerprints from closed `{path, sha256}` registries, not version labels. Initial advancement requires clean committed `HEAD`; successor advancement requires committed `git_range` and exact predecessor target. Persist the content-addressed receipt first, then one create-only predecessor link; reopen and verify both. Return a closed `baseline-advancement` artifact for eligible, ineligible, idempotent, and conflict outcomes.
+Compute ordered fingerprints from closed `{path, sha256}` registries, not version labels. Initial advancement requires clean committed `HEAD`; successor advancement requires committed `git_range` and exact predecessor target. Persist the content-addressed receipt first, then one create-only predecessor link; reopen and verify both. Return a closed `baseline-advancement` artifact for eligible, ineligible, idempotent, and conflict outcomes. `bind_scope_predecessor` must validate all three predecessor carriers against `ValidatedBaseline.receipt`, validate both full envelopes with their existing local schemas, recompute every carrier/internal digest join, and reuse `_validate_stored_context_relations` rather than duplicate it. It projects exactly the ordered `source_id`, kind, canonical path, and content digest slots plus ordered requirement IDs; it never returns a retained envelope, receipt, fragment, group, outcome, planner item, or raw bytes. Binding failure is safe `BASELINE_BINDING` and yields no capability.
 - [ ] **Step 4: Run focused GREEN**
 ```powershell
 python -m unittest tests.test_baseline_lifecycle -v
@@ -171,7 +176,8 @@ git commit -m "feat: add durable feature baselines"
 - Create: `tests/test_change_scope.py`
 - Create: `tests/fixtures/change-scope/relations.json`
 **Interfaces:**
-- Consumes: `ValidatedBaseline`, the frozen change input, complete current source/test inventories, analytics digest, and normalized selected module.
+- Consumes: `ScopePredecessor`, the frozen change input, complete current source/test inventories, analytics digest, and normalized selected module. It never consumes a `ValidatedBaseline` or predecessor source/context/receipt envelope directly.
+- `ScopeInputs` is exactly `ScopeInputs(project_root, run_mode, selected_module, analytics_sha256, change_input, current_source_inventory, current_test_inventory, predecessor, relations=())`; it has no baseline or predecessor-envelope fields.
 - Produces exactly:
 ```text
 start_scope(inputs: ScopeInputs) -> ScopeSnapshot
@@ -194,12 +200,16 @@ def test_scope_requires_both_audits_on_same_generation():
     """One acceptance, mixed generations, and late acceptance cannot promote."""
 def test_scope_rework_requires_immediate_successor_generation():
     """REWORK seals a generation and only its immediate descendant may continue."""
+def test_scope_inputs_require_exact_predecessor_capability():
+    """FULL accepts only None; CHANGE_SET rejects missing, forged, module/repository/base-mismatched, or raw-envelope predecessor authority."""
+def test_scope_snapshot_and_candidate_do_not_leak_predecessor_carriers():
+    """Snapshots and candidates exclude raw source/diff bytes, envelopes, receipts, fragments, groups, outcomes, and planner content."""
 ```
 - [ ] **Step 2: Run RED**
 Run `python -m unittest tests.test_change_scope -v`.
 Expected: missing scope schemas/module and no promoted scope receipt.
 - [ ] **Step 3: Implement complete metadata registry and deterministic closure**
-Rebuild metadata for every authorized current path and every technical test symbol. Store only IDs/digests/locators. Use exact canonical order: change rows, source inventory order, relation tuple `(relation_kind, from_source_id, to_source_id, locator)`, and `(file_id, symbol_id)` test pairs.
+Rebuild metadata for every authorized current path and every technical test symbol. Store only IDs/digests/locators. `FULL` requires `predecessor is None` and no change input. `CHANGE_SET` requires the exact lifecycle-minted capability and must bind its module, repository, target commit/tree, and derived base snapshot to the frozen change input before candidate creation. Before-side joins use only the capability's ordered slots; no scope code revalidates, retains, serializes, or reconstructs predecessor envelopes/receipt graph. Use exact canonical order: change rows, source inventory order, relation tuple `(relation_kind, from_source_id, to_source_id, locator)`, and `(file_id, symbol_id)` test pairs.
 Implement scope generations as this state graph:
 ```text
 candidate[g] -> false_inclusion[g] -> omission[g] -> receipt
@@ -209,12 +219,12 @@ candidate[g] -> false_inclusion[g] -> omission[g] -> receipt
 An `ACCEPT` audit has zero findings; `REWORK` has at least one kind-specific closed finding. Both audits read the candidate plus authorized evidence but not peer or producer reasoning. A FULL scope includes every source with governing reason `FULL_REFRESH`.
 - [ ] **Step 4: Run focused GREEN**
 ```powershell
-python -m unittest tests.test_change_scope -v
-python -m py_compile tools\change_scope.py tests\test_change_scope.py
+python -m unittest tests.test_baseline_lifecycle tests.test_change_scope -v
+python -m py_compile tools\baseline_lifecycle.py tools\change_scope.py tests\test_baseline_lifecycle.py tests\test_change_scope.py
 python tools\validate_artifact.py schemas\change-scope-receipt.schema.json tests\fixtures\change-scope\relations.json --expect-invalid
 git diff --check
 ```
-Expected: tests and compile pass; the deliberately non-receipt relation fixture is rejected by the receipt schema without remote schema access.
+Expected: the focused lifecycle/scope suites and compile pass; the deliberately non-receipt relation fixture is rejected by the receipt schema without remote schema access. The capability tests prove the full V5 represented/no-fact/fragment/group/outcome graph, factory-only forgery rejection, exact FULL/CHANGE_SET authority, and no predecessor-carrier leak from public snapshots/candidates.
 - [ ] **Step 5: Commit**
 ```powershell
 git add tools/change_scope.py schemas/change-scope-candidate.schema.json schemas/change-scope-audit.schema.json schemas/change-scope-receipt.schema.json tests/test_change_scope.py tests/fixtures/change-scope/relations.json
