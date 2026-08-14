@@ -243,8 +243,8 @@ git commit -m "feat: promote reviewed feature change scope"
 - Create: `tests/fixtures/stages/v6/change-result-v2.json`
 **Interfaces:**
 - Preserves V1 only for complete current-side FULL candidates.
-- Produces: `build_change_context_plan(scope_receipt, baseline_inventory, current_inventory, byte_resolver) -> Mapping[str, Any]`, `validate_change_batch_result(scope_receipt, plan, result, byte_resolver) -> Sequence[Mapping[str, str]]`, and `stable_change_fragment_id(item, fragment) -> str`.
-- Plan V2 item keys are exactly `item_id`, `change_id`, `change_kind`, `baseline_source_id`, `current_source_id`, `domain_key`, and `evidence_sides`.
+- Produces: `build_change_context_plan(project, selected_module, scope_receipt, scope_candidate, baseline_inventory, current_inventory, byte_resolver) -> Mapping[str, Any]`, `validate_change_batch_result(scope_receipt, plan, result, byte_resolver) -> Sequence[Mapping[str, str]]`, and `stable_change_fragment_id(item, fragment) -> str`.
+- Plan V2 item keys are exactly `item_id`, `change_id`, `change_kind`, `baseline_source_id`, `current_source_id`, `domain_key`, and `evidence_sides`; relation-expanded sources use `change_id: null`, `change_kind: "context"`, and never promote changed fragments.
 - [ ] **Step 1: Write side, range, effect, tombstone, and no-op RED tests**
 ```python
 def test_change_plan_v2_side_identity_range_and_order():
@@ -255,6 +255,10 @@ def test_deleted_behavior_requires_promoted_tombstone():
     """Deletion preserves baseline evidence and never fabricates current bytes."""
 def test_modified_and_renamed_noop_compare_both_sides():
     """No-change results require an authorized comparison of both sides."""
+def test_context_items_are_not_fabricated_changes():
+    """Relation-expanded sources use context items and supporting_context only."""
+def test_unequal_two_sided_chunks_are_not_zipped():
+    """One logical item carries ordered repeated side rows without omission."""
 ```
 - [ ] **Step 2: Run RED**
 Run `python -m unittest tests.test_change_context_v2 -v`.

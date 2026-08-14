@@ -286,11 +286,28 @@ Each Plan V2 item contains:
 }
 ```
 
-Added requires null `baseline_source_id` and only `after`; deleted requires null `current_source_id` and only `before`; modified requires both sides and both identities; renamed requires both sides, both identities, and the exact promoted rename `change_id`; binary uses the sides required by its `binary_change`. Ranges cover each selected side exactly, with the existing UTF-8 overlap rules for text. Binary items expose bounded metadata and content digests to scope review but no synthetic text ranges; unresolved binary semantics widen or block.
+The change-aware planner receives the reviewed scope candidate explicitly:
+`build_change_context_plan(project, selected_module, scope_receipt, scope_candidate,
+baseline_inventory, current_inventory, byte_resolver)`. It schema-validates the
+candidate and requires `artifact_sha256(scope_candidate) ==
+scope_receipt.candidate_sha256`; the receipt remains the promotion binding and is
+not enlarged with a duplicate change list. `project` and `selected_module` are
+required to reproduce the canonical `domain_key`; `byte_resolver` supplies bytes
+only after side identity and digest checks.
+
+Relation-expanded or widened sources that are not themselves change rows use a
+closed `change_kind: "context"` item with `change_id: null`. Context items carry
+only the authenticated side identities and ranges needed as supporting evidence;
+their results may emit `supporting_context` observations, never changed
+fragments or deletion tombstones. A source reached by several changes remains one
+context item with the candidate's ordered relation evidence; no arbitrary trigger
+change is invented.
+
+Added requires null `baseline_source_id` and only `after`; deleted requires null `current_source_id` and only `before`; modified requires both sides and both identities; renamed requires both sides, both identities, and the exact promoted rename `change_id`; binary uses the sides required by its `binary_change`; context uses whichever authenticated side(s) exist and `change_id: null`. A logical item may contain multiple ordered `evidence_sides` rows for one side, so unequal before/after chunk counts are represented without zipping, duplication, or omission. Ranges cover each selected side exactly, with the existing UTF-8 overlap rules for text. Binary items expose bounded metadata and content digests to scope review but no synthetic text ranges; unresolved binary semantics widen or block.
 
 Plan order is deterministic: rows occupying a baseline slot (`modified`, `deleted`, `renamed`) retain baseline inventory order; surviving current-only `added` rows follow in current inventory order. Split items preserve side, source, and byte-range order. No source or side may be silently duplicated or omitted.
 
-Batch Result V2 binds `schema_version:"2.0.0"`, exact scope receipt, plan, batch, item order, and one result per item. Its terminal outcome is `changed_behavior_fragments`, `deleted_behavior_tombstones`, or `no_changed_observable_fact`. Each fragment has `effect: added|modified|retired` and one or more evidence locators of the closed form `{side:"before|after", content_sha256, start_byte, end_byte}`. Added effects require `after`; retired effects require `before`; modified effects require at least one locator on each side. Locators must match the item's exact side digest and `read_range`; fragment ownership uses the anchor on the effect's authoritative side (`after` for added/modified, `before` for retired). Fragment IDs hash effect, both source identities, owning item, and all locators.
+Batch Result V2 binds `schema_version:"2.0.0"`, exact scope receipt, plan, batch, item order, and one result per item. Its terminal outcome is `changed_behavior_fragments`, `deleted_behavior_tombstones`, `supporting_context`, or `no_changed_observable_fact`. Context results are non-promoting observations only. Each changed fragment has `effect: added|modified|retired` and one or more evidence locators of the closed form `{side:"before|after", content_sha256, start_byte, end_byte}`. Added effects require `after`; retired effects require `before`; modified effects require at least one locator on each side. Locators must match the item's exact side digest and `read_range`; fragment ownership uses the anchor on the effect's authoritative side (`after` for added/modified, `before` for retired). Fragment IDs hash effect, both source identities, owning item, and all locators.
 
 A deleted source with supported baseline behavior emits promoted retired tombstones; it never fabricates current bytes. A rename or modification with no semantic change emits `no_changed_observable_fact` after comparing both sides. Current-byte validation rereads every `after` side from the exact target tree/snapshot; `before` bytes come only from the predecessor committed tree or frozen manifest digest. Receipt composition validates both again before applying tombstones or replacements.
 
