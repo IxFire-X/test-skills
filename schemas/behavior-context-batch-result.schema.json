@@ -1,6 +1,28 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema", "$id":"schemas/behavior-context-batch-result.schema.json", "type":"object", "additionalProperties":false,
-  "required":["schema_version","plan_sha256","batch_id","items"],
-  "properties":{"schema_version":{"const":"1.0.0"},"plan_sha256":{"$ref":"#/$defs/digest"},"batch_id":{"type":"string","pattern":"^BATCH-[0-9]{6}$"},"items":{"type":"array","items":{"$ref":"#/$defs/item-result"}}},
-  "$defs":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"safe_scalar":{"type":"string","minLength":1,"maxLength":4096,"pattern":".*\\S.*"},"range":{"type":"object","additionalProperties":false,"required":["start","end"],"properties":{"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0}}},"fragment":{"type":"object","additionalProperties":false,"required":["fragment_id","actor","operation","conditions","outcomes","anchor_byte","evidence_ranges"],"properties":{"fragment_id":{"type":"string","pattern":"^FRAGMENT-[0-9a-f]{64}$"},"actor":{"$ref":"#/$defs/safe_scalar"},"operation":{"$ref":"#/$defs/safe_scalar"},"conditions":{"type":"array","items":{"$ref":"#/$defs/safe_scalar"}},"outcomes":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/safe_scalar"}},"anchor_byte":{"type":"integer","minimum":0},"evidence_ranges":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/range"}}}},"item-result":{"type":"object","additionalProperties":false,"required":["item_id","outcome"],"properties":{"item_id":{"type":"string","pattern":"^ITEM-[0-9]{6}$"},"outcome":{"enum":["behavior_fragments","no_supported_observable_fact"]},"behavior_fragments":{"type":"array","items":{"$ref":"#/$defs/fragment"}}}}}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/behavior-context-batch-result.schema.json",
+  "oneOf": [{"$ref": "#/$defs/v1"}, {"$ref": "#/$defs/v2"}],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "safe-scalar": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": ".*\\S.*"},
+    "range": {"type": "object", "additionalProperties": false, "required": ["start", "end"], "properties": {"start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 0}}},
+    "v1-fragment": {"type": "object", "additionalProperties": false, "required": ["fragment_id", "actor", "operation", "conditions", "outcomes", "anchor_byte", "evidence_ranges"], "properties": {"fragment_id": {"type": "string", "pattern": "^FRAGMENT-[0-9a-f]{64}$"}, "actor": {"$ref": "#/$defs/safe-scalar"}, "operation": {"$ref": "#/$defs/safe-scalar"}, "conditions": {"type": "array", "items": {"$ref": "#/$defs/safe-scalar"}}, "outcomes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/safe-scalar"}}, "anchor_byte": {"type": "integer", "minimum": 0}, "evidence_ranges": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/range"}}}},
+    "v1-item": {"type": "object", "additionalProperties": false, "required": ["item_id", "outcome"], "properties": {"item_id": {"type": "string", "pattern": "^ITEM-[0-9]{6}$"}, "outcome": {"enum": ["behavior_fragments", "no_supported_observable_fact"]}, "behavior_fragments": {"type": "array", "items": {"$ref": "#/$defs/v1-fragment"}}}},
+    "v1": {"type": "object", "additionalProperties": false, "required": ["schema_version", "plan_sha256", "batch_id", "items"], "properties": {"schema_version": {"const": "1.0.0"}, "plan_sha256": {"$ref": "#/$defs/digest"}, "batch_id": {"type": "string", "pattern": "^BATCH-[0-9]{6}$"}, "items": {"type": "array", "items": {"$ref": "#/$defs/v1-item"}}}},
+    "locator": {"type": "object", "additionalProperties": false, "required": ["side", "content_sha256", "start_byte", "end_byte"], "properties": {"side": {"enum": ["before", "after"]}, "content_sha256": {"$ref": "#/$defs/digest"}, "start_byte": {"type": "integer", "minimum": 0}, "end_byte": {"type": "integer", "minimum": 1}}},
+    "v2-fragment": {"type": "object", "additionalProperties": false, "required": ["fragment_id", "effect", "anchor_byte", "evidence_locators"], "properties": {"fragment_id": {"type": "string", "pattern": "^FRAGMENT-[0-9a-f]{64}$"}, "effect": {"enum": ["added", "modified", "retired"]}, "anchor_byte": {"type": "integer", "minimum": 0}, "evidence_locators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/locator"}}}},
+    "v2-item": {
+      "type": "object", "additionalProperties": false,
+      "required": ["item_id", "outcome"],
+      "properties": {
+        "item_id": {"type": "string", "pattern": "^ITEM-[0-9]{6}$"},
+        "outcome": {"enum": ["changed_behavior_fragments", "deleted_behavior_tombstones", "supporting_context", "no_changed_observable_fact"]},
+        "behavior_fragments": {"type": "array", "items": {"$ref": "#/$defs/v2-fragment"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"outcome": {"enum": ["changed_behavior_fragments", "deleted_behavior_tombstones"]}}}, "then": {"required": ["behavior_fragments"], "properties": {"behavior_fragments": {"minItems": 1}}}, "else": {"properties": {"behavior_fragments": {"maxItems": 0}}}}
+      ]
+    },
+    "v2": {"type": "object", "additionalProperties": false, "required": ["schema_version", "scope_receipt_sha256", "plan_sha256", "batch_id", "items"], "properties": {"schema_version": {"const": "2.0.0"}, "scope_receipt_sha256": {"$ref": "#/$defs/digest"}, "plan_sha256": {"$ref": "#/$defs/digest"}, "batch_id": {"type": "string", "pattern": "^BATCH-[0-9]{6}$"}, "items": {"type": "array", "items": {"$ref": "#/$defs/v2-item"}}}}
+  }
 }

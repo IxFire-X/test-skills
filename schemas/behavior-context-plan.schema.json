@@ -1,6 +1,47 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema", "$id":"schemas/behavior-context-plan.schema.json", "type":"object", "additionalProperties":false,
-  "required":["schema_version","selected_module","authorized_behavior_sources_sha256","batches"],
-  "properties":{"schema_version":{"const":"1.0.0"},"selected_module":{"type":"string","minLength":1},"authorized_behavior_sources_sha256":{"$ref":"#/$defs/digest"},"batches":{"type":"array","items":{"$ref":"#/$defs/batch"}}},
-  "$defs":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},"range":{"type":"object","additionalProperties":false,"required":["start","end"],"properties":{"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0}}},"item":{"type":"object","additionalProperties":false,"required":["item_id","source_id","domain_key","accounted_range","read_range"],"properties":{"item_id":{"type":"string","pattern":"^ITEM-[0-9]{6}$"},"source_id":{"type":"string","minLength":1},"domain_key":{"type":"string","minLength":1},"accounted_range":{"$ref":"#/$defs/range"},"read_range":{"$ref":"#/$defs/range"}}},"batch":{"type":"object","additionalProperties":false,"required":["batch_id","items"],"properties":{"batch_id":{"type":"string","pattern":"^BATCH-[0-9]{6}$"},"items":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/item"}}}}}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/behavior-context-plan.schema.json",
+  "oneOf": [{"$ref": "#/$defs/v1"}, {"$ref": "#/$defs/v2"}],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "range": {"type": "object", "additionalProperties": false, "required": ["start", "end"], "properties": {"start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 0}}},
+    "v1-item": {"type": "object", "additionalProperties": false, "required": ["item_id", "source_id", "domain_key", "accounted_range", "read_range"], "properties": {"item_id": {"type": "string", "pattern": "^ITEM-[0-9]{6}$"}, "source_id": {"type": "string", "minLength": 1}, "domain_key": {"type": "string", "minLength": 1}, "accounted_range": {"$ref": "#/$defs/range"}, "read_range": {"$ref": "#/$defs/range"}}},
+    "v1-batch": {"type": "object", "additionalProperties": false, "required": ["batch_id", "items"], "properties": {"batch_id": {"type": "string", "pattern": "^BATCH-[0-9]{6}$"}, "items": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/v1-item"}}}},
+    "v1": {"type": "object", "additionalProperties": false, "required": ["schema_version", "selected_module", "authorized_behavior_sources_sha256", "batches"], "properties": {"schema_version": {"const": "1.0.0"}, "selected_module": {"type": "string", "minLength": 1}, "authorized_behavior_sources_sha256": {"$ref": "#/$defs/digest"}, "batches": {"type": "array", "items": {"$ref": "#/$defs/v1-batch"}}}},
+    "text-side": {"type": "object", "additionalProperties": false, "required": ["side", "content_sha256", "accounted_range", "read_range"], "properties": {"side": {"enum": ["before", "after"]}, "content_sha256": {"$ref": "#/$defs/digest"}, "accounted_range": {"$ref": "#/$defs/range"}, "read_range": {"$ref": "#/$defs/range"}}},
+    "binary-side": {"type": "object", "additionalProperties": false, "required": ["side", "content_sha256", "size_bytes", "text"], "properties": {"side": {"enum": ["before", "after"]}, "content_sha256": {"$ref": "#/$defs/digest"}, "size_bytes": {"type": "integer", "minimum": 0}, "text": {"const": false}}},
+    "side": {"oneOf": [{"$ref": "#/$defs/text-side"}, {"$ref": "#/$defs/binary-side"}]},
+    "before-side": {"allOf": [{"$ref": "#/$defs/side"}, {"properties": {"side": {"const": "before"}}}]},
+    "after-side": {"allOf": [{"$ref": "#/$defs/side"}, {"properties": {"side": {"const": "after"}}}]},
+    "v2-item": {
+      "type": "object", "additionalProperties": false,
+      "required": ["item_id", "change_id", "change_kind", "baseline_source_id", "current_source_id", "domain_key", "evidence_sides"],
+      "properties": {
+        "item_id": {"type": "string", "pattern": "^ITEM-[0-9]{6}$"},
+        "change_id": {"oneOf": [{"type": "string", "pattern": "^CHANGE-[0-9a-f]{64}$"}, {"type": "null"}]},
+        "change_kind": {"enum": ["added", "modified", "deleted", "renamed", "binary", "context"]},
+        "baseline_source_id": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+        "current_source_id": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+        "domain_key": {"type": "string", "minLength": 1},
+        "evidence_sides": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/side"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"change_kind": {"const": "added"}}}, "then": {"properties": {"change_id": {"type": "string", "pattern": "^CHANGE-[0-9a-f]{64}$"}, "baseline_source_id": {"type": "null"}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"items": {"$ref": "#/$defs/after-side"}}}}},
+        {"if": {"properties": {"change_kind": {"const": "deleted"}}}, "then": {"properties": {"change_id": {"type": "string", "pattern": "^CHANGE-[0-9a-f]{64}$"}, "baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "null"}, "evidence_sides": {"items": {"$ref": "#/$defs/before-side"}}}}},
+        {"if": {"properties": {"change_kind": {"enum": ["modified", "renamed"]}}}, "then": {"properties": {"change_id": {"type": "string", "pattern": "^CHANGE-[0-9a-f]{64}$"}, "baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"contains": {"$ref": "#/$defs/before-side"}, "minContains": 1, "allOf": [{"contains": {"$ref": "#/$defs/after-side"}, "minContains": 1}]}}}},
+        {"if": {"properties": {"change_kind": {"const": "binary"}}}, "then": {"properties": {"change_id": {"type": "string", "pattern": "^CHANGE-[0-9a-f]{64}$"}, "evidence_sides": {"items": {"$ref": "#/$defs/binary-side"}}}, "oneOf": [
+          {"properties": {"baseline_source_id": {"type": "null"}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"items": {"$ref": "#/$defs/after-side"}}}},
+          {"properties": {"baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "null"}, "evidence_sides": {"items": {"$ref": "#/$defs/before-side"}}}},
+          {"properties": {"baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"contains": {"$ref": "#/$defs/before-side"}, "minContains": 1, "allOf": [{"contains": {"$ref": "#/$defs/after-side"}, "minContains": 1}]}}}
+        ]}},
+        {"if": {"properties": {"change_kind": {"const": "context"}}}, "then": {"properties": {"change_id": {"type": "null"}}, "oneOf": [
+          {"properties": {"baseline_source_id": {"type": "null"}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"items": {"$ref": "#/$defs/after-side"}}}},
+          {"properties": {"baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "null"}, "evidence_sides": {"items": {"$ref": "#/$defs/before-side"}}}},
+          {"properties": {"baseline_source_id": {"type": "string", "minLength": 1}, "current_source_id": {"type": "string", "minLength": 1}, "evidence_sides": {"contains": {"$ref": "#/$defs/before-side"}, "minContains": 1, "allOf": [{"contains": {"$ref": "#/$defs/after-side"}, "minContains": 1}]}}}
+        ]}}
+      ]
+    },
+    "v2-batch": {"type": "object", "additionalProperties": false, "required": ["batch_id", "items"], "properties": {"batch_id": {"type": "string", "pattern": "^BATCH-[0-9]{6}$"}, "items": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/v2-item"}}}},
+    "v2": {"type": "object", "additionalProperties": false, "required": ["schema_version", "scope_receipt_sha256", "scope_candidate_sha256", "selected_module", "baseline_inventory_sha256", "current_inventory_sha256", "batches"], "properties": {"schema_version": {"const": "2.0.0"}, "scope_receipt_sha256": {"$ref": "#/$defs/digest"}, "scope_candidate_sha256": {"$ref": "#/$defs/digest"}, "selected_module": {"type": "string", "minLength": 1}, "baseline_inventory_sha256": {"$ref": "#/$defs/digest"}, "current_inventory_sha256": {"$ref": "#/$defs/digest"}, "batches": {"type": "array", "items": {"$ref": "#/$defs/v2-batch"}}}}
+  }
 }

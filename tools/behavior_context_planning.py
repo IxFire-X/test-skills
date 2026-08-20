@@ -97,6 +97,12 @@ def stable_fragment_id(item: Mapping[str, Any], fragment: Mapping[str, Any]) -> 
     return "FRAGMENT-" + hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
 
 
+def stable_change_fragment_id(item: Mapping[str, Any], fragment: Mapping[str, Any]) -> str:
+    """Derive the V2 identity from the closed change semantic fields."""
+    payload = {"effect": fragment["effect"], "baseline_source_id": item["baseline_source_id"], "current_source_id": item["current_source_id"], "item_id": item["item_id"], "evidence_locators": _plain(fragment["evidence_locators"])}
+    return "FRAGMENT-" + hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
 def _cut(data: bytes, point: int, backwards: bool) -> int:
     point = max(0, min(len(data), point))
     if point in (0, len(data)):
@@ -119,6 +125,277 @@ def _ranges(data: bytes) -> list[tuple[int, int, int, int]]:
         result.append((start, end, _cut(data, start - _OVERLAP, False), _cut(data, end + _OVERLAP, True)))
         start = end
     return result
+
+
+def _v2_fail(code: str, path: str, message: str) -> TestClassificationError:
+    return TestClassificationError((_diag(path, code, message),))
+
+
+def _v2_shape(value: Any, schema: str, code: str) -> None:
+    diagnostics = schema_diagnostics(_plain(value), _ROOT / "schemas" / schema, _ROOT)
+    if diagnostics:
+        raise _v2_fail(code, diagnostics[0]["path"], "Artifact does not satisfy its closed schema.")
+
+
+def _v2_candidate(value: Mapping[str, Any]) -> None:
+    _v2_shape(value, "change-scope-candidate.schema.json", "CHANGE_PLAN_SHAPE")
+
+
+def _v2_inventory(value: Mapping[str, Any], selected_module: str, path: str) -> list[Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", path, "Inventory must be a closed JSON object.")
+    if value.get("stage") == "source-inventory":
+        _v2_shape(value, "source-inventory-output.schema.json", "CHANGE_PLAN_SHAPE")
+        artifacts = value["artifacts"]
+        if artifacts["authorized_behavior_sources_sha256"] != _digest(_plain(artifacts["authorized_behavior_sources"])):
+            raise _v2_fail("CHANGE_PLAN_SHAPE", path, "Inventory envelope must bind its exact authorized sources.")
+    authorized = _sources(value)
+    if not isinstance(authorized, Mapping) or set(authorized) != {"module_id", "sources"} or authorized.get("module_id") != selected_module or not isinstance(authorized.get("sources"), list):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", path, "Inventory must contain the selected module's authorized sources.")
+    rows = authorized["sources"]
+    product_paths: list[str] = []
+    seen_product = False
+    for index, row in enumerate(rows):
+        pointer = f"{path}/sources/{index}"
+        if not isinstance(row, Mapping) or row.get("kind") not in {"supplied_requirement", "product_file"}:
+            raise _v2_fail("CHANGE_PLAN_SHAPE", pointer, "Inventory source rows must use a closed supported variant.")
+        if not isinstance(row.get("source_id"), str) or not row["source_id"] or not isinstance(row.get("content_digest"), str) or not row["content_digest"].startswith("sha256:") or len(row["content_digest"]) != 71 or any(character not in "0123456789abcdef" for character in row["content_digest"][7:]):
+            raise _v2_fail("CHANGE_PLAN_SHAPE", pointer, "Inventory source identity and digest must be canonical.")
+        if row["kind"] == "supplied_requirement":
+            if set(row) != {"source_id", "kind", "content_digest"} or seen_product:
+                raise _v2_fail("CHANGE_PLAN_SHAPE", pointer, "Supplied requirements must be closed and precede product files.")
+            continue
+        seen_product = True
+        if set(row) != {"source_id", "kind", "path", "content_digest"} or not isinstance(row.get("path"), str) or not row["path"] or Path(row["path"]).is_absolute() or ".." in PurePosixPath(row["path"]).parts or "\\" in row["path"]:
+            raise _v2_fail("CHANGE_PLAN_SHAPE", pointer, "Product sources must use safe canonical project-relative paths.")
+        expected = "SOURCE-" + hashlib.sha256(b"product_file\0" + row["path"].encode("utf-8")).hexdigest()
+        if row["source_id"] != expected:
+            raise _v2_fail("CHANGE_PLAN_SHAPE", pointer, "Product source identity must equal its stable path identity.")
+        product_paths.append(row["path"])
+    if len({row["source_id"] for row in rows}) != len(rows) or product_paths != sorted(product_paths) or len(product_paths) != len(set(product_paths)):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", path, "Source identities must be unique and product paths canonically ordered.")
+    return rows
+
+
+def _v2_bytes(resolver: Any, side: str, row: Mapping[str, Any], digest: str, size: int) -> bytes:
+    try:
+        value = resolver(side, row)
+    except TestClassificationError:
+        raise
+    except Exception as error:
+        if getattr(error, "code", None) == "CHANGE_SOURCE_DRIFT" or "CHANGE_SOURCE_DRIFT" in str(error):
+            raise _v2_fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Authorized side bytes changed after planning.") from None
+        raise _v2_fail("CHANGE_SIDE_BINDING", "/byte_resolver", "Authorized side bytes could not be resolved.") from None
+    if not isinstance(value, bytes) or digest != "sha256:" + hashlib.sha256(value).hexdigest() or len(value) != size:
+        raise _v2_fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Resolved bytes must match the exact planned side digest and size.")
+    return value
+
+
+def _v2_sides(resolver: Any, change: Mapping[str, Any], before: Mapping[str, Any] | None, after: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for side, source in (("before", before), ("after", after)):
+        if source is None:
+            continue
+        change_side = change.get(side)
+        if not isinstance(change_side, Mapping) or change_side.get("content_sha256") != source["content_digest"] or change_side.get("size_bytes") is None:
+            raise _v2_fail("CHANGE_SIDE_BINDING", f"/changes/{side}", "Change side must bind its matching authoritative inventory source.")
+        text = bool(change_side.get("text"))
+        data = _v2_bytes(resolver, side, source, source["content_digest"], int(change_side["size_bytes"]))
+        if not text:
+            result.append({"side": side, "content_sha256": source["content_digest"], "size_bytes": len(data), "text": False})
+        else:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise _v2_fail("CHANGE_SIDE_BINDING", f"/changes/{side}", "Text side must be valid UTF-8.") from error
+            for start, end, read_start, read_end in _ranges(data):
+                result.append({"side": side, "content_sha256": source["content_digest"], "accounted_range": {"start": start, "end": end}, "read_range": {"start": read_start, "end": read_end}})
+    return result
+
+
+def _v2_context_sides(resolver: Any, before: Mapping[str, Any] | None, after: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for side, source in (("before", before), ("after", after)):
+        if source is None:
+            continue
+        try:
+            value = resolver(side, source)
+        except TestClassificationError:
+            raise
+        except Exception as error:
+            if getattr(error, "code", None) == "CHANGE_SOURCE_DRIFT" or "CHANGE_SOURCE_DRIFT" in str(error):
+                raise _v2_fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Authorized side bytes changed after planning.") from None
+            raise _v2_fail("CHANGE_SIDE_BINDING", "/byte_resolver", "Authorized side bytes could not be resolved.") from None
+        if not isinstance(value, bytes) or source["content_digest"] != "sha256:" + hashlib.sha256(value).hexdigest():
+            raise _v2_fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Resolved bytes must match the exact inventory digest.")
+        try:
+            value.decode("utf-8")
+        except UnicodeDecodeError:
+            raise _v2_fail("CHANGE_SIDE_BINDING", "/byte_resolver", "Context source bytes must be valid UTF-8.") from None
+        for start, end, read_start, read_end in _ranges(value):
+            result.append({"side": side, "content_sha256": source["content_digest"], "accounted_range": {"start": start, "end": end}, "read_range": {"start": read_start, "end": read_end}})
+    return result
+
+
+def _v2_plan_semantics(plan: Mapping[str, Any]) -> None:
+    _v2_shape(plan, "behavior-context-plan.schema.json", "CHANGE_PLAN_SHAPE")
+    if plan.get("schema_version") != "2.0.0":
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/schema_version", "Change-set validation requires Plan V2.")
+    item_number = 0
+    seen_pairs: set[tuple[Any, Any]] = set()
+    for batch_number, batch in enumerate(plan["batches"], 1):
+        if batch["batch_id"] != f"BATCH-{batch_number:06d}":
+            raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Plan batches must use canonical physical order.")
+        for item in batch["items"]:
+            item_number += 1
+            if item["item_id"] != f"ITEM-{item_number:06d}":
+                raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Plan items must use canonical physical order.")
+            pair = (item["baseline_source_id"], item["current_source_id"])
+            if pair in seen_pairs:
+                raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "A logical source pair may appear only once.")
+            seen_pairs.add(pair)
+            grouped: dict[str, list[Mapping[str, Any]]] = {"before": [], "after": []}
+            for side in item["evidence_sides"]:
+                grouped[side["side"]].append(side)
+            expected = ({"before"} if item["baseline_source_id"] is not None else set()) | ({"after"} if item["current_source_id"] is not None else set())
+            if {name for name, rows in grouped.items() if rows} != expected:
+                raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Evidence sides must equal the item's source identities.")
+            if [side["side"] for side in item["evidence_sides"]] != [name for name in ("before", "after") for _ in grouped[name]]:
+                raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Evidence sides must be ordered before then after.")
+            for rows in grouped.values():
+                if not rows:
+                    continue
+                if len({row["content_sha256"] for row in rows}) != 1:
+                    raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Every logical side must use one content digest.")
+                text_rows = [row for row in rows if "read_range" in row]
+                if text_rows and len(text_rows) != len(rows):
+                    raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "A logical side cannot mix text ranges and binary metadata.")
+                if not text_rows and len(rows) != 1:
+                    raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "A binary side has exactly one metadata row.")
+                cursor = 0
+                for row in text_rows:
+                    accounted, read = row["accounted_range"], row["read_range"]
+                    if accounted["start"] != cursor or accounted["end"] < accounted["start"] or read["start"] > accounted["start"] or read["end"] < accounted["end"]:
+                        raise _v2_fail("CHANGE_PLAN_SHAPE", "/batches", "Text ranges must cover the side exactly once in order.")
+                    cursor = accounted["end"]
+
+
+def _v2_verify_planned_bytes(resolver: Any, item: Mapping[str, Any]) -> None:
+    for side_name in ("before", "after"):
+        rows = [row for row in item["evidence_sides"] if row["side"] == side_name]
+        if not rows:
+            continue
+        size = rows[0]["size_bytes"] if "size_bytes" in rows[0] else max(row["accounted_range"]["end"] for row in rows)
+        source_id = item["baseline_source_id"] if side_name == "before" else item["current_source_id"]
+        binding = {"source_id": source_id, "content_digest": rows[0]["content_sha256"]}
+        data = _v2_bytes(resolver, side_name, binding, rows[0]["content_sha256"], size)
+        if "read_range" in rows[0]:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise _v2_fail("CHANGE_SIDE_BINDING", "/byte_resolver", "Planned text side must remain valid UTF-8.") from None
+
+
+def build_change_context_plan(project: Path, selected_module: Mapping[str, Any], scope_receipt: Mapping[str, Any], scope_candidate: Mapping[str, Any], baseline_inventory: Mapping[str, Any], current_inventory: Mapping[str, Any], byte_resolver: Any) -> Mapping[str, Any]:
+    """Build the closed V2 plan from a promoted receipt and its safe candidate."""
+    _v2_shape(scope_receipt, "change-scope-receipt.schema.json", "CHANGE_PLAN_SHAPE")
+    _v2_candidate(scope_candidate)
+    if not isinstance(project, Path) or not isinstance(selected_module, Mapping) or not isinstance(selected_module.get("id"), str):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/selected_module", "A normalized project and selected module are required.")
+    module = selected_module["id"]
+    if scope_receipt["run_mode"] != "CHANGE_SET" or scope_candidate["run_mode"] != "CHANGE_SET" or scope_receipt["candidate_sha256"] != _digest(_plain(scope_candidate)):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/scope", "V2 requires an exact promoted CHANGE_SET candidate.")
+    for key in ("baseline_receipt_sha256", "change_input_sha256", "analytics_sha256"):
+        if scope_receipt[key] != scope_candidate[key]:
+            raise _v2_fail("CHANGE_PLAN_SHAPE", "/scope", "Receipt and candidate bindings must agree.")
+    if scope_candidate["selected_module"] != module:
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/selected_module", "Candidate module must equal the selected module.")
+    baseline, current = _v2_inventory(baseline_inventory, module, "/baseline_inventory"), _v2_inventory(current_inventory, module, "/current_inventory")
+    if scope_candidate["current_source_inventory_sha256"] != _digest(_plain(_sources(current_inventory))):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/current_inventory", "Candidate must bind the exact current inventory.")
+    by_base_path = {row["path"]: row for row in baseline if row["kind"] == "product_file"}
+    by_current_path = {row["path"]: row for row in current if row["kind"] == "product_file"}
+    by_base_id, by_current_id = {row["source_id"]: row for row in baseline}, {row["source_id"]: row for row in current}
+    included_ids = list(scope_receipt["included_source_ids"])
+    candidate_ids = [row["source_id"] for row in scope_candidate["included_sources"]]
+    if included_ids != candidate_ids or len(included_ids) != len(set(included_ids)):
+        raise _v2_fail("CHANGE_PLAN_SHAPE", "/included_source_ids", "Receipt must bind the candidate's exact included source projection.")
+    included = set(included_ids)
+    baseline_order = {row["source_id"]: index for index, row in enumerate(baseline)}
+    current_order = {row["source_id"]: index for index, row in enumerate(current)}
+    direct_ids: set[str] = set(); rows: list[tuple[int, int, int, dict[str, Any]]] = []
+    changes = scope_candidate["changes"]
+    for index, change in enumerate(changes):
+        kind = change["kind"]
+        old_path, new_path = change.get("old_path", change.get("path")), change.get("new_path", change.get("path"))
+        before = by_base_path.get(old_path) if change.get("before") is not None else None
+        after = by_current_path.get(new_path) if change.get("after") is not None else None
+        if (change.get("before") is not None) != (before is not None) or (change.get("after") is not None) != (after is not None):
+            raise _v2_fail("CHANGE_SIDE_BINDING", f"/changes/{index}", "Every change side must match one authoritative inventory row.")
+        if not ({row["source_id"] for row in (before, after) if row} & included):
+            continue
+        direct_ids.update(row["source_id"] for row in (before, after) if row)
+        sides = _v2_sides(byte_resolver, change, before, after)
+        item = {"item_id": f"ITEM-{len(rows)+1:06d}", "change_id": change["change_id"], "change_kind": kind, "baseline_source_id": before["source_id"] if before else None, "current_source_id": after["source_id"] if after else None, "domain_key": derive_domain_key(after or before, selected_module, project), "evidence_sides": sides}
+        slot = baseline_order[before["source_id"]] if before else current_order[after["source_id"]]
+        rows.append((0 if before else 1, slot, index, item))
+    for position, source_id in enumerate(included_ids):
+        if source_id in direct_ids:
+            continue
+        before, after = by_base_id.get(source_id), by_current_id.get(source_id)
+        if before is None and after is None:
+            raise _v2_fail("CHANGE_SIDE_BINDING", "/included_source_ids", "Every included source must belong to a supplied inventory.")
+        item = {"item_id": f"ITEM-{len(rows)+1:06d}", "change_id": None, "change_kind": "context", "baseline_source_id": before["source_id"] if before else None, "current_source_id": after["source_id"] if after else None, "domain_key": derive_domain_key(after or before, selected_module, project), "evidence_sides": _v2_context_sides(byte_resolver, before, after)}
+        slot = baseline_order[source_id] if before else current_order[source_id]
+        rows.append((0 if before else 1, slot, len(changes) + position, item))
+    rows.sort(key=lambda value: value[:3])
+    for number, row in enumerate(rows, 1):
+        item = row[3]
+        item["item_id"] = f"ITEM-{number:06d}"
+    plan = {"schema_version": "2.0.0", "scope_receipt_sha256": _digest(_plain(scope_receipt)), "scope_candidate_sha256": _digest(_plain(scope_candidate)), "selected_module": module, "baseline_inventory_sha256": _digest(_plain(_sources(baseline_inventory))), "current_inventory_sha256": _digest(_plain(_sources(current_inventory))), "batches": [{"batch_id": f"BATCH-{index:06d}", "items": [row[3]]} for index, row in enumerate(rows, 1)]}
+    _v2_plan_semantics(plan)
+    return _freeze(plan)
+
+
+def validate_change_batch_result(scope_receipt: Mapping[str, Any], plan: Mapping[str, Any], result: Mapping[str, Any], byte_resolver: Any) -> tuple[Mapping[str, str], ...]:
+    try:
+        _v2_shape(scope_receipt, "change-scope-receipt.schema.json", "CHANGE_RESULT_SHAPE")
+        _v2_plan_semantics(plan)
+        _v2_shape(result, "behavior-context-batch-result.schema.json", "CHANGE_RESULT_SHAPE")
+        if result.get("schema_version") != "2.0.0":
+            raise _v2_fail("CHANGE_RESULT_SHAPE", "/schema_version", "Change-set validation requires Batch Result V2.")
+        if plan["scope_receipt_sha256"] != _digest(_plain(scope_receipt)) or result["scope_receipt_sha256"] != _digest(_plain(scope_receipt)) or result["plan_sha256"] != _digest(_plain(plan)):
+            raise _v2_fail("CHANGE_RESULT_SHAPE", "/result", "Result must bind the exact receipt and plan.")
+        batch = next((row for row in plan["batches"] if row["batch_id"] == result["batch_id"]), None)
+        if batch is None or [row["item_id"] for row in result["items"]] != [row["item_id"] for row in batch["items"]]:
+            raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Result items must equal the planned batch in order.")
+        for item, row in zip(batch["items"], result["items"]):
+            _v2_verify_planned_bytes(byte_resolver, item)
+            outcome, fragments = row["outcome"], row.get("behavior_fragments", [])
+            if item["change_kind"] == "context" and outcome not in {"supporting_context", "no_changed_observable_fact"}: raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Context items cannot promote changed fragments or tombstones.")
+            if outcome == "supporting_context" and item["change_kind"] != "context": raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Only context items can emit supporting observations.")
+            deleted_item = item["change_kind"] == "deleted" or (item["change_kind"] == "binary" and item["current_source_id"] is None)
+            if outcome == "deleted_behavior_tombstones" and not deleted_item: raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Only a deleted source can emit deletion tombstones.")
+            if outcome in {"supporting_context", "no_changed_observable_fact"} and fragments: raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Non-fragment outcomes cannot carry fragments.")
+            if outcome in {"changed_behavior_fragments", "deleted_behavior_tombstones"} and not fragments: raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Behavior outcomes require fragments.")
+            for fragment in fragments:
+                if fragment["fragment_id"] != stable_change_fragment_id(item, fragment): raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Fragment ID must equal its closed deterministic derivation.")
+                sides = {name: [side for side in item["evidence_sides"] if side["side"] == name] for name in ("before", "after")}
+                locator_sides = {locator["side"] for locator in fragment["evidence_locators"]}
+                required = {"after"} if fragment["effect"] == "added" else {"before"} if fragment["effect"] == "retired" else {"before", "after"}
+                if not required <= locator_sides: raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Effect must bind its required evidence sides.")
+                if outcome == "deleted_behavior_tombstones" and fragment["effect"] != "retired": raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Deletion tombstones may contain only retired effects.")
+                if item["change_kind"] == "added" and fragment["effect"] != "added": raise _v2_fail("CHANGE_RESULT_SHAPE", "/items", "Added sources may emit only added effects.")
+                for locator in fragment["evidence_locators"]:
+                    matching = [side for side in sides[locator["side"]] if side.get("content_sha256") == locator["content_sha256"] and "read_range" in side and side["read_range"]["start"] <= locator["start_byte"] < locator["end_byte"] <= side["read_range"]["end"]]
+                    if not matching:
+                        raise _v2_fail("CHANGE_SIDE_BINDING", "/items", "Locator must remain inside an exact planned text side.")
+                authoritative = "before" if fragment["effect"] == "retired" else "after"
+                if not any(locator["side"] == authoritative and locator["start_byte"] <= fragment["anchor_byte"] < locator["end_byte"] for locator in fragment["evidence_locators"]):
+                    raise _v2_fail("CHANGE_SIDE_BINDING", "/items", "Fragment anchor must belong to its authoritative evidence side.")
+        return ()
+    except TestClassificationError as error:
+        return error.diagnostics
 
 
 def _sources(inventory: Mapping[str, Any]) -> Mapping[str, Any]:
