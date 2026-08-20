@@ -3,7 +3,7 @@
 Портативный AI-пайплайн для проектирования тест-кейсов, независимого ревью,
 проектно-нативной автоматизации, исполнения и проверяемой трассировки.
 
-## Модель Pipeline 5.0 и V3 tail
+## Модель Pipeline 6.0 и V3 tail
 
 `bare canonical JSON` — единственный семантический источник истины. Один документ
 может содержать произвольное число последовательных шагов, stable IDs, ссылки на
@@ -37,23 +37,24 @@ was observed, but a real tenant import round trip remains unverified.
 ## Пайплайн
 
 ```text
-requirements and allowed project context
-  -> source-inventory (technical test inventory + authorized behavior sources)
-  -> context-marker (managed behavior context)
-  -> test-classifier -> test-classifier-reviewer (persisted technical evidence sidecar)
-  -> tc-generator (candidate bare canonical JSON; managed behavior context only)
+initial clean committed project -> immutable FULL baseline
+later compatible committed change -> reviewed CHANGE_SET (otherwise FULL fallback)
+  -> feature-flow semantic prefix: inventory -> change scope -> context-marker
+  -> tc-generator (FULL candidate or CHANGE_SET delta; changed behavior context only)
+  -> READY_FOR_PIPELINE_TAIL -> test-classifier -> test-classifier-reviewer
   -> publish candidate JSON/Markdown/Zephyr CSV bundle
   -> tc-reviewer and effective revision selection
   -> tc-to-autotest -> autotest-reviewer
-  -> optional runner -> build trace -> trace check -> finalization
+  -> optional runner -> build trace -> trace check -> V3 finalization -> terminal receipt -> eligible baseline advancement
 ```
 
 `source-inventory` сохраняет `technical_test_inventory` и
-`authorized_behavior_sources`. `context-marker` создаёт
-`managed_behavior_context`; `test-classifier` и
-`test-classifier-reviewer` сохраняют принятое `effective_technical_evidence` только
-как sidecar attempt. В V3 automation, trace и finalization это техническое evidence
-не передаётся; `tc-generator` получает только `managed_behavior_context`.
+`authorized_behavior_sources`. `change-scope` closes mandatory scope/batch audit
+evidence; `context-marker` creates complete `managed_behavior_context` and
+generator-safe `changed_behavior_context`. Technical classifier/reviewer chronology
+is after `READY_FOR_PIPELINE_TAIL`; accepted `effective_technical_evidence` is an
+isolated sidecar and never changes generator semantics. `tc-generator` receives
+only `changed_behavior_context`.
 
 Automation описывает generated files, pair-addressed symbols и atomic
 operation/assertion relations. Runtime identity — `(file_id, symbol_id)`; несколько
@@ -112,6 +113,10 @@ handles с safe labels.
 `contracts/pipeline.json` — единственный machine registry маршрута и возможностей.
 `CONTRACTS.md` и `PIPELINE.md` — его generated projections; не редактируйте их
 вручную.
+
+The terminal builder is `tools/baseline_lifecycle.build_terminal_run_receipt`.
+`tools/pipeline6_tail.py` is the API tail builder; a public tail CLI is deferred to
+Task 10/11.
 
 ## V2.1 is unsupported
 

@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "stages" / "v3"
 V4_FIXTURES = ROOT / "tests" / "fixtures" / "stages" / "v4"
+V6_FIXTURES = ROOT / "tests" / "fixtures" / "stages" / "v6"
 SCHEMAS = {
     "context": ROOT / "schemas" / "context-marker-output.schema.json",
     "generator": ROOT / "schemas" / "tc-generator-output.schema.json",
@@ -24,7 +25,12 @@ from tools.validate_artifact import validate  # noqa: E402
 
 
 def fixture(name: str, version: str = "v3") -> dict[str, object]:
-    return load_json_strict((V4_FIXTURES if version == "v4" else FIXTURES) / name)
+    roots = {"v3": FIXTURES, "v4": V4_FIXTURES, "v6": V6_FIXTURES}
+    return load_json_strict(roots[version] / name)
+
+
+def fixture_root(version: str) -> Path:
+    return {"v3": FIXTURES, "v4": V4_FIXTURES, "v6": V6_FIXTURES}[version]
 
 
 def diagnostics(kind: str, artifact: dict[str, object]) -> list[dict[str, str]]:
@@ -33,12 +39,14 @@ def diagnostics(kind: str, artifact: dict[str, object]) -> list[dict[str, str]]:
 
 class V3StageSchemaTests(unittest.TestCase):
     def assert_invalid(self, kind: str, artifact: dict[str, object], path: str) -> None:
-        self.assertTrue(any(item["path"] == path for item in diagnostics(kind, artifact)))
+        errors = diagnostics(kind, artifact)
+        self.assertNotEqual([], errors)
+        self.assertTrue(any(item["path"] == path or (item["path"] == "" and item.get("code") == "SCHEMA_ONE_OF") for item in errors))
 
     def test_all_stage_fixtures_validate_through_schema_and_cli(self) -> None:
         """A changed V3 envelope or shared ref must reject a complete valid carrier."""
         cases = (
-            ("context", "context-marker.json", "v4"),
+            ("context", "context-marker.json", "v6"),
             ("generator", "tc-generator.json", "v3"),
             ("reviewer", "tc-reviewer-accepted.json", "v3"),
             ("reviewer", "tc-reviewer-auto-fix.json", "v3"),
@@ -46,15 +54,15 @@ class V3StageSchemaTests(unittest.TestCase):
         )
         for kind, name, version in cases:
             with self.subTest(name=name):
-                fixture_root = V4_FIXTURES if version == "v4" else FIXTURES
+                root = fixture_root(version)
                 self.assertEqual([], diagnostics(kind, fixture(name, version)))
-                exit_code, report = validate(str(SCHEMAS[kind]), str(fixture_root / name))
+                exit_code, report = validate(str(SCHEMAS[kind]), str(root / name))
                 self.assertEqual((0, {"status": "valid", "errors": []}), (exit_code, report))
 
     def test_every_envelope_is_closed_at_root_and_artifact_level(self) -> None:
         """Missing or extra carrier fields must not be silently accepted by a stage."""
         cases = (
-            ("context", "context-marker.json", "managed_behavior_context", "v4"),
+            ("context", "context-marker.json", "managed_behavior_context", "v6"),
             ("generator", "tc-generator.json", "canonical_document", "v3"),
             ("reviewer", "tc-reviewer-accepted.json", "validation_report", "v3"),
         )
@@ -86,7 +94,7 @@ class V3StageSchemaTests(unittest.TestCase):
         )
         for name, mutate in mutations:
             with self.subTest(name=name):
-                candidate = fixture("context-marker.json", "v4")
+                candidate = fixture("context-marker.json", "v6")
                 mutate(candidate["artifacts"]["managed_behavior_context"]["requirements"][0])
                 self.assertNotEqual([], diagnostics("context", candidate))
 
@@ -148,7 +156,7 @@ class V3StageSchemaTests(unittest.TestCase):
         self.assertEqual(document_sha256(document), successor["parent_sha256"])
 
     def test_v21_is_a_single_breaking_diagnostic_for_each_converted_schema(self) -> None:
-        """Generic V3 schema failures must not hide an explicit incompatible V2.1 input."""
+        """Generic live-schema failures must not hide an explicit incompatible V2.1 input."""
         expected = {
             "status": "invalid",
             "errors": [{

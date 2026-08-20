@@ -15,65 +15,14 @@ else:  # direct CLI execution
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
     root = root.resolve()
-    required_files = (
-        "contracts/pipeline.json",
-        "schemas/test-symbol-registry.schema.json",
-        "schemas/source-inventory-output.schema.json",
-        "schemas/test-classifier-output.schema.json",
-        "schemas/test-classifier-reviewer-output.schema.json",
-        "schemas/effective-technical-evidence.schema.json",
-        "schemas/canonical-test-document.schema.json",
-        "schemas/tc-reviewer-output.schema.json",
-        "schemas/tc-to-autotest-output.schema.json",
-        "schemas/autotest-reviewer-output.schema.json",
-        "schemas/run-tests-output.schema.json",
-        "schemas/trace-document.schema.json",
-        "schemas/orchestrator-output.schema.json",
-        "schemas/skillsrc.schema.json",
-        "schemas/project-discovery-output.schema.json",
-        "schemas/skillsrc-init-output.schema.json",
-        "tools/orchestrate_test_case_revision.py",
-        "tools/build_trace_document.py",
-        "tools/run_tests.py",
-        "tools/scan_project.py",
-        "tools/skillsrc_manifest.py",
-        "tools/discover_project.py",
-        "tools/init_skillsrc.py",
-        "tools/test_classification.py",
-        "skills/test-classifier/SKILL.md",
-        "skills/test-classifier-reviewer/SKILL.md",
-    )
+    # The contract checker owns the closed Pipeline 6 runtime/schema/policy lists.
+    # Doctor verifies bootstrap availability and delegates semantic registry checks.
+    required_files = ("contracts/pipeline.json", "schemas/pipeline.schema.json", "tools/contract_check.py")
     required_dirs = ("schemas", "tools", "contracts")
     missing_integrity = [item for item in required_files if not (root / item).is_file()]
     missing_integrity.extend(item for item in required_dirs if not (root / item).is_dir())
     if not root.is_dir():
         missing_integrity.insert(0, "root")
-    for relative, expected in (
-        ("contracts/pipeline.json", "pipeline"),
-        ("schemas/orchestrator-output.schema.json", "schemas/orchestrator-output.schema.json"),
-        ("schemas/test-symbol-registry.schema.json", "schemas/test-symbol-registry.schema.json"),
-        ("schemas/source-inventory-output.schema.json", "schemas/source-inventory-output.schema.json"),
-        ("schemas/test-classifier-output.schema.json", "schemas/test-classifier-output.schema.json"),
-        ("schemas/test-classifier-reviewer-output.schema.json", "schemas/test-classifier-reviewer-output.schema.json"),
-        ("schemas/effective-technical-evidence.schema.json", "schemas/effective-technical-evidence.schema.json"),
-        ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json"),
-        ("schemas/skillsrc.schema.json", "schemas/skillsrc.schema.json"),
-        ("schemas/project-discovery-output.schema.json", "schemas/project-discovery-output.schema.json"),
-        ("schemas/skillsrc-init-output.schema.json", "schemas/skillsrc-init-output.schema.json"),
-    ):
-        candidate = root / relative
-        if not candidate.is_file():
-            continue
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-            if expected == "pipeline":
-                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "5.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
-            else:
-                valid = data.get("$id") == expected and data.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
-            if not valid:
-                missing_integrity.append(f"invalid:{relative}")
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            missing_integrity.append(f"invalid:{relative}")
     pipeline_path = root / "contracts" / "pipeline.json"
     if pipeline_path.is_file():
         try:

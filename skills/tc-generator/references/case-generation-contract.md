@@ -1,6 +1,6 @@
 # V3 case-generation contract
 
-The bare document validated by `tools.canonical_document` is canonical. `tools.test_case_projections` renders immutable Markdown and Zephyr CSV; `tools.publish_test_case_bundle` publishes the three-file revision bundle. Consume only `artifacts.managed_behavior_context`; reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence as generator inputs.
+The bare document validated by `tools.canonical_document` is canonical. `tools.test_case_projections` renders immutable Markdown and Zephyr CSV; `tools.publish_test_case_bundle` publishes the three-file revision bundle. Consume only `changed_behavior_context`; reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, change_scope_receipt, managed_behavior_context, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence. FULL emits `candidate_document`; CHANGE_SET emits `canonical_document_delta` for `tools.document_delta`.
 
 ## Adaptive case boundary
 

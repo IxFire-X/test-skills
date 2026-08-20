@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/unchanged-document-selection.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact", "baseline_receipt_sha256", "delta_application_receipt_sha256", "effective_document_sha256", "effective_bundle_receipt_sha256"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "artifact": {"const": "unchanged-document-selection"},
+    "baseline_receipt_sha256": {"$ref": "#/$defs/digest"}, "delta_application_receipt_sha256": {"$ref": "#/$defs/digest"},
+    "effective_document_sha256": {"$ref": "#/$defs/digest"}, "effective_bundle_receipt_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

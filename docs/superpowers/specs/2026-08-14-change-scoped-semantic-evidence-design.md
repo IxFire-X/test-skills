@@ -52,7 +52,7 @@ python tools/test_classification.py feature-flow \
   [--record <candidate-or-audit.json>]
 ```
 
-`.skillsrc` is discovered automatically and remains unchanged. Exactly one module must be selected from direct path, symbol, route, or supplied requirement evidence. Multiple plausible modules block rather than guess.
+`.skillsrc` is discovered automatically and remains unchanged. Select a module only when `.skillsrc` names exactly one module, or every exact changed canonical path has one common uniquely containing module. An empty change set without a single configured module, any path outside that containment, or multiple candidates returns `BLOCKED`; analytics, symbols, routes, and supplied requirement prose never select a module.
 
 The façade validates inputs, derives state entirely from immutable readback, and returns one closed action:
 
@@ -71,7 +71,13 @@ COMPLETE
 BLOCKED
 ```
 
-The caller performs the requested LLM task, submits the closed artifact with `--record`, and calls the same command again. `feature_flow` owns mode selection, path derivation, ordering, retries, resume, assurance, and receipt construction.
+`FeatureFlowAction` is deliberately only `{kind, artifact, record_path, diagnostics}`, all recursively immutable. `artifact` is the bounded prompt/handoff mapping: it carries `run_mode` and the exact prerequisite path/digest bindings, or for `COMPLETE` the closed prefix-ledger handoff. `record_path` is the exact create-only JSON destination for recordable producer/audit actions. `diagnostics` is empty for a nonblocked action; `BLOCKED` carries safe diagnostics and has no `artifact` or `record_path`. `COMPLETE` means `READY_FOR_PIPELINE_TAIL`, never that automation, trace, terminal receipt, or baseline advancement has completed.
+
+The canonical prefix locations are `run_root/feature-flow/prefix/<ordinal>-<artifact>.json` and `run_root/feature-flow/prefix-ledger.json`; `--record` must name exactly the currently returned `record_path`. These are the only Task 8A state and resume authority: resume reads only completed canonical prefix files and the closed ledger, validates their schemas and digest joins in ordinal order, ignores temporary siblings, and returns the first missing required action. It creates no mutable state pointer, lease, branch, or completion marker. Immutable content projections at `run_root/artifacts/<sha256>.json` are required for Task 9 readback, but are never enumerated or used as Task 8A state or resume authority.
+
+The caller performs the requested LLM task, submits the closed artifact with `--record`, and calls the same command again. `feature_flow` owns only semantic-prefix mode selection, path derivation, ordering, and resume. It hashes the analytics file as `analytics_sha256`; it does not parse analytics semantics, store analytics text, or use analytics to select a module. `controller=None` remains `SEQUENTIAL`.
+
+`--patch-manifest` remains an exact public CLI flag, but the CLI returns `BLOCKED` for it until an in-process `BlobResolver` is supplied by the host: a file path cannot safely provide controller-owned bytes. Programmatic patch execution remains subject to the existing exact resolver/digest rules.
 
 ### Two internal deep modules
 
@@ -106,7 +112,7 @@ bind_scope_predecessor(
 ) -> ScopePredecessor
 ```
 
-The factory is called by `feature_flow` after it has read immutable predecessor artifacts. It first validates the exact full source-inventory envelope, the exact V5 context-marker envelope, and the exact behavior-context receipt against the artifact digests carried by the already validated Baseline Receipt. The binding chain is exact: `ValidatedBaseline.receipt_sha256` identifies the Baseline Receipt; its `authorized_behavior_sources_sha256`, `managed_behavior_context_sha256`, `behavior_source_accounting_sha256`, and `behavior_context_receipt_sha256` identify the full predecessor carriers; the source envelope's internal authorized-source digest, both V5 context projections' authorized-source digests, the accounting receipt digest, and the receipt's authorized-source digest must agree. The full source envelope and V5 context envelope each satisfy their closed local schema before any projection is made.
+The factory is called by `feature_flow` after it has reopened immutable predecessor payloads from the baseline root derived from the validated receipt. Task 9 writes each canonical payload at `baseline_root/payloads/sha256/<digest-without-prefix>.json`; Task 8 derives that root from the receipt's canonical content-addressed location, reopens only the receipt-named digests, and verifies every byte hash before minting a capability. It never writes, copies, scans, or guesses a payload location. It then validates the exact full source-inventory envelope, the exact V5 context-marker envelope, and the exact behavior-context receipt against the artifact digests carried by the already validated Baseline Receipt. The binding chain is exact: `ValidatedBaseline.receipt_sha256` identifies the Baseline Receipt; its `authorized_behavior_sources_sha256`, `managed_behavior_context_sha256`, `behavior_source_accounting_sha256`, and `behavior_context_receipt_sha256` identify the full predecessor carriers; the source envelope's internal authorized-source digest, both V5 context projections' authorized-source digests, the accounting receipt digest, and the receipt's authorized-source digest must agree. The full source envelope and V5 context envelope each satisfy their closed local schema before any projection is made.
 
 The factory then reuses the baseline module's pure stored-context relation validator; it does not copy a second partial validator into `change_scope`. That validator must prove the complete V5 joins for authorized source order and uniqueness, requirement display order and source links, product projections, represented and no-fact dispositions, fragment registry ownership, fragment-group coverage, and receipt source outcomes. It returns a recursively immutable, opaque `ScopePredecessor` containing only:
 
@@ -131,6 +137,8 @@ Failure to validate or bind a predecessor is `BASELINE_BINDING` internally. At t
 
 ## Run modes
 
+Every prefix starts by freezing one `feature-flow-input` at `run_root/feature-flow/prefix/000000-flow-input.json`. It records the exact repository identity and commit/tree when Git is available, the exact `.skillsrc` digest, the mode/input digests, and `durability` exactly `DURABLE|PROVISIONAL`. A flow whose `.skillsrc` was auto-created or updated may continue only as `PROVISIONAL` until that exact `.skillsrc` is present in the frozen committed tree; it cannot advance a durable baseline before then.
+
 ### Mandatory initial `FULL`
 
 No exact compatible baseline means a full run. The initial run always:
@@ -140,8 +148,9 @@ No exact compatible baseline means a full run. The initial run always:
 3. creates the complete authorized behavior-source inventory and complete technical test inventory;
 4. plans every authorized source range;
 5. promotes every semantic batch;
-6. builds the full managed behavior context and a terminal run receipt;
-7. advances a durable baseline only when the target is an exact committed Git tree and every terminal acceptance gate passes.
+6. builds the full managed behavior context and closes the semantic prefix at `READY_FOR_PIPELINE_TAIL`.
+
+Pipeline 6 tail execution, terminal receipt construction, and durable baseline advancement are Task 9 responsibilities. A clean committed FULL is only eligible for those later steps; a Task 8 `COMPLETE` action is not a terminal acceptance or baseline claim.
 
 A supplied diff on the first run is recorded as an input digest but never narrows the baseline. For an initial Git `FULL`, the durable target is exactly the clean committed `HEAD` commit and tree. A dirty Git worktree may run only as a frozen content-snapshot `FULL`; it is explicitly `PROVISIONAL` and cannot advance a durable baseline. A non-Git project may likewise run only as a provisional full content-digest snapshot and cannot claim Git identity or become an incremental predecessor.
 
@@ -611,7 +620,7 @@ For nonzero deltas, `publish-candidate` receives only the complete materialized 
 
 ## Durable baseline advancement
 
-`finalize-orchestration` emits a closed terminal run receipt binding every exact artifact used for acceptance. `advance-baseline` may create a successor only for:
+Task 9 `finalize-orchestration` emits a closed terminal run receipt binding every exact artifact used for acceptance. Task 9 `advance-baseline` may create a successor only for:
 
 - an initial clean committed-Git `FULL`; or
 - a committed `git_range` whose base commit/tree exactly equals the predecessor baseline target and whose head is the resulting committed target tree.
@@ -654,9 +663,9 @@ The closed Baseline Receipt V1 is:
 }
 ```
 
-A successor `CHANGE_SET` baseline requires nonnull predecessor digest and target equal to the accepted git-range head. Tool, policy, schema, or pipeline fingerprint incompatibility forces a new `FULL`; fingerprints are digests of closed ordered file/digest registries, not version labels alone.
+A successor `CHANGE_SET` baseline requires nonnull predecessor digest and target equal to the accepted git-range head. Task 8 uses conservative existing ordered `{path, sha256}` registries only to reject a plainly incompatible receipt; Task 9 finalizes the authoritative tool, policy, schema, and pipeline registries before any real baseline write. Tool, policy, schema, or pipeline fingerprint incompatibility forces a new `FULL`; fingerprints are digests of closed ordered file/digest registries, not version labels alone.
 
-Advancement writes the content-addressed receipt and a create-only predecessor link, flushes, reopens, and verifies both. At most one distinct successor may occupy a predecessor link. Concurrent identical advancement is idempotent; competing target trees return `BASELINE_CONFLICT` and neither becomes implicit latest. The next incremental base must name the unique validated successor and its base must equal that receipt's target commit/tree. No mutable latest pointer exists; an ambiguous or broken chain forces `FULL`.
+Task 9 advancement writes the content-addressed receipt, every receipt-named canonical payload under the baseline-root payload store, and then a create-only predecessor link; it flushes, reopens, and verifies all of them. At most one distinct successor may occupy a predecessor link. Concurrent identical advancement is idempotent; competing target trees return `BASELINE_CONFLICT` and neither becomes implicit latest. The next incremental base must name the unique validated successor and its base must equal that receipt's target commit/tree. No mutable latest pointer exists; an ambiguous or broken chain forces `FULL`.
 
 ## Pipeline 6.0
 
@@ -705,19 +714,19 @@ For every row below, arrays are exact and ordered. `rejects` is normatively the 
 
 Branch rules are closed: FULL generator output contains exactly `candidate_document`; CHANGE_SET contains exactly `canonical_document_delta`. Nonzero delta runs pass through the applier then the existing publish/review/revision route. Zero-op runs pass only through applier and `select-unchanged-document`, then join at `tc-to-autotest`. No stage can produce both branch alternatives. The applier resolves the baseline document through the controller-bound baseline receipt, not an LLM carrier, and verifies its digest before output.
 
-`finalize-orchestration` constructs `terminal_run_receipt` from its accepted tail artifacts plus the same run root's already validated, content-addressed prefix ledger. The ledger manifest binds every prefix digest before the first tail stage, so this is a deterministic readback dependency, not an undeclared carrier or semantic input. Missing, foreign, or mutable prefix evidence makes terminal-receipt production impossible and blocks baseline advancement.
+`finalize-orchestration` constructs `terminal_run_receipt` from its accepted tail artifacts plus the same run root's already validated, content-addressed prefix ledger and required immutable content projections at `run_root/artifacts/<sha256>.json`. The ledger manifest binds every prefix digest before the first tail stage, so this is a deterministic readback dependency, not an undeclared carrier or semantic input. Missing, foreign, mutable, or digest-mismatched projections make terminal-receipt production impossible and block baseline advancement. Runtime ruling (`pipeline6_tail`): the semantic-prefix handoff is generated first; technical classification and its independent review then run as an isolated tail evidence gate before candidate review or unchanged-baseline selection. This changes no candidate, delta, or generator semantics and only corrects the executable chronology.
 
 No scope, accounting, receipt, raw source/diff/analytics, or technical evidence carrier enters generation or the tail. Full runs set `changed_behavior_context` to the complete validated behavior projection; change-set runs carry only the reviewed semantic delta and stable baseline identity/digest index needed to author the closed document delta.
 
 ## Persistence, concurrency, and resume
 
-All authoritative artifacts are canonical compact UTF-8 JSON with closed schemas and create-only deterministic paths. Run roots contain manifest, immutable scope generations, immutable batch generations, promotions, receipt, and assurance summary. No mutable `current.json` exists.
+All authoritative artifacts are canonical compact UTF-8 JSON with closed schemas and create-only deterministic paths. Run roots contain immutable scope generations, batch generations, promotions, receipt, and assurance summary. For Task 8A, only `feature-flow/prefix/<ordinal>-<artifact>.json` plus `feature-flow/prefix-ledger.json` select or resume state. `run_root/artifacts/<sha256>.json` is an immutable content-projection namespace required for Task 9 readback, never a state pointer or resume source. No mutable `current.json` exists.
 
 Writes validate first, write a unique temporary sibling, flush where supported, atomically create without replacement, reopen, and verify bytes/digest. Identical concurrent writes are idempotent after readback. Different bytes for the same canonical path return a conflict and overwrite nothing.
 
 Each scope or batch generation has an exclusive lease epoch. A lease permits an attempted write but is not authority; committed readback is authority. Stale leases may be superseded after controller liveness checks. Batches can be sharded internally and processed in parallel; plan order controls final receipt order, and users never choose shard count.
 
-Resume revalidates repository identity, baseline, `.skillsrc`, inventories, frozen change input, plan, and current bytes; ignores incomplete temporary files; rejects gaps, branches, duplicate promotions, and out-of-order audits; then returns the exact next action. Drift triggers full refresh before semantic work or blocks an already frozen attempt; it never mutates the attempt in place.
+Task 8A resume reads only the frozen `feature-flow-input`, ordinal prefix records, and prefix ledger; it revalidates repository identity/commit/tree, durability, baseline, `.skillsrc`, inventories, frozen change input, plan, and current bytes; ignores incomplete temporary files; rejects gaps, branches, duplicate promotions, and out-of-order audits; then returns the exact next action. Drift triggers full refresh before semantic work or blocks an already frozen attempt; it never mutates the attempt in place. Content projections remain Task 9 readback inputs only.
 
 ## Safety
 
@@ -846,7 +855,7 @@ Migration is one-way and shadowed before authority changes:
 2. run clean-commit FULL shadow baselines and the 12-category pilot; compare full context and complete materialized documents with V5 without publishing or advancing a baseline;
 3. run CHANGE_SET shadows across add/modify/delete/rename/binary, zero-op, rework, dirty-worktree, patch, and committed git-range examples; verify expected scope, V2 side evidence, delta, full document, and advancement eligibility;
 4. exercise the exact Pipeline 6 carrier complement, both generator branches, zero-op bypass, terminal receipt, fingerprint rejection, and atomic competing-successor behavior;
-5. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after all RED, compatibility, and shadow gates pass;
+5. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after focused GREEN, compatibility, and shadow gates pass;
 6. start InvenTree attempt-04 from a new root; never import or wrap attempt-02/03 batch results as promoted evidence.
 
 Before each CHANGE_SET shadow, the façade must mint `ScopePredecessor` from readback of the exact predecessor full source envelope, V5 context envelope, and behavior-context receipt. Historical loose envelopes, receipts, or a reserialized capability cannot cross this seam. Historical V1 plans and V1 batch-result payloads remain valid only as nested FULL candidates. V2 plans/results are valid only as nested CHANGE_SET candidates. Neither version is directly authoritative. Historical V1 receipts and all loose or unreviewed V1/V2 results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate modes, sides, capabilities, audits, promotions, tombstones, deltas, terminal receipts, or baselines.

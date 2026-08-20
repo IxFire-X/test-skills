@@ -2,19 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/tc-generator-output.schema.json",
   "type": "object",
-  "required": ["schema_version", "stage", "artifacts", "warnings"],
+  "required": ["schema_version", "stage", "run_mode", "artifacts", "warnings"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "3.0.0"},
+    "schema_version": {"const": "4.0.0"},
     "stage": {"const": "tc-generator"},
+    "run_mode": {"enum": ["FULL", "CHANGE_SET"]},
     "artifacts": {
       "type": "object",
-      "required": ["canonical_document"],
+      "required": [],
       "additionalProperties": false,
       "properties": {
-        "canonical_document": {"$ref": "schemas/canonical-test-document.schema.json"}
+        "canonical_document": {"$ref": "schemas/canonical-test-document.schema.json"},
+        "canonical_document_delta": {"$ref": "schemas/canonical-document-delta.schema.json"}
       }
     },
     "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
-  }
+  },
+  "oneOf": [
+    {"properties": {"run_mode": {"const": "FULL"}, "artifacts": {"required": ["canonical_document"], "not": {"required": ["canonical_document_delta"]}}}},
+    {"properties": {"run_mode": {"const": "CHANGE_SET"}, "artifacts": {"required": ["canonical_document_delta"], "not": {"required": ["canonical_document"]}}}}
+  ]
 }

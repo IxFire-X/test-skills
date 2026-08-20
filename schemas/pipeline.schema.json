@@ -1,22 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/pipeline.schema.json",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["version", "pipeline", "core_skills", "skill_files", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections"],
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "pipeline", "core_skills", "skill_files", "artifacts", "steps", "verdicts", "transitions", "capabilities", "artifact_policy", "traceability", "projections", "historical_rejections"],
   "properties": {
-    "$schema": {"const": "schemas/pipeline.schema.json"},
-    "version": {"const": "5.0"},
-    "pipeline": {"const": "test-pipeline"},
-    "core_skills": {"type": "array"},
-    "skill_files": {"type": "object"},
+    "$schema": {"const": "schemas/pipeline.schema.json"}, "version": {"const": "6.0"}, "pipeline": {"const": "test-pipeline"}, "core_skills": {"type": "array"}, "skill_files": {"type": "object"},
     "artifacts": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "description"], "properties": {"id": {"type": "string"}, "description": {"type": "string"}}}},
-    "steps": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "accepts", "forwards", "produces", "rejects"], "properties": {"id": {"type": "string"}, "kind": {"enum": ["skill", "tool"]}, "accepts": {"type": "array"}, "forwards": {"type": "array"}, "produces": {"type": "array"}, "rejects": {"type": "array"}}}},
-    "verdicts": {"type": "object"},
-    "transitions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["from", "when", "transform"], "properties": {"from": {"type": "string"}, "when": {"type": "object"}, "transform": {"type": "string"}}}},
-    "capabilities": {"type": "array"},
-    "artifact_policy": {"type": "object"},
-    "traceability": {"type": "array"},
-    "projections": {"type": "object"}
+    "steps": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "accepts", "forwards", "produces", "rejects"], "properties": {"id": {"type": "string"}, "kind": {"enum": ["skill", "tool"]}, "accepts": {"type": "array"}, "forwards": {"type": "array"}, "produces": {"type": "array"}, "rejects": {"type": "array"}, "branches": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["when", "produces"], "properties": {"when": {"type": "object"}, "produces": {"type": "array"}}}}}}},
+    "verdicts": {"type": "object"}, "transitions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["from", "when", "transform"], "properties": {"from": {"type": "string"}, "when": {"type": "object"}, "transform": {"type": "string"}}}}, "capabilities": {"type": "array"}, "artifact_policy": {"type": "object"}, "traceability": {"type": "array"}, "projections": {"type": "object"}, "historical_rejections": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["component", "version", "live_status"], "properties": {"component": {"type": "string"}, "version": {"type": "string"}, "live_status": {"const": "REJECTED"}}}}
   }
 }

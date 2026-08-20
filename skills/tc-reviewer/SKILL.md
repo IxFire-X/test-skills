@@ -5,7 +5,7 @@ description: Use when a complete V3 canonical test-case candidate and digest req
 
 # Canonical test-case review
 
-Read the [review contract](references/review-verdicts.md), `schemas/tc-reviewer-output.schema.json`, `tools.canonical_document`, and `tools.revision_selection`. Review the complete candidate and its exact bare digest.
+Read the [review contract](references/review-verdicts.md), `schemas/tc-reviewer-output.schema.json`, `tools.canonical_document`, and `tools.revision_selection`. In Pipeline 6 this receives only a nonzero-delta or FULL candidate after the isolated technical classifier/reviewer gate; review the complete candidate and its exact bare digest.
 
 ## Procedure
 

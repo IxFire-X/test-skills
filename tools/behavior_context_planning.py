@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import weakref
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -30,6 +31,37 @@ class ValidatedBehaviorContext:
     requirements: tuple[Mapping[str, Any], ...]
     receipt_sha256: str
     authorized_behavior_sources_sha256: str
+    changed_requirements: tuple[Mapping[str, Any], ...] = ()
+    retired_requirements: tuple[Mapping[str, Any], ...] = ()
+    stable_requirement_links: tuple[Mapping[str, Any], ...] = ()
+
+
+class ComposedBehaviorContext:
+    """Opaque V6 authority minted only by promoted-evidence composition."""
+    __slots__ = ("__weakref__",)
+
+    @property
+    def managed_behavior_context(self) -> Mapping[str, Any]:
+        return _COMPOSED_CONTEXTS[self]["context"]["artifacts"]["managed_behavior_context"]
+
+    @property
+    def changed_behavior_context(self) -> Mapping[str, Any]:
+        return _COMPOSED_CONTEXTS[self]["context"]["artifacts"]["changed_behavior_context"]
+
+    @property
+    def behavior_source_accounting(self) -> Mapping[str, Any]:
+        return _COMPOSED_CONTEXTS[self]["context"]["artifacts"]["behavior_source_accounting"]
+
+    @property
+    def context(self) -> Mapping[str, Any]:
+        return _COMPOSED_CONTEXTS[self]["context"]
+
+    @property
+    def receipt(self) -> Mapping[str, Any]:
+        return _COMPOSED_CONTEXTS[self]["receipt"]
+
+
+_COMPOSED_CONTEXTS: weakref.WeakKeyDictionary[ComposedBehaviorContext, Mapping[str, Any]] = weakref.WeakKeyDictionary()
 
 
 def _fail(code: str, path: str, message: str) -> TestClassificationError:
@@ -99,7 +131,7 @@ def stable_fragment_id(item: Mapping[str, Any], fragment: Mapping[str, Any]) -> 
 
 def stable_change_fragment_id(item: Mapping[str, Any], fragment: Mapping[str, Any]) -> str:
     """Derive the V2 identity from the closed change semantic fields."""
-    payload = {"effect": fragment["effect"], "baseline_source_id": item["baseline_source_id"], "current_source_id": item["current_source_id"], "item_id": item["item_id"], "evidence_locators": _plain(fragment["evidence_locators"])}
+    payload = {"effect": fragment["effect"], "actor": fragment["actor"], "operation": fragment["operation"], "conditions": _plain(fragment["conditions"]), "outcomes": _plain(fragment["outcomes"]), "baseline_source_id": item["baseline_source_id"], "current_source_id": item["current_source_id"], "item_id": item["item_id"], "evidence_locators": _plain(fragment["evidence_locators"])}
     return "FRAGMENT-" + hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
 
 
@@ -499,6 +531,478 @@ def build_context_receipt(project: Path, module: Mapping[str, Any], inventory: M
     return _freeze({"schema_version": "1.0.0", "selected_module": authorized["module_id"], "authorized_behavior_sources_sha256": expected_digest, "context_plan_sha256": _digest(_plain(plan)), "batch_result_sha256s": [_digest(_plain(result_by_batch[batch["batch_id"]])) for batch in plan["batches"]], "fragment_registry": registry, "source_outcomes": outcomes})
 
 
+def _context_inventories(inventories: Mapping[str, Any], module_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    _v2_shape(inventories, "source-inventory-output.schema.json", "BEHAVIOR_ACCOUNTING_SHAPE")
+    artifacts = inventories.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/inventories/artifacts", "Source inventory artifacts are required.")
+    authorized = artifacts.get("authorized_behavior_sources")
+    technical = artifacts.get("technical_test_inventory")
+    if not isinstance(authorized, Mapping) or not isinstance(technical, Mapping):
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/inventories/artifacts", "Both source inventory projections are required.")
+    if (artifacts.get("authorized_behavior_sources_sha256") != _digest(_plain(authorized))
+            or artifacts.get("technical_test_inventory_sha256") != _digest(_plain(technical))
+            or authorized.get("module_id") != module_id or technical.get("module_id") != module_id):
+        raise _fail("BEHAVIOR_ACCOUNTING_DIGEST", "/inventories", "Inventories must bind the exact selected-module projections.")
+    return authorized, technical
+
+
+def _resolver_bytes(byte_resolver: Any, side: str, source: Mapping[str, Any]) -> bytes:
+    try:
+        value = byte_resolver(side, source)
+    except TestClassificationError:
+        raise
+    except Exception as error:
+        if getattr(error, "code", None) == "CHANGE_SOURCE_DRIFT" or "CHANGE_SOURCE_DRIFT" in str(error):
+            raise _fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Authorized source bytes changed after planning.") from None
+        raise _fail("BEHAVIOR_RECEIPT", "/byte_resolver", "Authorized source bytes could not be resolved.") from None
+    if not isinstance(value, bytes) or source.get("content_digest") != "sha256:" + hashlib.sha256(value).hexdigest():
+        raise _fail("CHANGE_SOURCE_DRIFT", "/byte_resolver", "Resolved bytes must match the exact authorized digest.")
+    return value
+
+
+def _baseline_projection(scope_receipt: Mapping[str, Any], baseline_context: Any) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]] | None:
+    if scope_receipt.get("run_mode") == "FULL":
+        if baseline_context is not None:
+            raise _fail("BEHAVIOR_RECEIPT", "/baseline_context", "FULL context composition cannot consume a predecessor.")
+        return None
+    if not isinstance(baseline_context, Mapping) or set(baseline_context) != {"predecessor", "context", "receipt"}:
+        raise _fail("BEHAVIOR_RECEIPT", "/baseline_context", "CHANGE_SET requires the issued predecessor plus its exact context and receipt.")
+    try:
+        from tools.baseline_lifecycle import ScopePredecessor, scope_predecessor_projection
+    except ImportError:
+        from baseline_lifecycle import ScopePredecessor, scope_predecessor_projection
+    predecessor = baseline_context["predecessor"]
+    if not isinstance(predecessor, ScopePredecessor):
+        raise _fail("BASELINE_BINDING", "/baseline_context/predecessor", "An issued predecessor capability is required.")
+    try:
+        projection = scope_predecessor_projection(predecessor)
+    except Exception as error:
+        raise _fail("BASELINE_BINDING", "/baseline_context/predecessor", "Predecessor capability is not authoritative.") from None
+    context = baseline_context["context"]
+    receipt = baseline_context["receipt"]
+    context_shape = schema_diagnostics(_plain(context), _ROOT / "schemas" / "context-marker-output.schema.json", _ROOT)
+    receipt_shape = schema_diagnostics(_plain(receipt), _ROOT / "schemas" / "behavior-context-receipt.schema.json", _ROOT)
+    if context_shape or receipt_shape:
+        raise _fail("BASELINE_BINDING", "/baseline_context", "Predecessor context and receipt must satisfy their closed schemas.")
+    if (scope_receipt.get("baseline_receipt_sha256") != projection.get("receipt_sha256")
+            or projection.get("selected_module") != receipt.get("selected_module")
+            or projection.get("context_envelope_sha256") != _digest(_plain(context))
+            or projection.get("behavior_context_receipt_sha256") != _digest(_plain(receipt))
+            or context.get("schema_version") != "6.0.0" or receipt.get("schema_version") != "2.0.0"):
+        raise _fail("BASELINE_BINDING", "/baseline_context", "Predecessor carriers do not bind the promoted scope baseline.")
+    artifacts = context.get("artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {"managed_behavior_context", "changed_behavior_context", "behavior_source_accounting"}:
+        raise _fail("BASELINE_BINDING", "/baseline_context/context", "Predecessor must be a complete V6 context.")
+    return projection, artifacts, receipt
+
+
+def _promoted_results(
+    scope_receipt: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    promotions: Sequence[Any],
+    byte_resolver: Any,
+) -> tuple[tuple[Mapping[str, Any], ...], tuple[Mapping[str, Any], ...], int]:
+    try:
+        from tools.batch_promotion import PromotionEvidence, replay_promotion_ledger
+        from tools.flow_artifacts import FlowError
+    except ImportError:
+        from batch_promotion import PromotionEvidence, replay_promotion_ledger
+        from flow_artifacts import FlowError
+    batches = plan.get("batches")
+    if not isinstance(batches, list) or not isinstance(promotions, Sequence) or isinstance(promotions, (str, bytes)) or len(promotions) != len(batches):
+        raise _fail("PROMOTION_COVERAGE", "/promotions", "Exactly one promotion evidence chain is required for every planned batch.")
+    if any(not isinstance(evidence, PromotionEvidence) for evidence in promotions):
+        raise _fail("PROMOTION_COVERAGE", "/promotions", "Only replayable promotion evidence is authoritative.")
+    try:
+        validated_rows = replay_promotion_ledger(scope_receipt, plan, tuple(promotions))
+    except FlowError as error:
+        raise _fail(error.code, "/promotions", "Promotion ledger did not reproduce its exact authority.") from None
+    results: list[Mapping[str, Any]] = []
+    authorities: list[Mapping[str, Any]] = []
+    reworks = 0
+    for index, (batch, validated) in enumerate(zip(batches, validated_rows)):
+        if validated.promotion.get("batch_id") != batch.get("batch_id"):
+            raise _fail("PROMOTION_COVERAGE", f"/promotions/{index}", "Promotion order must equal physical plan batch order.")
+        diagnostics = (validate_batch_result(plan, validated.result) if scope_receipt.get("run_mode") == "FULL"
+                       else validate_change_batch_result(scope_receipt, plan, validated.result, byte_resolver))
+        if diagnostics:
+            raise TestClassificationError(diagnostics)
+        results.append(validated.result)
+        authorities.append(validated.promotion)
+        reworks += validated.rework_count
+    return tuple(results), tuple(authorities), reworks
+
+
+def _semantic_tuple(fragment: Mapping[str, Any]) -> Mapping[str, Any]:
+    return {key: _plain(fragment[key]) for key in ("actor", "operation", "conditions", "outcomes")}
+
+
+def _semantic_requirement_id(semantic: Mapping[str, Any]) -> str:
+    return "REQ-" + hashlib.sha256(json.dumps(_plain(semantic), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _semantic_requirement(semantic: Mapping[str, Any], source_ids: Sequence[str], display_order: int) -> Mapping[str, Any]:
+    conditions = " and ".join(semantic["conditions"])
+    text = f"{semantic['actor']} {semantic['operation']}"
+    if conditions:
+        text += f" when {conditions}"
+    text += f"; outcomes: {'; '.join(semantic['outcomes'])}."
+    return _freeze({"requirement_id": _semantic_requirement_id(semantic), "display_order": display_order, "text": text, "provenance": list(source_ids)})
+
+
+def _retirement_rows(
+    baseline_requirements: Mapping[str, Mapping[str, Any]], baseline_links: Mapping[str, tuple[str, ...]],
+    current_claims: set[str], retired_fragments: Mapping[str, list[Mapping[str, Any]]],
+) -> tuple[Mapping[str, Any], ...]:
+    result: list[Mapping[str, Any]] = []
+    for requirement_id, fragments in retired_fragments.items():
+        baseline = baseline_requirements.get(requirement_id)
+        if baseline is None:
+            raise _fail("BEHAVIOR_RETIREMENT", "/promotions", "Retired semantic evidence must identify a baseline requirement.")
+        former_sources = set(baseline_links[requirement_id])
+        evidence_sources = {row["source_id"] for row in fragments}
+        if requirement_id in current_claims or evidence_sources != former_sources:
+            raise _fail("BEHAVIOR_RETIREMENT", "/promotions", "Retirement requires promoted evidence for every former support and no surviving semantic support.")
+        result.append(_freeze({
+            "object_kind": "requirement", "object_id": requirement_id,
+            "baseline_object_sha256": _digest(_plain(baseline)),
+            "reason": "REQUIREMENT_NO_LONGER_OBSERVABLE",
+            "support_evidence": {"status": "NO_SURVIVING_SOURCE_SUPPORT", "surviving_source_ids": [], "retirement_fragment_ids": [row["fragment_id"] for row in fragments]},
+        }))
+    return tuple(result)
+
+
+def compose_behavior_context(
+    project: Path,
+    module: Mapping[str, Any],
+    inventories: Mapping[str, Any],
+    scope_receipt: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    promotions: Sequence[Any],
+    baseline_context: Any,
+    byte_resolver: Any,
+) -> ComposedBehaviorContext:
+    """Compose V6 only from dual-audited promoted semantic results."""
+    _v2_shape(scope_receipt, "change-scope-receipt.schema.json", "BEHAVIOR_RECEIPT")
+    _v2_shape(plan, "behavior-context-plan.schema.json", "BEHAVIOR_RECEIPT")
+    if not isinstance(project, Path) or not isinstance(module, Mapping) or not isinstance(module.get("id"), str):
+        raise _fail("BEHAVIOR_RECEIPT", "/module", "A normalized project and selected module are required.")
+    run_mode = scope_receipt.get("run_mode")
+    if run_mode not in {"FULL", "CHANGE_SET"} or plan.get("schema_version") != ("1.0.0" if run_mode == "FULL" else "2.0.0"):
+        raise _fail("BEHAVIOR_RECEIPT", "/run_mode", "Run mode requires the exact FULL/V1 or CHANGE_SET/V2 plan.")
+    authorized, technical = _context_inventories(inventories, module["id"])
+    current_sources = authorized["sources"]
+    for source in current_sources:
+        _resolver_bytes(byte_resolver, "after", source)
+    if run_mode == "FULL":
+        if scope_receipt.get("included_source_ids") != [row["source_id"] for row in current_sources]:
+            raise _fail("BEHAVIOR_RECEIPT", "/scope_receipt/included_source_ids", "FULL scope receipt must cover current authorized sources exactly in inventory order.")
+        supplied = {row["source_id"]: _resolver_bytes(byte_resolver, "after", row) for row in current_sources if row["kind"] == "supplied_requirement"}
+        if _plain(build_context_plan(project, module, authorized, supplied)) != _plain(plan):
+            raise _fail("BEHAVIOR_RECEIPT", "/plan", "FULL plan must equal the deterministic current-source plan.")
+    else:
+        if (plan.get("selected_module") != module["id"] or plan.get("scope_candidate_sha256") != scope_receipt.get("candidate_sha256")
+                or plan.get("scope_receipt_sha256") != _digest(_plain(scope_receipt)) or plan.get("current_inventory_sha256") != _digest(_plain(authorized))):
+            raise _fail("BEHAVIOR_RECEIPT", "/plan", "CHANGE_SET plan must bind the exact module, scope candidate, receipt, and current inventory.")
+    baseline = _baseline_projection(scope_receipt, baseline_context)
+    baseline_managed: Mapping[str, Any] | None = None
+    baseline_receipt: Mapping[str, Any] | None = None
+    baseline_sources: tuple[Mapping[str, Any], ...] = ()
+    baseline_context_sha256: str | None = None
+    if baseline is not None:
+        projection, artifacts, baseline_receipt = baseline
+        baseline_managed = artifacts["managed_behavior_context"]
+        baseline_sources = tuple(projection["sources"])
+        baseline_context_sha256 = projection["context_envelope_sha256"]
+        if plan.get("baseline_inventory_sha256") != _digest({"module_id": module["id"], "sources": _plain(baseline_sources)}):
+            raise _fail("BASELINE_BINDING", "/plan/baseline_inventory_sha256", "CHANGE_SET plan must bind predecessor sources.")
+    results, authorities, rework_count = _promoted_results(scope_receipt, plan, promotions, byte_resolver)
+    plan_items = {item["item_id"]: item for batch in plan["batches"] for item in batch["items"]}
+    registry_rows: list[dict[str, Any]] = []
+    claims: dict[str, dict[str, Any]] = {}
+    retired_claims: dict[str, list[Mapping[str, Any]]] = {}
+    continuity: dict[tuple[str, str, str], list[str]] = {}
+    for result in results:
+        for row in result["items"]:
+            item = plan_items[row["item_id"]]
+            if (run_mode == "CHANGE_SET" and item.get("change_kind") in {"modified", "renamed"}
+                    and isinstance(item.get("change_id"), str) and isinstance(item.get("baseline_source_id"), str)
+                    and isinstance(item.get("current_source_id"), str)):
+                key = (item["change_id"], item["baseline_source_id"], item["current_source_id"])
+                continuity.setdefault(key, []).append(row["outcome"])
+            for fragment in row.get("behavior_fragments", []):
+                if run_mode == "FULL":
+                    source_id, effect = item["source_id"], "full"
+                else:
+                    source_id, effect = (item["baseline_source_id"] if fragment["effect"] == "retired" else item["current_source_id"]), fragment["effect"]
+                if not isinstance(source_id, str):
+                    raise _fail("BEHAVIOR_RECEIPT", "/promotions", "Promoted semantic fragments require an authoritative source owner.")
+                record = {"fragment_id": fragment["fragment_id"], "source_id": source_id, "item_id": item["item_id"], "effect": effect}
+                registry_rows.append(record)
+                requirement_id = _semantic_requirement_id(_semantic_tuple(fragment))
+                if effect == "retired":
+                    retired_claims.setdefault(requirement_id, []).append(_freeze(record))
+                else:
+                    claim = claims.setdefault(requirement_id, {"semantic": _semantic_tuple(fragment), "source_ids": set(), "fragment_ids": []})
+                    claim["source_ids"].add(source_id); claim["fragment_ids"].append(fragment["fragment_id"])
+    registry = {row["fragment_id"]: row for row in registry_rows}
+    if len(registry) != len(registry_rows):
+        raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "Promoted fragment identities must be globally unique.")
+
+    baseline_requirements = {row["requirement_id"]: row for row in baseline_managed["requirements"]} if baseline_managed else {}
+    baseline_order = list(baseline_requirements)
+    baseline_links = {row["requirement_id"]: tuple(row["source_ids"]) for row in baseline_managed["requirement_sources"]} if baseline_managed else {}
+    unchanged_bindings = []
+    baseline_by_id = {row["source_id"]: row for row in baseline_sources}
+    for source in current_sources:
+        old = baseline_by_id.get(source["source_id"])
+        if old is not None and old.get("content_digest") == source.get("content_digest"):
+            unchanged_bindings.append({"source_id": source["source_id"], "baseline_content_digest": old["content_digest"], "current_content_digest": source["content_digest"]})
+    unchanged_source_ids = {row["source_id"] for row in unchanged_bindings}
+    continued_sources = {
+        before: after for (_, before, after), outcomes in continuity.items()
+        if outcomes and all(outcome == "no_changed_observable_fact" for outcome in outcomes)
+    }
+    retired = _retirement_rows(baseline_requirements, baseline_links, set(claims), retired_claims)
+    retired_ids = {row["object_id"] for row in retired}
+    retained: dict[str, set[str]] = {key: set(value["source_ids"]) for key, value in claims.items()}
+    for requirement_id, links in baseline_links.items():
+        surviving = (set(links) & unchanged_source_ids) | {continued_sources[source_id] for source_id in links if source_id in continued_sources}
+        if requirement_id in retired_ids:
+            continue
+        if not surviving and requirement_id not in claims:
+            raise _fail("BEHAVIOR_RETIREMENT", "/promotions", "A baseline requirement lost all support without promoted retirement evidence.")
+        retained.setdefault(requirement_id, set()).update(surviving)
+    for requirement_id, evidence in claims.items():
+        if requirement_id in baseline_requirements:
+            probe = _semantic_requirement(evidence["semantic"], sorted(retained[requirement_id]), 1)
+            baseline_plain = {key: _plain(value) for key, value in baseline_requirements[requirement_id].items() if key not in {"display_order", "provenance"}}
+            probe_plain = {key: _plain(value) for key, value in probe.items() if key not in {"display_order", "provenance"}}
+            if baseline_plain != probe_plain:
+                raise _fail("BEHAVIOR_RECEIPT", "/promotions", "A promoted semantic tuple cannot reuse a non-identical baseline requirement ID.")
+    ordered_ids = [value for value in baseline_order if value in retained] + sorted(value for value in retained if value not in baseline_requirements)
+    requirements: list[Mapping[str, Any]] = []
+    for index, requirement_id in enumerate(ordered_ids, 1):
+        links = sorted(retained[requirement_id])
+        if requirement_id in baseline_requirements:
+            value = dict(_plain(baseline_requirements[requirement_id])); value["display_order"] = index; value["provenance"] = links
+            requirements.append(_freeze(value))
+        else:
+            requirements.append(_semantic_requirement(claims[requirement_id]["semantic"], links, index))
+    requirement_ids = [row["requirement_id"] for row in requirements]
+    current_requirement_by_id = {row["requirement_id"]: row for row in requirements}
+    current_links = {requirement_id: tuple(sorted(retained[requirement_id])) for requirement_id in requirement_ids}
+    changed_ids = [value for value in requirement_ids if value not in baseline_requirements]
+    stable_ids = [value for value in requirement_ids if value in baseline_requirements]
+    groups = [
+        {"group_id": "GROUP-" + hashlib.sha256(requirement_id.encode("utf-8")).hexdigest(), "fragment_ids": claims[requirement_id]["fragment_ids"], "requirement_ids": [requirement_id]}
+        for requirement_id in requirement_ids if requirement_id in claims
+    ]
+    grouped_ids = [fragment_id for group in groups for fragment_id in group["fragment_ids"]]
+    inverse = {row["source_id"]: [] for row in current_sources}
+    for requirement_id in requirement_ids:
+        for source_id in current_links[requirement_id]: inverse[source_id].append(requirement_id)
+    product_ids = {source_id for source_id, links in inverse.items() if links and next(row for row in current_sources if row["source_id"] == source_id)["kind"] == "product_file"}
+    managed = _freeze({
+        "authorized_behavior_sources_sha256": _digest(_plain(authorized)), "requirements": list(requirements),
+        "product_sources": [{"source_id": row["source_id"], "kind": "product_file", "path": row["path"], "content_digest": row["content_digest"], "summary": f"Behavior evidence from {row['path']}."} for row in current_sources if row["source_id"] in product_ids],
+        "requirement_sources": [{"requirement_id": value, "source_ids": list(current_links[value])} for value in requirement_ids],
+    })
+    dispositions: list[dict[str, Any]] = []
+    outcome_rows: list[dict[str, str]] = []
+    changed_fragment_sources = {row["source_id"] for row in registry_rows if row["effect"] in {"full", "added", "modified"}}
+    for source in current_sources:
+        source_id, linked = source["source_id"], inverse[source["source_id"]]
+        if linked:
+            dispositions.append({"source_id": source_id, "disposition": "represented", "requirement_ids": linked})
+            outcome = "behavior_fragments" if run_mode == "FULL" else "changed_behavior_fragments" if source_id in changed_fragment_sources else "preserved_behavior"
+        else:
+            if source["kind"] == "supplied_requirement":
+                raise _fail("BEHAVIOR_RECEIPT", "/promotions", "Supplied requirements require supported observable behavior.")
+            dispositions.append({"source_id": source_id, "disposition": "no_supported_observable_fact", "reason": "no_supported_actor_operation_or_outcome_after_full_review"})
+            outcome = "no_supported_observable_fact"
+        outcome_rows.append({"source_id": source_id, "domain_key": derive_domain_key(source, module, project), "outcome": outcome})
+    retirement_fragment_ids = [fragment_id for row in retired for fragment_id in row["support_evidence"]["retirement_fragment_ids"]]
+    expected_current_fragments = {fragment_id for fragment_id, row in registry.items() if row["effect"] != "retired"}
+    expected_retired_fragments = {fragment_id for fragment_id, row in registry.items() if row["effect"] == "retired"}
+    if set(grouped_ids) != expected_current_fragments or len(retirement_fragment_ids) != len(set(retirement_fragment_ids)) or set(retirement_fragment_ids) != expected_retired_fragments:
+        raise _fail("BEHAVIOR_ACCOUNTING_COVERAGE", "/promotions", "Every promoted fragment must be consumed exactly once by a current group or retirement tombstone.")
+    if run_mode == "FULL" and (stable_ids or retired or len(grouped_ids) != len(registry)):
+        raise _fail("BEHAVIOR_RECEIPT", "/promotions", "FULL context must project every promoted fact and every requirement as new full evidence.")
+    changed_requirements = tuple(_freeze(_plain(current_requirement_by_id[value])) for value in changed_ids)
+    changed_requirement_sources = tuple(_freeze({"requirement_id": value, "source_ids": list(current_links[value])}) for value in changed_ids)
+    stable_links = tuple(_freeze({"requirement_id": value, "baseline_requirement_sha256": _digest(_plain(baseline_requirements[value])), "source_ids": list(current_links[value])}) for value in stable_ids)
+    promotion_digests = [_digest(_plain(row)) for row in authorities]
+    independent_count = sum(row["review_mode"] == "INDEPENDENT" for row in authorities)
+    sequential_count = len(authorities) - independent_count
+    receipt = _freeze({
+        "schema_version": "2.0.0", "artifact": "behavior-context-receipt", "run_mode": run_mode,
+        "selected_module": module["id"], "baseline_receipt_sha256": scope_receipt.get("baseline_receipt_sha256"),
+        "scope_receipt_sha256": _digest(_plain(scope_receipt)), "authorized_behavior_sources_sha256": _digest(_plain(authorized)),
+        "context_plan_sha256": _digest(_plain(plan)), "promotion_sha256s": promotion_digests,
+        "unchanged_source_bindings": unchanged_bindings, "fragment_registry": registry_rows,
+        "source_outcomes": outcome_rows, "changed_requirement_ids": changed_ids,
+        "retired_requirements": list(retired),
+        "assurance": {"review_mode": "INDEPENDENT" if authorities and independent_count == len(authorities) else "SEQUENTIAL", "independent_promotion_count": independent_count, "sequential_promotion_count": sequential_count, "reworked_batch_count": rework_count},
+    })
+    receipt_sha256 = _digest(_plain(receipt))
+    accounting = _freeze({"authorized_behavior_sources_sha256": _digest(_plain(authorized)), "context_receipt_sha256": receipt_sha256, "source_dispositions": _plain(dispositions), "behavior_fragment_groups": _plain(groups)})
+    changed = _freeze({
+        "schema_version": "1.0.0", "artifact": "changed-behavior-context", "run_mode": run_mode,
+        "source": {"behavior_context_receipt_sha256": receipt_sha256, "baseline_context_sha256": baseline_context_sha256},
+        "requirements": list(changed_requirements), "requirement_sources": list(changed_requirement_sources),
+        "stable_requirement_links": list(stable_links), "retired_requirements": list(retired),
+    })
+    context = _freeze({"schema_version": "6.0.0", "stage": "context-marker", "artifacts": {"managed_behavior_context": _plain(managed), "changed_behavior_context": _plain(changed), "behavior_source_accounting": _plain(accounting)}, "warnings": []})
+    context_shape = schema_diagnostics(_plain(context), _ROOT / "schemas" / "context-marker-output.schema.json", _ROOT)
+    receipt_shape = schema_diagnostics(_plain(receipt), _ROOT / "schemas" / "behavior-context-receipt.schema.json", _ROOT)
+    if context_shape or receipt_shape:
+        first = (context_shape or receipt_shape)[0]
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", first["path"], "Composed context does not satisfy its closed V6 schema.")
+    result = object.__new__(ComposedBehaviorContext)
+    _COMPOSED_CONTEXTS[result] = _freeze({"context": context, "receipt": receipt, "context_sha256": _digest(_plain(context)), "receipt_sha256": receipt_sha256})
+    return result
+
+
+def _validate_v6_context_envelope(
+    context: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    authorized: Mapping[str, Any],
+    test_inventory: Mapping[str, Any],
+    project: Path,
+    module: Mapping[str, Any],
+    supplied_inputs: Mapping[str, bytes],
+) -> ValidatedBehaviorContext:
+    try:
+        from tools.test_classification import validate_managed_behavior_context
+    except ImportError:
+        from test_classification import validate_managed_behavior_context
+    context, receipt = _plain(context), _plain(receipt)
+    if context.get("schema_version") != "6.0.0" or receipt.get("schema_version") != "2.0.0":
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/schema_version", "V6 context requires behavior receipt V2.")
+    artifacts = context.get("artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {"managed_behavior_context", "changed_behavior_context", "behavior_source_accounting"}:
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/artifacts", "V6 context requires the three closed context projections.")
+    managed = artifacts["managed_behavior_context"]
+    changed = artifacts["changed_behavior_context"]
+    accounting = artifacts["behavior_source_accounting"]
+    diagnostics = validate_managed_behavior_context(_plain(managed), authorized, test_inventory, project)
+    if diagnostics:
+        raise TestClassificationError(diagnostics)
+    authorized_digest = _digest(_plain(authorized))
+    receipt_sha256 = _digest(_plain(receipt))
+    if (module.get("id") != authorized.get("module_id") or receipt.get("selected_module") != authorized.get("module_id")
+            or receipt.get("authorized_behavior_sources_sha256") != authorized_digest
+            or managed.get("authorized_behavior_sources_sha256") != authorized_digest
+            or accounting.get("authorized_behavior_sources_sha256") != authorized_digest
+            or accounting.get("context_receipt_sha256") != receipt_sha256
+            or changed.get("source", {}).get("behavior_context_receipt_sha256") != receipt_sha256
+            or changed.get("run_mode") != receipt.get("run_mode")):
+        raise _fail("BEHAVIOR_ACCOUNTING_DIGEST", "/artifacts", "V6 context projections must bind the exact receipt and authorized sources.")
+    if receipt["run_mode"] == "FULL":
+        if receipt.get("baseline_receipt_sha256") is not None or changed["source"].get("baseline_context_sha256") is not None:
+            raise _fail("BEHAVIOR_RECEIPT", "/baseline_receipt_sha256", "FULL context cannot bind a predecessor.")
+    elif receipt.get("baseline_receipt_sha256") is None or changed["source"].get("baseline_context_sha256") is None:
+        raise _fail("BEHAVIOR_RECEIPT", "/baseline_receipt_sha256", "CHANGE_SET context must bind a predecessor.")
+    sources = authorized.get("sources")
+    if not isinstance(sources, list):
+        raise _fail("BEHAVIOR_RECEIPT", "/authorized_behavior_sources/sources", "Authorized sources must be an array.")
+    supplied_ids = {row["source_id"] for row in sources if isinstance(row, Mapping) and row.get("kind") == "supplied_requirement"}
+    if set(supplied_inputs) != supplied_ids:
+        raise _fail("BEHAVIOR_SUPPLIED_INPUT", "/supplied-input", "Supplied inputs must cover the authorized supplied sources exactly.")
+    for source in sources:
+        _bytes(source, project, supplied_inputs)
+    source_ids = [row["source_id"] for row in sources]
+    requirement_ids = [row["requirement_id"] for row in managed["requirements"]]
+    inverse = {source_id: [] for source_id in source_ids}
+    for row in managed["requirement_sources"]:
+        for source_id in row["source_ids"]:
+            inverse[source_id].append(row["requirement_id"])
+    dispositions = accounting.get("source_dispositions")
+    outcomes = receipt.get("source_outcomes")
+    if ([row.get("source_id") if isinstance(row, Mapping) else None for row in dispositions or ()] != source_ids
+            or [row.get("source_id") if isinstance(row, Mapping) else None for row in outcomes or ()] != source_ids):
+        raise _fail("BEHAVIOR_ACCOUNTING_ORDER", "/source_outcomes", "V6 dispositions and outcomes must cover current sources in inventory order.")
+    product_ids = {row["source_id"] for row in managed["product_sources"]}
+    for source, disposition, outcome in zip(sources, dispositions, outcomes):
+        linked = inverse[source["source_id"]]
+        if disposition.get("disposition") == "represented":
+            if disposition.get("requirement_ids") != linked or not linked or outcome.get("outcome") not in {"behavior_fragments", "changed_behavior_fragments", "preserved_behavior"}:
+                raise _fail("BEHAVIOR_ACCOUNTING_LINK", "/source_dispositions", "Represented sources must retain their exact current requirement links and supported outcome.")
+        elif disposition.get("disposition") == "no_supported_observable_fact":
+            if linked or source.get("kind") == "supplied_requirement" or source["source_id"] in product_ids or outcome.get("outcome") != "no_supported_observable_fact":
+                raise _fail("BEHAVIOR_ACCOUNTING_DISPOSITION", "/source_dispositions", "No-fact sources cannot retain managed behavior links.")
+        else:
+            raise _fail("BEHAVIOR_ACCOUNTING_DISPOSITION", "/source_dispositions", "Disposition uses an unsupported variant.")
+    registry_rows = receipt.get("fragment_registry")
+    registry = {row.get("fragment_id"): row for row in registry_rows or () if isinstance(row, Mapping)}
+    if len(registry) != len(registry_rows or ()):
+        raise _fail("BEHAVIOR_RECEIPT", "/fragment_registry", "V6 fragment identities must be unique.")
+    grouped: list[str] = []
+    for group in accounting.get("behavior_fragment_groups", ()):
+        if group.get("requirement_ids") != [value for value in requirement_ids if value in group.get("requirement_ids", ())]:
+            raise _fail("BEHAVIOR_ACCOUNTING_LINK", "/behavior_fragment_groups", "Group requirement IDs must use managed context order.")
+        for fragment_id in group.get("fragment_ids", ()):
+            fragment = registry.get(fragment_id)
+            if fragment is None or fragment.get("effect") == "retired" or not set(group["requirement_ids"]) <= set(inverse.get(fragment.get("source_id"), ())):
+                raise _fail("BEHAVIOR_ACCOUNTING_LINK", "/behavior_fragment_groups", "Groups must bind promoted current fragments to their supported requirements.")
+        grouped.extend(group["fragment_ids"])
+    changed_requirements = changed.get("requirements")
+    changed_ids = [row.get("requirement_id") for row in changed_requirements or ()]
+    changed_sources = changed.get("requirement_sources")
+    stable_links = changed.get("stable_requirement_links")
+    retired = changed.get("retired_requirements")
+    if (receipt.get("changed_requirement_ids") != changed_ids
+            or [row.get("requirement_id") for row in changed_sources or ()] != changed_ids
+            or any(_plain(current) != _plain(next(row for row in managed["requirements"] if row["requirement_id"] == current["requirement_id"])) for current in changed_requirements)
+            or any(row.get("source_ids") != list(next(item for item in managed["requirement_sources"] if item["requirement_id"] == row.get("requirement_id"))["source_ids"]) for row in changed_sources or ())):
+        raise _fail("BEHAVIOR_ACCOUNTING_LINK", "/changed_behavior_context", "Changed requirement bodies and source links must be byte-identical managed projections.")
+    stable_ids = [row.get("requirement_id") for row in stable_links or ()]
+    retired_ids = [row.get("object_id") for row in retired or ()]
+    if len(set(changed_ids + stable_ids + retired_ids)) != len(changed_ids + stable_ids + retired_ids) or set(changed_ids + stable_ids) != set(requirement_ids):
+        raise _fail("BEHAVIOR_ACCOUNTING_COVERAGE", "/changed_behavior_context", "Changed, stable, and retired requirement identities must be disjoint and complete.")
+    if _plain(receipt.get("retired_requirements")) != _plain(retired):
+        raise _fail("BEHAVIOR_RETIREMENT", "/retired_requirements", "Changed context and receipt tombstones must be byte-identical.")
+    retirement_fragments = [fragment_id for row in retired or () for fragment_id in row["support_evidence"]["retirement_fragment_ids"]]
+    expected_current = {key for key, row in registry.items() if row.get("effect") != "retired"}
+    expected_retired = {key for key, row in registry.items() if row.get("effect") == "retired"}
+    if len(grouped) != len(set(grouped)) or set(grouped) != expected_current or len(retirement_fragments) != len(set(retirement_fragments)) or set(retirement_fragments) != expected_retired:
+        raise _fail("BEHAVIOR_ACCOUNTING_COVERAGE", "/fragment_registry", "Every promoted fragment must be consumed exactly once.")
+    if receipt["run_mode"] == "FULL" and (stable_links or retired or changed_ids != requirement_ids):
+        raise _fail("BEHAVIOR_ACCOUNTING_COVERAGE", "/changed_behavior_context", "FULL changed context must equal the complete managed requirement projection.")
+    bindings = receipt.get("unchanged_source_bindings")
+    binding_ids: set[str] = set()
+    source_by_id = {row["source_id"]: row for row in sources}
+    for row in bindings or ():
+        source = source_by_id.get(row.get("source_id"))
+        if source is None or row["source_id"] in binding_ids or row.get("baseline_content_digest") != row.get("current_content_digest") or row.get("current_content_digest") != source.get("content_digest"):
+            raise _fail("BEHAVIOR_RECEIPT", "/unchanged_source_bindings", "Unchanged bindings must be unique exact current digest equalities.")
+        binding_ids.add(row["source_id"])
+    assurance = receipt.get("assurance")
+    if not isinstance(assurance, Mapping) or assurance.get("independent_promotion_count", 0) + assurance.get("sequential_promotion_count", 0) != len(receipt.get("promotion_sha256s", ())):
+        raise _fail("BEHAVIOR_RECEIPT", "/assurance", "Assurance counts must cover every promotion.")
+    return ValidatedBehaviorContext(
+        tuple(_freeze(_plain(row)) for row in managed["requirements"]), receipt_sha256, authorized_digest,
+        tuple(_freeze(_plain(row)) for row in changed_requirements), tuple(_freeze(_plain(row)) for row in retired),
+        tuple(_freeze(_plain(row)) for row in stable_links),
+    )
+
+
+def validate_composed_behavior_context(
+    composed: ComposedBehaviorContext, authorized: Mapping[str, Any], test_inventory: Mapping[str, Any],
+    project: Path, module: Mapping[str, Any], supplied_inputs: Mapping[str, bytes],
+) -> ValidatedBehaviorContext:
+    """Validate an in-process V6 capability; persisted JSON is not V6 authority."""
+    if not isinstance(composed, ComposedBehaviorContext) or composed not in _COMPOSED_CONTEXTS:
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/context", "V6 validation requires a composition-minted capability.")
+    record = _COMPOSED_CONTEXTS[composed]
+    context, receipt = record["context"], record["receipt"]
+    if record["context_sha256"] != _digest(_plain(context)) or record["receipt_sha256"] != _digest(_plain(receipt)):
+        raise _fail("BEHAVIOR_ACCOUNTING_DIGEST", "/context", "Composition capability no longer binds exact context and receipt bytes.")
+    return _validate_v6_context_envelope(context, receipt, authorized, test_inventory, project, module, supplied_inputs)
+
+
 def _validate_context_envelope(context: Mapping[str, Any], receipt: Mapping[str, Any], authorized: Mapping[str, Any], test_inventory: Mapping[str, Any], project: Path, module: Mapping[str, Any], supplied_inputs: Mapping[str, bytes]) -> ValidatedBehaviorContext:
     try:
         from tools.test_classification import validate_managed_behavior_context
@@ -510,6 +1014,8 @@ def _validate_context_envelope(context: Mapping[str, Any], receipt: Mapping[str,
     if context_shape: raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", context_shape[0]["path"], "Context does not satisfy its closed V5 schema.")
     receipt_shape = schema_diagnostics(_plain(receipt), _ROOT / "schemas" / "behavior-context-receipt.schema.json", _ROOT)
     if receipt_shape: raise _fail("BEHAVIOR_RECEIPT", receipt_shape[0]["path"], "Receipt does not satisfy its closed schema.")
+    if context.get("schema_version") == "6.0.0" or receipt.get("schema_version") == "2.0.0":
+        raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/schema_version", "Loose V6 JSON is not authority; replay promotion evidence before validation.")
     if context.get("schema_version") != "5.0.0" or context.get("stage") != "context-marker": raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/schema_version", "Context must be the V5 context-marker envelope.")
     artifacts = context.get("artifacts")
     if not isinstance(artifacts, Mapping) or set(artifacts) != {"managed_behavior_context", "behavior_source_accounting"}: raise _fail("BEHAVIOR_ACCOUNTING_SHAPE", "/artifacts", "V5 context requires closed sibling artifacts.")

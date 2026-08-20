@@ -58,7 +58,7 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
         return _report_error(f"schema unreadable: {error}")
     if (
         isinstance(schema, dict)
-        and schema.get("properties", {}).get("schema_version", {}).get("const") == "3.0.0"
+        and schema.get("properties", {}).get("schema_version", {}).get("const") in {"3.0.0", "4.0.0"}
         and classify_version(artifact)["code"] == "V2_1_BREAKING_CHANGE"
     ):
         return 1, {

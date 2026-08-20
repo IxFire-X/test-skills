@@ -1,8 +1,8 @@
-# Контракт оркестрации Pipeline 5.0
+# Контракт оркестрации Pipeline 6.0
 
 ## Источники истины
 
-`contracts/pipeline.json`, V3 stage schemas и `tools.orchestrate_test_case_revision` — executable truth. Candidate проходит schema/semantic validation и immutable publication до review. Полный valid successor также публикуется до selection. Candidate/successor receipts остаются audit evidence; downstream получает только один effective document и его bare digest.
+`contracts/pipeline.json`, Pipeline 6 schemas, `tools.feature_flow`, `tools.pipeline6_tail`, V3 stage schemas и `tools.orchestrate_test_case_revision` — executable truth. Candidate проходит schema/semantic validation и immutable publication до review. Полный valid successor также публикуется до selection. Candidate/successor receipts остаются audit evidence; downstream получает только один effective document и его bare digest.
 
 ## Исполнимый порядок
 
@@ -22,27 +22,31 @@
 
    Затем загрузи `<project>/.skillsrc` и выбери exact module ID. Автоматически выбирай только единственный module. Для exact relative feature path выбирай содержащий его module root; для текста проверяй только `feature_sources` и source paths. При нуле совпадений запроси path/module ID, при нескольких — покажи IDs/evidence и запроси один выбор. Не переходи к `context-marker` без exact module selection.
 
-2. Выполни `source-inventory`, затем `context-marker` с raw content и обоими inventories. Если inventory содержит `supplied_requirement`, повторяй exact controller-only `--supplied-input SOURCE_ID=PATH` при `context-plan`, `context-receipt`, `validate-context`, `select` и portfolio audit; если таких rows нет, не передавай этот аргумент. Пути не сохраняй и не превращай в Pipeline carriers. Передай в `test-classifier` ровно `technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt` в этом порядке; затем передай candidate classification независимому `test-classifier-reviewer`. При `ПРИНЯТО` сохрани `effective_technical_evidence` как sidecar attempt; при `ТРЕБУЕТ ДОРАБОТКИ` остановись и верни findings классификатору. Не передавай classification/effective technical evidence в V3 automation, trace или final carriers. Передай только `managed_behavior_context` в `tc-generator`, проверь bare canonical JSON schema+semantic facade и вызови publisher; не создавай CSV отдельным legacy exporter.
+2. Until `READY_FOR_PIPELINE_TAIL`, repeat only `advance_feature_flow`: execute the exact returned producer/audit/generator action at its exact record path, record it, and call again. `SEQUENTIAL` is the portable controller. FULL is the initial immutable baseline; CHANGE_SET is selected only by compatible evidence. No user count, mode, scope, shard, or controller tuning exists. Both scope audits and both batch audits are mandatory.
 
-3. Вызови `orchestrate_revision(candidate, review_artifact, output_dir, csv_profile, ...)`. Candidate публикуется до review; valid full successor — до selection. Передай downstream только effective JSON/digest.
+3. Materialize final registries with `materialize_fingerprint_registries(root, contract)`, then repeat `advance_pipeline6_tail(..., fingerprint_registries=registries)` until `COMPLETE` or `BLOCKED`. Tail first runs technical classification and independent review after READY_FOR_PIPELINE_TAIL; it preserves `changed_behavior_context` byte-identically and never changes the candidate or delta already produced by `feature_flow`. It then consumes the FULL candidate or CHANGE_SET delta; the delta zero-op branch selects the bound baseline without candidate review.
 
-4. Выполни `tc-to-autotest` и `autotest-reviewer`. При reviewer auto-fix регенерируй automation и повтори review; не продолжай с частичной correction.
+4. The tail keeps `finalize_orchestration` V3 signature/schema unchanged. It uses `build_terminal_run_receipt` as the terminal builder and only then may advance an eligible baseline. Task 9 has no tail CLI; Task 10/11 needs a public invocation.
 
-5. Для generated nonzero-pair branch запусти selected module:
+5. **Publish candidate** before review and **publish a valid full successor** before selection; invoke `orchestrate_revision(candidate, review_artifact, output_dir, csv_profile, ...)` only for a FULL/nonzero-delta candidate. Передай downstream только effective revision и effective digest.
+
+6. Выполни `tc-to-autotest` и `autotest-reviewer`. При reviewer auto-fix регенерируй automation и повтори review; не продолжай с частичной correction.
+
+7. Для generated nonzero-pair branch запусти selected module:
 
    `python <root>/tools/run_tests.py --project <project> --skillsrc <project>/.skillsrc --module <module-id> --canonical-document <effective-document.json> --automation-artifact <tc-to-autotest-output.json>`
 
    Язык берётся из module; explicit `--language` обязан совпадать. BLOCKED/manual zero-pair branch пропускает только runner.
 
-6. Для каждой terminal branch построй trace через `tools.build_trace_document`, вызови `validate_trace_document(trace, document, automation, run_result=None)` и проверь `tools.trace_check <trace-document.json> --require-execution`.
+8. Для каждой terminal branch построй trace через `tools/build_trace_document.py`, вызови `validate_trace_document(trace, document, automation, run_result=None)` и проверь `tools/trace_check.py <trace-document.json> --require-execution`.
 
-7. Вызови `finalize_orchestration(effective_document, effective_bundle_receipt, automation_artifact, autotest_review_artifact, run_result, trace_document)`. Не собирай terminal carrier вручную.
+9. Do not hand-build the terminal carrier. The tail uses its existing V3 `finalize_orchestration` call, then `build_terminal_run_receipt` and eligible `advance_baseline`.
 
 Не включай discovery questions, answers и bootstrap receipts во входы evaluator-скиллов: это controller evidence. Передавай selected requirements/source files только как `raw_content` в `context-marker`; business content не входит в `.skillsrc` или bootstrap receipt.
 
 ## Route и terminal branches
 
-`source-inventory -> context-marker -> test-classifier -> test-classifier-reviewer -> tc-generator -> candidate publication -> tc-reviewer/effective selection -> tc-to-autotest -> autotest-reviewer -> optional runner -> trace -> finalization`.
+`feature-flow semantic prefix -> FULL candidate or CHANGE_SET delta -> READY_FOR_PIPELINE_TAIL -> test-classifier -> test-classifier-reviewer -> consume the bound candidate/delta -> nonzero candidate publication/review or zero-op bound selection -> tc-to-autotest -> autotest-reviewer -> optional runner -> trace -> V3 finalization -> terminal builder -> eligible baseline advancement`.
 
 Markdown/CSV никогда не являются downstream input. Runtime identity — exact pair `(file_id, symbol_id)`; несколько pairs для target имеют AND semantics. Trace строится для PASS, manual remainder, MANUAL_ONLY, BLOCKED, FAIL и NOT_RUNNABLE.
 

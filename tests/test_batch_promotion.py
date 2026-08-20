@@ -6,7 +6,7 @@ import copy
 import hashlib
 import unittest
 
-from tools.batch_promotion import PromotionSnapshot, ReviewController, advance_promotion, record_promotion, start_promotion
+from tools.batch_promotion import PromotionEvidence, PromotionSnapshot, ReviewController, advance_promotion, record_promotion, replay_promotion_ledger, start_promotion
 from tools.flow_artifacts import FlowError, artifact_sha256, canonical_bytes
 
 
@@ -114,6 +114,23 @@ class BatchPromotionTests(unittest.TestCase):
         promotion = advance_promotion(snapshot, controller).artifact
         self.assertEqual("INDEPENDENT", promotion["review_mode"])
         self.assertTrue(promotion["independence_attestation_sha256"].startswith("sha256:"))
+
+    def test_replay_threads_one_snapshot_across_two_batches(self) -> None:
+        receipt = scope("FULL"); value = plan(receipt)
+        value["batches"].append({"batch_id":"BATCH-000002", "items":[{"item_id":"ITEM-000002", "source_id":"REQ-two", "domain_key":"_supplied", "accounted_range":{"start":0,"end":1}, "read_range":{"start":0,"end":1}}]})
+        snapshot = start_promotion(receipt, value); evidence = []
+        for batch in value["batches"]:
+            request = advance_promotion(snapshot).artifact
+            nested = {"schema_version":"1.0.0", "plan_sha256":artifact_sha256(value), "batch_id":batch["batch_id"], "items":[{"item_id":batch["items"][0]["item_id"], "outcome":"no_supported_observable_fact"}]}
+            candidate_value = candidate(snapshot, nested, request)
+            snapshot = record_promotion(snapshot, candidate_value)
+            false = audit(candidate_value, "false_claim"); snapshot = record_promotion(snapshot, false)
+            omission = audit(candidate_value, "omission"); snapshot = record_promotion(snapshot, omission)
+            promoted = advance_promotion(snapshot)
+            evidence.append(PromotionEvidence((candidate_value, false, omission), promoted.artifact))
+            snapshot = promoted.next_snapshot
+        replayed = replay_promotion_ledger(receipt, value, tuple(evidence))
+        self.assertEqual(["BATCH-000001", "BATCH-000002"], [row.promotion["batch_id"] for row in replayed])
 
 
 if __name__ == "__main__":

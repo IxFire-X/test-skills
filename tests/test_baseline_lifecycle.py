@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tests.fixture_factory import canonical_document  # noqa: E402
+from tests.test_behavior_context_v6 import full_flow, plain  # noqa: E402
 from tools.baseline_lifecycle import (  # noqa: E402
     ValidatedBaseline,
     advance_baseline,
@@ -391,6 +392,11 @@ def build_run(
         "orchestrator_output": orchestration,
     }
     tails = {name: None if value is None else stored_json(run_root, PurePosixPath("artifacts/tail") / f"{name}.json", value) for name, value in tail_values.items()}
+    # Task 9A baseline advancement copies only receipt-named content-addressed
+    # projections; fixtures therefore materialize the same immutable namespace.
+    for stored in (*stored_prefix.values(), *(value for name, value in tails.items() if value is not None and name != "run_result")):
+        value = json.loads(stored.payload)
+        write_create_only(run_root, PurePosixPath("artifacts") / f"{stored.sha256[7:]}.json", value)
     registries, projected = baseline_fingerprints()
     kind = input_kind or ("git_head" if mode == "FULL" else "git_range")
     if kind == "git_worktree":
@@ -408,7 +414,7 @@ def build_run(
         if base is not None:
             change_input["base"] = {"commit": base[0], "tree": base[1]}
     ledger_value = {
-        "schema_version": "1.0.0", "artifact": "prefix-ledger", "repository_id": repository,
+        "schema_version": "1.0.0", "artifact": "prefix-ledger", "feature_flow_prefix_sha256": digest("feature-flow-prefix"), "tail_record_sha256s": [], "repository_id": repository,
         "selected_module": "root", "run_mode": mode, "change_input": change_input,
         "analytics_sha256": digest("analytics"), "source_drift": source_drift,
         "fingerprints": registries,
@@ -421,6 +427,12 @@ def build_run(
 
 
 def persist_terminal(run_root: Path, fixture: dict[str, Any], name: str = "terminal.json") -> StoredArtifact:
+    for binding in fixture["ledger_value"]["artifacts"].values():
+        value = json.loads((run_root / binding["path"]).read_bytes())
+        write_create_only(run_root, PurePosixPath("artifacts") / f"{binding['sha256'][7:]}.json", value)
+    for tail in fixture["tails"].values():
+        if tail is not None and "environment" not in json.loads(tail.payload):
+            write_create_only(run_root, PurePosixPath("artifacts") / f"{tail.sha256[7:]}.json", json.loads(tail.payload))
     return write_create_only(run_root, PurePosixPath("receipts") / name, build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
 
 
@@ -467,6 +479,9 @@ class BaselineLifecycleTests(unittest.TestCase):
         accounting["context_receipt_sha256"] = receipt_sha256
         values["behavior_source_accounting"] = copy.deepcopy(context)
         values["changed_behavior_context"]["source"]["behavior_context_receipt_sha256"] = receipt_sha256
+        if context.get("schema_version") == "6.0.0":
+            context["artifacts"]["changed_behavior_context"]["source"]["behavior_context_receipt_sha256"] = receipt_sha256
+            values["changed_behavior_context"] = copy.deepcopy(context["artifacts"]["changed_behavior_context"])
         classification = values["technical_test_classification"]["artifacts"]["classification"]
         classification["technical_test_inventory_sha256"] = inventory_sha256
         classification_sha256 = artifact_sha256(classification)
@@ -484,6 +499,7 @@ class BaselineLifecycleTests(unittest.TestCase):
             replacement = stored_json(run_root, PurePosixPath("rebound") / f"{name}.json", value)
             ledger["artifacts"][name] = {"path": replacement.path.relative_to(run_root).as_posix(), "sha256": replacement.sha256}
         self.replace_ledger(run_root, fixture, ledger)
+        fixture["ledger_value"] = ledger
 
     def test_terminal_binds_source_inventory_modules_to_selected_module(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -782,6 +798,16 @@ class BaselineLifecycleTests(unittest.TestCase):
             baseline = validate_baseline_receipt(advanced["successor_baseline_receipt"], project, "root", fixture["projected"])
             target = {"input_kind": "git_range", "repository_id": identity, "selected_module": "root", "base": {"commit": head, "tree": tree}, "fingerprints": fixture["projected"]}
             self.assertEqual("CHANGE_SET", choose_run_mode(target, baseline))
+            worktree = {**target, "input_kind": "git_worktree"}
+            patch = {**target, "input_kind": "patch_manifest", "base": {
+                "snapshot_sha256": artifact_sha256({"repository_id": identity, "tree": tree}),
+            }}
+            self.assertEqual("CHANGE_SET", choose_run_mode(worktree, baseline))
+            self.assertEqual("CHANGE_SET", choose_run_mode(patch, baseline))
+            wrong_worktree = copy.deepcopy(worktree); wrong_worktree["base"]["tree"] = "f" * 40
+            wrong_patch = copy.deepcopy(patch); wrong_patch["base"]["snapshot_sha256"] = digest("stale-patch-base")
+            self.assertEqual("FULL", choose_run_mode(wrong_worktree, baseline))
+            self.assertEqual("FULL", choose_run_mode(wrong_patch, baseline))
             self.assertEqual("FULL", choose_run_mode(target, advanced["successor_baseline_receipt"]))
             for key in ("repository_id", "selected_module", "base", "fingerprints"):
                 changed = copy.deepcopy(target)
@@ -914,6 +940,44 @@ class BaselineLifecycleTests(unittest.TestCase):
                 baseline, read("technical_test_inventory"), read("managed_behavior_context"), read("behavior_context_receipt"),
             )
             self.assertEqual(baseline.receipt_sha256, scope_predecessor_projection(predecessor)["receipt_sha256"])
+
+    def test_v6_terminal_prefix_advances_and_issues_only_matching_predecessor(self) -> None:
+        """A terminal V6 prefix must preserve its exact embedded/standalone changed projection and version pair."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, head, tree = make_project(root); run_root = root / "run"
+            fixture = build_run(run_root, identity, head, tree)
+            _, inventory, _, scope, _, _, composed = full_flow([("REQ-local", b"REQ-local")])
+            context, receipt, changed = plain(composed.context), plain(composed.receipt), plain(composed.changed_behavior_context)
+            def mutate(values: dict[str, dict[str, Any]]) -> None:
+                values["technical_test_inventory"] = plain(inventory)
+                values["authorized_behavior_sources"] = plain(inventory)
+                values["change_scope_receipt"] = plain(scope)
+                values["managed_behavior_context"] = plain(context)
+                values["behavior_source_accounting"] = plain(context)
+                values["changed_behavior_context"] = plain(changed)
+                values["behavior_context_receipt"] = plain(receipt)
+            self.rewrite_prefix_graph(run_root, fixture, mutate)
+            terminal = persist_terminal(run_root, fixture)
+            advanced = advance_baseline({"project": project, "baseline_root": root / "baselines"}, terminal)
+            self.assertEqual("ADVANCED", advanced["status"])
+            baseline = validate_baseline_receipt(advanced["successor_baseline_receipt"], project, "root", fixture["projected"])
+            ledger = json.loads(fixture["ledger"].payload)
+            values = {name: json.loads((run_root / Path(*PurePosixPath(binding["path"]).parts)).read_bytes()) for name, binding in ledger["artifacts"].items()}
+            predecessor = bind_scope_predecessor(baseline, values["technical_test_inventory"], values["managed_behavior_context"], values["behavior_context_receipt"])
+            self.assertEqual("root", scope_predecessor_projection(predecessor)["selected_module"])
+            for altered in ("embedded_changed", "version_pair"):
+                with self.subTest(altered=altered):
+                    broken_context = copy.deepcopy(values["managed_behavior_context"])
+                    broken_receipt = copy.deepcopy(values["behavior_context_receipt"])
+                    if altered == "embedded_changed":
+                        broken_context["artifacts"]["changed_behavior_context"]["requirements"] = []
+                    else:
+                        broken_receipt["schema_version"] = "1.0.0"
+                    self.assert_flow_error("BASELINE_BINDING", lambda: bind_scope_predecessor(baseline, values["technical_test_inventory"], broken_context, broken_receipt))
+            standalone_changed = copy.deepcopy(values["changed_behavior_context"])
+            standalone_changed["requirements"] = []
+            self.replace_prefix(run_root, fixture, "changed_behavior_context", standalone_changed)
+            self.assert_flow_error("BASELINE_BINDING", lambda: build_terminal_run_receipt(fixture["ledger"], fixture["tails"]))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Как работает полный тестовый пайплайн Pipeline 5.0
+# Как работает полный тестовый пайплайн Pipeline 6.0
 
 ## Главная идея
 
@@ -7,15 +7,15 @@
 возможностей; `CONTRACTS.md` и `PIPELINE.md` генерируются из него.
 
 ```text
-allowed requirements and read-only project context
-  -> source-inventory: technical test inventory + authorized behavior sources
-  -> context-marker: managed behavior context + source accounting + receipt
-  -> test-classifier -> test-classifier-reviewer: persisted technical evidence sidecar
-  -> tc-generator: candidate bare canonical JSON from managed behavior context only
+initial clean committed project -> immutable FULL baseline
+later compatible committed change -> CHANGE_SET; otherwise FULL fallback
+  -> feature-flow: source inventory -> change scope -> context marker
+  -> tc-generator: FULL candidate or CHANGE_SET delta from changed behavior context only
+  -> READY_FOR_PIPELINE_TAIL -> test-classifier -> test-classifier-reviewer
   -> publish immutable JSON/Markdown/CSV bundle
   -> tc-reviewer and effective revision selection
   -> tc-to-autotest -> autotest-reviewer
-  -> optional execution -> trace build/check -> finalization
+  -> optional execution -> trace build/check -> V3 finalization -> terminal receipt -> eligible baseline advancement
 ```
 
 Внешний контроллер читает нужный `SKILL.md`, reference, schema, вход текущего
@@ -23,13 +23,16 @@ allowed requirements and read-only project context
 reviewer должен работать в fresh context и не видеть hidden reasoning генератора.
 
 `source-inventory` механически создаёт snapshots test files/symbols и authorized
-behavior sources. `context-marker` выделяет managed behavior context, complete source
-accounting и immutable receipt; classifier
-и independent reviewer классифицируют полный inventory. Accepted
-`effective_technical_evidence` остаётся persisted sidecar attempt: в Phase 1 оно
-никогда не передаётся в V3 automation, trace или finalization. Structural guard:
-`tc-generator` получает только `managed_behavior_context`, без raw test source,
-inventory или classification.
+behavior sources. `feature-flow` repeatedly returns the sole allowed producer/audit
+action and exact record path: both scope audits and both batch audits are mandatory;
+portable controller is `SEQUENTIAL`, with no user count/mode/scope/shard tuning.
+`context-marker` creates complete `managed_behavior_context`, generator-safe
+`changed_behavior_context`, complete source accounting и immutable receipt. Classifier and
+independent reviewer run only after `READY_FOR_PIPELINE_TAIL`; accepted technical
+evidence remains isolated and never changes the already-produced generator/delta semantics. Structural
+guard: `tc-generator` получает только `changed_behavior_context`, без raw test
+source, inventory, accounting, receipt или classification.
+Accepted `effective_technical_evidence` is a sidecar only.
 
 Пути `SOURCE_ID=PATH` для `supplied_requirement` остаются controller evidence:
 контроллер повторяет их при planning, receipt, context validation, selection и audit,
@@ -150,11 +153,13 @@ python <root>/tools/run_tests.py --project <project> --skillsrc <project>/.skill
 ```
 
 Module execution требуется для publisher, потому что direct script form не разрешает
-его package imports из repository root. Finalization remains
-a Python seam: `orchestrate_revision(...)`,
+его package imports из repository root. Finalization remains a V3
+Python seam: `orchestrate_revision(...)`,
 `validate_trace_document(trace, document, automation, run_result=None)` и
-`finalize_orchestration(...)`. Нет finalization CLI и нет trace-check
-orchestrator-artifact flag.
+`finalize_orchestration(...)`. Pipeline 6 then uses
+`tools.baseline_lifecycle.build_terminal_run_receipt` and eligible baseline
+advancement. `tools/pipeline6_tail.py` is API-only here; Task 10/11 needs a public
+invocation. Нет finalization CLI и нет trace-check orchestrator-artifact flag.
 
 ## Что не должно происходить
 

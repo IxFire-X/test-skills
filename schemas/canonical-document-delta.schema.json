@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/canonical-document-delta.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact", "document_id", "baseline_document_sha256", "baseline_revision", "target_revision", "source", "metadata", "operation_capabilities", "requirements", "test_cases"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact": {"const": "canonical-document-delta"},
+    "document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$"},
+    "baseline_document_sha256": {"$ref": "#/$defs/digest"},
+    "baseline_revision": {"type": "integer", "minimum": 1},
+    "target_revision": {"type": "integer", "minimum": 1},
+    "source": {"type": "object", "additionalProperties": false, "required": ["behavior_context_receipt_sha256", "changed_behavior_context_sha256"], "properties": {"behavior_context_receipt_sha256": {"$ref": "#/$defs/digest"}, "changed_behavior_context_sha256": {"$ref": "#/$defs/digest"}}},
+    "metadata": {"$ref": "canonical-test-document.schema.json#/$defs/metadata"},
+    "operation_capabilities": {"$ref": "#/$defs/capabilities"},
+    "requirements": {"$ref": "#/$defs/requirements"},
+    "test_cases": {"$ref": "#/$defs/cases"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "capabilities": {"$ref": "#/$defs/partition", "allOf": [{"properties": {"added": {"items": {"$ref": "canonical-test-document.schema.json#/$defs/capability"}}, "modified": {"items": {"$ref": "#/$defs/capability-modification"}}, "retired": {"items": {"$ref": "#/$defs/capability-retirement"}}}}]},
+    "requirements": {"$ref": "#/$defs/partition", "allOf": [{"properties": {"added": {"items": {"$ref": "canonical-test-document.schema.json#/$defs/requirement"}}, "modified": {"items": {"$ref": "#/$defs/requirement-modification"}}, "retired": {"items": {"$ref": "#/$defs/requirement-retirement"}}}}]},
+    "cases": {"$ref": "#/$defs/partition", "allOf": [{"properties": {"added": {"items": {"$ref": "canonical-test-document.schema.json#/$defs/test_case"}}, "modified": {"items": {"$ref": "#/$defs/case-modification"}}, "retired": {"items": {"$ref": "#/$defs/case-retirement"}}}}]},
+    "partition": {"type": "object", "additionalProperties": false, "required": ["reused_ids", "added", "modified", "retired"], "properties": {"reused_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "added": {"type": "array"}, "modified": {"type": "array"}, "retired": {"type": "array"}}},
+    "capability-modification": {"type": "object", "additionalProperties": false, "required": ["capability_id", "baseline_object_sha256", "replacement"], "properties": {"capability_id": {"type": "string", "pattern": "^CAP-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "replacement": {"$ref": "canonical-test-document.schema.json#/$defs/capability"}}},
+    "requirement-modification": {"type": "object", "additionalProperties": false, "required": ["requirement_id", "baseline_object_sha256", "replacement"], "properties": {"requirement_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "replacement": {"$ref": "canonical-test-document.schema.json#/$defs/requirement"}}},
+    "case-modification": {"type": "object", "additionalProperties": false, "required": ["case_id", "baseline_object_sha256", "replacement"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "replacement": {"$ref": "canonical-test-document.schema.json#/$defs/test_case"}}},
+    "dependent-support": {"type": "object", "additionalProperties": false, "required": ["status", "surviving_object_ids"], "properties": {"status": {"const": "DEPENDENTS_RETIRED"}, "surviving_object_ids": {"type": "array", "maxItems": 0}}},
+    "requirement-support": {"type": "object", "additionalProperties": false, "required": ["status", "surviving_source_ids", "retirement_fragment_ids"], "properties": {"status": {"const": "NO_SURVIVING_SOURCE_SUPPORT"}, "surviving_source_ids": {"type": "array", "maxItems": 0}, "retirement_fragment_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^FRAGMENT-[0-9a-f]{64}$"}}}},
+    "capability-retirement": {"type": "object", "additionalProperties": false, "required": ["object_kind", "object_id", "baseline_object_sha256", "reason", "support_evidence"], "properties": {"object_kind": {"const": "operation_capability"}, "object_id": {"type": "string", "pattern": "^CAP-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "reason": {"enum": ["CAPABILITY_NO_LONGER_REFERENCED", "CAPABILITY_REPLACED"]}, "support_evidence": {"$ref": "#/$defs/dependent-support"}}},
+    "requirement-retirement": {"type": "object", "additionalProperties": false, "required": ["object_kind", "object_id", "baseline_object_sha256", "reason", "support_evidence"], "properties": {"object_kind": {"const": "requirement"}, "object_id": {"type": "string", "pattern": "^REQ-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "reason": {"enum": ["REQUIREMENT_NO_LONGER_OBSERVABLE", "REQUIREMENT_MERGED"]}, "support_evidence": {"$ref": "#/$defs/requirement-support"}}},
+    "case-retirement": {"type": "object", "additionalProperties": false, "required": ["object_kind", "object_id", "baseline_object_sha256", "reason", "support_evidence"], "properties": {"object_kind": {"const": "test_case"}, "object_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "baseline_object_sha256": {"$ref": "#/$defs/digest"}, "reason": {"enum": ["CASE_REQUIREMENTS_RETIRED", "CASE_MERGED", "CASE_NO_LONGER_OBSERVABLE"]}, "support_evidence": {"$ref": "#/$defs/dependent-support"}}}
+  }
+}

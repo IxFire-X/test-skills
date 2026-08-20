@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from tools.schema_validation import load_json_strict, schema_diagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNED_GUIDANCE = {
+    "skills/change-scope/SKILL.md": ("change-scope", "references/change-scope-contract.md"),
+    "skills/change-scope/references/change-scope-contract.md": None,
     "skills/context-marker/SKILL.md": ("context-marker", "references/context-artifact-contract.md"),
     "skills/context-marker/references/context-artifact-contract.md": None,
     "skills/tc-generator/SKILL.md": ("tc-generator", "references/case-generation-contract.md"),
@@ -70,7 +73,7 @@ def read(relative: str) -> str:
 
 class SkillContractsV3Tests(unittest.TestCase):
     def test_exact_owned_inventory_has_frontmatter_and_resolvable_references(self):
-        self.assertEqual(18, len(OWNED_GUIDANCE))
+        self.assertEqual(20, len(OWNED_GUIDANCE))
         for relative, metadata in OWNED_GUIDANCE.items():
             with self.subTest(relative=relative):
                 path = ROOT / relative
@@ -92,7 +95,7 @@ class SkillContractsV3Tests(unittest.TestCase):
             "skills/tc-reviewer/SKILL.md": ("canonical_document", "revision_selection", "tc-reviewer-output.schema.json"),
             "skills/tc-to-autotest/SKILL.md": ("canonical_document", "automation_validation", "execution_preflight"),
             "skills/autotest-reviewer/SKILL.md": ("canonical_document", "automation_validation", "autotest-reviewer-output.schema.json"),
-            "skills/orchestrate/SKILL.md": ("Pipeline 5.0", "orchestrate_test_case_revision", "build_trace_document", "trace_check"),
+            "skills/orchestrate/SKILL.md": ("Pipeline 6.0", "feature_flow", "pipeline6_tail", "build_terminal_run_receipt"),
         }
         for relative, terms in required_tools.items():
             with self.subTest(relative=relative):
@@ -103,9 +106,10 @@ class SkillContractsV3Tests(unittest.TestCase):
                 for stop_term in ("v2.1", "invention", "validator", "schema", "secret", "authorized"):
                     self.assertIn(stop_term, text)
 
-    def test_orchestration_reference_has_exact_pipeline5_classifier_carriers(self):
+    def test_orchestration_reference_has_pipeline6_changed_context_tail_chronology(self):
         text = read("skills/orchestrate/references/orchestration-contract.md")
-        self.assertIn("`technical_test_inventory`, `authorized_behavior_sources`, `managed_behavior_context`, `behavior_source_accounting`, `behavior_context_receipt`", text)
+        for term in ("READY_FOR_PIPELINE_TAIL", "changed_behavior_context", "SEQUENTIAL", "advance_pipeline6_tail", "build_terminal_run_receipt"):
+            self.assertIn(term, text)
 
     def test_guidance_has_no_legacy_semantic_model_or_one_step_limit(self):
         corpus = "\n".join(read(path) for path in OWNED_GUIDANCE).lower()
@@ -235,7 +239,7 @@ class SkillContractsV3Tests(unittest.TestCase):
         quick_validate = Path(r"C:\Users\User\.codex\skills\.system\skill-creator\scripts\quick_validate.py")
         for directory in ("skills/test-classifier", "skills/test-classifier-reviewer"):
             with self.subTest(directory=directory):
-                completed = subprocess.run(["python", str(quick_validate), directory], cwd=ROOT, text=True, capture_output=True)
+                completed = subprocess.run([sys.executable, str(quick_validate), directory], cwd=ROOT, text=True, capture_output=True)
                 self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
 
     def test_adaptive_case_granularity_inline_contexts_are_closed_v5_generator_inputs(self):

@@ -304,10 +304,10 @@ class RunTestsV3Tests(unittest.TestCase):
 
         command = runner.call_args_list[1].args[0]
         self.assertEqual(
-            [sys.executable, "-m", "pytest", "-q", "--rootdir", str(project.resolve())],
-            command[:6],
+            [sys.executable, "-B", "-m", "pytest", "-p", "no:cacheprovider", "-q", "--rootdir", str(project.resolve())],
+            command[:9],
         )
-        self.assertEqual("--junitxml", command[6])
+        self.assertEqual("--junitxml", command[9])
 
     def test_blocked_and_manual_artifacts_reject_direct_execution_without_a_report(self) -> None:
         """Treating blocked/manual work as NOT_RUNNABLE evidence would fabricate an execution attempt."""

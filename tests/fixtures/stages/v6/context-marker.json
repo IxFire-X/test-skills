@@ -1,0 +1,29 @@
+{
+  "schema_version": "6.0.0",
+  "stage": "context-marker",
+  "artifacts": {
+    "managed_behavior_context": {
+      "authorized_behavior_sources_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "requirements": [{"requirement_id": "REQ-demo", "display_order": 1, "text": "user observes result; outcomes: result.", "provenance": ["SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}],
+      "product_sources": [{"source_id": "SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "kind": "product_file", "path": "src/demo.py", "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "summary": "Behavior evidence from src/demo.py."}],
+      "requirement_sources": [{"requirement_id": "REQ-demo", "source_ids": ["SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}]
+    },
+    "changed_behavior_context": {
+      "schema_version": "1.0.0",
+      "artifact": "changed-behavior-context",
+      "run_mode": "FULL",
+      "source": {"behavior_context_receipt_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "baseline_context_sha256": null},
+      "requirements": [{"requirement_id": "REQ-demo", "display_order": 1, "text": "user observes result; outcomes: result.", "provenance": ["SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}],
+      "requirement_sources": [{"requirement_id": "REQ-demo", "source_ids": ["SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}],
+      "stable_requirement_links": [],
+      "retired_requirements": []
+    },
+    "behavior_source_accounting": {
+      "authorized_behavior_sources_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "context_receipt_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "source_dispositions": [{"source_id": "SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "disposition": "represented", "requirement_ids": ["REQ-demo"]}],
+      "behavior_fragment_groups": [{"group_id": "GROUP-demo", "fragment_ids": ["FRAGMENT-4444444444444444444444444444444444444444444444444444444444444444"], "requirement_ids": ["REQ-demo"]}]
+    }
+  },
+  "warnings": []
+}

@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from tools.schema_validation import load_json_strict  # noqa: E402
 from tools.test_classification import (  # noqa: E402
     TestClassificationError,
+    build_source_inventories,
     main,
     select_effective_technical_evidence,
     validate_technical_test_evidence,
@@ -83,6 +84,20 @@ class TechnicalTestClassificationTests(unittest.TestCase):
                 self.assertEqual((), self.diagnostics(candidate, review))
                 selected = select_effective_technical_evidence(self.inventory(), candidate, review, self.context(), self.root)
                 self.assertEqual([scope, scope], [row["test_scope"] for row in selected["classifications"]])
+
+    def test_snapshot_reader_overrides_checkout_bytes_and_requires_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp); (project / "src").mkdir()
+            (project / "src" / "app.py").write_bytes(b"VALUE = 1\r\n")
+            skillsrc = {"version": "3.0", "project": {"name": "snapshot"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": [{"id": "root", "root": ".", "stack": {"language": "python"}, "paths": {"source": ["src"]}}]}
+            snapshot = b"VALUE = 1\n"
+            default = build_source_inventories(project, skillsrc, "root", ())
+            frozen = build_source_inventories(project, skillsrc, "root", (), snapshot_reader=lambda path: snapshot)
+            self.assertNotEqual(default.authorized_behavior_sources["sources"][0]["content_digest"], frozen.authorized_behavior_sources["sources"][0]["content_digest"])
+            self.assertEqual("sha256:" + hashlib.sha256(snapshot).hexdigest(), frozen.authorized_behavior_sources["sources"][0]["content_digest"])
+            with self.assertRaises(TestClassificationError) as caught:
+                build_source_inventories(project, skillsrc, "root", (), snapshot_reader=lambda path: "not-bytes")
+            self.assertEqual("INVENTORY_READ_ERROR", caught.exception.diagnostics[0]["code"])
 
     def test_unknown_is_valid_but_cannot_be_upgraded(self) -> None:
         candidate = self.classification(scope="unknown")

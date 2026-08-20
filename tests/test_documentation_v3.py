@@ -48,7 +48,7 @@ class DocumentationV3Tests(unittest.TestCase):
             result.stdout.splitlines(),
         )
 
-    def test_each_public_guide_describes_the_pipeline_v4_model_and_v3_tail(self) -> None:
+    def test_each_public_guide_describes_the_pipeline6_model_and_v3_tail(self) -> None:
         required = (
             "bare canonical JSON",
             "Действие",
@@ -63,10 +63,14 @@ class DocumentationV3Tests(unittest.TestCase):
             "BLOCKED",
             "NOT_RUNNABLE",
             "tenant import round trip remains unverified",
-            "Pipeline 5.0",
+            "Pipeline 6.0",
             "managed_behavior_context",
+            "changed_behavior_context",
             "test-classifier",
             "effective_technical_evidence",
+            "FULL",
+            "CHANGE_SET",
+            "READY_FOR_PIPELINE_TAIL",
         )
         for name, text in self.docs.items():
             with self.subTest(document=name):
@@ -120,11 +124,11 @@ class DocumentationV3Tests(unittest.TestCase):
         pipeline = render_pipeline(self.contract)
         contracts = render_contracts(self.contract)
         self.assertIn("test-pipeline", pipeline)
-        self.assertIn("5.0", pipeline)
+        self.assertIn("6.0", pipeline)
         for step in self.contract["steps"]:
             self.assertIn(f"`{step['id']}`", pipeline)
             self.assertIn(f"`{step['kind']}`", pipeline)
-            for field in ("accepts", "forwards", "produces"):
+            for field in ("accepts", "forwards", "produces", "rejects"):
                 self.assertIn(field, pipeline)
                 for artifact in step[field]:
                     self.assertIn(f"`{artifact}`", pipeline)
@@ -140,6 +144,7 @@ class DocumentationV3Tests(unittest.TestCase):
         for capability in self.contract["capabilities"]:
             self.assertIn(capability["language"], contracts)
         self.assertIn("Artifact policy", contracts)
+        self.assertIn("Historical rejection registry", contracts)
         expected_traceability = [
             "requirement",
             "case",

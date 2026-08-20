@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 try:
     if __package__:
@@ -250,7 +250,17 @@ def _java_locators(text: str, path: str) -> list[dict[str, str]]:
     return [{"kind": "java_class_method", "class_fqn": class_fqn, "method_name": name} for name in names]
 
 
-def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
+def _snapshot_bytes(path: Path, portable: str, reader: Callable[[str], bytes] | None, pointer: str) -> bytes:
+    try:
+        value = path.read_bytes() if reader is None else reader(portable)
+    except (OSError, TypeError, ValueError) as error:
+        raise _error("INVENTORY_READ_ERROR", pointer, "Snapshot bytes could not be read.") from error
+    if type(value) is not bytes:
+        raise _error("INVENTORY_READ_ERROR", pointer, "Snapshot reader must return bytes.")
+    return value
+
+
+def _inventory(project_root: Path, module: Mapping[str, Any], snapshot_reader: Callable[[str], bytes] | None = None) -> dict[str, Any]:
     language = module["stack"]["language"]
     if language not in {"python", "java"}:
         raise _error("INVENTORY_UNSUPPORTED_LANGUAGE", "/stack/language", "Only Python and Java static test inventory is supported.")
@@ -267,8 +277,8 @@ def _inventory(project_root: Path, module: Mapping[str, Any]) -> dict[str, Any]:
             seen_files.add(path)
             portable = _portable_path(project_root, path)
             try:
-                text = path.read_text(encoding="utf-8")
-                data = path.read_bytes()
+                data = _snapshot_bytes(path, portable, snapshot_reader, portable)
+                text = data.decode("utf-8")
             except UnicodeDecodeError as error:
                 raise _error("INVENTORY_DECODE_ERROR", portable, "Supported test file is not UTF-8.") from error
             except OSError as error:
@@ -296,7 +306,7 @@ def _excluded_product(path: Path, portable: str, test_paths: set[str], test_root
     )
 
 
-def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory: Mapping[str, Any], supplied_inputs: Sequence[SuppliedInput]) -> dict[str, Any]:
+def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory: Mapping[str, Any], supplied_inputs: Sequence[SuppliedInput], snapshot_reader: Callable[[str], bytes] | None = None) -> dict[str, Any]:
     seen_ids: set[str] = set()
     sources: list[dict[str, str]] = []
     for index, supplied in enumerate(supplied_inputs):
@@ -324,16 +334,13 @@ def _authorized_sources(project_root: Path, module: Mapping[str, Any], inventory
             portable = _portable_path(project_root, path)
             if _excluded_product(path, portable, test_paths, test_roots, module["_resolved_root"], source_roots):
                 continue
-            try:
-                content = path.read_bytes()
-            except OSError as error:
-                raise _error("INVENTORY_READ_ERROR", portable, "Authorized product file could not be read.") from error
+            content = _snapshot_bytes(path, portable, snapshot_reader, portable)
             products.append({"source_id": "SOURCE-" + hashlib.sha256(b"product_file\0" + portable.encode("utf-8")).hexdigest(), "kind": "product_file", "path": portable, "content_digest": "sha256:" + hashlib.sha256(content).hexdigest()})
     products.sort(key=lambda row: row["path"])
     return {"module_id": module["id"], "sources": [*sources, *products]}
 
 
-def build_source_inventories(project_root: Path, skillsrc: Mapping[str, Any], module_id: str | None, supplied_inputs: Sequence[SuppliedInput]) -> SourceInventories:
+def build_source_inventories(project_root: Path, skillsrc: Mapping[str, Any], module_id: str | None, supplied_inputs: Sequence[SuppliedInput], *, snapshot_reader: Callable[[str], bytes] | None = None) -> SourceInventories:
     try:
         root = project_root.resolve()
         normalized = normalize_skillsrc(skillsrc)
@@ -342,8 +349,8 @@ def build_source_inventories(project_root: Path, skillsrc: Mapping[str, Any], mo
     except SkillsrcError as error:
         code = "INVENTORY_UNSAFE_PATH" if error.code in {"unsafe_path", "unsafe_module_root"} else "INVENTORY_MANIFEST"
         raise _error(code, "/skillsrc", str(error)) from error
-    inventory = _inventory(root, module)
-    sources = _authorized_sources(root, module, inventory, supplied_inputs)
+    inventory = _inventory(root, module, snapshot_reader)
+    sources = _authorized_sources(root, module, inventory, supplied_inputs, snapshot_reader)
     return SourceInventories(_freeze(inventory), _digest(inventory), _freeze(sources), _digest(sources))
 
 
@@ -545,7 +552,7 @@ def _select_effective_technical_evidence(inventory: Mapping[str, Any], classific
 
 
 def select_effective_technical_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], context: Any, project_root: Path) -> Mapping[str, Any]:
-    """Public selection gate: only the complete validated V5 context may supply requirements."""
+    """Public selection gate: only a complete validated managed context may supply requirements."""
     try:
         from tools.behavior_context_planning import ValidatedBehaviorContext
     except ImportError:
@@ -651,7 +658,7 @@ def validate_managed_behavior_context(behavior_context: Mapping[str, Any], autho
 
 
 def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: Mapping[str, Any], project_root: Path, skillsrc_path: Path, module_id: str | None = None, supplied_inputs: Sequence[SuppliedInput] = ()):
-    """Public V5-only context seam shared by validation, selection, and audits."""
+    """Public loose-file V5 loader; V6 requires the guarded composed capability seam."""
     try:
         context = load_json_strict(path)
         receipt = load_json_strict(receipt_path)
@@ -688,6 +695,16 @@ def load_validated_behavior_context(path: Path, receipt_path: Path, inventory: M
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeArgumentParser(prog="test_classification.py")
     commands = parser.add_subparsers(dest="command", required=True)
+    feature_flow = commands.add_parser("feature-flow")
+    feature_flow.add_argument("--project", required=True)
+    feature_flow.add_argument("--analytics", required=True)
+    feature_flow.add_argument("--run-root", required=True)
+    feature_flow.add_argument("--baseline-receipt")
+    feature_flow.add_argument("--base")
+    feature_flow.add_argument("--head")
+    feature_flow.add_argument("--worktree", action="store_true")
+    feature_flow.add_argument("--patch-manifest")
+    feature_flow.add_argument("--record")
     inventory = commands.add_parser("inventory")
     inventory.add_argument("--project", required=True)
     inventory.add_argument("--skillsrc", required=True)
@@ -719,6 +736,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     receipt.add_argument("--project", required=True); receipt.add_argument("--skillsrc", required=True); receipt.add_argument("--module"); receipt.add_argument("--inventory", required=True); receipt.add_argument("--plan", required=True); receipt.add_argument("--batch-result", action="append", required=True); receipt.add_argument("--supplied-input", action="append", default=[]); receipt.add_argument("--output", required=True)
     try:
         args = parser.parse_args(argv)
+        if args.command == "feature-flow":
+            try:
+                from tools.feature_flow import advance_feature_flow
+                from tools.git_change_adapter import ChangeInputSpec
+            except ImportError:
+                from feature_flow import advance_feature_flow
+                from git_change_adapter import ChangeInputSpec
+            has_change = bool(args.base or args.head or args.worktree or args.patch_manifest)
+            change = None if not has_change else ChangeInputSpec(args.base, args.head, args.worktree, Path(args.patch_manifest) if args.patch_manifest else None)
+            action = advance_feature_flow(
+                Path(args.project), Path(args.analytics), Path(args.run_root),
+                Path(args.baseline_receipt) if args.baseline_receipt else None,
+                change, Path(args.record) if args.record else None,
+            )
+            rendered = {
+                "kind": action.kind,
+                "artifact": None if action.artifact is None else _plain(action.artifact),
+                "record_path": None if action.record_path is None else str(action.record_path),
+                "diagnostics": _plain(action.diagnostics),
+            }
+            if action.kind == "BLOCKED":
+                print(json.dumps({"status": "error", "diagnostics": rendered["diagnostics"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")), file=sys.stderr)
+                return 2
+            print(json.dumps(rendered, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            return 0
         output = Path(args.output) if hasattr(args, "output") and args.output else None
         if output is not None and output.exists():
             raise _error("INVENTORY_OUTPUT_EXISTS" if args.command == "inventory" else "CLASSIFICATION_OUTPUT_EXISTS", "/output", "Output path already exists.")

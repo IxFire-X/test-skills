@@ -58,7 +58,7 @@ class ChangeContextV2Tests(unittest.TestCase):
         plan = build_change_context_plan(Path("."), {"id":"root", "paths":{"source":["src"]}}, self.receipt, self.candidate, {"module_id":"root", "sources":[self.base]}, {"module_id":"root", "sources":[self.current]}, self.resolver)
         item = plan["batches"][0]["items"][0]
         locators = [{"side":side["side"], "content_sha256":side["content_sha256"], "start_byte":side["accounted_range"]["start"], "end_byte":side["accounted_range"]["end"]} for side in item["evidence_sides"]]
-        fragment = {"effect":"modified", "anchor_byte":0, "evidence_locators":locators}; fragment["fragment_id"] = stable_change_fragment_id(item, fragment)
+        fragment = {"effect":"modified", "actor":"user", "operation":"updates record", "conditions":[], "outcomes":["record is updated"], "anchor_byte":0, "evidence_locators":locators}; fragment["fragment_id"] = stable_change_fragment_id(item, fragment)
         result = {"schema_version":"2.0.0", "scope_receipt_sha256":artifact_sha256(self.receipt), "plan_sha256":artifact_sha256(plan), "batch_id":plan["batches"][0]["batch_id"], "items":[{"item_id":item["item_id"], "outcome":"changed_behavior_fragments", "behavior_fragments":[fragment]}]}
         self.assertEqual((), validate_change_batch_result(self.receipt, plan, result, self.resolver))
         result["items"][0]["behavior_fragments"][0]["evidence_locators"] = locators[:1]
@@ -148,7 +148,7 @@ class ChangeContextV2Tests(unittest.TestCase):
         for side_name in ("before", "after"):
             side = next(row for row in item["evidence_sides"] if row["side"] == side_name)
             locators.append({"side":side_name, "content_sha256":side["content_sha256"], "start_byte":side["accounted_range"]["start"], "end_byte":side["accounted_range"]["end"]})
-        fragment = {"effect":"modified", "anchor_byte":locators[1]["start_byte"], "evidence_locators":locators}
+        fragment = {"effect":"modified", "actor":"user", "operation":"updates record", "conditions":[], "outcomes":["record is updated"], "anchor_byte":locators[1]["start_byte"], "evidence_locators":locators}
         fragment["fragment_id"] = stable_change_fragment_id(item, fragment)
         result = {"schema_version":"2.0.0", "scope_receipt_sha256":artifact_sha256(self.receipt), "plan_sha256":artifact_sha256(plan), "batch_id":"BATCH-000001", "items":[{"item_id":"ITEM-000001", "outcome":"changed_behavior_fragments", "behavior_fragments":[fragment]}]}
         self.assertEqual((), validate_change_batch_result(self.receipt, plan, result, self.resolver))
@@ -169,7 +169,7 @@ class ChangeContextV2Tests(unittest.TestCase):
         for side_name in ("before", "after"):
             side = next(row for row in item["evidence_sides"] if row["side"] == side_name)
             locators.append({"side":side_name, "content_sha256":side["content_sha256"], "start_byte":side["accounted_range"]["start"], "end_byte":side["accounted_range"]["end"]})
-        fragment = {"effect":"modified", "anchor_byte":999, "evidence_locators":locators}
+        fragment = {"effect":"modified", "actor":"user", "operation":"updates record", "conditions":[], "outcomes":["record is updated"], "anchor_byte":999, "evidence_locators":locators}
         fragment["fragment_id"] = stable_change_fragment_id(item, fragment)
         result = {"schema_version":"2.0.0", "scope_receipt_sha256":artifact_sha256(self.receipt), "plan_sha256":artifact_sha256(plan), "batch_id":"BATCH-000001", "items":[{"item_id":"ITEM-000001", "outcome":"changed_behavior_fragments", "behavior_fragments":[fragment]}]}
         self.assertEqual("CHANGE_SIDE_BINDING", validate_change_batch_result(self.receipt, plan, result, self.resolver)[0]["code"])

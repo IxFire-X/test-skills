@@ -147,16 +147,16 @@ class OrchestrationV3Tests(unittest.TestCase):
         with self.assertRaises(OrchestrationError):
             finalize_orchestration(document, receipt, automation, review, run, trace)
 
-    def test_contract_checker_rejects_exact_pipeline_v4_route_and_step_mutations(self) -> None:
-        # Break caught: a Pipeline 4.0 route, V3 tail branch, or stage carrier silently drifts while IDs still exist.
+    def test_contract_checker_rejects_pipeline6_tail_route_and_step_mutations(self) -> None:
+        # Break caught: a Pipeline 6 branch, preserved V3 tail, or stage carrier silently drifts while IDs still exist.
         from tools.contract_check import validate_pipeline_contract
 
         root = Path(__file__).resolve().parents[1]
         contract = json.loads((root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
         mutations = (
-            (lambda value: value["transitions"].__setitem__(3, {"from":"autotest-reviewer","when":{"review_verdict":"ПРИНЯТО","automation_status":"BLOCKED"},"transform":"run_tests"})),
-            (lambda value: value["transitions"].__setitem__(8, {"from":"run-tests","when":{"execution_verdict":"FAIL"},"transform":"stop_failed"})),
-            (lambda value: value["steps"][-1].__setitem__("accepts", ["raw_content"])),
+            lambda value: value["steps"][5]["branches"].__setitem__(0, {"when":{"run_mode":"FULL"},"produces":["canonical_document_delta"]}),
+            lambda value: value["transitions"].__setitem__(-1, {"from":"trace-check","when":{"trace_verdict":"FAIL"},"transform":"finalize_orchestration"}),
+            lambda value: value["steps"][-1].__setitem__("accepts", ["raw_content"]),
         )
         for mutate in mutations:
             changed = copy.deepcopy(contract); mutate(changed)

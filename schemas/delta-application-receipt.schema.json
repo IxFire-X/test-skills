@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/delta-application-receipt.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact", "status", "delta_sha256", "baseline_document_sha256", "candidate_document_sha256", "publication_required"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "artifact": {"const": "delta-application-receipt"},
+    "status": {"enum": ["CHANGED", "UNCHANGED"]}, "delta_sha256": {"$ref": "#/$defs/digest"},
+    "baseline_document_sha256": {"$ref": "#/$defs/digest"}, "candidate_document_sha256": {"$ref": "#/$defs/digest"},
+    "publication_required": {"type": "boolean"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

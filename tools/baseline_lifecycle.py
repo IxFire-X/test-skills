@@ -8,12 +8,14 @@ import re
 import subprocess
 import uuid
 import weakref
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
+from tools.canonical_document import CanonicalDocumentError, document_sha256, require_valid_canonical_document
 from tools.flow_artifacts import FlowError, StoredArtifact, artifact_sha256, canonical_bytes, write_create_only
+from tools.publish_test_case_bundle import Receipt
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
 
@@ -54,7 +56,6 @@ _SCHEMAS = {
     "technical_test_classification": "test-classifier-output.schema.json",
     "classification_review": "test-classifier-reviewer-output.schema.json",
     "effective_technical_evidence": "effective-technical-evidence.schema.json",
-    "validation_report": "tc-reviewer-output.schema.json",
 }
 
 
@@ -247,9 +248,9 @@ def _sorted_unique_strings(value: Any, path: str) -> list[str]:
 
 def _validate_stored_context_relations(
     managed: Mapping[str, Any], accounting: Mapping[str, Any], receipt: Mapping[str, Any],
-    authorized: Mapping[str, Any], inventory: Mapping[str, Any],
+    authorized: Mapping[str, Any], inventory: Mapping[str, Any], changed: Mapping[str, Any] | None = None,
 ) -> None:
-    """Recheck pure joins between canonical stored V5 context carriers.
+    """Recheck pure joins between canonical stored context carriers.
 
     Current bytes, plan derivation, and supplied-input contents remain upstream
     receipt authority because terminal construction has none of those inputs.
@@ -311,6 +312,86 @@ def _validate_stored_context_relations(
     for source_id, linked in inverse.items():
         if linked and source_by_id[source_id].get("kind") == "product_file" and source_id not in product_by_id:
             raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context/product_sources", "Every linked product source must have a managed projection.")
+
+    if receipt.get("schema_version") == "2.0.0":
+        if not isinstance(changed, Mapping):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "V6 context requires its changed projection.")
+        dispositions = accounting.get("source_dispositions")
+        outcomes = receipt.get("source_outcomes")
+        registry = receipt.get("fragment_registry")
+        groups = accounting.get("behavior_fragment_groups")
+        if not all(isinstance(value, list) for value in (dispositions, outcomes, registry, groups)):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting", "Stored V6 accounting and receipt arrays are invalid.")
+        if [row.get("source_id") if isinstance(row, Mapping) else None for row in dispositions] != source_ids or [row.get("source_id") if isinstance(row, Mapping) else None for row in outcomes] != source_ids:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/source_outcomes", "V6 dispositions and outcomes must cover current sources in inventory order.")
+        outcome_by_id = {row["source_id"]: row for row in outcomes}
+        registry_by_id: dict[str, Mapping[str, Any]] = {}
+        for row in registry:
+            fragment_id = row.get("fragment_id") if isinstance(row, Mapping) else None
+            source_id = row.get("source_id") if isinstance(row, Mapping) else None
+            if not isinstance(fragment_id, str) or fragment_id in registry_by_id or row.get("effect") != "retired" and source_id not in source_by_id:
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/fragment_registry", "V6 receipt fragments require unique current or retired source ownership.")
+            registry_by_id[fragment_id] = row
+        grouped_ids: list[str] = []
+        for group in groups:
+            fragments = group.get("fragment_ids") if isinstance(group, Mapping) else None
+            linked = group.get("requirement_ids") if isinstance(group, Mapping) else None
+            if not isinstance(fragments, list) or not fragments or len(fragments) != len(set(fragments)) or not isinstance(linked, list) or not linked or linked != [value for value in requirement_ids if value in linked]:
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/behavior_fragment_groups", "V6 groups require unique promoted fragments and canonical current requirements.")
+            for fragment_id in fragments:
+                fragment = registry_by_id.get(fragment_id)
+                if fragment is None or fragment.get("effect") == "retired" or not set(linked) <= set(inverse.get(fragment.get("source_id"), ())):
+                    raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/behavior_fragment_groups", "V6 groups must bind current fragments to exact managed source links.")
+            grouped_ids.extend(fragments)
+        changed_requirements = changed.get("requirements")
+        changed_sources = changed.get("requirement_sources")
+        stable_links = changed.get("stable_requirement_links")
+        retired = changed.get("retired_requirements")
+        if not all(isinstance(value, list) for value in (changed_requirements, changed_sources, stable_links, retired)):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "V6 changed projections must use closed arrays.")
+        changed_ids = [row.get("requirement_id") if isinstance(row, Mapping) else None for row in changed_requirements]
+        managed_by_id = {row["requirement_id"]: row for row in requirements}
+        managed_links = {row["requirement_id"]: row["source_ids"] for row in requirement_sources}
+        if (receipt.get("changed_requirement_ids") != changed_ids
+                or [row.get("requirement_id") if isinstance(row, Mapping) else None for row in changed_sources] != changed_ids
+                or any(_plain(row) != _plain(managed_by_id.get(row.get("requirement_id"))) for row in changed_requirements)
+                or any(row.get("source_ids") != managed_links.get(row.get("requirement_id")) for row in changed_sources)):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "V6 changed requirements must be byte-identical managed projections.")
+        stable_ids = [row.get("requirement_id") if isinstance(row, Mapping) else None for row in stable_links]
+        retired_ids = [row.get("object_id") if isinstance(row, Mapping) else None for row in retired]
+        if len(set(changed_ids + stable_ids + retired_ids)) != len(changed_ids + stable_ids + retired_ids) or set(changed_ids + stable_ids) != set(requirement_ids) or _plain(receipt.get("retired_requirements")) != _plain(retired):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "V6 requirement partitions must be disjoint, complete, and receipt-bound.")
+        retirement_fragments = [fragment_id for row in retired for fragment_id in row["support_evidence"]["retirement_fragment_ids"]]
+        current_fragments = {key for key, row in registry_by_id.items() if row.get("effect") != "retired"}
+        retired_fragments = {key for key, row in registry_by_id.items() if row.get("effect") == "retired"}
+        if len(grouped_ids) != len(set(grouped_ids)) or set(grouped_ids) != current_fragments or len(retirement_fragments) != len(set(retirement_fragments)) or set(retirement_fragments) != retired_fragments:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/fragment_registry", "V6 groups and tombstones must consume every promoted fragment exactly once.")
+        for source, disposition in zip(sources, dispositions):
+            linked = inverse[source["source_id"]]
+            outcome = outcome_by_id[source["source_id"]].get("outcome")
+            if disposition.get("disposition") == "represented":
+                if disposition.get("requirement_ids") != linked or not linked or outcome not in {"behavior_fragments", "changed_behavior_fragments", "preserved_behavior"}:
+                    raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "V6 represented sources must retain exact managed links and supported outcomes.")
+            elif disposition.get("disposition") == "no_supported_observable_fact":
+                if linked or source.get("kind") != "product_file" or source["source_id"] in product_by_id or outcome != "no_supported_observable_fact":
+                    raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "V6 no-fact sources cannot retain managed behavior.")
+            else:
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting/source_dispositions", "V6 disposition uses an unsupported variant.")
+        bindings = receipt.get("unchanged_source_bindings")
+        if not isinstance(bindings, list):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/unchanged_source_bindings", "V6 unchanged bindings must be an array.")
+        seen_bindings: set[str] = set()
+        for row in bindings:
+            source = source_by_id.get(row.get("source_id")) if isinstance(row, Mapping) else None
+            if source is None or row["source_id"] in seen_bindings or row.get("baseline_content_digest") != row.get("current_content_digest") or row.get("current_content_digest") != source.get("content_digest"):
+                raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/unchanged_source_bindings", "V6 unchanged bindings require unique exact digest equalities.")
+            seen_bindings.add(row["source_id"])
+        assurance = receipt.get("assurance")
+        if not isinstance(assurance, Mapping) or assurance.get("independent_promotion_count", 0) + assurance.get("sequential_promotion_count", 0) != len(receipt.get("promotion_sha256s", ())):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt/assurance", "V6 assurance counts must cover every promotion.")
+        if receipt.get("run_mode") == "FULL" and (stable_links or retired or changed_ids != requirement_ids):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "FULL V6 changed context must equal all managed requirements.")
+        return
 
     dispositions = accounting.get("source_dispositions")
     outcomes = receipt.get("source_outcomes")
@@ -392,38 +473,54 @@ def _validate_prefix_evidence(
     if inventory.get("module_id") != selected_module or authorized.get("module_id") != selected_module:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/technical_test_inventory", "Source inventories must bind the selected module.")
 
-    scope = _closed(values["change_scope_receipt"], {"schema_version", "artifact", "source", "payload_sha256"}, "/prefix_ledger/artifacts/change_scope_receipt")
-    scope_source = _closed(scope.get("source"), {"repository_id", "selected_module", "run_mode"}, "/prefix_ledger/artifacts/change_scope_receipt/source")
-    if scope.get("schema_version") != "1.0.0" or scope.get("artifact") != "change_scope_receipt" or scope_source != {"repository_id": repository, "selected_module": selected_module, "run_mode": run_mode}:
-        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/change_scope_receipt", "Change-scope sidecar does not bind the run source.")
-    _digest(scope.get("payload_sha256"), "/prefix_ledger/artifacts/change_scope_receipt/payload_sha256")
-
     receipt = values["behavior_context_receipt"]
     _validate_schema(receipt, "behavior-context-receipt.schema.json", "/prefix_ledger/artifacts/behavior_context_receipt")
     receipt_sha256 = artifact_sha256(receipt)
     if receipt.get("selected_module") != selected_module or receipt.get("authorized_behavior_sources_sha256") != authorized_sha256:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_context_receipt", "Behavior context receipt does not bind module and authorized sources.")
+    scope = values["change_scope_receipt"]
+    if receipt.get("schema_version") == "2.0.0":
+        _validate_schema(scope, "change-scope-receipt.schema.json", "/prefix_ledger/artifacts/change_scope_receipt")
+        if (scope.get("run_mode") != run_mode or receipt.get("run_mode") != run_mode
+                or receipt.get("scope_receipt_sha256") != artifact_sha256(scope)
+                or receipt.get("baseline_receipt_sha256") != scope.get("baseline_receipt_sha256")):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/change_scope_receipt", "Pipeline 6 context receipt must bind the exact promoted scope receipt.")
+    else:
+        scope = _closed(scope, {"schema_version", "artifact", "source", "payload_sha256"}, "/prefix_ledger/artifacts/change_scope_receipt")
+        scope_source = _closed(scope.get("source"), {"repository_id", "selected_module", "run_mode"}, "/prefix_ledger/artifacts/change_scope_receipt/source")
+        if scope.get("schema_version") != "1.0.0" or scope.get("artifact") != "change_scope_receipt" or scope_source != {"repository_id": repository, "selected_module": selected_module, "run_mode": run_mode}:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/change_scope_receipt", "Change-scope sidecar does not bind the run source.")
+        _digest(scope.get("payload_sha256"), "/prefix_ledger/artifacts/change_scope_receipt/payload_sha256")
     managed_envelope = values["managed_behavior_context"]
     accounting_envelope = values["behavior_source_accounting"]
     _validate_schema(managed_envelope, "context-marker-output.schema.json", "/prefix_ledger/artifacts/managed_behavior_context")
     _validate_schema(accounting_envelope, "context-marker-output.schema.json", "/prefix_ledger/artifacts/behavior_source_accounting")
     if managed_envelope != accounting_envelope:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/behavior_source_accounting", "Managed context projections must come from one exact envelope.")
+    if (managed_envelope.get("schema_version"), receipt.get("schema_version")) not in {("5.0.0", "1.0.0"), ("6.0.0", "2.0.0")}:
+        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context", "Context and receipt versions must use an exact supported pair.")
     context_artifacts = _mapping(managed_envelope.get("artifacts"), "/prefix_ledger/artifacts/managed_behavior_context/artifacts")
     managed = _mapping(context_artifacts.get("managed_behavior_context"), "/prefix_ledger/artifacts/managed_behavior_context/artifacts/managed_behavior_context")
     accounting = _mapping(context_artifacts.get("behavior_source_accounting"), "/prefix_ledger/artifacts/behavior_source_accounting/artifacts/behavior_source_accounting")
+    context_changed = context_artifacts.get("changed_behavior_context")
     if managed.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("authorized_behavior_sources_sha256") != authorized_sha256 or accounting.get("context_receipt_sha256") != receipt_sha256:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/managed_behavior_context", "Context, accounting, receipt, and authorized-source digests disagree.")
-    _validate_stored_context_relations(managed, accounting, receipt, authorized, inventory)
+    _validate_stored_context_relations(managed, accounting, receipt, authorized, inventory, context_changed if isinstance(context_changed, Mapping) else None)
 
-    changed = _closed(values["changed_behavior_context"], {"schema_version", "artifact", "source", "requirement_ids", "retired_requirement_ids"}, "/prefix_ledger/artifacts/changed_behavior_context")
-    changed_source = _closed(changed.get("source"), {"behavior_context_receipt_sha256"}, "/prefix_ledger/artifacts/changed_behavior_context/source")
-    if changed.get("schema_version") != "1.0.0" or changed.get("artifact") != "changed-behavior-context" or changed_source.get("behavior_context_receipt_sha256") != receipt_sha256:
-        raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "Changed context does not bind the behavior context receipt.")
-    requirement_ids = _sorted_unique_strings(changed.get("requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/requirement_ids")
-    retired_ids = _sorted_unique_strings(changed.get("retired_requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/retired_requirement_ids")
-    if set(requirement_ids) & set(retired_ids):
-        raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/changed_behavior_context", "Changed and retired requirement IDs must be disjoint.")
+    if receipt.get("schema_version") == "2.0.0":
+        changed = _mapping(values["changed_behavior_context"], "/prefix_ledger/artifacts/changed_behavior_context")
+        _validate_schema(changed, "changed-behavior-context.schema.json", "/prefix_ledger/artifacts/changed_behavior_context")
+        if not isinstance(context_changed, Mapping) or _plain(changed) != _plain(context_changed):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "Changed context must equal the exact projection inside the V6 envelope.")
+    else:
+        changed = _closed(values["changed_behavior_context"], {"schema_version", "artifact", "source", "requirement_ids", "retired_requirement_ids"}, "/prefix_ledger/artifacts/changed_behavior_context")
+        changed_source = _closed(changed.get("source"), {"behavior_context_receipt_sha256"}, "/prefix_ledger/artifacts/changed_behavior_context/source")
+        if changed.get("schema_version") != "1.0.0" or changed.get("artifact") != "changed-behavior-context" or changed_source.get("behavior_context_receipt_sha256") != receipt_sha256:
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/changed_behavior_context", "Changed context does not bind the behavior context receipt.")
+        requirement_ids = _sorted_unique_strings(changed.get("requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/requirement_ids")
+        retired_ids = _sorted_unique_strings(changed.get("retired_requirement_ids"), "/prefix_ledger/artifacts/changed_behavior_context/retired_requirement_ids")
+        if set(requirement_ids) & set(retired_ids):
+            raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/changed_behavior_context", "Changed and retired requirement IDs must be disjoint.")
 
     classification_envelope = values["technical_test_classification"]
     classification = _mapping(classification_envelope["artifacts"]["classification"], "/prefix_ledger/artifacts/technical_test_classification/artifacts/classification")
@@ -484,12 +581,16 @@ def build_terminal_run_receipt(
         raise _error("FLOW_ATOMIC_WRITE", "/prefix_ledger", "Prefix ledger run root is unavailable.") from None
     ledger = _read_stored(prefix_ledger, "/prefix_ledger", run_root)
     _closed(ledger, {
-        "schema_version", "artifact", "repository_id", "selected_module", "run_mode", "change_input",
+        "schema_version", "artifact", "feature_flow_prefix_sha256", "tail_record_sha256s", "repository_id", "selected_module", "run_mode", "change_input",
         "analytics_sha256", "source_drift", "fingerprints", "artifacts",
     }, "/prefix_ledger")
     if ledger.get("schema_version") != "1.0.0" or ledger.get("artifact") != "prefix-ledger":
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger", "Prefix ledger must use closed V1 identity.")
     repository = _digest(ledger.get("repository_id"), "/prefix_ledger/repository_id")
+    _digest(ledger.get("feature_flow_prefix_sha256"), "/prefix_ledger/feature_flow_prefix_sha256")
+    records = ledger.get("tail_record_sha256s")
+    if not isinstance(records, list) or any(not isinstance(row, str) or _DIGEST_RE.fullmatch(row) is None for row in records):
+        raise _error("BASELINE_BINDING", "/prefix_ledger/tail_record_sha256s", "Tail record digest list is invalid.")
     if not isinstance(ledger.get("selected_module"), str) or not ledger["selected_module"] or ledger.get("run_mode") not in {"FULL", "CHANGE_SET"} or type(ledger.get("source_drift")) is not bool:
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger", "Prefix ledger run metadata is invalid.")
     change_input = _change_input(ledger.get("change_input"), repository, ledger["run_mode"])
@@ -535,8 +636,26 @@ def build_terminal_run_receipt(
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/classification_review", "Classification verdict and findings disagree.")
 
     validation_envelope = prefix_values["validation_report"]
-    report = _mapping(validation_envelope["artifacts"]["validation_report"], "/prefix_ledger/artifacts/validation_report")
-    test_case_verdict = report.get("verdict")
+    report: Mapping[str, Any] | None = None
+    delta_application_sha256: str | None = None
+    unchanged_selection_sha256: str | None = None
+    if validation_envelope.get("stage") == "tc-reviewer":
+        _validate_schema(validation_envelope, "tc-reviewer-output.schema.json", "/prefix_ledger/artifacts/validation_report")
+        report = _mapping(validation_envelope["artifacts"]["validation_report"], "/prefix_ledger/artifacts/validation_report")
+        test_case_verdict = report.get("verdict")
+    else:
+        branch = _closed(validation_envelope, {"schema_version", "artifact", "delta_application_receipt", "unchanged_document_selection"}, "/prefix_ledger/artifacts/validation_report")
+        if branch.get("schema_version") != "1.0.0" or branch.get("artifact") != "unchanged-baseline-tail-branch":
+            raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger/artifacts/validation_report", "Tail branch is not a closed unchanged-baseline selection.")
+        delta = _mapping(branch.get("delta_application_receipt"), "/prefix_ledger/artifacts/validation_report/delta_application_receipt")
+        selection = _mapping(branch.get("unchanged_document_selection"), "/prefix_ledger/artifacts/validation_report/unchanged_document_selection")
+        _validate_schema(delta, "delta-application-receipt.schema.json", "/prefix_ledger/artifacts/validation_report/delta_application_receipt")
+        _validate_schema(selection, "unchanged-document-selection.schema.json", "/prefix_ledger/artifacts/validation_report/unchanged_document_selection")
+        if delta.get("status") != "UNCHANGED" or delta.get("publication_required") is not False or selection.get("delta_application_receipt_sha256") != artifact_sha256(delta):
+            raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/validation_report", "Unchanged selection does not bind an exact zero-op receipt.")
+        test_case_verdict = "UNCHANGED_BASELINE"
+        delta_application_sha256 = artifact_sha256(delta)
+        unchanged_selection_sha256 = artifact_sha256(selection)
 
     document = _mapping(tail_values["effective_document"], "/tail_artifacts/effective_document")
     expected_source = {
@@ -546,9 +665,9 @@ def build_terminal_run_receipt(
     bundle = _mapping(tail_values["effective_bundle_receipt"], "/tail_artifacts/effective_bundle_receipt")
     if bundle.get("document_id") != expected_source["document_id"] or bundle.get("revision") != expected_source["revision"] or bundle.get("document_sha256") != expected_source["source_digest"]:
         raise _error("BASELINE_BINDING", "/tail_artifacts/effective_bundle_receipt", "Effective bundle does not bind the effective document.")
-    if test_case_verdict == "ПРИНЯТО" and report.get("candidate", {}).get("document_sha256") != expected_source["source_digest"]:
+    if test_case_verdict == "ПРИНЯТО" and report is not None and report.get("candidate", {}).get("document_sha256") != expected_source["source_digest"]:
         raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/validation_report", "Accepted validation report does not bind the effective document.")
-    if test_case_verdict == "AUTO_FIX_APPLIED":
+    if test_case_verdict == "AUTO_FIX_APPLIED" and report is not None:
         successor = validation_envelope["artifacts"].get("successor_document")
         if not isinstance(successor, Mapping) or artifact_sha256(successor) != expected_source["source_digest"]:
             raise _error("BASELINE_BINDING", "/prefix_ledger/artifacts/validation_report", "Auto-fixed successor is not the effective document.")
@@ -597,8 +716,11 @@ def build_terminal_run_receipt(
     elif not isinstance(execution, Mapping) or execution.get("verdict") != run_verdict:
         raise _error("BASELINE_BINDING", "/tail_artifacts/trace_document/execution", "Trace execution does not agree with run_result.")
 
+    artifact_digests["delta_application_receipt_sha256"] = delta_application_sha256
+    artifact_digests["unchanged_document_selection_sha256"] = unchanged_selection_sha256
+    artifact_digests["validation_report_sha256"] = None if test_case_verdict == "UNCHANGED_BASELINE" else artifact_digests["validation_report_sha256"]
     receipt = {
-        "schema_version": "1.0.0", "artifact": "terminal-run-receipt", "repository_id": repository,
+        "schema_version": "1.0.0", "artifact": "terminal-run-receipt", "prefix_ledger_sha256": prefix_ledger.sha256, "repository_id": repository,
         "selected_module": ledger["selected_module"], "run_mode": ledger["run_mode"],
         "change_input": _plain(change_input), "analytics_sha256": analytics, "fingerprints": fingerprints,
         "artifacts": artifact_digests,
@@ -633,6 +755,59 @@ class ValidatedBaseline:
 _VALIDATED_BASELINES: weakref.WeakKeyDictionary[ValidatedBaseline, object] = weakref.WeakKeyDictionary()
 
 
+class ValidatedEffectiveBaseline:
+    """Opaque document-and-bundle capability issued from a validated baseline only."""
+    __slots__ = ("__weakref__",)
+
+    def __init__(self) -> None:
+        raise TypeError("ValidatedEffectiveBaseline is issued only by bind_effective_baseline.")
+
+
+_EFFECTIVE_BASELINES: weakref.WeakKeyDictionary[ValidatedEffectiveBaseline, Mapping[str, Any]] = weakref.WeakKeyDictionary()
+
+
+def bind_effective_baseline(
+    baseline: ValidatedBaseline, effective_document: Mapping[str, Any], effective_bundle_receipt: Receipt,
+) -> ValidatedEffectiveBaseline:
+    """Bind exact readback document and bundle receipt to a genuinely validated baseline."""
+    if not isinstance(baseline, ValidatedBaseline) or baseline not in _VALIDATED_BASELINES:
+        raise _error("BASELINE_BINDING", "/baseline", "A genuinely validated baseline is required.")
+    if not isinstance(effective_document, Mapping) or type(effective_bundle_receipt) is not Receipt:
+        raise _error("BASELINE_BINDING", "/effective", "Exact canonical document and bundle receipt are required.")
+    document = _plain(effective_document)
+    try:
+        require_valid_canonical_document(document)
+    except CanonicalDocumentError:
+        raise _error("BASELINE_BINDING", "/effective_document", "Effective document is not canonical.") from None
+    receipt = Receipt(**asdict(effective_bundle_receipt))
+    if (
+        artifact_sha256(document) != baseline.document_sha256
+        or artifact_sha256(asdict(receipt)) != baseline.bundle_sha256
+        or (receipt.document_id, receipt.revision, receipt.document_sha256)
+        != (document["document_id"], document["revision"], document_sha256(document))
+    ):
+        raise _error("BASELINE_BINDING", "/effective", "Effective document or bundle receipt does not bind the baseline.")
+    result = object.__new__(ValidatedEffectiveBaseline)
+    _EFFECTIVE_BASELINES[result] = _freeze({"document": document, "receipt": receipt, "baseline_receipt_sha256": baseline.receipt_sha256})
+    return result
+
+
+def effective_baseline_projection(value: ValidatedEffectiveBaseline) -> tuple[Mapping[str, Any], Receipt]:
+    """Return exact frozen predecessor payloads only for an issued capability."""
+    if not isinstance(value, ValidatedEffectiveBaseline) or value not in _EFFECTIVE_BASELINES:
+        raise _error("BASELINE_BINDING", "/baseline", "An issued effective baseline is required.")
+    row = _EFFECTIVE_BASELINES[value]
+    receipt = row["receipt"]
+    return row["document"], Receipt(**asdict(receipt))
+
+
+def effective_baseline_receipt_sha256(value: ValidatedEffectiveBaseline) -> str:
+    """Return the predecessor receipt digest only for an issued effective capability."""
+    if not isinstance(value, ValidatedEffectiveBaseline) or value not in _EFFECTIVE_BASELINES:
+        raise _error("BASELINE_BINDING", "/baseline", "An issued effective baseline is required.")
+    return str(_EFFECTIVE_BASELINES[value]["baseline_receipt_sha256"])
+
+
 class ScopePredecessor:
     """Opaque, immutable projection of a fully validated predecessor."""
     __slots__ = ("__weakref__",)
@@ -664,6 +839,7 @@ def bind_scope_predecessor(
         inventory = _mapping(source_artifacts.get("technical_test_inventory"), "/predecessor/inventory")
         managed = _mapping(context_artifacts.get("managed_behavior_context"), "/predecessor/managed")
         accounting = _mapping(context_artifacts.get("behavior_source_accounting"), "/predecessor/accounting")
+        context_changed = context_artifacts.get("changed_behavior_context")
         authorized_digest, inventory_digest = artifact_sha256(authorized), artifact_sha256(inventory)
         source_envelope_digest, context_envelope_digest = artifact_sha256(source_inventory_envelope), artifact_sha256(context_envelope)
         if (source_artifacts.get("authorized_behavior_sources_sha256") != authorized_digest
@@ -678,9 +854,13 @@ def bind_scope_predecessor(
             or authorized.get("module_id") != baseline.selected_module or inventory.get("module_id") != baseline.selected_module
             or managed.get("authorized_behavior_sources_sha256") != authorized_digest
             or accounting.get("authorized_behavior_sources_sha256") != authorized_digest
-            or accounting.get("context_receipt_sha256") != artifact_sha256(behavior_context_receipt)):
+            or accounting.get("context_receipt_sha256") != artifact_sha256(behavior_context_receipt)
+            or (context_envelope.get("schema_version"), behavior_context_receipt.get("schema_version")) not in {("5.0.0", "1.0.0"), ("6.0.0", "2.0.0")}
+            or behavior_context_receipt.get("schema_version") == "2.0.0" and (
+                not isinstance(context_changed, Mapping)
+            )):
             raise ValueError
-        _validate_stored_context_relations(managed, accounting, behavior_context_receipt, authorized, inventory)
+        _validate_stored_context_relations(managed, accounting, behavior_context_receipt, authorized, inventory, context_changed if isinstance(context_changed, Mapping) else None)
     except (FlowError, ValueError, TypeError, KeyError):
         raise _error("BASELINE_BINDING", "/predecessor", "Predecessor carriers do not bind validated baseline authority.") from None
     result = object.__new__(ScopePredecessor)
@@ -688,6 +868,8 @@ def bind_scope_predecessor(
         "receipt_sha256": baseline.receipt_sha256, "repository_id": baseline.repository_id,
         "target_commit": baseline.target_commit, "target_tree": baseline.target_tree,
         "selected_module": baseline.selected_module,
+        "context_envelope_sha256": context_envelope_digest,
+        "behavior_context_receipt_sha256": artifact_sha256(behavior_context_receipt),
         "sources": tuple(_freeze(_plain(row)) for row in authorized["sources"]),
         "requirement_ids": tuple(row["requirement_id"] for row in managed["requirements"]),
     })
@@ -776,14 +958,17 @@ def choose_run_mode(target: Mapping[str, Any], baseline: ValidatedBaseline | Non
     try:
         value = _mapping(target, "/target")
         base = _mapping(value.get("base"), "/target/base")
-        compatible = (
-            value.get("input_kind") == "git_range"
+        kind = value.get("input_kind")
+        shared = (
+            kind in {"git_range", "git_worktree", "patch_manifest"}
             and value.get("repository_id") == baseline.repository_id
             and value.get("selected_module") == baseline.selected_module
-            and base.get("commit") == baseline.target_commit
-            and base.get("tree") == baseline.target_tree
             and _fingerprint_digests(value.get("fingerprints"), "/target/fingerprints") == dict(baseline.fingerprints)
         )
+        if kind in {"git_range", "git_worktree"}:
+            compatible = shared and base.get("commit") == baseline.target_commit and base.get("tree") == baseline.target_tree
+        else:
+            compatible = shared and base.get("snapshot_sha256") == artifact_sha256({"repository_id": baseline.repository_id, "tree": baseline.target_tree})
     except FlowError:
         return "FULL"
     return "CHANGE_SET" if compatible else "FULL"
@@ -846,12 +1031,32 @@ def _advancement(
 def _eligible(acceptance: Mapping[str, Any]) -> bool:
     return (
         acceptance.get("classification_verdict") == "ПРИНЯТО"
-        and acceptance.get("test_case_review_verdict") in {"ПРИНЯТО", "AUTO_FIX_APPLIED"}
+        and acceptance.get("test_case_review_verdict") in {"ПРИНЯТО", "AUTO_FIX_APPLIED", "UNCHANGED_BASELINE"}
         and acceptance.get("autotest_review_verdict") == "ПРИНЯТО"
         and acceptance.get("trace_verdict") == "PASS"
         and acceptance.get("final_status") in ELIGIBLE_FINAL_STATUSES
         and acceptance.get("source_drift") is False
     )
+
+
+def _copy_baseline_payloads(run_root: Path, baseline_root: Path, digests: tuple[str, ...]) -> None:
+    """Copy only receipt-named, canonical run payloads before a lineage edge exists."""
+    for digest in digests:
+        if not isinstance(digest, str) or _DIGEST_RE.fullmatch(digest) is None:
+            raise _error("BASELINE_BINDING", "/terminal_receipt/artifacts", "Baseline payload digest is invalid.")
+        relative = PurePosixPath("artifacts") / f"{digest[7:]}.json"
+        try:
+            source = (run_root / Path(*relative.parts)).resolve(strict=True)
+            source.relative_to(run_root.resolve(strict=True))
+            raw = source.read_bytes()
+        except (OSError, ValueError):
+            raise _error("FLOW_ATOMIC_WRITE", "/terminal_receipt/artifacts", "Receipt-named run payload is unavailable.") from None
+        value = _read_json_bytes(raw, "/terminal_receipt/artifacts")
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != digest or artifact_sha256(value) != digest:
+            raise _error("BASELINE_BINDING", "/terminal_receipt/artifacts", "Receipt-named run payload does not match its digest.")
+        stored = write_create_only(baseline_root, PurePosixPath("payloads") / "sha256" / f"{digest[7:]}.json", value)
+        if stored.sha256 != digest:
+            raise _error("FLOW_ATOMIC_WRITE", "/baseline_payloads", "Baseline payload readback did not retain its digest.")
 
 
 def advance_baseline(
@@ -935,7 +1140,7 @@ def advance_baseline(
     else:
         return _advancement("INELIGIBLE", predecessor_digest)
 
-    terminal_artifacts = _closed(terminal.get("artifacts"), {name + "_sha256" for name in (*_PREFIX_KEYS, *_TAIL_KEYS)}, "/terminal_receipt/artifacts", "BASELINE_BINDING")
+    terminal_artifacts = _closed(terminal.get("artifacts"), {name + "_sha256" for name in (*_PREFIX_KEYS, *_TAIL_KEYS)} | {"delta_application_receipt_sha256", "unchanged_document_selection_sha256"}, "/terminal_receipt/artifacts", "BASELINE_BINDING")
     baseline = {
         "schema_version": "1.0.0", "artifact": "feature-baseline-receipt",
         "predecessor_baseline_sha256": predecessor_digest, "run_mode": run_mode,
@@ -949,6 +1154,18 @@ def advance_baseline(
     }
     _validate_schema(baseline, "feature-baseline-receipt.schema.json", "/successor_baseline_receipt")
     successor_digest = artifact_sha256(baseline)
+    try:
+        run_root = terminal_receipt.path.parent.parent.resolve(strict=True)
+    except OSError:
+        raise _error("FLOW_ATOMIC_WRITE", "/terminal_receipt", "Terminal receipt run root is unavailable.") from None
+    # The terminal itself is receipt-named too; materialize it in the same
+    # immutable run namespace before copying the complete successor closure.
+    write_create_only(run_root, PurePosixPath("artifacts") / f"{terminal_receipt.sha256[7:]}.json", terminal)
+    _copy_baseline_payloads(
+        run_root,
+        baseline_root,
+        tuple(baseline["artifacts"][name] for name in _BASELINE_ARTIFACT_KEYS),
+    )
     write_create_only(baseline_root, PurePosixPath("receipts") / f"{successor_digest[7:]}.json", baseline)
     if predecessor_digest is None:
         key = hashlib.sha256(canonical_bytes({"repository_id": repository, "selected_module": terminal["selected_module"]})).hexdigest()

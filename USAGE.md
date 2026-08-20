@@ -1,4 +1,4 @@
-# Использование Test Skills Pipeline 5.0
+# Использование Test Skills Pipeline 6.0
 
 ## Подключение и границы
 
@@ -36,12 +36,19 @@ python tools\contract_check.py --root . --full
 
 ## Артефакты и публикация
 
+Начните с чистого committed initial `FULL` baseline. Поздний compatible committed
+change запускается как `CHANGE_SET`; missing/incompatible baseline автоматически
+возвращается к FULL. Повторяйте только returned actions `feature_flow` в exact
+create-only `record_path`: обе scope audit и обе batch audit обязательны, portable
+controller — `SEQUENTIAL`, и нет user count/mode/scope/shard tuning.
+
 Перед генерацией `source-inventory` строит закрытые `technical_test_inventory` и
-`authorized_behavior_sources`. `context-marker` получает raw content и оба
-snapshots, но передаёт генератору только `managed_behavior_context`.
-`test-classifier` и независимый `test-classifier-reviewer` покрывают каждый
-инвентаризированный symbol; принятое `effective_technical_evidence` сохраняется
-рядом с attempt и не становится входом V3 automation, trace или finalization.
+`authorized_behavior_sources`; `change-scope` closes reviewed evidence;
+`context-marker` creates complete `managed_behavior_context` and generator-safe
+`changed_behavior_context`. После `READY_FOR_PIPELINE_TAIL` `test-classifier` и
+independent `test-classifier-reviewer` cover each technical symbol but never change
+the candidate/delta already produced by the prefix; accepted `effective_technical_evidence` remains an
+isolated sidecar. `tc-generator` receives only `changed_behavior_context`.
 
 `bare canonical JSON` — источник истины. Он хранит requirements, cases и
 произвольное число ordered steps с human actions/results, typed data flow,
@@ -144,6 +151,9 @@ The Python finalization seam is
 `validate_trace_document(trace, document, automation, run_result=None)`, and
 `finalize_orchestration(effective_document, effective_bundle_receipt,
 automation_artifact, autotest_review_artifact, run_result, trace_document)`.
+Pipeline 6 keeps that V3 seam/schema unchanged; its terminal builder is
+`tools.baseline_lifecycle.build_terminal_run_receipt`. `tools/pipeline6_tail.py` is
+an API until Task 10/11 adds a public invocation.
 
 ## V2.1 is unsupported
 

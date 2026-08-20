@@ -62,6 +62,22 @@ class PromotionAction:
     diagnostics: tuple[Mapping[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class PromotionEvidence:
+    """Persisted generation records plus their final promotion authority."""
+
+    records: tuple[Mapping[str, Any], ...]
+    promotion: Mapping[str, Any]
+    controller: "ReviewController | None" = None
+
+
+@dataclass(frozen=True)
+class ValidatedPromotion:
+    promotion: Mapping[str, Any]
+    result: Mapping[str, Any]
+    rework_count: int
+
+
 class IndependentReviewCapability:
     """Opaque controller-minted proof; serialized values cannot reproduce it."""
 
@@ -298,3 +314,33 @@ def advance_promotion(snapshot: PromotionSnapshot, controller: ReviewController 
     promotion = _promotion(snapshot, controller)
     next_snapshot = _next(snapshot, batch_index=snapshot.batch_index + 1, generation=1, candidate=None, false_audit=None, omission_audit=None, promotions=(*snapshot.promotions, promotion))
     return PromotionAction("PROMOTE_BATCH", promotion, next_snapshot)
+
+
+def replay_promotion_ledger(
+    scope_receipt: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    evidence: tuple[PromotionEvidence, ...],
+) -> tuple[ValidatedPromotion, ...]:
+    """Replay every planned batch in order without resetting state between batches."""
+    snapshot = start_promotion(scope_receipt, plan)
+    if len(evidence) != len(snapshot.inputs["batches"]):
+        raise _error("PROMOTION_COVERAGE", "/promotion_evidence", "Promotion evidence must cover every planned batch exactly once.")
+    result: list[ValidatedPromotion] = []
+    for index, item in enumerate(evidence):
+        if not isinstance(item, PromotionEvidence) or not item.records:
+            raise _error("BATCH_PROMOTION_SHAPE", f"/promotion_evidence/{index}", "Every batch requires persisted generation records.")
+        for record in item.records:
+            snapshot = record_promotion(snapshot, record)
+        action = advance_promotion(snapshot, item.controller)
+        if action.kind != "PROMOTE_BATCH" or _plain(action.artifact) != _plain(item.promotion) or action.next_snapshot is None:
+            raise _error("BATCH_PROMOTION_BINDING", f"/promotion_evidence/{index}/promotion", "Persisted records do not reproduce the exact promotion.")
+        assert snapshot.candidate is not None
+        result.append(ValidatedPromotion(
+            _freeze(_plain(item.promotion)), _freeze(_plain(snapshot.candidate["result"])),
+            snapshot.candidate["generation"] - 1,
+        ))
+        snapshot = action.next_snapshot
+    complete = advance_promotion(snapshot)
+    if complete.kind != "COMPLETE":
+        raise _error("PROMOTION_COVERAGE", "/promotion_evidence", "Promotion ledger did not reach exact completion.")
+    return tuple(result)

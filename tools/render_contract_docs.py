@@ -53,17 +53,19 @@ def render_pipeline(contract: dict[str, Any]) -> str:
         "",
         "## Steps",
         "",
-        "| Step | `kind` | `accepts` | `forwards` | `produces` |",
-        "|---|---|---|---|---|",
+        "| Step | `kind` | `accepts` | `forwards` | `produces` | `rejects` | `branches` |",
+        "|---|---|---|---|---|---|---|",
     ]
     for step in contract["steps"]:
         lines.append(
-            "| {id} | {kind} | {accepts} | {forwards} | {produces} |".format(
+            "| {id} | {kind} | {accepts} | {forwards} | {produces} | {rejects} | {branches} |".format(
                 id=_cell(step["id"]),
                 kind=_cell(step["kind"]),
                 accepts=_list_cell(step["accepts"]),
                 forwards=_list_cell(step["forwards"]),
                 produces=_list_cell(step["produces"]),
+                rejects=_list_cell(step["rejects"]),
+                branches=_cell(step.get("branches", [])),
             )
         )
     lines.extend(["", "## Transitions", "", "| From | Predicates | Transform |", "|---|---|---|"])
@@ -81,6 +83,9 @@ def render_contracts(contract: dict[str, Any]) -> str:
     lines.extend(["", "## Canonical skill files", "", "| Skill | Path |", "|---|---|"])
     for skill in contract["core_skills"]:
         lines.append(f"| {_cell(skill)} | {_cell(contract['skill_files'][skill])} |")
+    lines.extend(["", "## Historical rejection registry", "", "| Component | Version | Live status |", "|---|---|---|"])
+    for row in contract["historical_rejections"]:
+        lines.append(f"| {_cell(row['component'])} | {_cell(row['version'])} | {_cell(row['live_status'])} |")
     lines.extend(["", "## Verdict enums", "", "| Verdict type | Values |", "|---|---|"])
     for verdict_type, values in contract["verdicts"].items():
         lines.append(f"| {_cell(verdict_type)} | {_list_cell(values)} |")

@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from tools.canonical_document import document_sha256
+from tools.baseline_lifecycle import ValidatedEffectiveBaseline, effective_baseline_projection
+from tools.document_delta import AppliedDocumentDelta
+from tools.flow_artifacts import artifact_sha256
+from tools.publish_test_case_bundle import Receipt
 
 
 def _diagnostic(path: str, code: str, message: str) -> dict[str, str]:
@@ -172,3 +176,18 @@ def select_effective_document(candidate: dict[str, Any], validation_report: dict
     if successor is not None:
         raise SelectionError([_diagnostic("/successor_document", "SUCCESSOR_FORBIDDEN", "successor is forbidden for a rework review")])
     raise SelectionError([_diagnostic("/verdict", "NO_EFFECTIVE_DOCUMENT", "rework review has no effective document")])
+
+
+def select_unchanged_document(applied: AppliedDocumentDelta, validated_baseline: ValidatedEffectiveBaseline) -> tuple[Mapping[str, Any], Receipt]:
+    """Return the exact predecessor only for a minted no-op/baseline pair."""
+    if not isinstance(applied, AppliedDocumentDelta) or applied.status != "UNCHANGED" or applied.publication_required:
+        raise SelectionError([_diagnostic("/applied", "DOCUMENT_DELTA_NOOP", "Only a no-op application can bypass publication.")])
+    try:
+        from tools.document_delta import unchanged_document_selection
+        unchanged_document_selection(applied, validated_baseline)
+        document, receipt = effective_baseline_projection(validated_baseline)
+    except ValueError:
+        raise SelectionError([_diagnostic("/baseline", "DOCUMENT_DELTA_BINDING", "An issued effective baseline is required.")]) from None
+    if artifact_sha256(document) != applied.baseline_document_sha256 or artifact_sha256(document) != artifact_sha256(applied.candidate_document):
+        raise SelectionError([_diagnostic("/baseline", "DOCUMENT_DELTA_BINDING", "Baseline bytes do not match the no-op application.")])
+    return document, receipt

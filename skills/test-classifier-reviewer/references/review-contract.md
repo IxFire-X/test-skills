@@ -4,4 +4,4 @@ Read `schemas/test-classifier-reviewer-output.schema.json` as the executable car
 
 `reviewed_symbol_pairs` lists each `(file_id, symbol_id)` exactly once. The schema-defined accepted verdict means the unchanged complete classification is supported. Its rework verdict carries concrete findings with a path and, when applicable, the affected pair.
 
-The reviewer never auto-fix rows, never creates a classification, and never creates cases. It reports defects; the classifier owns any later replacement artifact. The reviewer does not originate requirements or infer evidence beyond the supplied authorized sources.
+The reviewer never auto-fix rows, never creates a classification, and never creates cases. It reports defects; the classifier owns any later replacement artifact. It preserves `changed_behavior_context` byte-identically after the semantic-prefix handoff and does not influence generator, delta, or candidate semantics.

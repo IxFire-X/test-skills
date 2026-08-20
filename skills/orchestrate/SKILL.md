@@ -1,11 +1,11 @@
 ---
 name: orchestrate
-description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация Pipeline 5.0.
+description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация Pipeline 6.0.
 ---
 
-# Оркестрация тестового пайплайна Pipeline 5.0
+# Оркестрация тестового пайплайна Pipeline 6.0
 
-Следуй Pipeline 5.0 из `contracts/pipeline.json` и [контракту оркестрации](references/orchestration-contract.md). Context Marker создаёт `managed_behavior_context`, `behavior_source_accounting` и `behavior_context_receipt`; классификатор принимает эти три носителя, а генератор принимает и пересылает только `managed_behavior_context`. Определяй пути скиллов только через `skill_files`; не используй копии или псевдонимы.
+Следуй Pipeline 6.0 из `contracts/pipeline.json` и [контракту оркестрации](references/orchestration-contract.md). Сначала заверши semantic-prefix только через `feature_flow`; Context Marker создаёт полный `managed_behavior_context`, generator-safe `changed_behavior_context`, accounting и receipt, после чего prefix получает generator result только из `changed_behavior_context`. После `READY_FOR_PIPELINE_TAIL` classifier/reviewer образуют изолированный technical-evidence gate и не меняют уже созданный candidate/delta. Определяй пути скиллов только через `skill_files`; не используй копии или псевдонимы.
 
 ## Обязательная подготовка
 
@@ -35,15 +35,12 @@ description: Использовать, когда запрос содержит 
 
 ## Lifecycle
 
-1. Сначала построй `technical_test_inventory` и `authorized_behavior_sources`; затем `context-marker` создаёт `managed_behavior_context`, `behavior_source_accounting` и `behavior_context_receipt`. Перед классификацией передай три V5 carrier; независимо классифицируй и проверь каждый test symbol. Accepted `effective_technical_evidence` сохрани рядом с attempt, но не передавай в V3 automation, trace или final carriers. Только `managed_behavior_context` передай в `tc-generator` для candidate bare canonical JSON.
-2. Publish candidate: проверь candidate schema+semantics и опубликуй immutable JSON/Markdown/Zephyr CSV bundle до review.
-3. Вызови `orchestrate_revision` из `tools.orchestrate_test_case_revision`: publish a valid full successor до выбора; downstream передавай ровно одну effective revision и effective digest.
-4. Сгенерируй и статически проверь automation. При `AUTO_FIX_APPLIED` от autotest reviewer выполни regeneration и review заново.
-5. Пропусти `tools.run_tests` только для BLOCKED или manual zero-pair branch. Для остальных используй selected `--skillsrc` и `--module`.
-6. Для каждой terminal branch построй trace через `tools/build_trace_document.py`, вызови `validate_trace_document`, затем `tools/trace_check.py --require-execution`.
-7. Вызови `finalize_orchestration` и получи ровно один status: `PASS`, `PASS_WITH_MANUAL_REMAINDER`, `MANUAL_ONLY`, `BLOCKED`, `FAIL` или `NOT_RUNNABLE`.
+1. Повторяй `tools.feature_flow.advance_feature_flow`: выполни только возвращённый producer/audit/generator action, сохрани его только в returned exact `record_path`, передай record и вызови facade снова. Portable controller — `SEQUENTIAL`; не спрашивай и не принимай user count/mode/scope/shard tuning. Initial run — immutable `FULL`; compatible later run may be `CHANGE_SET`. Обе scope audit и обе batch audit обязательны.
+2. При `COMPLETE` semantic-prefix имеет только `READY_FOR_PIPELINE_TAIL`. Вызови `tools.contract_check.materialize_fingerprint_registries(root, contract)`, затем повторяй `tools.pipeline6_tail.advance_pipeline6_tail(..., fingerprint_registries=...)`: запиши только returned tail record и вызови tail снова до `COMPLETE` или `BLOCKED`.
+3. Tail сначала independently классифицирует и проверяет technical tests; это chronology после READY_FOR_PIPELINE_TAIL, но не меняет уже созданный prefix generator result. Затем tail использует FULL candidate или CHANGE_SET delta: nonzero delta идёт в publish/review/revision, zero-op выбирает verified predecessor document без candidate review.
+4. Tail uses the existing V3 `finalize_orchestration` signature/schema unchanged, builds the terminal receipt with `tools/baseline_lifecycle.build_terminal_run_receipt`, and advances only eligible baselines. Не создавай CLI для tail здесь: Task 10/11 нужен public invocation.
 
-Markdown/CSV — immutable human projections. Не парси их для automation, не объединяй revisions и не создавай receipts вручную. Do not hand-build the terminal carrier. Не выдавай manual/blocker states за PASS и не меняй project code, existing tests, dependencies, configuration или secrets.
+Markdown/CSV — immutable human projections. Не парси их для automation, не объединяй revisions и не создавай receipts вручную. Do not hand-build the terminal carrier. Не выдавай manual/blocker states за PASS и не меняй project code, existing tests, dependencies, configuration или secrets. Raw source/diff, accounting, receipt и technical evidence никогда не входят в generation.
 
 ## Stop conditions
 

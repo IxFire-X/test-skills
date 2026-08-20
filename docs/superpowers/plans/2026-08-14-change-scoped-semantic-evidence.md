@@ -14,16 +14,16 @@
 - Pipeline version is exactly `6.0`; Context Marker is `6.0.0`; behavior-context receipt is `2.0.0`; mode-aware `tc-generator` is `4.0.0`; change-record, patch-manifest, scope, promotion, canonical delta, terminal-run, and baseline artifacts begin at `1.0.0`.
 - The bare canonical document and existing reviewer/automation/run/trace artifact versions remain unchanged.
 - `.skillsrc` remains exactly version `3.0`; do not modify `.skillsrc.example`, `schemas/skillsrc.schema.json`, `schemas/project-discovery-output.schema.json`, `schemas/skillsrc-init-output.schema.json`, `tools/discover_project.py`, `tools/init_skillsrc.py`, `tools/skillsrc_manifest.py`, `tools/stack_catalog.py`, or `tools/scan_project.py`.
-- One selected module is mandatory. Resolve it from direct path, symbol, route, or supplied requirement evidence; multiple plausible modules return `BLOCKED` and never guess.
-- A missing, stale, foreign, incompatible, partially readable, or ambiguous baseline selects `RUN_FULL_BASELINE`; there is no partial incremental fallback or user-tuned widening.
+- One selected module is mandatory. Select it only when `.skillsrc` names exactly one module, or every exact changed canonical path has one common uniquely containing module; otherwise return `BLOCKED` and never guess. Analytics, symbols, routes, and supplied requirement prose cannot select a module.
+- An initial call with `baseline_receipt=None` executes the complete FULL semantic prefix; any supplied diff/worktree input is frozen for provenance but never narrows it. `feature-flow/prefix/000000-flow-input.json` freezes exact repository identity and commit/tree when available, exact `.skillsrc` digest, mode/input digests, and `durability` exactly `DURABLE|PROVISIONAL`. An auto-created or updated `.skillsrc` may continue only `PROVISIONAL` until it is present in that exact committed tree. A requested baseline that is missing, stale, foreign, incompatible, partially readable, or ambiguous selects `RUN_FULL_BASELINE`; there is no partial incremental fallback or user-tuned widening.
 - Widen only in this order: `symbol -> file -> deterministic domain -> selected module -> FULL refresh`.
 - Durable artifacts are closed, canonical compact UTF-8 JSON and contain no raw source, raw diff, analytics text, prompts, responses, transcripts, hidden reasoning, supplied-input paths, environment values, or secrets.
 - Writes are validate-first, unique-temporary-sibling, flush, atomic create-without-replacement, reopen, and byte/digest verify. Identical concurrent writes are idempotent; differing bytes return `FLOW_CONFLICT` without overwrite.
 - Mandatory semantic assurance is `SEQUENTIAL`. Agent/subagent parallelism and trusted isolated `INDEPENDENT` review are optional optimizations; a plain single worker must complete the whole action loop.
 - Tests cross the public `advance_feature_flow` facade wherever the behavior is practical. Internal tests cover schema, ordering, persistence, and state invariants that cannot be isolated through a small facade scenario.
-- Follow strict RED -> GREEN within each task. Run only the named focused tests before Task 11. Run the complete test suite exactly once, in Task 11.
+- Do not run RED checks. Run only named, reasonable focused GREEN checks before Task 11; run the complete test suite exactly once, in Task 11.
 - Do not execute, import, start, or test `D:\AI-Projects\InvenTree-master` before Task 11. Attempts 02 and 03 remain immutable and must never be wrapped or imported as promoted Pipeline 6 evidence.
-- Every task ends in its own commit. Keep unrelated user changes intact; do not publish, push, or open a PR.
+- Do not stage or commit without an explicit current user request. Keep unrelated user changes intact; do not publish, push, or open a PR.
 
 ## File Map
 
@@ -110,7 +110,7 @@ git commit -m "feat: bind closed feature change inputs"
 ```
 ---
 
-### Task 2: Terminal Receipt and Durable Baseline Lifecycle
+### Task 2: Baseline Lifecycle Validation Primitives
 
 **Files:**
 - Create: `tools/baseline_lifecycle.py`
@@ -123,6 +123,7 @@ git commit -m "feat: bind closed feature change inputs"
 - Produces: `build_terminal_run_receipt(prefix_manifest, tail_artifacts) -> Mapping[str, Any]`, `validate_baseline_receipt(receipt, project, selected_module, fingerprints) -> ValidatedBaseline`, `bind_scope_predecessor(baseline: ValidatedBaseline, predecessor_source_inventory_envelope: Mapping[str, Any], predecessor_context_v5_envelope: Mapping[str, Any], predecessor_behavior_context_receipt: Mapping[str, Any]) -> ScopePredecessor`, `choose_run_mode(target, baseline=None) -> Literal["FULL", "CHANGE_SET"]`, and `advance_baseline(run, terminal_receipt, predecessor=None) -> Mapping[str, Any]`.
 - `ValidatedBaseline` exposes exact repository, commit/tree, module, inventory/context/document/bundle digests, fingerprints, and its canonical receipt digest; it never exposes a mutable latest pointer.
 - `bind_scope_predecessor` is the only predecessor projection. It validates the exact full source-inventory envelope, V5 context envelope, and behavior-context receipt against the Baseline Receipt's artifact digests; reuses `_validate_stored_context_relations` for the complete V5 graph; and returns a recursively immutable opaque capability containing only baseline identity, ordered authorized source identity slots, and ordered requirement IDs. It has no public constructor, JSON projection, standalone artifact digest, persistence, or deserialization route.
+- Task 2 supplies validation and binding primitives only. Task 9 is the only task that invokes terminal construction or baseline advancement in a real pipeline run and writes receipt-named baseline payloads.
 - [ ] **Step 1: Write baseline eligibility and lineage RED tests**
 ```python
 def test_initial_full_requires_exact_committed_tree():
@@ -468,7 +469,7 @@ git commit -m "feat: apply canonical feature document deltas"
 ```
 ---
 
-### Task 8: `feature_flow` Facade, Closed Actions, Resume, and CLI
+### Task 8A: Semantic-Prefix `feature_flow` Facade, Closed Actions, Resume, and CLI
 
 **Files:**
 - Create: `tools/feature_flow.py`
@@ -487,9 +488,11 @@ def advance_feature_flow(
     controller: ReviewController | None = None,
 ) -> FeatureFlowAction
 ```
-- `FeatureFlowAction.kind` is exactly one of `RUN_FULL_BASELINE`, `PRODUCE_CHANGE_SCOPE`, `RUN_SCOPE_FALSE_INCLUSION_AUDIT`, `RUN_SCOPE_OMISSION_AUDIT`, `PRODUCE_BATCH_CANDIDATE`, `RUN_BATCH_FALSE_CLAIM_AUDIT`, `RUN_BATCH_OMISSION_AUDIT`, `PROMOTE_BATCH`, `BUILD_CONTEXT`, `GENERATE_CHANGED_BEHAVIOR`, `COMPLETE`, or `BLOCKED`.
-- CLI required flags: `python tools/test_classification.py feature-flow --project PROJECT_ROOT --analytics ANALYTICS_JSON --run-root CREATE_ONLY_RUN_ROOT`; optional flags are exactly `--baseline-receipt RECEIPT_JSON`, `--base GIT_OBJECT`, `--head GIT_OBJECT`, `--worktree`, `--patch-manifest CLOSED_PATCH_JSON`, and `--record CANDIDATE_OR_AUDIT_JSON`. `.skillsrc` is automatic and has no CLI override.
-- [ ] **Step 1: Write facade-first run-mode, selection, resume, and safe CLI RED tests**
+- `FeatureFlowAction` has exactly four recursively immutable fields: `kind`, `artifact`, `record_path`, and `diagnostics`. Its action enum remains exactly `RUN_FULL_BASELINE`, `PRODUCE_CHANGE_SCOPE`, `RUN_SCOPE_FALSE_INCLUSION_AUDIT`, `RUN_SCOPE_OMISSION_AUDIT`, `PRODUCE_BATCH_CANDIDATE`, `RUN_BATCH_FALSE_CLAIM_AUDIT`, `RUN_BATCH_OMISSION_AUDIT`, `PROMOTE_BATCH`, `BUILD_CONTEXT`, `GENERATE_CHANGED_BEHAVIOR`, `COMPLETE`, or `BLOCKED`. `artifact` is the bounded prompt/handoff mapping carrying `run_mode` and immutable prerequisite path/digest bindings; `COMPLETE` binds the closed `prefix-ledger.json` handoff `READY_FOR_PIPELINE_TAIL`, never hidden tail completion, a terminal receipt, or baseline advancement. Recordable actions have the exact `record_path`; `BLOCKED` has no artifact/record path and carries only safe diagnostics.
+- Canonical Task 8A resume authority is only `RUN_ROOT/feature-flow/prefix/<ordinal>-<artifact>.json` plus `RUN_ROOT/feature-flow/prefix-ledger.json`. On resume, read only those complete canonical files, validate schemas/digest joins in ordinal order, ignore temporary siblings, and return the first missing action. `--record` must equal the currently returned canonical `record_path`; no pointer, lease, or branch is persisted. Immutable content projections at `RUN_ROOT/artifacts/<sha256>.json` are required for Task 9 readback but are never Task 8A state or resume authority.
+- CLI required flags: `python tools/test_classification.py feature-flow --project PROJECT_ROOT --analytics ANALYTICS_JSON --run-root CREATE_ONLY_RUN_ROOT`; optional flags are exactly `--baseline-receipt RECEIPT_JSON`, `--base GIT_OBJECT`, `--head GIT_OBJECT`, `--worktree`, `--patch-manifest CLOSED_PATCH_JSON`, and `--record CANDIDATE_OR_AUDIT_JSON`. `.skillsrc` is automatic and has no CLI override. The facade stores only `analytics_sha256`. The `--patch-manifest` CLI path returns `BLOCKED` until its host provides an in-process `BlobResolver`; it never attempts to reconstruct controller bytes from a path.
+- Baseline payloads are content-addressed canonical JSON under `baseline_root/payloads/sha256/<digest-without-prefix>.json`. Task 8A only reopens receipt-named payloads from the root derived from the validated receipt, verifies their digests, then calls lifecycle binders to mint opaque capabilities. It never writes, locates by scan, or reconstructs baseline payloads. Conservative existing fingerprint registries may reject a receipt now; Task 9 finalizes authoritative registries before any real baseline write.
+- [ ] **Step 1: Add focused facade contract checks**
 ```python
 def test_initial_full_requires_exact_committed_tree():
     """Facade returns durable FULL only for the exact clean committed tree."""
@@ -500,49 +503,45 @@ def test_git_range_requires_predecessor_target_as_base():
 def test_worktree_snapshot_freezes_staged_unstaged_and_untracked():
     """Facade persists one frozen provisional input and later drift blocks the attempt."""
 def test_feature_flow_selects_exactly_one_module_or_blocks():
-    """Direct path, symbol, route, and supplied evidence select one module; ambiguity blocks."""
+    """A single configured module or exact changed-path unique containment selects; everything else blocks."""
 def test_resume_ignores_temporary_files_and_returns_exact_action():
     """Temps, stale leases, gaps, branches, duplicates, and out-of-order audits never become state."""
+def test_prefix_complete_is_ready_for_pipeline_tail_only():
+    """COMPLETE exposes a closed prefix ledger and cannot claim tail, terminal, or baseline work."""
+def test_patch_manifest_cli_blocks_without_in_process_blob_resolver():
+    """The public flag is safe but cannot manufacture controller bytes from a path."""
 def test_safe_artifacts_and_diagnostics_do_not_echo_seeded_secret():
     """CLI exits 2 with one safe path/code/message row and no traceback or rejected value."""
 ```
-- [ ] **Step 2: Run RED**
-Run `python -m unittest tests.test_feature_flow -v`.
-Expected: missing facade and `feature-flow` parser command.
-- [ ] **Step 3: Implement immutable-readback orchestration**
-On every call, validate repository/baseline/manifest/inventories/change input/plan/current bytes first, scan only canonical committed paths, and derive the next state without a mutable pointer. Dispatch internally:
+- [ ] **Step 2: Implement immutable-readback semantic prefix**
+On every call, hash analytics without interpreting it; validate repository, baseline, conservative fingerprints, module selection, manifest/inventories/change input/plan/current bytes first; scan only canonical committed paths; and derive the next prefix state without a mutable pointer. Dispatch internally:
 ```text
 baseline selection -> change_scope -> batch_promotion -> context composition ->
-generation branch -> terminal receipt -> optional baseline advancement
+generation branch -> READY_FOR_PIPELINE_TAIL
 ```
-The returned action includes only its exact artifact path/digest bindings and bounded prompt inputs. Recording validates the expected action, schema, digest, generation, and write path before persistence. `controller=None` always reports `SEQUENTIAL` and still completes every action.
-- [ ] **Step 4: Run focused GREEN and CLI probes**
+The returned action has only its four exact fields. Recording validates the expected action's bounded artifact bindings, schema, digest, generation, and canonical `record_path` before persistence. `controller=None` always reports `SEQUENTIAL`. Do not implement tail invocation, terminal receipt construction, baseline advancement, or a baseline payload-store writer here.
+- [ ] **Step 3: Run focused GREEN and CLI probes**
 ```powershell
 python -m unittest tests.test_feature_flow tests.test_orchestrator_skillsrc_bootstrap -v
 python tools\test_classification.py feature-flow --help
 python -m py_compile tools\feature_flow.py tools\test_classification.py tests\test_feature_flow.py
 git diff --check
 ```
-Expected: tests pass; help shows the exact public flags and no mode/count/reviewer/shard/case tuning flags.
-- [ ] **Step 5: Commit**
-```powershell
-git add tools/feature_flow.py tools/test_classification.py tests/test_feature_flow.py
-git commit -m "feat: expose resumable feature flow"
-```
+Expected: tests pass; help shows the exact public flags and no mode/count/reviewer/shard/case tuning flags. Do not stage or commit without an explicit current user request.
 ---
 
 ### Task 9: Pipeline 6 Registry, Skills, Doctor, Renderer, and Public Docs
 
 **Files:**
-- Modify registry/schema/tooling: `contracts/pipeline.json`, `schemas/pipeline.schema.json`, `schemas/orchestrator-output.schema.json`, `tools/contract_check.py`, `tools/doctor.py`, `tools/render_contract_docs.py`.
+- Modify registry/schema/tooling: `contracts/pipeline.json`, `schemas/pipeline.schema.json`, `schemas/orchestrator-output.schema.json`, `tools/baseline_lifecycle.py`, `tools/contract_check.py`, `tools/doctor.py`, `tools/render_contract_docs.py`.
 - Create change-scope skill: `skills/change-scope/SKILL.md`, `skills/change-scope/references/change-scope-contract.md`.
 - Modify skill contracts: `skills/context-marker/{SKILL.md,references/context-artifact-contract.md}`, `skills/test-classifier/{SKILL.md,references/classification-contract.md}`, `skills/test-classifier-reviewer/{SKILL.md,references/review-contract.md}`, `skills/tc-generator/{SKILL.md,references/case-generation-contract.md}`, `skills/tc-reviewer/SKILL.md`, `skills/orchestrate/{SKILL.md,references/orchestration-contract.md}`.
 - Modify/generated docs: `README.md`, `USAGE.md`, `HOW-IT-WORKS.md`, `PIPELINE.md`, `CONTRACTS.md`; tests: create `tests/test_pipeline_v6.py`, modify `tests/test_documentation_v3.py`, `tests/test_skill_contracts_v3.py`, `tests/test_orchestration_v3.py`.
 **Interfaces:**
-- Consumes all runtime/schema interfaces from Tasks 1-8.
+- Consumes Task 8A's closed prefix ledger, required immutable content projections at `RUN_ROOT/artifacts/<sha256>.json`, and all prior runtime/schema interfaces; it owns the tail after `READY_FOR_PIPELINE_TAIL`. These projections are content readback only, never Task 8A state/resume authority. Task 9A runs technical classification and independent classification review immediately after that handoff, before the candidate-review or unchanged-baseline branch; it remains an isolated evidence gate and never changes candidate/delta semantics.
 - Produces the exact ordered Pipeline 6 carrier universe and stage rows in the accepted design. For every stage, `rejects` is materialized as ordered `U - accepts` and verified exactly.
-- `finalize_orchestration(effective_document, effective_bundle_receipt, automation_artifact, autotest_review_artifact, run_result, trace_document, trace_audit, prefix_ledger)` additionally emits a terminal-run receipt from accepted tail artifacts plus the immutable validated prefix ledger; `advance_baseline(run, terminal_receipt, predecessor)` accepts only that receipt.
-- [ ] **Step 1: Write exact Pipeline 6 routing and documentation RED tests**
+- `finalize_orchestration(effective_document, effective_bundle_receipt, automation_artifact, autotest_review_artifact, run_result, trace_document, trace_audit, prefix_ledger)` additionally emits a terminal-run receipt from accepted tail artifacts plus the immutable validated prefix ledger; `advance_baseline(run, terminal_receipt, predecessor)` accepts only that receipt. Task 9 alone writes the content-addressed receipt-named baseline payload store, finalizes authoritative pipeline/policy/tool/schema fingerprint registries, constructs terminal receipts, and advances baselines.
+- [ ] **Step 1: Add exact Pipeline 6 routing and documentation checks**
 ```python
 def test_pipeline6_exact_carrier_complements_and_branches():
     """Every accepts/forwards/produces/rejects array and FULL/CHANGE_SET branch is exact."""
@@ -553,16 +552,11 @@ def test_changed_context_crosses_classifier_stages_byte_identically():
 def test_terminal_receipt_uses_bound_prefix_ledger_not_hidden_carrier():
     """Missing, foreign, or mutable prefix evidence blocks finalization and advancement."""
 ```
-- [ ] **Step 2: Run RED**
-```powershell
-python -m unittest tests.test_pipeline_v6 tests.test_documentation_v3 tests.test_skill_contracts_v3 tests.test_orchestration_v3 -v
-```
-Expected: Pipeline 5 version/stages/carriers and V5 skill copy fail the new exact assertions.
-- [ ] **Step 3: Replace the live registry and update every skill contract**
-Materialize the 29-carrier ordered universe and 18 exact stage rows from the design. Add closed FULL/nonzero-delta/zero-op transitions, terminal receipt, and baseline advancement. Make `contract_check` compare every array, complement, schema, runtime file, core skill path, and projection.
+- [ ] **Step 2: Replace the live registry and update every skill contract**
+Materialize the 30-carrier ordered universe and 18 exact stage rows from the design. Conditional stages use ordered-union `produces` plus closed ordered `branches[{when,produces}]`; only `tc-generator`, `apply-document-delta`, and `advance-baseline` declare branches. Make `contract_check` compare every array, complement, schema, runtime file, core skill path, and projection.
 Skill instructions must direct a plain worker to repeatedly call `feature-flow`, perform only the returned producer/audit/generator action, record it, and call again. State explicitly that tests are technical evidence only, raw inputs never enter generation, both audits are mandatory, `SEQUENTIAL` is portable, and no count/mode/scope tuning exists.
 Update public docs to lead with initial full baseline then change-scoped runs. Render generated docs from the contract rather than editing their tables by hand.
-- [ ] **Step 4: Run focused GREEN, doctor, checker, and renderer**
+- [ ] **Step 3: Run focused GREEN, doctor, checker, and renderer**
 ```powershell
 python -m unittest tests.test_pipeline_v6 tests.test_documentation_v3 tests.test_skill_contracts_v3 tests.test_orchestration_v3 -v
 python tools\doctor.py --root .
@@ -664,7 +658,7 @@ Use the exact new root:
 ```powershell
 python tools\test_classification.py feature-flow --project D:\AI-Projects\InvenTree-master --analytics D:\AI-Projects\pipeline-artifacts\inventree-full-project-2026-08-13-raw-sol-high\00-project-bootstrap\attempt-01\skillsrc-init.json --run-root D:\AI-Projects\pipeline-artifacts\inventree-full-project-2026-08-14-pipeline6-attempt-04
 ```
-The controller then performs the returned action, writes only the requested candidate or audit JSON, records it with the same command plus `--record <exact-returned-path>`, and repeats until `COMPLETE` or `BLOCKED`. Use mandatory `SEQUENTIAL`; optional trusted independent calibration may run only as an additional non-authoritative comparison. Process all 24 fixed controls through both scope audits and both batch audits. Do not publish test artifacts or advance a baseline until every terminal gate accepts.
+The controller then performs the returned semantic-prefix action, writes only the requested candidate or audit JSON, records it with the same command plus `--record <exact-returned-path>`, and repeats until `COMPLETE` (`READY_FOR_PIPELINE_TAIL`) or `BLOCKED`. After that handoff, execute the Task 9 Pipeline 6 tail, which alone constructs the terminal receipt and may advance the baseline. Use mandatory `SEQUENTIAL`; optional trusted independent calibration may run only as an additional non-authoritative comparison. Process all 24 fixed controls through both scope audits and both batch audits. Do not publish test artifacts or advance a baseline until every terminal gate accepts.
 - [ ] **Step 4: Materialize and validate the safe acceptance report**
 Create `evals/change-scoped-semantic-evidence/attempt04-acceptance.json` from canonical readback digests, not manually copied claims. It must contain exactly 24 controls, the clean target commit/tree, baseline receipt digest, terminal receipt digest, per-phase artifact digests/verdicts, `SEQUENTIAL` assurance, zero mismatch count, and overall `PASS`.
 Run:
@@ -698,14 +692,14 @@ Record the final implementation SHA and the content-addressed external attempt r
 | Accepted design area | Owning task(s) |
 |---|---|
 | Change record/patch unions, Git range, worktree freeze, safety | 1 |
-| FULL/provisional rules, terminal receipt, fingerprints, durable chain | 2 |
+| FULL/provisional validation, predecessor binding, durable-chain guards | 2 |
 | Diff seed, impact registry, widening, complete test inventory, scope audits | 3 |
 | Plan/Result V2 sides, ordering, effects, deletion, rename/no-op | 4 |
 | FULL/V1 vs CHANGE_SET/V2, dual batch audits, rework, assurance | 5 |
 | Promoted composite context, unchanged bindings, retirement support | 6 |
 | Delta partitions/tombstones/applier, zero/nonzero review routes | 7 |
-| One facade, automatic module/mode, action loop, persistence/resume/errors | 8 |
-| Exact Pipeline 6 carriers/branches/versions/skills/docs/tooling | 9 |
+| Semantic-prefix facade, automatic module/mode, action loop, persistence/resume/errors | 8A |
+| Exact Pipeline 6 carriers/branches/versions/skills/docs/tooling, tail/terminal/advance/payload-store writer | 9 |
 | One-way migration, synthetic shadows, 24-control fixed eval | 10 |
 | Real clean-tree attempt-04, one full suite, final evidence | 11 |
 

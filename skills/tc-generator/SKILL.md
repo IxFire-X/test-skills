@@ -1,20 +1,20 @@
 ---
 name: tc-generator
-description: Use when a V3 context artifact must become a canonical test-case document and immutable Zephyr-facing human projections without inventing technical behavior.
+description: Use when a Pipeline 6 changed behavior context must become a FULL canonical test-case candidate or CHANGE_SET document delta without inventing technical behavior.
 ---
 
 # Canonical test-case generation
 
-Consume only artifacts.managed_behavior_context. Reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence as generator inputs. Emit JSON-only `artifacts.canonical_document`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume only `changed_behavior_context`. Reject raw_content, source_code_and_diff, technical_test_inventory, authorized_behavior_sources, change_scope_receipt, managed_behavior_context, behavior_source_accounting, behavior_context_receipt, test source text, technical_test_classification, classification_review, and effective_technical_evidence. FULL emits JSON-only `candidate_document`; CHANGE_SET emits only `canonical_document_delta`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, delta schema, and `tools.canonical_document` define the machine source.
 
 ## Procedure
 
-1. Validate the managed behavior context. Derive only supported requirements and product behavior; technical test evidence cannot create a behavior or case.
+1. Validate only the supplied `changed_behavior_context`. Derive only its supported requirements and product behavior; technical test evidence cannot create a behavior or case.
 2. Derive case boundaries before assigning IDs. Use one case per independently executable scenario. Build its scenario key from setup/role, initial state, input partition/branch condition, primary action or cohesive dependent action chain, and terminal outcome. Split a branch only when it is independently executable; deduplicate overlapping evidence from the same control flow. Derive the count from those keys, never from a numeric target.
 3. Create one canonical document with stable IDs and physical ordering. A case projects as a Title, Goal, and Preconditions with arbitrary sequential steps; preparation is represented as steps.
 4. For every step, provide human action and expected result plus structured operation, typed inputs, previous-step output references, outputs, and assertions when automation is possible. Human expected result covers every machine assertion.
 5. For a manual or blocked step, use its exact canonical manual/blocker branch and reason; do not turn a project-generation obstacle into invented behavior.
-6. Validate the bare document through `tools.canonical_document`, wrap it in the V3 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The pipeline later derives immutable Markdown and Zephyr CSV projections from the selected revision.
+6. Validate the bare document through `tools.canonical_document`, wrap it in the mode-bound V4 (`4.0.0`) generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The pipeline later derives immutable Markdown and Zephyr CSV projections from the selected revision.
 
 ## Projection rule
 

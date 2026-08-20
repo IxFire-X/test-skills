@@ -5,7 +5,7 @@ description: Use when a discovered technical-test inventory needs an evidence-ba
 
 # Technical-test classification
 
-Read the [classification contract](references/classification-contract.md), `schemas/test-classifier-output.schema.json`, and the supplied inventory before classifying. This skill makes bounded semantic judgments only: scope, source-span provenance, and rationale for existing pairs.
+Read the [classification contract](references/classification-contract.md), `schemas/test-classifier-output.schema.json`, and the supplied inventory before classifying. This post-`READY_FOR_PIPELINE_TAIL` gate makes bounded technical judgments only: scope, source-span provenance, and rationale for existing pairs.
 
 ## Procedure
 
@@ -13,6 +13,7 @@ Read the [classification contract](references/classification-contract.md), `sche
 2. Classify the observable test boundary: `unit` for an isolated in-process collaborator, `integration` for a real boundary such as database or HTTP client/server integration, `e2e` for a complete user-facing journey, and `unknown` when the evidence cannot establish one of those boundaries.
 3. For every pair, attach exact source-span provenance that supports the decision and a concise rationale grounded in that evidence.
 4. Emit the closed `test-classifier` JSON envelope. Existing schema and validation tooling own IDs, digests, ordering, and coverage; do not restate or replace those mechanical rules.
+5. Preserve `changed_behavior_context` byte-identically for the reviewer. Its classification is isolated technical evidence and never influences generator case boundaries.
 
 ## Boundaries
 

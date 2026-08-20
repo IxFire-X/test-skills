@@ -1,6 +1,6 @@
-# V5 managed behavior context and accounting artifact contract
+# V6 managed behavior context, changed projection, and accounting artifact contract
 
-`schemas/context-marker-output.schema.json`, `tools.behavior_context_planning.validate_context_envelope`, and `tools.test_classification.load_validated_behavior_context` are executable truth. Emit `schema_version: "5.0.0"`, `stage: "context-marker"`, closed sibling `managed_behavior_context` and `behavior_source_accounting` branches, and no warnings. The accounting sidecar binds the immutable receipt, gives every authorized source one terminal disposition, and groups every receipt fragment exactly once.
+`schemas/context-marker-output.schema.json`, `tools.behavior_context_planning.validate_context_envelope`, and `tools.test_classification.load_validated_behavior_context` are executable truth. Emit `schema_version: "6.0.0"`, `stage: "context-marker"`, closed `managed_behavior_context`, `changed_behavior_context`, and `behavior_source_accounting` siblings, plus receipt `schema_version: "2.0.0"`. The accounting sidecar binds the immutable receipt, gives every authorized source one terminal disposition, and groups every receipt fragment exactly once.
 
 For each planned item, derive `fragment_id` as `FRAGMENT-` plus lowercase SHA-256 of canonical closed fragment fields excluding `fragment_id`, with the owning `item_id` and `source_id` included. Never choose or rewrite the ID manually.
 
@@ -12,4 +12,4 @@ For reproducible IDs, normalize provenance references and text only for sorting:
 
 `managed_behavior_context` contains the exact digest of the authorized behavior-source snapshot, unchanged canonical requirements, closed product-source rows, and one ordered source-ID row for every requirement. A product row copies authorized `source_id`, `kind`, `path`, and `content_digest` exactly, plus only a concise safe summary. Requirement source IDs are nonempty, unique, and sorted. A supplied requirement or an authorized non-test product source must originate every requirement; test inventory paths, test source text, relabeled test facts, and invented sources are forbidden.
 
-Validate both the envelope and source graph before downstream use. Downstream generation consumes only the managed behavior context, never a prose reconstruction or technical inventory.
+Validate the envelope and source graph before downstream use. The classifier receives complete managed and byte-identical changed context; downstream generation consumes only `changed_behavior_context`, never a prose reconstruction, technical inventory, accounting, receipt, raw source, or diff.

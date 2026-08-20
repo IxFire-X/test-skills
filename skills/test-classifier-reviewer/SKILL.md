@@ -13,6 +13,7 @@ Read the [review contract](references/review-contract.md), `schemas/test-classif
 2. Review every `(file_id, symbol_id)` pair exactly once in physical order. Check its scope, source-span provenance, and rationale against the authorized evidence.
 3. Emit the schema-defined accepted verdict only when the complete classification is valid. Otherwise emit its rework verdict with concrete `findings`, including the path and affected pair when applicable.
 4. Emit the closed reviewer envelope. Schema and validation tooling own digest equality, pair coverage, ordering, and verdict mechanics; do not duplicate them as prose policy.
+5. Forward only byte-identical `changed_behavior_context` after acceptance. This isolated technical gate happens after `READY_FOR_PIPELINE_TAIL` and before candidate review or unchanged-baseline selection; it never changes generator or delta semantics.
 
 ## Boundaries
 

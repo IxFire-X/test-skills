@@ -1,0 +1,17 @@
+{
+  "schema_version": "2.0.0",
+  "artifact": "behavior-context-receipt",
+  "run_mode": "FULL",
+  "selected_module": "fixture",
+  "baseline_receipt_sha256": null,
+  "scope_receipt_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "authorized_behavior_sources_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "context_plan_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "promotion_sha256s": ["sha256:3333333333333333333333333333333333333333333333333333333333333333"],
+  "unchanged_source_bindings": [],
+  "fragment_registry": [{"fragment_id": "FRAGMENT-4444444444444444444444444444444444444444444444444444444444444444", "source_id": "SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "item_id": "ITEM-000001", "effect": "full"}],
+  "source_outcomes": [{"source_id": "SOURCE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "domain_key": "_root", "outcome": "behavior_fragments"}],
+  "changed_requirement_ids": ["REQ-demo"],
+  "retired_requirements": [],
+  "assurance": {"review_mode": "SEQUENTIAL", "independent_promotion_count": 0, "sequential_promotion_count": 1, "reworked_batch_count": 0}
+}

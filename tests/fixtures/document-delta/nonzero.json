@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "artifact": "canonical-document-delta",
+  "document_id": "TCDOC-fixture",
+  "baseline_document_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "baseline_revision": 1,
+  "target_revision": 2,
+  "source": {"behavior_context_receipt_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "changed_behavior_context_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+  "metadata": {"subject": {"kind": "http_endpoint", "method": "GET", "path": "/items"}, "documentation": ["https://example.invalid/spec"], "project": "EXAMPLE", "author": "FIXTURE_CHANGED", "date": "2026-08-20"},
+  "operation_capabilities": {"reused_ids": [], "added": [], "modified": [], "retired": []},
+  "requirements": {"reused_ids": [], "added": [], "modified": [], "retired": []},
+  "test_cases": {"reused_ids": [], "added": [], "modified": [], "retired": []}
+}
