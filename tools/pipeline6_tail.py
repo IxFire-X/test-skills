@@ -28,9 +28,11 @@ from tools.orchestrate_test_case_revision import finalize_orchestration, orchest
 from tools.publish_test_case_bundle import Receipt
 from tools.run_tests import run_tests_v3
 from tools.schema_validation import schema_diagnostics
-from tools.test_classification import validate_technical_test_evidence
+from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
+from tools.test_classification import build_source_inventories, validate_technical_test_evidence
 from tools.trace_check import check as check_trace
 from tools.json_cli import JsonArgumentParser
+from tools.feature_flow import _git, _git_blob_reader, _git_provenance
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -202,6 +204,48 @@ def _terminal_change_input(change: Mapping[str, Any]) -> Mapping[str, Any]:
     raise FlowError("FEATURE_FLOW_INPUT", "/prefix/change_input", "Change input kind is outside the terminal union.")
 
 
+def _verify_full_source_snapshot(project: Path, flow: Mapping[str, Any], source: Mapping[str, Any]) -> None:
+    """Require every FULL tail to use its exact frozen source projection."""
+    try:
+        skillsrc_path = project / ".skillsrc"
+        skillsrc_bytes = skillsrc_path.read_bytes()
+        repository = flow.get("repository_id")
+        revision = flow.get("source_revision")
+        reader = None
+        if repository is not None:
+            provenance = _git_provenance(project)
+            if not isinstance(provenance, Mapping) or provenance.get("repository_id") != repository:
+                raise ValueError()
+            if not isinstance(revision, Mapping) or not isinstance(revision.get("commit"), str) or not isinstance(revision.get("tree"), str):
+                raise ValueError()
+            if _git(project, "rev-parse", f"{revision['commit']}^{{tree}}") != revision["tree"]:
+                raise ValueError()
+            if provenance.get("commit") != revision["commit"] or provenance.get("tree") != revision["tree"]:
+                raise ValueError()
+            if revision.get("durability") == "DURABLE":
+                if provenance.get("status"):
+                    raise ValueError()
+                reader = _git_blob_reader(project, revision["commit"])
+            elif revision.get("durability") != "PROVISIONAL":
+                raise ValueError()
+        inventories = build_source_inventories(project, load_skillsrc(skillsrc_path), flow.get("selected_module"), (), snapshot_reader=reader)
+    except (OSError, SkillsrcError, TypeError, ValueError):
+        raise FlowError("CHANGE_SOURCE_DRIFT", "/project", "FULL source snapshot could not be rebuilt.") from None
+    envelope = {
+        "schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
+            "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+            "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+        }, "warnings": [],
+    }
+    snapshot = artifact_sha256({
+        "selected_module": flow.get("selected_module"), "skillsrc_sha256": "sha256:" + hashlib.sha256(skillsrc_bytes).hexdigest(),
+        "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+        "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+    })
+    if flow.get("skillsrc_sha256") != "sha256:" + hashlib.sha256(skillsrc_bytes).hexdigest() or flow.get("source_snapshot_sha256") != snapshot or _plain(source) != envelope:
+        raise FlowError("CHANGE_SOURCE_DRIFT", "/project", "FULL source snapshot no longer matches the frozen prefix.")
+
+
 def _records(run_root: Path) -> list[tuple[Path, Mapping[str, Any]]]:
     root = run_root / "pipeline6-tail" / "records"
     if not root.exists():
@@ -255,7 +299,8 @@ def _manifest(run_root: Path, prefix: Mapping[str, Any], records: list[tuple[Pat
     changed, changed_stored = _binding(run_root, bindings.get("changed_behavior_context"), "/prefix/changed_behavior_context")
     context_receipt, receipt_stored = _binding(run_root, bindings.get("behavior_context_receipt"), "/prefix/behavior_context_receipt")
     mode, repository = flow.get("run_mode"), flow.get("repository_id")
-    if mode not in {"FULL", "CHANGE_SET"} or not isinstance(repository, str):
+    snapshot = flow.get("source_snapshot_sha256")
+    if mode not in {"FULL", "CHANGE_SET"} or (repository is not None and not isinstance(repository, str)) or not isinstance(snapshot, str):
         raise FlowError("FEATURE_FLOW_INPUT", "/prefix/flow_input", "Flow input does not bind run metadata.")
     if mode == "FULL":
         full_change = bindings.get("change_input")
@@ -265,7 +310,11 @@ def _manifest(run_root: Path, prefix: Mapping[str, Any], records: list[tuple[Pat
                 change = _terminal_change_input(raw_change)
             else:
                 full_change = None
-        if not isinstance(full_change, Mapping):
+        if repository is None:
+            if isinstance(full_change, Mapping):
+                raise FlowError("FEATURE_FLOW_INPUT", "/prefix/change_input", "Local FULL flow cannot bind a change input.")
+            change = None
+        elif not isinstance(full_change, Mapping):
             revision = flow.get("source_revision")
             if not isinstance(revision, Mapping):
                 raise FlowError("FEATURE_FLOW_INPUT", "/prefix/flow_input", "FULL flow input lacks committed target identity.")
@@ -283,7 +332,7 @@ def _manifest(run_root: Path, prefix: Mapping[str, Any], records: list[tuple[Pat
     }
     ledger = {"schema_version": "1.0.0", "artifact": "prefix-ledger", "feature_flow_prefix_sha256": artifact_sha256(prefix), "tail_record_sha256s": [artifact_sha256(value) for _, value in records], "repository_id": repository,
         "selected_module": flow.get("selected_module"), "run_mode": mode, "change_input": change,
-        "analytics_sha256": flow.get("analytics_sha256"), "source_drift": False, "fingerprints": fingerprints,
+        "analytics_sha256": flow.get("analytics_sha256"), "source_snapshot_sha256": snapshot, "source_drift": False, "fingerprints": fingerprints,
         "artifacts": {name: {"path": stored.path.relative_to(run_root).as_posix(), "sha256": stored.sha256} for name, stored in rows.items()}}
     return write_create_only(run_root, PurePosixPath("manifest") / "prefix-ledger.json", ledger)
 
@@ -422,6 +471,10 @@ def advance_pipeline6_tail(
         bindings = prefix.get("artifacts")
         if not isinstance(bindings, Mapping):
             raise FlowError("FEATURE_FLOW_INPUT", "/feature-flow/prefix-ledger/artifacts", "Prefix bindings are required.")
+        flow, _ = _binding(run_root, bindings.get("flow_input"), "/prefix/flow_input")
+        if flow.get("run_mode") == "FULL":
+            source, _ = _binding(run_root, bindings.get("source_inventory"), "/prefix/source_inventory")
+            _verify_full_source_snapshot(project, flow, source)
         handoff, _ = _binding(run_root, bindings.get("delta_handoff"), "/prefix/delta_handoff")
         records = _records(run_root)
         names = [path.name for path, _ in records]

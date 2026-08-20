@@ -45,6 +45,8 @@ def report_errors(report: dict[str, object], controls: list[dict[str, object]]) 
         phases = control.get("phases")
         if not isinstance(phases, list):
             continue
+        if [row.get("phase") for row in phases if isinstance(row, dict)] != PHASES:
+            errors.append("phase names must exactly match the fixed phase order")
         mismatches = 0
         for row in phases:
             if not isinstance(row, dict):
@@ -61,6 +63,8 @@ def report_errors(report: dict[str, object], controls: list[dict[str, object]]) 
         if control.get("status") != ("PASS" if mismatches == 0 else "FAIL"):
             errors.append("control status must match its mismatch count")
         control_mismatches.append(mismatches)
+    if len(control_mismatches) != 24 or len(report.get("controls", [])) != 24:
+        errors.append("report must contain exactly 24 controls")
     total = sum(control_mismatches)
     if report.get("mismatch_count") != total:
         errors.append("overall mismatch_count must equal control mismatch sum")

@@ -416,7 +416,7 @@ def build_run(
     ledger_value = {
         "schema_version": "1.0.0", "artifact": "prefix-ledger", "feature_flow_prefix_sha256": digest("feature-flow-prefix"), "tail_record_sha256s": [], "repository_id": repository,
         "selected_module": "root", "run_mode": mode, "change_input": change_input,
-        "analytics_sha256": digest("analytics"), "source_drift": source_drift,
+        "analytics_sha256": digest("analytics"), "source_snapshot_sha256": digest("source-snapshot"), "source_drift": source_drift,
         "fingerprints": registries,
         "artifacts": {name: {"path": stored_prefix[name].path.relative_to(run_root).as_posix(), "sha256": stored_prefix[name].sha256} for name in PREFIX_KEYS},
     }

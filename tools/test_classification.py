@@ -699,6 +699,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     feature_flow.add_argument("--project", required=True)
     feature_flow.add_argument("--analytics", required=True)
     feature_flow.add_argument("--run-root", required=True)
+    feature_flow.add_argument("--module")
     feature_flow.add_argument("--baseline-receipt")
     feature_flow.add_argument("--base")
     feature_flow.add_argument("--head")
@@ -749,6 +750,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 Path(args.project), Path(args.analytics), Path(args.run_root),
                 Path(args.baseline_receipt) if args.baseline_receipt else None,
                 change, Path(args.record) if args.record else None,
+                module_id=args.module,
             )
             rendered = {
                 "kind": action.kind,

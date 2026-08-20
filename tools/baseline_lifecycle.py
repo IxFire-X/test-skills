@@ -209,8 +209,12 @@ def _source(value: Any, path: str) -> Mapping[str, Any]:
     return source
 
 
-def _change_input(value: Any, repository: str, run_mode: str) -> Mapping[str, Any]:
+def _change_input(value: Any, repository: str | None, run_mode: str) -> Mapping[str, Any] | None:
     path = "/prefix_ledger/change_input"
+    if value is None:
+        if repository is None and run_mode == "FULL":
+            return None
+        raise _error("FEATURE_FLOW_INPUT", path, "Only a local FULL run may omit change input.")
     source = _mapping(value, path)
     kind = source.get("input_kind")
     shapes = {
@@ -582,11 +586,12 @@ def build_terminal_run_receipt(
     ledger = _read_stored(prefix_ledger, "/prefix_ledger", run_root)
     _closed(ledger, {
         "schema_version", "artifact", "feature_flow_prefix_sha256", "tail_record_sha256s", "repository_id", "selected_module", "run_mode", "change_input",
-        "analytics_sha256", "source_drift", "fingerprints", "artifacts",
+        "analytics_sha256", "source_snapshot_sha256", "source_drift", "fingerprints", "artifacts",
     }, "/prefix_ledger")
     if ledger.get("schema_version") != "1.0.0" or ledger.get("artifact") != "prefix-ledger":
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger", "Prefix ledger must use closed V1 identity.")
-    repository = _digest(ledger.get("repository_id"), "/prefix_ledger/repository_id")
+    repository_value = ledger.get("repository_id")
+    repository = None if repository_value is None else _digest(repository_value, "/prefix_ledger/repository_id")
     _digest(ledger.get("feature_flow_prefix_sha256"), "/prefix_ledger/feature_flow_prefix_sha256")
     records = ledger.get("tail_record_sha256s")
     if not isinstance(records, list) or any(not isinstance(row, str) or _DIGEST_RE.fullmatch(row) is None for row in records):
@@ -594,6 +599,7 @@ def build_terminal_run_receipt(
     if not isinstance(ledger.get("selected_module"), str) or not ledger["selected_module"] or ledger.get("run_mode") not in {"FULL", "CHANGE_SET"} or type(ledger.get("source_drift")) is not bool:
         raise _error("FEATURE_FLOW_INPUT", "/prefix_ledger", "Prefix ledger run metadata is invalid.")
     change_input = _change_input(ledger.get("change_input"), repository, ledger["run_mode"])
+    source_snapshot = _digest(ledger.get("source_snapshot_sha256"), "/prefix_ledger/source_snapshot_sha256")
     analytics = _digest(ledger.get("analytics_sha256"), "/prefix_ledger/analytics_sha256")
     fingerprints = _fingerprint_registries(ledger.get("fingerprints"))
     bindings = _closed(ledger.get("artifacts"), set(_PREFIX_KEYS), "/prefix_ledger/artifacts")
@@ -722,7 +728,7 @@ def build_terminal_run_receipt(
     receipt = {
         "schema_version": "1.0.0", "artifact": "terminal-run-receipt", "prefix_ledger_sha256": prefix_ledger.sha256, "repository_id": repository,
         "selected_module": ledger["selected_module"], "run_mode": ledger["run_mode"],
-        "change_input": _plain(change_input), "analytics_sha256": analytics, "fingerprints": fingerprints,
+        "change_input": _plain(change_input), "analytics_sha256": analytics, "source_snapshot_sha256": source_snapshot, "fingerprints": fingerprints,
         "artifacts": artifact_digests,
         "acceptance": {
             "classification_verdict": classification_verdict,
@@ -1077,8 +1083,12 @@ def advance_baseline(
     baseline_root = run_value.get("baseline_root")
     if not isinstance(project, Path) or not isinstance(baseline_root, Path):
         raise _error("FEATURE_FLOW_INPUT", "/run", "Run must contain Path project and baseline_root values.")
-    terminal_repository = _digest(terminal.get("repository_id"), "/terminal_receipt/repository_id")
+    terminal_repository_value = terminal.get("repository_id")
+    if terminal_repository_value is None and terminal.get("run_mode") == "FULL" and terminal.get("change_input") is None:
+        return _advancement("PROVISIONAL", predecessor_digest)
+    terminal_repository = _digest(terminal_repository_value, "/terminal_receipt/repository_id")
     change = _change_input(terminal.get("change_input"), terminal_repository, terminal.get("run_mode"))
+    assert change is not None
     input_kind = change.get("input_kind")
     if input_kind in {"git_worktree", "patch_manifest"}:
         return _advancement("PROVISIONAL", predecessor_digest)

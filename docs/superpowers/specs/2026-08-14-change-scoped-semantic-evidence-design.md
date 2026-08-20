@@ -35,6 +35,8 @@ advance_feature_flow(
     change_input=None,
     recorded_artifact=None,
     controller=None,
+    *,
+    module_id=None,
 ) -> FeatureFlowAction
 ```
 
@@ -45,6 +47,7 @@ python tools/test_classification.py feature-flow \
   --project <root> \
   --analytics <file> \
   --run-root <create-only-directory> \
+  [--module <exact-skillsrc-module-id>] \
   [--baseline-receipt <receipt.json>] \
   [--base <git-object>] [--head <git-object>] \
   [--worktree] \
@@ -52,7 +55,7 @@ python tools/test_classification.py feature-flow \
   [--record <candidate-or-audit.json>]
 ```
 
-`.skillsrc` is discovered automatically and remains unchanged. Select a module only when `.skillsrc` names exactly one module, or every exact changed canonical path has one common uniquely containing module. An empty change set without a single configured module, any path outside that containment, or multiple candidates returns `BLOCKED`; analytics, symbols, routes, and supplied requirement prose never select a module.
+`.skillsrc` is discovered and created automatically when absent. The pipeline never commits it. An auto-created or updated file permits a local `PROVISIONAL` FULL run immediately; a durable baseline requires a later clean project revision that already contains those exact bytes. `module_id`, when supplied, must name exactly one normalized `.skillsrc` module and contain every changed canonical path. Without it, selection succeeds only when `.skillsrc` names one module or every changed path has one common uniquely containing module. An empty change set with multiple configured modules, an unknown module, a path outside the selected module, or multiple inferred candidates returns `BLOCKED`; analytics, symbols, routes, and supplied requirement prose never select a module.
 
 The façade validates inputs, derives state entirely from immutable readback, and returns one closed action:
 
@@ -78,6 +81,12 @@ The canonical prefix locations are `run_root/feature-flow/prefix/<ordinal>-<arti
 The caller performs the requested LLM task, submits the closed artifact with `--record`, and calls the same command again. `feature_flow` owns only semantic-prefix mode selection, path derivation, ordering, and resume. It hashes the analytics file as `analytics_sha256`; it does not parse analytics semantics, store analytics text, or use analytics to select a module. `controller=None` remains `SEQUENTIAL`.
 
 `--patch-manifest` remains an exact public CLI flag, but the CLI returns `BLOCKED` for it until an in-process `BlobResolver` is supplied by the host: a file path cannot safely provide controller-owned bytes. Programmatic patch execution remains subject to the existing exact resolver/digest rules.
+
+### Controller evidence
+
+The action loop must work without rebuilding façade internals. `PRODUCE_BATCH_CANDIDATE` therefore carries its complete closed plan projection: item/source IDs, side, canonical product path, content digest, domain key, and accounted/read ranges. Audit actions carry the same reviewed projection. No action contains raw bytes or excerpts.
+
+The host reads one requested range through `read_feature_flow_evidence(project, run_root, action, item_id, side=None, *, change_input=None, blob_resolver=None) -> bytes`. This function reopens the action-named plan and inventory, verifies path confinement, ownership, digest, side, and range, then returns only those bytes. FULL reads the current file; Git range/worktree CHANGE_SET reads the exact predecessor or frozen target side. Patch CHANGE_SET repeats the host's original `ChangeInputSpec` and `BlobResolver`; the reader reacquires and digest-compares the normalized change input before resolving one controller-owned blob. There is no public capability class, serialized reader, cache, or new artifact family. `controller=None` keeps the manual `SEQUENTIAL` action/record loop; a programmatic controller uses the same action and reader and can return only the requested candidate or audit.
 
 ### Two internal deep modules
 
@@ -137,7 +146,9 @@ Failure to validate or bind a predecessor is `BASELINE_BINDING` internally. At t
 
 ## Run modes
 
-Every prefix starts by freezing one `feature-flow-input` at `run_root/feature-flow/prefix/000000-flow-input.json`. It records the exact repository identity and commit/tree when Git is available, the exact `.skillsrc` digest, the mode/input digests, and `durability` exactly `DURABLE|PROVISIONAL`. A flow whose `.skillsrc` was auto-created or updated may continue only as `PROVISIONAL` until that exact `.skillsrc` is present in the frozen committed tree; it cannot advance a durable baseline before then.
+Every prefix writes one `feature-flow-input` at `run_root/feature-flow/prefix/000000-flow-input.json`. It binds the selected module, `.skillsrc`, analytics/change inputs, and `source_snapshot_sha256 = artifact_sha256({selected_module, skillsrc_sha256, authorized_behavior_sources_sha256, technical_test_inventory_sha256})`. Git repository/commit/tree fields are included when Git is available and omitted when it is not; they never gate a local FULL run. Clean committed Git makes the run `DURABLE`; every other source snapshot is `PROVISIONAL`. Resume recomputes the same snapshot and blocks on drift.
+
+The tail binds that same source snapshot. A provisional run completes normally but publishes no successor baseline receipt, predecessor link, or baseline payload. No local revision abstraction, virtual filesystem, or synthetic Git identity is introduced.
 
 ### Mandatory initial `FULL`
 
@@ -150,9 +161,9 @@ No exact compatible baseline means a full run. The initial run always:
 5. promotes every semantic batch;
 6. builds the full managed behavior context and closes the semantic prefix at `READY_FOR_PIPELINE_TAIL`.
 
-Pipeline 6 tail execution, terminal receipt construction, and durable baseline advancement are Task 9 responsibilities. A clean committed FULL is only eligible for those later steps; a Task 8 `COMPLETE` action is not a terminal acceptance or baseline claim.
+Pipeline 6 tail execution, terminal receipt construction, and durable baseline advancement are Task 9 responsibilities. Any accepted FULL may enter the tail and receive an honest terminal status; only a clean committed FULL can advance a durable baseline. A Task 8 `COMPLETE` action is not a terminal acceptance or baseline claim.
 
-A supplied diff on the first run is recorded as an input digest but never narrows the baseline. For an initial Git `FULL`, the durable target is exactly the clean committed `HEAD` commit and tree. A dirty Git worktree may run only as a frozen content-snapshot `FULL`; it is explicitly `PROVISIONAL` and cannot advance a durable baseline. A non-Git project may likewise run only as a provisional full content-digest snapshot and cannot claim Git identity or become an incremental predecessor.
+A supplied diff on the first run is recorded as an input digest but never narrows the baseline. For an initial Git `FULL`, the durable target is exactly the clean committed `HEAD` commit and tree. A dirty Git worktree may run only as a frozen Git-backed `PROVISIONAL` FULL whose base commit/tree and target inventory snapshot are both bound; it cannot advance a durable baseline. A non-Git project requires no Git executable or repository: it creates/loads `.skillsrc`, selects one module, inventories filesystem bytes, freezes the content snapshot identity above, and runs the complete semantic prefix and tail as `PROVISIONAL`. It can generate, review, resume, and select test artifacts, but cannot claim Git identity, advance a durable baseline, or become a `CHANGE_SET` predecessor. Moving to Git later starts one clean FULL baseline; it does not import provisional authority.
 
 ### Subsequent `CHANGE_SET`
 
@@ -718,6 +729,52 @@ Branch rules are closed: FULL generator output contains exactly `candidate_docum
 
 No scope, accounting, receipt, raw source/diff/analytics, or technical evidence carrier enters generation or the tail. Full runs set `changed_behavior_context` to the complete validated behavior projection; change-set runs carry only the reviewed semantic delta and stable baseline identity/digest index needed to author the closed document delta.
 
+### Executable calibration and attempt identity
+
+The fixed 24-control suite is an executable release gate, not a report template. The same controller that drives a project run reads `scenarios.json` in its declared order and runs each synthetic control independently through the public action loop's seven logical phases:
+
+```text
+scope_selection
+scope_false_inclusion
+scope_omission
+candidate_extraction
+batch_false_claim
+batch_omission
+promotion
+```
+
+Each control uses a fresh single-source synthetic scope and `SEQUENTIAL` producer/reviewer contexts. The controller persists only the closed phase artifacts and their digests under the new attempt root; the already versioned synthetic snippet remains only in the eval suite and is not copied into the calibration report. A phase's `actual_verdict` is `PASS` only when the produced artifact, rejection/preservation behavior, audit verdict, and promotion state match that control's oracle. Correctly rejecting a deceptive claim is therefore a phase PASS. Any phase mismatch stops project promotion and prevents tail/baseline execution. The deterministic report validator checks schema, counts, order, digest readback, and status arithmetic; it never performs or substitutes for semantic review and never fills phase rows from expected values.
+
+Every real acceptance attempt begins with one create-only `attempt-root.json`:
+
+```json
+{
+  "schema_version": "1.0.0",
+  "artifact": "pipeline6-attempt-root",
+  "suite": "change-scoped-semantic-evidence",
+  "root_name": "inventree-full-project-2026-08-14-pipeline6-attempt-04",
+  "implementation_sha": "<40 lowercase hex>",
+  "target": {
+    "repository_id": "sha256:<64 lowercase hex>",
+    "commit": "<40 lowercase hex>",
+    "tree": "<40 lowercase hex>",
+    "module_id": "root",
+    "skillsrc_sha256": "sha256:<64 lowercase hex>"
+  },
+  "review_mode": "SEQUENTIAL"
+}
+```
+
+The object is closed and contains no absolute path. `attempt_root_sha256` is exactly `artifact_sha256(attempt-root.json)`; it is never a recursive directory hash. The acceptance test knows the one authorized external root, reopens this manifest, verifies the closed fields and digest, recursively inventories JSON artifacts only within that root, recomputes canonical digests, and requires every phase, terminal, and baseline digest named by the report to exist in that inventory. Attempts 02/03 and paths outside the authorized root are never searched or accepted.
+
+Calibration runs before the real project tail. Only a zero-mismatch calibration may drive the InvenTree prefix and tail. The final report then joins the already accepted calibration ledger with the real target commit/tree, terminal receipt, and baseline receipt. This ordering avoids a circular report dependency while making the calibration an actual baseline gate.
+
+### Tail host authority
+
+`baseline_root` is an explicit host input and is never inferred from the project or run root. A local non-Git run may use it only as the caller-selected location required by the common tail interface; the `PROVISIONAL` branch writes no baseline receipt, predecessor link, or baseline payload there. A CLI using the default rejecting execution registry may finish only a branch that genuinely requires no executable automation. Any generated automation that requires adapters or providers must use the programmatic tail API with an explicit allowlist registry and provider resolver. The registry authorizes only named adapter/action pairs; there is no allow-all default. Missing project dependencies, providers, adapters, executable symbols, or authoritative test evidence remain `NOT_RUNNABLE`/manual remainder according to the existing tail contracts and are never rewritten to PASS for acceptance.
+
+Task 11 uses a separately authorized baseline root. Its isolated bootstrap commit contains only the automatically generated and validated `.skillsrc`; the pipeline itself never stages or commits a project. The acceptance target is the resulting clean commit/tree, not the upstream pre-bootstrap commit. Existing InvenTree checkouts and historical attempts remain untouched.
+
 ## Persistence, concurrency, and resume
 
 All authoritative artifacts are canonical compact UTF-8 JSON with closed schemas and create-only deterministic paths. Run roots contain immutable scope generations, batch generations, promotions, receipt, and assurance summary. For Task 8A, only `feature-flow/prefix/<ordinal>-<artifact>.json` plus `feature-flow/prefix-ledger.json` select or resume state. `run_root/artifacts/<sha256>.json` is an immutable content-projection namespace required for Task 9 readback, never a state pointer or resume source. No mutable `current.json` exists.
@@ -726,7 +783,7 @@ Writes validate first, write a unique temporary sibling, flush where supported, 
 
 Each scope or batch generation has an exclusive lease epoch. A lease permits an attempted write but is not authority; committed readback is authority. Stale leases may be superseded after controller liveness checks. Batches can be sharded internally and processed in parallel; plan order controls final receipt order, and users never choose shard count.
 
-Task 8A resume reads only the frozen `feature-flow-input`, ordinal prefix records, and prefix ledger; it revalidates repository identity/commit/tree, durability, baseline, `.skillsrc`, inventories, frozen change input, plan, and current bytes; ignores incomplete temporary files; rejects gaps, branches, duplicate promotions, and out-of-order audits; then returns the exact next action. Drift triggers full refresh before semantic work or blocks an already frozen attempt; it never mutates the attempt in place. Content projections remain Task 9 readback inputs only.
+Task 8A resume reads only the frozen `feature-flow-input`, ordinal prefix records, and prefix ledger; it revalidates the source snapshot, optional Git identity, durability, baseline, `.skillsrc`, inventories, frozen change input, plan, and current bytes; ignores incomplete temporary files; rejects gaps, branches, duplicate promotions, and out-of-order audits; then returns the exact next action. Drift triggers full refresh before semantic work or blocks an already frozen attempt; it never mutates the attempt in place. Content projections remain Task 9 readback inputs only.
 
 ## Safety
 
@@ -743,6 +800,8 @@ All direct CLI failures use safe `{path, code, message}`, exit 2, and no traceba
 | Code | Meaning |
 |---|---|
 | `FEATURE_FLOW_INPUT` | CLI/input variant is incomplete, conflicting, or unsafe. |
+| `FEATURE_FLOW_EVIDENCE` | Action prerequisites, item ownership, byte authority, range, or content digest cannot be revalidated. |
+| `CALIBRATION_MISMATCH` | At least one fixed control phase differs from its oracle; project tail/baseline is forbidden. |
 | `BASELINE_MISSING` | No exact compatible baseline exists; action is full refresh. |
 | `BASELINE_BINDING` | Repository/tree/module/inventory/context identity differs. |
 | `CHANGE_INPUT` | Git range, worktree snapshot, or patch manifest is invalid. |
@@ -844,6 +903,12 @@ Implementation begins with these public-interface failures:
 39. `test_scope_predecessor_is_baseline_minted_and_opaque` — only `bind_scope_predecessor` can create a recursively immutable capability; it exposes exactly baseline identity, ordered source slots, and ordered requirement IDs, with no JSON projection or raw predecessor carrier.
 40. `test_scope_predecessor_revalidates_full_v5_receipt_joins` — foreign/digest-matched, incomplete, represented/no-fact, fragment/group/outcome, or requirement/product/source-link mismatch rejects before `CHANGE_SET` candidate creation and makes the façade select `RUN_FULL_BASELINE`.
 41. `test_scope_inputs_require_exact_predecessor_capability` — `FULL` accepts only `None`; `CHANGE_SET` rejects a missing, forged, module/repository/base-mismatched, or raw-envelope predecessor and snapshots/candidates retain no raw source/diff/receipt/fragment/planner content.
+42. `test_local_non_git_full_is_provisional_and_never_requires_git` — automatic `.skillsrc`, exact module selection, content-snapshot identity, complete prefix/tail, resume, and no baseline advancement work without a Git executable or repository.
+43. `test_multimodule_full_requires_exact_module_and_never_guesses` — `--module root` selects the exact normalized module; missing, foreign, or non-containing selections block.
+44. `test_batch_action_exposes_closed_projection_and_verified_evidence_reader` — the controller receives every exact item/source/range binding and verified bytes without raw durable content; foreign, stale, and drifted reads reject.
+45. `test_fixed_24_controls_execute_all_seven_phases` — 168 actual phase evaluations run in order; one oracle mismatch blocks the real tail and baseline.
+46. `test_attempt_root_manifest_binds_report_and_all_named_artifacts` — the closed root manifest defines `attempt_root_sha256`; every named digest reads back within the one authorized root and no prior attempt is authority.
+47. `test_tail_requires_explicit_adapter_and_provider_authority` — no execution requirement can pass through the default rejecting registry or an unlisted pair.
 
 Tests cross the external `feature_flow` interface. Focused internal module tests cover only invariants not observable through a practical façade scenario.
 
@@ -852,11 +917,12 @@ Tests cross the external `feature_flow` interface. Focused internal module tests
 Migration is one-way and shadowed before authority changes:
 
 1. implement closed schemas and modules while Pipeline 5 remains authoritative;
-2. run clean-commit FULL shadow baselines and the 12-category pilot; compare full context and complete materialized documents with V5 without publishing or advancing a baseline;
-3. run CHANGE_SET shadows across add/modify/delete/rename/binary, zero-op, rework, dirty-worktree, patch, and committed git-range examples; verify expected scope, V2 side evidence, delta, full document, and advancement eligibility;
-4. exercise the exact Pipeline 6 carrier complement, both generator branches, zero-op bypass, terminal receipt, fingerprint rejection, and atomic competing-successor behavior;
-5. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after focused GREEN, compatibility, and shadow gates pass;
-6. start InvenTree attempt-04 from a new root; never import or wrap attempt-02/03 batch results as promoted evidence.
+2. run the executable 24-control/12-category calibration; any mismatch stops before a project tail or baseline;
+3. run local non-Git and dirty-project provisional FULL shadows, then a clean-commit FULL shadow baseline; compare full context and complete materialized documents with V5 without publishing outside the isolated attempt;
+4. run CHANGE_SET shadows across add/modify/delete/rename/binary, zero-op, rework, dirty-worktree, patch, and committed git-range examples; verify expected scope, V2 side evidence, delta, full document, and advancement eligibility;
+5. exercise the exact Pipeline 6 carrier complement, both generator branches, zero-op bypass, terminal receipt, fingerprint rejection, and atomic competing-successor behavior;
+6. switch atomically to Pipeline 6, Context Marker V6, mode-aware Generator V4, Receipt V2, delta materialization, and baseline advancement only after focused GREEN, compatibility, and shadow gates pass;
+7. bootstrap only `.skillsrc` in an isolated InvenTree worktree, commit that exact configuration, and start attempt-04 from a new root; never import or wrap attempt-02/03 batch results as promoted evidence.
 
 Before each CHANGE_SET shadow, the façade must mint `ScopePredecessor` from readback of the exact predecessor full source envelope, V5 context envelope, and behavior-context receipt. Historical loose envelopes, receipts, or a reserialized capability cannot cross this seam. Historical V1 plans and V1 batch-result payloads remain valid only as nested FULL candidates. V2 plans/results are valid only as nested CHANGE_SET candidates. Neither version is directly authoritative. Historical V1 receipts and all loose or unreviewed V1/V2 results remain immutable evidence but are rejected by the live Pipeline 6 route. Deleted/before/rename evidence must be reprocessed as V2; no migration tool may fabricate modes, sides, capabilities, audits, promotions, tombstones, deltas, terminal receipts, or baselines.
 
@@ -874,10 +940,12 @@ Other residual risks:
 - binary/generated/config files may be opaque; ambiguity widens or refreshes rather than inventing meaning;
 - repeated auditor disagreement can grow immutable artifacts; rework stays batch-local and remains honest;
 - controller attestation defects can overstate independence; the default is `SEQUENTIAL` and trust requires an in-memory capability;
+- a local content snapshot cannot provide rename history or durable incremental ancestry; it remains FULL and provisional by design;
+- a host adapter allowlist can be incomplete or wrong; exact pair binding and honest `NOT_RUNNABLE` outcomes prevent silent execution claims;
 - long-running source drift can invalidate work; frozen inputs and repeated digest checks stop rather than mix snapshots.
 
 The intended trade is higher evidence cost at the exact point of change for much lower risk of generating tests from unsupported or incomplete behavior.
 
 ## Acceptance
 
-The design is accepted when a plain single LLM can run the complete action loop with no tuning; the first run always creates a complete exact baseline; later exact-baseline runs generate only reviewed changed behavior; ambiguity widens safely; tests remain technical evidence rather than requirements; every authoritative scope and batch has two semantic accepts; assurance is reported honestly; and no unpromoted or raw evidence can reach generation.
+The design is accepted when a plain single LLM can run the complete action loop with no tuning; a local project can complete a provisional FULL without Git; a clean configured Git project can create a durable exact baseline; later exact-baseline runs generate only reviewed changed behavior; all 24 fixed controls actually pass all seven phases before the real tail; ambiguity widens safely; tests remain technical evidence rather than requirements; every authoritative scope and batch has two semantic accepts; assurance and execution readiness are reported honestly; and no unpromoted or raw evidence can reach generation.

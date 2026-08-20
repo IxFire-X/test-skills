@@ -3,17 +3,18 @@
   "$id": "schemas/terminal-run-receipt.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "artifact", "prefix_ledger_sha256", "repository_id", "selected_module", "run_mode", "change_input", "analytics_sha256", "fingerprints", "artifacts", "acceptance"],
+  "required": ["schema_version", "artifact", "prefix_ledger_sha256", "repository_id", "selected_module", "run_mode", "change_input", "analytics_sha256", "source_snapshot_sha256", "fingerprints", "artifacts", "acceptance"],
   "properties": {
     "schema_version": {"const": "1.0.0"}, "artifact": {"const": "terminal-run-receipt"}, "prefix_ledger_sha256": {"$ref": "#/$defs/digest"},
-    "repository_id": {"$ref": "#/$defs/digest"}, "selected_module": {"type": "string", "minLength": 1},
-    "run_mode": {"enum": ["FULL", "CHANGE_SET"]}, "change_input": {"$ref": "#/$defs/change_input"},
-    "analytics_sha256": {"$ref": "#/$defs/digest"}, "fingerprints": {"$ref": "#/$defs/fingerprints"},
+    "repository_id": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"}, "selected_module": {"type": "string", "minLength": 1},
+    "run_mode": {"enum": ["FULL", "CHANGE_SET"]}, "change_input": {"type": ["null", "object"]},
+    "analytics_sha256": {"$ref": "#/$defs/digest"}, "source_snapshot_sha256": {"$ref": "#/$defs/digest"}, "fingerprints": {"$ref": "#/$defs/fingerprints"},
     "artifacts": {"$ref": "#/$defs/artifacts"}, "acceptance": {"$ref": "#/$defs/acceptance"}
   },
   "allOf": [
-    {"if": {"properties": {"run_mode": {"const": "FULL"}}, "required": ["run_mode"]}, "then": {"properties": {"change_input": {"not": {"properties": {"input_kind": {"const": "git_range"}}, "required": ["input_kind"]}}}}},
-    {"if": {"properties": {"run_mode": {"const": "CHANGE_SET"}}, "required": ["run_mode"]}, "then": {"properties": {"change_input": {"not": {"properties": {"input_kind": {"const": "git_head"}}, "required": ["input_kind"]}}}}},
+    {"if": {"properties": {"run_mode": {"const": "FULL"}}, "required": ["run_mode"]}, "then": {"properties": {"change_input": {"anyOf": [{"type": "null"}, {"not": {"properties": {"input_kind": {"const": "git_range"}}, "required": ["input_kind"]}}]}}}},
+    {"if": {"properties": {"run_mode": {"const": "CHANGE_SET"}}, "required": ["run_mode"]}, "then": {"required": ["repository_id", "change_input"], "properties": {"repository_id": {"$ref": "#/$defs/digest"}, "change_input": {"$ref": "#/$defs/change_input"}}}},
+    {"if": {"properties": {"repository_id": {"type": "null"}}, "required": ["repository_id"]}, "then": {"properties": {"run_mode": {"const": "FULL"}, "change_input": {"type": "null"}}}, "else": {"properties": {"change_input": {"$ref": "#/$defs/change_input"}}}},
     {"if": {"properties": {"acceptance": {"properties": {"test_case_review_verdict": {"const": "UNCHANGED_BASELINE"}}, "required": ["test_case_review_verdict"]}}, "required": ["acceptance"]}, "then": {"properties": {"artifacts": {"properties": {"validation_report_sha256": {"type": "null"}, "delta_application_receipt_sha256": {"$ref": "#/$defs/digest"}, "unchanged_document_selection_sha256": {"$ref": "#/$defs/digest"}}, "required": ["validation_report_sha256", "delta_application_receipt_sha256", "unchanged_document_selection_sha256"]}}}, "else": {"properties": {"artifacts": {"properties": {"validation_report_sha256": {"$ref": "#/$defs/digest"}, "delta_application_receipt_sha256": {"type": "null"}, "unchanged_document_selection_sha256": {"type": "null"}}, "required": ["validation_report_sha256", "delta_application_receipt_sha256", "unchanged_document_selection_sha256"]}}}}
   ],
   "$defs": {

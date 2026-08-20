@@ -147,6 +147,26 @@ def _git(project: Path, *args: str) -> str:
         raise FlowError("FEATURE_FLOW_INPUT", "/project", "Git proof is not canonical text.") from None
 
 
+def _git_provenance(project: Path) -> Mapping[str, Any] | None:
+    """Return the complete Git identity, or ``None`` for a local project only."""
+    try:
+        probe = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=project, capture_output=True, check=False)
+    except OSError:
+        return None
+    if probe.returncode:
+        if b"not a git repository" in probe.stderr.lower():
+            return None
+        raise FlowError("FEATURE_FLOW_INPUT", "/project", "Git proof could not be established.")
+    if probe.stdout.strip() != b"true":
+        return None
+    return {
+        "repository_id": _repository_id(project),
+        "commit": _git(project, "rev-parse", "HEAD^{commit}"),
+        "tree": _git(project, "rev-parse", "HEAD^{tree}"),
+        "status": _git(project, "status", "--porcelain=v1", "--untracked-files=all"),
+    }
+
+
 def _git_blob_reader(project: Path, commit: str):
     def read(portable_path: str) -> bytes:
         try:
@@ -172,22 +192,21 @@ def _inventory_snapshot_reader(project: Path, mode: str, change: Mapping[str, An
     return None
 
 
-def _full_provenance(project: Path, bootstrap_status: str, change: Mapping[str, Any] | None, existing: Mapping[str, Any] | None, skillsrc_sha256: str) -> Mapping[str, Any]:
+def _full_provenance(provenance: Mapping[str, Any], bootstrap_status: str, change: Mapping[str, Any] | None, existing: Mapping[str, Any] | None, skillsrc_sha256: str) -> Mapping[str, Any]:
     """Freeze the exact revision inventoried by a FULL run and its durability."""
-    status = _git(project, "status", "--porcelain=v1", "--untracked-files=all")
+    status = provenance["status"]
     dirty_paths = tuple(line.split(maxsplit=1)[-1] for line in status.splitlines() if line.split(maxsplit=1))
-    prior_provisional = isinstance(existing, Mapping) and isinstance(existing.get("source_revision"), Mapping) and existing["source_revision"].get("durability") == "PROVISIONAL"
     worktree = isinstance(change, Mapping) and change.get("input_kind") in {"git_worktree", "patch_manifest"}
     skillsrc_only = bool(dirty_paths) and all(path == ".skillsrc" for path in dirty_paths)
     if not dirty_paths:
         durability = "DURABLE"
-    elif worktree or (skillsrc_only and (bootstrap_status in {"created", "updated"} or prior_provisional)):
+    elif worktree or skillsrc_only:
         durability = "PROVISIONAL"
     else:
         raise FlowError("FEATURE_FLOW_INPUT", "/project", "A FULL run requires committed sources unless an explicit worktree snapshot is supplied.")
     return {
-        "commit": _git(project, "rev-parse", "HEAD^{commit}"),
-        "tree": _git(project, "rev-parse", "HEAD^{tree}"),
+        "commit": provenance["commit"],
+        "tree": provenance["tree"],
         "skillsrc_sha256": skillsrc_sha256,
         "durability": durability,
         "baseline_eligible": durability == "DURABLE",
@@ -200,23 +219,31 @@ def _repository_id(project: Path) -> str:
     return "sha256:" + hashlib.sha256(str(common).encode("utf-8")).hexdigest()
 
 
-def _module(project: Path, changed_paths: tuple[str, ...]) -> tuple[Mapping[str, Any], str]:
+def _module(project: Path, changed_paths: tuple[str, ...], module_id: str | None) -> tuple[Mapping[str, Any], str]:
+    skillsrc = project / ".skillsrc"
+    bootstrap_status = "unchanged"
+    if not skillsrc.exists():
+        try:
+            bootstrap = ensure_skillsrc(project, {}, write=True)
+        except (OSError, TypeError, ValueError):
+            raise FlowError("FEATURE_FLOW_INPUT", "/.skillsrc", "Project skill bootstrap could not be completed.") from None
+        if (
+            not isinstance(bootstrap, Mapping)
+            or schema_diagnostics(_plain(bootstrap), _ROOT / "schemas" / "skillsrc-init-output.schema.json", _ROOT)
+            or bootstrap.get("status") not in {"created", "updated", "unchanged"}
+        ):
+            raise FlowError("FEATURE_FLOW_INPUT", "/.skillsrc", "Project skill bootstrap requires safe user input or resolution.")
+        bootstrap_status = str(bootstrap["status"])
     try:
-        bootstrap = ensure_skillsrc(project, {}, write=True)
-    except (OSError, TypeError, ValueError):
-        raise FlowError("FEATURE_FLOW_INPUT", "/.skillsrc", "Project skill bootstrap could not be completed.") from None
-    if (
-        not isinstance(bootstrap, Mapping)
-        or schema_diagnostics(_plain(bootstrap), _ROOT / "schemas" / "skillsrc-init-output.schema.json", _ROOT)
-        or bootstrap.get("status") not in {"created", "updated", "unchanged"}
-    ):
-        raise FlowError("FEATURE_FLOW_INPUT", "/.skillsrc", "Project skill bootstrap requires safe user input or resolution.")
-    try:
-        normalized = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))
+        normalized = normalize_skillsrc(load_skillsrc(skillsrc))
     except (OSError, SkillsrcError):
         raise FlowError("FEATURE_FLOW_INPUT", "/.skillsrc", "A valid project .skillsrc is required.") from None
     modules = list(normalized["modules"])
-    if not changed_paths:
+    if module_id is not None:
+        if not isinstance(module_id, str) or not module_id:
+            raise FlowError("FEATURE_FLOW_INPUT", "/module", "Module selection must name one exact configured module.")
+        selected_id = module_id
+    elif not changed_paths:
         if len(modules) != 1:
             raise FlowError("FEATURE_FLOW_INPUT", "/module", "Exactly one module must be selected.")
         selected_id: str | None = None
@@ -236,7 +263,12 @@ def _module(project: Path, changed_paths: tuple[str, ...]) -> tuple[Mapping[str,
         resolve_module_root(project.resolve(), selected)
     except SkillsrcError:
         raise FlowError("FEATURE_FLOW_INPUT", "/module", "Selected module root is unsafe.") from None
-    return selected, str(bootstrap["status"])
+    root = str(selected.get("root", "")).strip("/")
+    root = "" if root == "." else root
+    prefix = "" if not root else root + "/"
+    if changed_paths and not all(path == root or path.startswith(prefix) for path in changed_paths):
+        raise FlowError("FEATURE_FLOW_INPUT", "/module", "Selected module does not contain every changed path.")
+    return selected, bootstrap_status
 
 
 def _baseline_root(receipt_path: Path) -> Path:
@@ -294,7 +326,10 @@ def _manifest(run_root: Path, value: Mapping[str, Any]) -> None:
     if path.exists():
         existing = _read_json(path, "FLOW_CONFLICT", "/run_root")
         if _plain(existing) != _plain(value):
-            if existing.get("run_mode") == value.get("run_mode") == "FULL" and existing.get("source_revision") != value.get("source_revision"):
+            if existing.get("run_mode") == value.get("run_mode") == "FULL" and (
+                existing.get("source_revision") != value.get("source_revision")
+                or existing.get("source_snapshot_sha256") != value.get("source_snapshot_sha256")
+            ):
                 raise FlowError("CHANGE_SOURCE_DRIFT", "/project", "The frozen FULL source revision has changed.")
             if existing.get("change_input_sha256") and value.get("change_input_sha256") and existing.get("run_mode") == value.get("run_mode") == "FULL":
                 raise FlowError("CHANGE_SOURCE_DRIFT", "/change_input", "Frozen provisional change input has changed.")
@@ -373,6 +408,206 @@ def _record_path(run_root: Path, index: int, kind: str) -> Path:
     directory = run_root / "feature-flow" / "prefix"
     directory.mkdir(parents=True, exist_ok=True)
     return directory / f"{index:06d}-{_record_label(kind)}.json"
+
+
+def _read_binding(run_root: Path, binding: Any, pointer: str) -> Mapping[str, Any]:
+    if not isinstance(binding, Mapping) or set(binding) != {"path", "sha256"} or not isinstance(binding.get("path"), str):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", pointer, "A closed immutable artifact binding is required.")
+    relative = PurePosixPath(binding["path"])
+    if relative.is_absolute() or ".." in relative.parts or "\\" in binding["path"]:
+        raise FlowError("FEATURE_FLOW_EVIDENCE", pointer, "Artifact binding path is unsafe.")
+    try:
+        root = run_root.resolve(strict=True)
+        path = (root / Path(*relative.parts)).resolve(strict=True)
+        path.relative_to(root)
+        value = _read_json(path, "FEATURE_FLOW_EVIDENCE", pointer)
+        raw = path.read_bytes()
+    except (OSError, ValueError):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", pointer, "Bound artifact is unavailable.") from None
+    if raw != canonical_bytes(value) or artifact_sha256(value) != binding.get("sha256"):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", pointer, "Bound artifact does not match its digest.")
+    return value
+
+
+def _change_side_source(change: Mapping[str, Any] | None, change_id: Any, side: str) -> Mapping[str, Any] | None:
+    """Return one frozen change side with its portable path restored."""
+    if not isinstance(change, Mapping) or not isinstance(change_id, str):
+        return None
+    rows = [row for row in change.get("changes", ()) if isinstance(row, Mapping) and row.get("change_id") == change_id]
+    if len(rows) != 1 or not isinstance(rows[0].get(side), Mapping):
+        return None
+    row, source = rows[0], rows[0][side]
+    path = row.get("old_path" if side == "before" and row.get("kind") == "renamed" else "new_path" if side == "after" and row.get("kind") == "renamed" else "path")
+    if not isinstance(path, str) or not isinstance(source.get("source_id"), str) or not isinstance(source.get("content_sha256"), str):
+        return None
+    return {"path": path, "source_id": source["source_id"], "content_digest": source["content_sha256"]}
+
+
+def _batch_prompt(plan: Mapping[str, Any], prompt: Mapping[str, Any], inventory: Mapping[str, Any], change: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Attach the selected closed item projection without changing record authority."""
+    batch_id = prompt.get("batch_id")
+    batch = next((row for row in plan.get("batches", ()) if isinstance(row, Mapping) and row.get("batch_id") == batch_id), None)
+    if not isinstance(batch, Mapping):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", "/plan", "Batch action does not name an exact planned batch.")
+    sources = inventory.get("artifacts", {}).get("authorized_behavior_sources", {}).get("sources", ())
+    by_id = {row.get("source_id"): row for row in sources if isinstance(row, Mapping)}
+    items: list[Mapping[str, Any]] = []
+    for item in batch.get("items", ()):
+        if not isinstance(item, Mapping):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/plan", "Batch item is invalid.")
+        row = dict(_plain(item))
+        source_id = row.get("source_id") or row.get("current_source_id")
+        source = by_id.get(source_id)
+        if not isinstance(source, Mapping):
+            source = _change_side_source(change, row.get("change_id"), "before")
+        if isinstance(source, Mapping):
+            row.update({key: source[key] for key in ("path", "content_digest") if key in source})
+        for evidence_side, identity_key in (("before", "baseline_source_id"), ("after", "current_source_id")):
+            identity = row.get(identity_key)
+            bound = by_id.get(identity)
+            if not isinstance(bound, Mapping):
+                bound = _change_side_source(change, row.get("change_id"), evidence_side)
+            if isinstance(bound, Mapping):
+                row.update({f"{evidence_side}_{key}": bound[key] for key in ("path", "content_digest") if key in bound})
+        items.append(row)
+    value = dict(_plain(prompt)); value["items"] = items
+    return _freeze(value)
+
+
+def _batch_action_payload(
+    run_root: Path, kind: str, prompt: Mapping[str, Any], plan: Mapping[str, Any],
+    inventory: Mapping[str, Any], manifest: Mapping[str, Any], change: Mapping[str, Any] | None, destination: Path,
+) -> Mapping[str, Any]:
+    prerequisites = {
+        "context_plan": _binding(run_root, plan),
+        "source_inventory": _binding(run_root, inventory),
+        "flow_input": _binding(run_root, manifest),
+    }
+    if change is not None:
+        prerequisites["change_input"] = _binding(run_root, change)
+    bound_prompt = _batch_prompt(plan, prompt, inventory, change)
+    carrier = {
+        "schema_version": "1.0.0", "artifact": "feature-flow-batch-action", "action": kind,
+        "record_path": destination.resolve().relative_to(run_root.resolve()).as_posix(),
+        "run_mode": bound_prompt.get("run_mode"), "prerequisites": _plain(prerequisites), "request": _plain(bound_prompt),
+    }
+    return _freeze({
+        "run_mode": carrier["run_mode"], "action": kind, "artifact": _binding(run_root, carrier),
+        "prerequisites": carrier["prerequisites"], "prompt": carrier["request"],
+    })
+
+
+def _authenticated_evidence_action(run_root: Path, action: FeatureFlowAction) -> Mapping[str, Any]:
+    """Require the caller's batch action to equal its persisted destination-bound carrier."""
+    destination = _record_path(run_root, len(_records(run_root)) + 1, action.kind)
+    if action.record_path != destination:
+        raise FlowError("FEATURE_FLOW_EVIDENCE", "/action", "Batch action does not name the current canonical record destination.")
+    artifact = action.artifact
+    if (not isinstance(artifact, Mapping)
+            or set(artifact) != {"run_mode", "action", "artifact", "prerequisites", "prompt"}
+            or artifact.get("action") != action.kind or not isinstance(artifact.get("prompt"), Mapping)):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", "/action", "Batch action has no canonical persisted prompt.")
+    carrier = _read_binding(run_root, artifact.get("artifact"), "/action/artifact")
+    expected_path = destination.resolve().relative_to(run_root.resolve()).as_posix()
+    if (set(carrier) != {"schema_version", "artifact", "action", "record_path", "run_mode", "prerequisites", "request"}
+            or carrier.get("schema_version") != "1.0.0" or carrier.get("artifact") != "feature-flow-batch-action"
+            or carrier.get("action") != action.kind or carrier.get("record_path") != expected_path
+            or _plain({key: artifact.get(key) for key in ("run_mode", "action", "prerequisites", "prompt")})
+            != _plain({"run_mode": carrier.get("run_mode"), "action": carrier.get("action"), "prerequisites": carrier.get("prerequisites"), "prompt": carrier.get("request")})):
+        raise FlowError("FEATURE_FLOW_EVIDENCE", "/action", "Batch action does not match its canonical persisted carrier.")
+    return artifact
+
+
+def read_feature_flow_evidence(
+    project: Path, run_root: Path, action: FeatureFlowAction, item_id: str, side: str | None = None,
+    *, change_input: ChangeInputSpec | None = None, blob_resolver: BlobResolver | None = None,
+) -> bytes:
+    """Read exactly one digest-verified range named by a public batch action."""
+    try:
+        if not all(isinstance(value, Path) for value in (project, run_root)) or not isinstance(action, FeatureFlowAction) or action.kind not in {"PRODUCE_BATCH_CANDIDATE", "RUN_BATCH_FALSE_CLAIM_AUDIT", "RUN_BATCH_OMISSION_AUDIT"} or not isinstance(item_id, str):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/action", "A batch action and item ID are required.")
+        artifact = _authenticated_evidence_action(run_root, action)
+        if not isinstance(artifact.get("prerequisites"), Mapping):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/action", "Batch action has no closed evidence bindings.")
+        prerequisites = artifact["prerequisites"]
+        plan = _read_binding(run_root, prerequisites.get("context_plan"), "/action/prerequisites/context_plan")
+        inventory = _read_binding(run_root, prerequisites.get("source_inventory"), "/action/prerequisites/source_inventory")
+        flow = _read_binding(run_root, prerequisites.get("flow_input"), "/action/prerequisites/flow_input")
+        prompt = artifact["prompt"]
+        batch_id = prompt.get("batch_id")
+        batches = [row for row in plan.get("batches", ()) if isinstance(row, Mapping) and row.get("batch_id") == batch_id]
+        if len(batches) != 1:
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/action/prompt/batch_id", "Action batch is not uniquely bound.")
+        items = [row for row in batches[0].get("items", ()) if isinstance(row, Mapping) and row.get("item_id") == item_id]
+        if len(items) != 1:
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Item is not uniquely owned by the selected batch.")
+        item = items[0]
+        mode = flow.get("run_mode")
+        change = None
+        if mode == "FULL":
+            if side is not None:
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/side", "FULL evidence has no before-or-after side.")
+            source_id, range_row = item.get("source_id"), item
+        else:
+            change = _read_binding(run_root, prerequisites.get("change_input"), "/action/prerequisites/change_input")
+            evidence = [row for row in item.get("evidence_sides", ()) if isinstance(row, Mapping) and row.get("side") == side]
+            if side not in {"before", "after"} or len(evidence) != 1:
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/side", "Change evidence side is not uniquely bound.")
+            source_id, range_row = (item.get("baseline_source_id") if side == "before" else item.get("current_source_id")), evidence[0]
+        sources = inventory.get("artifacts", {}).get("authorized_behavior_sources", {}).get("sources", ())
+        source = next((row for row in sources if isinstance(row, Mapping) and row.get("source_id") == source_id), None)
+        frozen = _change_side_source(change, item.get("change_id"), str(side)) if mode != "FULL" else None
+        if not isinstance(source, Mapping):
+            source = frozen
+        if not isinstance(source, Mapping) or not isinstance(source.get("path"), str):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Item source is not in the bound inventory or frozen change input.")
+        if source is not frozen and source.get("source_id") != source_id:
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Item source does not bind the requested evidence side.")
+        path = PurePosixPath(source["path"])
+        if path.is_absolute() or ".." in path.parts or "\\" in source["path"]:
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Item source path is unsafe.")
+        revision = flow.get("source_revision")
+        if mode == "FULL" and isinstance(revision, Mapping) and revision.get("durability") == "DURABLE":
+            data = _git_blob_reader(project, str(revision.get("commit")))(source["path"])
+        elif mode != "FULL" and isinstance(change, Mapping) and change.get("input_kind") == "git_range":
+            snapshot = change.get("base") if side == "before" else change.get("target")
+            if not isinstance(snapshot, Mapping) or not isinstance(snapshot.get("commit"), str):
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/action/prerequisites/change_input", "Git range snapshot is not bound.")
+            data = _git_blob_reader(project, snapshot["commit"])(source["path"])
+        elif mode != "FULL" and isinstance(change, Mapping) and change.get("input_kind") == "git_worktree" and side == "before":
+            snapshot = change.get("base")
+            if not isinstance(snapshot, Mapping) or not isinstance(snapshot.get("commit"), str):
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/action/prerequisites/change_input", "Worktree base snapshot is not bound.")
+            data = _git_blob_reader(project, snapshot["commit"])(source["path"])
+        elif mode != "FULL" and isinstance(change, Mapping) and change.get("input_kind") == "patch_manifest":
+            if not isinstance(change_input, ChangeInputSpec) or change_input.patch_manifest is None or blob_resolver is None:
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/change_input", "Patch evidence requires the original ChangeInputSpec and BlobResolver.")
+            reacquired = acquire_change_input(project, change_input, blob_resolver)
+            if artifact_sha256(_plain(reacquired)) != artifact_sha256(_plain(change)):
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/change_input", "Reacquired patch input does not match the bound change input.")
+            manifest = _read_json(change_input.patch_manifest, "FEATURE_FLOW_EVIDENCE", "/change_input/patch_manifest")
+            blobs = manifest.get("content_blobs", ())
+            blob = next((row for row in blobs if isinstance(row, Mapping) and row.get("content_sha256") == range_row.get("content_sha256")), None)
+            blob_id = blob.get("controller_blob_id") if isinstance(blob, Mapping) else None
+            data = blob_resolver.get(blob_id) if isinstance(blob_resolver, Mapping) else blob_resolver(blob_id) if isinstance(blob_id, str) else None
+            if not isinstance(data, bytes):
+                raise FlowError("FEATURE_FLOW_EVIDENCE", "/change_input", "Patch blob could not be resolved from its bound controller identity.")
+        else:
+            target = (project.resolve() / Path(*path.parts)).resolve()
+            target.relative_to(project.resolve())
+            data = target.read_bytes()
+        digest = source.get("content_digest") if mode == "FULL" else range_row.get("content_sha256")
+        read_range = range_row.get("read_range")
+        if not isinstance(digest, str) or digest != "sha256:" + hashlib.sha256(data).hexdigest() or not isinstance(read_range, Mapping):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Evidence content no longer matches its bound digest.")
+        start, end = read_range.get("start"), read_range.get("end")
+        if type(start) is not int or type(end) is not int or start < 0 or end < start or end > len(data):
+            raise FlowError("FEATURE_FLOW_EVIDENCE", "/item_id", "Evidence range is outside verified content.")
+        return data[start:end]
+    except FlowError:
+        raise
+    except Exception:
+        raise FlowError("FEATURE_FLOW_EVIDENCE", "/evidence", "Evidence could not be read.") from None
 
 
 def _replayed_record(run_root: Path, records: list[Mapping[str, Any]], index: int, kind: str, supplied: Path | None) -> tuple[Mapping[str, Any], Path | None]:
@@ -503,6 +738,7 @@ def advance_feature_flow(
     controller: ReviewController | None = None,
     *,
     blob_resolver: BlobResolver | None = None,
+    module_id: str | None = None,
 ) -> FeatureFlowAction:
     """Advance only one deterministic semantic-prefix action from canonical readback."""
     del controller  # Prefix assurance is always SEQUENTIAL; controller tuning is not public.
@@ -515,7 +751,7 @@ def advance_feature_flow(
         if change_input is not None and change_input.patch_manifest is not None and blob_resolver is None:
             raise FlowError("FEATURE_FLOW_INPUT", "/patch_manifest", "Patch manifests require an in-process BlobResolver.")
         change = acquire_change_input(project, change_input, blob_resolver) if change_input is not None else None
-        module, bootstrap_status = _module(project, _change_paths(change))
+        module, bootstrap_status = _module(project, _change_paths(change), module_id)
         mode, baseline, predecessor, effective, source, context, behavior_receipt = "FULL", None, None, None, None, None, None
         if baseline_receipt is None:
             # A first-run range/worktree is frozen in the manifest for drift
@@ -540,15 +776,32 @@ def advance_feature_flow(
         if manifest_path.exists():
             existing_manifest = _read_json(manifest_path, "FLOW_CONFLICT", "/run_root")
         skillsrc_sha256 = _safe_digest(project / ".skillsrc", "FEATURE_FLOW_INPUT", "/.skillsrc")
-        source_revision = _full_provenance(project, bootstrap_status, change, existing_manifest, skillsrc_sha256) if mode == "FULL" else None
-        manifest = {"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": change["repository_id"] if change else _repository_id(project),
+        provenance = _git_provenance(project)
+        if mode == "CHANGE_SET" and provenance is None:
+            raise FlowError("FEATURE_FLOW_INPUT", "/project", "Change-scoped execution requires Git provenance.")
+        source_revision = (
+            _full_provenance(provenance, bootstrap_status, change, existing_manifest, skillsrc_sha256)
+            if mode == "FULL" and provenance is not None
+            else None if provenance is None else {
+                "commit": provenance["commit"], "tree": provenance["tree"], "skillsrc_sha256": skillsrc_sha256,
+                "durability": "DURABLE" if change.get("input_kind") == "git_range" else "PROVISIONAL",
+                "baseline_eligible": change.get("input_kind") == "git_range",
+            }
+        )
+        snapshot_reader = _inventory_snapshot_reader(project, mode, change, source_revision)
+        inventories = build_source_inventories(project, load_skillsrc(project / ".skillsrc"), module["id"], (), snapshot_reader=snapshot_reader)
+        source_snapshot_sha256 = artifact_sha256({
+            "selected_module": module["id"], "skillsrc_sha256": skillsrc_sha256,
+            "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+            "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+        })
+        manifest = {"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": change["repository_id"] if change else (None if provenance is None else provenance["repository_id"]),
                     "selected_module": module["id"], "run_mode": mode, "analytics_sha256": analytics_digest,
                     "baseline_receipt_sha256": None if baseline is None else baseline.receipt_sha256,
                     "change_input_sha256": None if change is None else change["change_input_sha256"], "skillsrc_sha256": skillsrc_sha256,
-                    "source_revision": source_revision}
+                    "source_revision": source_revision, "durability": "PROVISIONAL" if source_revision is None else source_revision["durability"],
+                    "source_snapshot_sha256": source_snapshot_sha256}
         _manifest(run_root, manifest)
-        snapshot_reader = _inventory_snapshot_reader(project, mode, change, source_revision)
-        inventories = build_source_inventories(project, load_skillsrc(project / ".skillsrc"), module["id"], (), snapshot_reader=snapshot_reader)
         source_envelope = {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
             "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
             "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
@@ -575,7 +828,7 @@ def advance_feature_flow(
                     destination = _record_path(run_root, index + 1, action.kind)
                     supplied = _recorded(destination, recorded_artifact)
                     _artifact(run_root, supplied)
-                    return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver)
+                    return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver, module_id=module_id)
                 return FeatureFlowAction(action.kind, _action_payload(run_root, action.kind, action.artifact), _record_path(run_root, index + 1, action.kind))
             value, recorded_artifact = _replayed_record(run_root, records, index, action.kind, recorded_artifact)
             scope = record_scope(scope, value); index += 1
@@ -612,8 +865,10 @@ def advance_feature_flow(
                     destination = _record_path(run_root, index + 1, action.kind)
                     supplied = _recorded(destination, recorded_artifact)
                     _artifact(run_root, supplied)
-                    return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver)
-                return FeatureFlowAction(action.kind, _action_payload(run_root, action.kind, action.artifact), _record_path(run_root, index + 1, action.kind))
+                    return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver, module_id=module_id)
+                destination = _record_path(run_root, index + 1, action.kind)
+                payload = _batch_action_payload(run_root, action.kind, action.artifact, plan, source_envelope, manifest, change, destination) if action.kind in {"PRODUCE_BATCH_CANDIDATE", "RUN_BATCH_FALSE_CLAIM_AUDIT", "RUN_BATCH_OMISSION_AUDIT"} else _action_payload(run_root, action.kind, action.artifact)
+                return FeatureFlowAction(action.kind, payload, destination)
             value, recorded_artifact = _replayed_record(run_root, records, index, action.kind, recorded_artifact)
             promotion = record_promotion(promotion, value); current.append(value); index += 1
         if index < len(records):
@@ -636,7 +891,7 @@ def advance_feature_flow(
                 return FeatureFlowAction("GENERATE_CHANGED_BEHAVIOR", _action_payload(run_root, "GENERATE_CHANGED_BEHAVIOR", request, prerequisites), _record_path(run_root, index + 1, "GENERATE_CHANGED_BEHAVIOR"))
             generated = _recorded(_record_path(run_root, index + 1, "GENERATE_CHANGED_BEHAVIOR"), recorded_artifact)
             _artifact(run_root, generated)
-            return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver)
+            return advance_feature_flow(project, analytics, run_root, baseline_receipt, change_input, blob_resolver=blob_resolver, module_id=module_id)
         # Recompose on readback, then make the closed handoff.  We intentionally
         # do not run tc-reviewer, automation, trace, terminal receipt, or advance baseline.
         resolver = _byte_resolver(project, baseline, snapshot_reader) if baseline is not None else (lambda side, row: snapshot_reader(str(row["path"])) if snapshot_reader is not None else (project / Path(*str(row["path"]).split("/"))).read_bytes())

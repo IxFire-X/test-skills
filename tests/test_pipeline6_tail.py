@@ -5,12 +5,16 @@ import unittest
 import subprocess
 import json
 import sys
+import copy
 from dataclasses import fields
 from pathlib import Path
 
 from tools.flow_artifacts import FlowError, artifact_sha256, canonical_bytes
 from tools.contract_check import materialize_fingerprint_registries
 from tools.pipeline6_tail import PipelineTailAction, _terminal_change_input, advance_pipeline6_tail
+from tools.feature_flow import _plain
+from tools.skillsrc_manifest import load_skillsrc
+from tools.test_classification import build_source_inventories
 from tests.test_baseline_lifecycle import build_run, make_project, persist_terminal, bundle_for
 from tools.baseline_lifecycle import advance_baseline, bind_effective_baseline, validate_baseline_receipt
 from tools.document_delta import apply_document_delta, delta_application_receipt, unchanged_document_selection
@@ -72,7 +76,39 @@ class Pipeline6TailTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _feature_prefix(self, root: Path, fixture: dict, repository: str, head: str, tree: str, full_change: dict | None = None) -> None:
+    @staticmethod
+    def _install_skillsrc(project: Path) -> None:
+        (project / ".skillsrc").write_text(json.dumps({
+            "version": "3.0", "project": {"name": "fixture"},
+            "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+            "modules": [{"id": "root", "root": ".", "stack": {"language": "python"}, "paths": {"source": ["feature.txt"]}, "detected_from": ["pyproject.toml"]}],
+        }), encoding="utf-8")
+
+    @staticmethod
+    def _rebind_fixture_source(root: Path, fixture: dict, project: Path, head: str | None = None) -> None:
+        reader = None if head is None else lambda portable: subprocess.run(["git", "show", f"{head}:{portable}"], cwd=project, check=True, capture_output=True).stdout
+        inventories = build_source_inventories(project, load_skillsrc(project / ".skillsrc"), "root", (), snapshot_reader=reader)
+        source = {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
+            "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+            "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+        }, "warnings": []}
+        source_row = source["artifacts"]["authorized_behavior_sources"]["sources"][0]
+        from tests import test_baseline_lifecycle as lifecycle
+        def rebind(values: dict) -> None:
+            values["technical_test_inventory"] = source
+            receipt = values["behavior_context_receipt"]
+            receipt["fragment_registry"][0]["source_id"] = source_row["source_id"]
+            receipt["source_outcomes"][0]["source_id"] = source_row["source_id"]
+            managed = values["managed_behavior_context"]["artifacts"]["managed_behavior_context"]
+            managed["product_sources"] = [{**source_row, "summary": "Fixture behavior source."}]
+            managed["requirement_sources"][0]["source_ids"] = [source_row["source_id"]]
+            values["managed_behavior_context"]["artifacts"]["behavior_source_accounting"]["source_dispositions"][0]["source_id"] = source_row["source_id"]
+        lifecycle.BaselineLifecycleTests().rewrite_prefix_graph(root / "run", fixture, rebind)
+        for binding in fixture["ledger_value"]["artifacts"].values():
+            payload = (root / "run" / binding["path"]).read_bytes()
+            (root / "run" / "artifacts" / f"{binding['sha256'][7:]}.json").write_bytes(payload)
+
+    def _feature_prefix(self, root: Path, fixture: dict, repository: str, head: str, tree: str, full_change: dict | None = None, *, local: bool = False, project: Path | None = None) -> None:
         run = root / "run"; artifact = fixture["ledger_value"]["artifacts"]
         # The fixture's legacy lifecycle manifest is deliberately replaced by
         # the Task 9 tail-enriched manifest under the same canonical location.
@@ -82,10 +118,43 @@ class Pipeline6TailTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(payload)
             return {"path": path.relative_to(run).as_posix(), "sha256": "sha256:" + __import__("hashlib").sha256(payload).hexdigest()}
         change = None if full_change is None else put("change", full_change)
-        flow = put("flow", {"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": repository, "selected_module": "root", "run_mode": "FULL", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "baseline_receipt_sha256": None, "change_input_sha256": None if full_change is None else artifact_sha256(full_change), "skillsrc_sha256": fixture["ledger_value"]["analytics_sha256"], "source_revision": {"commit": head, "tree": tree}})
+        source = artifact["technical_test_inventory"]
+        skillsrc_sha256, source_snapshot = fixture["ledger_value"]["analytics_sha256"], "sha256:" + "a" * 64
+        if project is not None and not local:
+            skillsrc_bytes = (project / ".skillsrc").read_bytes()
+            reader = None if full_change is not None else lambda portable: subprocess.run(["git", "show", f"{head}:{portable}"], cwd=project, check=True, capture_output=True).stdout
+            inventories = build_source_inventories(project, load_skillsrc(project / ".skillsrc"), "root", (), snapshot_reader=reader)
+            source = put("git-source", {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
+                "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+                "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+            }, "warnings": []})
+            (run / "artifacts" / f"{source['sha256'][7:]}.json").write_bytes((run / source["path"]).read_bytes())
+            skillsrc_sha256 = "sha256:" + __import__("hashlib").sha256(skillsrc_bytes).hexdigest()
+            source_snapshot = artifact_sha256({"selected_module": "root", "skillsrc_sha256": skillsrc_sha256,
+                "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+                "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256})
+        if local:
+            if project is None:
+                raise AssertionError("local fixture requires a never-Git project")
+            skillsrc_bytes = (project / ".skillsrc").read_bytes()
+            inventories = build_source_inventories(project, load_skillsrc(project / ".skillsrc"), "root", ())
+            source = put("local-source", {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
+                "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+                "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+            }, "warnings": []})
+            skillsrc_sha256 = "sha256:" + __import__("hashlib").sha256(skillsrc_bytes).hexdigest()
+            source_snapshot = artifact_sha256({"selected_module": "root", "skillsrc_sha256": skillsrc_sha256,
+                "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+                "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256})
+        flow = put("flow", {"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": None if local else repository, "selected_module": "root", "run_mode": "FULL", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "baseline_receipt_sha256": None, "change_input_sha256": None if full_change is None else artifact_sha256(full_change), "skillsrc_sha256": skillsrc_sha256, "source_snapshot_sha256": source_snapshot, "source_revision": None if local else {"commit": head, "tree": tree, "durability": "PROVISIONAL" if full_change is not None else "DURABLE"}})
         document = fixture["document"]
         handoff = put("handoff", {"schema_version": "1.0.0", "artifact": "feature-flow-ready-handoff", "status": "READY_FOR_PIPELINE_TAIL", "run_mode": "FULL", "generator_output": flow, "changed_behavior_context": artifact["changed_behavior_context"], "behavior_context_receipt": artifact["behavior_context_receipt"], "candidate_document": put("candidate", document)})
-        bindings = {"flow_input": flow, "source_inventory": artifact["technical_test_inventory"], "change_scope_receipt": artifact["change_scope_receipt"], "context_envelope": artifact["managed_behavior_context"], "changed_behavior_context": artifact["changed_behavior_context"], "behavior_context_receipt": artifact["behavior_context_receipt"], "delta_handoff": handoff}
+        scope = artifact["change_scope_receipt"]
+        if local:
+            value = copy.deepcopy(json.loads((run / scope["path"]).read_bytes()))
+            value["source"]["repository_id"] = None
+            scope = put("local-scope", value)
+        bindings = {"flow_input": flow, "source_inventory": source, "change_scope_receipt": scope, "context_envelope": artifact["managed_behavior_context"], "changed_behavior_context": artifact["changed_behavior_context"], "behavior_context_receipt": artifact["behavior_context_receipt"], "delta_handoff": handoff}
         if change is not None: bindings["change_input"] = change
         ledger = {"schema_version": "1.0.0", "artifact": "feature-flow-prefix-ledger", "status": "READY_FOR_PIPELINE_TAIL", "run_mode": "FULL", "selected_module": "root", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "artifacts": bindings, "records": []}
         path = run / "feature-flow" / "prefix-ledger.json"; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(canonical_bytes(ledger))
@@ -95,11 +164,13 @@ class Pipeline6TailTests(unittest.TestCase):
             root = Path(temp); project, identity, _, _ = make_project(root)
             (project / "tests").mkdir(); (project / "tests" / "test_item.py").write_text("def test_item(): pass", encoding="utf-8")
             self._install_pytest_shim(project)
+            self._install_skillsrc(project)
             subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "test"], cwd=project, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
             tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
             fixture = build_run(root / "run", identity, head, tree)
-            self._feature_prefix(root, fixture, identity, head, tree)
+            self._rebind_fixture_source(root, fixture, project, head)
+            self._feature_prefix(root, fixture, identity, head, tree, project=project)
             records = [
                 fixture["ledger_value"] and __import__("json").loads((root / "run" / fixture["ledger_value"]["artifacts"]["technical_test_classification"]["path"]).read_bytes()),
                 __import__("json").loads((root / "run" / fixture["ledger_value"]["artifacts"]["classification_review"]["path"]).read_bytes()),
@@ -124,11 +195,20 @@ class Pipeline6TailTests(unittest.TestCase):
             root = Path(temp); project, identity, _, _ = make_project(root)
             (project / "tests").mkdir(); (project / "tests" / "test_item.py").write_text("def test_item(): pass", encoding="utf-8")
             self._install_pytest_shim(project)
+            self._install_skillsrc(project)
             subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "test"], cwd=project, check=True)
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
             tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
             fixture = build_run(root / "run", identity, head, tree)
-            self._feature_prefix(root, fixture, identity, head, tree, {"input_kind": "git_worktree", "repository_id": identity, "base": {"commit": head, "tree": tree, "snapshot_sha256": "sha256:" + "a" * 64}, "target": {"snapshot_sha256": "sha256:" + "b" * 64}, "changes": []})
+            self._rebind_fixture_source(root, fixture, project)
+            self._feature_prefix(root, fixture, identity, head, tree, {"input_kind": "git_worktree", "repository_id": identity, "base": {"commit": head, "tree": tree, "snapshot_sha256": "sha256:" + "a" * 64}, "target": {"snapshot_sha256": "sha256:" + "b" * 64}, "changes": []}, project=project)
+            source_path = project / "feature.txt"; original = source_path.read_bytes()
+            source_path.write_bytes(original + b"drift\n")
+            drift = advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=self._ReadyResolver(), adapter_registry=self._ReadyRegistry(), fingerprint_registries=_current_registries())
+            self.assertEqual("BLOCKED", drift.kind)
+            self.assertEqual("CHANGE_SOURCE_DRIFT", drift.diagnostics[0]["code"])
+            self.assertFalse((root / "run" / "pipeline6-tail" / "records").exists())
+            source_path.write_bytes(original)
             records = [
                 json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["technical_test_classification"]["path"]).read_bytes()),
                 json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["classification_review"]["path"]).read_bytes()),
@@ -149,6 +229,82 @@ class Pipeline6TailTests(unittest.TestCase):
             self.assertEqual("BLOCKED", advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=resolver, adapter_registry=adapters, fingerprint_registries=registries).kind)
             completion_path.write_bytes(canonical_bytes(completion))
             self.assertEqual("PROVISIONAL", advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=resolver, adapter_registry=adapters, fingerprint_registries=registries).kind)
+
+    def test_full_worktree_tail_rejects_head_drift_with_identical_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, _, _ = make_project(root)
+            (project / "tests").mkdir(); (project / "tests" / "test_item.py").write_text("def test_item(): pass", encoding="utf-8")
+            self._install_pytest_shim(project); self._install_skillsrc(project)
+            subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "test"], cwd=project, check=True)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            fixture = build_run(root / "run", identity, head, tree)
+            self._rebind_fixture_source(root, fixture, project)
+            change = {"input_kind": "git_worktree", "repository_id": identity, "base": {"commit": head, "tree": tree, "snapshot_sha256": "sha256:" + "a" * 64}, "target": {"snapshot_sha256": "sha256:" + "b" * 64}, "changes": []}
+            self._feature_prefix(root, fixture, identity, head, tree, change, project=project)
+            subprocess.run(["git", "commit", "--allow-empty", "-m", "head drift"], cwd=project, check=True)
+            drift = advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=self._ReadyResolver(), adapter_registry=self._ReadyRegistry(), fingerprint_registries=_current_registries())
+            self.assertEqual("BLOCKED", drift.kind)
+            self.assertEqual("CHANGE_SOURCE_DRIFT", drift.diagnostics[0]["code"])
+            self.assertFalse((root / "run" / "pipeline6-tail" / "records").exists())
+
+    def test_non_git_full_tail_completes_provisionally_without_baseline_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, _, _ = make_project(root)
+            (project / "tests").mkdir(); (project / "tests" / "test_item.py").write_text("def test_item(): pass", encoding="utf-8")
+            self._install_pytest_shim(project)
+            subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "test"], cwd=project, check=True)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            fixture = build_run(root / "run", identity, head, tree)
+            local_project = root / "local-project"; (local_project / "tests").mkdir(parents=True)
+            (local_project / "src").mkdir()
+            (local_project / "src" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (local_project / ".skillsrc").write_text(json.dumps({"version": "3.0", "project": {"name": "local"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": [{"id": "root", "root": ".", "stack": {"language": "python"}, "paths": {"source": ["src"], "tests": []}, "detected_from": ["fixture"]}]}), encoding="utf-8")
+            (local_project / "tests" / "test_item.py").write_text("def test_item(): pass", encoding="utf-8")
+            self._install_pytest_shim(local_project)
+            inventories = build_source_inventories(local_project, load_skillsrc(local_project / ".skillsrc"), "root", ())
+            source = {"schema_version": "1.0.0", "stage": "source-inventory", "artifacts": {
+                "technical_test_inventory": _plain(inventories.technical_test_inventory), "technical_test_inventory_sha256": inventories.technical_test_inventory_sha256,
+                "authorized_behavior_sources": _plain(inventories.authorized_behavior_sources), "authorized_behavior_sources_sha256": inventories.authorized_behavior_sources_sha256,
+            }, "warnings": []}
+            source_row = source["artifacts"]["authorized_behavior_sources"]["sources"][0]
+            source_id = source_row["source_id"]
+            from tests import test_baseline_lifecycle as lifecycle
+            def rebind(values: dict) -> None:
+                values["technical_test_inventory"] = source
+                receipt = values["behavior_context_receipt"]
+                receipt["fragment_registry"][0]["source_id"] = source_id
+                receipt["source_outcomes"][0]["source_id"] = source_id
+                managed = values["managed_behavior_context"]["artifacts"]["managed_behavior_context"]
+                managed["product_sources"] = [{**source_row, "summary": "Local fixture behavior source."}]
+                managed["requirement_sources"][0]["source_ids"] = [source_id]
+                values["managed_behavior_context"]["artifacts"]["behavior_source_accounting"]["source_dispositions"][0]["source_id"] = source_id
+            lifecycle.BaselineLifecycleTests().rewrite_prefix_graph(root / "run", fixture, rebind)
+            self._feature_prefix(root, fixture, identity, head, tree, local=True, project=local_project)
+            source_path = local_project / "src" / "app.py"; original = source_path.read_bytes()
+            source_path.write_bytes(original + b"# drift\n")
+            drift = advance_pipeline6_tail(local_project, root / "run", root / "baselines", provider_resolver=self._ReadyResolver(), adapter_registry=self._ReadyRegistry(), fingerprint_registries=_current_registries())
+            self.assertEqual("BLOCKED", drift.kind)
+            self.assertEqual("CHANGE_SOURCE_DRIFT", drift.diagnostics[0]["code"])
+            self.assertFalse((root / "run" / "pipeline6-tail" / "records").exists())
+            self.assertFalse((root / "run" / "receipts" / "terminal-run-receipt.json").exists())
+            source_path.write_bytes(original)
+            records = [
+                json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["technical_test_classification"]["path"]).read_bytes()),
+                json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["classification_review"]["path"]).read_bytes()),
+                json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["validation_report"]["path"]).read_bytes()),
+                json.loads(fixture["tails"]["automation_artifact"].payload), json.loads(fixture["tails"]["autotest_review"].payload),
+            ]
+            registries = _current_registries(); adapters = self._ReadyRegistry(); resolver = self._ReadyResolver()
+            action = advance_pipeline6_tail(local_project, root / "run", root / "baselines", provider_resolver=resolver, adapter_registry=adapters, fingerprint_registries=registries)
+            for value in records:
+                action.record_path.parent.mkdir(parents=True, exist_ok=True); action.record_path.write_bytes(canonical_bytes(value))
+                action = advance_pipeline6_tail(local_project, root / "run", root / "baselines", provider_resolver=resolver, adapter_registry=adapters, fingerprint_registries=registries)
+            self.assertEqual("PROVISIONAL", action.kind, action.diagnostics)
+            self.assertIsNone(action.artifact["baseline_advancement"]["successor_baseline_receipt"])
+            self.assertFalse((root / "baselines" / "receipts").exists())
+            self.assertEqual(action.artifact, advance_pipeline6_tail(local_project, root / "run", root / "baselines", provider_resolver=resolver, adapter_registry=adapters, fingerprint_registries=registries).artifact)
 
     def test_change_set_zero_op_bypasses_candidate_review_and_validation_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -173,7 +329,7 @@ class Pipeline6TailTests(unittest.TestCase):
             def put(value: dict) -> dict:
                 payload = canonical_bytes(value); digest = "sha256:" + __import__("hashlib").sha256(payload).hexdigest(); path = run / "artifacts" / f"{digest[7:]}.json"; path.write_bytes(payload)
                 return {"path": path.relative_to(run).as_posix(), "sha256": digest}
-            flow = put({"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": identity, "selected_module": "root", "run_mode": "CHANGE_SET", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "baseline_receipt_sha256": baseline["successor_baseline_sha256"], "change_input_sha256": artifact_sha256(fixture["ledger_value"]["change_input"]), "skillsrc_sha256": fixture["ledger_value"]["analytics_sha256"], "source_revision": None})
+            flow = put({"schema_version": "1.0.0", "artifact": "feature-flow-input", "repository_id": identity, "selected_module": "root", "run_mode": "CHANGE_SET", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "baseline_receipt_sha256": baseline["successor_baseline_sha256"], "change_input_sha256": artifact_sha256(fixture["ledger_value"]["change_input"]), "skillsrc_sha256": fixture["ledger_value"]["analytics_sha256"], "source_snapshot_sha256": "sha256:" + "a" * 64, "source_revision": None})
             change = put(fixture["ledger_value"]["change_input"])
             handoff = put({"schema_version": "1.0.0", "artifact": "feature-flow-ready-handoff", "status": "READY_FOR_PIPELINE_TAIL", "run_mode": "CHANGE_SET", "generator_output": flow, "changed_behavior_context": artifact["changed_behavior_context"], "behavior_context_receipt": artifact["behavior_context_receipt"], "delta_application_receipt": put(delta_application_receipt(applied)), "unchanged_document_selection": put(selection), "effective_baseline_document": put(fixture["document"]), "effective_baseline_bundle_receipt": put(__import__("dataclasses").asdict(bundle_for(fixture["document"])))})
             ledger = {"schema_version": "1.0.0", "artifact": "feature-flow-prefix-ledger", "status": "READY_FOR_PIPELINE_TAIL", "run_mode": "CHANGE_SET", "selected_module": "root", "analytics_sha256": fixture["ledger_value"]["analytics_sha256"], "artifacts": {"flow_input": flow, "change_input": change, "source_inventory": artifact["technical_test_inventory"], "change_scope_receipt": artifact["change_scope_receipt"], "context_envelope": artifact["managed_behavior_context"], "changed_behavior_context": artifact["changed_behavior_context"], "behavior_context_receipt": artifact["behavior_context_receipt"], "delta_handoff": handoff}, "records": []}
@@ -245,7 +401,11 @@ class Pipeline6TailTests(unittest.TestCase):
 
     def test_stale_or_forged_tail_record_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp); project, identity, head, tree = make_project(root); fixture = build_run(root / "run", identity, head, tree); self._feature_prefix(root, fixture, identity, head, tree)
+            root = Path(temp); project, identity, _, _ = make_project(root)
+            self._install_skillsrc(project); subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "skillsrc"], cwd=project, check=True)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            fixture = build_run(root / "run", identity, head, tree); self._rebind_fixture_source(root, fixture, project, head); self._feature_prefix(root, fixture, identity, head, tree, project=project)
             registries = _current_registries()
             action = advance_pipeline6_tail(project, root / "run", root / "baselines", fingerprint_registries=registries)
             forged = action.record_path.with_name("000001-review-automation.json"); forged.parent.mkdir(parents=True, exist_ok=True); forged.write_bytes(canonical_bytes({"artifact": "forged"}))
