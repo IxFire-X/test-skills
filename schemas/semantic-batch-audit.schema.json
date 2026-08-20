@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"schemas/semantic-batch-audit.schema.json",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","artifact","audit_kind","candidate_sha256","batch_id","generation","verdict","findings"],
+  "properties":{
+    "schema_version":{"const":"1.0.0"},
+    "artifact":{"const":"semantic-batch-audit"},
+    "audit_kind":{"enum":["false_claim","omission"]},
+    "candidate_sha256":{"$ref":"#/$defs/digest"},
+    "batch_id":{"type":"string","pattern":"^BATCH-[0-9]{6}$"},
+    "generation":{"type":"integer","minimum":1},
+    "verdict":{"enum":["ACCEPT","REWORK"]},
+    "findings":{"type":"array","uniqueItems":true,"items":{"$ref":"#/$defs/finding"}}
+  },
+  "allOf":[
+    {"if":{"properties":{"verdict":{"const":"ACCEPT"}}},"then":{"properties":{"findings":{"maxItems":0}}},"else":{"properties":{"findings":{"minItems":1}}}},
+    {"if":{"properties":{"audit_kind":{"const":"false_claim"}}},"then":{"properties":{"findings":{"items":{"properties":{"code":{"enum":["BATCH_UNSUPPORTED_ACTOR","BATCH_UNSUPPORTED_OPERATION","BATCH_UNSUPPORTED_CONDITION","BATCH_UNSUPPORTED_OUTCOME","BATCH_UNSUPPORTED_EVIDENCE","BATCH_UNSUPPORTED_ROUTE"]}}}}}},"else":{"properties":{"findings":{"items":{"properties":{"code":{"enum":["BATCH_SUPPORTED_FACT_OMITTED","BATCH_NO_FACT_INCORRECT","BATCH_DELETION_EFFECT_OMITTED","BATCH_BOUNDARY_FACT_OMITTED","BATCH_PUBLIC_CONTRACT_OMITTED","BATCH_RUNTIME_CONFIG_OMITTED"]}}}}}}}
+  ],
+  "$defs":{
+    "digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "finding":{"type":"object","additionalProperties":false,"required":["finding_id","code","candidate_pointer","item_id","summary"],"properties":{"finding_id":{"type":"string","pattern":"^FINDING-[0-9a-f]{64}$"},"code":{"type":"string","minLength":1},"candidate_pointer":{"type":"string","pattern":"^/result/items/(0|[1-9][0-9]*)(/.*)?$"},"item_id":{"type":"string","pattern":"^ITEM-[0-9]{6}$"},"summary":{"type":"string","minLength":1,"maxLength":512,"pattern":"^[^\\u0000-\\u001f\\u007f]+$"}}}
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"schemas/semantic-batch-promotion.schema.json",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","artifact","run_mode","scope_receipt_sha256","plan_sha256","batch_id","generation","candidate_sha256","result_schema_version","result_sha256","audit_sha256s","review_mode","independence_attestation_sha256"],
+  "properties":{
+    "schema_version":{"const":"1.0.0"},
+    "artifact":{"const":"semantic-batch-promotion"},
+    "run_mode":{"enum":["FULL","CHANGE_SET"]},
+    "scope_receipt_sha256":{"$ref":"#/$defs/digest"},
+    "plan_sha256":{"$ref":"#/$defs/digest"},
+    "batch_id":{"type":"string","pattern":"^BATCH-[0-9]{6}$"},
+    "generation":{"type":"integer","minimum":1},
+    "candidate_sha256":{"$ref":"#/$defs/digest"},
+    "result_schema_version":{"enum":["1.0.0","2.0.0"]},
+    "result_sha256":{"$ref":"#/$defs/digest"},
+    "audit_sha256s":{"type":"object","additionalProperties":false,"required":["false_claim","omission"],"properties":{"false_claim":{"$ref":"#/$defs/digest"},"omission":{"$ref":"#/$defs/digest"}}},
+    "review_mode":{"enum":["SEQUENTIAL","INDEPENDENT"]},
+    "independence_attestation_sha256":{"oneOf":[{"$ref":"#/$defs/digest"},{"type":"null"}]}
+  },
+  "allOf":[
+    {"if":{"properties":{"run_mode":{"const":"FULL"}}},"then":{"properties":{"result_schema_version":{"const":"1.0.0"}}},"else":{"properties":{"result_schema_version":{"const":"2.0.0"}}}},
+    {"if":{"properties":{"review_mode":{"const":"SEQUENTIAL"}}},"then":{"properties":{"independence_attestation_sha256":{"type":"null"}}},"else":{"properties":{"independence_attestation_sha256":{"$ref":"#/$defs/digest"}}}}
+  ],
+  "$defs":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"}}
+}

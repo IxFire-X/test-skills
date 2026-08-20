@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"schemas/semantic-batch-candidate.schema.json",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","artifact","run_mode","scope_receipt_sha256","plan_sha256","batch_id","generation","parent_candidate_sha256","triggering_audit_sha256s","result_schema_version","result"],
+  "properties":{
+    "schema_version":{"const":"1.0.0"},
+    "artifact":{"const":"semantic-batch-candidate"},
+    "run_mode":{"enum":["FULL","CHANGE_SET"]},
+    "scope_receipt_sha256":{"$ref":"#/$defs/digest"},
+    "plan_sha256":{"$ref":"#/$defs/digest"},
+    "batch_id":{"type":"string","pattern":"^BATCH-[0-9]{6}$"},
+    "generation":{"type":"integer","minimum":1},
+    "parent_candidate_sha256":{"oneOf":[{"$ref":"#/$defs/digest"},{"type":"null"}]},
+    "triggering_audit_sha256s":{"type":"array","uniqueItems":true,"items":{"$ref":"#/$defs/digest"}},
+    "result_schema_version":{"enum":["1.0.0","2.0.0"]},
+    "result":{"$ref":"behavior-context-batch-result.schema.json"}
+  },
+  "allOf":[
+    {"if":{"properties":{"generation":{"const":1}}},"then":{"properties":{"parent_candidate_sha256":{"type":"null"},"triggering_audit_sha256s":{"maxItems":0}}},"else":{"properties":{"parent_candidate_sha256":{"$ref":"#/$defs/digest"},"triggering_audit_sha256s":{"minItems":1}}}},
+    {"if":{"properties":{"run_mode":{"const":"FULL"}}},"then":{"properties":{"result_schema_version":{"const":"1.0.0"},"result":{"properties":{"schema_version":{"const":"1.0.0"}}}}},"else":{"properties":{"result_schema_version":{"const":"2.0.0"},"result":{"properties":{"schema_version":{"const":"2.0.0"}}}}}}
+  ],
+  "$defs":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"}}
+}
