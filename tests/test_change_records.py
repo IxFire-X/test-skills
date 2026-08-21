@@ -272,6 +272,73 @@ class ChangeRecordTests(unittest.TestCase):
                 write_create_only(root, PurePosixPath("artifacts/safe.json"), {"artifact": "other"})
             self.assertNotIn(SECRET, stored.path.read_text(encoding="utf-8"))
 
+    def test_safe_artifacts_allow_semantic_token_prose_but_reject_secret_material(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stored = write_create_only(root, PurePosixPath("artifacts/semantic.json"), {
+                "artifact": "semantic-evidence",
+                "requirement": "returns a token with 3600-second expiry",
+                "token_kind": "access", "credential_status": "required",
+                "auth_scheme": "bearer", "key_id": "KEY-session", "author": "QA", "authority": "local",
+            })
+            self.assertIn("token with 3600-second expiry", stored.path.read_text(encoding="utf-8"))
+            for value in (
+                {"access_token": "not-durable"},
+                {"apiToken": "not-durable"},
+                {"rawSource": "not-durable"}, {"sourceCode": "not-durable"}, {"rawDiff": "not-durable"},
+                {"auth_token": "not-durable"}, {"auth_key": "not-durable"}, {"api_secret": "not-durable"},
+                {"client_secret_value": "not-durable"}, {"authorizationHeader": "not-durable"},
+                {"oauth_token": "not-durable"}, {"raw_secret_payload": "not-durable"}, {"credential_value": "not-durable"},
+                {"userAuthToken": "not-durable"}, {"github_token": "not-durable"}, {"db_password": "not-durable"},
+                {"token-kind": "access"}, {"token.kind": "access"}, {"Token_Kind": "access"},
+                {"credential.status": "required"},
+                {"summary": "auth=not-durable"}, {"summary": "token: not-durable"},
+                {"summary": "authorization: not-durable"}, {"summary": "credential=not-durable"},
+                {"summary": "secret: not-durable"}, {"summary": "password=not-durable"},
+                {"summary": "api_key: not-durable"}, {"summary": "access_token=not-durable"},
+                {"summary": "refresh_token: not-durable"}, {"summary": "client_secret=not-durable"},
+                {"summary": "auth_token: not-durable"}, {"summary": "apiToken=not-durable"},
+                {"summary": "credential_value: not-durable"}, {"summary": "oauth_token=not-durable"},
+                {"summary": "authorizationHeader=not-durable"}, {"summary": "client_secret_value: not-durable"},
+                {"summary": "raw_secret_payload=not-durable"}, {"summary": "github_token: not-durable"},
+                {"summary": "db_password=not-durable"},
+                {"summary": "api key=opaque-value"}, {"summary": "authorization header: opaque-value"},
+                {"summary": "api/key=opaque-value"}, {"summary": "github token: opaque-value"},
+                {"summary": "status:auth=not-durable"},
+                {"summary": "token-kind=access"}, {"summary": "token.kind=access"},
+                {"summary": "Token_Kind=access"}, {"summary": "credential.status=required"},
+                {"summary": "Bearer status=opaque-token-value"}, {"summary": "Bearer abc123"},
+                {"summary": "sk-proj-abcdefghijklmnopqrstuvwx"},
+                {"reasoning": "internal steps"},
+                {"source": "stored at D:/private/run"},
+                {"source": "stored at \\\\server\\share\\run"},
+                {"source": "stored, C:/private/run"}, {"source": "stored, \\\\server\\share\\run"},
+                {"bad\x7f": "safe"}, {"D:/private/run": "safe"},
+                {"sk-proj-abcdefghijklmnopqrstuvwx": "safe"}, {"auth_token=not-durable": "safe"},
+            ):
+                with self.subTest(value=value), self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath(f"artifacts/rejected-{len(value)}.json"), value)
+            for codepoint in (*range(32), 127):
+                with self.subTest(codepoint=codepoint), self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath("artifacts/control.json"), {"summary": f"safe{chr(codepoint)}text"})
+            tuple_stored = write_create_only(root, PurePosixPath("artifacts/tuple.json"), {"items": ("one", "two")})
+            self.assertEqual(["one", "two"], json.loads(tuple_stored.payload)["items"])
+            route_stored = write_create_only(root, PurePosixPath("artifacts/route.json"), {"route": "/health"})
+            self.assertEqual("/health", json.loads(route_stored.payload)["route"])
+            api_route_stored = write_create_only(root, PurePosixPath("artifacts/api-route.json"), {"route": "/items/{item_id}"})
+            self.assertEqual("/items/{item_id}", json.loads(api_route_stored.payload)["route"])
+            posix_route_stored = write_create_only(root, PurePosixPath("artifacts/posix-routes.json"), {"routes": ["/tmp", "/etc", "/run", "/home"]})
+            self.assertEqual(["/tmp", "/etc", "/run", "/home"], json.loads(posix_route_stored.payload)["routes"])
+            url_stored = write_create_only(root, PurePosixPath("artifacts/url.json"), {"reference": "https://example.invalid/spec"})
+            self.assertEqual("https://example.invalid/spec", json.loads(url_stored.payload)["reference"])
+            status_stored = write_create_only(root, PurePosixPath("artifacts/status.json"), {"summary": "status: active"})
+            self.assertEqual("status: active", json.loads(status_stored.payload)["summary"])
+            chained_status_stored = write_create_only(root, PurePosixPath("artifacts/chained-status.json"), {"summary": "status:phase=active"})
+            self.assertEqual("status:phase=active", json.loads(chained_status_stored.payload)["summary"])
+            for value in (b"bytes", object()):
+                with self.subTest(non_json=value), self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath("artifacts/non-json.json"), {"value": value})
+
 
 if __name__ == "__main__":
     unittest.main()

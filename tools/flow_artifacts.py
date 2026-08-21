@@ -29,8 +29,47 @@ class StoredArtifact:
     sha256: str
 
 
-_FORBIDDEN_KEY = re.compile(r"(?:raw_source|source_code|raw_diff|^diff$|prompt|environment|secret|token|password|credential|^raw$)", re.IGNORECASE)
-_FORBIDDEN_TEXT = re.compile(r"(?:secret|token|password|credential)", re.IGNORECASE)
+_FORBIDDEN_KEY = re.compile(
+    r"(?:rawsource|sourcecode|rawdiff|^diff$|prompt|environment|reasoning|^raw$)",
+    re.IGNORECASE,
+)
+_FORBIDDEN_TEXT = re.compile(
+    r"(?:\b(?:secret|password)\b|\bBearer\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9_]{20,}\b|\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b)",
+    re.IGNORECASE,
+)
+_ABSOLUTE_PATH = re.compile(
+    rf"(?:^[A-Za-z]:[\\/]|^\\\\|(?<![A-Za-z0-9])"
+    rf"(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/]))"
+)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_SEMANTIC_FIELD_KEYS = frozenset(("token_kind", "credential_status", "auth_scheme", "key_id"))
+_ASSIGNMENT = re.compile(r"(?<![A-Za-z0-9])(?P<key>[A-Za-z][A-Za-z0-9_.\-/ ]{0,95}?)\s*[:=](?=\s*\S+)")
+_AUTH_FIELD_KEY = re.compile(r"^(?:auth|auth(?:token|key|secret|password|credential|header|value)[a-z0-9]*|authentication[a-z0-9]*|authorization[a-z0-9]*)$")
+
+
+def _normalized_key(key: str) -> str:
+    return "".join(character for character in key.casefold() if character.isalnum())
+
+
+def _is_secret_field_key(key: str, normalized: str) -> bool:
+    return key not in _SEMANTIC_FIELD_KEYS and (
+        _AUTH_FIELD_KEY.fullmatch(normalized) is not None or any(marker in normalized for marker in ("secret", "password", "token", "credential"))
+        or (any(prefix in normalized for prefix in ("api", "oauth", "client", "access", "refresh", "bearer", "private", "session"))
+            and any(marker in normalized for marker in ("key", "token", "secret", "password", "credential")))
+    )
+
+
+def _is_forbidden_field_key(key: str) -> bool:
+    normalized = _normalized_key(key)
+    return _FORBIDDEN_KEY.search(normalized) is not None or _is_secret_field_key(key, normalized)
+
+
+def _unsafe_text(value: str) -> bool:
+    return (
+        len(value) > 512 or _CONTROL.search(value) is not None or _ABSOLUTE_PATH.search(value) is not None
+        or _FORBIDDEN_TEXT.search(value) is not None
+        or any(_is_forbidden_field_key(match["key"]) for match in _ASSIGNMENT.finditer(value))
+    )
 
 
 def canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -59,14 +98,18 @@ def artifact_sha256(value: Mapping[str, Any]) -> str:
 def _safe(value: Any, pointer: str = "") -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            if not isinstance(key, str) or _FORBIDDEN_KEY.search(key):
+            if not isinstance(key, str):
+                raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains a prohibited durable field.")
+            if _unsafe_text(key):
+                raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains a prohibited durable field.")
+            if _is_forbidden_field_key(key):
                 raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains a prohibited durable field.")
             _safe(item, f"{pointer}/{key}")
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             _safe(item, f"{pointer}/{index}")
     elif isinstance(value, str):
-        if len(value) > 512 or "\x00" in value or "\r" in value or "\n" in value or _FORBIDDEN_TEXT.search(value):
+        if _unsafe_text(value):
             raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains unsafe durable text.")
     elif value is None or isinstance(value, bool) or (isinstance(value, (int, float)) and not isinstance(value, bool)):
         return
