@@ -466,6 +466,27 @@ class FeatureFlowTests(unittest.TestCase):
             self.assertEqual("BLOCKED", dirty.kind)
             self.assertEqual("FEATURE_FLOW_INPUT", dirty.diagnostics[0]["code"])
 
+    def test_durable_full_uses_blob_bytes_across_crlf_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, analytics = _project(root); run = root / "run"
+            (project / ".gitattributes").write_text("*.py text eol=crlf\n", encoding="utf-8")
+            _git(project, "add", ".gitattributes"); _git(project, "add", "--renormalize", "src/app.py")
+            _git(project, "commit", "-m", "declare checkout eol")
+            blob = subprocess.run(["git", "show", "HEAD:src/app.py"], cwd=project, check=True, capture_output=True).stdout
+            (project / "src" / "app.py").unlink(); _git(project, "checkout", "--", "src/app.py")
+            self.assertNotEqual(blob, (project / "src" / "app.py").read_bytes())
+            status = subprocess.run(["git", "status", "--porcelain"], cwd=project, check=True, capture_output=True, text=True).stdout
+            self.assertEqual("", status)
+            action = advance_feature_flow(project, analytics, run)
+            scope_candidate = _plain(action.artifact["prompt"]); action.record_path.write_bytes(canonical_bytes(scope_candidate))
+            action = advance_feature_flow(project, analytics, run, recorded_artifact=action.record_path)
+            for audit_kind in ("false_inclusion", "omission"):
+                audit = {"schema_version": "1.0.0", "artifact": "change-scope-audit", "candidate_sha256": artifact_sha256(scope_candidate), "audit_kind": audit_kind, "verdict": "ACCEPT", "findings": []}
+                action.record_path.write_bytes(canonical_bytes(audit))
+                action = advance_feature_flow(project, analytics, run, recorded_artifact=action.record_path)
+            self.assertEqual("PRODUCE_BATCH_CANDIDATE", action.kind, action.diagnostics)
+            self.assertEqual(4, len(list((run / "feature-flow" / "prefix").glob("*.json"))))
+
     def test_git_range_deleted_before_evidence_uses_frozen_side_and_rejects_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); project, analytics = _project(root); receipt = _advanced_baseline(project, root, include_app_source=True)

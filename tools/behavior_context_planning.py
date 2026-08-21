@@ -68,7 +68,7 @@ def _fail(code: str, path: str, message: str) -> TestClassificationError:
     return TestClassificationError((_diag(path, code, message),))
 
 
-def _bytes(source: Mapping[str, Any], project: Path, supplied: Mapping[str, bytes]) -> bytes:
+def _bytes(source: Mapping[str, Any], project: Path, supplied: Mapping[str, bytes], snapshot_reader: Any | None = None) -> bytes:
     source_id = source["source_id"]
     if source["kind"] == "supplied_requirement":
         if source_id not in supplied:
@@ -87,11 +87,13 @@ def _bytes(source: Mapping[str, Any], project: Path, supplied: Mapping[str, byte
         raise _fail("BEHAVIOR_PLAN", "/sources", "Authorized product files cannot be symlinks.")
     try:
         resolved = _confined(project, candidate, "/sources")
-        value = resolved.read_bytes()
+        value = snapshot_reader(path) if snapshot_reader is not None else resolved.read_bytes()
     except (OSError, TestClassificationError) as error:
         if isinstance(error, TestClassificationError):
             raise
         raise _fail("BEHAVIOR_PLAN", "/sources", "Authorized product file could not be read.") from error
+    if not isinstance(value, bytes):
+        raise _fail("BEHAVIOR_PLAN", "/sources", "Authorized product file could not be read.")
     if "sha256:" + hashlib.sha256(value).hexdigest() != source["content_digest"]:
         raise _fail("BEHAVIOR_PLAN", "/sources", "Authorized product file bytes no longer match inventory.")
     try: value.decode("utf-8")
@@ -438,7 +440,9 @@ def _sources(inventory: Mapping[str, Any]) -> Mapping[str, Any]:
     return inventory
 
 
-def build_context_plan(project: Path, module: Mapping[str, Any], inventory: Mapping[str, Any], supplied_inputs: Mapping[str, bytes] = {}) -> Mapping[str, Any]:
+def build_context_plan(
+    project: Path, module: Mapping[str, Any], inventory: Mapping[str, Any], supplied_inputs: Mapping[str, bytes] = {}, *, snapshot_reader: Any | None = None,
+) -> Mapping[str, Any]:
     authorized = _sources(inventory)
     sources = authorized.get("sources") if isinstance(authorized, Mapping) else None
     if not isinstance(sources, list) or not isinstance(authorized.get("module_id"), str):
@@ -452,7 +456,7 @@ def build_context_plan(project: Path, module: Mapping[str, Any], inventory: Mapp
     for source in sources:
         if not isinstance(source, Mapping) or source.get("kind") not in {"product_file", "supplied_requirement"}:
             raise _fail("BEHAVIOR_PLAN", "/sources", "Authorized sources must use supported closed kinds.")
-        data = _bytes(source, project, supplied_inputs)
+        data = _bytes(source, project, supplied_inputs, snapshot_reader)
         domain = derive_domain_key(source, module, project)
         for start, end, read_start, read_end in _ranges(data):
             items.append({"item_id": f"ITEM-{len(items)+1:06d}", "source_id": source["source_id"], "domain_key": domain, "accounted_range": {"start": start, "end": end}, "read_range": {"start": read_start, "end": read_end}})
@@ -699,7 +703,10 @@ def compose_behavior_context(
         if scope_receipt.get("included_source_ids") != [row["source_id"] for row in current_sources]:
             raise _fail("BEHAVIOR_RECEIPT", "/scope_receipt/included_source_ids", "FULL scope receipt must cover current authorized sources exactly in inventory order.")
         supplied = {row["source_id"]: _resolver_bytes(byte_resolver, "after", row) for row in current_sources if row["kind"] == "supplied_requirement"}
-        if _plain(build_context_plan(project, module, authorized, supplied)) != _plain(plan):
+        current_source_reader = lambda path: _resolver_bytes(
+            byte_resolver, "after", next(row for row in current_sources if row.get("path") == path)
+        )
+        if _plain(build_context_plan(project, module, authorized, supplied, snapshot_reader=current_source_reader)) != _plain(plan):
             raise _fail("BEHAVIOR_RECEIPT", "/plan", "FULL plan must equal the deterministic current-source plan.")
     else:
         if (plan.get("selected_module") != module["id"] or plan.get("scope_candidate_sha256") != scope_receipt.get("candidate_sha256")

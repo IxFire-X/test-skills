@@ -834,7 +834,7 @@ def advance_feature_flow(
             scope = record_scope(scope, value); index += 1
         _artifact(run_root, scope_receipt)
         if mode == "FULL":
-            plan = _plain(build_context_plan(project, module, _plain(inventories.authorized_behavior_sources)))
+            plan = _plain(build_context_plan(project, module, _plain(inventories.authorized_behavior_sources), snapshot_reader=snapshot_reader))
         else:
             assert baseline is not None and source is not None and scope_candidate is not None
             plan = _plain(build_change_context_plan(project, module, scope_receipt, scope_candidate, source, source_envelope, _byte_resolver(project, baseline, snapshot_reader)))
