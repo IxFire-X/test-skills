@@ -339,6 +339,36 @@ class ChangeRecordTests(unittest.TestCase):
                 with self.subTest(non_json=value), self.assertRaises(FlowError):
                     write_create_only(root, PurePosixPath("artifacts/non-json.json"), {"value": value})
 
+    def test_safe_artifacts_allow_long_requirement_text_only_at_canonical_context_pointers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for context in ("managed_behavior_context", "changed_behavior_context"):
+                for length in (513, 4096):
+                    value = "x" * length
+                    stored = write_create_only(root, PurePosixPath(f"artifacts/{context}-{length}.json"), {
+                        "artifacts": {context: {"requirements": [{"text": value}]}}
+                    })
+                    self.assertIn(value, stored.path.read_text(encoding="utf-8"))
+                with self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath(f"artifacts/{context}-too-long.json"), {
+                        "artifacts": {context: {"requirements": [{"text": "x" * 4097}]}}
+                    })
+            for value in (
+                {"text": "x" * 513},
+                {"artifacts": {"other_behavior_context": {"requirements": [{"text": "x" * 513}]}}},
+                {"artifacts": {"managed_behavior_context": {"requirements": [{"title": "x" * 513}]}}},
+                {"artifacts": {"managed_behavior_context": {"requirements": {"00": {"text": "x" * 513}}}}},
+                {"artifacts": {"managed_behavior_context": {"requirements": {"0": {"text": "x" * 4096}}}}},
+                {"artifacts/managed_behavior_context/requirements/0/text": "x" * 513},
+            ):
+                with self.subTest(other_path=value), self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath("artifacts/ordinary-text.json"), value)
+            for value in ("Bearer token-value", "x" * 500 + " C:/private/run", "safe\x00text", "auth_token=not-durable"):
+                with self.subTest(value=value), self.assertRaises(FlowError):
+                    write_create_only(root, PurePosixPath("artifacts/unsafe-requirement.json"), {
+                        "artifacts": {"managed_behavior_context": {"requirements": [{"text": value}]}}
+                    })
+
 
 if __name__ == "__main__":
     unittest.main()

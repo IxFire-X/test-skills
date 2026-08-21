@@ -64,11 +64,22 @@ def _is_forbidden_field_key(key: str) -> bool:
     return _FORBIDDEN_KEY.search(normalized) is not None or _is_secret_field_key(key, normalized)
 
 
-def _unsafe_text(value: str) -> bool:
+def _unsafe_text(value: str, *, max_length: int = 512) -> bool:
     return (
-        len(value) > 512 or _CONTROL.search(value) is not None or _ABSOLUTE_PATH.search(value) is not None
+        len(value) > max_length or _CONTROL.search(value) is not None or _ABSOLUTE_PATH.search(value) is not None
         or _FORBIDDEN_TEXT.search(value) is not None
         or any(_is_forbidden_field_key(match["key"]) for match in _ASSIGNMENT.finditer(value))
+    )
+
+
+def _is_requirement_text_path(segments: tuple[str | int, ...]) -> bool:
+    return (
+        len(segments) == 5
+        and segments[0] == "artifacts"
+        and segments[1] in ("managed_behavior_context", "changed_behavior_context")
+        and segments[2] == "requirements"
+        and type(segments[3]) is int
+        and segments[4] == "text"
     )
 
 
@@ -95,7 +106,7 @@ def artifact_sha256(value: Mapping[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def _safe(value: Any, pointer: str = "") -> None:
+def _safe(value: Any, pointer: str = "", segments: tuple[str | int, ...] = ()) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
             if not isinstance(key, str):
@@ -104,12 +115,12 @@ def _safe(value: Any, pointer: str = "") -> None:
                 raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains a prohibited durable field.")
             if _is_forbidden_field_key(key):
                 raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains a prohibited durable field.")
-            _safe(item, f"{pointer}/{key}")
+            _safe(item, f"{pointer}/{key}", segments + (key,))
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
-            _safe(item, f"{pointer}/{index}")
+            _safe(item, f"{pointer}/{index}", segments + (index,))
     elif isinstance(value, str):
-        if _unsafe_text(value):
+        if _unsafe_text(value, max_length=4096 if _is_requirement_text_path(segments) else 512):
             raise FlowError("FLOW_SAFE_TEXT", pointer, "Artifact contains unsafe durable text.")
     elif value is None or isinstance(value, bool) or (isinstance(value, (int, float)) and not isinstance(value, bool)):
         return
