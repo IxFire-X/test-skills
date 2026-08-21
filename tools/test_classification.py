@@ -430,16 +430,18 @@ def _inventory_diagnostics(inventory: Mapping[str, Any]) -> tuple[Mapping[str, s
     return ()
 
 
-def _inventory_file_diagnostics(inventory: Mapping[str, Any], project_root: Path) -> tuple[Mapping[str, str], ...]:
+def _inventory_file_diagnostics(inventory: Mapping[str, Any], project_root: Path, *, snapshot_reader: Callable[[str], bytes] | None = None) -> tuple[Mapping[str, str], ...]:
     files = inventory["artifacts"]["technical_test_inventory"]["files"]
     for index, row in enumerate(files):
         path = Path(row["path"])
         try:
             resolved = _confined(project_root, project_root / path, f"/artifacts/technical_test_inventory/files/{index}/path")
-            content = resolved.read_bytes()
+            content = resolved.read_bytes() if snapshot_reader is None else snapshot_reader(row["path"])
         except TestClassificationError as error:
             return error.diagnostics
-        except OSError:
+        except (OSError, TypeError, ValueError):
+            return (_diag(f"/artifacts/technical_test_inventory/files/{index}/path", "CLASSIFICATION_FILE_READ", "Inventory file could not be read."),)
+        if type(content) is not bytes:
             return (_diag(f"/artifacts/technical_test_inventory/files/{index}/path", "CLASSIFICATION_FILE_READ", "Inventory file could not be read."),)
         actual = "sha256:" + hashlib.sha256(content).hexdigest()
         if actual != row["content_digest"]:
@@ -447,7 +449,7 @@ def _inventory_file_diagnostics(inventory: Mapping[str, Any], project_root: Path
     return ()
 
 
-def validate_technical_test_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path) -> tuple[Mapping[str, str], ...]:
+def validate_technical_test_evidence(inventory: Mapping[str, Any], classification: Mapping[str, Any], classification_review: Mapping[str, Any], requirements: Sequence[Mapping[str, Any]], project_root: Path, *, snapshot_reader: Callable[[str], bytes] | None = None) -> tuple[Mapping[str, str], ...]:
     """Validate closed test classifications and independent-review evidence without judging scope semantics."""
     for value, schema, code in (
         (inventory, "source-inventory-output.schema.json", "INVENTORY_SCHEMA"),
@@ -502,8 +504,12 @@ def validate_technical_test_evidence(inventory: Mapping[str, Any], classificatio
                 return (_diag(f"{span_path}/end_line", "CLASSIFICATION_PROVENANCE", "Provenance end_line must be an exact positive integer."),)
             if line_count is None:
                 try:
-                    line_count = len((project_root / files[row["file_id"]]["path"]).read_text(encoding="utf-8").splitlines())
-                except (OSError, UnicodeDecodeError):
+                    source_path = files[row["file_id"]]["path"]
+                    content = (project_root / source_path).read_bytes() if snapshot_reader is None else snapshot_reader(source_path)
+                    if type(content) is not bytes:
+                        raise TypeError()
+                    line_count = len(content.decode("utf-8").splitlines())
+                except (OSError, TypeError, ValueError, UnicodeDecodeError):
                     return (_diag(f"{prefix}/provenance", "CLASSIFICATION_PROVENANCE", "Provenance source file could not be read as UTF-8."),)
             pair = (start, end)
             if start < 1 or end < start:
@@ -513,7 +519,7 @@ def validate_technical_test_evidence(inventory: Mapping[str, Any], classificatio
             if pair in seen_spans or (previous is not None and pair < previous):
                 return (_diag(f"{prefix}/provenance", "CLASSIFICATION_PROVENANCE", "Provenance spans must be unique and canonical by line range."),)
             seen_spans.add(pair); previous = pair
-    diagnostics = _inventory_file_diagnostics(inventory, project_root)
+    diagnostics = _inventory_file_diagnostics(inventory, project_root, snapshot_reader=snapshot_reader)
     if diagnostics:
         return diagnostics
     if review_rows["technical_test_inventory_sha256"] != inventory_digest:

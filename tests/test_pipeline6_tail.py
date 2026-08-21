@@ -190,6 +190,53 @@ class Pipeline6TailTests(unittest.TestCase):
             self.assertIn("terminal_run_receipt", action.artifact)
             self.assertIn(action.artifact["baseline_advancement"]["status"], {"ADVANCED", "IDEMPOTENT"})
 
+    def test_durable_full_tail_uses_git_bytes_for_technical_test_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); project, identity, _, _ = make_project(root)
+            (project / "tests").mkdir()
+            (project / "tests" / "test_item.py").write_bytes(b"def test_item():\n    assert True\n")
+            (project / ".gitattributes").write_text("tests/test_item.py text eol=crlf\n", encoding="utf-8")
+            self._install_pytest_shim(project)
+            self._install_skillsrc(project)
+            skillsrc = json.loads((project / ".skillsrc").read_bytes())
+            skillsrc["modules"][0]["paths"]["tests"] = ["tests"]
+            (project / ".skillsrc").write_bytes(canonical_bytes(skillsrc))
+            subprocess.run(["git", "add", "."], cwd=project, check=True); subprocess.run(["git", "commit", "-m", "test"], cwd=project, check=True)
+            subprocess.run(["git", "config", "core.autocrlf", "true"], cwd=project, check=True)
+            (project / "tests" / "test_item.py").unlink()
+            subprocess.run(["git", "checkout-index", "--force", "--", "tests/test_item.py"], cwd=project, check=True)
+            subprocess.run(["git", "add", "--renormalize", "tests/test_item.py"], cwd=project, check=True)
+            self.assertIn(b"\r\n", (project / "tests" / "test_item.py").read_bytes())
+            (project / "tests" / "test_item.py").write_bytes(b"def test_item(): pass\r\n")
+            subprocess.run(["git", "update-index", "--assume-unchanged", "tests/test_item.py"], cwd=project, check=True)
+            self.assertEqual("", subprocess.run(["git", "status", "--porcelain=v1"], cwd=project, check=True, capture_output=True, text=True).stdout)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project, check=True, capture_output=True, text=True).stdout.strip()
+            fixture = build_run(root / "run", identity, head, tree)
+            self._rebind_fixture_source(root, fixture, project, head)
+            self._feature_prefix(root, fixture, identity, head, tree, project=project)
+            records = [
+                json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["technical_test_classification"]["path"]).read_bytes()),
+                json.loads((root / "run" / fixture["ledger_value"]["artifacts"]["classification_review"]["path"]).read_bytes()),
+            ]
+            prefix = json.loads((root / "run" / "feature-flow" / "prefix-ledger.json").read_bytes())
+            source_binding = prefix["artifacts"]["source_inventory"]
+            source = json.loads((root / "run" / source_binding["path"]).read_bytes())
+            symbols = source["artifacts"]["technical_test_inventory"]["symbols"]
+            records[0]["artifacts"]["classification"]["classifications"] = [{
+                "file_id": row["file_id"], "symbol_id": row["symbol_id"], "test_scope": "unknown", "requirement_ids": [],
+                "provenance": [{"file_id": row["file_id"], "start_line": 2, "end_line": 2}],
+                "rationale": "The exact frozen test symbol is classified without a requirement mapping.",
+            } for row in symbols]
+            records[1]["artifacts"]["classification_review"]["classification_sha256"] = artifact_sha256(records[0]["artifacts"]["classification"])
+            records[1]["artifacts"]["classification_review"]["reviewed_symbol_pairs"] = [{"file_id": row["file_id"], "symbol_id": row["symbol_id"]} for row in symbols]
+            action = advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=self._ReadyResolver(), adapter_registry=self._ReadyRegistry(), fingerprint_registries=_current_registries())
+            self.assertEqual("CLASSIFY_TECHNICAL_TESTS", action.kind, action.diagnostics)
+            for value in records:
+                action.record_path.parent.mkdir(parents=True, exist_ok=True); action.record_path.write_bytes(canonical_bytes(value))
+                action = advance_pipeline6_tail(project, root / "run", root / "baselines", provider_resolver=self._ReadyResolver(), adapter_registry=self._ReadyRegistry(), fingerprint_registries=_current_registries())
+            self.assertEqual("REVIEW_CANDIDATE_DOCUMENT", action.kind, action.diagnostics)
+
     def test_full_worktree_tail_is_provisional_and_replays_without_successor(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); project, identity, _, _ = make_project(root)

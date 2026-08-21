@@ -15,7 +15,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -204,7 +204,7 @@ def _terminal_change_input(change: Mapping[str, Any]) -> Mapping[str, Any]:
     raise FlowError("FEATURE_FLOW_INPUT", "/prefix/change_input", "Change input kind is outside the terminal union.")
 
 
-def _verify_full_source_snapshot(project: Path, flow: Mapping[str, Any], source: Mapping[str, Any]) -> None:
+def _verify_full_source_snapshot(project: Path, flow: Mapping[str, Any], source: Mapping[str, Any]) -> Callable[[str], bytes] | None:
     """Require every FULL tail to use its exact frozen source projection."""
     try:
         skillsrc_path = project / ".skillsrc"
@@ -244,6 +244,7 @@ def _verify_full_source_snapshot(project: Path, flow: Mapping[str, Any], source:
     })
     if flow.get("skillsrc_sha256") != "sha256:" + hashlib.sha256(skillsrc_bytes).hexdigest() or flow.get("source_snapshot_sha256") != snapshot or _plain(source) != envelope:
         raise FlowError("CHANGE_SOURCE_DRIFT", "/project", "FULL source snapshot no longer matches the frozen prefix.")
+    return reader
 
 
 def _records(run_root: Path) -> list[tuple[Path, Mapping[str, Any]]]:
@@ -289,6 +290,24 @@ def _receipt(value: Mapping[str, Any]) -> Receipt:
     if set(value) != set(fields):
         raise FlowError("BASELINE_BINDING", "/effective_bundle_receipt", "Effective bundle receipt is not closed.")
     return Receipt(**{name: value[name] for name in fields})
+
+
+def _run_relative_receipt(run_root: Path, receipt: Receipt) -> Receipt:
+    paths: dict[str, str] = {}
+    root = run_root.resolve()
+    for field in ("json_path", "markdown_path", "csv_path"):
+        value = getattr(receipt, field)
+        path = Path(value) if isinstance(value, str) else None
+        if path is None or not path.is_absolute():
+            raise FlowError("FEATURE_FLOW_INPUT", "/effective_bundle_receipt", "Published bundle paths must be absolute.")
+        try:
+            resolved = path.resolve(strict=True)
+            paths[field] = resolved.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            raise FlowError("FEATURE_FLOW_INPUT", "/effective_bundle_receipt", "Published bundle paths must remain under the run root.") from None
+        if not resolved.is_file():
+            raise FlowError("FEATURE_FLOW_INPUT", "/effective_bundle_receipt", "Published bundle paths must identify files.")
+    return Receipt(receipt.document_id, receipt.revision, receipt.csv_profile, paths["json_path"], paths["markdown_path"], paths["csv_path"], receipt.document_sha256, receipt.markdown_sha256, receipt.csv_sha256)
 
 
 def _manifest(run_root: Path, prefix: Mapping[str, Any], records: list[tuple[Path, Mapping[str, Any]]], bindings: Mapping[str, Any], classification: Mapping[str, Any], review: Mapping[str, Any], evidence: Mapping[str, Any], validation: Mapping[str, Any], fingerprints: Mapping[str, Any]) -> StoredArtifact:
@@ -472,9 +491,10 @@ def advance_pipeline6_tail(
         if not isinstance(bindings, Mapping):
             raise FlowError("FEATURE_FLOW_INPUT", "/feature-flow/prefix-ledger/artifacts", "Prefix bindings are required.")
         flow, _ = _binding(run_root, bindings.get("flow_input"), "/prefix/flow_input")
+        snapshot_reader = None
         if flow.get("run_mode") == "FULL":
             source, _ = _binding(run_root, bindings.get("source_inventory"), "/prefix/source_inventory")
-            _verify_full_source_snapshot(project, flow, source)
+            snapshot_reader = _verify_full_source_snapshot(project, flow, source)
         handoff, _ = _binding(run_root, bindings.get("delta_handoff"), "/prefix/delta_handoff")
         records = _records(run_root)
         names = [path.name for path, _ in records]
@@ -503,7 +523,7 @@ def advance_pipeline6_tail(
         context, _ = _binding(run_root, bindings.get("context_envelope"), "/prefix/context_envelope")
         context_artifacts = context.get("artifacts")
         requirements = context_artifacts.get("managed_behavior_context", {}).get("requirements") if isinstance(context_artifacts, Mapping) and isinstance(context_artifacts.get("managed_behavior_context"), Mapping) else None
-        if not isinstance(requirements, list) or validate_technical_test_evidence(source, classification, review, requirements, project):
+        if not isinstance(requirements, list) or validate_technical_test_evidence(source, classification, review, requirements, project, snapshot_reader=snapshot_reader):
             raise FlowError("BASELINE_BINDING", "/records", "Technical classification evidence is not accepted and complete.")
         unchanged = handoff.get("unchanged_document_selection")
         candidate = handoff.get("candidate_document")
@@ -545,7 +565,7 @@ def advance_pipeline6_tail(
             selected = orchestrate_revision(candidate_value, validation, run_root / "pipeline6-tail" / "published", "zephyr-scale-step-row-24-v1")
             if selected.status != "EFFECTIVE_SELECTED" or selected.effective_document is None or selected.effective_bundle_receipt is None:
                 return _blocked("FEATURE_FLOW_INPUT", "/records/candidate-review", "Candidate review did not select an effective document.")
-            document, bundle, validation_branch = _plain(selected.effective_document), asdict(selected.effective_bundle_receipt), validation
+            document, bundle, validation_branch = _plain(selected.effective_document), asdict(_run_relative_receipt(run_root, selected.effective_bundle_receipt)), validation
         else:
             document, _ = _binding(run_root, handoff.get("effective_baseline_document"), "/prefix/effective_baseline_document")
             bundle, _ = _binding(run_root, handoff.get("effective_baseline_bundle_receipt"), "/prefix/effective_baseline_bundle_receipt")
