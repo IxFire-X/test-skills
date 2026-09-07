@@ -51,6 +51,9 @@ paragraph must retain both its product meaning and its instructions without copy
 instructions into the scenario. Cite the shared rule and exact field for a violation.
 Check that a reader unfamiliar with the project can understand the purpose and result;
 technical execution details must not obscure the meaningful action.
+For baseline snapshots, verify that human fields identify the initial state from
+Preconditions or a concrete preceding action, and the captured data used later;
+“before this step” alone does not identify that state.
 Check the shared rules on scenario-specific setup, helper controls in Test Data,
 object-specific preservation and an objective that adds meaning to the title. Trace a
 date/control dependency to the actual scenario, not just to a required helper argument.

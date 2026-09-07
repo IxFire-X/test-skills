@@ -100,7 +100,10 @@ contract is the same; do not invent a new adapter or dependency to supply it.
 
 Verify the required APIs and setup from authorized project code/tests or available
 dependency documentation/metadata, retrieving missing evidence within the allowed
-context. Absence of a ready-made fixture, helper or capability declaration alone is
+context. Keep dependency evidence in the authorized technical context and reference it
+from capability provenance; do not copy API signatures, framework annotations or
+isolation configuration into human Action/Test Data/Expected Result fields.
+Absence of a ready-made fixture, helper or capability declaration alone is
 not an automation blocker. An unavailable API, inaccessible dependency evidence,
 unresolved input/oracle, or forbidden setup still is a concrete gap. Do not assert
 that an environment has already started or return an expected constant as an observed
@@ -142,9 +145,12 @@ labels and framework plumbing out of human Action.
 For `project_action`, Test Data describes application inputs and the records to observe,
 not the complete helper argument map. Form fields, path/query values and concrete setup
 records remain exact; internal read selectors, sentinel values and comparison controls
-stay in structured inputs/provenance. For example, describe “all owners saved before
-step 2” rather than a helper's `entity="none"`; do not imply that a server-date control
-is an HTTP parameter. Identify a previous-step ID as “ID of the owner created in step N”
+stay in structured inputs/provenance. For an initial snapshot, name the starting
+state from Preconditions (for example, “owners already present in the initial clinic
+database”), not “saved before this step”. For a later snapshot, name the concrete
+preceding action whose result is observed. State what is captured (records, IDs or
+count) and preserve the scope used by later comparisons. Do not expose a helper's
+`entity="none"` or imply that a server-date control is an HTTP parameter. Identify a previous-step ID as “ID of the owner created in step N”
 and bind that exact output structurally. Human wording is a view of those bindings,
 never a source from which automation reconstructs missing values. The direct `http`
 body-format rules below remain specific to that operation kind.

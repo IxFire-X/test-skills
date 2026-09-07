@@ -52,6 +52,15 @@ worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
 
 ## 2. Выбери exact module и заморозь baseline
 
+Если нужные для native test boundary API или настройки подтверждаются только внешними
+зависимостями, до inventory сохрани разрешённые узкие выдержки их документации или
+метаданных отдельным evidence-файлом в eligible project tree. Укажи точную версию,
+источник и digest; включи файл в обычный immutable context receipt для генератора и
+reviewer. Это техническое доказательство, не новое бизнес-требование и не текст
+человеческих шагов ТК. Не копируй целиком зависимости или секреты. Поздно обнаруженный
+пробел не закрывай незаявленными bytes после freeze: используй разрешённый retrieval
+либо сохрани gap для следующей попытки.
+
 1. Выполни локальный read-only inventory eligible project tree.
 2. Исключи `.git`, dependencies, build outputs, binaries, generated artifacts и файлы
    с потенциальными secrets из model context.
