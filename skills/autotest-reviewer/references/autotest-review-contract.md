@@ -6,6 +6,12 @@ Review atomic operation/assertion relation ownership, canonical physical order, 
 
 Inspect each generated symbol for exact canonical input literals and input/output/assertion bindings. A literal or binding drift is rework even if declared relations, locators, and digests are internally consistent.
 
+For shared helpers, follow calls from each declared test method to the actual operation
+and assertion; a helper call or relation alone is not coverage. Apply the readability
+guidance in the [automation contract](../../tc-to-autotest/references/automation-output-contract.md).
+Lost assertions or changed semantics require rework; accurate repetition or naming
+preferences alone are advisory and do not justify a regeneration cycle.
+
 Also inspect testing-work constraints in the selected canonical `requirements` linked
 by each case's `requirement_ids`; they need not appear in human case fields. Verify
 applicable restrictions against proposed source and authorized project configuration,

@@ -414,7 +414,7 @@ def test_controller_baseline_drift_preserves_exact_closed_request_in_not_runnabl
     assert receipt["execution"]["baseline_digest"] == coordinates["attempt"]["baseline_digest"]
 
 
-def test_cmd_exec_missing_carrier_is_controller_error_and_leaves_attempt_resumable(tmp_path: Path) -> None:
+def test_cmd_exec_missing_carrier_is_controller_error_and_leaves_attempt_resumable(tmp_path: Path, capsys) -> None:
     from tools.pilot_state import derive_state, read_attempt_receipt
     from tools.run_pipeline import cmd_exec
 
@@ -434,6 +434,19 @@ def test_cmd_exec_missing_carrier_is_controller_error_and_leaves_attempt_resumab
     result = cmd_exec(args)
 
     assert result == 2
+    capsys.readouterr()
+    from tools.run_pipeline import build_parser
+
+    omitted = build_parser().parse_args(["exec", "--project", str(project), "--run", args.run])
+    before = derive_state(coordinates["run_root"])
+    assert cmd_exec(omitted) == 2
+    error = json.loads(capsys.readouterr().out)
+    assert error["reason"] == "RUNNER_INPUT"
+    assert error["message"] == (
+        "initial execution requires: --canonical-document, --automation-artifact, --autotest-review, "
+        "--authorization-receipt, --host-isolation-receipt, --generated-delta-receipt"
+    )
+    assert derive_state(coordinates["run_root"]) == before
     with pytest.raises(ValueError, match="missing execution-receipt"):
         read_attempt_receipt(
             coordinates["run_root"], coordinates["attempt"]["attempt_id"], "execution-receipt", "ARTIFACT_READ_BACK",

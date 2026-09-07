@@ -80,6 +80,19 @@ previous contacts, pets and visits). If the assertion compares a broader snapsho
 describe that scope honestly too. Do not remove required preservation assertions for
 brevity or add all-table invariants automatically to unrelated scenarios.
 
+Prefer one short objective sentence and a result stated as an observable fact. For
+example, an empty-name case can aim to "Не допустить создание владельца без имени";
+its result can say "Форма сообщает об обязательном имени; новый владелец не сохранён".
+Use only outcomes supported at the selected test boundary. A preservation result can
+say "Контакты владельца обновлены; его ID, питомцы и визиты сохранены без изменений"
+when those are the actual checks. Identify a broader snapshot's contents once in the
+step that captures it, then refer to that named snapshot rather than repeating its
+table list. Keep source call chains in provenance; a characterization expectation
+still identifies the current component boundary and the exact observed failure.
+For catalog prerequisites, check the entries needed by the scenario. Require the
+entire catalog or its order only when that is part of the required behavior; source
+seed contents alone do not make catalog equality a requirement.
+
 The v4 projection displays `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
 
 ## Canonical physical order

@@ -10,6 +10,19 @@ Generated source preserves every canonical literal and every input/output/assert
 
 The generator must not recover request values from human `action`, `test_data`, Markdown, reviewer warnings, old revisions, or project helper defaults. Those fields are not automation input. A request-affecting value absent from selected canonical structured inputs is rework, not permission to infer it.
 
+Keep generated tests readable as ordinary project tests. Use descriptive method and
+local variable names, retaining case IDs in comments or display names and exact
+locators in the artifact. For Java, factor repeated request, readback or assertion mechanics
+into small private helpers in the generated class when that removes actual duplication;
+pass each assertion ID through to its failure message. Keep concrete scenario inputs,
+operation order and expected values visible at the call site. Preserve every selected
+canonical assertion and its atomic relation, including setup checks: excess canonical
+coverage must be corrected before selection, never silently dropped by automation.
+Do not build a generic operation/assertion interpreter, split classes solely to meet a
+line limit, or replace independent persistence reads with managed-object comparisons.
+Use existing native assertions without redundant casts or repeated regex compilation;
+shared helpers must preserve assertion semantics and identify the failing case/check.
+
 Read the testing-work constraints in the selected canonical `requirements` linked by
 the applicable cases' `requirement_ids`, even when absent from human case fields.
 Preserve restrictions on the subject under test, framework, dependencies and file edits.

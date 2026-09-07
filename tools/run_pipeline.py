@@ -929,6 +929,16 @@ def cmd_exec(args: Any) -> int:
         from tools.run_tests import load_automation_artifact, load_autotest_review_artifact
         from tools.schema_validation import load_json_strict
 
+        missing = [
+            "--" + name.replace("_", "-")
+            for name in (
+                "canonical_document", "automation_artifact", "autotest_review",
+                "authorization_receipt", "host_isolation_receipt", "generated_delta_receipt",
+            )
+            if not getattr(args, name, None)
+        ]
+        if missing:
+            raise ValueError("initial execution requires: " + ", ".join(missing))
         supplied_document = load_canonical_document(Path(args.canonical_document))
         supplied_automation = load_automation_artifact(Path(args.automation_artifact))
         supplied_review = load_autotest_review_artifact(Path(args.autotest_review))
