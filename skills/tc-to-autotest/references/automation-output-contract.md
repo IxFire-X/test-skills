@@ -23,6 +23,17 @@ line limit, or replace independent persistence reads with managed-object compari
 Use existing native assertions without redundant casts or repeated regex compilation;
 shared helpers must preserve assertion semantics and identify the failing case/check.
 
+For Spring tests, choose context lifetime from the state actually changed by the
+scenarios. Reuse a context within a class when confirmed cleanup restores all relevant
+state even after failure and cases cannot interfere concurrently. Do not add
+`DirtiesContext(AFTER_EACH_TEST_METHOD)` automatically to database scenarios with
+complete cleanup. Keep fresh contexts when bean/cache/static state or the selected
+canonical isolation requires them; database cleanup alone does not prove that reset.
+Factor identical failure-preserving cleanup blocks into one small helper or an existing
+fixture when repeated across cases. Keep each case's baseline and cleanup assertion ID
+explicit, execute cleanup after setup or assertion failure, and retain the original
+failure if cleanup also fails. Do not share mutable scenario data between tests.
+
 Read the testing-work constraints in the selected canonical `requirements` linked by
 the applicable cases' `requirement_ids`, even when absent from human case fields.
 Preserve restrictions on the subject under test, framework, dependencies and file edits.
