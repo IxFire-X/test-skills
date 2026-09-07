@@ -1,4 +1,4 @@
-"""Publish immutable canonical JSON, human-preview, and Zephyr CSV revision bundles."""
+"""Publish canonical JSON/HTML/CSV bundles with a derived Markdown companion."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from tools.test_case_projections import (
 
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
 _PROFILE = _PROFILE_V4
-_ORDER = ("json", "preview", "csv")
+_ORDER = ("json", "preview", "csv", "markdown")
 _MESSAGES = {
     "OUTPUT_DIRECTORY_ERROR": "Output directory is unavailable.",
     "HARDLINK_UNAVAILABLE": "Atomic hard-link publication is unavailable.",
@@ -42,6 +42,7 @@ class BundlePayloads:
     preview_bytes: bytes
     csv_bytes: bytes
     warnings: tuple[str, ...]
+    markdown_bytes: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,8 @@ def build_bundle(document: dict[str, Any], csv_profile: str = _PROFILE, *, _allo
     _validate_once(document, csv_profile, allow_historical=_allow_historical)
     preview = _render_html_preview_validated(document, csv_profile) if csv_profile == _PROFILE_V4 else _render_markdown_validated(document, csv_profile)
     csv = _render_zephyr_csv_validated(document, csv_profile)
-    return BundlePayloads(canonical_bytes(document), preview.payload, csv.payload, preview.warnings + csv.warnings)
+    markdown = _render_markdown_validated(document, csv_profile).payload if csv_profile == _PROFILE_V4 else b""
+    return BundlePayloads(canonical_bytes(document), preview.payload, csv.payload, preview.warnings + csv.warnings, markdown)
 
 
 def _resolved_output_directory(output_dir: str | os.PathLike[str], create: bool) -> Path:
@@ -139,7 +141,7 @@ def _targets(document: dict[str, Any], directory: Path, csv_profile: str = _PROF
 
 
 def _payloads(bundle: BundlePayloads) -> tuple[tuple[str, bytes], ...]:
-    return tuple(zip(_ORDER, (bundle.json_bytes, bundle.preview_bytes, bundle.csv_bytes)))
+    return tuple(zip(_ORDER, (bundle.json_bytes, bundle.preview_bytes, bundle.csv_bytes, bundle.markdown_bytes)))
 
 
 def _preflight(targets: tuple[tuple[str, Path], ...], bundle: BundlePayloads) -> tuple[str, ...]:
@@ -207,7 +209,7 @@ def _write_temps(directory: Path, missing: tuple[str, ...], bundle: BundlePayloa
         raise BundlePublicationError("TEMPORARY_WRITE_FAILED") from None
 
 
-def _read_final(targets: tuple[tuple[str, Path], ...], bundle: BundlePayloads) -> tuple[bytes, bytes, bytes]:
+def _read_final(targets: tuple[tuple[str, Path], ...], bundle: BundlePayloads) -> tuple[bytes, ...]:
     expected = dict(_payloads(bundle))
     values: list[bytes] = []
     mismatches: list[str] = []
@@ -227,7 +229,7 @@ def _read_final(targets: tuple[tuple[str, Path], ...], bundle: BundlePayloads) -
     return tuple(values)  # type: ignore[return-value]
 
 
-def _receipt(document: dict[str, Any], csv_profile: str, targets: tuple[tuple[str, Path], ...], payloads: tuple[bytes, bytes, bytes]) -> Receipt:
+def _receipt(document: dict[str, Any], csv_profile: str, targets: tuple[tuple[str, Path], ...], payloads: tuple[bytes, ...]) -> Receipt:
     return Receipt(
         document_id=document["document_id"], revision=document["revision"], csv_profile=csv_profile,
         json_path=str(targets[0][1]), preview_path=str(targets[1][1]), csv_path=str(targets[2][1]),
@@ -240,6 +242,8 @@ def publish_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str],
     bundle = build_bundle(document, csv_profile)
     directory = _resolved_output_directory(output_dir, create=True)
     targets = _targets(document, directory, csv_profile)
+    # Markdown is a derived companion; existing authoritative receipt fields stay unchanged.
+    targets += (("markdown", directory / f"{document['document_id']}.r{document['revision']}.md"),)
     missing = _preflight(targets, bundle)
     if not missing:
         return _receipt(document, csv_profile, targets, _read_final(targets, bundle))

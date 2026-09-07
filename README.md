@@ -61,10 +61,17 @@ explicit Skill invocation
 может быть только один. `WAITING_FOR_INPUT` и `WAITING_FOR_MODEL` продолжаются через
 resume; terminal attempt неизменяем.
 
-Canonical JSON — единственный семантический источник. HTML и
+Canonical JSON — единственный семантический источник. HTML, Markdown и
 `zephyr-scale-step-row-24-v4` CSV — derived human projections. Опциональный
 `zephyr-scale-xml-observed-v1` остаётся observed/unverified: реальный Zephyr tenant
 import/re-export не доказан.
+
+При публикации кейсов рядом с `<document_id>.r<revision>.html` автоматически
+создаётся `<document_id>.r<revision>.md`: цель, предусловия и шаги с данными и
+ожидаемыми результатами. Markdown строится из того же JSON и не служит входом
+автоматизации. Повторная публикация сверяет его байты и не перезаписывает изменённую
+вручную копию. Формат существующих receipts сохранён: `--verify-only` проверяет
+JSON/HTML/CSV, а Markdown проверяется при публикации и не входит в receipt.
 
 ## Execution и generated files
 

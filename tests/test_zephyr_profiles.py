@@ -12,6 +12,27 @@ V3 = "zephyr-scale-step-row-24-v3"
 V4 = "zephyr-scale-step-row-24-v4"
 
 
+def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(tmp_path: Path) -> None:
+    from tools.publish_test_case_bundle import BundleMismatchError, publish_bundle, verify_bundle
+    from tools.test_case_projections import render_markdown
+
+    document = canonical_fixture()
+    original = json.dumps(document, ensure_ascii=False)
+    receipt = publish_bundle(document, tmp_path)
+    markdown = Path(receipt.json_path).with_suffix(".md")
+    text = markdown.read_text(encoding="utf-8")
+    assert markdown.read_bytes() == render_markdown(document).payload
+    assert "## ТК-1." in text and "### Шаг 1" in text
+    assert document["test_cases"][0]["title"] in text
+    assert "**Предусловия:**" in text and "**Ожидаемый результат**" in text
+    assert json.dumps(document, ensure_ascii=False) == original
+    assert publish_bundle(document, tmp_path) == receipt == verify_bundle(document, tmp_path)
+    markdown.write_text("Изменённая вручную копия", encoding="utf-8")
+    with pytest.raises(BundleMismatchError, match="markdown"):
+        publish_bundle(document, tmp_path)
+    assert markdown.read_text(encoding="utf-8") == "Изменённая вручную копия"
+
+
 def test_new_projection_public_defaults_are_exact_v4_and_receipts_use_preview_names(tmp_path: Path) -> None:
     from tools.publish_test_case_bundle import _parser, build_bundle, publish_bundle
     from tools.test_case_projections import render_zephyr_csv
@@ -20,7 +41,7 @@ def test_new_projection_public_defaults_are_exact_v4_and_receipts_use_preview_na
     bundle = build_bundle(document)
     assert bundle.preview_bytes.startswith(b"<!doctype html>")
     assert bundle.csv_bytes == render_zephyr_csv(document).payload
-    assert "markdown" not in " ".join(bundle.__dataclass_fields__)
+    assert bundle.markdown_bytes.startswith(b"# ")
     assert next(action.default for action in _parser()._actions if action.dest == "csv_profile") == V4
     receipt = publish_bundle(document, tmp_path)
     assert receipt.csv_profile == V4

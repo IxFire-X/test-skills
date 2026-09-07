@@ -52,7 +52,7 @@ def _readable_table_cell(value: str) -> str:
     return escape_inline(value).replace("\\_", "_")
 
 
-def _markdown_human_blocks(value: str) -> list[str]:
+def _markdown_human_blocks(value: str, *, literal: bool = False) -> list[str]:
     value = value.replace("\r\n", "\n").replace("\r", "\n").strip()
     trailing_json: str | None = None
     source_lines = value.splitlines()
@@ -74,7 +74,7 @@ def _markdown_human_blocks(value: str) -> list[str]:
         paragraph = paragraph.strip()
         if not paragraph:
             continue
-        rendered.append("\n\n".join(paragraph.splitlines()))
+        rendered.append("\n\n".join(escape_inline(line) if literal else line for line in paragraph.splitlines()))
     if trailing_json is not None:
         rendered.append(f"```json\n{trailing_json}\n```")
     return "\n\n".join(rendered).splitlines()
@@ -145,19 +145,23 @@ def _http_url(step: dict[str, Any]) -> str | None:
     return path + ("?" + urlencode(query) if query else "")
 
 
-def _html_action(step: dict[str, Any]) -> str:
+def _human_action(step: dict[str, Any]) -> str:
     action = step["action"]
     operation = step["operation"]
     url = _http_url(step)
     if url is None or operation is None:
-        return _html_text(action)
+        return action
     signature = f"{operation['method']} {operation['path']}"
     resolved = f"{operation['method']} {url}"
     if signature in action:
         action = action.replace(signature, resolved, 1)
     elif resolved not in action:
         action = f"{action.rstrip('.')} — {resolved}."
-    return _html_text(action)
+    return action
+
+
+def _html_action(step: dict[str, Any]) -> str:
+    return _html_text(_human_action(step))
 
 
 def _html_test_data(step: dict[str, Any]) -> str:
@@ -230,23 +234,22 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
     return Projection("".join(rows).encode("utf-8"), warnings)
 
 
-def render_markdown(document: dict[str, Any], profile: str) -> Projection:
-    """Reject legacy Markdown publication; historical bytes are verified by bundle receipts."""
+def render_markdown(document: dict[str, Any], profile: str = _PROFILE_V4) -> Projection:
+    """Render a current human-readable Markdown companion from canonical JSON."""
     _reject_unknown_profile(profile)
     if profile == _PROFILE_V4:
-        raise ValueError(f"Markdown preview is unavailable for {_PROFILE_V4}; use render_html_preview")
+        require_valid_canonical_document(document)
+        return _render_markdown_validated(document, profile)
     raise ValueError("historical Markdown projections are verification-only through an explicit bundle receipt")
 
 
 def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projection:
     """Render Markdown after the public facade has accepted the canonical document."""
-    if profile == _PROFILE_V4:
-        raise ValueError(f"Markdown preview is unavailable for {_PROFILE_V4}; use render_html_preview")
     metadata = document["metadata"]
     documentation = metadata["documentation"]
     warnings: tuple[str, ...] = ()
     if documentation:
-        if profile == _PROFILE_V3:
+        if profile in {_PROFILE_V3, _PROFILE_V4}:
             rendered_documentation = " • ".join(_readable_table_cell(item) for item in documentation)
         else:
             rendered_documentation = "<br>".join(escape_inline(item) for item in documentation)
@@ -281,7 +284,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
                 expectations = "<br>".join(escape_inline(item["text"]) for item in step["expectations"])
                 lines.append(f"| {step_number} | {escape_inline(step['action'])} | {expectations} |")
             else:
-                if profile == _PROFILE_V3:
+                if profile in {_PROFILE_V3, _PROFILE_V4}:
                     data = step["test_data"]
                     expected = "\n\n".join(item["text"] for item in step["expectations"])
                 else:
@@ -292,9 +295,9 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
                     lines.append(f"| {step_number} | {render(step['action'])} | {render(data)} | {render(expected)} |")
                 else:
                     lines.extend([
-                        "", f"### Шаг {step_number}", "", step["action"], "",
-                        "**Тестовые данные / запрос**", "", *_markdown_human_blocks(data), "",
-                        "**Ожидаемый результат**", "", *_markdown_human_blocks(expected),
+                        "", f"### Шаг {step_number}", "", escape_inline(_human_action(step)) if profile == _PROFILE_V4 else step["action"], "",
+                        "**Тестовые данные / запрос**", "", *_markdown_human_blocks(data, literal=profile == _PROFILE_V4), "",
+                        "**Ожидаемый результат**", "", *_markdown_human_blocks(expected, literal=profile == _PROFILE_V4),
                     ])
     return Projection(("\n".join(lines) + "\n").encode("utf-8"), warnings)
 
