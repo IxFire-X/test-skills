@@ -73,6 +73,13 @@ def _local_attempt(project: Path, *, module: str = ".") -> tuple[Path, str, dict
     from tools.pilot_state import read_run
     from tools.run_pipeline import run_phase_one_spine
 
+    # The copied fixture names a Windows interpreter; bind the host path before freezing.
+    skillsrc = project / ".skillsrc"
+    config = json.loads(skillsrc.read_text(encoding="utf-8"))
+    for entry in config["modules"]:
+        if entry["root"] == module:
+            entry["test"]["interpreter"] = MODULE_PYTHON
+    skillsrc.write_text(json.dumps(config, ensure_ascii=False) + "\n", encoding="utf-8")
     identity = {"project": str(project.resolve()), "module": module, "policy_profile": "local-pilot-v1"}
     baseline = build_phase_two_baseline(project, identity, skill_pack_root=project / ".pilot-runs")
     result = run_phase_one_spine(

@@ -997,6 +997,8 @@ def test_round5_temporary_replacement_is_preserved_and_fails_publication(
         result = original_stat(path, *args, **kwargs)
         candidate = Path(path)
         if not swapped and candidate.name.endswith(".tmp"):
+            if kwargs.get("dir_fd") is not None:
+                candidate = root / candidate
             candidate.unlink()
             candidate.write_bytes(b"foreign\n")
             swapped["path"] = candidate
