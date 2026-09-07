@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="fixture" tests="1" failures="1" errors="0" skipped="0">
+  <testcase classname="tests.test_sample" name="test_one" file="tests/test_sample.py">
+    <failure message="assertion failed">FAILURE_PAYLOAD_MARKER</failure>
+    <system-out>SYSTEM_OUT_MARKER</system-out>
+    <system-err>SYSTEM_ERR_MARKER</system-err>
+  </testcase>
+</testsuite>

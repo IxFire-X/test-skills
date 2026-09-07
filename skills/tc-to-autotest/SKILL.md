@@ -1,149 +1,38 @@
 ---
 name: tc-to-autotest
-description: Создаёт проектно-нативные автотесты из принятых ручных тест-кейсов с полной трассировкой «тест-кейс → файл → метод». Использовать для автоматизации тест-кейсов в существующем или новом проекте на Java, Kotlin, Python, Go, TypeScript/JavaScript и других подтверждённых стеках.
+description: Use when the selected effective canonical test-case document must be translated into one project-native V5 automation version with explicit operation and assertion coverage.
 ---
 
-# Генерация проектно-нативных автотестов
+# Project-native automation generation
 
-Работай только с принятыми тест-кейсами и объявленным контекстом проекта.
-Канонические поля и инварианты описаны в
-[контракте результата автоматизации](references/automation-output-contract.md).
+Use only the selected effective canonical document and its digest. Read the [automation contract](references/automation-output-contract.md), `tools.canonical_document`, `tools.automation_validation`, and `tools.execution_preflight`.
 
-## Канонические входы
+Emit a complete proposed generated file set; the controller alone materializes it in the
+selected module's active test root after accepted static review. This role does not use an
+attempt-local/isolated project copy and never authorizes execution.
 
-Принимай только маршрутизированные артефакты этапа:
+## Procedure
 
-- `validation_report`;
-- `generated_test_cases`;
-- `corrected_test_cases`, если проверяющий действительно внёс допустимые исправления.
+1. Validate the selected document and discover the project only within authorized paths. Preserve project-native layout, framework, setup, and runtime-only secret handles. The generated framework must equal the selected `.skillsrc` module framework; a Java file path must be the class FQN under that module's selected native test root, never an attempt-local substitute. Не добавляй зависимости.
+2. For direct canonical/provider-backed execution, run global provider/adapter preflight before a test process or symbol. An exact accepted generated-source chain is instead gated by its static binding review and then the project-native test process; do not fabricate its runtime bindings.
+3. Emit `GENERATED` only when every automated operation and assertion has an atomic operation/assertion relation to a generated `(file_id, symbol_id)` pair. Preserve every canonical literal and binding exactly in source. Multiple required pairs for one target mean AND, not an alternative. `automation_revision=1` has null predecessor fields; the sole permitted `automation_revision=2` is a complete fresh artifact bound to the exact revision-1 automation digest and the exact `AUTO_FIX_APPLIED` review digest.
+   Automation must not recover request values from `action`, `test_data`, Markdown, reviewer prose, helper defaults, or an old revision. If a request-affecting value has no selected canonical structured input, stop for rework.
+4. Emit exactly one manual disposition for every manual step. Emit `BLOCKED` only for a canonical blocker with empty generated/relation/disposition arrays; a project-generation problem without a canonical blocker stops without fabricating a BLOCKED artifact.
+5. Validate via `tools.automation_validation`. Each `generated_files` row carries exact UTF-8 `content` and its matching SHA-256 `content_digest`; the complete artifact has one deterministic digest for independent review. Never write project files or claim execution. Never create a third version, a partial/destructive correction, or any regeneration after runtime `FAIL`.
 
-Проверь входные JSON по их схемам до генерации. При `ТРЕБУЕТ ДОРАБОТКИ` останови
-этап. При `AUTO_FIX_APPLIED` используй `corrected_test_cases`; иначе используй
-`generated_test_cases`. Не объединяй две версии тест-кейса и не восстанавливай
-отсутствующие данные по догадке.
+Each generated test must reach the real behavior named by its operation relation and
+assert the corresponding observed value or state. Do not replace the subject under test
+with its expected answer, assert a constant against itself, swallow an unexpected
+exception, or add skip/xfail/disabled markers to hide an unimplemented scenario. Mock only
+an external boundary when the selected canonical scenario and project conventions permit
+it; never mock the behavior the test claims to cover. Use deterministic data, explicit
+setup and teardown through existing fixtures, order-independent tests, and bounded waits
+for observed conditions instead of arbitrary sleeps. Missing fixtures/setup are rework.
+Keep generated paths and process assumptions valid on Linux and Windows; use the selected
+project runtime and native framework APIs, never a hardcoded host Python path.
 
-Файлы репозитория, манифест, конфигурация тестов и ближайшие релевантные тесты
-являются только явно разрешённым контекстом проекта. Они не становятся новыми
-бизнес-требованиями.
+Markdown/CSV and their human prose are never automation inputs.
 
-## Жёсткая граница изменений
+## Stop conditions
 
-Не изменяй исходный код приложения, существующие тесты, конфигурацию проекта,
-манифесты, файлы блокировки версий или зависимости.
-
-Записывай только объявленные новые файлы сгенерированных тестов. В существующем
-проекте создавай изолированные тестовые файлы в принятой им структуре каталогов.
-Не переписывай рабочий код, существующие тесты и настройки ради прохождения
-генерации.
-
-В новом пустом тестовом рабочем пространстве создавай только явно запрошенную
-минимальную тестовую инфраструктуру. Не добавляй зависимости без переданного
-манифеста, файла блокировки версий либо явного выбора пользователя.
-
-## Выбор языка и тестовой среды
-
-1. Определи язык, фреймворк, средство запуска, структуру тестов и команды по манифесту проекта и существующим тестам.
-2. Найди ближайший тест того же маршрута, компонента или слоя. Извлеки из него пакет или модуль, фикстуры, клиент, аннотации или обработчики, проверки и очистку.
-3. Считай подтверждённую архитектуру проекта важнее любого примера или ресурса скилла.
-4. Используй базовый класс, только если он действительно является шаблоном проекта. `@WebMvcTest + MockMvc`, фикстуры `pytest`, Go `testing`, Vitest/Jest и другие проектные варианты не требуют выдуманного `BaseApiTest`.
-5. Никогда не выбирай Java или другой язык по умолчанию, если стек проекта не определён или не поддерживается. Верни блокирующую диагностику.
-
-Материалы в `assets/java-python-conventions/` являются необязательными стартовыми
-соглашениями только для нового рабочего пространства без существующей
-архитектуры. Не применяй их поверх обнаруженного проектно-нативного шаблона.
-
-## Подготовка среды и секреты
-
-До генерации каждого сценария сопоставь его предусловия с ближайшим
-проектно-нативным примером. Переноси только подтверждённые и необходимые:
-
-- роли и разрешения;
-- фикстуры и фабрики;
-- обработчики подготовки и очистки;
-- инициализацию клиента или приложения;
-- используемый во время выполнения помощник аутентификации.
-
-Наличие базового класса само по себе не доказывает, что доступ к конкретному
-маршруту настроен. Если обязательная подготовка не подтверждена, останови
-генерацию исполнимого теста и верни блокирующую диагностику вместо догадки.
-
-Никогда не копируй, не выводи и не сохраняй bearer-, session- или API-токены,
-пароли, cookie, закрытые ключи, секреты фикстур и учётные данные из исходного кода,
-журналов, артефактов или тест-кейсов. Используй только подтверждённый помощник
-времени выполнения или принятый проектом механизм передачи секретов. Не выдумывай
-`testToken`, `ApiConfig`, фиктивного пользователя или резервные учётные данные.
-
-## Смысловая генерация
-
-Для каждого `TC-*` сохрани без расширения:
-
-- связанные `REQ-*`;
-- предусловия и роль;
-- действие и точные тестовые данные;
-- маршрут или операцию;
-- каждый наблюдаемый ожидаемый результат.
-
-Каждый ожидаемый результат должен действительно создаваться выбранной тестовой
-средой. Например, нельзя ожидать JSON или соответствующий тип содержимого, если
-описанное действие возвращает обычный текст. Нельзя проверять роль, которую
-подготовка не назначает.
-
-Не добавляй тесты, действия, роли, статусы, поля ответа, побочные эффекты или
-инфраструктуру, которых нет во входе. Не пропускай тест-кейсы. Параметризация
-допустима, если каждый исходный `TC-*` остаётся отдельной записью
-`automation_matrix` и входит в `test_case_ids` метода.
-
-Используй нативный для проекта идентификатор трассировки:
-
-- Java/Kotlin — отображаемое имя или нативный эквивалент фреймворка с `TC-*`;
-- Python — имя, параметризация или маркер с `TC-*`;
-- Go — `Test...`, имя табличного теста или подтеста с `TC-*`;
-- TypeScript/JavaScript — заголовок `test` или `it` с `TC-*`;
-- иной фреймворк — его стабильный отображаемый идентификатор теста.
-
-## Машинный результат
-
-JSON является единственным машинным источником истины. Выводи ровно артефакт,
-соответствующий
-[схеме](../../schemas/tc-to-autotest-output.schema.json):
-
-- `schema_version: "2.1.0"`;
-- `stage: "tc-to-autotest"`;
-- `warnings`;
-- `artifacts.automation_matrix`;
-- `artifacts.generated_test_files`;
-- `artifacts.generated_test_methods`.
-
-Сгенерированные файлы исходного кода являются сопутствующими артефактами, а не
-JSON-полями с кодом. Сначала запиши каждый файл по разрешённому пути относительно
-проекта, затем вычисли SHA-256 его фактических байтов и помести `sha256:<hex>` в
-`content_digest`.
-
-Обеспечь точные связи:
-
-- каждый `automation_matrix.test_case_id` существует во входе;
-- каждый ID файла и метода уникален и существует;
-- каждый метод ссылается на существующий файл;
-- `test_case_ids` и `requirement_ids` метода не содержат оборванных ссылок;
-- у каждого входного тест-кейса есть ровно один исполнимый маршрут к одному или нескольким методам;
-- лишних исполнимых тестов вне входных тест-кейсов нет.
-
-Не заявляй, что тесты скомпилированы, запущены или пройдены. Такие утверждения
-допустимы только на основании доказательства, полученного отдельным средством
-запуска. При блокирующей диагностике не выпускай ложный успешный артефакт,
-формально соответствующий схеме.
-
-## Самопроверка
-
-Перед завершением проверь:
-
-- что входной вердикт разрешает генерацию;
-- что файлы проекта вне новых сгенерированных тестов не изменены;
-- что язык, фреймворк и тестовая среда подтверждены;
-- что роли, разрешения, фикстуры и подготовка аутентификации сохранены;
-- что секреты отсутствуют;
-- что все и только входные `TC-*` отражены в матрице и исходном коде;
-- что действия, данные и ожидаемые результаты эквивалентны входу;
-- что пути ограничены разрешённой областью, ID согласованы, а дайджест каждого файла совпадает;
-- что JSON соответствует схеме;
-- что утверждения о выполнении отсутствуют.
+Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or work outside the authorized scope. Also stop when discovery, preflight, runtime setup, or a required project change is unresolved.

@@ -4,79 +4,77 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 try:
-    from jsonschema import Draft202012Validator, SchemaError
+    from jsonschema import SchemaError
 except ImportError as error:  # pragma: no cover
-    Draft202012Validator = None
     SchemaError = Exception
     _IMPORT_ERROR = error
 else:
     _IMPORT_ERROR = None
 
-
-def _pointer(parts: Iterable[object]) -> str:
-    encoded = "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
-    return f"/{encoded}" if encoded else ""
-
-
-def _error_path(error: Any) -> str:
-    path = list(error.absolute_path)
-    if error.validator == "required":
-        path.append(error.message.removeprefix("'").split("'", 1)[0])
-    elif error.validator == "additionalProperties":
-        path.append(error.message.removeprefix("Additional properties are not allowed ('").split("'", 1)[0])
-    return _pointer(path)
+try:
+    if __package__:
+        from .schema_validation import SchemaRegistryError, StrictJsonError, classify_version, load_json_strict, schema_diagnostics, validator_for
+    else:  # direct CLI execution
+        from schema_validation import SchemaRegistryError, StrictJsonError, classify_version, load_json_strict, schema_diagnostics, validator_for
+except ImportError as error:  # pragma: no cover
+    SchemaRegistryError = StrictJsonError = Exception
+    _SCHEMA_VALIDATION_IMPORT_ERROR = error
+else:
+    _SCHEMA_VALIDATION_IMPORT_ERROR = None
 
 
 def _report_error(message: str) -> tuple[int, dict[str, Any]]:
     return 2, {"status": "error", "errors": [{"path": "", "message": message}]}
 
 
-def _read_json(path: str) -> Any:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def _root_for_schema(schema_path: Path) -> Path:
+    return schema_path.resolve().parent.parent
 
 
 def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]:
-    """Return (fixed exit code, deterministic report) for a schema/artifact pair."""
+    """Validate one artifact; cross-artifact execution evidence belongs to V3 workflow tools."""
     if _IMPORT_ERROR is not None:
         return _report_error(f"missing dependency: {_IMPORT_ERROR}")
+    if _SCHEMA_VALIDATION_IMPORT_ERROR is not None:
+        return _report_error(f"schema validation unavailable: {_SCHEMA_VALIDATION_IMPORT_ERROR}")
+    schema_file = Path(schema_path)
+    root = _root_for_schema(schema_file)
     try:
-        schema = _read_json(schema_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        validator_for(schema_file, root)
+    except (SchemaRegistryError, StrictJsonError, SchemaError) as error:
         return _report_error(f"schema unreadable: {error}")
     try:
-        Draft202012Validator.check_schema(schema)
-    except SchemaError as error:
-        return _report_error(f"schema invalid: {error}")
-    try:
-        artifact = _read_json(artifact_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        artifact = load_json_strict(Path(artifact_path))
+    except StrictJsonError as error:
         return _report_error(f"artifact unreadable: {error}")
     try:
-        errors = sorted(Draft202012Validator(schema).iter_errors(artifact), key=lambda error: (_error_path(error), error.message))
+        schema = load_json_strict(schema_file)
+    except StrictJsonError as error:
+        return _report_error(f"schema unreadable: {error}")
+    if (
+        isinstance(schema, dict)
+        and schema.get("properties", {}).get("schema_version", {}).get("const") in {"3.0.0", "4.0.0"}
+        and classify_version(artifact)["code"] == "V2_1_BREAKING_CHANGE"
+    ):
+        return 1, {
+            "status": "invalid",
+            "errors": [{
+                "path": "/schema_version",
+                "code": "V2_1_BREAKING_CHANGE",
+                "message": "schema version 2.1.0 is incompatible with canonical model 3.0.0",
+            }],
+        }
+    try:
+        errors = schema_diagnostics(artifact, schema_file, root)
     except Exception as error:  # noqa: BLE001  # pragma: no cover
         return _report_error(f"runtime error: {error}")
     if errors:
-        return 1, {"status": "invalid", "errors": [{"path": _error_path(error), "message": error.message} for error in errors]}
-    if schema.get("$id") == "schemas/run-tests-output.schema.json":
-        try:
-            if __package__:
-                from .run_tests import validate_execution_evidence
-            else:  # direct CLI execution
-                from run_tests import validate_execution_evidence
-            semantic = validate_execution_evidence(
-                artifact["verdict"], artifact["run_id"], artifact["execution_evidence"], artifact["evidence_authoritative"]
-            )
-        except (KeyError, TypeError, ImportError) as error:
-            return _report_error(f"run-tests semantic validation unavailable: {error}")
-        if semantic:
-            return 1, {"status": "invalid", "errors": [{"path": "", "message": message} for message in semantic]}
+        return 1, {"status": "invalid", "errors": errors}
     return 0, {"status": "valid", "errors": []}
 
 
@@ -89,6 +87,8 @@ class _JsonArgumentParser(argparse.ArgumentParser):
 def _emit(report: dict[str, Any]) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    import json
+
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 

@@ -1,0 +1,22 @@
+{
+  "schema_version": "5.0.0",
+  "version": "3.0",
+  "project": {"name": "python-pytest"},
+  "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+  "modules": [
+    {
+      "id": "python-pytest",
+      "root": ".",
+      "stack": {"language": "python", "framework": "pytest"},
+      "detected_from": ["pyproject.toml"],
+      "paths": {"source": ["src"], "tests": ["tests"]},
+      "test": {
+        "framework": "pytest",
+        "adapter_id": "pytest:selected-symbols-v1",
+        "interpreter": ".venv/Scripts/python.exe",
+        "build_profile": "default",
+        "adapter_parameters": {}
+      }
+    }
+  ]
+}

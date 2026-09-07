@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/pre-finalization-trace.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "policy_profile", "run_id", "attempt_id", "canonical_digest", "effective_canonical_digest", "reviewer", "execution_trace", "execution", "evidence", "resume_validation_digest", "generated_delta_digest", "disposition_receipt_digest", "disposition_verification", "dispositions", "stage_causes", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "stage": {"const": "pre_finalization_trace"},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "run_id": {"$ref": "#/$defs/id"},
+    "attempt_id": {"$ref": "#/$defs/id"},
+    "canonical_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "effective_canonical_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "reviewer": {"$ref": "#/$defs/reviewer"},
+    "execution_trace": {"$ref": "#/$defs/execution_trace"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "evidence": {"$ref": "#/$defs/evidence"},
+    "resume_validation_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "generated_delta_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "disposition_receipt_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "disposition_verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", null]},
+    "dispositions": {"type": "array", "items": {"$ref": "#/$defs/disposition"}},
+    "stage_causes": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_:-]*$"}, "uniqueItems": true},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "reviewer": {"type": "object", "additionalProperties": false, "required": ["digest", "session_complete", "authoritative_verdict", "authoritative_verdict_count", "pre_verdict_abort", "isolation"], "properties": {"digest": {"$ref": "#/$defs/digest"}, "session_complete": {"type": "boolean"}, "authoritative_verdict": {"enum": ["ACCEPTED", "REJECTED", null]}, "authoritative_verdict_count": {"enum": [0, 1]}, "pre_verdict_abort": {"type": "boolean"}, "isolation": {"enum": ["verified", "independence_unverified"]}}, "allOf": [{"if": {"properties": {"session_complete": {"const": true}}, "required": ["session_complete"]}, "then": {"properties": {"authoritative_verdict": {"enum": ["ACCEPTED", "REJECTED"]}, "authoritative_verdict_count": {"const": 1}, "pre_verdict_abort": {"const": false}}}, "else": {"properties": {"authoritative_verdict": {"const": null}, "authoritative_verdict_count": {"const": 0}, "pre_verdict_abort": {"const": true}}}}]},
+    "execution_trace": {"type": "object", "additionalProperties": false, "required": ["applicability", "trace_receipt_digest", "trace_sha256", "audit_receipt_digest", "audit_valid"], "properties": {"applicability": {"enum": ["PRESENT", "NOT_APPLICABLE"]}, "trace_receipt_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}, "trace_sha256": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}, "audit_receipt_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}, "audit_valid": {"type": ["boolean", "null"]}}, "allOf": [{"if": {"properties": {"applicability": {"const": "PRESENT"}}, "required": ["applicability"]}, "then": {"properties": {"trace_receipt_digest": {"$ref": "#/$defs/digest"}, "trace_sha256": {"$ref": "#/$defs/digest"}, "audit_receipt_digest": {"$ref": "#/$defs/digest"}, "audit_valid": {"type": "boolean"}}}, "else": {"properties": {"trace_receipt_digest": {"const": null}, "trace_sha256": {"const": null}, "audit_receipt_digest": {"const": null}, "audit_valid": {"const": null}}}}]},
+    "execution": {"type": "object", "additionalProperties": false, "properties": {"verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"]}, "execution_receipt_digest": {"$ref": "#/$defs/digest"}, "framework_evidence_digest": {"$ref": "#/$defs/digest"}, "environment_receipt_digest": {"$ref": "#/$defs/digest"}}},
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["materialization", "execution", "dispositions"], "properties": {"materialization": {"enum": ["REQUIRED", "NOT_APPLICABLE", "PRESENT"]}, "execution": {"enum": ["REQUIRED", "NOT_APPLICABLE", "PRESENT"]}, "dispositions": {"enum": ["REQUIRED", "NOT_APPLICABLE", "PRESENT"]}}},
+    "disposition": {"type": "object", "additionalProperties": false, "required": ["file_id", "path", "content_digest", "ownership_digest", "baseline_absent", "materialization", "disposition"], "properties": {"file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "path": {"type": "string", "minLength": 1}, "content_digest": {"$ref": "#/$defs/digest"}, "ownership_digest": {"$ref": "#/$defs/digest"}, "baseline_absent": {"const": true}, "materialization": {"enum": ["MATERIALIZED", "NOT_MATERIALIZED"]}, "disposition": {"enum": ["RETAINED", "CLEANED", "NOT_MATERIALIZED", "PRESERVED_EXECUTION_UNKNOWN", "PRESERVED_CONTENT_CONFLICT", "PRESERVED_CLEANUP_CONFLICT"]}, "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_:-]*$"}}}
+  },
+  "allOf": [
+    {"if": {"properties": {"policy_profile": {"const": "cases-only-v1"}}, "required": ["policy_profile"]}, "then": {"properties": {"generated_delta_digest": {"const": null}, "disposition_receipt_digest": {"const": null}, "disposition_verification": {"enum": ["NOT_APPLICABLE", null]}, "dispositions": {"maxItems": 0}, "execution_trace": {"properties": {"applicability": {"const": "NOT_APPLICABLE"}}}, "evidence": {"properties": {"materialization": {"const": "NOT_APPLICABLE"}, "execution": {"const": "NOT_APPLICABLE"}, "dispositions": {"const": "NOT_APPLICABLE"}}}}}},
+    {"if": {"properties": {"evidence": {"properties": {"dispositions": {"const": "NOT_APPLICABLE"}}, "required": ["dispositions"]}}, "required": ["evidence"]}, "then": {"properties": {"generated_delta_digest": {"const": null}, "disposition_receipt_digest": {"const": null}, "disposition_verification": {"enum": ["NOT_APPLICABLE", null]}, "dispositions": {"maxItems": 0}}}},
+    {"if": {"properties": {"evidence": {"properties": {"dispositions": {"const": "PRESENT"}}, "required": ["dispositions"]}}, "required": ["evidence"]}, "then": {"properties": {"generated_delta_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "disposition_receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "disposition_verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"]}, "dispositions": {"minItems": 1}}}}
+  ]
+}

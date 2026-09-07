@@ -1,128 +1,138 @@
-# Test Skills
+# Test Skills Portable Pilot
 
-Портативный AI-пайплайн для создания ручных тест-кейсов, независимого ревью,
-генерации проектно-нативных автотестов, их проверки, запуска и сквозной
-трассировки.
+## Презентация и обзор
 
-Пакет не привязан к конкретному AI-клиенту или модели. Его может выполнять
-любой агент, который умеет читать локальные файлы, создавать JSON и исходный
-код, а также запускать Python-команды. Формат `SKILL.md` используется как
-переносимый контракт инструкций.
+- [Презентация на русском: 16 слайдов, около 20 минут](docs/portable-testing-pipeline-ru.pptx).
+- [Заметки докладчика](docs/presentation-notes-ru.md).
+- [Что сделано, структура пакета и причины попробовать](docs/portable-pipeline-overview-ru.md).
+- [Результаты большого пилота и границы подтверждённого](docs/pilot-evidence.md).
 
-## Что входит
+В этом репозитории опубликован переносимый пакет тестирования. Старые версии
+сохранены в истории Git.
 
-| Компонент | Назначение |
-|---|---|
-| `context-marker` | Нормализует требования и сохраняет происхождение каждого факта |
-| `tc-generator` | Создаёт детерминированные тест-кейсы в JSON и CSV |
-| `tc-reviewer` | Проверяет полноту, смысл, роли, подготовку, данные и ожидаемые результаты |
-| `tc-to-autotest` | Создаёт новые автотесты в стиле целевого проекта |
-| `autotest-reviewer` | Независимо проверяет сгенерированный тестовый код |
-| `orchestrate` | Управляет порядком этапов, контрольными точками и остановками |
+Портативный skill-pack для проектирования тест-кейсов, независимого ревью,
+генерации автотестов, project-native выполнения и проверяемой трассировки.
+Пакет не является самостоятельным LLM runner: моделью управляет совместимая CLI,
+а Python tools только читают, проверяют, публикуют и исполняют закрытые операции.
 
-Машинная цепочка:
+## Точка входа
 
-```text
-требования и исходный код
-  -> automatic project discovery and .skillsrc initialization
-  -> module selection
-  -> context-marker
-  -> tc-generator -> CSV
-  -> tc-reviewer
-  -> tc-to-autotest
-  -> autotest-reviewer
-  -> запуск тестов
-  -> проверка трассировки
-  -> итоговый артефакт оркестратора
-```
+Скопируйте пакет целиком в обычный рабочий проект и явно попросите model-enabled
+CLI выполнить `skills/orchestrate/SKILL.md`. Совместимая CLI обязана прочитать exact
+Skills, references, schemas и `contracts/pipeline.json`, сохранять и читать обратно
+артефакты, создавать отдельный fresh reviewer invocation и уметь продолжить
+nonterminal attempt из durable state.
 
-JSON является источником истины. CSV предназначен для просмотра и
-Jira Zephyr-ориентированного переноса. Сгенерированный исходный код является
-сопутствующим артефактом; факт выполнения подтверждает только средство запуска.
+Первичный вход — один документ требований для новой или изменяемой фичи. Project,
+module, path или `--target` могут только сузить scope. Сам путь к проекту не разрешает
+придумать фичу.
 
-## Поддержка
+## Два профиля
 
-- Python 3.10+.
-- Windows и Linux; macOS должен работать через тот же POSIX-маршрут, но отдельно
-  не сертифицирован.
-- Полная генерация, проверка и выполнение: Java/JUnit 5 и Python/pytest.
-- TypeScript/Jest и Go/testing пока поддерживаются экспериментально и не могут
-  завершить формальный пайплайн со статусом `PASS`.
+- `cases-only-v1` создаёт и независимо проверяет canonical test cases. Код проекта не
+  запускается; materialization и execution имеют `NOT_APPLICABLE`.
+- `local-pilot-v1` после accepted canonical и automation review материализует exact
+  generated file set и запускает только reviewed targets через project-native
+  pytest, Maven wrapper или Gradle wrapper.
 
-## Быстрый старт
+Явный запрос полного pipeline даёт run-scoped разрешение на такое выполнение только
+для текущего run. Простое наличие папки или запрос тест-кейсов код не запускают.
+Пайплайн не создаёт clone/worktree/sandbox, не ставит JDK, Python, зависимости или
+plugins и не меняет CI, cron, Git history или remote.
 
-Клонируйте пакет отдельно от целевого проекта:
-
-```bash
-git clone https://github.com/IxFire-X/test-skills.git
-cd test-skills
-python -m venv .venv
-python -m pip install -r requirements.txt
-python tools/doctor.py --root .
-python tools/contract_check.py --root . --full
-```
-
-На Linux активируйте окружение через `source .venv/bin/activate`; на Windows —
-через `.venv\Scripts\Activate.ps1`. Если команда `python` отсутствует, используйте
-`python3` во всех примерах.
-
-При первой команде оркестратор автоматически сканирует структуру проекта и
-создаёт `.skillsrc`. Если критическое значение неоднозначно, он остановится и
-задаст один вопрос. Это v3-манифест с одним или несколькими `modules[]`;
-контекст фичи строится отдельно только после выбора exact module ID.
-
-Ручная инициализация нужна лишь для диагностики или CI:
-
-```bash
-python tools/init_skillsrc.py --project /path/to/project --write --output /path/to/project/docs/to_do/skillsrc-init.json
-```
-
-На Windows путь может выглядеть как `D:\\work\\project`, на Linux — как
-`/work/project`. `.skillsrc` описывает проект, но не даёт разрешения менять его
-исходный код, тесты, конфигурацию или зависимости. В v2-манифестах сохраняется
-совместимость; новые автоматически созданные манифесты имеют версию v3.
-
-Передайте AI-агенту:
+## Как идёт run
 
 ```text
-Используй полный тестовый пайплайн из
-<skill-pack>/skills/orchestrate/SKILL.md.
-
-Корень пакета скиллов: <skill-pack>
-Корень проекта: <project>
-Область проверки: <пути требований и явно разрешённого исходного кода>
-Артефакты: <project>/docs/to_do/test-pipeline/<run-id>
-
-Не изменяй рабочий исходный код, существующие тесты, конфигурацию,
-зависимости и файлы блокировки версий.
+explicit Skill invocation
+  -> run manifest + authorization + RUN_CREATED
+  -> read-only inventory -> exact module -> frozen execution baseline
+  -> append-only attempt
+  -> deterministic requirement batches
+  -> canonical candidate -> one fresh authoritative review
+  -> cases-only finalization
+     или
+     automation -> static review -> generated delta -> materialization
+       -> project-native execution -> trace -> file dispositions
+       -> finalization -> terminal result
 ```
 
-Подробная инструкция: [USAGE.md](USAGE.md).
+Один run навсегда связан с одной exact project/module identity. Он может содержать
+последовательную append-only lineage child attempts, но одновременно nonterminal
+может быть только один. `WAITING_FOR_INPUT` и `WAITING_FOR_MODEL` продолжаются через
+resume; terminal attempt неизменяем.
 
-## Структура поставки
+Canonical JSON — единственный семантический источник. HTML и
+`zephyr-scale-step-row-24-v4` CSV — derived human projections. Опциональный
+`zephyr-scale-xml-observed-v1` остаётся observed/unverified: реальный Zephyr tenant
+import/re-export не доказан.
 
-```text
-skills/             инструкции для AI, справочники, материалы и экспортёр CSV
-schemas/            JSON Schema Draft 2020-12
-contracts/          канонический реестр и маршрутизация
-tools/              валидатор, сканер, средство запуска и трассировка
-requirements.txt    зависимости Python времени выполнения
-CONTRACTS.md         человекочитаемая проекция контрактов артефактов
-PIPELINE.md          человекочитаемая проекция маршрута
-.skillsrc.example    пример манифеста целевого проекта
-USAGE.md             полная инструкция
+## Execution и generated files
+
+Executor получает закрытый adapter ID, exact interpreter/wrapper path, build profile
+и typed parameters — не shell string. Он запускается из выбранного module cwd и не
+исправляет тест после FAIL без отдельного доказанного решения.
+
+Generated output — множество файлов, и у каждого есть materialization и disposition
+receipt. Основные правила:
+
+- authoritative `PASS` и valid trace позволяют записать pre-finalization
+  `RETAINED`; acceptance дополнительно требует valid finalization;
+- `FAIL` и `NOT_RUNNABLE` очищают только byte-identical pipeline-owned files;
+- `UNKNOWN` никогда не очищает generated delta;
+- partial materialization запрещает execution и безопасно закрывается как
+  `PARTIAL/NOT_APPLICABLE`.
+
+## Результат
+
+Результат не является одним старым status. Он содержит независимые оси:
+
+- lifecycle: `ACTIVE`, `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL`, `TERMINAL`;
+- completion: `COMPLETE`, `PARTIAL`, `FATAL` или ещё не установлен;
+- verification: `PASS`, `FAIL`, `UNKNOWN`, `NOT_RUNNABLE`, `NOT_APPLICABLE` или ещё
+  не установлен;
+- coverage: `FULL`, `MIXED`, `MANUAL_ONLY` или ещё не установлено;
+- terminal `reason_code` и вычисленное `accepted`.
+
+Invalid finalization всё равно завершает attempt, но даёт `accepted=false` и
+`FINALIZATION_INVALID`. Фактические verification/coverage при этом не переписываются.
+
+## Секреты и границы
+
+Файл с потенциальным secret целиком исключается из model context. Артефакты содержат
+только safe labels или opaque runtime handles, никогда raw values или обычный hash
+секрета. Окружение хранит только allowlisted safe key IDs/labels без values.
+
+Пайплайн может создавать только свои новые generated-test files и собственные evidence
+artifacts. Application source, существующие тесты, настройки, lock files и зависимости
+не меняются.
+
+## Проверка пакета
+
+Linux и Windows — целевые платформы реализации. CI этого репозитория запускает один
+и тот же implementation gate на Ubuntu и Windows; он проверяет пакет, а не квалификацию
+всех CLI/моделей/проектов. Настройка CI целевого проекта остаётся за его владельцем.
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE = '1'
+python -m tools.ci_gate --root .
+python -m tools.doctor --root .
 ```
 
-`contracts/pipeline.json` — единственный машинный реестр путей, этапов,
-переходов и поддерживаемых возможностей. `CONTRACTS.md` и `PIPELINE.md`
-генерируются из него и не редактируются вручную.
+На Linux используйте `export PYTHONDONTWRITEBYTECODE=1`, затем те же команды Python.
+`tools.ci_gate` уже включает contract check, проверку проекций и весь pytest; отдельно
+повторять их не требуется. Сама команда не создаёт CI-сервис или workflow.
+Весь этот раздел предназначен для maintainer/release-проверки и автоматически из
+обычного production pipeline run не вызывается.
 
-## Основные гарантии
+`contracts/pipeline.json` — machine truth. `CONTRACTS.md` и `PIPELINE.md` — generated
+projections. `release/manifest.json` связывает package `0.5.0-pilot` с exact runtime
+bytes и сейчас честно имеет `implemented_unverified`; readiness допустима только как
+`core-pilot-ready for <exact verified tuple>` после внешнего adaptive release eval.
+Release eval запускается только отдельной явной командой квалификации и не входит в
+обычный production pipeline run. Пакет не создаёт и не изменяет CI целевого проекта.
 
-- источник и требования целевого проекта только читаются;
-- неподтверждённое поведение не додумывается;
-- рабочий код и существующие тесты не подгоняются под тест-кейсы;
-- учётные данные, токены, cookie и закрытые ключи не сохраняются;
-- любая ошибка схемы, проверки, запуска или трассировки останавливает последующие этапы;
-- неудачный артефакт сохраняется, а исправление получает новый каталог попытки;
-- итоговый `PASS` требует доказательств выполнения на уровне методов и полной трассировки.
+Company runner, production rollback и реальный Zephyr tenant round-trip не входят в
+core pilot readiness и остаются `N/A`, пока не появится отдельное evidence.
+
+Подробнее: [USAGE.md](USAGE.md), [HOW-IT-WORKS.md](HOW-IT-WORKS.md) и
+[RELEASE.md](RELEASE.md).

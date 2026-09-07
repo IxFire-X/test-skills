@@ -1,503 +1,267 @@
 #!/usr/bin/env python3
-"""Validate deterministic requirement-to-execution SDD trace documents."""
+"""Safe V5 audit receipt for a pre-finalization trace projection."""
 
 from __future__ import annotations
 
-import argparse
-import copy
-import hashlib
 import json
 import re
 import sys
-import unicodedata
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-try:
-    from jsonschema import Draft202012Validator, SchemaError
-except ImportError as error:  # pragma: no cover - depends on installation
-    Draft202012Validator = None
-    SchemaError = Exception
-    _IMPORT_ERROR: Exception | None = error
-else:
-    _IMPORT_ERROR = None
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+ROOT = Path(__file__).resolve().parents[1]
+TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"
+AUDIT_SCHEMA = ROOT / "schemas" / "trace-audit-output.schema.json"
+from tools.json_cli import JsonArgumentParser
 
-DEFAULT_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "trace-document.schema.json"
-DEFAULT_ORCHESTRATOR_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "orchestrator-output.schema.json"
-_WINDOWS_DEVICE_BASENAMES = {"con", "prn", "aux", "nul", "clock$", *(f"com{number}" for number in range(1, 10)), *(f"lpt{number}" for number in range(1, 10))}
 
+class _TraceArgumentParser(JsonArgumentParser):
+    """Emit one value-redacting JSON object for every CLI argument error."""
 
-def _pointer(parts: Iterable[object]) -> str:
-    encoded = "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
-    return f"/{encoded}" if encoded else ""
-
-
-def _schema_path(error: Any) -> str:
-    path = list(error.absolute_path)
-    if error.validator == "required":
-        path.append(error.message.removeprefix("'").split("'", 1)[0])
-    elif error.validator == "additionalProperties":
-        path.append(error.message.removeprefix("Additional properties are not allowed ('").split("'", 1)[0])
-    return _pointer(path)
-
-
-def _diagnostic(code: str, path: str, message: str) -> dict[str, str]:
-    return {"code": code, "path": path, "message": message}
-
-
-def _canonical_value(value: object) -> object:
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return {unicodedata.normalize("NFC", str(key)): _canonical_value(item) for key, item in sorted(value.items(), key=lambda pair: unicodedata.normalize("NFC", str(pair[0])))}
-    if isinstance(value, list):
-        items = [_canonical_value(item) for item in value]
-        return sorted(items, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    return value
-
-
-def _source_digest(document: object) -> str:
-    try:
-        payload = json.dumps(_canonical_value(document), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    except (TypeError, ValueError):
-        payload = b"null"
-    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
-
-
-def _report(errors: list[dict[str, str]], mappings: list[dict[str, object]], summary: dict[str, int], source_digest: str | None = None) -> dict[str, object]:
-    errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
-    mappings.sort(key=lambda item: (str(item["requirement_id"]), str(item["test_case_id"]), str(item["method_id"])))
-    messages = sorted({item["message"] for item in errors})
-    trace_audit: dict[str, object] = {"verdict": "PASS" if not errors else "FAIL", "mappings": mappings, "errors": messages}
-    if source_digest is not None:
-        trace_audit["source_digest"] = source_digest
-    return {
-        "valid": not errors,
-        "trace_audit": trace_audit,
-        "errors": errors,
-        "warnings": [],
-        "summary": summary,
-    }
-
-
-def _summary(document: object) -> dict[str, int]:
-    if not isinstance(document, dict):
-        return {"requirements": 0, "test_cases": 0, "generated_files": 0, "methods": 0, "mappings": 0, "evidence": 0}
-
-    def count(name: str, parent: dict[str, object] = document) -> int:
-        value = parent.get(name, [])
-        return len(value) if isinstance(value, list) else 0
-
-    execution = document.get("execution")
-    return {
-        "requirements": count("requirements"),
-        "test_cases": count("test_cases"),
-        "generated_files": count("generated_files"),
-        "methods": count("methods"),
-        "mappings": count("trace_map"),
-        "evidence": count("evidence", execution) if isinstance(execution, dict) else 0,
-    }
-
-
-def _load_validator(schema_path: Path) -> Draft202012Validator:
-    if _IMPORT_ERROR is not None or Draft202012Validator is None:
-        raise RuntimeError(f"missing jsonschema runtime: {_IMPORT_ERROR}")
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
-
-
-def _schema_diagnostics(error: Any) -> list[dict[str, str]]:
-    if error.validator == "additionalProperties" and isinstance(error.instance, dict) and isinstance(error.schema, dict):
-        properties = set(error.schema.get("properties", {}))
-        patterns = [re.compile(pattern) for pattern in error.schema.get("patternProperties", {})]
-        unexpected = sorted(key for key in error.instance if key not in properties and not any(pattern.search(key) for pattern in patterns))
-        if unexpected:
-            return [_diagnostic("invalid_input_schema", _pointer([*error.absolute_path, key]), f"additional property is not allowed: {key}") for key in unexpected]
-    return [_diagnostic("invalid_input_schema", _schema_path(error), error.message)]
-
-
-def _schema_report(document: object, schema_path: Path) -> list[dict[str, str]]:
-    try:
-        validator = _load_validator(schema_path)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError, RuntimeError) as error:
-        return [_diagnostic("schema_error", "", f"schema unavailable or invalid: {error}")]
-    return [diagnostic for error in sorted(validator.iter_errors(document), key=lambda item: (_schema_path(item), item.message)) for diagnostic in _schema_diagnostics(error)]
-
-
-def _append(errors: list[dict[str, str]], code: str, path: str, message: str) -> None:
-    errors.append(_diagnostic(code, path, message))
-
-
-def _ids(records: list[dict[str, object]], entity: str, errors: list[dict[str, str]]) -> dict[str, dict[str, object]]:
-    result: dict[str, dict[str, object]] = {}
-    for index, record in enumerate(records):
-        identifier = str(record["id"])
-        if identifier in result:
-            _append(errors, "DUPLICATE_ID", f"/{entity}/{index}/id", f"duplicate {entity} id: {identifier}")
-        else:
-            result[identifier] = record
-    return result
-
-
-def _canonical_path(path: object) -> str:
-    """Return a defensive cross-platform physical identity key for a portable path."""
-    segments: list[str] = []
-    for segment in unicodedata.normalize("NFC", str(path)).replace("\\", "/").split("/"):
-        if segment in {"", "."}:
-            continue
-        if segment == "..":
-            if segments:
-                segments.pop()
-            continue
-        segments.append(segment)
-    return "/".join(segments).casefold()
-
-
-def _nonportable_path_problem(path: object) -> str | None:
-    """Return the first Windows-incompatible segment property, if any."""
-    for segment in unicodedata.normalize("NFC", str(path)).split("/"):
-        if any(unicodedata.category(character) == "Cc" for character in segment):
-            return "contains a Unicode control character"
-        if segment.endswith((".", " ")):
-            return "contains a segment ending with a dot or space"
-        basename = segment.split(".", 1)[0].casefold()
-        if basename in _WINDOWS_DEVICE_BASENAMES:
-            return f"contains a reserved Windows device basename: {segment}"
-    return None
-
-
-def _semantic_check(document: dict[str, object], require_execution: bool) -> tuple[list[dict[str, str]], list[dict[str, object]]]:
-    errors: list[dict[str, str]] = []
-    requirements = document["requirements"]
-    test_cases = document["test_cases"]
-    files = document["generated_files"]
-    methods = document["methods"]
-    trace_map = document["trace_map"]
-    assert isinstance(requirements, list) and isinstance(test_cases, list)
-    assert isinstance(files, list) and isinstance(methods, list) and isinstance(trace_map, list)
-    requirement_by_id = _ids(requirements, "requirements", errors)
-    case_by_id = _ids(test_cases, "test_cases", errors)
-    file_by_id = _ids(files, "generated_files", errors)
-    method_by_id = _ids(methods, "methods", errors)
-    paths: dict[str, int] = {}
-    for index, generated_file in enumerate(files):
-        path = generated_file["path"]
-        if path != unicodedata.normalize("NFC", str(path)):
-            _append(errors, "NONCANONICAL_PATH", f"/generated_files/{index}/path", f"generated file path is not NFC-normalized: {path}")
-        if problem := _nonportable_path_problem(path):
-            _append(errors, "NONPORTABLE_PATH", f"/generated_files/{index}/path", f"generated file path {problem}: {path}")
-        physical_path = _canonical_path(path)
-        if physical_path in paths:
-            _append(errors, "DUPLICATE_PATH", f"/generated_files/{index}/path", f"duplicate generated file path: {path}")
-        else:
-            paths[physical_path] = index
-    locators: dict[tuple[object, object], int] = {}
-    for index, method in enumerate(methods):
-        locator = (method["file_id"], method["name"])
-        if locator in locators:
-            _append(errors, "DUPLICATE_METHOD_LOCATOR", f"/methods/{index}", f"duplicate generated method locator: {locator[0]}::{locator[1]}")
-        else:
-            locators[locator] = index
-
-    for index, case in enumerate(test_cases):
-        for requirement_id in case["requirement_ids"]:
-            if requirement_id not in requirement_by_id:
-                _append(errors, "UNKNOWN_REQUIREMENT", f"/test_cases/{index}/requirement_ids", f"unknown requirement: {requirement_id}")
-    for index, method in enumerate(methods):
-        if method["file_id"] not in file_by_id:
-            _append(errors, "UNKNOWN_FILE", f"/methods/{index}/file_id", f"unknown generated file: {method['file_id']}")
-        for case_id in method["test_case_ids"]:
-            if case_id not in case_by_id:
-                _append(errors, "UNKNOWN_TEST_CASE", f"/methods/{index}/test_case_ids", f"unknown test case: {case_id}")
-        for requirement_id in method["requirement_ids"]:
-            if requirement_id not in requirement_by_id:
-                _append(errors, "UNKNOWN_REQUIREMENT", f"/methods/{index}/requirement_ids", f"unknown requirement: {requirement_id}")
-
-    mapping_keys: set[tuple[object, object, object, object]] = set()
-    mapped_requirements: set[object] = set()
-    mapped_cases: set[object] = set()
-    mapped_methods: set[object] = set()
-    mapped_case_requirements: set[tuple[object, object]] = set()
-    mapped_method_cases: set[tuple[object, object]] = set()
-    mapped_method_requirements: set[tuple[object, object]] = set()
-    audit_mappings: list[dict[str, object]] = []
-    for index, mapping in enumerate(trace_map):
-        key = (mapping["requirement_id"], mapping["test_case_id"], mapping["file_id"], mapping["method_id"])
-        if key in mapping_keys:
-            _append(errors, "DUPLICATE_MAPPING", f"/trace_map/{index}", f"duplicate trace mapping: {'|'.join(map(str, key))}")
-        mapping_keys.add(key)
-        requirement_id, case_id, file_id, method_id = key
-        mapped_requirements.add(requirement_id)
-        mapped_cases.add(case_id)
-        mapped_methods.add(method_id)
-        mapped_case_requirements.add((case_id, requirement_id))
-        mapped_method_cases.add((method_id, case_id))
-        mapped_method_requirements.add((method_id, requirement_id))
-        if requirement_id not in requirement_by_id:
-            _append(errors, "UNKNOWN_REQUIREMENT", f"/trace_map/{index}/requirement_id", f"unknown requirement: {requirement_id}")
-        if case_id not in case_by_id:
-            _append(errors, "UNKNOWN_TEST_CASE", f"/trace_map/{index}/test_case_id", f"unknown test case: {case_id}")
-        if file_id not in file_by_id:
-            _append(errors, "UNKNOWN_FILE", f"/trace_map/{index}/file_id", f"unknown generated file: {file_id}")
-        if method_id not in method_by_id:
-            _append(errors, "UNKNOWN_METHOD", f"/trace_map/{index}/method_id", f"unknown generated method: {method_id}")
-        case = case_by_id.get(case_id)
-        method = method_by_id.get(method_id)
-        if case is not None and requirement_id not in case["requirement_ids"]:
-            _append(errors, "MAPPING_MISMATCH", f"/trace_map/{index}", f"test case {case_id} does not declare requirement {requirement_id}")
-        if method is not None:
-            if case_id not in method["test_case_ids"]:
-                _append(errors, "MAPPING_MISMATCH", f"/trace_map/{index}", f"method {method_id} does not declare test case {case_id}")
-            if requirement_id not in method["requirement_ids"]:
-                _append(errors, "MAPPING_MISMATCH", f"/trace_map/{index}", f"method {method_id} does not declare requirement {requirement_id}")
-            if method["file_id"] != file_id:
-                _append(errors, "MAPPING_MISMATCH", f"/trace_map/{index}", f"method {method_id} belongs to {method['file_id']}, not {file_id}")
-
-    for identifier in sorted(requirement_by_id):
-        if identifier not in mapped_requirements:
-            _append(errors, "MISSING_MAPPING", "/requirements", f"requirement has no trace mapping: {identifier}")
-    for identifier in sorted(case_by_id):
-        if identifier not in mapped_cases:
-            _append(errors, "MISSING_MAPPING", "/test_cases", f"test case has no trace mapping: {identifier}")
-    for case_index, case in enumerate(test_cases):
-        for requirement_index, requirement_id in enumerate(case["requirement_ids"]):
-            if (case["id"], requirement_id) not in mapped_case_requirements:
-                _append(errors, "MISSING_MAPPING", f"/test_cases/{case_index}/requirement_ids/{requirement_index}", f"test case {case['id']} declaration has no trace mapping for requirement {requirement_id}")
-    for identifier in sorted(method_by_id):
-        if identifier not in mapped_methods:
-            _append(errors, "ORPHAN_METHOD", "/methods", f"generated method has no trace mapping: {identifier}")
-    for method_index, method in enumerate(methods):
-        for case_index, case_id in enumerate(method["test_case_ids"]):
-            if (method["id"], case_id) not in mapped_method_cases:
-                _append(errors, "MISSING_MAPPING", f"/methods/{method_index}/test_case_ids/{case_index}", f"method {method['id']} declaration has no trace mapping for test case {case_id}")
-        for requirement_index, requirement_id in enumerate(method["requirement_ids"]):
-            if (method["id"], requirement_id) not in mapped_method_requirements:
-                _append(errors, "MISSING_MAPPING", f"/methods/{method_index}/requirement_ids/{requirement_index}", f"method {method['id']} declaration has no trace mapping for requirement {requirement_id}")
-    methods_per_file = {method["file_id"] for method in methods if method["file_id"] in file_by_id}
-    for identifier in sorted(file_by_id):
-        if identifier not in methods_per_file:
-            _append(errors, "ORPHAN_FILE", "/generated_files", f"generated file has no generated method: {identifier}")
-
-    execution = document.get("execution")
-    evidence_by_method: dict[object, list[dict[str, object]]] = {}
-    unavailable = False
-    if isinstance(execution, dict):
-        unavailable = execution["verdict"] == "NOT_RUNNABLE"
-        evidence_keys: set[tuple[object, object]] = set()
-        for index, evidence in enumerate(execution["evidence"]):
-            run_id, method_id = evidence["run_id"], evidence["method_id"]
-            evidence_key = (run_id, method_id)
-            if evidence_key in evidence_keys:
-                _append(errors, "DUPLICATE_MAPPING", f"/execution/evidence/{index}", f"duplicate execution evidence: {run_id}|{method_id}")
-            evidence_keys.add(evidence_key)
-            if method_id not in method_by_id:
-                _append(errors, "UNKNOWN_METHOD", f"/execution/evidence/{index}/method_id", f"unknown execution method: {method_id}")
-            evidence_by_method.setdefault(method_id, []).append(evidence)
-        skip_rules: dict[object, list[dict[str, object]]] = {}
-        for index, rule in enumerate(execution["allowed_skips"]):
-            method_id = rule["method_id"]
-            if method_id not in method_by_id:
-                _append(errors, "UNKNOWN_METHOD", f"/execution/allowed_skips/{index}/method_id", f"unknown allowed-skip method: {method_id}")
-            skip_rules.setdefault(method_id, []).append(rule)
-            if len(skip_rules[method_id]) > 1:
-                _append(errors, "DUPLICATE_SKIP_RULE", f"/execution/allowed_skips/{index}/method_id", f"duplicate allowed-skip rule for method: {method_id}")
-        skipped_methods = {evidence["method_id"] for evidence in execution["evidence"] if evidence["status"] == "skipped"}
-        for method_id in sorted(skip_rules, key=str):
-            if method_id not in skipped_methods:
-                _append(errors, "UNUSED_SKIP_RULE", "/execution/allowed_skips", f"allowed-skip rule is unused: {method_id}")
-        for method_id, records in evidence_by_method.items():
-            for record in records:
-                if record["status"] in {"failed", "error"}:
-                    _append(errors, "EXECUTION_FAILURE", "/execution/evidence", f"execution {record['status']} for method: {method_id}")
-                if record["status"] == "skipped" and len(skip_rules.get(method_id, [])) != 1:
-                    _append(errors, "DISALLOWED_SKIP", "/execution/evidence", f"skipped method lacks exactly one allowed-skip rule: {method_id}")
-        failed_records = [record for records in evidence_by_method.values() for record in records if record["status"] in {"failed", "error"}]
-        if execution["verdict"] == "PASS" and failed_records:
-            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict PASS contradicts failed or error evidence")
-        if execution["verdict"] == "FAIL" and not failed_records:
-            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict FAIL has no failed or error evidence")
-        if execution["verdict"] == "NOT_RUNNABLE" and (execution["evidence"] or execution["allowed_skips"]):
-            _append(errors, "EXECUTION_VERDICT_MISMATCH", "/execution/verdict", "execution verdict NOT_RUNNABLE requires empty evidence and allowed skips")
-
-    execution_is_effective = require_execution or bool(document["execution_required"])
-    if isinstance(execution, dict) and execution["verdict"] != "PASS":
-        _append(errors, "EXECUTION_GATE", "/execution", "supplied execution must have verdict PASS for a valid trace")
-    elif execution_is_effective and not isinstance(execution, dict):
-        _append(errors, "EXECUTION_GATE", "/execution", "execution is required and must have verdict PASS")
-    if isinstance(execution, dict) and execution["verdict"] == "PASS":
-        for method_id in sorted(mapped_methods, key=str):
-            if method_id not in evidence_by_method:
-                _append(errors, "MISSING_EXECUTION", "/execution/evidence", f"mapped method has no execution evidence: {method_id}")
-
-    if not unavailable:
-        for mapping in trace_map:
-            method_id = mapping["method_id"]
-            evidence_ids = sorted({str(item["run_id"]) for item in evidence_by_method.get(method_id, [])})
-            audit_mappings.append({"requirement_id": mapping["requirement_id"], "test_case_id": mapping["test_case_id"], "file_id": mapping["file_id"], "method_id": method_id, "evidence_ids": evidence_ids})
-
-    base_errors = list(errors)
-    expected_verdict = "NOT_RUNNABLE" if unavailable else "FAIL" if base_errors else "PASS"
-    if document["final_verdict"] != expected_verdict:
-        _append(errors, "VERDICT_MISMATCH", "/final_verdict", f"claimed final verdict {document['final_verdict']} does not match {expected_verdict}")
-    return errors, audit_mappings
-
-
-def _check(document: object, require_execution: bool, schema_path: Path) -> dict[str, object]:
-    summary = _summary(document)
-    source_digest = _source_digest(document)
-    schema_errors = _schema_report(document, schema_path)
-    if schema_errors:
-        return _report(schema_errors, [], summary, source_digest)
-    assert isinstance(document, dict)
-    errors, mappings = _semantic_check(document, require_execution)
-    return _report(errors, mappings, summary, source_digest)
-
-
-def check(document: dict[str, object], require_execution: bool = False) -> dict[str, object]:
-    """Return a deterministic SDD trace audit without mutating *document*."""
-    return _check(document, require_execution, DEFAULT_SCHEMA)
-
-
-def _orchestrator_schema_report(artifact: object) -> list[dict[str, str]]:
-    diagnostics = _schema_report(artifact, DEFAULT_ORCHESTRATOR_SCHEMA)
-    return [_diagnostic("invalid_orchestrator_schema", item["path"], item["message"]) for item in diagnostics]
-
-
-def _normalized_trace_audit(trace_audit: object) -> object:
-    if not isinstance(trace_audit, dict):
-        return trace_audit
-    normalized = copy.deepcopy(trace_audit)
-    mappings = normalized.get("mappings")
-    if isinstance(mappings, list):
-        for mapping in mappings:
-            if isinstance(mapping, dict) and isinstance(mapping.get("evidence_ids"), list):
-                mapping["evidence_ids"] = sorted(mapping["evidence_ids"])
-        mappings.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-    if isinstance(normalized.get("errors"), list):
-        normalized["errors"] = sorted(normalized["errors"])
-    return normalized
-
-
-def _normalized_document_evidence(document: object) -> list[dict[str, object]] | None:
-    if not isinstance(document, dict) or not isinstance(document.get("execution"), dict):
-        return None
-    execution = document["execution"]
-    rules: dict[object, list[dict[str, object]]] = {}
-    for rule in execution["allowed_skips"]:
-        rules.setdefault(rule["method_id"], []).append(rule)
-    status_to_verdict = {"passed": "PASS", "failed": "FAIL", "error": "FAIL", "skipped": "SKIPPED"}
-    normalized: list[dict[str, object]] = []
-    for evidence in execution["evidence"]:
-        item: dict[str, object] = {"run_id": evidence["run_id"], "method_id": evidence["method_id"], "verdict": status_to_verdict[evidence["status"]]}
-        if evidence["status"] == "skipped" and len(rules.get(evidence["method_id"], [])) == 1:
-            rule = rules[evidence["method_id"]][0]
-            item.update({"reason": rule["reason"], "policy_ref": rule["policy_ref"]})
-        normalized.append(item)
-    return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-def _normalized_artifact_evidence(artifact: dict[str, object]) -> list[dict[str, object]]:
-    evidence = artifact["artifacts"]["execution_evidence"]
-    assert isinstance(evidence, list)
-    normalized = [{key: item[key] for key in ("run_id", "method_id", "verdict", "reason", "policy_ref") if key in item} for item in evidence]
-    return sorted(normalized, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-def _normalized_document_run(document: dict[str, object]) -> dict[str, object] | None:
-    execution = document.get("execution")
-    if not isinstance(execution, dict):
-        return None
-    return {key: execution[key] for key in ("verdict", "reason", "command", "runner", "exit_code") if key in execution}
-
-
-def _normalized_artifact_run(artifact: dict[str, object]) -> dict[str, object]:
-    run = artifact["artifacts"]["run_tests_verdict"]
-    assert isinstance(run, dict)
-    return {key: run[key] for key in ("verdict", "reason", "command", "runner", "exit_code") if key in run}
-
-
-def _cross_report(authoritative: dict[str, object], cross_errors: list[dict[str, str]]) -> dict[str, object]:
-    report = copy.deepcopy(authoritative)
-    errors = [*report["errors"], *cross_errors]
-    errors.sort(key=lambda item: (item["path"], item["code"], item["message"]))
-    report["errors"] = errors
-    report["valid"] = not errors
-    return report
-
-
-def _check_orchestrator(artifact: object, document: object, require_execution: bool, schema_path: Path) -> dict[str, object]:
-    authoritative = _check(document, require_execution, schema_path)
-    schema_errors = _orchestrator_schema_report(artifact)
-    if schema_errors:
-        return _cross_report(authoritative, schema_errors)
-    assert isinstance(artifact, dict) and isinstance(document, dict)
-    artifacts = artifact["artifacts"]
-    assert isinstance(artifacts, dict)
-    cross_errors: list[dict[str, str]] = []
-    execution = document.get("execution")
-    if not isinstance(execution, dict):
-        _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/execution", "topology-only document cannot be accepted as a final orchestrator artifact")
-    else:
-        if _normalized_artifact_run(artifact) != _normalized_document_run(document):
-            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/run_tests_verdict", "orchestrator run facts do not match trace execution facts")
-        if _normalized_artifact_evidence(artifact) != _normalized_document_evidence(document):
-            _append(cross_errors, "ORCHESTRATOR_EXECUTION_MISMATCH", "/artifacts/execution_evidence", "orchestrator execution evidence does not match trace execution evidence")
-    if _normalized_trace_audit(artifacts["trace_audit"]) != _normalized_trace_audit(authoritative["trace_audit"]):
-        _append(cross_errors, "ORCHESTRATOR_TRACE_MISMATCH", "/artifacts/trace_audit", "orchestrator trace audit does not match authoritative trace audit")
-    return _cross_report(authoritative, cross_errors)
-
-
-def check_orchestrator(artifact: dict[str, object], document: dict[str, object], require_execution: bool = True) -> dict[str, object]:
-    """Validate a final orchestrator envelope against its authoritative trace document."""
-    return _check_orchestrator(artifact, document, require_execution, DEFAULT_SCHEMA)
-
-
-def _emit(report: dict[str, object]) -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-class _JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
-        _emit(_report([_diagnostic("argument_error", "", f"argument error: {message}")], [], _summary({})))
+        print(json.dumps({"status": "error", "errors": [{"path": "", "code": "TRACE_ARGUMENT", "message": "Trace arguments are invalid."}]}, ensure_ascii=False, separators=(",", ":")))
         raise SystemExit(2)
 
 
-def main() -> int:
-    parser = _JsonArgumentParser(description=__doc__)
-    parser.add_argument("document")
-    parser.add_argument("--require-execution", action="store_true")
-    parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
-    parser.add_argument("--orchestrator-artifact", type=Path)
-    args = parser.parse_args()
-    try:
-        document = json.loads(Path(args.document).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        _emit(_report([_diagnostic("input_error", "", f"document unreadable: {error}")], [], _summary({})))
-        return 2
-    has_orchestrator_artifact = args.orchestrator_artifact is not None
-    artifact: object | None = None
-    if has_orchestrator_artifact:
+def _diag(path: str, code: str, message: str = "Trace input is invalid.") -> dict[str, str]:
+    return {"path": path, "code": code, "message": message}
+
+
+def _safe(rows: list[Mapping[str, Any]], default: str) -> list[dict[str, str]]:
+    return [_diag("" if str(row.get("code", "")) == "SCHEMA_ADDITIONAL_PROPERTIES" else str(row.get("path", "")), str(row.get("code", default))) for row in rows]
+
+
+def _summary(trace: Any) -> dict[str, int]:
+    if not isinstance(trace, Mapping):
+        return {key: 0 for key in ("requirements", "test_cases", "steps", "expectations", "assertions", "files", "symbols", "relations", "manual_dispositions", "evidence")}
+    execution = trace.get("execution")
+    return {
+        "requirements": len(trace.get("requirements", [])) if isinstance(trace.get("requirements"), list) else 0,
+        "test_cases": len(trace.get("test_cases", [])) if isinstance(trace.get("test_cases"), list) else 0,
+        "steps": len(trace.get("steps", [])) if isinstance(trace.get("steps"), list) else 0,
+        "expectations": len(trace.get("expectations", [])) if isinstance(trace.get("expectations"), list) else 0,
+        "assertions": len(trace.get("assertions", [])) if isinstance(trace.get("assertions"), list) else 0,
+        "files": len(trace.get("files", [])) if isinstance(trace.get("files"), list) else 0,
+        "symbols": len(trace.get("symbols", [])) if isinstance(trace.get("symbols"), list) else 0,
+        "relations": len(trace.get("implementation_relations", [])) if isinstance(trace.get("implementation_relations"), list) else 0,
+        "manual_dispositions": len(trace.get("manual_dispositions", [])) if isinstance(trace.get("manual_dispositions"), list) else 0,
+        "evidence": len(execution.get("evidence", [])) if isinstance(execution, Mapping) and isinstance(execution.get("evidence"), list) else 0,
+    }
+
+
+def _audit_source(trace: Any) -> dict[str, Any]:
+    source = trace.get("source") if isinstance(trace, Mapping) else None
+    if isinstance(source, Mapping) and set(source) == {"document_id", "revision", "source_digest"} and isinstance(source.get("document_id"), str) and re.fullmatch(r"TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?", source["document_id"]) and type(source.get("revision")) is int and source["revision"] >= 1 and isinstance(source.get("source_digest"), str) and re.fullmatch(r"sha256:[0-9a-f]{64}", source["source_digest"]):
+        return {"document_id": source["document_id"], "revision": source["revision"], "source_digest": source["source_digest"]}
+    return {"document_id": "TCDOC-invalid", "revision": 1, "source_digest": "sha256:" + "0" * 64}
+
+
+def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
+    from tools.schema_validation import classify_version, schema_diagnostics
+    from tools.build_trace_document import project_declared_order
+    from tools.run_tests import validate_process_evidence
+    if classify_version(trace)["code"] == "V2_1_BREAKING_CHANGE":
+        return [_diag("/schema_version", "V2_1_BREAKING_CHANGE", "V2.1 artifacts are incompatible with V3 trace.")]
+    structural = schema_diagnostics(trace, TRACE_SCHEMA, ROOT)
+    if structural:
+        return _safe(structural, "TRACE_SCHEMA")
+    assert isinstance(trace, Mapping)
+    rows: list[dict[str, str]] = []
+    requirement_order: list[str] = []
+    requirements: set[str] = set()
+    for index, row in enumerate(trace["requirements"]):
+        if row["requirement_id"] in requirements or row["display_order"] != index + 1: rows.append(_diag(f"/requirements/{index}", "TRACE_REQUIREMENT_ORDER"))
+        requirements.add(row["requirement_id"])
+        requirement_order.append(row["requirement_id"])
+    cases: dict[str, Mapping[str, Any]] = {}
+    for index, row in enumerate(trace["test_cases"]):
+        if row["case_id"] in cases or row["display_order"] != index + 1:
+            rows.append(_diag(f"/test_cases/{index}", "TRACE_CASE_OWNERSHIP"))
         try:
-            artifact = json.loads(args.orchestrator_artifact.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            _emit(_report([_diagnostic("orchestrator_input_error", "", f"orchestrator artifact unreadable: {error}")], [], _summary(document)))
-            return 2
+            expected_requirements = project_declared_order(requirement_order, row["requirement_ids"])
+        except ValueError:
+            rows.append(_diag(f"/test_cases/{index}", "TRACE_CASE_OWNERSHIP"))
+        else:
+            if row["requirement_ids"] != expected_requirements:
+                rows.append(_diag(f"/test_cases/{index}/requirement_ids", "TRACE_CASE_REQUIREMENT_ORDER"))
+        cases[row["case_id"]] = row
+    steps: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for index, row in enumerate(trace["steps"]):
+        key = (row["case_id"], row["step_id"])
+        expected_order = 1 + sum(1 for earlier in trace["steps"][:index] if earlier["case_id"] == row["case_id"])
+        if row["case_id"] not in cases or key in steps or row["display_order"] != expected_order: rows.append(_diag(f"/steps/{index}", "TRACE_STEP_OWNERSHIP"))
+        steps[key] = row
+    expectations: set[tuple[str, str, str]] = set()
+    for index, row in enumerate(trace["expectations"]):
+        key = (row["case_id"], row["step_id"], row["expectation_id"])
+        expected_order = 1 + sum(1 for earlier in trace["expectations"][:index] if (earlier["case_id"], earlier["step_id"]) == key[:2])
+        if key in expectations or key[:2] not in steps or row["display_order"] != expected_order: rows.append(_diag(f"/expectations/{index}", "TRACE_EXPECTATION_OWNERSHIP"))
+        expectations.add(key)
+    assertions: set[tuple[str, str, str, str]] = set()
+    for index, row in enumerate(trace["assertions"]):
+        key = (row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"])
+        expected_order = 1 + sum(1 for earlier in trace["assertions"][:index] if (earlier["case_id"], earlier["step_id"], earlier["expectation_id"]) == key[:3])
+        if key in assertions or key[:3] not in expectations or row["display_order"] != expected_order: rows.append(_diag(f"/assertions/{index}", "TRACE_ASSERTION_OWNERSHIP"))
+        assertions.add(key)
+    case_order = {row["case_id"]: index for index, row in enumerate(trace["test_cases"])}
+    step_order = {key: row["display_order"] for key, row in steps.items()}
+    expectation_order = {(row["case_id"], row["step_id"], row["expectation_id"]): row["display_order"] for row in trace["expectations"]}
+    assertion_order = {(row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"]): row["display_order"] for row in trace["assertions"]}
+    registry_orders = (
+        ("/steps", [(case_order.get(row["case_id"], 10**9), row["display_order"]) for row in trace["steps"]]),
+        ("/expectations", [(case_order.get(row["case_id"], 10**9), step_order.get((row["case_id"], row["step_id"]), 10**9), row["display_order"]) for row in trace["expectations"]]),
+        ("/assertions", [(case_order.get(row["case_id"], 10**9), step_order.get((row["case_id"], row["step_id"]), 10**9), expectation_order.get((row["case_id"], row["step_id"], row["expectation_id"]), 10**9), row["display_order"]) for row in trace["assertions"]]),
+    )
+    for path, order in registry_orders:
+        if order != sorted(order):
+            rows.append(_diag(path, "TRACE_PARENT_ORDER"))
+    files: dict[str, Mapping[str, Any]] = {}
+    paths: set[str] = set()
+    for index, row in enumerate(trace["files"]):
+        if row["file_id"] in files or row["path"] in paths: rows.append(_diag(f"/files/{index}", "TRACE_DUPLICATE_FILE"))
+        files[row["file_id"]] = row
+        paths.add(row["path"])
+    symbols: set[tuple[str, str]] = set()
+    locators: set[tuple[str, str]] = set()
+    for index, row in enumerate(trace["symbols"]):
+        pair = (row["file_id"], row["symbol_id"])
+        locator = (row["file_id"], json.dumps(row["locator"], ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        if row["file_id"] not in files or pair in symbols or locator in locators: rows.append(_diag(f"/symbols/{index}", "TRACE_SYMBOL_OWNERSHIP"))
+        symbols.add(pair)
+        locators.add(locator)
+    required: set[tuple[str, str]] = set()
+    relation_keys: set[tuple[Any, ...]] = set()
+    for index, relation in enumerate(trace["implementation_relations"]):
+        path = f"/implementation_relations/{index}"
+        pair = (relation["file_id"], relation["symbol_id"])
+        if relation["case_id"] not in cases or (relation["case_id"], relation["step_id"]) not in steps:
+            rows.append(_diag(path, "TRACE_RELATION_STEP")); continue
+        if steps[(relation["case_id"], relation["step_id"])]["manual_only"] or steps[(relation["case_id"], relation["step_id"])]["blocker_ids"]:
+            rows.append(_diag(path, "TRACE_RELATION_NONREADY")); continue
+        if relation["kind"] == "assertion" and (relation["case_id"], relation["step_id"], relation["expectation_id"], relation["assertion_id"]) not in assertions:
+            rows.append(_diag(path, "TRACE_RELATION_ASSERTION")); continue
+        if pair not in symbols or relation["file_id"] not in files:
+            rows.append(_diag(path, "TRACE_RELATION_SYMBOL")); continue
+        key = (relation["kind"], relation["case_id"], relation["step_id"], relation.get("expectation_id"), relation.get("assertion_id"), *pair)
+        if key in relation_keys:
+            rows.append(_diag(path, "TRACE_DUPLICATE_RELATION")); continue
+        relation_keys.add(key)
+        required.add(pair)
+    relation_order = []
+    for relation in trace["implementation_relations"]:
+        relation_order.append((case_order.get(relation["case_id"], 10**9), step_order.get((relation["case_id"], relation["step_id"]), 10**9), 0 if relation["kind"] == "operation" else 1, expectation_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id")), -1), assertion_order.get((relation["case_id"], relation["step_id"], relation.get("expectation_id"), relation.get("assertion_id")), -1), relation["file_id"], relation["symbol_id"]))
+    if relation_order != sorted(relation_order): rows.append(_diag("/implementation_relations", "TRACE_RELATION_ORDER"))
+    for pair in symbols:
+        if pair not in required: rows.append(_diag("/symbols", "TRACE_ORPHAN_SYMBOL"))
+    for file_id in files:
+        if not any(pair[0] == file_id for pair in required): rows.append(_diag("/files", "TRACE_ORPHAN_FILE"))
+    manual: set[tuple[str, str]] = set()
+    for row in trace["manual_dispositions"]:
+        key = (row["case_id"], row["step_id"])
+        if key in manual or key not in steps or not steps[key]["manual_only"]:
+            rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_OWNERSHIP"))
+        manual.add(key)
+    manual_order = [(case_order.get(row["case_id"], 10**9), step_order.get((row["case_id"], row["step_id"]), 10**9)) for row in trace["manual_dispositions"]]
+    if manual_order != sorted(manual_order): rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_ORDER"))
+    for key, step in steps.items():
+        if step["manual_only"] and key not in manual: rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_COVERAGE"))
+        if not step["manual_only"] and not step["blocker_ids"]:
+            if not any(row["kind"] == "operation" and (row["case_id"], row["step_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_OPERATION_COVERAGE"))
+    for key in assertions:
+        step = steps.get((key[0], key[1]))
+        if step is None:
+            continue
+        if not step["manual_only"] and not step["blocker_ids"] and not any(row["kind"] == "assertion" and (row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_ASSERTION_COVERAGE"))
+    for key in expectations:
+        step = steps.get((key[0], key[1]))
+        if step is not None and not step["manual_only"] and not step["blocker_ids"] and not any(assertion[:3] == key for assertion in assertions):
+            rows.append(_diag("/assertions", "TRACE_ASSERTION_TOPOLOGY"))
+    if trace["automation_status"] == "BLOCKED":
+        if not any(step["blocker_ids"] for step in steps.values()) or not trace["automation_diagnostics"] or any((trace["files"], trace["symbols"], trace["implementation_relations"], trace["manual_dispositions"])): rows.append(_diag("/automation_status", "TRACE_BLOCKED_BRANCH"))
+    elif any(step["blocker_ids"] for step in steps.values()) or trace["automation_diagnostics"]:
+        rows.append(_diag("/automation_status", "TRACE_GENERATED_BRANCH"))
+    execution = trace["execution"]
+    blocked_or_manual = trace["automation_status"] == "BLOCKED" or not required
+    if blocked_or_manual and execution is not None:
+        rows.append(_diag("/execution", "TRACE_EXECUTION_FORBIDDEN"))
+    if not blocked_or_manual and execution is None:
+        rows.append(_diag("/execution", "TRACE_EXECUTION_REQUIRED"))
+    if isinstance(execution, Mapping):
+        seen: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+        for evidence in execution["evidence"]:
+            if evidence["run_id"] != execution["run_id"]:
+                rows.append(_diag("/execution/evidence", "TRACE_STALE_EVIDENCE")); continue
+            if evidence["source_digest"] != trace["source"]["source_digest"]:
+                rows.append(_diag("/execution/evidence", "TRACE_EVIDENCE_SOURCE")); continue
+            pair = (evidence["file_id"], evidence["symbol_id"])
+            if pair not in required or evidence["file_digest"] != files.get(pair[0], {}).get("file_digest"):
+                rows.append(_diag("/execution/evidence", "TRACE_EVIDENCE_PAIR")); continue
+            seen.setdefault(pair, []).append(evidence)
+        if any(len(values) != 1 for values in seen.values()): rows.append(_diag("/execution/evidence", "TRACE_DUPLICATE_EVIDENCE"))
+        statuses = {key: values[0]["status"] for key, values in seen.items() if len(values) == 1}
+        process = execution["process_evidence"]
+        changed_file_ids = {file_id for row in process if row.get("kind") == "SOURCE_CHANGED" and isinstance(row.get("affected_file_ids"), list) for file_id in row["affected_file_ids"] if isinstance(file_id, str)}
+        if any(row.get("file_id") in changed_file_ids for row in execution["evidence"]):
+            rows.append(_diag("/execution/evidence", "TRACE_SOURCE_CHANGED_EVIDENCE"))
+        rows.extend(validate_process_evidence(process, execution["run_id"], trace["source"], execution.get("exit_code"), execution.get("duration_sec"), execution.get("target"), "TRACE", tuple(file_id for file_id, _ in required)))
+        evidence_structural_error = any(row["code"] in {"TRACE_EVIDENCE_SOURCE", "TRACE_EVIDENCE_PAIR", "TRACE_DUPLICATE_EVIDENCE", "TRACE_SOURCE_CHANGED_EVIDENCE"} for row in rows)
+        process_structural_error = any(row["code"].startswith("TRACE_PROCESS_") or row["code"] == "TRACE_STALE_PROCESS_EVIDENCE" for row in rows)
+        derived = "FAIL" if evidence_structural_error or process_structural_error or process or any(status in {"FAILED", "ERROR"} for status in statuses.values()) else "NOT_RUNNABLE" if len(statuses) != len(required) or "SKIPPED" in statuses.values() else "PASS"
+        if execution["verdict"] != "UNKNOWN" and execution["verdict"] != derived: rows.append(_diag("/execution/verdict", "TRACE_EXECUTION_VERDICT"))
+        if execution["verdict"] == "UNKNOWN" and execution["evidence_authoritative"]:
+            rows.append(_diag("/execution/evidence_authoritative", "TRACE_UNKNOWN_EVIDENCE"))
+        zero_collect = (
+            not evidence_structural_error
+            and not process_structural_error
+            and not execution["evidence"]
+            and len(process) == 1
+            and process[0].get("kind") == "NO_TESTS_COLLECTED"
+        )
+        complete = zero_collect or (
+            not evidence_structural_error and not process and len(statuses) == len(required)
+        )
+        if execution["evidence_authoritative"] != complete: rows.append(_diag("/execution/evidence_authoritative", "TRACE_EVIDENCE_AUTHORITATIVE"))
+    expected_lifecycle = {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE" if execution is None else execution["verdict"]}
+    if trace["lifecycle"] != expected_lifecycle:
+        rows.append(_diag("/lifecycle", "TRACE_LIFECYCLE"))
+    return sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
+
+
+def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, automation: Mapping[str, Any] | None = None, autotest_review: Mapping[str, Any] | None = None, run_result: Mapping[str, Any] | None = None, require_execution: bool = False) -> dict[str, Any]:
+    """Audit a trace alone or prove it exactly matches upstream pre-finalization artifacts."""
+    supplied = (document is not None, automation is not None, autotest_review is not None, run_result is not None)
+    # The audit always enforces the branch's exact obligation; this flag preserves the
+    # public CLI spelling without forcing a fabricated run for BLOCKED/MANUAL_ONLY.
+    rows = _internal(trace, require_execution)
+    if any(supplied) and not (document is not None and automation is not None and autotest_review is not None):
+        rows.append(_diag("", "TRACE_EXTERNAL_SET", "External trace inputs must be supplied as a complete branch."))
+    elif document is not None and automation is not None and autotest_review is not None:
+        from tools.build_trace_document import validate_trace_document
+        rows.extend(validate_trace_document(trace, document, automation, autotest_review, run_result))
+    rows = sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
+    required = []
+    if isinstance(trace, Mapping) and isinstance(trace.get("implementation_relations"), list):
+        required = [{"file_id": file_id, "symbol_id": symbol_id} for file_id, symbol_id in sorted({(row.get("file_id"), row.get("symbol_id")) for row in trace["implementation_relations"] if isinstance(row, Mapping) and isinstance(row.get("file_id"), str) and isinstance(row.get("symbol_id"), str) and re.fullmatch(r"FILE-[A-Za-z0-9_.:-]+", row["file_id"]) and re.fullmatch(r"SYMBOL-[A-Za-z0-9_.:-]+", row["symbol_id"])})]
+    from tools.build_trace_document import trace_sha256
+    source = _audit_source(trace)
+    lifecycle = trace.get("lifecycle") if isinstance(trace, Mapping) and isinstance(trace.get("lifecycle"), Mapping) else {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE"}
+    digest = trace_sha256(trace) if isinstance(trace, Mapping) else "sha256:" + "0" * 64
+    return {"schema_version": "5.0.0", "stage": "trace-check", "valid": not rows, "trace_audit": {"verdict": "PASS" if not rows else "FAIL", "trace_sha256": digest, "source": source, "lifecycle": dict(lifecycle), "required_symbol_pairs": required, "relation_count": _summary(trace)["relations"], "errors": [row["code"] for row in rows]}, "errors": rows, "warnings": [], "summary": _summary(trace)}
+
+
+def main(argv: list[str] | None = None) -> int:
+    from tools.schema_validation import StrictJsonError, load_json_strict
+    parser = _TraceArgumentParser(description=__doc__); parser.add_argument("document", type=Path); parser.add_argument("--require-execution", action="store_true")
+    args = parser.parse_args(argv)
     try:
-        report = _check_orchestrator(artifact, document, args.require_execution, args.schema) if has_orchestrator_artifact else _check(document, args.require_execution, args.schema)
-    except Exception:  # noqa: BLE001 - the CLI must never leak a traceback
-        _emit(_report([_diagnostic("runtime_error", "", "runtime error during trace check")], [], _summary(document)))
-        return 2
-    if any(error["code"] in {"invalid_input_schema", "schema_error", "invalid_orchestrator_schema", "orchestrator_input_error"} for error in report["errors"]):
-        exit_code = 2
-    else:
-        exit_code = 0 if report["valid"] else 1
-    _emit(report)
-    return exit_code
+        report = check(load_json_strict(args.document), require_execution=args.require_execution)
+    except (StrictJsonError, OSError):
+        report = {"schema_version": "5.0.0", "stage": "trace-check", "valid": False, "trace_audit": {"verdict": "FAIL", "trace_sha256": "sha256:" + "0" * 64, "source": {"document_id": "TCDOC-invalid", "revision": 1, "source_digest": "sha256:" + "0" * 64}, "lifecycle": {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE"}, "required_symbol_pairs": [], "relation_count": 0, "errors": ["TRACE_IO"]}, "errors": [_diag("", "TRACE_IO", "Trace input is unavailable.")], "warnings": [], "summary": _summary({})}
+        print(json.dumps(report, ensure_ascii=False, separators=(",", ":"))); return 2
+    print(json.dumps(report, ensure_ascii=False, separators=(",", ":"))); return 0 if report["valid"] else 2 if any(row["code"].startswith("SCHEMA_") or row["code"] == "V2_1_BREAKING_CHANGE" for row in report["errors"]) else 1
 
 
 if __name__ == "__main__":

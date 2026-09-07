@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "suite_id": "pilot-critical-v1",
+  "policy": "adaptive-1-3-5-v1",
+  "smoke_scenario": "smoke",
+  "critical_scenarios": [
+    "fresh-non-git",
+    "dirty-git-preservation",
+    "nested-module",
+    "secret-exclusion",
+    "waiting-for-model-resume",
+    "one-user-question-resume",
+    "reviewer-rejection",
+    "review-context-limit",
+    "materialization-failure",
+    "execution-interruption-unknown",
+    "terminal-idempotent-retry",
+    "child-execution-retry",
+    "retained-native-rerun"
+  ],
+  "scenario_contracts": {
+    "smoke": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "accepted-terminal", "execution_required": true},
+    "fresh-non-git": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "fresh-non-git", "execution_required": true},
+    "dirty-git-preservation": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "dirty-tree-preserved", "execution_required": true},
+    "nested-module": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "nested-module-bound", "execution_required": true},
+    "secret-exclusion": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "secret-inputs-excluded", "execution_required": true},
+    "waiting-for-model-resume": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "waiting-model-resumed", "execution_required": true},
+    "one-user-question-resume": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "one-question-resumed", "execution_required": true},
+    "reviewer-rejection": {"accepted": false, "verification": "NOT_APPLICABLE", "reason_code": "REWORK", "check_id": "reviewer-rejection", "execution_required": false},
+    "review-context-limit": {"accepted": false, "verification": "NOT_APPLICABLE", "reason_code": "REVIEW_CONTEXT_LIMIT", "check_id": "review-context-limit", "execution_required": false},
+    "materialization-failure": {"accepted": false, "verification": "NOT_APPLICABLE", "reason_code": "MATERIALIZATION_INCOMPLETE", "check_id": "materialization-incomplete", "execution_required": false},
+    "execution-interruption-unknown": {"accepted": false, "verification": "UNKNOWN", "reason_code": "EXECUTION_UNKNOWN", "check_id": "execution-unknown", "execution_required": true},
+    "terminal-idempotent-retry": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "terminal-retry-noop", "execution_required": true},
+    "child-execution-retry": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "child-execution-retry", "execution_required": true},
+    "retained-native-rerun": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "retained-native-rerun", "execution_required": true}
+  },
+  "stable_repetitions": 3,
+  "escalated_repetitions": 5,
+  "escalate_on": ["instability", "protocol_violation"],
+  "protocol_violation_blocks_readiness": true,
+  "digest": "sha256:26577c28e228ceea8678f71ac3b4fef2524ab2bccc99ca9ef7d8e9c56fc40ff9"
+}

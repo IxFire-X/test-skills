@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/assembly-receipt.schema.json",
+  "title": "Assembly Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_digest", "header_digest", "fragment_digests", "document_digest", "pre_review_audit", "warnings", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "plan_digest": {"$ref": "#/$defs/digest"}, "header_digest": {"$ref": "#/$defs/digest"},
+    "fragment_digests": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["batch_id", "digest"], "properties": {"batch_id": {"type": "string", "pattern": "^BATCH-[a-z0-9-]+$"}, "digest": {"$ref": "#/$defs/digest"}}}},
+    "document_digest": {"$ref": "#/$defs/digest"}, "pre_review_audit": {"type": "object", "additionalProperties": false, "required": ["schema", "semantic", "coverage", "provenance"], "properties": {"schema": {"const": "PASS"}, "semantic": {"const": "PASS"}, "coverage": {"const": "PASS"}, "provenance": {"const": "PASS"}}}, "warnings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["code", "fingerprint", "case_ids"], "properties": {"code": {"const": "POSSIBLE_DUPLICATE"}, "fingerprint": {"type": "string", "minLength": 1}, "case_ids": {"type": "array", "minItems": 2, "items": {"type": "string"}}}}}, "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

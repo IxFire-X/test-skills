@@ -2,163 +2,104 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/tc-to-autotest-output.schema.json",
   "type": "object",
-  "required": [
-    "schema_version",
-    "stage",
-    "artifacts",
-    "warnings"
-  ],
   "additionalProperties": false,
+  "required": ["schema_version", "stage", "artifacts", "warnings"],
   "properties": {
-    "schema_version": {
-      "const": "2.1.0"
-    },
-    "stage": {
-      "const": "tc-to-autotest"
-    },
-    "warnings": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
+    "schema_version": {"const": "5.0.0"},
+    "stage": {"const": "tc-to-autotest"},
+    "artifacts": {"$ref": "#/$defs/artifacts"},
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"},
+    "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_id", "revision", "source_digest", "effective_bundle_receipt_digest"],
+      "properties": {
+        "document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$", "maxLength": 102},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "source_digest": {"$ref": "#/$defs/digest"},
+        "effective_bundle_receipt_digest": {"$ref": "#/$defs/digest"}
       }
+    },
+    "generated_file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file_id", "path", "language", "framework", "content", "content_digest"],
+      "properties": {
+        "file_id": {"$ref": "#/$defs/file_id"},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "language": {"enum": ["python", "java"]},
+        "framework": {"type": "string", "minLength": 1},
+        "content": {"type": "string"},
+        "content_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "python_module_function": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "function_name"],
+      "properties": {"kind": {"const": "python_module_function"}, "function_name": {"type": "string", "minLength": 1}}
+    },
+    "python_class_method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "qualified_class_name", "method_name"],
+      "properties": {"kind": {"const": "python_class_method"}, "qualified_class_name": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}
+    },
+    "java_class_method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "class_fqn", "method_name"],
+      "properties": {"kind": {"const": "java_class_method"}, "class_fqn": {"type": "string", "minLength": 1}, "method_name": {"type": "string", "minLength": 1}}
+    },
+    "generated_symbol": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file_id", "symbol_id", "locator"],
+      "properties": {"file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}, "locator": {"oneOf": [{"$ref": "#/$defs/python_module_function"}, {"$ref": "#/$defs/python_class_method"}, {"$ref": "#/$defs/java_class_method"}]}}
+    },
+    "operation_relation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "case_id", "step_id", "file_id", "symbol_id"],
+      "properties": {"kind": {"const": "operation"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}}
+    },
+    "assertion_relation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "case_id", "step_id", "expectation_id", "assertion_id", "file_id", "symbol_id"],
+      "properties": {"kind": {"const": "assertion"}, "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}, "expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"}, "assertion_id": {"type": "string", "pattern": "^ASSERT-[A-Za-z0-9_.:-]+$"}, "file_id": {"$ref": "#/$defs/file_id"}, "symbol_id": {"$ref": "#/$defs/symbol_id"}}
+    },
+    "manual_disposition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["case_id", "step_id"],
+      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}}
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "code", "message"],
+      "properties": {"path": {"type": "string"}, "code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}
     },
     "artifacts": {
-      "type": "object",
-      "required": [
-        "automation_matrix",
-        "generated_test_files",
-        "generated_test_methods"
-      ],
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
+      "required": ["automation_status", "source", "automation_revision", "predecessor_automation_sha256", "correction_review_sha256", "generated_files", "generated_symbols", "implementation_relations", "manual_dispositions", "diagnostics"],
       "properties": {
-        "automation_matrix": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "test_case_id",
-              "generated_file_ids",
-              "generated_method_ids"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "test_case_id": {
-                "type": "string",
-                "pattern": "^TC-[A-Za-z0-9_.:-]+$"
-              },
-              "generated_file_ids": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
-                }
-              },
-              "generated_method_ids": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"
-                }
-              }
-            }
-          }
+        "automation_status": {"enum": ["GENERATED", "BLOCKED"]}, "source": {"$ref": "#/$defs/source"},
+        "automation_revision": {"type": "integer", "minimum": 1, "maximum": 2},
+        "predecessor_automation_sha256": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "correction_review_sha256": {"type": ["null", "string"], "pattern": "^sha256:[0-9a-f]{64}$"},
+        "generated_files": {"type": "array", "items": {"$ref": "#/$defs/generated_file"}},
+        "generated_symbols": {"type": "array", "items": {"$ref": "#/$defs/generated_symbol"}},
+        "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
+        "manual_dispositions": {"type": "array", "items": {"$ref": "#/$defs/manual_disposition"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"automation_revision": {"const": 1}}, "required": ["automation_revision"]},
+          "then": {"properties": {"predecessor_automation_sha256": {"const": null}, "correction_review_sha256": {"const": null}}}
         },
-        "generated_test_files": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "path",
-              "language",
-              "framework",
-              "content_digest"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "type": "string",
-                "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
-              },
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "language": {
-                "type": "string",
-                "minLength": 1
-              },
-              "framework": {
-                "type": "string",
-                "minLength": 1
-              },
-              "content_digest": {
-                "type": "string",
-                "pattern": "^sha256:[a-fA-F0-9]{64}$"
-              }
-            }
-          }
-        },
-        "generated_test_methods": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "file_id",
-              "test_case_ids",
-              "requirement_ids",
-              "name",
-              "content_digest"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "type": "string",
-                "pattern": "^METHOD-[A-Za-z0-9_.:-]+$"
-              },
-              "file_id": {
-                "type": "string",
-                "pattern": "^FILE-[A-Za-z0-9_.:-]+$"
-              },
-              "test_case_ids": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^TC-[A-Za-z0-9_.:-]+$"
-                }
-              },
-              "requirement_ids": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "pattern": "^REQ-[A-Za-z0-9_.:-]+$"
-                }
-              },
-              "name": {
-                "type": "string",
-                "minLength": 1
-              },
-              "content_digest": {
-                "type": "string",
-                "pattern": "^sha256:[a-fA-F0-9]{64}$"
-              }
-            }
-          }
+        {
+          "if": {"properties": {"automation_revision": {"const": 2}}, "required": ["automation_revision"]},
+          "then": {"properties": {"predecessor_automation_sha256": {"$ref": "#/$defs/digest"}, "correction_review_sha256": {"$ref": "#/$defs/digest"}}}
         }
-      }
+      ]
     }
   }
 }

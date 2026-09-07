@@ -1,18 +1,4 @@
-# Локальное окружение Python
-.venv/
-venv/
-
-# Кэши и результаты инструментов
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-
-# Локальный манифест целевого проекта
-.skillsrc
-
-# Изолированные рабочие деревья разработки
-.worktrees/
+.superpowers/sdd/2026-08-26-portable-testing-skills-pilot-delivery/task-0-report.md

@@ -1,5 +1,6 @@
 # Обычно этот файл создаёт tools/init_skillsrc.py.
 # Редактируйте подтверждённые значения; при конфликте следующий запуск покажет diff.
+schema_version: "5.0.0"
 version: "3.0"
 
 project:
@@ -21,6 +22,10 @@ modules:
       tests: ["tests"]
     test:
       framework: "pytest"
+      adapter_id: "pytest:selected-symbols-v1"
+      interpreter: ".venv/Scripts/python.exe"
+      build_profile: "default"
+      adapter_parameters: {}
     feature_sources:
       requirements: ["docs/requirements"]
     detected_from: ["backend/pyproject.toml"]
@@ -33,8 +38,6 @@ modules:
     paths:
       source: ["src"]
       tests: ["tests"]
-    test:
-      framework: "jest"
     feature_sources:
       requirements: ["docs/requirements"]
     detected_from: ["frontend/package.json"]

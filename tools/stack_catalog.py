@@ -2,10 +2,29 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 IGNORED_DIR_NAMES = frozenset({
-    ".git", ".idea", ".tools", ".venv", "venv", "__pycache__",
-    "node_modules", "target", "build", "dist", ".pytest_cache", ".ruff_cache",
+    ".git", ".hg", ".svn", ".idea", ".vscode", ".tools", ".venv", "venv", "__pycache__",
+    "node_modules", "target", "build", "dist", "generated", "generated-sources",
+    ".pytest_cache", ".ruff_cache", ".mypy_cache", ".worktrees", ".tox", "htmlcov",
+    "coverage", "site-packages", "to_do", "vendor",
+    ".secrets", "secrets", ".credentials", "credentials",
 })
+_IGNORED_DIR_NAMES_CASEFOLDED = frozenset(name.casefold() for name in IGNORED_DIR_NAMES)
+
+
+def is_ignored_dir_name(name: str) -> bool:
+    return name.casefold() in _IGNORED_DIR_NAMES_CASEFOLDED
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 MANIFEST_LANGUAGES = {
     "pyproject.toml": "python", "requirements.txt": "python",
@@ -14,6 +33,29 @@ MANIFEST_LANGUAGES = {
     "package.json": "typescript", "go.mod": "go",
 }
 WORKSPACE_MANIFEST_NAMES = frozenset({"settings.gradle", "settings.gradle.kts", "go.work"})
+
+
+def confined_files(root: Path) -> list[Path]:
+    """Walk root without following links, skipping IGNORED_DIR_NAMES."""
+    root = Path(root)
+    try:
+        resolved_root = root.resolve()
+    except OSError:
+        return []
+    found: list[Path] = []
+    for current, dirs, files in os.walk(root, followlinks=False):
+        base = Path(current)
+        dirs[:] = sorted(name for name in dirs if not is_ignored_dir_name(name) and not _is_reparse(base / name))
+        for name in sorted(files):
+            path = base / name
+            if _is_reparse(path):
+                continue
+            try:
+                path.resolve().relative_to(resolved_root)
+            except (OSError, ValueError):
+                continue
+            found.append(path)
+    return found
 PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "Pipfile"]
 JAVA_MANIFESTS = ["pom.xml", "build.gradle", "build.gradle.kts"]
 JS_MANIFESTS = ["package.json"]
@@ -22,9 +64,9 @@ PYTHON_FRAMEWORK_MARKERS = [("django", "django"), ("rest_framework", "django"), 
 JAVA_FRAMEWORK_MARKERS = [("spring-boot-starter", "spring-boot"), ("org.springframework.boot", "spring-boot"), ("quarkus", "quarkus"), ("micronaut", "micronaut")]
 JS_FRAMEWORK_MARKERS = [('"express"', "express"), ('"next"', "nextjs"), ('"nuxt"', "nuxt"), ('"@nestjs/core"', "nestjs"), ('"fastify"', "fastify")]
 GO_FRAMEWORK_MARKERS = [("github.com/gin-gonic/gin", "gin"), ("github.com/labstack/echo", "echo"), ("github.com/gofiber/fiber", "fiber"), ("github.com/gorilla/mux", "gorilla-mux")]
-PYTHON_TEST_MARKERS = [("pytest", "pytest"), ("nose", "nose")]
-JAVA_TEST_MARKERS = [("junit-jupiter", "junit5"), ("junit:junit", "junit4"), ("org.testng", "testng")]
-JS_TEST_MARKERS = [('"jest"', "jest"), ('"mocha"', "mocha"), ('"vitest"', "vitest")]
+PYTHON_TEST_MARKERS = [("pytest", "pytest"), ("unittest", "unittest")]
+JAVA_TEST_MARKERS = [("junit-jupiter", "junit5")]
+JS_TEST_MARKERS = [('"jest"', "jest"), ('"mocha"', "mocha")]
 GO_TEST_MARKERS: list[tuple[str, str]] = []
 BUILD_TOOL_NORMALIZE = {"uv": "pip", "conda": "pip", "pipenv": "pip", "setuptools": "pip", "kotlin": "gradle"}
 

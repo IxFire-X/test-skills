@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+addopts = "-p project_plugin --strict-markers"
+pythonpath = ["src"]
+markers = ["native: project-native marker"]

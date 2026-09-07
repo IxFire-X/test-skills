@@ -12,6 +12,25 @@ import yaml
 from jsonschema import Draft202012Validator
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_mapping(loader: yaml.SafeLoader, node: yaml.nodes.MappingNode, deep: bool = False) -> dict:
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate key: {key}", key_node.start_mark
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping)
+
+
 class SkillsrcError(ValueError):
     def __init__(
         self,
@@ -26,9 +45,14 @@ class SkillsrcError(ValueError):
 
 def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]:
     """Load a YAML manifest and validate it against the bundled schema."""
+    return parse_skillsrc_bytes(path.read_bytes(), schema_path)
+
+
+def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None) -> dict[str, Any]:
+    """Parse and validate one exact UTF-8 manifest byte sequence."""
     schema_path = schema_path or Path(__file__).resolve().parents[1] / "schemas" / "skillsrc.schema.json"
     try:
-        source = path.read_text(encoding="utf-8")
+        source = data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise SkillsrcError(
             "invalid_encoding",
@@ -36,7 +60,7 @@ def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]
             [{"path": "/", "message": str(error)}],
         ) from error
     try:
-        document = yaml.safe_load(source)
+        document = yaml.load(source, Loader=_UniqueKeyLoader)
     except yaml.YAMLError as error:
         raise SkillsrcError(
             "invalid_yaml",
@@ -124,7 +148,7 @@ def select_module(normalized: Mapping[str, Any], module_id: str | None) -> dict[
 
 
 def resolve_module_root(project_root: Path, module: Mapping[str, Any]) -> Path:
-    """Resolve a module root only when it remains confined to the project root."""
+    """Resolve an existing module root confined without symlink/reparse hops."""
     root = module.get("root")
     problem = _portable_path_problem(root) if isinstance(root, str) and root else "invalid path"
     if problem:
@@ -135,7 +159,23 @@ def resolve_module_root(project_root: Path, module: Mapping[str, Any]) -> Path:
         )
 
     resolved_project_root = project_root.resolve()
-    resolved_module_root = (resolved_project_root / root).resolve()
+    candidate = resolved_project_root / root
+    probe = resolved_project_root
+    for part in Path(root).parts:
+        probe = probe / part
+        if _is_reparse(probe):
+            raise SkillsrcError(
+                "unsafe_module_root",
+                "unsafe module root",
+                [{"path": "/root", "message": "symlink or reparse hop is not allowed"}],
+            )
+    if not candidate.exists() or not candidate.is_dir():
+        raise SkillsrcError(
+            "unsafe_module_root",
+            "unsafe module root",
+            [{"path": "/root", "message": "module root must be an existing directory"}],
+        )
+    resolved_module_root = candidate.resolve()
     try:
         common = os.path.commonpath([str(resolved_project_root), str(resolved_module_root)])
     except ValueError as error:
@@ -151,6 +191,14 @@ def resolve_module_root(project_root: Path, module: Mapping[str, Any]) -> Path:
             [{"path": "/root", "message": "path escapes project root"}],
         )
     return resolved_module_root
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def _validate_unique_module_ids(document: Mapping[str, Any]) -> None:
@@ -227,11 +275,9 @@ def _validate_v3_paths(document: Mapping[str, Any], details: list[dict[str, obje
                 _append_path_error(details, f"{base}/detected_from/{value_index}", value)
         test = module.get("test")
         if isinstance(test, Mapping):
-            wrapper = test.get("wrapper")
-            if isinstance(wrapper, Mapping):
-                for platform in ("windows", "linux"):
-                    if platform in wrapper:
-                        _append_path_error(details, f"{base}/test/wrapper/{platform}", wrapper[platform])
+            for key in ("wrapper", "interpreter"):
+                if key in test:
+                    _append_path_error(details, f"{base}/test/{key}", test[key])
 
 
 def _validate_registry_paths(document: Mapping[str, Any], details: list[dict[str, object]]) -> None:

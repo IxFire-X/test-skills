@@ -1,104 +1,91 @@
 #!/usr/bin/env python3
-"""Render deterministic Markdown projections from contracts/pipeline.json."""
-
+"""Render deterministic human projections of Pipeline 4.0 machine truth."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-if __package__:
-    from .json_cli import JsonArgumentParser, emit_error
-else:  # direct CLI execution
-    from json_cli import JsonArgumentParser, emit_error
+from tools.json_cli import JsonArgumentParser
+
 
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
-PROJECTION_PATHS = {"contracts": "CONTRACTS.md", "pipeline": "PIPELINE.md"}
+RUNTIME_SIGNATURE_ORDER = ("create_run", "append_event", "create_attempt", "derive_state", "terminal_result", "exit_code")
+RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", "reason_code", "accepted")
+POLICY_ORDER = ("cases-only-v1", "local-pilot-v1")
+ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
+STAGE_ORDER = ("orchestrate", "context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
 
-def _projection_errors(contract: dict[str, Any]) -> list[str]:
-    projections = contract.get("projections")
-    if not isinstance(projections, dict):
-        return ["projections must be an object"]
-    errors = []
-    for name, expected_path in PROJECTION_PATHS.items():
-        if projections.get(name) != expected_path:
-            errors.append(f"projection {name} must be exactly {expected_path}")
-    if set(projections) != set(PROJECTION_PATHS):
-        errors.append("projection keys must be exactly contracts and pipeline")
-    return errors
+def _table(rows: list[Mapping[str, Any]], columns: list[tuple[str, str]]) -> list[str]:
+    header = "| " + " | ".join(title for title, _ in columns) + " |"
+    divider = "|" + "|".join("---" for _ in columns) + "|"
+    body = ["| " + " | ".join(f"`{row[key]}`" for _, key in columns) + " |" for row in rows]
+    return [header, divider, *body]
 
 
-def render_pipeline(contract: dict[str, Any]) -> str:
-    rows = ["| Step | Accepts | Produces |", "|---|---|---|"]
-    for step in contract["steps"]:
-        rows.append(f"| `{step['id']}` | {', '.join(step.get('accepts', []))} | {', '.join(step.get('produces', []))} |")
-    return "# Pipeline\n\nGenerated from `contracts/pipeline.json`. Do not edit manually.\n\n" + "\n".join(rows) + "\n"
-
-
-def render_contracts(contract: dict[str, Any]) -> str:
-    lines = ["# Contract Reference", "", MARKER, "", "## Artifacts", "", "| Artifact | Description |", "|---|---|"]
-    for artifact in contract["artifacts"]:
-        lines.append(f"| `{artifact['id']}` | {artifact['description']} |")
-    lines.extend(["", "## Canonical skill files", "", "| Skill | Path |", "|---|---|"])
-    for skill in contract["core_skills"]:
-        lines.append(f"| `{skill}` | `{contract['skill_files'][skill]}` |")
-    lines.extend(["", "## Review verdict branches", "", "| Reviewer | Verdict | Transform |", "|---|---|---|"])
-    for transition in contract["transitions"]:
-        verdict = transition.get("when", {}).get("review_verdict")
-        if verdict:
-            lines.append(f"| `{transition['from']}` | `{verdict}` | `{transition['transform']}` |")
-    lines.extend(["", "## Execution and trace verdict branches", "", "| Stage | Execution verdict | Trace verdict | Transform |", "|---|---|---|---|"])
-    for transition in contract["transitions"]:
-        when = transition.get("when", {})
-        verdict = when.get("execution_verdict")
-        if verdict:
-            trace_verdict = when.get("trace_verdict", "")
-            lines.append(f"| `{transition['from']}` | `{verdict}` | {f'`{trace_verdict}`' if trace_verdict else ''} | `{transition['transform']}` |")
-    lines.extend(["", "## Language capabilities", "", "| Language | Framework | Generation | Review | Execution | Status |", "|---|---|---|---|---|---|"])
-    for capability in contract["capabilities"]:
-        lines.append(
-            "| {language} | {framework} | {generation} | {review} | {execution} | {status} |".format(
-                **{key: str(value).lower() if isinstance(value, bool) else value for key, value in capability.items()}
-            )
-        )
-    lines.extend(["", "## Artifact policy", "", f"- Persistent artifacts: `{contract['artifact_policy']['persistent_root']}`", f"- Generated test source: {contract['artifact_policy']['generated_test_source']}", "", "## Traceability", "", " → ".join(f"`{item}`" for item in contract["traceability"]), ""])
-    return "\n".join(lines)
-
-
-def _rendered_files(contract: dict[str, Any]) -> dict[str, str]:
-    return {
-        contract["projections"]["contracts"]: render_contracts(contract),
-        contract["projections"]["pipeline"]: render_pipeline(contract),
-    }
+def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
+    contracts = ["# Contract Reference", "", MARKER, "", "## Core Skills", ""]
+    contracts.extend(f"- `{name}` — `{contract['skill_files'][name]}`" for name in contract["core_skills"])
+    artifact_rows = [{**row, "component_state": row.get("component_state", "-")} for row in contract["artifact_registry"]]
+    schema_rows = [{**row, "component_state": row.get("component_state", "-")} for row in contract["schema_registry"]]
+    stages = {row["stage"]: {**row, "profiles": ", ".join(row["profiles"])} for row in contract["stage_registry"]}
+    contracts.extend(["", "## Model stage registry", "", *_table([stages[name] for name in STAGE_ORDER], [("Stage", "stage"), ("Role", "role"), ("Role policy", "role_policy"), ("Cardinality", "cardinality"), ("Profiles", "profiles")])])
+    contracts.extend(["", "## Projection profiles", "", *_table(contract["projection_profiles"], [("Profile", "id"), ("Format", "format"), ("Mode", "mode"), ("Tenant status", "tenant_status")])])
+    contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
+    pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
+    pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
+    pipeline.extend(["", "## Event order", "", " → ".join(f"`{event['event_type']}`" for event in contract["event_order"]), "", "## Global ordering constraints", ""])
+    pipeline.extend(f"- `{constraint['before']} → {constraint['after']}`" + (" (narrow exception)" if constraint.get("narrow_exception") else "") for constraint in contract["global_event_constraints"])
+    reviewer = contract["reviewer_session_contract"]
+    pipeline.extend(["", "## Reviewer session", "", f"- one session; evidence pairs `{reviewer['evidence_pairs']['minimum']}..{reviewer['evidence_pairs']['maximum']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
+    for name in RESULT_AXIS_ORDER:
+        axis = contract["result_axes"][name]
+        if name in {"accepted", "reason_code"}:
+            pipeline.append(f"- `{name}`: preterminal `{axis['preterminal']}`; terminal `{axis['terminal']}`")
+        else:
+            pipeline.append(f"- `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
+    pipeline.extend(["", "## Normative result tuples", ""])
+    pipeline.extend(f"- `{name}`: `{json.dumps(contract['result_tuples'][name], ensure_ascii=False, sort_keys=True)}`" for name in ("complete_fail", "execution_unknown", "pre_execution_rework", "early_fatal", "review_context_limit", "invalid_finalization"))
+    policies = {row["id"]: row for row in contract["policy_profiles"]}
+    adapters = {row["id"]: row for row in contract["adapter_registry"]}
+    pipeline.extend(["", "## Policies", "", *_table([policies[name] for name in POLICY_ORDER], [("Policy", "id"), ("Version", "version"), ("Semantic ready", "semantic_ready")]), "", "## Adapters", "", *_table([adapters[name] for name in ADAPTER_ORDER], [("Adapter", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Version", "version")]), "", "## Acceptance predicates", ""])
+    for profile in POLICY_ORDER:
+        predicates = contract["acceptance_predicates"][profile]
+        pipeline.append(f"- `{profile}`: `{', '.join(predicates)}`")
+    pipeline.extend(["", "## Exit priority", ""])
+    pipeline.extend(f"- `{rule['when']} => {rule['code']}`" for rule in contract["exit_priority"])
+    release = contract["release_qualification"]
+    pipeline.extend([
+        "", "## Release qualification", "",
+        f"- package: `{release['package_version']}` via `{release['manifest_path']}`",
+        f"- compatibility contract: `{release['compatibility_contract_version']}`",
+        f"- execution profile: `{release['execution_profile_version']}`",
+        f"- release eval: `{release['release_eval_policy']}` / `{release['scenario_suite']}`",
+        f"- component state: `{release['component_state']}`; ready tuple: `{json.dumps(release['ready_tuple'])}`",
+        f"- core-pilot N/A: `{', '.join(release['not_applicable'])}`",
+    ])
+    pipeline.append("")
+    return {contract["projections"]["contracts"]: "\n".join(contracts), contract["projections"]["pipeline"]: "\n".join(pipeline)}
 
 
 def main() -> int:
-    parser = JsonArgumentParser(description="Render contract Markdown projections")
-    parser.add_argument("--root", default=".", help="Portable pack root")
-    parser.add_argument("--check", action="store_true", help="Fail when checked-in projections drift")
-    args = parser.parse_args()
-    root = Path(args.root).resolve()
-    try:
-        contract = json.loads((root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
-        errors = _projection_errors(contract)
-        if errors:
-            print("render failed: " + "; ".join(errors))
-            return 2
-        files = _rendered_files(contract)
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
-        emit_error(f"input error: {error}")
-        return 2
-    drifted = []
-    for relative_path, contents in files.items():
-        target = root / relative_path
-        if args.check:
-            if not target.is_file() or target.read_text(encoding="utf-8") != contents:
-                drifted.append(relative_path)
+    parser = JsonArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--check", action="store_true")
+    arguments = parser.parse_args()
+    root = Path(arguments.root).resolve()
+    contract = json.loads((root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
+    drift: list[str] = []
+    for relative_path, contents in _rendered_files(contract).items():
+        path = root / relative_path
+        if arguments.check:
+            if not path.is_file() or path.read_text(encoding="utf-8") != contents:
+                drift.append(relative_path)
         else:
-            target.write_text(contents, encoding="utf-8", newline="\n")
-    if drifted:
-        print("projection drift: " + ", ".join(drifted))
+            path.write_text(contents, encoding="utf-8", newline="\n")
+    if drift:
+        print("projection drift: " + ", ".join(drift))
         return 1
     return 0
 

@@ -1,86 +1,30 @@
 ---
 name: tc-reviewer
-description: Использовать после tc-generator или при проверке соответствующих схеме ручных тест-кейсов. Скилл проверяет трассируемость, исполнимость ожидаемых результатов и неподтверждённые предположения, применяет только безопасные механические исправления и возвращает канонический JSON-артефакт tc-reviewer.
+description: Use when a complete canonical test-case candidate requires one fresh role-isolated review session, a bounded evidence retrieval, an effective selection, or rework.
 ---
 
-# Проверка тест-кейсов
+# Canonical test-case review
 
-Проверь переданный результат `tc-generator`, не добавляя поведение продукта,
-которого нет во входных данных.
+Read the [review contract](references/review-verdicts.md), `schemas/tc-reviewer-output.schema.json`, `schemas/reviewer-session.schema.json`, `tools.canonical_document`, and `tools.revision_selection`. Review the complete candidate and its exact bare digest.
 
-## Обязательные входные данные
+## Session boundary
 
-Прочитай в указанном порядке:
+There is exactly one fresh, role-isolated reviewer session for the whole canonical branch. The controller first publishes and reads back revision 1 as `UNREVIEWED`, constructs the exact package binding, then owns the separate session ledger: `REVIEW_SESSION_STARTED`, zero or more bounded `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` pairs, one `AUTHORITATIVE_VERDICT`, then `REVIEW_SESSION_COMPLETED`; an explicit pre-verdict abort such as `REVIEW_CONTEXT_LIMIT` is the only terminal zero-verdict path. The model output never contains the session ledger. Do not create per-batch, hierarchical, or second reviewer sessions. Do not use generator dialogue or reasoning.
 
-1. переданный JSON-артефакт `tc-generator`;
-2. [review-verdicts.md](references/review-verdicts.md);
-3. `schemas/tc-reviewer-output.schema.json` из корня пакета скиллов.
+Request only permitted C-lite evidence from the immutable inventory. Each request and provided evidence binds the immutable candidate/package digest and stays within the controller context budget. Same-model review is allowed only with distinct invocation IDs, fresh context, reviewer role policy, and host isolation evidence; otherwise report `independence_unverified` and do not claim acceptance.
 
-Входной артефакт — единственный источник истины для требований, их происхождения,
-ролей, маршрутов, данных и ожидаемого поведения. Не заполняй пробелы знаниями о
-репозитории или правдоподобными значениями по умолчанию, если задача явно не
-передала их как дополнительный вход.
+The authoritative verdict selects or rejects canonical content only. It does not set the
+attempt's terminal `accepted`, materialize files, execute code, or bypass the later trace
+and finalization predicates of `cases-only-v1` or `local-pilot-v1`.
 
-## Порядок проверки
+## Procedure
 
-1. Собери упорядоченные ID требований, ID тест-кейсов и связи покрытия.
-2. Проверь каждый тест-кейс из входного артефакта. Сохрани исходный порядок в `reviewed_test_case_ids`.
-3. Для каждого тест-кейса проверь:
-   - что ID требований существуют, а прямые и обратные связи покрытия совпадают;
-   - что действия, роли, маршруты и данные подтверждены переданными требованиями;
-   - что каждый шаг содержит конкретный наблюдаемый ожидаемый результат;
-   - что `expected_outcome` согласуется с проверяемым результатом шага;
-   - что полная цепочка «подготовка → действие → наблюдаемый результат» внутренне исполнима: заявленная тестовая среда действительно может получить указанные тип ответа, форму тела, статус и состояние;
-   - что в обязательном исполнимом результате нет заглушек `TBD`, `TODO`, `unknown` или `not specified`.
-4. До внесения изменений классифицируй каждый дефект:
-   - `mechanical` — орфография, пунктуация или форматирование, для которых в тех же входных данных существует единственная точная замена;
-   - `blocking` — отсутствующее поведение или ожидаемый результат, неподтверждённая авторизация, оборванная трассируемость, противоречие либо любое исправление, требующее выбора продуктового поведения.
-5. Примени приоритет вердиктов из справочника. Один блокирующий дефект задаёт всему результату вердикт `ТРЕБУЕТ ДОРАБОТКИ` и запрещает исправления.
-6. Выведи один JSON-артефакт, соответствующий `schemas/tc-reviewer-output.schema.json`.
+1. Schema- and semantic-validate the candidate. `reviewed_case_ids` equals every case exactly once in physical order.
+2. Review every step, data-flow edge, human field, assertion, disposition and requirement relation. Apply the mandatory [human scenario rules](../tc-generator/references/case-generation-contract.md#human-scenario-rules) and the [review contract](references/review-verdicts.md). Findings cite the exact canonical location and violated requirement or rule; stylistic preference alone cannot reject an unambiguous conforming case.
+   Compare original authorized requirements, normalized context and cases in both directions. Retrieve missing original evidence through the bounded context channel; if unavailable, report the gap. Confirm that steps exercise each claimed behavior and assert an observable result, including applicable negative/boundary conditions. An ID link or objective alone is insufficient. Keep a known defect with a clear required oracle testable; only missing oracle/input/access/setup justifies its corresponding gap.
+3. Emit the `effective` reference: exact candidate for `ПРИНЯТО`, exact successor for `AUTO_FIX_APPLIED`, and `null` for `ТРЕБУЕТ ДОРАБОТКИ`. Return `ПРИНЯТО` only for the unchanged valid candidate. Return `AUTO_FIX_APPLIED` only with one complete valid successor revision 2, exact candidate digest, preserved source/canonical/case mappings and identity graph, and valid lineage.
+4. A destructive, partial, or semantic-choice correction requires `ТРЕБУЕТ ДОРАБОТКИ`; it never selects a partial patch. Revision 3 and a second authoritative verdict are forbidden.
 
-## Правило замкнутого мира
+## Stop conditions
 
-Никогда не выдумывай и не подменяй:
-
-- HTTP-статусы или коды ответа;
-- роли, разрешения или правила аутентификации;
-- маршруты, методы, поля, записи или переходы состояния;
-- повторы, сохранение данных, уведомления, аудит и другие побочные эффекты;
-- ожидаемые результаты вместо заглушек или отсутствующих результатов.
-
-Считай противоречие между тестовой средой и ожидаемым результатом блокирующим,
-даже если каждое отдельное значение присутствует во входных данных. Например,
-нельзя принимать ожидание JSON-ответа, когда указанное действие возвращает
-обычный текст, или результат для авторизованного пользователя, когда подготовка
-не устанавливает требуемую роль.
-
-Оформи неподтверждённое утверждение как находку уровня `BLOCKING` с доказательством
-на уровне конкретного поля. Не переписывай тест-кейс под поведение, которое лишь
-кажется разумным.
-
-## Безопасные исправления
-
-Используй `AUTO_FIX_APPLIED`, только если все дефекты механические и каждая замена
-имеет ровно одно толкование, подтверждённое входными данными. Для каждого
-изменённого тест-кейса:
-
-- скопируй полный объект тест-кейса;
-- измени только подтверждённый механический дефект;
-- добавь одну запись об исправлении, связанную с тест-кейсом;
-- сохрани все остальные поля эквивалентными исходным JSON-значениям.
-
-Отсутствующий ожидаемый результат или заглушка никогда не являются механическим
-исправлением. Неподтверждённую роль нельзя автоматически заменять подтверждённой.
-
-## Правила результата
-
-- `ПРИНЯТО`: нет находок, исправлений и исправленных тест-кейсов.
-- `AUTO_FIX_APPLIED`: есть хотя бы одна неблокирующая находка и одно исправление; `corrected_test_cases` содержит только изменённые полные тест-кейсы.
-- `ТРЕБУЕТ ДОРАБОТКИ`: есть хотя бы одна находка `BLOCKING`, а исправления и исправленные тест-кейсы отсутствуют.
-- Каждая находка и исправление использует в `related_ids` только переданные ID требований или тест-кейсов.
-- Доказательство называет точное входное поле и наблюдаемое значение, но не утверждает, что код запускался.
-- `warnings` предназначен только для ограничений всего этапа и не заменяет находки.
-- Возвращай только JSON, когда вызывающая сторона запрашивает артефакт пайплайна.
-
-Перед возвратом проверь артефакт репозиторным валидатором и канонической схемой
-результата.
+Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. Do not select an unvalidated successor or reconstruct revisions in prose.

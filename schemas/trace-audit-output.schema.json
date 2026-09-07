@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/trace-audit-output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "valid", "trace_audit", "errors", "warnings", "summary"],
+  "properties": {
+    "schema_version": {"const": "5.0.0"},
+    "stage": {"const": "trace-check"},
+    "valid": {"type": "boolean"},
+    "trace_audit": {"$ref": "#/$defs/audit"},
+    "errors": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}},
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "summary": {"type": "object", "additionalProperties": false, "required": ["requirements", "test_cases", "steps", "expectations", "assertions", "files", "symbols", "relations", "manual_dispositions", "evidence"], "properties": {"requirements": {"type": "integer", "minimum": 0}, "test_cases": {"type": "integer", "minimum": 0}, "steps": {"type": "integer", "minimum": 0}, "expectations": {"type": "integer", "minimum": 0}, "assertions": {"type": "integer", "minimum": 0}, "files": {"type": "integer", "minimum": 0}, "symbols": {"type": "integer", "minimum": 0}, "relations": {"type": "integer", "minimum": 0}, "manual_dispositions": {"type": "integer", "minimum": 0}, "evidence": {"type": "integer", "minimum": 0}}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["document_id", "revision", "source_digest"], "properties": {"document_id": {"type": "string", "pattern": "^TCDOC-[a-z0-9](?:[a-z0-9_.-]*[a-z0-9_-])?$"}, "revision": {"type": "integer", "minimum": 1}, "source_digest": {"$ref": "#/$defs/digest"}}},
+    "pair": {"type": "object", "additionalProperties": false, "required": ["file_id", "symbol_id"], "properties": {"file_id": {"type": "string", "pattern": "^FILE-[A-Za-z0-9_.:-]+$"}, "symbol_id": {"type": "string", "pattern": "^SYMBOL-[A-Za-z0-9_.:-]+$"}}},
+    "lifecycle": {"type": "object", "additionalProperties": false, "required": ["projection", "verification"], "properties": {"projection": {"const": "PRE_FINALIZATION"}, "verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"]}}},
+    "audit": {"type": "object", "additionalProperties": false, "required": ["verdict", "trace_sha256", "source", "lifecycle", "required_symbol_pairs", "relation_count", "errors"], "properties": {"verdict": {"enum": ["PASS", "FAIL"]}, "trace_sha256": {"$ref": "#/$defs/digest"}, "source": {"$ref": "#/$defs/source"}, "lifecycle": {"$ref": "#/$defs/lifecycle"}, "required_symbol_pairs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/pair"}}, "relation_count": {"type": "integer", "minimum": 0}, "errors": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+    "diagnostic": {"type": "object", "additionalProperties": false, "required": ["path", "code", "message"], "properties": {"path": {"type": "string"}, "code": {"type": "string", "minLength": 1}, "message": {"type": "string", "minLength": 1}}}
+  }
+}

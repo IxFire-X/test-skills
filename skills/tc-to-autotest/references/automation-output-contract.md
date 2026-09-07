@@ -1,105 +1,23 @@
-# Контракт генерации автотестов
+# V5 automation-output contract
 
-## Содержание
+`schemas/tc-to-autotest-output.schema.json`, `tools.canonical_document`, and `tools.automation_validation` are executable truth. Input is the selected effective canonical JSON and its exact digest, never Markdown or Zephyr CSV.
 
-- [Приоритет источников](#приоритет-источников)
-- [Выбор проектного шаблона](#выбор-проектного-шаблона)
-- [Эквивалентность тест-кейса и метода](#эквивалентность-тест-кейса-и-метода)
-- [Инварианты JSON](#инварианты-json)
-- [Ошибки, требующие остановки](#ошибки-требующие-остановки)
+For `GENERATED`, declare `source`, `automation_revision`, `predecessor_automation_sha256`, `correction_review_sha256`, generated files with exact UTF-8 `content` and matching byte digests, generated symbols with the exact locator variant, implementation relations, manual dispositions, and no diagnostics. `source` must include the selected document ID/revision/digest and the exact attempt-owned `effective_bundle_receipt_digest`; never reuse a digest from another attempt or effective selection. Runtime identity is `(file_id, symbol_id)`. An operation relation identifies case/step/pair; an assertion relation additionally identifies expectation/assertion/pair. Relations are atomic. Required pairs are complete and AND-combined.
 
-## Приоритет источников
+The initial complete artifact is revision 1 and has null predecessor fields. One and only one corrected complete artifact may be revision 2: it binds both the revision-1 complete automation digest and the exact static-review digest that returned `AUTO_FIX_APPLIED`. A correction is a complete V5 artifact, never a patch or deletion-only delta. A third automation version is invalid. Runtime `FAIL` never permits regeneration.
 
-Используй источники в следующем порядке:
+Generated source preserves every canonical literal and every input/output/assertion binding exactly. A source-proven non-secret helper/default with one безопасное детерминированное значение must already be a canonical literal, never a hidden fixture name. Do not substitute a similarly named literal, inferred route, response binding, or assertion expression.
 
-1. `validation_report` определяет, разрешена ли генерация.
-2. `corrected_test_cases` используется только при соответствующем принятом вердикте; иначе каноном является `generated_test_cases`.
-3. Ручные тест-кейсы задают сценарии, данные и ожидаемые результаты.
-4. Манифест проекта и ближайшие тесты задают язык, фреймворк, структуру каталогов и подготовку среды выполнения.
-5. Рабочий исходный код разрешено использовать только для подтверждения технических имён и фактических точек сопряжения, но не для добавления новых бизнес-ожиданий.
-6. Встроенные материалы применяются только при отсутствии проектно-нативного решения и явном выборе нового рабочего пространства.
+The generator must not recover request values from human `action`, `test_data`, Markdown, reviewer warnings, old revisions, or project helper defaults. Those fields are not automation input. A request-affecting value absent from selected canonical structured inputs is rework, not permission to infer it.
 
-При конфликте между тест-кейсом и подтверждённым входным требованием останови
-генерацию и передай описание конфликта предыдущему этапу. Не «исправляй» тест-кейс
-внутри генератора.
+Read the testing-work constraints in the selected canonical `requirements` linked by
+the applicable cases' `requirement_ids`, even when absent from human case fields.
+Preserve restrictions on the subject under test, framework, dependencies and file edits.
+They govern implementation; they are not additional product operations/assertions and
+cannot supply missing structured request values, setup or expected results.
 
-## Выбор проектного шаблона
+For each manual step declare exactly one manual disposition. `BLOCKED` is permitted only for a canonical blocker and has nonempty diagnostics with empty files, symbols, relations, and dispositions. Do not report a project-discovery or dependency failure as canonical blocking.
 
-Для существующего проекта собери минимальные сведения:
+Use project-native discovery and declare output only below the selected module's active test root. The automation artifact is a proposed file set; only the controller may materialize it after accepted static review. Do not edit the application, existing tests, configuration, lock files, or dependencies. Keep secrets as runtime handles only. Direct canonical/provider-backed execution runs global provider/adapter preflight through `tools.execution_preflight`. Exact accepted generated-source execution is gated by static review of the complete binding chain and then the project-native test process; it never fabricates runtime provider values.
 
-| Поле | Источник |
-|---|---|
-| язык и фреймворк | манифест сборки, файл блокировки версий, конфигурация тестов |
-| команда запуска | конфигурация пакета или сборки либо документированная команда проекта |
-| корень и структура тестов | существующие тестовые файлы |
-| клиент и тестовая среда | ближайший пример для той же функции или маршрута |
-| фикстуры и подготовка | тот же пример и общие тестовые помощники |
-| роли и разрешения | подтверждённая исходным кодом подготовка тестов маршрута |
-| идентификатор трассировки | нативное соглашение фреймворка |
-
-Не считай отсутствие конкретного файла — `BaseApiTest`, `conftest.py` или
-`jest.config` — ошибкой само по себе. Ошибка возникает, только когда нельзя
-подтвердить рабочий проектно-нативный путь.
-
-Для нового рабочего пространства разрешены материалы:
-
-- `assets/java-python-conventions/java-junit5.md`;
-- `assets/java-python-conventions/python-pytest.md`.
-
-Они не являются требованиями к существующим проектам и не разрешают автоматически
-добавлять зависимости.
-
-## Эквивалентность тест-кейса и метода
-
-Для каждого тест-кейса построй карту:
-
-```text
-TC → REQ → подготовка → действие → тестовые данные → ожидаемый результат → FILE → METHOD
-```
-
-Проверь отдельно:
-
-- что подготовка действительно создаёт роль, разрешение, фикстуру и состояние, требуемые тест-кейсом;
-- что действие вызывает точную операцию с точными данными;
-- что каждый ожидаемый результат имеет конкретную проверку или обоснованную, подтверждённую входом пометку `TODO`;
-- что выбранная тестовая среда способна создать наблюдаемое значение заявленного типа или формата содержимого;
-- что очистка не уничтожает проверяемое состояние до проверки;
-- что параметризованный метод сохраняет идентичность каждой строки `TC-*`.
-
-Помощник, фикстура и фабрика не являются самостоятельными исполнимыми тестами и
-не добавляются как лишние тест-кейсы.
-
-## Инварианты JSON
-
-Канонический JSON не содержит байты исходного кода. Он связывает сопутствующие
-файлы по ID, пути и дайджесту.
-
-Требуй:
-
-- уникальные `FILE-*` и `METHOD-*`;
-- пути относительно проекта, не выходящие за разрешённый корень тестов;
-- SHA-256 фактических байтов каждого объявленного файла;
-- существующий `file_id` для каждого метода;
-- непустые и существующие `test_case_ids` и `requirement_ids`;
-- двунаправленное покрытие между матрицей и методами;
-- отсутствие ID файлов и методов, не объявленных в соответствующих массивах.
-
-`content_digest` метода описывает объявленный артефакт метода, но не заменяет
-дайджест файла и не доказывает выполнение.
-
-## Ошибки, требующие остановки
-
-Не выпускай успешный артефакт при любом из условий:
-
-- входной вердикт проверяющего блокирует генерацию;
-- язык, фреймворк или тестовая среда не подтверждены;
-- обязательная подготовка среды выполнения неизвестна;
-- безопасный механизм аутентификации отсутствует;
-- требуется изменить приложение, конфигурацию или зависимости;
-- входной тест-кейс недетерминирован или противоречив;
-- невозможно представить все тест-кейсы без выдуманного поведения;
-- путь сопутствующего файла выходит за разрешённый корень тестов.
-
-Верни одну конкретную причину, отсутствующий источник и безопасный следующий шаг.
-Не подменяй блокировку полем `warnings` и не заявляй `PASS` без доказательства от
-средства запуска.
+The V5 automation object is the sole source transport. Each `artifacts.generated_files[]` row contains its project-relative path below the selected module test root, exact UTF-8 `content`, and `content_digest`. The digest must already equal SHA-256 of those UTF-8 bytes. Do not emit a second transport, normalize newlines, or write project files before accepted static review and materialization.

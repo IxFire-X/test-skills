@@ -1,141 +1,129 @@
-# Контракт оркестрации
+# Исполнимый контракт frozen pilot Pipeline 4.0
 
 ## Источники истины
 
-| Назначение | Канонический источник |
+- `contracts/pipeline.json`: stages, artifacts, schemas, profiles, adapters, lifecycle,
+  acceptance и exit projection;
+- `release/manifest.json`: package/runtime identity и текущая qualification;
+- stage schemas и deterministic tools: проверка/публикация фактов;
+- durable bytes/events под `<project>/.pilot-runs/<run_id>/`: evidence конкретного run.
+
+Human docs не переопределяют machine truth. Каждый artifact controller публикует
+атомарно и читает обратно до следующего перехода.
+
+## Обязательная последовательность
+
+1. Получи exact project, один requirements document, profile и run-scoped authorization.
+2. До scan/model call создай/readback-проверь authorization, run manifest и
+   `RUN_CREATED`.
+3. Read-only inventory -> exact module -> authoritative `.skillsrc` -> complete frozen
+   execution baseline. Все три boundary возникают до `ATTEMPT_CREATED`.
+4. Создай единственный nonterminal attempt. Persist/readback-проверяй event/artifact
+   identity и digest на каждом переходе.
+5. Один раз вызови `context-marker` для complete normalized source requirements, затем
+   создай deterministic batch plan. Для каждого batch: context receipt -> `tc-generator`
+   -> immutable fragment bytes. Каждая logical stage invocation имеет exact stage-bound
+   persisted/read-back `model-request` со всеми input digests, model и invocation;
+   `MODEL_REQUESTED` ссылается на этот envelope до вызова, затем следует
+   `MODEL_RESPONSE_RECEIVED`. Каждый generator fragment немедленно получает
+   `CANDIDATE_PUBLISHED`.
+6. Собери/audit bare canonical JSON; опубликуй revision 1 как `UNREVIEWED` с exact V4
+   bundle receipt и `CANDIDATE_PUBLISHED` stage `assembly`.
+7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
+   authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
+   candidate digest получает `REVIEW_REQUESTED` до reviewer `MODEL_REQUESTED`.
+8. Выбери candidate или единственный complete successor. Передай downstream только
+   effective JSON/digest.
+9. Для `cases-only-v1` зафиксируй materialization/execution/dispositions как
+   `NOT_APPLICABLE` и перейди к trace/finalization.
+10. Для `local-pilot-v1`: automation -> static review -> optional one complete
+    correction/review -> generated delta -> per-file materialization -> one exact
+    project-native execution.
+11. Построй execution trace, определи disposition всего generated set, затем выполни
+    pre-finalization trace -> finalization receipt/readback -> terminal result -> derived
+    terminal trace -> terminal event.
+
+## Project и execution boundary
+
+Pipeline работает в обычном рабочем проекте и не создаёт isolated copy. Разрешены
+read-only inventory и новые pipeline-owned generated-test files в selected active test
+root. Запрещено менять application source, existing tests, config, lock files,
+dependencies, permissions или behavior ради PASS.
+
+Project code запускается только при `local-pilot-v1`, explicit run authorization,
+complete materialization и accepted static review. Closed adapter получает:
+
+```text
+adapter_id + exact interpreter/wrapper + build_profile + typed adapter_parameters
+```
+
+Shell strings, `argv_template`, automatic fallback и cross-module orchestration
+запрещены. Environment receipt хранит только allowlisted safe key IDs/labels без values.
+
+## Reviewer cardinality
+
+Canonical branch имеет максимум одну reviewer session и максимум один authoritative
+verdict. Successful/effective canonical требует ровно один verdict. Zero разрешён только
+для explicit terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT`.
+
+Automation имеет одну static reviewer invocation на revision и не более двух полных
+versions/reviews: initial + одна correction. Model self-attestation не доказывает fresh
+context; это делает только host/controller evidence.
+
+## Generated set и disposition
+
+Каждый generated file имеет path, exact bytes/digest, materialization receipt и конечный
+disposition. Execution не начинается при partial materialization.
+
+| Branch | Disposition |
 |---|---|
-| порядок, пути скиллов, `accepts`, `forwards` и переходы | `contracts/pipeline.json` |
-| контракт пайплайна | `schemas/pipeline.schema.json` |
-| результат этапа | `schemas/<stage>-output.schema.json` |
-| выполнение | `tools/run_tests.py` и `schemas/run-tests-output.schema.json` |
-| структура трассировки | `tools/build_trace_document.py` и `schemas/trace-document.schema.json` |
-| смысл трассировки | `tools/trace_check.py` |
-| итоговый артефакт | `schemas/orchestrator-output.schema.json` |
+| authoritative `PASS` + valid trace | unchanged file `RETAINED` |
+| `FAIL` / `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
+| `UNKNOWN`, unchanged | `PRESERVED_EXECUTION_UNKNOWN` |
+| `UNKNOWN`, drifted | `PRESERVED_CONTENT_CONFLICT` + unknown evidence |
+| partial materialization | safe cleanup либо `NOT_MATERIALIZED` |
 
-Если поясняющий текст расходится с этими файлами, остановись и сообщи о
-несоответствии контракта.
+Если cleanup нельзя доказать безопасным, сохрани file с exact reason и
+`accepted=false`. Cleanup при `UNKNOWN` запрещён.
 
-## Маршрут артефактов
+## Finalization и result
 
-| Этап | Вход | Результат и решение |
-|---|---|---|
-| `context-marker` | `raw_content` | `analytics_documentation`, `source_code_and_diff` |
-| `tc-generator` | оба предыдущих блока JSON | `generated_test_cases`, затем обязательная CSV-копия |
-| `tc-reviewer` | `generated_test_cases` | исходные тест-кейсы при `ПРИНЯТО`; `corrected_test_cases` при `AUTO_FIX_APPLIED`; остановка при запросе доработки |
-| `tc-to-autotest` | выбранные тест-кейсы и отчёт проверки | `automation_matrix`, `generated_test_files`, `generated_test_methods` |
-| `autotest-reviewer` | тест-кейсы, артефакты автоматизации и сопутствующий исходный код | принятый результат или запрос доработки в `autotest_review`, без утверждений о выполнении |
-| `run-tests` | проверенный артефакт автоматизации и изолированный проект | `run_tests_verdict`, доказательства выполнения `execution_evidence` на уровне методов |
-| `trace-check` | требования, тест-кейсы, файлы, методы и доказательства средства запуска | `trace_audit` |
+Finalization verifier читает pre-finalization trace, заканчивающийся dispositions.
+Materialization/execution/dispositions проверяются только когда required текущим
+profile/branch; иначе они `NOT_APPLICABLE`, не missing.
 
-CSV нужен для переноса в Jira Zephyr и просмотра человеком. Из него должны без
-потерь восстанавливаться исходные упорядоченные `test_cases`, но каждый последующий
-этап всегда читает JSON.
+Receipt `valid=false` не препятствует terminal transition: terminal reason становится
+`FINALIZATION_INVALID`, а прежняя stage cause остаётся immutable evidence. Verification
+и coverage не переписываются.
 
-## Исполнимый порядок
+Читай результат по всем полям:
 
-В фактическом журнале команд используй абсолютные пути и абсолютный рабочий
-каталог. В командах ниже `<root>` означает абсолютный корень пакета.
+```text
+attempt_state + completion + verification + coverage + reason_code + accepted
+```
 
-1. До `context-marker` выбери exact project root и `<run>`, затем создай или
-обнови `.skillsrc` и сохрани immutable bootstrap receipt:
+Нельзя преобразовывать `FAIL`, `UNKNOWN`, `NOT_RUNNABLE`, manual coverage или invalid
+finalization в PASS-подобный плоский status.
 
-   `python <root>/tools/init_skillsrc.py --project <project> --write --output <project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json`
+## Resume
 
-   `python <root>/tools/validate_artifact.py <root>/schemas/skillsrc-init-output.schema.json <project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json`
+Waiting/model interruption продолжает тот же attempt только после validation frozen
+snapshot/config. Requirements/module/policy drift создаёт child attempt. Late undeclared
+execution input закрывает текущий attempt как `NOT_RUNNABLE/BASELINE_INCOMPLETE`.
+Execution interruption даёт `UNKNOWN`; retry — только explicit child attempt после
+доказанной остановки прежнего process scope.
 
-   При `needs_input` или `conflict` останови pipeline, покажи ровно первый
-   unresolved question с options, evidence и impact и не задавай следующий
-   вопрос одновременно. Сохрани выбранные option IDs в новой immutable attempt:
+## Release claim
 
-   `python <root>/tools/init_skillsrc.py --project <project> --write --answers <project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-answers.json --output <project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-init.json`
-
-   Проверь новую квитанцию той же командой `validate_artifact.py`, заменив
-   `attempt-01` на `attempt-02`. Продолжай только при `created`, `updated` или
-   `unchanged`.
-
-   Затем загрузи `<project>/.skillsrc` и выбери exact module ID. Автоматически
-   выбирай только единственный module. Для exact user-supplied relative feature
-   path выбери module, чей module root содержит этот path. Для текстового названия проверяй только объявленные
-   `feature_sources` и source paths; выбери один module только при прямом
-   совпадении requirement, route, symbol или path и запиши module ID и evidence
-   в controller receipt. При нуле совпадений попроси path/module ID; при нескольких
-   покажи module IDs и evidence и запроси один выбор. Не переходи к
-   `context-marker` без exact module selection.
-
-2. Проверь артефакт этапа:
-
-   `python <root>/tools/validate_artifact.py <root>/schemas/<stage>-output.schema.json <artifact.json>`
-
-3. После `tc-generator`:
-
-   `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv>`
-
-   `python <root>/skills/tc-generator/scripts/export_test_cases_csv.py --input <tc-generator-output.json> --output <tc-generator-output.csv> --verify-only`
-
-4. После принятой проверки автотестов:
-
-   `python <root>/tools/run_tests.py --project <project> --skillsrc <project>/.skillsrc --module <module-id> --automation-artifact <tc-to-autotest-output.json>`
-
-   Сохрани стандартный вывод без изменений как JSON результата запуска и проверь
-   его по `run-tests-output.schema.json`.
-
-5. Построй трассировку:
-
-   `python <root>/tools/build_trace_document.py --requirements <context-marker-output.json> --test-cases <tc-generator-output.json> --automation-artifact <tc-to-autotest-output.json> --run-result <run-result.json> --output <trace-document.json>`
-
-6. Выполни аудит трассировки:
-
-   `python <root>/tools/trace_check.py <trace-document.json> --require-execution`
-
-7. Собери `orchestrator-output.json` только из сохранённых фактов запуска и трассировки, проверь его по схеме и выполни перекрёстную проверку:
-
-   `python <root>/tools/trace_check.py <trace-document.json> --orchestrator-artifact <orchestrator-output.json> --require-execution`
-
-Сохраняй штатный код завершения каждой команды отдельно от стандартного вывода.
-Не составляй квитанции средства запуска или трассировки вручную.
-
-Не включай discovery questions, answers и bootstrap receipts во входы
-evaluator-скиллов: это controller evidence. Передавай выбранные requirements и source files
-только как `raw_content` существующему `context-marker`; его schema-valid JSON
-остается динамическим контекстом фичи. Не создавай второй каталог фич, не добавляй
-business content в `.skillsrc` и не сохраняй его в bootstrap receipt.
-
-## Граница проекта
-
-Разрешены чтение исходного кода без изменений и новый файл сгенерированных тестов
-в заранее выбранном изолированном каталоге. Запрещено менять рабочий исходный код,
-существующие тесты, конфигурацию, файлы блокировки версий, зависимости, разрешения
-или поведение приложения ради прохождения теста.
-
-Если сгенерированный тест несовместим с проектом, исправляй генератор или входной
-контракт в новой попытке. Никогда не подстраивай проект под тест-кейс.
-
-## Контекст этапа
-
-Передавай:
-
-- объявленные входные JSON;
-- необходимые файлы сгенерированного исходного кода;
-- только подтверждённые исходным кодом проектные соглашения, подготовку, роли, разрешения, аутентификацию и ожидаемые результаты;
-- точный путь результата.
-
-Не передавай:
-
-- ответы предыдущего проверяющего;
-- скрытый ожидаемый результат или оценочную карточку;
-- внутренние рассуждения и черновики;
-- лишние файлы проекта;
-- учётные данные и секреты окружения.
-
-## Итоговый артефакт
-
-`orchestrator-output.json` должен пройти `schemas/orchestrator-output.schema.json`.
-
-- `run_tests_verdict` копирует вердикт, причину, команду, средство запуска и код завершения из результата запуска.
-- `execution_evidence` нормализует только сохранённые записи средства запуска на уровне методов.
-- `trace_audit` копируется из `trace_check.py`.
-- `PASS` требует кода завершения 0, непустых доказательств и результата трассировки `PASS`.
-- `FAIL` и `NOT_RUNNABLE` — честные конечные состояния, а не принятие.
-
-Минимальный `PASS` и честный `NOT_RUNNABLE` находятся в
-`../assets/orchestration-fixtures/`.
+Manifest state `implemented_unverified` не является readiness. Допустимый claim после
+adaptive release eval имеет только вид `core-pilot-ready for <exact verified tuple>`.
+Adaptive `1 -> 3 -> 5` запускается только отдельной явной release qualification;
+пакет не создаёт и не изменяет CI. Обычный production run выполняет одну logical
+invocation каждой нужной model stage. Generator response записывает
+`transport_attempts=1|2`; остальные responses — `1`. Bounded reviewer C-lite
+кардинальность выводится из exact evidence pairs ledger, а не из повторов stage.
+Instability или protocol violation навсегда дисквалифицирует текущую campaign; после
+устранения причины новая clean campaign связывается с её eval receipt и требует пять
+fresh runs каждого critical scenario.
+Company runner, production rollback и Zephyr tenant round-trip остаются отдельными `N/A`
+для core pilot.

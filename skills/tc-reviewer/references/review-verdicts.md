@@ -1,108 +1,77 @@
-# Контракт вердиктов и исправлений tc-reviewer
+# Pilot reviewer-session and verdict contract
 
-## Таблица решений
+The controller publishes/reads back canonical revision 1 as `UNREVIEWED`, creates the exact reviewer package binding, and keeps the host-owned `reviewer-session` ledger separate from model-produced `tc-reviewer-output`. The allowed sequence is `STARTED -> (REQUESTED -> PROVIDED)* -> AUTHORITATIVE_VERDICT -> COMPLETED`, or `STARTED -> ... -> ABORTED` before a verdict. At most one verdict exists. A completed/effective canonical has exactly one verdict; only an explicit pre-verdict abort, including `REVIEW_CONTEXT_LIMIT`, has zero.
 
-| Наивысший класс дефекта | Вердикт | Находки | Исправления | Исправленные тест-кейсы |
-|---|---|---|---|---|
-| дефектов нет | `ПРИНЯТО` | пусто | пусто | пусто |
-| только механические | `AUTO_FIX_APPLIED` | одна или несколько находок `WARNING` или `INFO` | одно или несколько | только полные изменённые тест-кейсы |
-| любой блокирующий дефект | `ТРЕБУЕТ ДОРАБОТКИ` | содержит `BLOCKING` | пусто | пусто |
+Each package binds candidate, normalized requirements, source/canonical/case mappings, inventory/context receipts, and exact evidence digests. Retrieval is C-lite and budgeted. Per-batch reviewers, reviewer trees, a second session, a second verdict, generator reasoning, and silent context truncation are forbidden. Host evidence proves isolation; missing proof is `independence_unverified` and makes acceptance false.
 
-Блокирующий дефект имеет приоритет над всеми механическими. Не применяй частичные
-автоматические исправления, если в той же проверке есть блокирующий дефект.
+Use those authorized context receipts to compare against the original requirements,
+not only their model-normalized subset. Reject dropped acceptance criteria, requirements
+linked to irrelevant cases, and expected results weakened to match an implementation
+defect. When original evidence is unavailable within the budget, report the gap or the
+existing context-limit abort; never infer complete coverage from a valid mapping graph.
 
-## Механические исправления
+Audit coverage in two passes using the existing canonical requirements and mappings.
+First derive the distinct conditions from the original authorized request yourself
+and reconcile them with `requirements`: check each input variant, boundary, branch,
+field rule and state transition, including several conditions in one source paragraph.
+Do not use the generator's inventory as the sole list of what should be tested.
+Second, trace every behavioral canonical condition to its actual case inputs,
+operations and assertions (or justified manual/blocker gap). For example, linking a
+length-30 case to a length-31 rejection condition does not cover that rejection.
+Check all jointly required observations, such as rejection and unchanged storage.
+Report a missing condition against its source/mapping and a missing check against
+the affected canonical requirement and case/step. Do not claim full coverage from
+the number of conditions, cases or relations. This audit belongs to the same single
+authoritative review; no additional reviewer role or user-supplied checklist is required.
 
-Исправление является механическим, только если одновременно выполнены все условия:
+`tools.revision_selection` validates candidate digest, full successor lineage, source/canonical/case traceability, and identity preservation; `tools.canonical_document` validates canonical semantics. Canonical review has revision 1 and at most one complete mechanical successor revision 2; revision 3, destructive, partial, and choice-bearing changes are `ТРЕБУЕТ ДОРАБОТКИ`.
 
-1. Исходное значение видно в переданном тест-кейсе.
-2. Замена видна или однозначно следует из другого значения в том же входном артефакте.
-3. Замена не выбирает поведение продукта.
-4. Роль, маршрут, значение данных, переход состояния, статус и код ошибки не меняются.
-5. Исправление можно описать одной точной текстовой операцией или операцией форматирования.
+The verdict is canonical evidence, not the terminal pipeline result. Acceptance remains a
+versioned policy decision after branch-valid trace and finalization; local execution also
+requires generated-delta, execution, and disposition evidence.
 
-Типичные механические дефекты:
+| Verdict | Required output |
+|---|---|
+| `ПРИНЯТО` | candidate is selected; no successor |
+| `AUTO_FIX_APPLIED` | one complete successor document, incremented lineage, preserved identity graph |
+| `ТРЕБУЕТ ДОРАБОТКИ` | blocking findings; no successor |
 
-- однозначная опечатка, например `sesion`, когда во всём остальном артефакте последовательно используется `session`;
-- пунктуация или пробелы, не меняющие смысл;
-- механически некорректная метка, точная нормализованная форма которой уже присутствует во входных данных.
+`reviewed_case_ids` lists all candidate cases exactly once in physical order. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
 
-Не являются механическими:
+Review every human Action/Test Data/Expected Result triple against the mandatory
+[human scenario rules](../../tc-generator/references/case-generation-contract.md#human-scenario-rules),
+which are the shared format authority for generator and reviewer. Verify machine
+operation/input/output/assertion ownership, previous-step data flow and manual/blocker
+branches. A violation needs a precise location and a concrete ambiguity, semantic error
+or broken format rule; a preference for different Russian wording is not rework.
+Check that testing-work instructions remain in linked canonical requirements rather than
+human case fields, while necessary setup and actual product constraints remain testable.
+Do not demand extra cases or assertions to test the author of the tests. A mixed source
+paragraph must retain both its product meaning and its instructions without copying the
+instructions into the scenario. Cite the shared rule and exact field for a violation.
+Check that a reader unfamiliar with the project can understand the purpose and result;
+technical execution details must not obscure the meaningful action.
+Check the shared rules on scenario-specific setup, helper controls in Test Data,
+object-specific preservation and an objective that adds meaning to the title. Trace a
+date/control dependency to the actual scenario, not just to a required helper argument.
+Distinguish required behavior from source-derived exception/message characterization:
+verify its provenance, selected boundary and stated scope; explicit requirement error
+codes remain authoritative. Unsupported or contradictory oracles are correctness
+findings. Redundant but accurate wording is a readability observation, not by itself a
+blocking defect; cite concrete ambiguity when comprehension or execution is impaired.
 
-- заполнение `TBD`, `TODO`, `unknown` или пустого значимого результата;
-- изменение ожидаемого статуса или кода ответа;
-- замена неподтверждённой роли подтверждённой;
-- выбор маршрута, поля, значения, предусловия или перехода состояния;
-- разрешение противоречащих друг другу требований;
-- добавление отсутствующего покрытия или придумывание связи с требованием.
+Review native operation capabilities against the shared generation contract. A
+composition of confirmed application/framework calls need not already exist as an
+application helper or runtime provider; a route need not use direct HTTP binding when
+the declared native test boundary exercises it faithfully. Reject unsupported calls,
+fabricated observations and changed transport semantics. Also challenge a blocker
+based only on the lack of a ready-made helper when the authorized evidence supports
+the required composition. Check its argument/result bindings and real persistence
+boundary, not merely its label. Missing evidence remains a gap, never a guessed API.
 
-## Блокирующие находки
-
-Используй `BLOCKING`, когда тест-кейс нельзя выполнить или считать надёжным без
-решения о поведении продукта. Рекомендуемые стабильные коды:
-
-- `EXPECTED_RESULT_MISSING`: ожидаемый результат шага или всего тест-кейса является заглушкой либо не содержит наблюдаемого результата;
-- `UNSUPPORTED_AUTHORIZATION`: тест-кейс заявляет роль или разрешение, которых нет в переданных правилах;
-- `UNSUPPORTED_BEHAVIOR`: тест-кейс заявляет маршрут, статус, поле или побочный эффект, которых нет в требованиях;
-- `DANGLING_REQUIREMENT_ID`: тест-кейс ссылается на неизвестное требование;
-- `COVERAGE_MISMATCH`: прямые связи тест-кейсов и обратное покрытие не совпадают;
-- `CONTRADICTORY_ORACLE`: результаты шагов противоречат итоговому ожидаемому результату;
-- `NONDETERMINISTIC_ORACLE`: заявлен успех или отказ без наблюдаемого условия;
-- `HARNESS_ORACLE_MISMATCH`: указанная подготовка, действие или тестовая среда не могут дать заявленные тип ответа, форму тела, статус либо состояние.
-
-Коды описывают дефект, но не дают права додумывать отсутствующее поведение. Текст
-находки объясняет, что именно не подтверждено и какие сведения из источника нужны.
-
-## Доказательства и идентификаторы
-
-`reviewed_test_case_ids` содержит каждый ID входного тест-кейса ровно один раз и
-сохраняет исходный порядок.
-
-Каждый элемент `related_ids` должен быть ID требования или тест-кейса из того же
-входного артефакта. В доказательствах используй ссылки на поля, например:
-
-- `TC-0042.steps[0].expected_result=TBD`
-- `TC-0042.preconditions[0]=Authenticated as warehouse_operator`
-- `REQ-AUTH-001.text permits only sales_manager`
-
-Не используй в качестве доказательства выдуманные строки журналов, наблюдения из
-базы данных, HTTP-ответы или утверждения о выполнении кода.
-
-## Целостность исправленного тест-кейса
-
-При вердикте `AUTO_FIX_APPLIED` скопируй полный изменённый тест-кейс и сохрани:
-
-- `id` и `requirement_ids`;
-- категории и приоритет;
-- предусловия и тестовые данные;
-- каждое неизменённое поле шага;
-- неизменённый итоговый ожидаемый результат.
-
-Отличаться может только точное поле, указанное в исправлении. Не добавляй
-неизменённые тест-кейсы в `corrected_test_cases`.
-
-## Примеры
-
-### Принятие
-
-Тест-кейс соответствует требованию, использует существующие ID и содержит
-наблюдаемый ожидаемый результат. Верни `ПРИНЯТО` с пустыми находками,
-исправлениями и исправленными тест-кейсами.
-
-### Механическое исправление
-
-В заголовке написано `Delete active sesion`, а требование и все остальные поля
-используют `session`. Верни `AUTO_FIX_APPLIED`, укажи заголовок как доказательство,
-замени только `sesion` на `session` и включи полный исправленный тест-кейс.
-
-### Отсутствующий результат
-
-Ожидаемый результат шага и итоговый результат равны `TBD`. Верни
-`ТРЕБУЕТ ДОРАБОТКИ` с кодом `EXPECTED_RESULT_MISSING`. Не выводи самостоятельно
-HTTP-статус или успешный ответ.
-
-### Неподтверждённая авторизация
-
-Тест-кейс выполняется от имени `warehouse_operator`, но единственное переданное
-правило разрешения называет `sales_manager`. Верни `ТРЕБУЕТ ДОРАБОТКИ` с кодом
-`UNSUPPORTED_AUTHORIZATION`. Не заменяй роль и не предсказывай ответ с отказом.
+Compare candidate requirements with the input context without losing behavior classes.
+Each relevant product-behavior warning needs either a testable canonical step or a concrete gap for
+missing oracle, input, access or setup. A known defect with a clear oracle stays testable.
+Every structured assertion must inspect the intended behavior; relations and warnings
+cannot stand in for coverage. The report binds the exact bare candidate digest, and a
+successor is validated as a whole, never merged with its candidate.

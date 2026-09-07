@@ -1,115 +1,226 @@
 ---
 name: orchestrate
-description: Использовать, когда запрос содержит «создай тест-кейсы», «сгенерируй автотесты», «запусти тестовый пайплайн», «создай тесты», «инициализируй проект», «быстрый старт» или «настрой проект» и требуется координация нескольких канонических скиллов тестирования.
+description: Использовать, когда пользователь просит создать тест-кейсы, сгенерировать автотесты или выполнить полный portable testing pipeline для одного документа требований и одного project module.
 ---
 
-# Оркестрация тестового пайплайна
+# Оркестрация frozen pilot Pipeline 4.0
 
-## Принцип
+Ты — controller в совместимой model-enabled CLI. Не запускай из Python модель и не
+передавай model credentials. Python tools здесь только детерминированно проверяют,
+публикуют/readback-проверяют артефакты и, при явном разрешении, запускают exact
+project-native test targets.
 
-Координируй только канонический маршрут из `contracts/pipeline.json`. Считай
-JSON-артефакты машинным источником истины, средство запуска — единственным
-доказательством выполнения, а Markdown, CSV и сгенерированный исходный код —
-только сопутствующими материалами.
+Полностью прочитай `contracts/pipeline.json`, persisted `release/manifest.json` и
+[контракт оркестрации](references/orchestration-contract.md). Используй только exact
+Skills из `skill_files` и model stages из `stage_registry`; копии и псевдонимы не
+являются registered input.
 
-## Обязательная подготовка
+Пути `contracts/`, `schemas/`, `skills/`, `tools/` и `release/` разрешай от корня
+этого пакета. Python tools вызывай с cwd пакета и абсолютным `--project` целевого
+проекта, чтобы не импортировать чужой модуль `tools`. Cwd project-native executor
+при этом остаётся выбранным module root, как требует frozen request.
 
-1. Полностью прочитай `contracts/pipeline.json` и [контракт оркестрации](references/orchestration-contract.md).
-2. Определяй пути скиллов только через `skill_files`; не используй псевдонимы, устаревшие каталоги или копии из плагинов.
-3. Выбери exact корень целевого проекта и каталог текущего запуска под `<project>/docs/to_do/<run>/`.
-4. До чтения первого stage skill выполни bootstrap с output `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-01/skillsrc-init.json` и проверь его квитанцию точными командами из контракта.
-5. При `needs_input` или `conflict` останови пайплайн до `context-marker`. Покажи только первый неразрешённый вопрос вместе с его options, evidence и impact; не задавай следующий вопрос одновременно.
-6. После ответа сохрани только выбранные option IDs как `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-answers.json` и заново выполни bootstrap с output `<project>/docs/to_do/<run>/00-project-bootstrap/attempt-02/skillsrc-init.json`. Не изменяй прежнюю attempt-папку или её квитанцию.
-7. Только при `created`, `updated` или `unchanged` загрузи `<project>/.skillsrc` и выбери exact module ID по контракту.
-8. При неоднозначном feature-to-module выборе останови пайплайн и запроси один выбор; не выбирай module по вероятности. Только после exact module selection переходи к `context-marker`.
-9. Прочитай только нужный текущему этапу `SKILL.md`, объявленные для него входы и схему.
-10. Осмотри проект без изменений. Не меняй файлы проекта, конфигурацию, зависимости и рабочий код ради тестов.
-11. Выбери изолированное место для новых файлов сгенерированных тестов.
+При формировании reviewer prompt явно передай `run_root` и `attempt_id` и разреши
+read-only вызовы штатных `tools.pilot_state` readers для exact boundary, effective
+canonical и связанных receipts текущего attempt. Эти API также читают необходимые
+run manifest и journal bindings. Не запрещай их общим запретом на run-файлы:
+проверка происхождения обязательна. За пределами reviewer context остаются диалог
+и reasoning генератора, transport logs и несвязанные runs; проверенные артефакты
+и записи идентичности не являются диалогом генератора.
 
-Не включай discovery questions, answers и bootstrap-квитанции во входы
-evaluator-скиллов. Это controller evidence, а не содержимое фичи.
+Для проверки хода работы используй `run_pipeline status` и компактные результаты
+штатных API. Transport JSONL разбирай как JSON и выводи только нужные поля последних
+завершённых событий: одна строка может содержать весь input или исходник, поэтому
+`head`/`tail` по числу строк не ограничивают объём. Повторно нужную функцию читай
+адресно, не выводи весь Python-модуль. Это правило вывода статуса: полное чтение
+обязательных входов роли, validators, digest и readback остаётся обязательным.
 
-## Выбор модуля фичи
+## 1. Выбери профиль и создай run
 
-Выбирай module ID только в следующем порядке:
+Допустимы только:
 
-1. Выбери единственный module автоматически.
-2. Для exact user-supplied relative feature path выбери module, чей module root содержит этот path.
-3. Для текстового названия проверь только объявленные `feature_sources` и source paths.
-4. При одном module с прямым совпадением requirement, route, symbol или path выбери его и запиши module ID и evidence в controller receipt.
-5. При нуле совпадений попроси путь или module ID.
-6. При нескольких совпадениях покажи module IDs и evidence, затем запроси один выбор.
+- `cases-only-v1`: draft canonical cases/review без выполнения project code; `accepted=false`, не full-pipeline exit 0;
+- `local-pilot-v1`: полный pipeline с run-scoped project-native execution; `accepted=true` только после live PASS.
 
-Передай выбранные requirements и исходные файлы как `raw_content` существующему
-`context-marker`. Его schema-valid JSON — динамический контекст фичи для текущей
-attempt. Не создавай второй каталог фич, не добавляй business content в `.skillsrc`
-и не сохраняй его в bootstrap receipt.
+Для `local-pilot-v1` execution разрешён только явным пользовательским запросом полного
+pipeline в этом run. Наличие папки, scan или запрос test cases не разрешают execution.
 
-## Канонический маршрут
+До scan и первого model call вызови durable Phase 1 boundary: создай
+`run-authorization-receipt.json`, `run-manifest.json`, readback-проверь оба и запиши
+`RUN_CREATED`. State хранится под `<project>/.pilot-runs/<run_id>/`. Не создавай clone,
+worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
 
-Выполняй этапы строго последовательно:
+## 2. Выбери exact module и заморозь baseline
 
-1. `context-marker`
-2. `tc-generator`
-3. экспорт JSON → CSV без потерь
-4. `tc-reviewer`
-5. `tc-to-autotest`
-6. `autotest-reviewer`
-7. `tools/run_tests.py`
-8. `tools/build_trace_document.py`
-9. `tools/trace_check.py --require-execution`
-10. `orchestrator-output.json` и повторный `trace_check.py --orchestrator-artifact`
+1. Выполни локальный read-only inventory eligible project tree.
+2. Исключи `.git`, dependencies, build outputs, binaries, generated artifacts и файлы
+   с потенциальными secrets из model context.
+3. Выбери ровно один exact module. Автоматически выбирай только единственный module
+   или module, доказанно содержащий exact user path. При неоднозначности покажи один
+   вопрос и перейди в `WAITING_FOR_INPUT`.
+   `--module` принимает ID из inventory/`.skillsrc`, а не путь: например,
+   корню `.` может соответствовать ID `root`. Сначала сопоставь user path с module,
+   затем передавай его exact ID; при единственном module не подставляй `.` как ID.
+4. Прими valid существующий `.skillsrc` как authoritative. Отсутствующий создай
+   автоматически и атомарно; execution-significant drift требует одного подтверждения.
+5. Сформируй complete execution baseline: requirements, `.skillsrc`, eligible
+   source/config/build/fixture inputs, доказанные parent/wrapper dependencies, module
+   cwd/test root, interpreter или wrapper, adapter ID, build profile и typed params.
+6. Опубликуй/readback-проверь module selection, inventory и baseline до
+   `ATTEMPT_CREATED`, затем создай один nonterminal attempt.
 
-После каждого этапа с JSON сначала запускай `tools/validate_artifact.py` с его
-канонической схемой. При ненулевом коде завершения остановись до следующего этапа.
+Поздно найденный undeclared execution input не добавляй в baseline. Закрой branch как
+`NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение возможно только через child attempt.
+Run остаётся связан с исходной project/module identity.
 
-После валидного `tc-generator-output.json` всегда создай соседний CSV через
-`skills/tc-generator/scripts/export_test_cases_csv.py`, затем проверь его с
-`--verify-only`. Последующим этапам передавай JSON, а не CSV.
+## 3. Построй canonical из deterministic batches
 
-Для этапа `tools/run_tests.py` используй выбранный module: `--module <module-id>`.
+1. Один раз вызови `context-marker` для authorized requirements/context и
+   persist/readback-проверь полный normalized source-requirement artifact. До вызова
+   persist/readback-проверь `model-request` с exact stage/role/policy, model,
+   invocation и ordered artifact `input_digests`; `MODEL_REQUESTED` ссылается на digest
+   этого envelope. После schema-valid ответа запиши `MODEL_RESPONSE_RECEIVED` с exact
+   output digest.
+2. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
+   каждый context-selection receipt.
+3. Для каждого batch вызови `tc-generator` с declared immutable inputs.
+   Persist/readback-проверь каждый complete fragment и сразу запиши
+   `CANDIDATE_PUBLISHED` для его exact digest.
+4. Собери один bare canonical JSON `1.0.0` с explicit many-to-many traceability и
+   выполни schema/semantic/provenance audit.
+   Проверь полноту относительно исходного документа, а не только normalized context.
+   Передай reviewer исходные authorized requirement bytes через существующие immutable
+   context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.
+5. Немедленно опубликуй revision 1 как `UNREVIEWED` с V4 derived bundle и прочитай exact
+   bytes обратно; journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
+   HTML/CSV никогда не становятся downstream model input.
 
-## Передача данных и изоляция
+Human-facing canonical поля обязательны на русском; technical tokens сохраняются
+exact. Не ограничивай число requirements/cases искусственным потолком.
 
-- Передавай этапу только артефакты из его `accepts` или предыдущего `forwards` в контракте пайплайна и необходимые факты проекта, подтверждённые исходным кодом.
-- Не передавай внутренние рассуждения, ожидаемый ответ, оценочные карточки проверяющих или выводы прежних агентов.
-- Сохраняй без ослабления происхождение, ID требований, ID тест-кейсов, подготовку, роли, разрешения, аутентификацию, действие, данные и ожидаемый результат.
-- Считай сгенерированный исходный код сопутствующим артефактом. Машинным источником истины остаётся соответствующий JSON с путями и SHA-256.
-- Никогда не сохраняй учётные данные, токены, cookie и другие секреты в запрос, JSON, CSV, сгенерированный исходный код или доказательства.
+## 4. Выполни одно authoritative canonical review
 
-## Контрольные точки
+Controller формирует immutable package из candidate, exact requirements/context/source
+evidence и provenance. Открой одну fresh role-isolated reviewer session и вызови
+`tc-reviewer`. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
+candidate; сам вызов окружи stage-bound `MODEL_REQUESTED` и
+`MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
 
-| Проверка | Продолжить | Остановиться |
-|---|---|---|
-| схема | валидатор завершился с кодом 0 | любой ненулевой код |
-| `tc-reviewer` | `ПРИНЯТО` с исходными тест-кейсами или `AUTO_FIX_APPLIED` с исправленными | `ТРЕБУЕТ ДОРАБОТКИ`, неизвестный вердикт |
-| `autotest-reviewer` | `ПРИНЯТО` или явно разрешённый контрактом исправленный результат | `ТРЕБУЕТ ДОРАБОТКИ`, неизвестный вердикт |
-| средство запуска | подтверждённый `PASS`, код завершения 0 | `FAIL`, `NOT_RUNNABLE`, ненулевой код |
-| трассировка | `PASS`, штатный код завершения 0, точная перекрёстная проверка артефакта оркестратора | `FAIL`, расхождение, ненулевой код |
+Эти события ограничивают одну logical stage invocation. Поле
+`MODEL_RESPONSE_RECEIVED.transport_attempts` равно `1` без retry или `2` после
+единственного transport/schema retry генератора; для остальных stages оно всегда `1`.
+Кардинальность C-lite фиксируется самими
+`EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs reviewer ledger. Эти внутренние действия
+не являются повторениями release campaign. Adaptive `1 -> 3 -> 5` запускается только
+отдельной явной release qualification, никогда обычным production run.
 
-Для Java и Python `NOT_RUNNABLE` не является успехом. Для экспериментально
-поддерживаемого стека сохрани честный артефакт `NOT_RUNNABLE`, соответствующий
-схеме, но не объявляй цепочку принятой.
+Внутри session допустимы zero or more bounded C-lite
+`EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs. Запрещены per-batch/hierarchical reviewers,
+вторая session, generator dialogue/reasoning и больше одного authoritative verdict.
+Successful session содержит ровно один verdict; explicit terminal pre-verdict abort,
+включая `REVIEW_CONTEXT_LIMIT`, содержит ноль.
 
-## Ошибки и новые попытки
+`ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает только один complete
+successor revision 2 и тот же authoritative verdict. Любая смысловая/частичная/третья
+correction — `REWORK/PARTIAL`. Без host isolation evidence записывай
+`independence_unverified` и не принимай branch.
 
-- Не исправляй и не перезаписывай неудачный логический артефакт.
-- Сохрани сам артефакт, результат валидации, буквальные `argv`, рабочий каталог, код завершения и первопричину.
-- Запускай новую попытку только после фактического изменения входа, скилла или контракта контроллера. Старую попытку оставляй неизменяемой и не учитывай в оценке.
-- Повтор той же команды допустим только при сбое среды или транспорта до появления результата этапа; запиши обе попытки.
-- Если стек, подготовка, роль, разрешения, аутентификация или наблюдаемый ожидаемый результат не подтверждены источниками, запроси доработку вместо догадки.
+При отказе или terminal pre-verdict abort не вызывай automation даже в `local-pilot-v1`.
+Закрой раннюю отрицательную ветку через trace/finalization с
+`materialization=execution=NOT_APPLICABLE`, исходной причиной и `accepted=false`.
 
-## Финальное принятие
+## 5. Закрой выбранный профиль
 
-Объявляй для пайплайна `PASS`, только когда одновременно:
+### `cases-only-v1`
 
-- все JSON этапов прошли свои схемы;
-- проверяющий выбрал исходные или явно исправленные тест-кейсы как источник истины;
-- проверка автотестов принята;
-- `run_tests.py` вернул подтверждённый `PASS` с доказательствами на уровне методов;
-- документ трассировки прошёл `--require-execution`;
-- `orchestrator-output.json` прошёл схему и точную перекрёстную проверку трассировки;
-- рабочий код, конфигурация и зависимости проекта не менялись.
+Не вызывай automation, materialization или executor. Зафиксируй их как
+`NOT_APPLICABLE`, затем создай branch-valid pre-finalization trace и выполни общий
+finalization/terminal порядок. Результат draft/artifact-only: `verification=NOT_APPLICABLE`,
+`accepted=false`; green full-pipeline exit 0 запрещён.
 
-Человекочитаемый отчёт разрешён, но он не заменяет ни одной JSON-квитанции.
-Минимальные проверяемые примеры находятся в `assets/orchestration-fixtures/`.
+### `local-pilot-v1`
+
+Для model request `tc-to-autotest:rN` передай `input_digests` ровно как
+`[effective.document_digest, effective.effective_bundle_receipt_digest]` из
+`read_effective_canonical`. Для `autotest-reviewer:rN` — ровно
+`[boundary.automation_digest, boundary.digest]` из read-back
+`automation-review-boundary-rN`. Порядок значим. Это привязки артефактов этапа,
+а не hashes всех прочитанных skill/schema/source файлов или полного prompt.
+Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
+эти поля. Не переписывай опубликованный request после вызова модели.
+
+1. Вызови `tc-to-autotest` для effective canonical.
+2. Открой attempt-owned automation review boundary и вызови `autotest-reviewer` в fresh
+   invocation. Разрешены initial + максимум одна complete correction/review.
+3. После accepted static review сформируй complete generated delta. Controller
+   материализует каждый новый pipeline-owned file в active test root и пишет receipt;
+   partial materialization запрещает execution.
+4. Построй closed execution request. Используй только adapter ID, exact frozen
+   interpreter/wrapper, build profile и typed params; user shell strings и
+   `argv_template` запрещены.
+5. Запусти exact reviewed targets один раз через module-selected pytest, `mvnw` или
+   `gradlew`. Не исправляй тест после runtime `FAIL`.
+
+Для первого запуска используй существующий `tools.run_pipeline exec` из cwd пакета.
+Передай все шесть carrier paths к уже опубликованным/read-back артефактам этого
+attempt; они сверяются с durable evidence и не заменяют authorization или review:
+
+```powershell
+python -m tools.run_pipeline exec --project "$project" --module "$moduleId" --run "$runId" `
+  --canonical-document "$effectiveCanonicalPath" `
+  --automation-artifact "$automationPath" --autotest-review "$automationReviewPath" `
+  --authorization-receipt "$authorizationPath" --host-isolation-receipt "$isolationPath" `
+  --generated-delta-receipt "$generatedDeltaPath"
+```
+
+Здесь `$moduleId` — выбранный ID, а все `*Path` — абсолютные пути: effective canonical,
+принятые automation/review, run authorization, `automation-review-boundary-rN` и
+generated-delta соответственно. Получи их из результатов штатной публикации и
+readback; не создавай заменяющие receipts. Перед первым `exec` проверь наличие всех
+шести значений. Пропущенный carrier даёт `RUNNER_INPUT` до старта; это не результат
+тестов. Resume после `EXECUTION_STARTED` следует штатной ветке восстановления,
+а не повторному запуску по этому примеру.
+
+Controller/process timeout без authoritative framework result даёт `UNKNOWN`.
+Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`. После
+`EXECUTION_STARTED` interruption не перезапускай автоматически.
+
+## 6. Выполни линейное закрытие
+
+Строго соблюдай порядок:
+
+```text
+materialization -> execution -> execution trace -> retain/cleanup decision
+-> disposition receipts -> pre-finalization trace -> finalization verification
+-> finalization receipt readback -> terminal result -> derived terminal trace
+-> terminal event
+```
+
+Disposition обязан покрыть весь generated file set:
+
+- `PASS` + valid trace/path/digests: `RETAINED` до finalization;
+- `FAIL`/`NOT_RUNNABLE`: очищай только byte-identical pipeline-owned files;
+- `UNKNOWN`: cleanup запрещён; используй `PRESERVED_EXECUTION_UNKNOWN` или
+  `PRESERVED_CONTENT_CONFLICT`;
+- partial materialization: execution не начинается; созданные неизменённые files
+  безопасно очищаются, остальные получают `NOT_MATERIALIZED`.
+
+Terminal transition требует completed/read-back finalization receipt. `valid=false`
+всё равно terminal, но даёт `FINALIZATION_INVALID` и `accepted=false`, не переписывая
+verification/coverage. `RETAINED` сам по себе не означает acceptance.
+
+## Resume и child attempts
+
+`WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages остаются
+nonterminal. Продолжай их в новой CLI session только после snapshot/config validation.
+Requirements/module/policy drift создаёт child attempt. Terminal attempt immutable.
+Execution retry требует доказанной остановки прежнего process scope и explicit child
+attempt; одновременно active может быть только один.
+
+## Stop conditions
+
+Остановись без guess при invalid/unsupported version, ambiguous module, unsafe path,
+required invention, unavailable tool/model, schema/semantic/provenance failure, secret
+exposure, baseline drift, stale digest/readback, unproved reviewer isolation, partial
+materialization или выходе за authorized scope. Сохрани factual partial/waiting evidence
+и не выдавай `implemented_unverified` за verified readiness.

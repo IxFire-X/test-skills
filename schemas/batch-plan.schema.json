@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/batch-plan.schema.json",
+  "title": "Batch Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_requirements", "header_digest", "context_receipt_digest", "batches", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "source_requirements": {"type": "array", "minItems": 1, "items": {"$ref": "canonical-test-document.schema.json#/$defs/source_requirement"}},
+    "header_digest": {"$ref": "#/$defs/digest"},
+    "context_receipt_digest": {"$ref": "#/$defs/digest"},
+    "batches": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/batch"}},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "batch": {"type": "object", "additionalProperties": false, "required": ["batch_id", "ordinal", "namespace", "owned_source_requirement_ids", "header_digest", "context_receipt_digest", "completeness"], "properties": {"batch_id": {"type": "string", "pattern": "^BATCH-[a-z0-9-]+$"}, "ordinal": {"type": "integer", "minimum": 1}, "namespace": {"type": "string", "pattern": "^B[1-9][0-9]*$"}, "owned_source_requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^SREQ-[A-Za-z0-9_.:-]+$"}}, "header_digest": {"$ref": "#/$defs/digest"}, "context_receipt_digest": {"$ref": "#/$defs/digest"}, "completeness": {"const": "COMPLETE"}}}
+  }
+}

@@ -1,60 +1,31 @@
 ---
 name: context-marker
-description: Использовать, когда нужно преобразовать переданные требования и изменения исходного кода в артефакт контекста тестового пайплайна с сохранением происхождения каждого факта.
+description: Use when authorized requirements, code observations, or change notes must become a provenance-preserving 5.0.0 source-requirement context artifact for the test pipeline.
 ---
 
-# Разметка контекста
+# Context marking
 
-Создай один JSON-артефакт `context-marker-output.json`. Читай только входы,
-явно разрешённые вызывающей стороной; не сканируй посторонние файлы. Машинным
-источником истины является репозиторная [схема](../../schemas/context-marker-output.schema.json).
-Перед работой прочитай краткий [контракт артефакта](references/context-artifact-contract.md).
+Produce a 5.0.0 `context-marker` envelope. Read the executable [context contract](references/context-artifact-contract.md) and `schemas/context-marker-output.schema.json`; `tools.canonical_document` owns shared canonical definitions.
 
-## Порядок работы
+Run once inside an existing nonterminal attempt after the controller has published and
+read back the exact authorized inventory/context receipts. Produce the complete normalized
+source-requirement set from those inputs; the controller creates batches afterwards. Do
+not rescan the project, create a run/attempt, or widen feature/module scope.
 
-1. До назначения канонических ID классифицируй только утверждения, подтверждённые разрешёнными источниками. Явное описание поведения или критерий приёмки является требованием. Самостоятельные контекстные метаданные являются наблюдениями по источнику.
-2. Следуй детерминированному алгоритму локального контракта для ID требований, точных ссылок на их источники, встроенных сведений о происхождении и непустых ветвей.
-3. Создай только каноническую структуру схемы с `schema_version: "2.1.0"`, `stage: "context-marker"` и двумя ветвями `artifacts`. Не добавляй обёртки и альтернативные ключи.
-4. Любое неподтверждённое утверждение, включая утверждение заказчика, которого нет в разрешённых источниках, помещай только в `warnings` как пробел в данных. Не превращай его в требование или факт об исходном коде.
-5. Если для заполнения структуры пришлось бы выдумать данные, верни блокирующую диагностику.
-6. Если доступны валидатор, схема и путь выходного файла, один раз проверь результат через `tools/validate_artifact.py`. Иначе честно сообщи об ошибке или невозможности проверки.
+## Procedure
 
-## Проверка требования на наблюдаемый результат
+1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
+2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
+3. Explicit authorized requirements define expected behavior; code and runtime reports describe the current implementation. Preserve both when they disagree, with a source-bound warning. Never replace a required outcome with the observed defect. When requirements leave an outcome undefined, trace its end-to-end control flow through reachable throws, exception translation, and HTTP mapping; label the observation and preserve an unresolved oracle as a warning.
+4. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
+5. Validate the 5.0.0 envelope with `tools/validate_artifact.py` and its schema before return.
 
-Прежде чем назначать канонический ID, проверь каждое требование к поведению и
-каждый критерий приёмки. Из разрешённых источников должны быть понятны:
+Before returning, reconcile every behavior and acceptance criterion in the original
+authorized request with the normalized source set. Preserve each condition, role, boundary,
+failure outcome, and state change, even when several share one source paragraph. Do not
+drop an unsupported or ambiguous requirement: retain it and its precise gap warning.
+Schema validity and requirement counts alone do not prove this semantic completeness.
 
-- действие или условие;
-- результат, который можно наблюдать извне: HTTP-статус, поле ответа, код ошибки,
-  изменение состояния или событие.
+## Stop conditions
 
-Сформулируй требование так, чтобы ожидаемый результат был однозначным и его можно
-было проверить тестом. Одного указания маршрута или HTTP-метода недостаточно.
-
-Подтверждение может быть распределено между несколькими разрешёнными источниками.
-Объединяй только явно подтверждённые факты и добавляй `provenance` каждого факта
-в детерминированном порядке. Не копируй секреты и учётные данные. Сохраняй
-несекретные наблюдаемые результаты: HTTP-статус, наличие или отсутствие поля
-ответа, событие или состояние. Если наблюдаемого результата нет, сохрани
-частичное описание поведения и добавь предупреждение о пробеле в данных вместо
-выдуманного ожидаемого результата.
-
-## Проверка перед записью
-
-До назначения канонического ID проверь, подходит ли утверждение под критерии
-требования, и правильно его классифицируй. Самостоятельные контекстные метаданные
-остаются наблюдением по источнику. Требованием становится только явное описание
-поведения или критерий приёмки. Нельзя молча удалить ни один подтверждённый факт.
-
-Если структурированная запись факта содержит отдельные поля идентификатора и
-текста утверждения, помести в `requirements[].provenance` две точные ссылки:
-сначала на идентификатор, затем на текст. Исходный идентификатор не является ID
-вида `REQ-*`. Ссылка содержит только JSON Pointer, `path#anchor` или `path:line`:
-без цитаты, описания, поясняющей метки, разделителя ` — ` и суффикса. Формат
-`<ссылка> — <точное наблюдение или пробел>` допустим только для строк в `sources`
-и `warnings`.
-
-## Границы
-
-- Не выводи XML, пакетные результаты, обёртки, пустые каркасы массивов и альтернативные ключи структуры.
-- Не удаляй, не выдумывай и не переклассифицируй утверждения только ради прохождения схемы.
+Stop instead of guessing on pre-5.0 input, required invention, an unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. A missing observable result is a data-gap warning, not permission to invent a result.

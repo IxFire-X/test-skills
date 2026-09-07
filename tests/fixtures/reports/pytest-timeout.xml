@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuite tests="1" failures="1" errors="0"><testcase classname="tests.test_a" name="test_a" time="10"><failure type="TimeoutError" message="test timed out">timeout</failure></testcase></testsuite>

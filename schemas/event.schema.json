@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "seq", "event_type", "run_id", "actor", "observed_at", "prev_digest", "artifact_digest", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "seq": {"type": "integer", "minimum": 1},
+    "event_type": {"enum": ["RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"]},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "actor": {"const": "controller"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "batch_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "stage_instance_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "transport_attempts": {"type": "integer", "minimum": 1, "maximum": 2},
+    "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "prev_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"seq": {"const": 1}}, "required": ["seq"]}, "then": {"properties": {"event_type": {"const": "RUN_CREATED"}, "prev_digest": {"const": null}}, "not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"seq": {"minimum": 2}}, "required": ["seq"]}, "then": {"properties": {"prev_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}},
+    {"if": {"properties": {"event_type": {"const": "RUN_CREATED"}}, "required": ["event_type"]}, "then": {"properties": {"seq": {"const": 1}, "prev_digest": {"const": null}}, "not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"event_type": {"const": "MODULE_SELECTED"}}, "required": ["event_type"]}, "then": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"event_type": {"enum": ["INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN"]}}, "required": ["event_type"]}, "then": {"not": {"anyOf": [{"required": ["attempt_id"]}, {"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"event_type": {"const": "CONTEXT_SELECTED"}}, "required": ["event_type"]}, "then": {"required": ["attempt_id", "batch_id"], "not": {"required": ["stage_instance_id"]}}},
+    {"if": {"properties": {"event_type": {"const": "ATTEMPT_CREATED"}}, "required": ["event_type"]}, "then": {"required": ["attempt_id"], "not": {"anyOf": [{"required": ["batch_id"]}, {"required": ["stage_instance_id"]}]}}},
+    {"if": {"properties": {"event_type": {"enum": ["MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"]}}, "required": ["event_type"]}, "then": {"required": ["attempt_id", "stage_instance_id"]}},
+    {"if": {"properties": {"event_type": {"const": "MODEL_RESPONSE_RECEIVED"}}, "required": ["event_type"]}, "then": {"required": ["transport_attempts"]}, "else": {"not": {"required": ["transport_attempts"]}}},
+    {"if": {"properties": {"event_type": {"enum": ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"]}}, "required": ["event_type"]}, "then": {"not": {"required": ["stage_instance_id"]}}},
+    {"if": {"properties": {"event_type": {"enum": ["WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"]}}, "required": ["event_type"]}, "then": {"required": ["attempt_id"]}}
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/terminal-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "attempt_id", "policy_profile", "attempt_state", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "attempt_state": {"enum": ["ACTIVE", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "TERMINAL"]},
+    "completion": {"enum": ["COMPLETE", "PARTIAL", "FATAL", null]},
+    "verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", null]},
+    "coverage": {"enum": ["FULL", "MIXED", "MANUAL_ONLY", null]},
+    "reason_code": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "accepted": {"type": "boolean"},
+    "trace_valid": {"type": "boolean"},
+    "finalization_valid": {"type": "boolean"},
+    "operational_reliable": {"type": "boolean"},
+    "evidence": {"$ref": "#/$defs/evidence"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_schema_valid", "canonical_semantics_valid", "canonical_provenance_valid", "reviewer_session_complete", "authoritative_verdict", "authoritative_verdict_count", "reviewer_pre_verdict_abort", "reviewer_isolation_state", "blocker_count", "trace_valid", "finalization_completed", "finalization_read_back", "finalization_valid", "materialization_applicability", "execution_applicability", "automation_accepted", "generated_required_count", "generated_materialized_count", "generated_retained_count", "exact_target_pass", "mixed_manual_traceable", "operational_reliable"],
+      "properties": {
+        "canonical_schema_valid": {"type": "boolean"},
+        "canonical_semantics_valid": {"type": "boolean"},
+        "canonical_provenance_valid": {"type": "boolean"},
+        "reviewer_session_complete": {"type": "boolean"},
+        "authoritative_verdict": {"enum": ["ACCEPTED", "REJECTED", null]},
+        "authoritative_verdict_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "reviewer_pre_verdict_abort": {"type": "boolean"},
+        "reviewer_isolation_state": {"enum": ["verified", "independence_unverified"]},
+        "blocker_count": {"type": "integer", "minimum": 0},
+        "trace_valid": {"type": "boolean"},
+        "finalization_completed": {"type": "boolean"},
+        "finalization_read_back": {"type": "boolean"},
+        "finalization_valid": {"type": "boolean"},
+        "materialization_applicability": {"enum": ["REQUIRED", "NOT_APPLICABLE"]},
+        "execution_applicability": {"enum": ["REQUIRED", "NOT_APPLICABLE"]},
+        "automation_accepted": {"type": "boolean"},
+        "generated_required_count": {"type": "integer", "minimum": 0},
+        "generated_materialized_count": {"type": "integer", "minimum": 0},
+        "generated_retained_count": {"type": "integer", "minimum": 0},
+        "exact_target_pass": {"type": "boolean"},
+        "mixed_manual_traceable": {"type": "boolean"},
+        "operational_reliable": {"type": "boolean"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"attempt_state": {"const": "TERMINAL"}}, "required": ["attempt_state"]},
+      "then": {"required": ["completion", "verification", "coverage", "accepted", "trace_valid", "finalization_valid", "operational_reliable", "evidence"], "properties": {"evidence": {"properties": {"finalization_completed": {"const": true}, "finalization_read_back": {"const": true}}}}},
+      "else": {
+        "properties": {"completion": {"const": null}, "verification": {"const": null}, "coverage": {"const": null}},
+        "not": {"anyOf": [{"required": ["accepted"]}, {"required": ["reason_code"]}, {"required": ["trace_valid"]}, {"required": ["finalization_valid"]}, {"required": ["operational_reliable"]}, {"required": ["evidence"]}]}
+      }
+    },
+    {
+      "if": {"properties": {"reason_code": {"const": "REWORK"}}, "required": ["reason_code"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "evidence": {"properties": {"reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "REJECTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"const": "EXECUTION_UNKNOWN"}}, "required": ["reason_code"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "UNKNOWN"}, "accepted": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"const": "MATERIALIZATION_INCOMPLETE"}}, "required": ["reason_code"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "policy_profile": {"const": "local-pilot-v1"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "evidence": {"properties": {"reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}, "automation_accepted": {"const": true}, "materialization_applicability": {"const": "REQUIRED"}, "execution_applicability": {"const": "NOT_APPLICABLE"}, "exact_target_pass": {"const": false}, "generated_required_count": {"minimum": 1}, "generated_retained_count": {"const": 0}}}}}
+    },
+    {
+      "if": {"properties": {"policy_profile": {"const": "local-pilot-v1"}, "evidence": {"properties": {"materialization_applicability": {"const": "REQUIRED"}, "execution_applicability": {"const": "NOT_APPLICABLE"}}}}, "required": ["policy_profile", "evidence"]},
+      "then": {"properties": {"completion": {"const": "PARTIAL"}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "evidence": {"properties": {"reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}, "automation_accepted": {"const": true}, "exact_target_pass": {"const": false}, "generated_retained_count": {"const": 0}}}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"const": "REVIEW_CONTEXT_LIMIT"}}, "required": ["reason_code"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "PARTIAL"}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "evidence": {"properties": {"authoritative_verdict": {"const": null}, "authoritative_verdict_count": {"const": 0}, "reviewer_session_complete": {"const": false}, "reviewer_pre_verdict_abort": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"reason_code": {"const": "FINALIZATION_INVALID"}}, "required": ["reason_code"]},
+      "then": {"properties": {"accepted": {"const": false}, "evidence": {"properties": {"finalization_completed": {"const": true}, "finalization_read_back": {"const": true}, "finalization_valid": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"accepted": {"const": true}}, "required": ["accepted"]},
+      "then": {"properties": {"reason_code": {"const": null}}}
+    },
+    {
+      "if": {"required": ["evidence"], "properties": {"evidence": {"properties": {"finalization_valid": {"const": false}}}}},
+      "then": {"properties": {"reason_code": {"const": "FINALIZATION_INVALID"}}, "required": ["reason_code"]}
+    },
+    {
+      "if": {"properties": {"verification": {"const": "UNKNOWN"}}, "required": ["verification"]},
+      "then": {"anyOf": [{"required": ["reason_code", "completion", "accepted"], "properties": {"reason_code": {"const": "EXECUTION_UNKNOWN"}, "completion": {"const": "PARTIAL"}, "accepted": {"const": false}}}, {"required": ["reason_code"], "properties": {"reason_code": {"const": "FINALIZATION_INVALID"}}}]}
+    },
+    {
+      "if": {"required": ["evidence"], "properties": {"evidence": {"properties": {"reviewer_session_complete": {"const": true}}}}},
+      "then": {"properties": {"evidence": {"properties": {"authoritative_verdict": {"enum": ["ACCEPTED", "REJECTED"]}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}}}}}
+    },
+    {
+      "if": {"required": ["evidence"], "properties": {"evidence": {"properties": {"reviewer_session_complete": {"const": false}}}}},
+      "then": {"properties": {"evidence": {"properties": {"authoritative_verdict": {"const": null}, "authoritative_verdict_count": {"const": 0}, "reviewer_pre_verdict_abort": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"policy_profile": {"const": "cases-only-v1"}}, "required": ["policy_profile", "evidence"]},
+      "then": {"properties": {"evidence": {"properties": {"materialization_applicability": {"const": "NOT_APPLICABLE"}, "execution_applicability": {"const": "NOT_APPLICABLE"}, "automation_accepted": {"const": false}, "generated_required_count": {"const": 0}, "generated_materialized_count": {"const": 0}, "generated_retained_count": {"const": 0}, "exact_target_pass": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"policy_profile": {"const": "local-pilot-v1"}, "evidence": {"properties": {"execution_applicability": {"const": "NOT_APPLICABLE"}}}}, "required": ["policy_profile", "evidence"]},
+      "then": {"properties": {"evidence": {"properties": {"exact_target_pass": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"accepted": {"const": true}, "policy_profile": {"const": "local-pilot-v1"}, "coverage": {"const": "MIXED"}}, "required": ["accepted", "policy_profile", "coverage"]},
+      "then": {"properties": {"evidence": {"properties": {"mixed_manual_traceable": {"const": true}}}}}
+    },
+    {
+      "if": {"required": ["evidence"], "properties": {"evidence": {"properties": {"reviewer_pre_verdict_abort": {"const": true}}}}},
+      "then": {"required": ["reason_code"], "properties": {"completion": {"enum": ["PARTIAL", "FATAL"]}, "accepted": {"const": false}, "reason_code": {"type": "string", "not": {"enum": ["REWORK", "EXECUTION_UNKNOWN", "MATERIALIZATION_INCOMPLETE"]}}}}
+    },
+    {
+      "if": {"properties": {"trace_valid": {"const": true}}, "required": ["trace_valid"]},
+      "then": {"properties": {"evidence": {"properties": {"trace_valid": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"trace_valid": {"const": false}}, "required": ["trace_valid"]},
+      "then": {"properties": {"evidence": {"properties": {"trace_valid": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"finalization_valid": {"const": true}}, "required": ["finalization_valid"]},
+      "then": {"properties": {"evidence": {"properties": {"finalization_valid": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"finalization_valid": {"const": false}}, "required": ["finalization_valid"]},
+      "then": {"properties": {"evidence": {"properties": {"finalization_valid": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"operational_reliable": {"const": true}}, "required": ["operational_reliable"]},
+      "then": {"properties": {"evidence": {"properties": {"operational_reliable": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"operational_reliable": {"const": false}}, "required": ["operational_reliable"]},
+      "then": {"properties": {"evidence": {"properties": {"operational_reliable": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"policy_profile": {"const": "cases-only-v1"}, "attempt_state": {"const": "TERMINAL"}}, "required": ["policy_profile", "attempt_state"]},
+      "then": {"properties": {"verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"policy_profile": {"const": "local-pilot-v1"}, "attempt_state": {"const": "TERMINAL"}, "evidence": {"required": ["materialization_applicability", "execution_applicability"], "properties": {"materialization_applicability": {"const": "NOT_APPLICABLE"}, "execution_applicability": {"const": "NOT_APPLICABLE"}}}}, "required": ["policy_profile", "attempt_state", "evidence"]},
+      "then": {"properties": {"completion": {"enum": ["PARTIAL", "FATAL"]}, "verification": {"const": "NOT_APPLICABLE"}, "accepted": {"const": false}, "reason_code": {"type": "string", "minLength": 1}, "evidence": {"properties": {"automation_accepted": {"const": false}, "generated_required_count": {"const": 0}, "generated_materialized_count": {"const": 0}, "generated_retained_count": {"const": 0}, "exact_target_pass": {"const": false}}}}}
+    },
+    {
+      "if": {"properties": {"accepted": {"const": true}, "policy_profile": {"const": "local-pilot-v1"}}, "required": ["accepted", "policy_profile"]},
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "COMPLETE"}, "verification": {"const": "PASS"}, "coverage": {"enum": ["FULL", "MIXED"]}, "trace_valid": {"const": true}, "finalization_valid": {"const": true}, "operational_reliable": {"const": true}, "evidence": {"properties": {"canonical_schema_valid": {"const": true}, "canonical_semantics_valid": {"const": true}, "canonical_provenance_valid": {"const": true}, "reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}, "reviewer_isolation_state": {"const": "verified"}, "blocker_count": {"const": 0}, "trace_valid": {"const": true}, "finalization_completed": {"const": true}, "finalization_read_back": {"const": true}, "finalization_valid": {"const": true}, "materialization_applicability": {"const": "REQUIRED"}, "execution_applicability": {"const": "REQUIRED"}, "automation_accepted": {"const": true}, "generated_required_count": {"minimum": 1}, "exact_target_pass": {"const": true}, "operational_reliable": {"const": true}}}}}
+    }
+  ]
+}

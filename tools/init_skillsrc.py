@@ -4,25 +4,32 @@ from __future__ import annotations
 
 import argparse
 import copy
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
-import stat
 import sys
 import tempfile
+from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
 import yaml
 
 if __package__:
-    from .discover_project import discover_project
+    from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
+    from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
+    from .schema_validation import StrictJsonError, load_json_strict
+    from .stack_catalog import is_ignored_dir_name
     from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 else:
-    from discover_project import discover_project
+    from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
+    from discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
+    from schema_validation import StrictJsonError, load_json_strict
+    from stack_catalog import is_ignored_dir_name
     from skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+
+
+__all__ = ["OutputConfinementError"]
 
 
 class InitError(ValueError):
@@ -43,33 +50,6 @@ class Conflict(InitError):
         self.questions = questions
 
 
-class OutputConfinementError(InitError):
-    def __init__(self, message: str):
-        super().__init__("output_confined", message)
-
-
-@dataclass(frozen=True)
-class VerifiedOutputTarget:
-    project_root: Path
-    relative_parent: tuple[str, ...]
-    parent: Path
-    parent_identity: tuple[int, int, int | None]
-    name: str
-    guards: tuple[int, ...]
-
-    @property
-    def destination(self) -> Path:
-        return self.parent / self.name
-
-    @property
-    def parent_guard(self) -> int:
-        return self.guards[-1]
-
-    def close(self) -> None:
-        for guard in reversed(self.guards):
-            _close_directory_guard(guard)
-
-
 def _set_field(module: dict[str, Any], field: str, value: object) -> None:
     parts = field.split(".")
     if len(parts) < 4 or parts[0] != "modules":
@@ -80,7 +60,7 @@ def _set_field(module: dict[str, Any], field: str, value: object) -> None:
     target[parts[-1]] = value
 
 
-def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -> dict[str, Any]:
+def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], project_dir: Path) -> dict[str, Any]:
     questions = discovery.get("questions", [])
     if not isinstance(questions, list):
         raise InitError("discovery_invalid", "discovery questions are invalid")
@@ -124,7 +104,51 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str]) -
         if len(parts) < 4 or parts[1] not in by_id:
             raise InitError("discovery_invalid", "question does not refer to a discovered module")
         _set_field(by_id[parts[1]], field, value)
-    return {"version": "3.0", "project": {"name": discovery.get("project_name", "project")}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": modules}
+    for module in modules:
+        if isinstance(module, dict):
+            module.pop("readiness", None)
+            _close_discovered_test(module, project_dir)
+    return {"schema_version": "5.0.0", "version": "3.0", "project": {"name": discovery.get("project_name", "project")}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": modules}
+
+
+def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
+    """Emit only the frozen closed execution tuple, or omit execution config."""
+    test = module.get("test")
+    stack = module.get("stack")
+    if not isinstance(test, Mapping) or not isinstance(stack, Mapping):
+        module.pop("test", None)
+        return
+    framework = test.get("framework")
+    language = stack.get("language")
+    build_tool = stack.get("build_tool")
+    if language == "python" and framework == "pytest":
+        module["test"] = {
+            "framework": "pytest",
+            "adapter_id": "pytest:selected-symbols-v1",
+            "interpreter": ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python",
+            "build_profile": "default",
+            "adapter_parameters": {},
+        }
+        return
+    wrapper_names = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}
+    names = wrapper_names.get(build_tool)
+    wrapper = names[os.name == "nt"] if names else None
+    root = project_dir.resolve()
+    target = root / str(module.get("root", ".")) / wrapper if wrapper else None
+    adapter_ids = {
+        "maven": "maven-wrapper:selected-symbols-v1",
+        "gradle": "gradle-wrapper:selected-symbols-v1",
+    }
+    if language == "java" and framework == "junit5" and build_tool in adapter_ids and target is not None and target.is_file() and _ok(root, target) and not _is_reparse(target):
+        module["test"] = {
+            "framework": "junit5",
+            "adapter_id": adapter_ids[build_tool],
+            "wrapper": wrapper,
+            "build_profile": "default",
+            "adapter_parameters": {},
+        }
+        return
+    module.pop("test", None)
 
 
 def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
@@ -151,6 +175,7 @@ def _merge_additive(existing: Any, proposed: Any, field: str, questions: list[di
         return copy.deepcopy(existing if existing != proposed else proposed)
     question = _question(f"replace:{field}", field, "replace")
     question["_path"] = path
+    question["_existing"] = copy.deepcopy(existing)
     question["_detected"] = copy.deepcopy(proposed)
     questions.append(question)
     return copy.deepcopy(existing)
@@ -220,7 +245,7 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
                 raise InitError("answer_unknown", f"unknown option for {question['id']}")
         unanswered = [q for q in questions if q["id"] not in answers]
         if unanswered:
-            return {"status": "conflict", "document": existing, "questions": [_public_question(q) for q in questions]}
+            return {"status": "conflict", "document": existing, "questions": [_explained_question(unanswered[0])]}
         for question in questions:
             if answers[question["id"]] == "use-detected":
                 if question["operation"] == "remove":
@@ -235,6 +260,30 @@ def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any]
 
 def _public_question(question: Mapping[str, Any]) -> dict[str, Any]:
     return {key: copy.deepcopy(value) for key, value in question.items() if not key.startswith("_")}
+
+
+def _safe_summary(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if len(text) > 120:
+        text = text[:117] + "..."
+    return text
+
+
+def _explained_question(question: Mapping[str, Any]) -> dict[str, Any]:
+    public = _public_question(question)
+    existing = question.get("_existing")
+    detected = question.get("_detected")
+    if detected is not None:
+        public["options"] = [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep existing {question.get('field')}: {_safe_summary(existing)}"]},
+            {"id": "use-detected", "value": "use-detected", "evidence": [f"use detected {question.get('field')}: {_safe_summary(detected)}"]},
+        ]
+    elif question.get("operation") == "remove":
+        public["options"] = [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep module {question.get('_module_id')}"]},
+            {"id": "use-detected", "value": "use-detected", "evidence": [f"remove module {question.get('_module_id')}"]},
+        ]
+    return public
 
 
 def _set_document_path(modules: list[dict[str, Any]], path: list[str], value: Any) -> None:
@@ -274,7 +323,87 @@ def _payload(document: Mapping[str, Any]) -> bytes:
     return yaml.safe_dump(dict(document), allow_unicode=True, sort_keys=False, default_flow_style=False).replace("\r\n", "\n").encode("utf-8")
 
 
-def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None) -> None:
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _structural_diff(existing: Any, proposed: Any, path: str = "") -> list[dict[str, str]]:
+    """Return only paths and operations; never serialise configuration values."""
+    if isinstance(existing, Mapping) and isinstance(proposed, Mapping):
+        changes: list[dict[str, str]] = []
+        for key in sorted(set(existing) | set(proposed), key=str):
+            child = f"{path}/{key}".replace("//", "/")
+            if key not in existing:
+                changes.append({"path": child, "operation": "add"})
+            elif key not in proposed:
+                changes.append({"path": child, "operation": "remove"})
+            else:
+                changes.extend(_structural_diff(existing[key], proposed[key], child))
+        return changes
+    if isinstance(existing, list) and isinstance(proposed, list):
+        changes = []
+        for index in range(max(len(existing), len(proposed))):
+            child = f"{path}/{index}"
+            if index >= len(existing):
+                changes.append({"path": child, "operation": "add"})
+            elif index >= len(proposed):
+                changes.append({"path": child, "operation": "remove"})
+            else:
+                changes.extend(_structural_diff(existing[index], proposed[index], child))
+        return changes
+    return [] if existing == proposed else [{"path": path or "/", "operation": "replace"}]
+
+
+def _proposal(existing: Mapping[str, Any], original: bytes, proposed: Mapping[str, Any]) -> dict[str, Any]:
+    proposed_bytes = _payload(proposed)
+    return {
+        "original_digest": _digest(original),
+        "proposed_digest": _digest(proposed_bytes),
+        "structural_diff": _structural_diff(existing, proposed),
+    }
+
+
+def _replacement_is_bound(approval: Mapping[str, Any] | None, proposal: Mapping[str, Any]) -> bool:
+    if not isinstance(approval, Mapping) or set(approval) != {"approval_id", "original_digest", "proposed_digest"}:
+        return False
+    approval_id = approval.get("approval_id")
+    return (
+        isinstance(approval_id, str)
+        and bool(re.fullmatch(r"[A-Za-z0-9._:-]+", approval_id))
+        and approval.get("original_digest") == proposal["original_digest"]
+        and approval.get("proposed_digest") == proposal["proposed_digest"]
+    )
+
+
+def _preserve_immutable_evidence(project_root: Path, directory: Path | None, original: bytes) -> None:
+    if directory is None:
+        raise InitError("replacement_unbound", "immutable evidence directory is required")
+    project = Path(project_root).resolve(strict=True)
+    candidate = Path(directory)
+    directory = candidate if candidate.is_absolute() else project / candidate
+    try:
+        relative = directory.absolute().relative_to(project)
+    except ValueError as error:
+        raise InitError("evidence_write_error", "immutable evidence directory escapes project") from error
+    probe = project
+    for part in relative.parts:
+        probe /= part
+        if not probe.exists() or _is_reparse(probe):
+            raise InitError("evidence_write_error", "immutable evidence directory is unsafe")
+    directory = directory.resolve(strict=True)
+    if not directory.is_dir():
+        raise InitError("evidence_write_error", "immutable evidence directory is unsafe")
+    destination = directory / (hashlib.sha256(original).hexdigest() + ".skillsrc")
+    try:
+        create_confined_bytes_exclusive(project, directory, destination, original)
+        read_back = read_confined_bytes(project, directory, destination)
+    except (OSError, OutputConfinementError, ValueError) as error:
+        raise InitError("evidence_write_error", "immutable evidence write failed") from error
+    if read_back != original:
+        raise InitError("evidence_write_error", "immutable evidence read-back failed")
+
+
+def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None, *, before_replace: Any = None) -> bytes:
     handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc.", suffix=".tmp", dir=project_dir)
     temporary = Path(temporary_name)
     try:
@@ -289,14 +418,20 @@ def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mappin
         current = destination.read_bytes() if destination.exists() else None
         if current != expected_destination:
             raise InitError("destination_changed", ".skillsrc changed during initialization")
+        if before_replace is not None:
+            before_replace()
         os.replace(temporary, destination)
+        read_back = destination.read_bytes()
+        load_skillsrc(destination)
+        return read_back
     finally:
         if temporary.exists(): temporary.unlink()
 
 
-def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str, exit_code: int | None = None) -> dict[str, Any]:
+def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any]], questions: list[dict[str, Any]], errors: list[str], fingerprint: str, exit_code: int | None = None, *, proposal: Mapping[str, Any] | None = None, read_back: bytes | None = None) -> dict[str, Any]:
     operation = {"created": "create", "updated": "update"}.get(status)
     receipt = {
+        "schema_version": "5.0.0",
         "status": status,
         "skillsrc_path": ".skillsrc",
         "written": written,
@@ -308,6 +443,10 @@ def _receipt(status: str, root: Path, written: bool, modules: list[dict[str, Any
         "discovery_fingerprint": fingerprint,
     }
     receipt = _sanitize(receipt)
+    if proposal is not None:
+        receipt["proposal"] = copy.deepcopy(dict(proposal))
+    if read_back is not None:
+        receipt["read_back_digest"] = _digest(read_back)
     if exit_code is not None:
         receipt["_exit_code"] = exit_code
     return receipt
@@ -345,7 +484,114 @@ def _modules_on_disk(destination: Path) -> list[dict[str, Any]]:
         return []
 
 
-def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) -> dict[str, Any]:
+def _is_reparse(path: Path) -> bool:
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
+
+
+def _resolve_explicit_target(root: Path, value: str | None) -> Path | None:
+    if value is None:
+        return None
+    portable = value.replace("\\", "/")
+    raw = Path(portable)
+    windows = PureWindowsPath(value)
+    if (
+        not portable
+        or raw.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or any(part in {"", ".", ".."} or ":" in part or is_ignored_dir_name(part) for part in portable.split("/"))
+    ):
+        return None
+    candidate = root / raw
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    probe = candidate
+    while True:
+        if _is_reparse(probe):
+            return None
+        if probe == root:
+            break
+        probe = probe.parent
+    return resolved
+
+
+def _valid_explicit_target(root: Path, modules: list[dict[str, Any]], value: str | None) -> bool:
+    resolved = _resolve_explicit_target(root, value)
+    if resolved is None:
+        return False
+    for module in modules:
+        module_root = root / str(module.get("root") or ".")
+        paths = module.get("paths") if isinstance(module.get("paths"), Mapping) else {}
+        feature_sources = module.get("feature_sources") if isinstance(module.get("feature_sources"), Mapping) else {}
+        language = (module.get("stack") or {}).get("language") if isinstance(module.get("stack"), Mapping) else None
+        suffixes = SOURCE_SUFFIXES.get(language, frozenset())
+        sources = list(paths.get("source") or []) + list(feature_sources.get("source") or [])
+        for source in sources:
+            source_root = module_root / str(source)
+            try:
+                source_parts = source_root.relative_to(root).parts
+            except ValueError:
+                continue
+            if any(is_ignored_dir_name(part) for part in source_parts) or _is_reparse(source_root):
+                continue
+            try:
+                resolved.relative_to(source_root.resolve(strict=True))
+            except (OSError, ValueError):
+                continue
+            if resolved.is_file():
+                return resolved.suffix.lower() in suffixes
+            return resolved.is_dir() and _source_dir_has_code(root, resolved, suffixes)
+    return False
+
+
+def _existing_discovery_answers(existing: Mapping[str, Any] | None, discovery: Mapping[str, Any], answers: Mapping[str, str]) -> dict[str, str]:
+    effective = dict(answers)
+    if existing is None:
+        return effective
+    try:
+        modules = {module["id"]: module for module in normalize_skillsrc(existing)["modules"]}
+    except (SkillsrcError, TypeError, ValueError, KeyError):
+        return effective
+    for question in discovery.get("questions", []):
+        if not isinstance(question, Mapping) or question.get("id") in effective:
+            continue
+        parts = str(question.get("field", "")).split(".")
+        if len(parts) < 4 or parts[0] != "modules" or parts[1] not in modules:
+            continue
+        current: Any = modules[parts[1]]
+        for part in parts[2:]:
+            if not isinstance(current, Mapping):
+                break
+            current = current.get(part)
+        else:
+            for option in question.get("options", []):
+                if isinstance(option, Mapping) and current in {option.get("id"), option.get("value")}:
+                    effective[str(question["id"])] = str(option["id"])
+                    break
+    return effective
+
+
+def _authority_question() -> dict[str, Any]:
+    return {
+        "id": "skillsrc:replace",
+        "field": ".skillsrc",
+        "impact": "Execution-significant .skillsrc drift requires explicit confirmation",
+        "operation": "replace",
+        "options": [
+            {"id": "keep-existing", "value": "keep-existing", "evidence": []},
+            {"id": "replace-proposed", "value": "replace-proposed", "evidence": []},
+        ],
+    }
+
+
+def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None = None, replacement_approval: Mapping[str, Any] | None = None, immutable_evidence_dir: Path | None = None) -> dict[str, Any]:
     root = project_dir.resolve(); destination = root / ".skillsrc"
     try:
         discovery = discover_project(root)
@@ -360,12 +606,8 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) 
         raw_errors = discovery.get("errors", [])
         errors = [str(error) for error in raw_errors] if isinstance(raw_errors, list) and raw_errors else ["discovery_invalid"]
         return _receipt("error", root, False, modules, [], errors, fingerprint, 2)
-    try:
-        proposed = compile_skillsrc(discovery, answers)
-    except NeedsInput as error:
-        return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
-    except InitError as error:
-        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+    if explicit_target is not None and _resolve_explicit_target(root, explicit_target) is None:
+        return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
     try:
         if destination.exists():
             if not destination.is_file():
@@ -377,12 +619,70 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) 
         return _receipt("error", root, False, modules, [], ["read_error"], fingerprint, 2)
     try:
         existing = load_skillsrc(destination) if original is not None else None
+        existing_modules = normalize_skillsrc(existing)["modules"] if existing is not None else []
     except (SkillsrcError, OSError, TypeError, ValueError) as error:
         code = getattr(error, "code", "read_error")
         return _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
+    working_discovery = copy.deepcopy(discovery)
+    if explicit_target is not None and not _valid_explicit_target(root, existing_modules + modules, explicit_target):
+        return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
+    declared_existing = {
+        str(module.get("id"))
+        for module in existing_modules
+        if list((module.get("paths") or {}).get("source") or [])
+        or list((module.get("feature_sources") or {}).get("source") or [])
+    }
+    working_discovery["questions"] = [
+        question
+        for question in working_discovery.get("questions", [])
+        if not (
+            isinstance(question, Mapping)
+            and str(question.get("field", "")).endswith(".paths.source")
+            and str(question.get("field", "")).split(".")[1] in declared_existing
+        )
+    ]
+    source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping) and str(question.get("field", "")).endswith(".paths.source")]
+    if source_questions:
+        questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)]
+        if not questions:
+            return _receipt("error", root, False, modules, [], ["discovery_invalid"], fingerprint, 2)
+        known = {question["id"] for question in questions if isinstance(question.get("id"), str)}
+        extra = [key for key in answers if key not in known and not str(key).startswith(("replace:", "remove:", "migrate-"))]
+        if extra:
+            return _receipt("error", root, False, modules, [], ["answer_unknown"], fingerprint, _input_exit_code("answer_unknown"))
+        return _receipt("needs_input", root, False, modules, questions, [], fingerprint)
+    effective_answers = _existing_discovery_answers(existing, working_discovery, answers)
     try:
-        discovery_ids = {question["id"] for question in discovery.get("questions", [])}
-        reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in answers.items() if key not in discovery_ids})
+        proposed = compile_skillsrc(working_discovery, effective_answers, root)
+    except NeedsInput as error:
+        return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
+    except InitError as error:
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
+    if existing is not None:
+        proposal = _proposal(existing, original, proposed)
+        if not proposal["structural_diff"]:
+            return _receipt("unchanged", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
+        if not _replacement_is_bound(replacement_approval, proposal):
+            if replacement_approval is not None:
+                return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], ["replacement_unbound"], fingerprint, proposal=proposal, exit_code=2)
+            return _receipt("needs_input", root, False, normalize_skillsrc(existing)["modules"], [_authority_question()], [], fingerprint, proposal=proposal)
+        if not write:
+            return _receipt("preview", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
+        try:
+            read_back = atomic_write_skillsrc(
+                root,
+                destination,
+                proposed,
+                fingerprint,
+                original,
+                before_replace=lambda: _preserve_immutable_evidence(root, immutable_evidence_dir, original),
+            )
+        except Exception as error:
+            return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
+        return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back)
+    try:
+        discovery_ids = {question["id"] for question in working_discovery.get("questions", [])}
+        reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in effective_answers.items() if key not in discovery_ids})
     except (InitError, SkillsrcError, TypeError, ValueError, KeyError) as error:
         if not isinstance(error, InitError):
             return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
@@ -395,292 +695,42 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool) 
     if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
     if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
     try:
-        atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
+        read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
     except Exception as error:
         return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
-    return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint)
-
-
-def _output_relative(root: Path, value: str | Path) -> tuple[Path, tuple[str, ...]]:
-    raw = str(value)
-    if raw.startswith(("\\\\", "//", "\\\\?\\")):
-        raise OutputConfinementError("--output must be below exact docs/to_do")
-    project_root = root.resolve(strict=True)
-    candidate = Path(raw)
-    try:
-        relative = candidate.relative_to(project_root) if candidate.is_absolute() else candidate
-    except ValueError as error:
-        raise OutputConfinementError("--output must be below exact docs/to_do") from error
-    parts = relative.parts
-    if len(parts) < 3 or parts[:2] != ("docs", "to_do") or any(part in {"", ".", ".."} or ":" in part for part in parts):
-        raise OutputConfinementError("--output must be below exact docs/to_do")
-    return project_root, tuple(parts)
-
-
-def _is_link_or_reparse(path: Path) -> bool:
-    details = os.stat(path, follow_symlinks=False)
-    attributes = getattr(details, "st_file_attributes", 0)
-    return stat.S_ISLNK(details.st_mode) or bool(attributes & 0x400)
-
-
-def _parent_identity(path: Path) -> tuple[int, int, int | None]:
-    details = os.stat(path, follow_symlinks=False)
-    return details.st_dev, details.st_ino, getattr(details, "st_file_attributes", None)
-
-
-def _open_directory_guard(path: Path) -> int:
-    before = _parent_identity(path)
-    if _is_link_or_reparse(path):
-        raise OutputConfinementError("--output parent is a symlink or reparse point")
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-
-        create_file = ctypes.windll.kernel32.CreateFileW
-        create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        create_file.restype = wintypes.HANDLE
-        handle = create_file(str(path), 0x100081, 0x1 | 0x2, None, 3, 0x02000000 | 0x00200000, None)
-        if handle == wintypes.HANDLE(-1).value:
-            raise ctypes.WinError()
-        guard = int(handle)
-    else:
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        guard = os.open(path, flags)
-    try:
-        if _parent_identity(path) != before or _is_link_or_reparse(path):
-            raise OutputConfinementError("--output parent changed during validation")
-        if os.name != "nt":
-            details = os.fstat(guard)
-            if (details.st_dev, details.st_ino) != before[:2]:
-                raise OutputConfinementError("--output parent changed during validation")
-    except Exception:
-        _close_directory_guard(guard)
-        raise
-    return guard
-
-
-def _close_directory_guard(guard: int) -> None:
-    if os.name == "nt":
-        import ctypes
-        ctypes.windll.kernel32.CloseHandle(guard)
-    else:
-        os.close(guard)
-
-
-def _open_posix_child_guard(parent_guard: int, name: str) -> int:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    guard = os.open(name, flags, dir_fd=parent_guard)
-    try:
-        if not stat.S_ISDIR(os.fstat(guard).st_mode):
-            raise OutputConfinementError("--output parent component is not a directory")
-    except Exception:
-        os.close(guard)
-        raise
-    return guard
-
-
-def _open_windows_replacement_handle(path: Path) -> int:
-    import ctypes
-    from ctypes import wintypes
-
-    create_file = ctypes.windll.kernel32.CreateFileW
-    create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    create_file.restype = wintypes.HANDLE
-    handle = create_file(str(path), 0x00010000, 0x1 | 0x2 | 0x4, None, 3, 0x80, None)
-    if handle == wintypes.HANDLE(-1).value:
-        raise ctypes.WinError()
-    return int(handle)
-
-
-def _replace_output(record: VerifiedOutputTarget, temporary: Path, replacement_handle: int | None) -> None:
-    if os.name != "nt":
-        os.replace(temporary.name, record.name, src_dir_fd=record.parent_guard, dst_dir_fd=record.parent_guard)
-        return
-
-    import ctypes
-    from ctypes import wintypes
-
-    if replacement_handle is None:
-        raise OSError("missing replacement handle")
-
-    class FileRenameInfo(ctypes.Structure):
-        _fields_ = [
-            ("ReplaceIfExists", ctypes.c_ubyte),
-            ("RootDirectory", wintypes.HANDLE),
-            ("FileNameLength", wintypes.DWORD),
-            ("FileName", wintypes.WCHAR * 1),
-        ]
-
-    encoded_name = record.name.encode("utf-16-le")
-    size = FileRenameInfo.FileName.offset + len(encoded_name)
-    buffer = ctypes.create_string_buffer(size)
-    info = FileRenameInfo.from_buffer(buffer)
-    info.ReplaceIfExists = 1
-    info.RootDirectory = record.parent_guard
-    info.FileNameLength = len(encoded_name)
-    ctypes.memmove(ctypes.addressof(buffer) + FileRenameInfo.FileName.offset, encoded_name, len(encoded_name))
-    class IoStatusBlock(ctypes.Structure):
-        _fields_ = [("Status", ctypes.c_void_p), ("Information", ctypes.c_size_t)]
-
-    status_block = IoStatusBlock()
-    set_information = ctypes.windll.ntdll.NtSetInformationFile
-    set_information.argtypes = [wintypes.HANDLE, ctypes.POINTER(IoStatusBlock), wintypes.LPVOID, wintypes.ULONG, ctypes.c_int]
-    set_information.restype = wintypes.LONG
-    status = set_information(replacement_handle, ctypes.byref(status_block), buffer, size, 10)
-    if status != 0:
-        to_dos_error = ctypes.windll.ntdll.RtlNtStatusToDosError
-        to_dos_error.argtypes = [wintypes.LONG]
-        to_dos_error.restype = wintypes.ULONG
-        raise ctypes.WinError(to_dos_error(status))
-
-
-def _remove_owned_temporary(project_root: Path, temporary: Path, identity: tuple[int, int, int | None]) -> None:
-    candidates = [temporary]
-    if not temporary.exists():
-        try:
-            candidates.extend(project_root.rglob(temporary.name))
-        except OSError:
-            return
-    for candidate in candidates:
-        try:
-            if candidate.is_file() and _parent_identity(candidate) == identity:
-                candidate.unlink()
-                return
-        except OSError:
-            continue
-
-
-def _verified_output_target(root: Path, value: str | Path) -> VerifiedOutputTarget:
-    project_root, parts = _output_relative(root, value)
-    parent_parts = parts[:-1]
-    current = project_root
-    guards: list[int] = []
-    try:
-        guards.append(_open_directory_guard(current))
-        for part in parent_parts:
-            current /= part
-            if os.name == "nt":
-                try:
-                    current.mkdir()
-                except FileExistsError:
-                    pass
-                guards.append(_open_directory_guard(current))
-            else:
-                try:
-                    os.mkdir(part, dir_fd=guards[-1])
-                except FileExistsError:
-                    pass
-                guards.append(_open_posix_child_guard(guards[-1], part))
-        parent = current.resolve(strict=True)
-        if os.name != "nt":
-            guarded = os.fstat(guards[-1])
-            if (guarded.st_dev, guarded.st_ino) != _parent_identity(parent)[:2]:
-                raise OutputConfinementError("--output parent changed during validation")
-        required = (project_root / "docs" / "to_do").resolve(strict=True)
-        parent.relative_to(required)
-    except (OSError, ValueError) as error:
-        for guard in reversed(guards):
-            _close_directory_guard(guard)
-        if isinstance(error, OutputConfinementError):
-            raise
-        raise OutputConfinementError("--output must be below exact docs/to_do") from error
-    return VerifiedOutputTarget(project_root, parent_parts, parent, _parent_identity(parent), parts[-1], tuple(guards))
-
-
-def _verify_output_parent(record: VerifiedOutputTarget, temporary: Path) -> None:
-    requested_parent = record.project_root.joinpath(*record.relative_parent)
-    current = record.project_root
-    try:
-        for part in record.relative_parent:
-            current /= part
-            if _is_link_or_reparse(current):
-                raise OutputConfinementError("--output parent is a symlink or reparse point")
-        resolved = requested_parent.resolve(strict=True)
-        if not os.path.samefile(resolved, record.parent) or _parent_identity(resolved) != record.parent_identity:
-            raise OutputConfinementError("--output parent changed during receipt write")
-        if temporary.parent.resolve(strict=True) != record.parent or _parent_identity(temporary.parent) != record.parent_identity:
-            raise OutputConfinementError("receipt temporary parent changed during write")
-    except (OSError, ValueError) as error:
-        if isinstance(error, OutputConfinementError):
-            raise
-        raise OutputConfinementError("--output parent changed during receipt write") from error
-
-
-def _confined_output(root: Path, value: str) -> Path:
-    project_root, parts = _output_relative(root, value)
-    return project_root.joinpath(*parts)
-
-
-def _atomic_json_target(record: VerifiedOutputTarget, value: Mapping[str, Any]) -> None:
-    handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc-init.", suffix=".tmp", dir=record.parent)
-    temporary = Path(temporary_name)
-    temporary_identity = _parent_identity(temporary)
-    replacement_handle: int | None = None
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
-        if os.name == "nt":
-            replacement_handle = _open_windows_replacement_handle(temporary)
-        _verify_output_parent(record, temporary)
-        _replace_output(record, temporary, replacement_handle)
-        if os.name != "nt":
-            try:
-                _verify_output_parent(record, temporary)
-            except OutputConfinementError:
-                try:
-                    written = os.stat(record.name, dir_fd=record.parent_guard, follow_symlinks=False)
-                    if (written.st_dev, written.st_ino) == temporary_identity[:2] and stat.S_ISREG(written.st_mode):
-                        os.unlink(record.name, dir_fd=record.parent_guard)
-                except FileNotFoundError:
-                    pass
-                raise
-    finally:
-        if replacement_handle is not None:
-            _close_directory_guard(replacement_handle)
-        if os.name == "nt":
-            _remove_owned_temporary(record.project_root, temporary, temporary_identity)
-        else:
-            try:
-                os.unlink(temporary.name, dir_fd=record.parent_guard)
-            except FileNotFoundError:
-                pass
-
-
-def _atomic_json(root: Path, path: Path, value: Mapping[str, Any]) -> None:
-    record = _verified_output_target(root, path)
-    try:
-        _atomic_json_target(record, value)
-    finally:
-        record.close()
+    return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--output")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(); parser.add_argument("--project", required=True); parser.add_argument("--write", action="store_true"); parser.add_argument("--answers"); parser.add_argument("--replacement-approval"); parser.add_argument("--immutable-evidence-dir"); parser.add_argument("--output")
     args = parser.parse_args(); root = Path(args.project)
-    output_target: VerifiedOutputTarget | None = None
+    output_target: ConfinedOutputTarget | None = None
     try:
-        answers = {} if not args.answers else json.loads(Path(args.answers).read_text(encoding="utf-8"))
+        answers = {} if not args.answers else load_json_strict(Path(args.answers))
         if not isinstance(answers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in answers.items()): raise ValueError("answers must be a string mapping")
+        approval = None if not args.replacement_approval else load_json_strict(Path(args.replacement_approval))
+        if approval is not None and not isinstance(approval, dict): raise ValueError("replacement approval must be an object")
         if not root.is_dir(): raise ValueError("--project does not exist")
-        output = _confined_output(root, args.output) if args.output else None
-        if output is not None:
-            output_target = _verified_output_target(root, output)
-    except (OSError, json.JSONDecodeError, ValueError) as error:
+        if args.output:
+            output_target = acquire_confined_output(root, args.output)
+    except (OSError, StrictJsonError, ValueError) as error:
         print(json.dumps({"status": "error", "errors": [_sanitize(str(error))]}, ensure_ascii=False)); return 2
     try:
-        report = ensure_skillsrc(root, answers, args.write)
+        report = ensure_skillsrc(root, answers, args.write, replacement_approval=approval, immutable_evidence_dir=Path(args.immutable_evidence_dir) if args.immutable_evidence_dir else None)
     except (OSError, TypeError, ValueError, KeyError):
         report = _receipt("error", root.resolve(), False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
     public_report = _public_report(report)
     if output_target is not None:
         try:
-            _atomic_json(root, output_target.destination, public_report)
+            output_target.write_bytes(json.dumps(public_report, ensure_ascii=False, indent=2).encode("utf-8"))
         except (OSError, ValueError) as error:
             print(json.dumps(public_report, ensure_ascii=False, indent=2))
             print(json.dumps({"receipt_error": _sanitize(str(error))}, ensure_ascii=False), file=sys.stderr)
-            output_target.close()
             return 1
-        output_target.close()
+        finally:
+            output_target.close()
     print(json.dumps(public_report, ensure_ascii=False, indent=2))
     return 0 if public_report["status"] in {"preview", "created", "updated", "unchanged"} else 3 if public_report["status"] in {"needs_input", "conflict"} else int(report.get("_exit_code", 1))
 

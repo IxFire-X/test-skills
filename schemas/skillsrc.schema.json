@@ -2,6 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/skillsrc.schema.json",
   "title": "Portable .skillsrc manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "5.0.0"},
+    "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
+    "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
+    "discovery": {}, "modules": {}
+  },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
     {"$ref": "#/$defs/v3"}
@@ -12,6 +20,7 @@
       "required": ["project"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": {"const": "5.0.0"},
         "version": {"type": "string", "minLength": 1, "not": {"const": "3.0"}},
         "project": {"$ref": "#/$defs/v2_project"},
         "paths": {"$ref": "#/$defs/v2_paths"},
@@ -28,6 +37,7 @@
       "required": ["version", "project", "discovery", "modules"],
       "additionalProperties": false,
       "properties": {
+        "schema_version": {"const": "5.0.0"},
         "version": {"const": "3.0"},
         "project": {"$ref": "#/$defs/v3_project"},
         "discovery": {"$ref": "#/$defs/discovery"},
@@ -79,7 +89,39 @@
         "test": {"$ref": "#/$defs/module_test"},
         "feature_sources": {"$ref": "#/$defs/feature_sources"},
         "detected_from": {"$ref": "#/$defs/nonempty_unique_strings"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["test"]
+          },
+          "then": {
+            "oneOf": [
+              {
+                "required": ["stack", "test"],
+                "properties": {
+                  "stack": {"required": ["language"], "properties": {"language": {"const": "python"}}},
+                  "test": {"$ref": "#/$defs/pytest_test"}
+                }
+              },
+              {
+                "required": ["stack", "test"],
+                "properties": {
+                  "stack": {"required": ["language", "build_tool"], "properties": {"language": {"const": "java"}, "build_tool": {"const": "maven"}}},
+                  "test": {"$ref": "#/$defs/maven_test"}
+                }
+              },
+              {
+                "required": ["stack", "test"],
+                "properties": {
+                  "stack": {"required": ["language", "build_tool"], "properties": {"language": {"const": "java"}, "build_tool": {"const": "gradle"}}},
+                  "test": {"$ref": "#/$defs/gradle_test"}
+                }
+              }
+            ]
+          }
+        }
+      ]
     },
     "stack": {
       "type": "object",
@@ -120,18 +162,50 @@
       }
     },
     "module_test": {
+      "oneOf": [
+        {"$ref": "#/$defs/pytest_test"},
+        {"$ref": "#/$defs/maven_test"},
+        {"$ref": "#/$defs/gradle_test"}
+      ]
+    },
+    "closed_adapter_parameters": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "pytest_test": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["framework", "adapter_id", "interpreter", "build_profile", "adapter_parameters"],
       "properties": {
-        "framework": {"$ref": "#/$defs/test_framework"},
-        "wrapper": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "windows": {"type": "string", "minLength": 1},
-            "linux": {"type": "string", "minLength": 1}
-          }
-        }
+        "framework": {"const": "pytest"},
+        "adapter_id": {"const": "pytest:selected-symbols-v1"},
+        "interpreter": {"type": "string", "minLength": 1},
+        "build_profile": {"type": "string", "minLength": 1},
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+      }
+    },
+    "maven_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["framework", "adapter_id", "wrapper", "build_profile", "adapter_parameters"],
+      "properties": {
+        "framework": {"const": "junit5"},
+        "adapter_id": {"const": "maven-wrapper:selected-symbols-v1"},
+        "wrapper": {"type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*mvnw(?:\\.cmd)?$"},
+        "build_profile": {"type": "string", "minLength": 1},
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+      }
+    },
+    "gradle_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["framework", "adapter_id", "wrapper", "build_profile", "adapter_parameters"],
+      "properties": {
+        "framework": {"const": "junit5"},
+        "adapter_id": {"const": "gradle-wrapper:selected-symbols-v1"},
+        "wrapper": {"type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*gradlew(?:\\.bat)?$"},
+        "build_profile": {"type": "string", "minLength": 1},
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
       }
     },
     "v2_sdd": {

@@ -1,76 +1,19 @@
-# Контракт независимой проверки автотестов
+# V5 static automation-review contract
 
-## Содержание
+Validate canonical JSON with `tools.canonical_document` and artifact relations with `tools.automation_validation`. Verify the automation source against the selected effective document's exact digest and its exact attempt-owned `effective_bundle_receipt_digest`, then inspect every declared file's inline UTF-8 `content` and every generated locator. Use the runner-compatibility check with `materialized=False`; no generated file is written or required on disk during this review. On-disk digest/confinement checks remain mandatory after controller materialization.
 
-- [Порядок проверки](#порядок-проверки)
-- [Таблица смысловой эквивалентности](#таблица-смысловой-эквивалентности)
-- [Коды находок](#коды-находок)
-- [Вердикты](#вердикты)
+Review atomic operation/assertion relation ownership, canonical physical order, and complete coverage. `reviewed_files` contains every declared `(file_id, content_digest)` in generated-file physical order; `reviewed_symbol_pairs` contains every distinct required pair exactly once in generated-symbol physical order; `reviewed_relations_sha256` identifies the complete physical relation array. Multiple pairs for a target are AND requirements. Verify exactly one manual disposition per manual step, canonical-blocker branches, no extra relation, and no missing assertion.
 
-## Порядок проверки
+Inspect each generated symbol for exact canonical input literals and input/output/assertion bindings. A literal or binding drift is rework even if declared relations, locators, and digests are internally consistent.
 
-1. Проверь схему JSON и точный набор входных данных.
-2. Проверь границы путей, существование сопутствующих файлов и SHA-256.
-3. Проверь уникальность и связность ID `TC`, `REQ`, `FILE` и `METHOD`.
-4. Построй ожидаемое множество исполнимых тест-кейсов из ручных тест-кейсов.
-5. Построй фактическое множество по матрице, методам и нативным идентификаторам в исходном коде.
-6. Найди пропущенные и лишние исполнимые тесты.
-7. Для каждого сопоставленного тест-кейса проверь смысловую эквивалентность.
-8. Проверь проектно-нативную подготовку, стек и отсутствие секретов.
-9. Сформируй находки и только затем вердикт.
+Also inspect testing-work constraints in the selected canonical `requirements` linked
+by each case's `requirement_ids`; they need not appear in human case fields. Verify
+applicable restrictions against proposed source and authorized project configuration,
+including subject substitution, framework, dependencies and file edits. A requirement
+link alone is not compliance evidence. Leave actual execution/file preservation to the
+controller's existing checks; do not claim a static review proves runtime compliance.
 
-Нельзя начинать с вердикта и подбирать под него доказательства.
+Findings are static evidence only. A semantic issue, stale digest, missing declared content, invalid locator, absent pair, secret, or unconfirmed setup is rework. The review binds `automation_revision`, reviewer session/invocation IDs, the role policy, and the digest of the exact attempt-owned controller readback boundary (`automation-review-boundary-r1` or `-r2`). The controller validates that boundary against the active attempt; self-attested isolation is not accepted. There is one static reviewer invocation per version and at most two reviews: `AUTO_FIX_APPLIED` returns only to one complete, digest-bound revision 2; never run an obsolete artifact or regenerate after runtime `FAIL`.
 
-## Таблица смысловой эквивалентности
-
-| Элемент | Что доказать | Типичный блокирующий дефект |
-|---|---|---|
-| подготовка | роль, разрешение, фикстура и состояние действительно создаются | базовый класс есть, но разрешение для маршрута отсутствует |
-| действие | вызвана точная операция, маршрут или функция | тест вызывает соседний маршрут или другой метод |
-| данные | различены отсутствие, `null`, пустое и граничное значения; сами значения сохранены | поле сериализуется как `null`, хотя тест-кейс требует его отсутствия |
-| транспорт | формат данных, заголовки и сериализация соответствуют тестовой среде | обычная строка трактуется как JSON-ответ |
-| ожидаемый результат | каждый ожидаемый результат имеет точную проверку | проверен только статус, а тело или состояние пропущено |
-| побочный эффект | проверяется только эффект, подтверждённый входом | без требования добавлена проверка аудита, платежа или журнала |
-| очистка | тест изолирован и не стирает состояние до проверки | очистка выполняется до проверки |
-
-При параметризации проверяй каждую строку отдельно. Общий метод не доказывает,
-что конкретный `TC-*` получает свои данные и ожидаемый результат.
-
-## Коды находок
-
-Используй стабильные коды, когда они применимы:
-
-- `MISSING_TEST_CASE` — входной тест-кейс не имеет исполнимой реализации;
-- `EXTRA_EXECUTABLE_TEST` — исполнимый тест не связан с входным тест-кейсом;
-- `TRACEABILITY_MISMATCH` — матрица, метод и идентификатор в исходном коде расходятся;
-- `RUNTIME_SETUP_MISSING` — отсутствует подтверждённая подготовка, разрешение или фикстура;
-- `ACTION_MISMATCH` — реализовано другое действие;
-- `TEST_DATA_MISMATCH` — данные, отсутствие, `null` или граница не соответствуют тест-кейсу;
-- `ASSERTION_MISSING` — ожидаемый результат не проверяется;
-- `HARNESS_ORACLE_MISMATCH` — тестовая среда не может создать заявленные тип данных, значение или состояние;
-- `UNSUPPORTED_BEHAVIOR` — добавлена неподтверждённая проверка;
-- `PROJECT_STACK_MISMATCH` — код не соответствует манифесту или примеру проекта;
-- `SECRET_PERSISTED` — секрет или учётные данные записаны в артефакт;
-- `UNSUPPORTED_EXECUTION_CLAIM` — заявлен запуск без доказательства от средства запуска.
-
-Сообщение должно называть ожидаемое и фактическое значения. Доказательство должно
-указывать конкретное поле, фрагмент исходного кода или ID; одного названия кода
-недостаточно.
-
-## Вердикты
-
-`ПРИНЯТО` допустимо только после полной проверки всех объявленных файлов и методов,
-когда `findings` и `corrections` пусты.
-
-`AUTO_FIX_APPLIED` допустимо только для механических изменений, не меняющих
-поведение теста: например, исправления ошибочной ссылки в метаданных при
-однозначном доказательстве из исходного кода. Не применяй автоматическое
-исправление к подготовке, действию, данным, проверкам, аутентификации или числу
-тестов.
-
-`ТРЕБУЕТ ДОРАБОТКИ` обязателен при любом блокирующем дефекте. Не включай
-исправленный код и не маскируй дефект предупреждением.
-
-Материалы `assets/autotest-fixtures/` предназначены для локальной прямой проверки
-различия корректного проектно-нативного теста и теста с пропущенной подготовкой
-среды. Они не являются требованиями к рабочему продукту.
+Only the controller may turn an accepted review into a generated delta, materialize files,
+claim execution, decide dispositions, or compute terminal acceptance.

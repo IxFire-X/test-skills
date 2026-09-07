@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/run-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "project", "policy_profile", "authorization_digest", "project_state", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "project": {"type": "string", "minLength": 1},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "authorization_digest": {"$ref": "#/$defs/digest"},
+    "project_state": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "path", "entries", "digest"],
+          "properties": {
+            "kind": {"const": "GIT_DIRECTORY"}, "path": {"const": ".git"},
+            "entries": {"const": []}, "digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "status", "files", "digest"],
+          "properties": {
+            "kind": {"const": "GIT_TREE"},
+            "status": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/file"}},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        }
+      ]
+    },
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""Report portable skill-pack runtime capabilities as deterministic JSON."""
+"""Report portable skill-pack integrity and unqualified runtime capabilities."""
 
 import importlib.util
 import json
@@ -15,17 +15,37 @@ else:  # direct CLI execution
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
     root = root.resolve()
+    qualification: dict[str, object] = {"state": "unavailable", "ready_tuple": None}
     required_files = (
         "contracts/pipeline.json",
+        "schemas/canonical-test-document.schema.json",
+        "schemas/tc-reviewer-output.schema.json",
         "schemas/tc-to-autotest-output.schema.json",
+        "schemas/autotest-reviewer-output.schema.json",
+        "schemas/run-tests-output.schema.json",
+        "schemas/trace-document.schema.json",
+        "schemas/orchestrator-output.schema.json",
         "schemas/skillsrc.schema.json",
         "schemas/project-discovery-output.schema.json",
         "schemas/skillsrc-init-output.schema.json",
+        "schemas/compatibility-evidence.schema.json",
+        "schemas/scenario-observation-receipt.schema.json",
+        "schemas/release-eval-run.schema.json",
+        "schemas/release-eval-receipt.schema.json",
+        "schemas/release-manifest.schema.json",
+        "release/manifest.json",
+        "tools/orchestrate_test_case_revision.py",
+        "tools/build_trace_document.py",
         "tools/run_tests.py",
+        "tools/execution_adapters.py",
         "tools/scan_project.py",
         "tools/skillsrc_manifest.py",
         "tools/discover_project.py",
         "tools/init_skillsrc.py",
+        "tools/compatibility_contract.py",
+        "tools/release_manifest.py",
+        "evals/release_eval.py",
+        "evals/scenarios/pilot-critical.json",
     )
     required_dirs = ("schemas", "tools", "contracts")
     missing_integrity = [item for item in required_files if not (root / item).is_file()]
@@ -34,6 +54,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         missing_integrity.insert(0, "root")
     for relative, expected in (
         ("contracts/pipeline.json", "pipeline"),
+        ("schemas/orchestrator-output.schema.json", "schemas/orchestrator-output.schema.json"),
         ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json"),
         ("schemas/skillsrc.schema.json", "schemas/skillsrc.schema.json"),
         ("schemas/project-discovery-output.schema.json", "schemas/project-discovery-output.schema.json"),
@@ -45,7 +66,12 @@ def inspect_environment(root: Path) -> dict[str, object]:
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if expected == "pipeline":
-                valid = data.get("$schema") == "schemas/pipeline.schema.json" and data.get("version") == "1.0" and data.get("pipeline") == "test-pipeline" and isinstance(data.get("steps"), list)
+                valid = (
+                    data.get("$schema") == "schemas/pipeline.schema.json"
+                    and data.get("version") == "4.0"
+                    and data.get("pipeline") == "portable-testing-skills-frozen-pilot"
+                    and isinstance(data.get("artifact_registry"), list)
+                )
             else:
                 valid = data.get("$id") == expected and data.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
             if not valid:
@@ -64,14 +90,27 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 missing_integrity.append("invalid:pipeline_contract")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError):
             missing_integrity.append("invalid:pipeline_contract")
+    release_manifest_path = root / "release" / "manifest.json"
+    if release_manifest_path.is_file():
+        try:
+            if __package__:
+                from .release_manifest import load_release_manifest
+            else:  # direct CLI execution
+                from release_manifest import load_release_manifest
+            manifest = load_release_manifest(root)
+            qualification = dict(manifest["qualification"])
+        except (ImportError, TypeError, ValueError):
+            missing_integrity.append("invalid:release/manifest.json")
     dependencies = {
         name: {"required": True, "available": importlib.util.find_spec(name) is not None}
         for name in ("jsonschema", "yaml")
     }
-    python_supported = sys.version_info >= (3, 10)
+    python_supported = sys.version_info >= (3, 11)
     ready = not missing_integrity and python_supported and all(item["available"] for item in dependencies.values())
     return {
         "status": "PASS" if ready else "NOT_RUNNABLE",
+        "status_scope": "pack_integrity",
+        "qualification": qualification,
         "python": {
             "supported": python_supported,
             "version": platform.python_version(),
@@ -79,10 +118,14 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "dependencies": dependencies,
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
         "languages": {
-            "java": {"execution": True},
-            "python": {"execution": True},
-            "typescript": {"execution": False},
-            "go": {"execution": False},
+            "java": {"execution": True, "verified": False},
+            "python": {"execution": True, "verified": False},
+            "typescript": {"execution": False, "verified": False},
+            "go": {"execution": False, "verified": False},
+        },
+        "adapters": {
+            "local_project_native": {"core": True, "verified": False},
+            "company_runner": {"core": False, "verified": False},
         },
         "root": str(root.resolve()),
     }

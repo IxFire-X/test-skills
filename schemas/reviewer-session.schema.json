@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/reviewer-session.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session_id", "boundary_digest", "package_binding", "context_budget_bytes", "generator_role", "reviewer_role", "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "events", "status", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "session_id": {"$ref": "#/$defs/label"},
+    "boundary_digest": {"$ref": "#/$defs/digest"},
+    "package_binding": {"$ref": "#/$defs/package_binding"},
+    "context_budget_bytes": {"type": "integer", "minimum": 1},
+    "generator_role": {"const": "generator"},
+    "reviewer_role": {"const": "canonical-reviewer"},
+    "generator_invocation_id": {"$ref": "#/$defs/label"},
+    "reviewer_invocation_id": {"$ref": "#/$defs/label"},
+    "host_isolation": {"$ref": "#/$defs/host_isolation"},
+    "events": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/event"}},
+    "status": {"enum": ["WAITING", "COMPLETED", "ABORTED"]},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "package_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_digest", "candidate_receipt_digest", "assembly_digest", "context_marker_output_digest", "generator_batches", "inventory_digest", "context_receipt_digests", "base_package_byte_count", "package_digest"],
+      "properties": {
+        "candidate_digest": {"$ref": "#/$defs/digest"},
+        "candidate_receipt_digest": {"$ref": "#/$defs/digest"},
+        "assembly_digest": {"$ref": "#/$defs/digest"},
+        "context_marker_output_digest": {"$ref": "#/$defs/digest"},
+        "generator_batches": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["batch_id", "digest", "context_receipt_digest"], "properties": {"batch_id": {"type": "string", "pattern": "^BATCH-[a-z0-9-]+$"}, "digest": {"$ref": "#/$defs/digest"}, "context_receipt_digest": {"$ref": "#/$defs/digest"}}}},
+        "inventory_digest": {"$ref": "#/$defs/digest"},
+        "context_receipt_digests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+        "base_package_byte_count": {"type": "integer", "minimum": 1},
+        "package_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "host_isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fresh_context", "distinct_invocations", "role_policy", "evidence_digest"],
+      "properties": {
+        "fresh_context": {"type": "boolean"},
+        "distinct_invocations": {"type": "boolean"},
+        "role_policy": {"const": "canonical-reviewer-v1"},
+        "evidence_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "event": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "REVIEW_SESSION_STARTED"}}},
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type", "request_digest", "byte_count"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "EVIDENCE_REQUESTED"}, "request_digest": {"$ref": "#/$defs/digest"}, "byte_count": {"type": "integer", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type", "request_digest", "provided_digest", "byte_count", "cumulative_package_digest"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "EVIDENCE_PROVIDED"}, "request_digest": {"$ref": "#/$defs/digest"}, "provided_digest": {"$ref": "#/$defs/digest"}, "byte_count": {"type": "integer", "minimum": 0}, "cumulative_package_digest": {"$ref": "#/$defs/digest"}}},
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type", "verdict", "report_digest", "verdict_digest"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "AUTHORITATIVE_VERDICT"}, "verdict": {"enum": ["ACCEPTED", "REJECTED"]}, "report_digest": {"$ref": "#/$defs/digest"}, "verdict_digest": {"$ref": "#/$defs/digest"}}},
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "REVIEW_SESSION_COMPLETED"}}},
+        {"type": "object", "additionalProperties": false, "required": ["ordinal", "event_type", "reason_code"], "properties": {"ordinal": {"type": "integer", "minimum": 1}, "event_type": {"const": "REVIEW_SESSION_ABORTED"}, "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"}}}
+      ]
+    }
+  }
+}

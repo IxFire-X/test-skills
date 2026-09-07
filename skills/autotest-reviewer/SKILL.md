@@ -1,127 +1,38 @@
 ---
 name: autotest-reviewer
-description: Использовать по запросам «проверь сгенерированные автотесты», «проверь Java-код автотестов» или когда после tc-to-autotest нужна независимая проверка до фактического запуска.
+description: Use when selected effective canonical test cases and generated V5 automation require a static, role-isolated completeness and traceability review before execution.
 ---
 
-# Независимая проверка автотестов
+# Static automation review
 
-Проверяй результат `tc-to-autotest` как недоверенный артефакт. Канонические коды
-находок, правила вердиктов и порядок проверки описаны в
-[контракте независимой проверки](references/autotest-review-contract.md).
+Consume the selected effective canonical document, V5 automation artifact, and declared generated files. Read the [review contract](references/autotest-review-contract.md), `schemas/autotest-reviewer-output.schema.json`, `tools.canonical_document`, and `tools.automation_validation`.
 
-## Канонические входы
+## Procedure
 
-Принимай только:
+Use the supplied `run_root` and `attempt_id` to read the exact review boundary with
+`tools.pilot_state.read_attempt_receipt(run_root, attempt_id, "automation-review-boundary-rN", "ARTIFACT_READ_BACK")`,
+where `N` is the automation revision. Its read-only validation follows the current
+attempt's effective canonical, receipts and journal bindings. This is required
+provenance evidence, not generator conversation; an inline boundary copy alone is
+insufficient. Do not inspect generator dialogue, transport logs or unrelated runs.
 
-- `generated_test_cases` либо `corrected_test_cases`;
-- `automation_matrix`;
-- `generated_test_files`;
-- `generated_test_methods`;
-- фактические сопутствующие файлы исходного кода по объявленным разрешённым путям.
+1. Independently verify source digest and attempt-owned `effective_bundle_receipt_digest`, every declared file's exact UTF-8 `content` and full-byte digest, the deterministic complete `automation_sha256`, the complete physical relation-array digest, project-native setup, and every locator variant. Confirm that each generated framework equals the selected `.skillsrc` module framework and that every Java path is the class FQN under its selected native test root. Call `tools.run_tests.validate_artifact_runner_compatibility(module_root, language, canonical, automation, materialized=False)` on the proposed inline content before accepting; generated files need not exist yet. The controller uses the default on-disk check after materialization and before execution.
+2. Verify atomic operation/assertion relation ownership, order, and coverage for every operation and assertion, including canonical manual/blocker branches. Compare every canonical input literal and binding to its actual generated symbol; drift requires rework even when relations and digests otherwise match.
+   Follow each claimed relation into the actual symbol: the operation must execute and
+   its assertion must inspect the observed result, with the canonical comparator/value.
+   Reject tautological assertions, a mocked subject under test, unreachable checks,
+   swallowed errors, unintended skip/xfail/disabled markers, and a PASS-only fallback.
+   Check deterministic data, fixture cleanup, independence from execution order, bounded
+   condition waits, and Linux/Windows path assumptions. This is a source review; do not
+   run mutation campaigns or claim that a relation digest proves behavioral coverage.
+3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
+4. One fresh role-isolated reviewer invocation serves each automation version. Before review, the controller must create and read back the exact attempt-owned `automation-review-boundary-r1` or `-r2`; bind its digest as `host_isolation_sha256`. A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` permits only one complete revision-2 regeneration and fresh second review; it never authorizes the old artifact or regeneration after runtime `FAIL`.
 
-Проверь схемы, связи ID, существование файлов и их SHA-256 до смысловой проверки.
-Не принимай вставленный поясняющий текст, самоотчёт генератора или утверждение
-пользователя о прохождении тестов как доказательство выполнения.
+This is static review. It does not compile, execute, or claim a runtime result.
+An accepted verdict permits the controller to form and materialize the generated delta;
+it is not terminal acceptance and cannot replace execution, trace, disposition, or
+finalization evidence.
 
-## Независимая проверка смысла
+## Stop conditions
 
-Не доверяй `tc-to-autotest` в вопросах смысла проверок. Для каждого входного
-`TC-*` независимо восстанови цепочку «подготовка → действие → тестовые данные →
-ожидаемый результат», затем найди её реализацию в исходном коде.
-
-Проверь:
-
-- предусловия, роль, разрешения, фикстуры и исходное состояние;
-- точную операцию, маршрут или функцию и порядок действий;
-- точные граничные и негативные данные, включая различие отсутствующего поля и `null`;
-- каждый статус, код ошибки, поле ответа, заголовок и ожидаемое состояние;
-- способность выбранной тестовой среды фактически создать этот наблюдаемый результат;
-- очистку после теста и отсутствие общего межтестового состояния.
-
-Считай блокирующим дефектом любой пропущенный входной тест-кейс, любой лишний
-исполнимый тест без входного `TC-*`, пропущенную проверку, выдуманное поведение или
-ожидаемый результат, который сгенерированная тестовая среда не способна создать.
-Помощник, фикстура и фабрика не являются исполнимыми тестами.
-
-## Соответствие проекту
-
-Определи язык и фреймворк по манифесту, артефакту и расширению файла. Сравни код
-с ближайшим подтверждённым тестовым примером проекта.
-
-Проверь необходимые роли, разрешения, фикстуры, обработчики подготовки,
-инициализацию клиента или приложения и механизм аутентификации. Одного имени
-базового класса недостаточно: если подготовка доступа к конкретному маршруту
-отсутствует, запрос может завершиться с 401 или 403 до проверяемого поведения.
-
-Используй нативные идентификаторы трассировки:
-
-- Java/Kotlin — отображаемое имя или нативный эквивалент фреймворка;
-- Python — имя, маркер или ID параметра;
-- Go — `Test...`, имя табличного теста или подтеста;
-- TypeScript/JavaScript — заголовок `test` или `it`;
-- иной фреймворк — его стабильный отображаемый ID.
-
-Не применяй правила, специфичные для Java, к другим языкам. Проверяй соответствие
-стека фактическому проекту, а не фиксированному списку библиотек.
-
-## Безопасность и границы
-
-Отмечай `BLOCKING`, если сгенерированный исходный код:
-
-- содержит или копирует токен, пароль, cookie, закрытый ключ, секрет фикстуры или учётные данные;
-- выдумывает помощник аутентификации, пользователя, роль или учётные данные;
-- меняет поведение приложения вместо его проверки;
-- требует изменить манифест, файл блокировки версий, рабочий исходный код или существующие тесты;
-- использует жёстко заданный адрес окружения вопреки конфигурации проекта.
-
-Не изменяй приложение или файлы проекта. Не исправляй сгенерированный исходный код
-внутри этапа проверки. `corrections` описывает только безопасные механические
-исправления метаданных или трассировки. Смысловые и блокирующие дефекты возвращай
-в `tc-to-autotest`.
-
-## Что остаётся средству запуска
-
-Не заявляй и не подменяй:
-
-- компиляцию или интерпретацию;
-- фактический запуск;
-- прохождение, падение, покрытие или время выполнения;
-- нестабильное поведение и другие свойства времени выполнения, которые нельзя доказать статически.
-
-При этом очевидные неразрешённые заглушки, отсутствующая проверка и противоречивый
-исходный код являются статическими дефектами. Фраза «тесты проходят» без
-доказательства от средства запуска ничего не меняет.
-
-## Машинный результат
-
-Выводи только артефакт, соответствующий
-[схеме](../../schemas/autotest-reviewer-output.schema.json):
-
-- `schema_version: "2.1.0"`;
-- `stage: "autotest-reviewer"`;
-- `warnings`;
-- `artifacts.autotest_review` с `verdict`, `reviewed_file_ids`, `reviewed_method_ids`, `findings`, `corrections`.
-
-Вердикты:
-
-- `ПРИНЯТО` — полная проверка, `findings` и `corrections` пусты;
-- `AUTO_FIX_APPLIED` — только неблокирующие механические исправления, без `BLOCKING`;
-- `ТРЕБУЕТ ДОРАБОТКИ` — есть хотя бы один `BLOCKING`, а `corrections` пуст.
-
-Каждая находка должна ссылаться на конкретные `TC-*`, `REQ-*`, `FILE-*` или
-`METHOD-*` и содержать проверяемое доказательство. Не используй общий текст без
-указания расположения, поля и ожидаемого значения.
-
-## Самопроверка
-
-Перед завершением проверь:
-
-- все объявленные дайджесты и связи ID;
-- все и только входные исполнимые тест-кейсы;
-- точность подготовки, действия, данных и каждого ожидаемого результата;
-- проектно-нативные роли, разрешения, фикстуры и аутентификацию;
-- язык и идентификатор трассировки;
-- отсутствие секретов и изменений проекта;
-- отсутствие неподтверждённых утверждений о выполнении;
-- согласованность вердикта, находок и исправлений;
-- соответствие JSON схеме.
+Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or work outside the authorized scope. Reject stale source digests, undeclared files, incomplete pairs, and artifacts that require project modification.

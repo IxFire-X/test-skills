@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuite tests="1" failures="0" errors="1"><testcase classname="pkg.SampleTest" name="works" time="10"><error type="java.util.concurrent.TimeoutException" message="timed out">timeout</error></testcase></testsuite>

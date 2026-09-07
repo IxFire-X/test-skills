@@ -1,416 +1,247 @@
-# Использование Test Skills
+# Использование portable pilot
 
-## 1. Выберите способ подключения
+## 1. Подключите пакет
 
-### Центральный пакет скиллов — рекомендуется
+Поместите папку пакета в обычный рабочий проект, сохранив `contracts/`, `schemas/`,
+`skills/`, `tools/`, `evals/` и `release/`. Проект уже должен иметь рабочие JDK/Maven,
+Gradle или Python/pytest environment. Пайплайн ничего не устанавливает.
 
-Храните `test-skills` отдельно и используйте его для нескольких проектов:
+Удобное место — `<project>/.tools/test-skills/`. Все пути пакета разрешаются от этой
+папки. Команды `python -m tools...` выполняйте с cwd пакета и передавайте абсолютный
+`--project`; так модуль `tools` целевого проекта не подменит инструменты пакета.
+Сами автотесты запускаются из выбранного module root.
+
+Нормативная точка входа — явный запрос model-enabled CLI выполнить
+`skills/orchestrate/SKILL.md`. Python controller не выбирает модель, не хранит model
+credentials и не предоставляет standalone `pipeline run`.
+
+Пример запроса CLI:
 
 ```text
-workspace/
-  test-skills/
-  project-a/
-    .skillsrc
-    docs/to_do/
-  project-b/
-    .skillsrc
-    docs/to_do/
+Выполни skills/orchestrate/SKILL.md для требований docs/feature.md в этом проекте.
+Профиль: local-pilot-v1. Разрешаю project-native выполнение exact reviewed targets
+только в рамках этого run.
 ```
 
-Так проект не получает копию инструментов времени выполнения, а обновление пакета
-выполняется в одном месте.
+Для тест-кейсов без запуска кода выберите `cases-only-v1` и не давайте execution
+authorization.
 
-### Вложенный автономный каталог
+## 2. Что указать
 
-Если проект должен быть полностью автономным, перенесите репозиторий целиком в
-отдельный каталог, например `.ai/test-skills/`. Не разносите `skills/`,
-`schemas/`, `contracts/` и `tools/` по разным местам: относительные ссылки
-намеренно рассчитаны на сохранение структуры пакета.
+Обязательно:
 
-## 2. Подготовьте окружение
+- один документ требований новой или изменяемой фичи;
+- exact project root;
+- профиль `cases-only-v1` или `local-pilot-v1`.
 
-Требуется Python 3.10+.
+Если проект многомодульный, укажите module ID или дайте pipeline выбрать его по
+доказанному exact path. При неоднозначности pipeline задаёт только один вопрос и
+переходит в `WAITING_FOR_INPUT`. Текстовый guess запрещён.
 
-### Linux/macOS
+`--target` или allowlist могут сузить read-only inventory. `.git`, dependencies,
+build outputs, binaries, generated artifacts и потенциальные secrets не передаются
+модели. Файл с потенциальным secret исключается целиком; если он необходим, дайте
+sanitized source, safe fixture или opaque runtime handle.
 
-```bash
-cd /path/to/test-skills
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 tools/doctor.py --root .
-python3 tools/contract_check.py --root . --full
+## 3. `.skillsrc`
+
+Linux и Windows используют один пайплайн и project-native адаптеры:
+
+| Runtime | Linux | Windows |
+|---|---|---|
+| Python / pytest | `.venv/bin/python` | `.venv/Scripts/python.exe` |
+| Maven / JUnit 5 | `mvnw` | `mvnw.cmd` |
+| Gradle / JUnit 5 | `gradlew` | `gradlew.bat` |
+
+Автоматическое обнаружение выбирает runtime текущей ОС. Linux venv может содержать
+стандартный interpreter symlink: baseline связывает `pyvenv.cfg`, целевой interpreter
+и его bytes. Произвольные symlink wrappers и выходы пути за module запрещены. На Linux
+interpreter/wrapper должен уже иметь executable permission; пайплайн её не изменяет.
+После переноса проекта на другую ОС создайте её venv и подтвердите изменение runtime
+в существующем `.skillsrc`; старый attempt с прежним baseline не переиспользуется.
+
+Пакет переносится в проект целиком, но автоматическое выполнение ограничено этими
+адаптерами и имеющимся project setup. Для другого языка/framework сохраняйте явный
+manual/blocker gap; наличие Python tools в пакете само по себе не делает такой проект
+исполняемым. `coverage=FULL` означает покрытие автоматизацией выбранного canonical
+документа, а не доказательство исчерпывающего покрытия произвольной функциональности.
+Для полноты reviewer сравнивает исходные требования, сценарии и наблюдаемые проверки;
+нерешённые пробелы и manual-проверки должны оставаться видны в результате.
+
+Если `.skillsrc` отсутствует, scanner предлагает и атомарно создаёт его. Существующий
+valid файл — authoritative user configuration и молча не перезаписывается. Значимый
+drift требует `WAITING_FOR_INPUT`; подтверждённая замена сохраняет прежние bytes как
+evidence.
+
+Каждый attempt выбирает ровно один exact module, включая nested module. Module cwd,
+test root, wrapper/interpreter, adapter ID, build profile и typed adapter parameters
+принадлежат этому attempt. Cross-module orchestration в pilot отсутствует.
+
+## 4. Durable run
+
+До scan или model call controller создаёт:
+
+```text
+<project>/.pilot-runs/<run_id>/
+  run-authorization-receipt.json
+  run-manifest.json
+  events/
+  attempts/
 ```
 
-### Windows PowerShell
+Все JSON artifacts публикуются атомарно, читаются обратно и связываются digest.
+Один run получает одну project/module identity и последовательную append-only lineage
+child attempts. Одновременно разрешён максимум один nonterminal attempt.
+
+`WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages можно
+продолжить из новой CLI session после snapshot/config validation. Изменение
+requirements, module или policy создаёт child attempt. Terminal attempt не меняется.
+
+Если процесс был запущен, но authoritative framework result отсутствует, результат —
+`UNKNOWN`; автоматический повтор запрещён. Новый execution retry возможен только в
+explicit child attempt после доказанной остановки прежнего process scope.
+
+Для чувствительных параметров pytest задавайте безопасные явные `ids`: значения
+параметров могут попасть в имена тестов в JUnit. Отчёт с обнаруженной сигнатурой
+токена в имени, классе или пути не сохраняется; runner завершает такой execution
+как `UNKNOWN` с причиной `JUNIT_INVALID` и очищает чувствительный вывод.
+
+## 5. Canonical и reviewer
+
+Requirements детерминированно разбиваются на batches из разрешённых source roots.
+Каждый source requirement получает provenance и digest, затем many-to-many mapping к
+canonical requirements, cases, steps, assertions, symbols и execution evidence.
+
+Candidate revision 1 немедленно публикуется как `UNREVIEWED` и читается обратно.
+После этого открывается одна fresh role-isolated reviewer session для полного canonical
+branch. Внутри неё допустимы bounded C-lite evidence requests, но:
+
+- per-batch/hierarchical/multiple-authoritative reviewers запрещены;
+- successful session содержит ровно один authoritative verdict;
+- terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT`, содержит ноль;
+- generator dialogue/reasoning reviewer не получает;
+- без host isolation evidence записывается `independence_unverified`, acceptance
+  запрещён.
+
+Canonical human fields пишутся по-русски. JSON остаётся единственным semantic source;
+HTML и `zephyr-scale-step-row-24-v4` CSV — derived exports.
+
+## 6. `cases-only-v1`
+
+Профиль даёт draft/artifact-only canonical cases: verification=NOT_APPLICABLE, accepted=false, полный pipeline exit не 0. Live PASS и accepted=true только у local-pilot-v1. Для него:
+
+```text
+materialization = NOT_APPLICABLE
+execution       = NOT_APPLICABLE
+dispositions    = NOT_APPLICABLE
+verification    = NOT_APPLICABLE
+```
+
+Запрос этого профиля не запускает project code, plugins или lifecycle hooks.
+
+## 7. `local-pilot-v1`
+
+После accepted canonical pipeline:
+
+1. создаёт automation revision 1;
+2. выполняет отдельный static review;
+3. при correction допускает ровно одну полную revision 2 и второй review;
+4. формирует complete generated file set;
+5. материализует каждый pipeline-owned file и пишет receipt;
+6. запускает exact reviewed targets закрытым adapter;
+7. строит execution trace и disposition всего generated delta;
+8. выполняет finalization и terminal transition.
+
+Execution работает в доверенном обычном проекте: pytest plugins, conftest, Maven/Gradle
+plugins и lifecycle hooks могут выполнять код. Run-scoped authorization относится
+только к текущему явному запросу. Никакого постоянного trust store, clone или sandbox
+нет.
+
+Pipeline не принимает shell strings или `argv_template`. Команду строит только один из
+closed adapters:
+
+- `pytest:selected-symbols-v1`;
+- `maven-wrapper:selected-symbols-v1`;
+- `gradle-wrapper:selected-symbols-v1`.
+
+## 8. Disposition и finalization
+
+Физический порядок неизменяем:
+
+```text
+materialization -> execution -> execution trace -> retain/cleanup decision
+-> disposition receipts -> pre-finalization trace -> finalization verification
+-> finalization receipt readback -> terminal result -> derived terminal trace
+-> terminal event
+```
+
+Для всего generated file set:
+
+- `PASS` + valid trace/path/digests: `RETAINED` до finalization;
+- `FAIL`/`NOT_RUNNABLE`: byte-identical pipeline-owned files получают `CLEANED`;
+- `UNKNOWN`: unchanged file получает `PRESERVED_EXECUTION_UNKNOWN`, изменённый —
+  `PRESERVED_CONTENT_CONFLICT`; cleanup запрещён;
+- partial materialization: execution не начинается, неизменённые созданные файлы
+  очищаются, остальные получают `NOT_MATERIALIZED`.
+
+Для `FAIL` cleanup следует только после readback execution receipt, где остаются
+exact generated bytes, native report, bounded scrubbed output, exit и structured result.
+Valid process-bound report с `tests=0` даёт `NO_TESTS_COLLECTED`, `FAIL`, exit `1`;
+missing/corrupt/unbound report, timeout и OS error дают `UNKNOWN`, exit `2`.
+
+Если безопасный cleanup невозможен, файл сохраняется с точной причиной и
+`accepted=false`. Terminal transition требует completed/read-back finalization receipt,
+но receipt может иметь `valid=false`; тогда terminal reason — `FINALIZATION_INVALID`.
+
+## 9. Как читать результат
+
+Не сводите результат к одному слову. Проверяйте вместе:
+
+```text
+attempt_state  completion  verification  coverage  reason_code  accepted
+```
+
+Поля completion/verification/coverage могут отсутствовать, пока факт не установлен.
+`COMPLETE + FAIL` допустим. `EXECUTION_UNKNOWN` означает
+`TERMINAL + PARTIAL + UNKNOWN + accepted=false`.
+
+Exit projection:
+
+- `0` — accepted terminal;
+- `1` — trustworthy terminal, но unaccepted;
+- `2` — controller error, unreliable closure, UNKNOWN, NOT_RUNNABLE или FATAL;
+- `3` — waiting for input/model.
+
+## 10. Проверка и release identity
 
 ```powershell
-cd D:\path\to\test-skills
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python tools\doctor.py --root .
-python tools\contract_check.py --root . --full
+python -m tools.contract_check --root . --full
+python -m tools.render_contract_docs --root . --check
+python -m pytest -q
+python -m tools.doctor --root .
+python -m tools.ci_gate --root .
 ```
 
-`doctor.py` возвращает `PASS`, только когда Python, зависимости и обязательные
-файлы времени выполнения доступны. `NOT_RUNNABLE` означает проблему среды, а не успех.
-
-Для запуска Java дополнительно нужны подходящий JDK и проектные `mvnw` или
-`gradlew` либо Maven/Gradle в `PATH`. Для запуска Python нужен принятый проектом
-интерпретатор с `pytest`.
-
-## 3. Автоматическая инициализация манифеста
-
-При первой команде оркестратор автоматически сканирует структуру проекта и
-создаёт `.skillsrc`. Если критическое значение неоднозначно, он остановится и
-задаст один вопрос; только после ответа создаётся новый immutable attempt, а
-предыдущая квитанция и артефакты не перезаписываются.
-
-### Один модуль
-
-Для обычного проекта укажите корень проекта в запросе оркестратору. Он создаст
-v3-манифест с одним module ID и затем построит контекст фичи отдельно от
-обнаружения стека.
-
-### Монорепозиторий
-
-В монорепозитории v3-манифест содержит `modules[]`. После инициализации выберите
-exact module ID, например `backend` или `frontend`; рабочие корни, язык и пути
-берутся только из выбранного модуля.
-
-### Диагностика и CI
-
-Ручной запуск не является обязательной подготовкой. Он полезен для диагностики
-или CI, когда нужен сохранённый receipt:
-
-```bash
-python tools/init_skillsrc.py --project /path/to/project --write --output /path/to/project/docs/to_do/skillsrc-init.json
-```
-
-Если receipt вернул вопрос, сохраните единственный ответ в JSON и запустите
-новую попытку с `--answers <answers.json>`; не меняйте старую попытку. Быстрая
-проверка свежести — повторить ту же команду: неизменный проект вернёт
-`unchanged` и оставит `.skillsrc` byte-identical.
-
-На Windows используйте, например, `D:\\work\\project`, на Linux —
-`/work/project`. Существующие v2-манифесты совместимы, но автоматическая
-инициализация создаёт v3. `.skillsrc` описывает стек и пути, но не даёт AI
-разрешения менять рабочий исходный код, существующие тесты, конфигурацию,
-зависимости или lock-файлы.
-
-`.skillsrc` сообщает стек и пути, но не разрешает AI менять рабочий исходный код,
-существующие тесты, конфигурацию, зависимости или файлы блокировки версий.
-Его нормативная форма описана в `schemas/skillsrc.schema.json`; контроллер,
-который проверяет YAML по схеме, должен использовать именно эту схему.
-`tools/validate_artifact.py` предназначен только для JSON и не принимает YAML.
-
-Если нужен read-only просмотр до инициализации, стек можно определить без
-изменений проекта:
-
-```bash
-python <skill-pack>/tools/scan_project.py \
-  --project <project> \
-  --target <feature-relative-path>
-```
-
-Постоянный `--output` разрешён только внутри точного `docs/to_do`.
-
-## 4. Подготовьте вход и границы
-
-До запуска укажите:
-
-1. корень пакета скиллов;
-2. корень проекта;
-3. конкретную функцию или ограниченную область проверки;
-4. явно разрешённые требования, OpenAPI, документацию, изменения и исходные файлы;
-5. новый каталог запуска внутри `<project>/docs/to_do/`;
-6. разрешено ли создавать новые файлы сгенерированных тестов в изолированной
-   копии проекта.
-
-Не передавайте учётные данные, cookie, bearer-токены, закрытые ключи и реальные
-пароли. Если тесту нужна авторизация, предоставьте только существующий помощник
-времени выполнения или безопасный механизм передачи секретов проекта.
-
-Рекомендуемая структура артефактов:
-
-```text
-docs/to_do/test-pipeline/<feature>/<attempt>/
-  01-context-marker-output.json
-  01-context-marker-validation.json
-  02-tc-generator-output.json
-  02-tc-generator-output.csv
-  02-tc-generator-validation.json
-  03-tc-reviewer-output.json
-  03-tc-reviewer-validation.json
-  04-tc-to-autotest-output.json
-  05-autotest-reviewer-output.json
-  06-run-result.json
-  07-trace-document.json
-  08-orchestrator-output.json
-```
-
-Имена каталогов можно менять, но каждый новый логический запуск должен получать
-новый путь. Не перезаписывайте неудачную попытку.
-
-## 5. Подключите AI-хост
-
-### Хост умеет загружать скиллы
-
-Зарегистрируйте шесть каталогов из `skills/` либо передайте точные пути из
-`contracts/pipeline.json`. Агент всё равно должен иметь доступ ко всему
-корню пакета, потому что скиллы используют соседние схемы, контракты и
-инструменты.
-
-Для полного маршрута активируйте `skills/orchestrate/SKILL.md`.
-
-### Хост не знает формата SKILL.md
-
-На каждой стадии передавайте модели в таком порядке:
-
-1. соответствующий `skills/<name>/SKILL.md`;
-2. прямо указанную в нём `references/*.md`;
-3. соответствующую схему из `schemas/`;
-4. только входные артефакты текущей стадии;
-5. зарезервированный путь результата.
-
-После ответа модели контроллер запускает валидатор схемы. Это позволяет
-использовать пакет с любым LLM/API, а не только со специализированным клиентом.
-
-Для независимой проверки желательно выполнять генератор и проверяющий скилл в
-разных контекстах. Проверяющий не должен видеть ожидаемый ответ, внутренние
-рассуждения генератора или оценочные карточки.
-
-## 6. Выполните стадии
-
-### 6.1 Context Marker
-
-Загрузите:
-
-- `skills/context-marker/SKILL.md`;
-- `skills/context-marker/references/context-artifact-contract.md`;
-- `schemas/context-marker-output.schema.json`;
-- явно разрешённые требования и доказательства из исходного кода.
-
-Результат — `context-marker-output.json` с `REQ-*`, происхождением, наблюдениями
-по исходному коду и предупреждениями. Он не должен превращать технический факт в новое
-бизнес-правило.
-
-Проверка:
-
-```bash
-python <skill-pack>/tools/validate_artifact.py \
-  <skill-pack>/schemas/context-marker-output.schema.json \
-  <run>/01-context-marker-output.json
-```
-
-### 6.2 Генератор тест-кейсов
-
-Загрузите скилл `tc-generator`, его контракт генерации, схему результата и
-валидный JSON от `context-marker`.
-
-Результат содержит:
-
-- точную копию требований;
-- атомарные `TC-*`;
-- подготовку, тестовые данные, упорядоченные шаги и наблюдаемый ожидаемый результат;
-- двустороннее покрытие `REQ -> TC`.
-
-После проверки JSON обязательно создайте CSV:
-
-```bash
-python <skill-pack>/skills/tc-generator/scripts/export_test_cases_csv.py \
-  --input <run>/02-tc-generator-output.json \
-  --output <run>/02-tc-generator-output.csv
-
-python <skill-pack>/skills/tc-generator/scripts/export_test_cases_csv.py \
-  --input <run>/02-tc-generator-output.json \
-  --output <run>/02-tc-generator-output.csv \
-  --verify-only
-```
-
-CSV является транспортным представлением без потерь. Последующие этапы получают
-JSON, а не CSV.
-
-### 6.3 Проверка тест-кейсов
-
-`tc-reviewer` проверяет каждый кейс на:
-
-- существующие связи с требованиями и полное покрытие;
-- отсутствие лишних кейсов;
-- точные роли, разрешения, маршрут, подготовку и данные;
-- конкретный ожидаемый результат шага и всего тест-кейса;
-- способность указанной тестовой среды создать ожидаемые статус, тело и состояние;
-- отсутствие выдуманного поведения и заглушек в обязательных полях.
-
-Ветви:
-
-| Вердикт | Действие |
-|---|---|
-| `ПРИНЯТО` | Продолжить с исходными тест-кейсами |
-| `AUTO_FIX_APPLIED` | Продолжить только с исправленной канонической версией |
-| `ТРЕБУЕТ ДОРАБОТКИ` | Остановиться и исправить вход предыдущего этапа |
-
-Автоматически исправляются только однозначные механические ошибки. Неизвестный
-Статус, роль или ожидаемый результат нельзя выбирать по догадке.
-
-### 6.4 Преобразование тест-кейсов в автотесты
-
-`tc-to-autotest` принимает только разрешённую проверяющим ветку. Он изучает
-манифест и ближайшие тесты проекта, затем создаёт новые тестовые файлы и
-JSON с:
-
-- `automation_matrix`;
-- `generated_test_files`;
-- `generated_test_methods`;
-- путями в разрешённых границах и SHA-256 фактических файлов.
-
-Он не изменяет рабочий исходный код, существующие тесты, конфигурацию проекта,
-зависимости или файлы блокировки версий. Если аутентификация, подготовка или
-тестовая среда не подтверждены, этап
-должна остановиться вместо генерации фиктивного кода.
-
-### 6.5 Проверка автотестов
-
-`autotest-reviewer` не доверяет самоотчёту генератора. Он независимо
-восстанавливает для каждого `TC-*` цепочку:
-
-```text
-подготовка -> действие -> точные данные -> проверки ожидаемого результата
-```
-
-Проверяются проектные фикстуры и аутентификация, пропущенные и лишние исполнимые
-методы, идентификаторы трассировки, утечки секретов, подготовка и очистка, а также
-способность кода проверить заявленный результат. Проверяющий скилл не заявляет,
-что тесты запускались.
-
-### 6.6 Средство запуска
-
-Только средство запуска подтверждает исполнение:
-
-```bash
-python <skill-pack>/tools/run_tests.py \
-  --project <project> \
-  --skillsrc <project>/.skillsrc \
-  --module <module-id> \
-  --automation-artifact <run>/04-tc-to-autotest-output.json
-```
-
-При необходимости используйте `--python-executable`, `--pytest-target` или
-принятые проектом аргументы средства запуска из `--help`.
-
-Результаты:
-
-- `PASS` — код завершения средства запуска равен 0 и есть доказательства на уровне методов;
-- `FAIL` — тесты/collection/compile завершились ошибкой;
-- `NOT_RUNNABLE` — требуемая возможность отсутствует.
-
-`NOT_RUNNABLE` не является финальным успехом.
-
-### 6.7 Трассировка
-
-Постройте трассировку:
-
-```bash
-python <skill-pack>/tools/build_trace_document.py \
-  --requirements <run>/01-context-marker-output.json \
-  --test-cases <run>/02-tc-generator-output.json \
-  --automation-artifact <run>/04-tc-to-autotest-output.json \
-  --run-result <run>/06-run-result.json \
-  --output <run>/07-trace-document.json
-```
-
-Проверьте его:
-
-```bash
-python <skill-pack>/tools/trace_check.py \
-  <run>/07-trace-document.json \
-  --require-execution
-```
-
-После создания `orchestrator-output.json` выполните перекрёстную проверку:
-
-```bash
-python <skill-pack>/tools/trace_check.py \
-  <run>/07-trace-document.json \
-  --orchestrator-artifact <run>/08-orchestrator-output.json \
-  --require-execution
-```
-
-Финальный PASS допустим только для полной связи:
-
-```text
-REQ -> TC -> FILE -> METHOD -> RUN evidence
-```
-
-## 7. Готовый запрос для полной цепочки
-
-```text
-Используй скилл orchestrate из <skill-pack>/skills/orchestrate/SKILL.md
-и каноническую маршрутизацию из <skill-pack>/contracts/pipeline.json.
-
-Корень пакета скиллов: <абсолютный путь к пакету>
-Корень проекта: <абсолютный путь к проекту>
-Область функции: <описание>
-Разрешённые входы: <абсолютные пути или пути относительно проекта>
-Корень артефактов: <project>/docs/to_do/test-pipeline/<feature>/<attempt>
-Рабочее пространство сгенерированных тестов: <путь к изолированной копии проекта>
-
-Пройди context-marker -> tc-generator -> CSV -> tc-reviewer ->
-tc-to-autotest -> autotest-reviewer -> run-tests -> trace-check.
-После каждого JSON проверь его по схеме. Остановись при первом ненулевом коде
-завершения, запросе доработки от проверяющего, результате запуска не `PASS` или
-расхождении трассировки.
-
-Не изменяй рабочий исходный код, существующие тесты, конфигурацию, зависимости и
-файлы блокировки версий. Не сохраняй секреты. Показывай результат каждого этапа
-человеку.
-```
-
-## 8. Windows и Linux
-
-Skill instructions, schemas и Python tools являются кроссплатформенными.
-
-На Linux средство запуска использует:
-
-- `.venv/bin/python`;
-- `./mvnw`;
-- `./gradlew`;
-- `$JAVA_HOME/bin/java` либо `java` из `PATH`.
-
-На Windows средство запуска использует:
-
-- `.venv\Scripts\python.exe`;
-- `mvnw.cmd`/`gradlew.cmd`;
-- `cmd /c` для `.cmd` и `.bat` wrappers.
-
-Убедитесь, что POSIX-обёртки уже имеют право на выполнение. Не меняйте файлы
-проекта автоматически только ради прохождения пайплайна.
-
-Полная приёмочная проверка выпуска была выполнена на Windows. POSIX-ветки
-реализованы и покрыты модульными тестами, но отдельная полная сквозная проверка
-на Linux ещё не проводилась.
-
-## 9. Ограничения
-
-- Формально поддерживаемая полная цепочка: Java/JUnit 5 и Python/pytest.
-- TypeScript/Jest и Go/testing: экспериментальная поддержка, выполнение отключено.
-- Kotlin и другие стеки могут быть проанализированы моделью, но не должны
-  получать формальный `PASS` пайплайна без расширения канонических возможностей.
-- Качество рассуждений может различаться между языковыми моделями. Схемы и
-  инструменты уменьшают вариативность, но не заменяют способность модели понимать
-  код и требования.
-- Сопоставление с Jira Zephyr зависит от версии и конфигурации плагина. Перед
-  массовым импортом проверьте один CSV и при необходимости создайте отдельный
-  адаптер, не меняя канонический JSON.
-
-## 10. Диагностика
-
-1. Выполните `python tools/doctor.py --root .`.
-2. Выполните `python tools/contract_check.py --root . --full`.
-3. Проверьте конкретный JSON через `tools/validate_artifact.py`.
-4. Проверьте `--help` проблемного CLI.
-5. Убедитесь, что AI читает файлы из канонических путей
-   `contracts/pipeline.json`, а не старые копии.
-6. При ошибке схемы или смысла сохраните исходный артефакт и создайте новую
-   попытку после исправления причины.
+Это maintainer/release-команды, а не шаги обычного production run. Runtime не запускает
+полный repository test suite, `ci_gate` или release eval автоматически.
+
+`release/manifest.json` — persisted machine authority для package version, exact runtime
+registry/digest, pipeline contract, profiles, adapters и release-eval suite. Он исключён
+из собственного runtime digest, чтобы не создавать self-cycle.
+
+Текущий package state — `implemented_unverified`. Claim
+`core-pilot-ready for <exact verified tuple>` разрешён только после одного smoke и
+трёх fresh runs каждого critical scenario. Instability или protocol violation навсегда
+блокирует readiness текущей campaign; evaluator сохраняет append-only receipt в
+`.pilot-runs/release-eval-ledger`, и следующая clean campaign автоматически требует
+пять fresh runs каждого critical scenario. `--predecessor-evaluation` нужен только для
+импорта валидного внешнего predecessor; отсутствие флага не сбрасывает уже записанную
+эскалацию.
+Эта adaptive campaign запускается отдельно для release qualification; production run
+не вызывает её и не повторяет model stages ради квалификации.
+В обычном run generator записывает `MODEL_RESPONSE_RECEIVED.transport_attempts=1|2`;
+`2` означает единственный внутренний transport/schema retry. У остальных stages это
+поле равно `1`, а C-lite cardinality читается из evidence pairs reviewer ledger.
+
+Company runner, production rollback и реальный Zephyr tenant round-trip для core pilot
+остаются `N/A`.
