@@ -18,6 +18,33 @@ DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 
 
+def test_directory_guard_tolerates_reported_attribute_bit_but_rejects_reparse(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    original_stat = os.stat
+    calls = 0
+    extra = 0x10000000  # Exact transient bit observed on the Windows CI runner.
+
+    def observed_stat(path, *args, **kwargs):
+        nonlocal calls
+        details = original_stat(path, *args, **kwargs)
+        if path != tmp_path:
+            return details
+        calls += 1
+        return SimpleNamespace(
+            st_dev=details.st_dev, st_ino=details.st_ino, st_mode=details.st_mode,
+            st_file_attributes=0x10 | (extra if calls == 1 else 0),
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "stat", observed_stat)
+        guard = confined_output._open_directory_guard(tmp_path)
+        confined_output._close_guard(guard)
+        calls, extra = 0, 0x400
+        with pytest.raises(OutputConfinementError):
+            confined_output._open_directory_guard(tmp_path)
+
+
 def _sealed(value: dict) -> dict:
     value = dict(value)
     value["digest"] = pilot_state._digest(value)

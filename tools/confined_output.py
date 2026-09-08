@@ -39,7 +39,12 @@ def _is_link_or_reparse(path: Path) -> bool:
 
 def _identity(path: Path) -> tuple[int, int, int | None]:
     details = os.stat(path, follow_symlinks=False)
-    return details.st_dev, details.st_ino, getattr(details, "st_file_attributes", None)
+    attributes = getattr(details, "st_file_attributes", None)
+    if attributes is not None and stat.S_ISDIR(details.st_mode):
+        # Windows may inconsistently report this directory bit (CPython #126253).
+        # Preserve every other attribute, including FILE_ATTRIBUTE_REPARSE_POINT.
+        attributes &= ~0x10000000
+    return details.st_dev, details.st_ino, attributes
 
 
 def _relative_output(root: Path, value: str | Path) -> tuple[Path, tuple[str, ...]]:
