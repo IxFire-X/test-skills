@@ -83,8 +83,11 @@ def _open_directory_guard(path: Path) -> int:
     else:
         guard = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
     try:
-        if _identity(path) != before or _is_link_or_reparse(path):
-            raise OutputConfinementError("--output parent changed during validation")
+        after = _identity(path)
+        if after != before or _is_link_or_reparse(path):
+            raise OutputConfinementError(
+                f"--output parent changed during validation (identity before={before!r}, after={after!r})"
+            )
         if os.name != "nt":
             details = os.fstat(guard)
             if (details.st_dev, details.st_ino) != before[:2]:
