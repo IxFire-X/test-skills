@@ -2,6 +2,7 @@
 
 ## Презентация и обзор
 
+- [Подробный справочник всех файлов и схемы взаимодействия модулей](docs/pipeline-file-guide-ru.md).
 - [Презентация на русском: 16 слайдов, около 20 минут](docs/portable-testing-pipeline-ru.pptx).
 - [Заметки докладчика](docs/presentation-notes-ru.md).
 - [Что сделано, структура пакета и причины попробовать](docs/portable-pipeline-overview-ru.md).
