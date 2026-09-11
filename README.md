@@ -2,6 +2,7 @@
 
 ## Презентация и обзор
 
+- [Настоящие тест-кейсы Spring Petclinic: 64 кейса, 290 шагов](docs/examples/petclinic-owner-lifecycle/cases.md) — [HTML, исходный JSON и пояснение к результатам](docs/examples/petclinic-owner-lifecycle/README.md).
 - [Подробный справочник всех файлов и схемы взаимодействия модулей](docs/pipeline-file-guide-ru.md).
 - [Презентация на русском: 16 слайдов, около 20 минут](docs/portable-testing-pipeline-ru.pptx).
 - [Заметки докладчика](docs/presentation-notes-ru.md).
