@@ -13,14 +13,14 @@
 
 ## 2. Один раз подключить пакет
 
-Версия с доработками portable-пайплайна находится в ветке **`Fix-and-Test`**. Откройте терминал **в корне рабочего проекта** и выполните:
+Установите пакет из ветки **`main`**. Откройте терминал **в корне рабочего проекта** и выполните:
 
 ```text
-git clone --branch Fix-and-Test --single-branch https://github.com/IxFire-X/test-skills.git .tools/test-skills
+git clone --branch main --single-branch https://github.com/IxFire-X/test-skills.git .tools/test-skills
 python -m venv .tools/test-skills/.venv
 ```
 
-Вместо Git можно скачать [ZIP ветки Fix-and-Test](https://github.com/IxFire-X/test-skills/archive/refs/heads/Fix-and-Test.zip) и распаковать содержимое папки пакета в `.tools/test-skills`. После распаковки должен существовать файл `.tools/test-skills/skills/orchestrate/SKILL.md`; затем выполните команду создания `.venv` выше. Если `python` не находится, используйте путь к установленному Python 3.11+.
+Вместо Git можно скачать [ZIP ветки main](https://github.com/IxFire-X/test-skills/archive/refs/heads/main.zip) и распаковать содержимое папки пакета в `.tools/test-skills`. После распаковки должен существовать файл `.tools/test-skills/skills/orchestrate/SKILL.md`; затем выполните команду создания `.venv` выше. Если `python` не находится, используйте путь к установленному Python 3.11+.
 
 Установите зависимости пакета в созданное окружение. Выберите команду для своей ОС; терминал по-прежнему должен быть в корне проекта.
 
