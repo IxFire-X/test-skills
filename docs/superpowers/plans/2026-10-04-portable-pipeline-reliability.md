@@ -343,3 +343,17 @@ RestAssured, AssertJ, Allure и запрет JDBC не становятся ун
 - Конкретно недоступны: разрешённые code/spec/config/test-data inputs рабочего проекта и выбранный change; фактический CLI/model ID Deepseek, лимиты и host evidence изоляции/полной передачи входов; URL/access handles либо реальный MockMvc setup; механизм запуска и восстановления данных. Секреты не запрашиваются. По ответу пользователя проект существует, но доступа здесь нет; повторное согласование не требуется.
 - Нельзя подтвердить семантическую полноту обоих объёмов, фактический Surefire/Failsafe маршрут, качество генерации/review на Deepseek и отсутствие спасательных подсказок в реальных парах. A/B большого ревью и расширение reviewer-схемы без этих измерений не вводились.
 - Все отметки `[x]` выше относятся к реализованной локально проверяемой работе; они не закрывают внешние критерии приёмки. Qualification остаётся `implemented_unverified`, `ready_tuple=null`.
+
+### Продолжение 5 октября — инструкция установки и доступность внешней приёмки
+
+- Исходное состояние после переноса: `D:\AI-Projects\test-skills`, ветка `Fix-and-Test`, HEAD `279bcddcfc1eb8d2838717a495b4b867cfabe43b`, рабочее дерево чистое. При read-only оценке GitHub default branch `main` указывала на `8726c7a775771771be40a42100f1acd4cdd7453e`, поэтому прежний `git clone` из QUICKSTART получал версию до доработок.
+- Пользователь разрешил следующий шаг, но подтвердил: доступа к рабочему проекту по-прежнему нет. Контрольная пара reviewer остаётся 0/2, итоговые запуски — 0/2 full-spec и 0/2 change со связанной регрессией; все они UNVERIFIED. Локальные примеры и другая модель их не заменяют.
+- Исправлена установка в QUICKSTART: явная ветка `Fix-and-Test` для clone и ZIP. В QUICKSTART, README и USAGE отражён системный Maven; в USAGE сохранена точная граница `test`/Surefire без обещания Failsafe/`verify`. Runtime-код, схемы, принятые кейсы и qualification не менялись.
+- Проверка этой правки: `contract_check --full`, `render_contract_docs --check`, `doctor` (только `pack_integrity`) и `git diff --check` — PASS. Адресная проверка clone/ZIP и локальных ссылок — PASS; `git ls-remote --exit-code origin refs/heads/Fix-and-Test` подтвердил SHA `279bcddcfc1eb8d2838717a495b4b867cfabe43b`. Независимое read-only ревью diff — без замечаний. Новые тесты не добавлялись; полный pytest для правки документации не повторялся.
+- На этом checkpoint были изменены только QUICKSTART, README, USAGE и этот план; правка была локальной, commit/push ещё не выполнялись.
+
+### Публикация 5 октября — подготовка commit, push и слияния
+
+- Пользователь явно разрешил commit/push и слияние с `main` при успешной проверке. После fetch: `origin/main=8726c7a775771771be40a42100f1acd4cdd7453e`, `origin/Fix-and-Test=279bcddcfc1eb8d2838717a495b4b867cfabe43b`; расхождения нет, возможно fast-forward без переписывания истории.
+- GitHub Actions run `37303258086` для runtime-коммита `279bcdd`: Ubuntu/Python 3.11 и 3.12 — success; Windows/Python 3.12 на момент подготовки ещё выполняется. До результата Windows слияние не объявляется проверенным.
+- Публикуемая правка затрагивает только четыре указанных документа. Байты runtime, схем и manifest не меняются; внешняя приёмка Deepseek и рабочего проекта остаётся UNVERIFIED.

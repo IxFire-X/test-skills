@@ -52,7 +52,8 @@ Linux и Windows используют один пайплайн и project-nativ
 | Runtime | Linux | Windows |
 |---|---|---|
 | Python / pytest | `.venv/bin/python` | `.venv/Scripts/python.exe` |
-| Maven / JUnit 5 | `mvnw` | `mvnw.cmd` |
+| Maven Wrapper / JUnit 5 | `mvnw` | `mvnw.cmd` |
+| Системный Maven / JUnit 5 | `mvn` в PATH | `mvn.cmd` в PATH |
 | Gradle / JUnit 5 | `gradlew` | `gradlew.bat` |
 
 Автоматическое обнаружение выбирает runtime текущей ОС. Linux venv может содержать
@@ -61,6 +62,13 @@ Linux и Windows используют один пайплайн и project-nativ
 interpreter/wrapper должен уже иметь executable permission; пайплайн её не изменяет.
 После переноса проекта на другую ОС создайте её venv и подтвердите изменение runtime
 в существующем `.skillsrc`; старый attempt с прежним baseline не переиспользуется.
+
+При создании `.skillsrc` для Maven сначала выбирается пригодный wrapper, затем
+системный `mvn` из PATH. Для системного варианта используется
+`maven:selected-symbols-v1` и поле `executable`; разрешённый абсолютный путь и bytes
+launcher связываются с baseline. Существующая явная конфигурация не переключается
+молча. Оба Maven-адаптера запускают фазу `test` и читают Surefire; маршрут
+Failsafe/`verify` ими не реализован.
 
 Пакет переносится в проект целиком, но автоматическое выполнение ограничено этими
 адаптерами и имеющимся project setup. Для другого языка/framework сохраняйте явный
@@ -76,7 +84,7 @@ drift требует `WAITING_FOR_INPUT`; подтверждённая заме�
 evidence.
 
 Каждый attempt выбирает ровно один exact module, включая nested module. Module cwd,
-test root, wrapper/interpreter, adapter ID, build profile и typed adapter parameters
+test root, wrapper/interpreter/executable, adapter ID, build profile и typed adapter parameters
 принадлежат этому attempt. Cross-module orchestration в pilot отсутствует.
 
 ## 4. Durable run
@@ -164,6 +172,7 @@ closed adapters:
 
 - `pytest:selected-symbols-v1`;
 - `maven-wrapper:selected-symbols-v1`;
+- `maven:selected-symbols-v1`;
 - `gradle-wrapper:selected-symbols-v1`.
 
 ## 8. Disposition и finalization

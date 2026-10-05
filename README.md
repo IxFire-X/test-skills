@@ -37,7 +37,7 @@ module, path или `--target` могут только сузить scope. Са�
   запускается; materialization и execution имеют `NOT_APPLICABLE`.
 - `local-pilot-v1` после accepted canonical и automation review материализует exact
   generated file set и запускает только reviewed targets через project-native
-  pytest, Maven wrapper или Gradle wrapper.
+  pytest, Maven Wrapper, системный Maven или Gradle Wrapper.
 
 Явный запрос полного pipeline даёт run-scoped разрешение на такое выполнение только
 для текущего run. Простое наличие папки или запрос тест-кейсов код не запускают.
@@ -79,7 +79,7 @@ JSON/HTML/CSV, а Markdown проверяется при публикации и
 
 ## Execution и generated files
 
-Executor получает закрытый adapter ID, exact interpreter/wrapper path, build profile
+Executor получает закрытый adapter ID, exact interpreter/wrapper/executable path, build profile
 и typed parameters — не shell string. Он запускается из выбранного module cwd и не
 исправляет тест после FAIL без отдельного доказанного решения.
 
