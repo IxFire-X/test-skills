@@ -372,6 +372,11 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             durable["root"], str(attempt["attempt_id"]),
             "context-marker:baseline", str(context_marker_digest),
         )
+        marker_request_event = durable["model_lifecycle"]["stages"]["context-marker:baseline"]["MODEL_REQUESTED"]
+        marker_request = durable["read_model_request"](
+            durable["root"], str(attempt["attempt_id"]), "context-marker:baseline",
+            marker_request_event["artifact_digest"],
+        )
     except (KeyError, TypeError, ValueError):
         _error(errors, "STAGE_READBACK_INVALID")
         return "independence_unverified"
@@ -447,11 +452,11 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
         ),
         "context-marker": (
             "context-marker:baseline", "model-stage-artifact", context_marker_digest, None,
-            [baseline["requirements"]["digest"], baseline["inventory_digest"]], [context_marker_digest],
+            marker_request["input_digests"], [context_marker_digest],
         ),
         "tc-reviewer": (
             "tc-reviewer:canonical", "model-stage-artifact", reviewer_output_digest, ledger["reviewer_invocation_id"],
-            [package["package_digest"]], [reviewer_output_digest],
+            [package["candidate_digest"], package["package_digest"]], [reviewer_output_digest],
         ),
     }
     exact_keys = {"stage_instance_id", "stage", "status", "role", "role_policy", "model_id", "invocation_id", "input_digests", "output_digests", "artifact_ref"}

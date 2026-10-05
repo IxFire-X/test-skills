@@ -1,4 +1,4 @@
-"""Reject thin catalogs and non-human scenarios on a canonical document."""
+"""Check human wording and report optional scenario-design recommendations."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from tools.json_cli import JsonArgumentParser, emit_error
 from tools.schema_validation import load_json_strict
 
 HTTP_LEAD = re.compile(r"^\s*(GET|POST|PUT|PATCH|DELETE)\b", re.I)
-HANDLE_RE = re.compile(r"reverse\s*\(|/api/|\b(GET|POST|PUT|PATCH|DELETE)\b", re.I)
 TITLE_WORD = re.compile(r"[0-9A-Za-zА-Яа-яЁё_-]+")
 INTERNAL_CALL = re.compile(r"\breverse\s*\(|\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\s*\(", re.I)
 RAW_BINDING = re.compile(
@@ -45,13 +44,6 @@ TRANSLATIONESE = re.compile(
     re.I,
 )
 GAP_RE = re.compile(r"пробел|нет ручки|не автоматиз|\bmanual\b", re.I)
-ID_FLOW_RE = re.compile(r"запомнить|из шага|entity_id|_id|\bpk\b|step_output", re.I)
-
-
-def _handle_in(text: str) -> bool:
-    return bool(HANDLE_RE.search(text or ""))
-
-
 def _expected_parts(step: dict[str, Any]) -> list[str]:
     parts: list[str] = []
     if step.get("expected"):
@@ -92,6 +84,7 @@ def _is_gap(step: dict[str, Any]) -> bool:
 def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
     cases = list(document.get("test_cases") or [])
     problems: list[str] = []
+    recommendations: list[str] = []
     if not cases:
         problems.append("no scenarios")
 
@@ -107,17 +100,6 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
             problems.append(
                 f"{case_id}: mostly ПРОБЕЛ — put UI/plugin gaps in «Пробелы», not a test case"
             )
-
-    thin = []
-    for case, steps in live:
-        focused_refusal = len(steps) == 1 and (
-            REFUSAL_CODE.search(_expected_text(steps[0]))
-            and REFUSAL_ORACLE.search(_expected_text(steps[0]))
-        )
-        if len(steps) < 3 and not focused_refusal:
-            thin.append(str(case.get("case_id") or case.get("id") or "?"))
-    if live and (len(thin) == len(live) or len(thin) > max(1, len(live) // 3)):
-        problems.append("too many one-shot cases (catalog of requests): " + ", ".join(thin))
 
     bad_http_actions: list[str] = []
     internal_actions: list[str] = []
@@ -172,8 +154,6 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
                     bad_http_actions.append(case_id)
                 if not data.strip():
                     missing_data.append(case_id)
-            elif _handle_in(action):
-                bad_http_actions.append(case_id)
             if INTERNAL_CALL.search(action):
                 internal_actions.append(case_id)
             if RAW_BINDING.search(data):
@@ -236,17 +216,17 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
     if translationese:
         problems.append("human fields contain English-template translationese: " + ", ".join(dict.fromkeys(translationese)))
     if weak_titles:
-        problems.append("title must name the checked behavior and object: " + ", ".join(weak_titles))
+        recommendations.append("check that title names the behavior and object: " + ", ".join(weak_titles))
     if http_titles:
         problems.append("title contains HTTP/path instead of domain behavior: " + ", ".join(dict.fromkeys(http_titles)))
     if duplicate_titles:
-        problems.append("duplicate titles: " + ", ".join(duplicate_titles))
+        recommendations.append("check duplicate titles: " + ", ".join(duplicate_titles))
     if http_only_expected:
         problems.append("expected result is only an HTTP code or «успешно»: " + ", ".join(dict.fromkeys(http_only_expected)))
     if weak_refusal:
         problems.append("refusal step needs a human oracle (entity still there / error), not only 400: " + ", ".join(dict.fromkeys(weak_refusal)))
     if setup_heavy:
-        problems.append("put fixture entities in Предусловия, not as first steps: " + ", ".join(setup_heavy))
+        recommendations.append("consider moving fixture setup to Предусловия: " + ", ".join(setup_heavy))
     if vague:
         problems.append("test data says «как в коде» — write the actual body: " + ", ".join(dict.fromkeys(vague)))
     if vague_values:
@@ -264,9 +244,7 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
     writes = any(word in joined for word in ("post", "put", "patch", "create", "созда"))
     reads = any(word in joined for word in ("get", "read", "прочит", "повтор", "откры"))
     if writes and not reads:
-        problems.append("creates or changes something but never reads it back")
-    if live and not ID_FLOW_RE.search(joined) and "step_output" not in json.dumps(document, ensure_ascii=False):
-        problems.append("no id flow between steps (remember an id from step N and use it later)")
+        recommendations.append("consider whether the specified write outcome needs readback")
 
     human = bool(
         bad_http_actions
@@ -276,10 +254,7 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
         or machine_expected
         or secret_exposure
         or translationese
-        or weak_titles
         or http_titles
-        or duplicate_titles
-        or setup_heavy
         or vague
         or vague_values
         or ambiguous
@@ -301,6 +276,7 @@ def check_canonical(document: dict[str, Any]) -> dict[str, Any]:
             for case in cases
         ],
         "problems": problems,
+        "recommendations": recommendations,
     }
 
 

@@ -5,7 +5,7 @@ description: Use when a complete canonical test-case candidate requires one fres
 
 # Canonical test-case review
 
-Read the [review contract](references/review-verdicts.md), `schemas/tc-reviewer-output.schema.json`, `schemas/reviewer-session.schema.json`, `tools.canonical_document`, and `tools.revision_selection`. Review the complete candidate and its exact bare digest.
+Read the [review contract](references/review-verdicts.md), `schemas/tc-reviewer-output.schema.json`, `schemas/reviewer-session.schema.json`, and complete authorized review inputs. Execute the canonical/revision validators; read their source only as needed to diagnose a failure. Review the complete candidate and its exact bare digest.
 
 ## Session boundary
 
@@ -21,6 +21,10 @@ and finalization predicates of `cases-only-v1` or `local-pilot-v1`.
 
 1. Schema- and semantic-validate the candidate. `reviewed_case_ids` equals every case exactly once in physical order.
 2. Review every step, data-flow edge, human field, assertion, disposition and requirement relation. Apply the mandatory [human scenario rules](../tc-generator/references/case-generation-contract.md#human-scenario-rules) and the [review contract](references/review-verdicts.md). Findings cite the exact canonical location and violated requirement or rule; stylistic preference alone cannot reject an unambiguous conforming case.
+   Expected must describe a system result before execution in every step, including
+   the last; a service-only mark such as «Проверено автотестом» is invalid. A short
+   native case with a supported action and oracle needs no HTTP block, minimum step
+   count or automatic ID transfer. Runtime PASS/FAIL belongs in the execution report.
    Compare original authorized requirements, normalized context and cases in both directions. Retrieve missing original evidence through the bounded context channel; if unavailable, report the gap. Confirm that steps exercise each claimed behavior and assert an observable result, including applicable negative/boundary conditions. An ID link or objective alone is insufficient. Keep a known defect with a clear required oracle testable; only missing oracle/input/access/setup justifies its corresponding gap.
 3. Emit the `effective` reference: exact candidate for `ПРИНЯТО`, exact successor for `AUTO_FIX_APPLIED`, and `null` for `ТРЕБУЕТ ДОРАБОТКИ`. Return `ПРИНЯТО` only for the unchanged valid candidate. Return `AUTO_FIX_APPLIED` only with one complete valid successor revision 2, exact candidate digest, preserved source/canonical/case mappings and identity graph, and valid lineage.
 4. A destructive, partial, or semantic-choice correction requires `ТРЕБУЕТ ДОРАБОТКИ`; it never selects a partial patch. Revision 3 and a second authoritative verdict are forbidden.

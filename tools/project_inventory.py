@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -66,7 +67,7 @@ _PARENT_BUILD_PATHS = frozenset({
     "package.json", "go.mod", "go.work",
 })
 _CLOSED_ADAPTER_IDS = frozenset({
-    "pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1",
+    "pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1",
 })
 _EXECUTION_SOURCE_SUFFIXES = frozenset({
     ".py", ".java", ".kt", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".cs",
@@ -161,10 +162,34 @@ def module_runtime_path(project_root: Path, relative_path: str) -> Path:
     return candidate
 
 
-def runtime_identity(project_root: Path, relative_path: str) -> str:
+def system_maven_path(executable: str) -> Path:
+    """Resolve the one closed host tool; its launcher is the identity boundary."""
+    if not isinstance(executable, str) or not executable or "\0" in executable:
+        raise InventoryError("system Maven executable is missing")
+    raw = Path(executable)
+    if executable != "mvn" and not raw.is_absolute():
+        raise InventoryError("system Maven requires mvn or an absolute launcher path")
+    found = shutil.which("mvn") if executable == "mvn" else executable
+    if not found:
+        raise InventoryError("system Maven is unavailable on PATH")
+    candidate = Path(found).absolute()
+    if candidate.name.casefold() not in ({"mvn.cmd"} if os.name == "nt" else {"mvn"}):
+        raise InventoryError("system Maven path must name the closed launcher")
+    try:
+        candidate = candidate.resolve(strict=True)
+    except OSError as error:
+        raise InventoryError("system Maven launcher is unavailable") from error
+    if not candidate.is_file() or (os.name != "nt" and not os.access(candidate, os.X_OK)):
+        raise InventoryError("system Maven launcher is unavailable or not executable")
+    return candidate.resolve()
+
+
+def runtime_identity(project_root: Path, relative_path: str, *, adapter_id: str | None = None) -> str:
     """Bind runtime bytes, and the configuration/target of a POSIX venv link."""
-    candidate = module_runtime_path(project_root, relative_path)
+    candidate = system_maven_path(relative_path) if adapter_id == "maven:selected-symbols-v1" else module_runtime_path(project_root, relative_path)
     content = _content_digest(candidate)
+    if adapter_id == "maven:selected-symbols-v1":
+        return _digest({"path": str(candidate), "launcher": content})
     if candidate.is_symlink():
         return _digest({"runtime": content, "target": str(candidate.resolve(strict=True)), "venv": _content_digest(candidate.parent.parent / "pyvenv.cfg")})
     return content
@@ -324,7 +349,12 @@ def build_inventory(
     project_identity = _project_identity(project_root)
     files: list[dict[str, Any]] = []
     exclusions: list[dict[str, str]] = []
-    for current, dir_names, file_names in os.walk(module_root, topdown=True, followlinks=False):
+
+    def walk_error(error: OSError) -> None:
+        relative = _lexical_rel(project_root, Path(error.filename)) if error.filename else None
+        raise InventoryError(f"inventory directory is unreadable: {relative or module}") from error
+
+    for current, dir_names, file_names in os.walk(module_root, topdown=True, followlinks=False, onerror=walk_error):
         current_path = Path(current)
         admitted_dirs: list[str] = []
         for name in sorted(dir_names):
@@ -362,9 +392,16 @@ def build_inventory(
             if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
                 exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
                 continue
+            secret = _secret_rule(path, b"")
+            if secret is not None:
+                rule, label = secret
+                exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
+                continue
             try:
                 contents = path.read_bytes()
-            except OSError:
+            except OSError as error:
+                if _kind(project_path, path) in {"source", "config"} or suffix in {".md", ".markdown", ".rst", ".txt", ".adoc"}:
+                    raise InventoryError(f"required inventory file is unreadable: {project_path}") from error
                 exclusions.append(_exclusion(project_path, "UNREADABLE", "readability-v1", "unreadable"))
                 continue
             if b"\0" in contents[:8192]:
@@ -433,9 +470,8 @@ def build_inventory(
                 continue
             try:
                 contents = path.read_bytes()
-            except OSError:
-                exclusions.append(_exclusion(project_path, "UNREADABLE", "readability-v1", "unreadable"))
-                continue
+            except OSError as error:
+                raise InventoryError(f"required parent configuration is unreadable: {project_path}") from error
             secret = _secret_rule(path, contents)
             if secret is not None:
                 rule, label = secret
@@ -568,13 +604,16 @@ def _verify_inventory_root(project_root: Path, inventory: Mapping[str, Any]) -> 
 def build_execution_baseline(
     inventory: Mapping[str, Any], *, project_root: Path, requirements: Mapping[str, str], skillsrc_file_id: str,
     skillsrc_authority: Mapping[str, Any],
-    execution_file_ids: Iterable[str], parent_build_file_ids: Iterable[str], interpreter_path: str | None,
-    wrapper_path: str | None, adapter_id: str, build_profile: str, adapter_parameters: Mapping[str, Any],
+    execution_file_ids: Iterable[str], parent_build_file_ids: Iterable[str], interpreter_path: str | None = None,
+    wrapper_path: str | None = None, adapter_id: str | None = None, build_profile: str | None = None, adapter_parameters: Mapping[str, Any] | None = None,
     interpreter_identity: str | None = None, wrapper_identity: str | None = None,
-    proved_dependency_file_ids: Iterable[str] = (),
+    proved_dependency_file_ids: Iterable[str] = (), policy_profile: str = "local-pilot-v1",
+    executable_path: str | None = None, executable_identity: str | None = None,
 ) -> dict[str, Any]:
-    """Freeze controller-declared execution inputs; context is intentionally absent."""
-    if any(
+    """Freeze controller-declared profile-applicable inputs; context is intentionally absent."""
+    if policy_profile not in {"cases-only-v1", "local-pilot-v1"}:
+        raise InventoryError("baseline policy profile is invalid")
+    if policy_profile == "local-pilot-v1" and any(
         isinstance(item, Mapping) and _secret_exclusion_is_execution_significant(item, str(inventory.get("module", ".")))
         for item in inventory.get("exclusions", [])
     ):
@@ -583,30 +622,43 @@ def build_execution_baseline(
         raise InventoryError("requirements identity is unsafe")
     if not isinstance(requirements.get("digest"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", requirements["digest"]):
         raise InventoryError("requirements digest is invalid")
-    if not all(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", value) for value in (adapter_id, build_profile)):
-        raise InventoryError("execution identity is unsafe")
-    if adapter_id not in _CLOSED_ADAPTER_IDS:
-        raise InventoryError("adapter ID is not closed")
-    if wrapper_path is not None and (not isinstance(wrapper_path, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,256}", wrapper_path)):
-        raise InventoryError("wrapper path is unsafe")
-    if adapter_id == "pytest:selected-symbols-v1":
-        if not isinstance(interpreter_path, str) or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", interpreter_path):
-            raise InventoryError("pytest requires an interpreter path")
-        if not isinstance(interpreter_identity, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", interpreter_identity):
-            raise InventoryError("pytest requires an interpreter identity")
-        if wrapper_path is not None or wrapper_identity is not None:
-            raise InventoryError("pytest forbids a wrapper identity")
+    if policy_profile == "cases-only-v1":
+        if any(value is not None for value in (adapter_id, build_profile, adapter_parameters, interpreter_path, interpreter_identity, wrapper_path, wrapper_identity, executable_path, executable_identity)):
+            raise InventoryError("cases-only baseline forbids execution facts")
     else:
-        if wrapper_path is None or not isinstance(wrapper_identity, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", wrapper_identity):
-            raise InventoryError("wrapper adapters require a wrapper identity")
-        if interpreter_path is not None or interpreter_identity is not None:
-            raise InventoryError("wrapper adapters forbid an interpreter identity")
-        expected_wrappers = {
-            "maven-wrapper:selected-symbols-v1": {"mvnw", "mvnw.cmd"},
-            "gradle-wrapper:selected-symbols-v1": {"gradlew", "gradlew.bat"},
-        }
-        if Path(wrapper_path).name.casefold() not in expected_wrappers[adapter_id]:
-            raise InventoryError("wrapper path must name the module-local closed wrapper")
+        if not all(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", value) for value in (adapter_id, build_profile)):
+            raise InventoryError("execution identity is unsafe")
+        if adapter_id not in _CLOSED_ADAPTER_IDS:
+            raise InventoryError("adapter ID is not closed")
+        if wrapper_path is not None and (not isinstance(wrapper_path, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,256}", wrapper_path)):
+            raise InventoryError("wrapper path is unsafe")
+        if adapter_id == "maven:selected-symbols-v1":
+            if not isinstance(executable_path, str) or str(system_maven_path(executable_path)) != executable_path:
+                raise InventoryError("system Maven baseline requires the resolved absolute launcher")
+            if not isinstance(executable_identity, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", executable_identity):
+                raise InventoryError("system Maven requires an executable identity")
+            if any(value is not None for value in (interpreter_path, interpreter_identity, wrapper_path, wrapper_identity)):
+                raise InventoryError("system Maven forbids module-local runtime facts")
+        elif adapter_id == "pytest:selected-symbols-v1":
+            if not isinstance(interpreter_path, str) or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", interpreter_path):
+                raise InventoryError("pytest requires an interpreter path")
+            if not isinstance(interpreter_identity, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", interpreter_identity):
+                raise InventoryError("pytest requires an interpreter identity")
+            if wrapper_path is not None or wrapper_identity is not None:
+                raise InventoryError("pytest forbids a wrapper identity")
+        else:
+            if wrapper_path is None or not isinstance(wrapper_identity, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", wrapper_identity):
+                raise InventoryError("wrapper adapters require a wrapper identity")
+            if interpreter_path is not None or interpreter_identity is not None:
+                raise InventoryError("wrapper adapters forbid an interpreter identity")
+            expected_wrappers = {
+                "maven-wrapper:selected-symbols-v1": {"mvnw", "mvnw.cmd"},
+                "gradle-wrapper:selected-symbols-v1": {"gradlew", "gradlew.bat"},
+            }
+            if Path(wrapper_path).name.casefold() not in expected_wrappers[adapter_id]:
+                raise InventoryError("wrapper path must name the module-local closed wrapper")
+        if adapter_id != "maven:selected-symbols-v1" and (executable_path is not None or executable_identity is not None):
+            raise InventoryError("module-local adapters forbid a system executable identity")
     skillsrc_item = _require_file_ids(inventory, [skillsrc_file_id])[0]
     if Path(str(skillsrc_item["project_path"])).name != ".skillsrc":
         raise InventoryError("skillsrc file identity must bind an exact .skillsrc")
@@ -617,7 +669,7 @@ def build_execution_baseline(
     if project_root.name != inventory.get("project"):
         raise InventoryError("project root does not match inventory identity")
     _verify_inventory_root(project_root, inventory)
-    test_root = _selected_test_root(project_root, inventory, project_root / Path(str(skillsrc_item["project_path"])))
+    test_root = _selected_test_root(project_root, inventory, project_root / Path(str(skillsrc_item["project_path"]))) if policy_profile == "local-pilot-v1" else None
     execution_items = _require_file_ids(inventory, execution_file_ids)
     parent_items = _require_file_ids(inventory, parent_build_file_ids)
     dependency_items = _require_file_ids(inventory, proved_dependency_file_ids)
@@ -634,21 +686,25 @@ def build_execution_baseline(
         raise InventoryError("baseline inputs must be unique")
     if {item["opaque_id"] for item in inputs} != set(_inventory_index(inventory)):
         raise InventoryError("execution baseline must cover every eligible inventory input")
-    _validate_adapter_parameters(adapter_parameters)
+    if policy_profile == "local-pilot-v1":
+        _validate_adapter_parameters(adapter_parameters)
     baseline: dict[str, Any] = {
-        "schema_version": "1.0.0", "project": inventory["project"], "project_identity": inventory["project_identity"], "module": inventory["module"],
+        "schema_version": "1.0.0", "policy_profile": policy_profile, "project": inventory["project"], "project_identity": inventory["project_identity"], "module": inventory["module"],
         "inventory_digest": inventory["digest"],
         "requirements": {"requirement_id": requirements["requirement_id"], "digest": requirements["digest"]},
-        "skillsrc_file_id": skillsrc_file_id, "skillsrc_authority": authority, "test_root": test_root, "inputs": inputs,
-        "adapter_id": adapter_id, "build_profile": build_profile,
-        "adapter_parameters": dict(adapter_parameters),
+        "skillsrc_file_id": skillsrc_file_id, "skillsrc_authority": authority, "inputs": inputs,
     }
-    if adapter_id == "pytest:selected-symbols-v1":
-        baseline["interpreter_path"] = interpreter_path
-        baseline["interpreter_identity"] = interpreter_identity
-    else:
-        baseline["wrapper_path"] = wrapper_path
-        baseline["wrapper_identity"] = wrapper_identity
+    if policy_profile == "local-pilot-v1":
+        baseline.update(test_root=test_root, adapter_id=adapter_id, build_profile=build_profile, adapter_parameters=dict(adapter_parameters))
+        if adapter_id == "pytest:selected-symbols-v1":
+            baseline["interpreter_path"] = interpreter_path
+            baseline["interpreter_identity"] = interpreter_identity
+        elif adapter_id == "maven:selected-symbols-v1":
+            baseline["executable_path"] = executable_path
+            baseline["executable_identity"] = executable_identity
+        else:
+            baseline["wrapper_path"] = wrapper_path
+            baseline["wrapper_identity"] = wrapper_identity
     baseline["digest"] = _digest(baseline)
     _validate_receipt_schema(baseline, "execution-baseline.schema.json", InventoryError)
     return baseline
@@ -661,11 +717,13 @@ def _validate_baseline_shape(baseline: Mapping[str, Any]) -> None:
 
 
 def validate_execution_baseline_binding(
-    baseline: Mapping[str, Any], inventory: Mapping[str, Any], module_root: Path,
+    baseline: Mapping[str, Any], inventory: Mapping[str, Any], module_root: Path, *, policy_profile: str = "local-pilot-v1",
 ) -> None:
     """Prove one frozen baseline is complete, inventory-bound, and executable as declared."""
     _validate_baseline_shape(baseline)
     _validate_receipt_schema(baseline, "execution-baseline.schema.json", InventoryError)
+    if baseline.get("policy_profile") != policy_profile:
+        raise InventoryError("baseline policy profile does not match the authorized run")
     index = _inventory_index(inventory)
     if (
         baseline.get("project") != inventory.get("project")
@@ -695,17 +753,24 @@ def validate_execution_baseline_binding(
             project_root = project_root.parent
     skillsrc_path = project_root / Path(str(skillsrc["project_path"]))
     try:
-        from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
+        from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 
-        load_skillsrc(skillsrc_path)
+        document = normalize_skillsrc(load_skillsrc(skillsrc_path))
     except (OSError, SkillsrcError, ValueError) as error:
         raise InventoryError("execution baseline skillsrc is not valid authoritative configuration") from error
+    if policy_profile == "cases-only-v1":
+        return
     if baseline.get("test_root") != _selected_test_root(project_root, inventory, skillsrc_path):
         raise InventoryError("execution baseline test root binding is invalid")
     _validate_adapter_parameters(baseline.get("adapter_parameters"))
-    runtime_path = baseline.get("interpreter_path") or baseline.get("wrapper_path")
-    identity_key = "interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1" else "wrapper_identity"
-    if not isinstance(runtime_path, str) or runtime_identity(module_root, runtime_path) != baseline.get(identity_key):
+    runtime_path = baseline.get("interpreter_path") or baseline.get("wrapper_path") or baseline.get("executable_path")
+    if baseline.get("adapter_id") == "maven:selected-symbols-v1":
+        selected = [item for item in document["modules"] if item.get("root") == inventory.get("module")]
+        test = selected[0].get("test") if len(selected) == 1 else None
+        if not isinstance(test, Mapping) or test.get("adapter_id") != baseline["adapter_id"] or str(system_maven_path(test.get("executable"))) != runtime_path:
+            raise InventoryError("execution baseline system Maven path binding is invalid")
+    identity_key = "interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1" else "executable_identity" if baseline.get("adapter_id") == "maven:selected-symbols-v1" else "wrapper_identity"
+    if not isinstance(runtime_path, str) or runtime_identity(module_root, runtime_path, adapter_id=baseline.get("adapter_id")) != baseline.get(identity_key):
         raise InventoryError("execution baseline runtime binding is invalid")
 
 
@@ -861,6 +926,7 @@ def validate_execution_baseline(
     baseline: Mapping[str, Any], inventory: Mapping[str, Any], *, late_dependency_file_ids: Iterable[str] = (),
     requirements: Mapping[str, str] | None = None, adapter_id: str | None = None, build_profile: str | None = None,
     adapter_parameters: Mapping[str, Any] | None = None, runtime_identity_value: str | None = None,
+    policy_profile: str = "local-pilot-v1",
 ) -> dict[str, Any]:
     """Validate a frozen baseline without adding new inputs to it."""
     _validate_baseline_shape(baseline)
@@ -874,11 +940,14 @@ def validate_execution_baseline(
         return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
     if adapter_parameters is not None and dict(adapter_parameters) != baseline.get("adapter_parameters"):
         return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
-    identity_key = "interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1" else "wrapper_identity"
-    if runtime_identity_value is None:
+    if baseline.get("policy_profile") != policy_profile:
         return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
-    if runtime_identity_value != baseline.get(identity_key):
-        return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
+    if policy_profile == "local-pilot-v1":
+        identity_key = "interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1" else "executable_identity" if baseline.get("adapter_id") == "maven:selected-symbols-v1" else "wrapper_identity"
+        if runtime_identity_value is None:
+            return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
+        if runtime_identity_value != baseline.get(identity_key):
+            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
     late_ids = list(late_dependency_file_ids)
     if late_ids:
         try:

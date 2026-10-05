@@ -39,3 +39,35 @@ the implementation as proof of correctness. If the intended scope or expected ou
 cannot be established, retain the exact uncertainty for controller clarification.
 Downstream generation decomposes this evidence into canonical coverage conditions,
 and review independently reconciles those conditions with the original request.
+
+For standard OpenSpec, the authorized `openspec/specs/<capability>/spec.md` documents
+are baseline; `openspec/changes/<selected-change>/specs/<capability>/spec.md` documents
+are one explicitly selected live delta. Compose the final state: RENAMED changes identity
+and keeps baseline behavior, REMOVED deletes it, MODIFIED replaces the complete block,
+ADDED introduces a block. A rename followed by MODIFIED uses the TO name. Reject an
+unmatched operation or ambiguous duplicate; do not silently match similar names or apply
+archive twice. Retain every scenario and condition of each surviving block.
+
+`tools.build_context` retains source IDs and adds inline identity provenance, for example
+`openspec/specs/catalog/spec.md:8 — capability=catalog; ### Requirement: Search; #### Scenario: Found`.
+Keep those exact requirement/scenario references, `path — sha256:...`, and any RENAMED
+references in normalized rows. The identity union across split rows must equal the final
+selected source set, with matching source digests; IDs are never replaced by titles.
+`openspec_diagnostics` checks the actual normalized envelope at controller publication
+and readback, reporting missing/extra identities and origin mismatches with source
+locations. Archived documents are historical context and are not reapplied. This is a composition check;
+independent review still checks all semantic conditions in the bodies.
+
+The marker request binds exactly `[baseline.requirements.digest, baseline.inventory_digest,
+*context_receipt_digests]`, with at least one current authorized context receipt from the
+same attempt/inventory. Publication and readback verify the bound OpenSpec files and
+normalized identities. No additional source discovery or whole-project claim follows
+from those receipts: full-spec scope needs all agreed specifications authorized; change
+scope needs the selected delta and the justified related regression inputs.
+
+Keep gaps in existing `warnings`, with four fields: source requirement/scenario and link;
+what is missing; which checks it blocks; the concrete question requiring resolution.
+Requirement-without-scenario warnings preserve the requirement. Unsupported schema,
+unmatched names or missing baseline require clarification; they never authorize invented
+requirements. Substantive unresolved gaps block full-coverage claims, while independently
+confirmed behavior may proceed under the existing protocol.

@@ -176,3 +176,28 @@ def test_legacy_v3_entrypoint_is_process_free(tmp_path: Path, monkeypatch):
 
     assert result["verdict"] == "NOT_RUNNABLE"
     assert result["diagnostics"][0]["code"] == "RUNNER_LEGACY_DISABLED"
+
+
+def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path, monkeypatch):
+    from tools.execution_adapters import build_request
+    from tools.run_tests import _request_is_attempt_local, _request_report_path
+
+    executable = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
+    executable.write_text("runtime", encoding="utf-8")
+    executable.chmod(0o755)
+    module = tmp_path / "module"
+    module.mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path))
+    request = build_request("maven:selected-symbols-v1", {
+        "module_root": str(module),
+        "test": {"adapter_id": "maven:selected-symbols-v1", "executable": "mvn", "build_profile": "default", "adapter_parameters": {}},
+    }, [{"selector": "pkg.SampleTest#works"}])
+
+    assert request.executable == str(executable.resolve())
+    assert request.argv == (str(executable.resolve()), "-Pdefault", "-Dtest=pkg.SampleTest#works", "test")
+    assert _request_is_attempt_local(request, tmp_path, module)
+    assert _request_report_path(request) == module / "target/surefire-reports"
+    from tools.run_tests import ProcessOutcome, _process_row, validate_process_evidence
+    source = {"source_digest": "sha256:" + "a" * 64}
+    row = _process_row("OS_ERROR", ProcessOutcome(127, "", "", "OS_ERROR"), "RUN-system", source, request.adapter_id, 1.0)
+    assert validate_process_evidence([row], "RUN-system", source, 127, 1.0, {"runner": "maven", "command": request.adapter_id}) == []

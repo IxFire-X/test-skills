@@ -77,6 +77,7 @@ Version: `4.0`
 |---|---|---|---|
 | `pytest:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
 | `maven-wrapper:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
+| `maven:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
 | `gradle-wrapper:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
 
 ## Acceptance predicates

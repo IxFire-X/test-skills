@@ -26,7 +26,9 @@ def automated_document() -> dict:
             "base_url_source": {"kind": "environment", "name": "BASE_URL", "provenance": ["test"]},
             "method": "GET", "path": "/products",
         },
+        "test_data": "Тело запроса отсутствует.",
     })
+    step["expectations"][0]["text"] = "Отображается список доступных товаров.\n\nHTTP 200 OK"
     step["expectations"][0]["assertions"] = [{
         "assertion_id": "ASSERT-batch-a-001", "display_order": 1,
         "actual": {"kind": "http_status"}, "operator": "equals",

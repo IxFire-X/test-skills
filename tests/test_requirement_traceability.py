@@ -132,3 +132,59 @@ def test_context_allows_more_than_two_hundred_normalized_source_requirements() -
     requirements = context["artifacts"]["analytics_documentation"]["requirements"]
     assert len(requirements) == 201
     assert requirements[-1]["source_requirement_id"] == "SREQ-0201"
+
+
+def test_openspec_composes_selected_change_and_checks_split_normalized_context() -> None:
+    from tools.build_context import openspec_diagnostics
+
+    def snapshot(path: str, content: str) -> dict[str, str]:
+        return {"path": path, "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
+
+    baseline = "## Requirements\n" + "\n".join(
+        f"### Requirement: {name}\nKeep literal `a  b` for {name}.\n#### Scenario: {name} scenario\n- WHEN used\n- THEN baseline {name}\n"
+        for name in ["Retained", "Changed", "Deleted", "Old Name"]
+    )
+    delta = (
+        "## ADDED Requirements\n### Requirement: Added\nNew behavior.\n#### Scenario: Added scenario\n- WHEN new\n- THEN added\n"
+        "## MODIFIED Requirements\n### Requirement: Changed\nFull replacement.\n#### Scenario: Replacement scenario\n- WHEN changed\n- THEN replacement\n"
+        "## REMOVED Requirements\n### Requirement: Deleted\nReason: retired.\nMigration: Added.\n"
+        "## RENAMED Requirements\n- FROM: `### Requirement: Old Name`\n- TO: `### Requirement: New Name`\n"
+    )
+    archived = "## ADDED Requirements\n### Requirement: Archived Only\nHistorical.\n#### Scenario: Old\n- WHEN old\n- THEN old\n"
+    entries = [snapshot("openspec/specs/catalog/spec.md", baseline), snapshot("openspec/changes/update/specs/catalog/spec.md", delta), snapshot("openspec/changes/archive/old/specs/catalog/spec.md", archived)]
+    context = build_context(Path.cwd(), docs_snapshot=entries)
+    rows = context["artifacts"]["analytics_documentation"]["requirements"]
+    texts = "\n".join(row["text"] for row in rows)
+    assert len(rows) == 4
+    assert "baseline Retained" in texts and "`a  b`" in texts and "baseline Old Name" in texts
+    assert "Replacement scenario" in texts and "Changed scenario" not in texts
+    assert "### Requirement: New Name" in texts and "### Requirement: Deleted" not in texts
+    assert "Archived Only" not in texts
+    assert any("historical archived context" in warning for warning in context["warnings"])
+    assert openspec_diagnostics(context, entries) == []
+    split = deepcopy(context)
+    split_rows = split["artifacts"]["analytics_documentation"]["requirements"]
+    for row in list(split_rows):
+        scenario_marks = [mark for mark in row["provenance"] if "; #### Scenario:" in mark]
+        extra = deepcopy(row)
+        row["provenance"] = [mark for mark in row["provenance"] if mark not in scenario_marks]
+        extra["provenance"] = [mark for mark in extra["provenance"] if " — capability=" not in mark] + scenario_marks
+        extra["source_requirement_id"] += "-scenario"
+        extra["display_order"] = len(split_rows) + 1
+        split_rows.append(extra)
+    assert openspec_diagnostics(split, entries) == []
+    assert schema_diagnostics({key: value for key, value in split.items() if key != "status"}, Path("schemas/context-marker-output.schema.json"), Path.cwd()) == []
+
+
+def test_openspec_reports_missing_extra_and_wrong_source_in_normalized_context() -> None:
+    from tools.build_context import openspec_diagnostics
+
+    content = "## Requirements\n### Requirement: Search\nSearch the catalog.\n#### Scenario: Found\n- WHEN search\n- THEN results\n"
+    entry = {"path": "openspec/specs/catalog/spec.md", "content": content, "sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()}
+    context = build_context(Path.cwd(), docs_snapshot=[entry])
+    row = context["artifacts"]["analytics_documentation"]["requirements"][0]
+    row["digest"] = "sha256:" + "0" * 64
+    row["provenance"] = [mark.replace("#### Scenario: Found", "#### Scenario: Invented") for mark in row["provenance"]]
+    diagnostics = openspec_diagnostics(context, [entry])
+    assert {item["code"] for item in diagnostics} == {"OPENSPEC_MISSING", "OPENSPEC_EXTRA", "OPENSPEC_SOURCE_MISMATCH"}
+    assert all(item["path"].startswith(entry["path"] + ":") for item in diagnostics)

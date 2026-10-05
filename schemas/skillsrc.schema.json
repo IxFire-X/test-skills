@@ -184,7 +184,7 @@
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
       }
     },
-    "maven_test": {
+    "maven_wrapper_test": {
       "type": "object",
       "additionalProperties": false,
       "required": ["framework", "adapter_id", "wrapper", "build_profile", "adapter_parameters"],
@@ -192,6 +192,20 @@
         "framework": {"const": "junit5"},
         "adapter_id": {"const": "maven-wrapper:selected-symbols-v1"},
         "wrapper": {"type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*mvnw(?:\\.cmd)?$"},
+        "build_profile": {"type": "string", "minLength": 1},
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+      }
+    },
+    "maven_test": {
+      "oneOf": [{"$ref": "#/$defs/maven_wrapper_test"}, {"$ref": "#/$defs/maven_system_test"}]
+    },
+    "maven_system_test": {
+      "type": "object", "additionalProperties": false,
+      "required": ["framework", "adapter_id", "executable", "build_profile", "adapter_parameters"],
+      "properties": {
+        "framework": {"const": "junit5"},
+        "adapter_id": {"const": "maven:selected-symbols-v1"},
+        "executable": {"type": "string", "minLength": 1},
         "build_profile": {"type": "string", "minLength": 1},
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
       }

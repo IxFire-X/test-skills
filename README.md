@@ -1,5 +1,7 @@
 # Test Skills Portable Pilot
 
+**[Быстрый старт: подключить пакет, запустить и открыть результаты](QUICKSTART.md).** Готовые запросы для модели и пояснение к выходным файлам; читать внутренние модули для первого запуска не требуется.
+
 ## Презентация и обзор
 
 - [Настоящие тест-кейсы Spring Petclinic: 64 кейса, 290 шагов](docs/examples/petclinic-owner-lifecycle/cases.md) — [HTML, исходный JSON и пояснение к результатам](docs/examples/petclinic-owner-lifecycle/README.md).

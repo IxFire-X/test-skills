@@ -20,6 +20,11 @@ run state, review your own output, publish projections, or write generated proje
 5. Validate the fragment's canonical content through `tools.canonical_document`, wrap it in the 5.0.0 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The controller assembles all immutable fragments into the sole canonical document before reviewer or projection work.
 
 Apply the mandatory [human scenario rules](references/case-generation-contract.md#human-scenario-rules) to every human field and its structured inputs/assertions. They are the single format authority for Russian wording, HTTP/JSON, placeholders, and requirement oracles.
+The shared canonical validator checks every step, including the last. Expected is a
+criterion before execution: describe the observable system result, never «Проверено
+автотестом» or «проверка пройдена». Runtime PASS/FAIL belongs in the execution report.
+One supported action with its meaningful oracle is sufficient; do not add steps or ID
+transfer to satisfy a length heuristic.
 
 For each product-behavior requirement, cover all distinct supported behavior classes, not merely
 one happy-path case. Consider success, invalid input, relevant boundaries, authorization,

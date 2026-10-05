@@ -51,6 +51,14 @@ paragraph must retain both its product meaning and its instructions without copy
 instructions into the scenario. Cite the shared rule and exact field for a violation.
 Check that a reader unfamiliar with the project can understand the purpose and result;
 technical execution details must not obscure the meaningful action.
+Expected is a pre-execution criterion, not «Проверено автотестом» or «проверка
+пройдена». Check every step, including the last; reject a service-only replacement
+with its exact field and the required observable result. An incidental autotest mention
+inside a substantive result is allowed. Actual PASS/FAIL belongs in execution reports.
+Use the generator contract's short HTTP example and confirmed status/body facts;
+do not impose HTTP format on `project_action`. The common canonical validator owns
+mechanical checks; a meaningful one-action case needs no minimum length or mandatory
+ID transfer. Standalone linter recommendations do not by themselves justify rework.
 For baseline snapshots, verify that human fields identify the initial state from
 Preconditions or a concrete preceding action, and the captured data used later;
 “before this step” alone does not identify that state.

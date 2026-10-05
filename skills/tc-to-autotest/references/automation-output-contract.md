@@ -40,6 +40,15 @@ Preserve restrictions on the subject under test, framework, dependencies and fil
 They govern implementation; they are not additional product operations/assertions and
 cannot supply missing structured request values, setup or expected results.
 
+Before generation, these existing requirements/context must identify the application,
+agreed interface and authorized configuration/authentication sources. Test through that
+boundary and assert its observable response or state. For Java/backend prefer the external
+API; real-component MockMvc is permitted when the run has not required external API.
+Follow existing project clients and fixtures. Independent database readback is allowed
+when authorized, but cannot replace an action the case requires through the interface.
+Keep the accepted operations, data and Expected unchanged; an application defect remains
+FAIL. Neither a long scenario nor a particular assertion/HTTP library is required.
+
 For each manual step declare exactly one manual disposition. `BLOCKED` is permitted only for a canonical blocker and has nonempty diagnostics with empty files, symbols, relations, and dispositions. Do not report a project-discovery or dependency failure as canonical blocking.
 
 Use project-native discovery and declare output only below the selected module's active test root. The automation artifact is a proposed file set; only the controller may materialize it after accepted static review. Do not edit the application, existing tests, configuration, lock files, or dependencies. Keep secrets as runtime handles only. Direct canonical/provider-backed execution runs global provider/adapter preflight through `tools.execution_preflight`. Exact accepted generated-source execution is gated by static review of the complete binding chain and then the project-native test process; it never fabricates runtime provider values.

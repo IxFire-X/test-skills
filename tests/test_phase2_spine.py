@@ -18,18 +18,13 @@ def _baseline(project: Path, *, generated_root: Path | None = None) -> tuple[dic
     (project / ".skillsrc").write_text('{"project":{"name":"x","language":"python","build_tool":"pip"},"paths":{"source":"src","tests":"tests"},"test":{"framework":"pytest"}}\n', encoding="utf-8")
     (project / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     (project / "test_app.py").write_text("def test_ok(): pass\n", encoding="utf-8")
-    runtime = project / ".venv" / "Scripts" / "python.exe"
-    runtime.parent.mkdir(parents=True, exist_ok=True)
-    runtime.write_bytes(b"fixture-runtime-v1")
     inventory = build_inventory(project, project, generated_roots=() if generated_root is None else (generated_root,))
     return inventory, build_execution_baseline(
         inventory, project_root=project, requirements={"requirement_id": "req-1", "digest": "sha256:" + "a" * 64},
         skillsrc_file_id=_file_id(inventory, ".skillsrc"),
         skillsrc_authority=build_skillsrc_authority_receipt((project / ".skillsrc").read_bytes()),
         execution_file_ids=[_file_id(inventory, "pyproject.toml"), _file_id(inventory, "test_app.py")],
-        parent_build_file_ids=[], interpreter_path=".venv/Scripts/python.exe",
-        interpreter_identity=runtime_identity(project, ".venv/Scripts/python.exe"),
-        wrapper_path=None, wrapper_identity=None, adapter_id="pytest:selected-symbols-v1", build_profile="default", adapter_parameters={},
+        parent_build_file_ids=[], policy_profile="cases-only-v1",
     )
 
 

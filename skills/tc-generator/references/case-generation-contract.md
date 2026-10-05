@@ -172,6 +172,29 @@ For an HTTP step, `test_data` contains only a full pretty-printed JSON request b
 
 The Expected Result first states the observable system result, then, for HTTP, a blank line, exact `HTTP <status> <reason>`, and only confirmed response fields as pretty-printed JSON. Omit an unconfirmed body rather than inventing it. Do not print `Выход:`, `Проверка:`, `http_body:/...`, assertion expressions, «успешно», `ok`, or a bare HTTP code. Do not fork `200 или 201`. Data is deterministic: no `random` / `faker` / «любое значение». A source-proven non-secret helper/default with one safe deterministic value is a canonical literal, visible in the URL or body. Use a fixture only when authorized sources do not safely determine that value. Secret values and handles never render; only `safe_label` may appear, and it is not a resolved value.
 
+Expected describes a criterion before execution. «Проверено автотестом», «проверка
+пройдена» and other execution-only marks cannot replace the system result, including
+in the last step. Mentioning an autotest inside a substantive observable result is not
+itself a violation. Actual PASS/FAIL remains in the execution report. The shared
+canonical validator applies these rules before assembly, successor selection and
+publication; the standalone `human_scenario` recommendations are not an acceptance gate.
+A valid single-action case needs no extra CRUD cycle or ID transfer. Review its oracle
+and requirement coverage rather than its length.
+
+For example, with a confirmed GET returning the product list:
+`test_data` is `Тело запроса отсутствует.` and Expected is:
+
+```text
+Приложение возвращает список доступных товаров.
+
+HTTP 200 OK
+```
+
+Use the status and response fields established by the authorized requirement and
+machine contract. Missing facts remain explicit gaps; this example does not supply them.
+HTTP body/status rules are specific to `operation.kind=http`; native operations retain
+their supported human data and observable oracle without an invented HTTP block.
+
 Canonical requirements are a semantics-preserving Russian decomposition of their
 context requirements into the coverage conditions described above. Do not drop
 access-control, isolation, boundary, or other behavior classes while decomposing.

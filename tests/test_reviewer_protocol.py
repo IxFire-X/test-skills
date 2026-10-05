@@ -236,7 +236,7 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     publish_model_request(
         run_root, attempt_id, "context-marker:baseline",
         model_id="model-context", invocation_id=f"context-{attempt_id}",
-        input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]],
+        input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], context["digest"]],
     )
     marker_publication = publish_model_stage_artifact(
         run_root, attempt_id, "context-marker:baseline", marker,

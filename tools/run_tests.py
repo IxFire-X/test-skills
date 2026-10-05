@@ -374,10 +374,10 @@ def _source_changed_file_ids(process_evidence: Sequence[Mapping[str, Any]]) -> s
 
 def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run_id: str | None, source: Mapping[str, Any], exit_code: int | None, duration_sec: float | None, target: Mapping[str, Any] | None, prefix: str = "RUNNER", required_file_ids: Sequence[str] = ()) -> list[dict[str, str]]:
     """Validate one process outcome against its enclosing, authoritative run metadata."""
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     rows: list[dict[str, str]] = []
-    profiles = {"pytest": PYTEST, "maven": MAVEN, "gradle": GRADLE}
+    profiles = {"pytest": (PYTEST,), "maven": (MAVEN, SYSTEM_MAVEN), "gradle": (GRADLE,)}
     known_file_ids = set(required_file_ids)
     source_changed_rows = 0
     ordinary_rows = 0
@@ -440,7 +440,7 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
             exit_valid = False
         if not exit_valid:
             rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_EXIT", "Process cause must match the enclosing exit code."))
-        if not isinstance(target, Mapping) or row.get("command_profile") != target.get("command") or profiles.get(target.get("runner")) != row.get("command_profile"): rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_PROFILE", "Process profile must match the enclosing target."))
+        if not isinstance(target, Mapping) or row.get("command_profile") != target.get("command") or row.get("command_profile") not in profiles.get(target.get("runner"), ()): rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_PROFILE", "Process profile must match the enclosing target."))
         if row.get("duration_sec") != duration_sec: rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_DURATION", "Process duration must match the enclosing run."))
         if row.get("stdout_tail") != "" or row.get("stderr_tail") != "": rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_OUTPUT", "Process output tails must be empty."))
     if source_changed_rows > 1:
@@ -1085,7 +1085,7 @@ def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]
 
 
 def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None) -> dict[str, Any]:
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     prestart = verdict == "NOT_RUNNABLE" and run_id is None
     request_backed = _request_report_path(request) is not None
@@ -1093,6 +1093,7 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
         runner, command_profile = {
             PYTEST: ("pytest", PYTEST),
             MAVEN: ("maven", MAVEN),
+            SYSTEM_MAVEN: ("maven", SYSTEM_MAVEN),
             GRADLE: ("gradle", GRADLE),
         }[request.adapter_id]
         interpreter = request.executable
@@ -1200,16 +1201,21 @@ def _attempt_execution_scope(run_root: Path | None, attempt_id: str | None) -> t
 
 
 def _request_is_attempt_local(request: Any, project: Path, module: Path) -> bool:
-    """Reject cross-project replay and host executables before a process can start."""
-    from tools.execution_adapters import ExecutionRequest
-    from tools.project_inventory import module_runtime_path
+    """Reject cross-project replay and undeclared host tools before a process can start."""
+    from tools.execution_adapters import ExecutionRequest, SYSTEM_MAVEN
+    from tools.project_inventory import module_runtime_path, system_maven_path
 
     if not isinstance(request, ExecutionRequest):
         return False
     try:
         cwd = Path(request.cwd).resolve(strict=True)
-        relative = Path(request.executable).relative_to(module).as_posix()
-        executable = module_runtime_path(module, relative)
+        if request.adapter_id == SYSTEM_MAVEN:
+            executable = system_maven_path(request.executable)
+            if str(executable) != request.executable:
+                return False
+        else:
+            relative = Path(request.executable).relative_to(module).as_posix()
+            executable = module_runtime_path(module, relative)
     except (OSError, ValueError):
         return False
     return cwd == module and executable.is_file() and module.is_relative_to(project)
@@ -1262,6 +1268,7 @@ def build_closed_execution_request(
     from tools.execution_adapters import (
         GRADLE,
         MAVEN,
+        SYSTEM_MAVEN,
         PYTEST,
         AdapterRequestError,
         build_request,
@@ -1269,7 +1276,7 @@ def build_closed_execution_request(
 
     test = module.get("test") if isinstance(module, Mapping) else None
     adapter_id = test.get("adapter_id") if isinstance(test, Mapping) else None
-    expected = {"python": {PYTEST}, "java": {MAVEN, GRADLE}}[language]
+    expected = {"python": {PYTEST}, "java": {MAVEN, SYSTEM_MAVEN, GRADLE}}[language]
     if adapter_id not in expected:
         raise RunnerInputError(
             "RUNNER_ADAPTER",
@@ -1294,7 +1301,7 @@ def build_closed_execution_request(
         request_module["module_root"] = str(execution_root.resolve())
         # ``framework`` establishes manifest/schema selection; the adapter seam
         # intentionally accepts only launch-significant closed fields.
-        runtime_key = "interpreter" if adapter_id == PYTEST else "wrapper"
+        runtime_key = "interpreter" if adapter_id == PYTEST else "executable" if adapter_id == SYSTEM_MAVEN else "wrapper"
         request_module["test"] = {
             "adapter_id": test["adapter_id"],
             "build_profile": test["build_profile"],
@@ -1310,15 +1317,15 @@ def build_closed_execution_request(
 
 
 def _request_report_path(request: Any) -> Path | None:
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, ExecutionRequest, command_for
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, ExecutionRequest, command_for
 
-    if not isinstance(request, ExecutionRequest) or request.adapter_id not in {PYTEST, MAVEN, GRADLE}:
+    if not isinstance(request, ExecutionRequest) or request.adapter_id not in {PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE}:
         return None
     if not request.argv or request.argv[0] != request.executable or request.timeout_seconds <= 0 or len(request.selectors) != len(set(request.selectors)):
         return None
     if set(request.environment_labels) - SAFE_ENVIRONMENT_LABELS or request.environment_labels != ("PROJECT_NATIVE_ENV",):
         return None
-    if request.adapter_id in {MAVEN, GRADLE} and not request.build_profile:
+    if request.adapter_id in {MAVEN, SYSTEM_MAVEN, GRADLE} and not request.build_profile:
         return None
     try:
         cwd = Path(request.cwd).resolve(strict=True)
@@ -1383,7 +1390,7 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     """Execute exactly one closed project-native adapter request after authorization."""
     from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
     from tools.execution_adapters import (
-        GRADLE, MAVEN, PYTEST, classify_execution, invoke_request, is_zero_test_report,
+        GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, classify_execution, invoke_request, is_zero_test_report,
     )
 
     artifacts = automation_artifact.get("artifacts", {}) if isinstance(automation_artifact, Mapping) else {}
@@ -1391,9 +1398,9 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     automation_digest = automation_sha256(automation_artifact) if isinstance(automation_artifact, Mapping) else "sha256:" + "0" * 64
     review_digest = autotest_review_sha256(autotest_review_artifact) if isinstance(autotest_review_artifact, Mapping) else "sha256:" + "0" * 64
     adapter_id = getattr(request, "adapter_id", None)
-    language = "java" if adapter_id in {MAVEN, GRADLE} else "python"
+    language = "java" if adapter_id in {MAVEN, SYSTEM_MAVEN, GRADLE} else "python"
     target = {
-        PYTEST: ("pytest", PYTEST), MAVEN: ("maven", MAVEN), GRADLE: ("gradle", GRADLE),
+        PYTEST: ("pytest", PYTEST), MAVEN: ("maven", MAVEN), SYSTEM_MAVEN: ("maven", SYSTEM_MAVEN), GRADLE: ("gradle", GRADLE),
     }.get(adapter_id, ("not_applicable", None))
     scope = _attempt_execution_scope(run_root, attempt_id)
     attempt_project = scope[0] if scope is not None else Path(getattr(request, "cwd", Path.cwd()))
@@ -1401,7 +1408,7 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     if scope is None:
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/attempt", "RUNNER_ATTEMPT_SCOPE", "Execution requires one durable attempt scope.")], request=request)
     if not _request_is_attempt_local(request, scope[0], scope[1]):
-        return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/request", "RUNNER_REQUEST_PROVENANCE", "Execution request must use the exact attempt module and module-local runtime.")])
+        return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/request", "RUNNER_REQUEST_PROVENANCE", "Execution request must use the exact attempt module and declared closed runtime.")])
     report_path = _request_report_path(request)
     if report_path is None:
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/request", "RUNNER_REQUEST", "Execution request is not a closed project-native adapter request.")])

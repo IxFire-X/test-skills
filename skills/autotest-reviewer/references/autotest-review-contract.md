@@ -19,6 +19,25 @@ including subject substitution, framework, dependencies and file edits. A requir
 link alone is not compliance evidence. Leave actual execution/file preservation to the
 controller's existing checks; do not claim a static review proves runtime compliance.
 
+For each case retain the declared application boundary, the actual test/helper call path,
+absence of target substitution and the assertion observing Expected, with file and
+class/method references. A confirmed unit substitute is a blocking finding and requires
+`ТРЕБУЕТ ДОРАБОТКИ`; heuristic signals alone require inspection, not automatic rejection.
+At `ПРИНЯТО`, findings and corrections remain empty under the existing schema. Store
+positive evidence in top-level `warnings`, for example the following shape, using actual
+reviewed identifiers and code (never copy the placeholders as evidence):
+
+```text
+REVIEW_EVIDENCE <case/relation IDs>: boundary=<declared interface>;
+path=<file:class.method → helper → boundary>; real behavior=<code evidence>;
+oracle=<assertion location and observed Expected>.
+```
+
+The string is an existing-contract evidence channel, not a new schema or acceptance
+predicate. Its syntax does not prove that the reviewer traced the code. The required
+Deepseek functional-vs-unit control calls must separately assess both verdict correctness
+and preservation of these answers before claiming the contract sufficient in practice.
+
 Findings are static evidence only. A semantic issue, stale digest, missing declared content, invalid locator, absent pair, secret, or unconfirmed setup is rework. The review binds `automation_revision`, reviewer session/invocation IDs, the role policy, and the digest of the exact attempt-owned controller readback boundary (`automation-review-boundary-r1` or `-r2`). The controller validates that boundary against the active attempt; self-attested isolation is not accepted. There is one static reviewer invocation per version and at most two reviews: `AUTO_FIX_APPLIED` returns only to one complete, digest-bound revision 2; never run an obsolete artifact or regenerate after runtime `FAIL`.
 
 Only the controller may turn an accepted review into a generated delta, materialize files,

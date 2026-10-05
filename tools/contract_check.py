@@ -40,7 +40,7 @@ ARTIFACT_ROWS = [
     ("execution_receipt",6,"IMPLEMENTED"),("framework_evidence",6,"IMPLEMENTED"),("environment_receipt",6,"IMPLEMENTED"),("resume_validation_receipt",7,"IMPLEMENTED"),("execution_trace",7,"IMPLEMENTED"),("trace_audit",7,"IMPLEMENTED"),("orchestrator_output",7,"IMPLEMENTED"),("pre_finalization_trace",7,"IMPLEMENTED"),("terminal_result",7,"IMPLEMENTED"),("derived_terminal_trace",7,"IMPLEMENTED"),
     ("compatibility_evidence",8,"IMPLEMENTED"),("retained_native_rerun_receipt",8,"IMPLEMENTED"),("scenario_observation_receipt",8,"IMPLEMENTED"),("release_eval_run",8,"IMPLEMENTED"),("release_eval_receipt",8,"IMPLEMENTED"),("release_manifest",8,"IMPLEMENTED"),
 ]
-ADAPTERS = ["pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"]
+ADAPTERS = ["pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"]
 POLICIES = ["cases-only-v1", "local-pilot-v1"]
 STAGE_ROWS = [
     {"stage": "orchestrate", "role": "controller", "role_policy": "orchestrate-v1", "cardinality": "once", "profiles": POLICIES},

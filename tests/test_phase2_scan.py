@@ -130,3 +130,72 @@ def test_scan_rejects_an_oversized_context_file_without_silent_truncation(tmp_pa
         "EXECUTION_BASELINE_FROZEN", "ATTEMPT_CREATED",
     ]
     assert payloads[-1]["reason"] == "CONTEXT_SELECTION_INVALID"
+
+
+def test_scan_denied_directory_keeps_diagnostic_run_without_inventory_ready(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    import pytest
+
+    from tools.pilot_state import derive_state
+    from tools.project_inventory import InventoryError, build_inventory
+
+    project, module = _project(tmp_path)
+    denied = module / "src"
+    original_scandir = os.scandir
+
+    def scandir(path):
+        if Path(path) == denied:
+            raise PermissionError(13, "raw-secret-never-publish", str(denied))
+        return original_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    with pytest.raises(InventoryError, match="directory is unreadable: services/api/src"):
+        build_inventory(project, module)
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+
+    assert run_pipeline.cmd_scan(_args(project)) == 2
+
+    scan = payloads[-1]
+    run_root, attempt_id = _durable(scan)
+    assert attempt_id is None
+    assert [event["event_type"] for event in derive_state(run_root)["events"]] == [
+        "RUN_CREATED", "MODULE_SELECTED",
+    ]
+    assert scan["reason"] == "INVENTORY_INVALID"
+    assert scan["detail"] == "inventory directory is unreadable: services/api/src"
+    assert scan["scope"]["module"] == "services/api"
+    assert "raw-secret-never-publish" not in json.dumps(payloads)
+    assert run_pipeline.cmd_status(SimpleNamespace(project=str(project), run=scan["run_id"])) == 0
+
+
+def test_cases_only_scan_needs_no_runtime_and_cannot_supply_local_execution_proof(tmp_path: Path, monkeypatch) -> None:
+    from tools.pilot_state import derive_state
+    from tools.project_inventory import InventoryError, read_execution_baseline, read_inventory_receipt, validate_execution_baseline_binding
+    import pytest
+
+    project, module = _project(tmp_path)
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+    document = parse_skillsrc_bytes((project / ".skillsrc").read_bytes())
+    document["modules"][0].pop("test")
+    (project / ".skillsrc").write_bytes(_payload(document))
+    (module / ".venv/Scripts/python.exe").unlink()
+    (module / "src/app.py").write_text("VALUE = 1\n", encoding="utf-8")
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+    args = _args(project)
+    args.profile = "cases-only-v1"
+
+    assert run_pipeline.cmd_scan(args) == 0
+
+    scan = payloads[-1]
+    root, _attempt = _durable(scan)
+    baseline = read_execution_baseline(root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
+    inventory = read_inventory_receipt(root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    assert baseline["policy_profile"] == "cases-only-v1"
+    assert not {"test_root", "adapter_id", "build_profile", "adapter_parameters", "interpreter_path", "wrapper_path", "executable_path"} & baseline.keys()
+    assert "EXECUTION_BASELINE_FROZEN" in [event["event_type"] for event in derive_state(root)["events"]]
+    with pytest.raises(InventoryError, match="profile"):
+        validate_execution_baseline_binding(baseline, inventory, module)
+    assert run_pipeline.cmd_scan(_args(project)) == 2

@@ -69,13 +69,14 @@ def _confined(project: Path, candidate: Path) -> Path:
 
 
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
-    from tools.pilot_state import derive_state, read_run
+    from tools import pilot_state as pilot
+    from tools.project_inventory import read_execution_baseline
 
     root = Path(run_root).resolve()
-    run = read_run(root)
-    state = derive_state(root)
+    run = pilot.read_run(root)
+    state = pilot.derive_state(root)
     attempt = state["attempts"][-1] if state["attempts"] else None
-    return {
+    result = {
         "status": status,
         "stage": stage,
         "project": str(Path(project).resolve()),
@@ -84,8 +85,152 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         "attempt_id": attempt.get("attempt_id") if attempt else None,
         "attempt_state": attempt.get("state") if attempt else None,
         "event_count": len(state["events"]),
+        "last_confirmed_stage": "run-created",
+        "next_expected_artifact": "module selection, inventory and profile baseline",
+        "stop_reason": None,
+        "evidence_path": str(root / "run-manifest.json"),
+        "warnings": [], "warning_evidence_path": None, "evidence_errors": [],
         **extra,
     }
+    if attempt is None:
+        result["stop_detail"] = "No attempt yet; an early scan failure may have no persisted cause."
+        return result
+    attempt_id = attempt["attempt_id"]
+    events = [row for row in state["events"] if row.get("attempt_id") == attempt_id]
+    confirmed: list[tuple[int, dict[str, Any]]] = []
+
+    def record(digest: str, label: str, next_artifact: str | None, path: str, **facts: Any) -> None:
+        sequence = max((row["seq"] for row in state["events"] if row.get("artifact_digest") == digest and row.get("attempt_id") in (None, attempt_id)), default=0)
+        confirmed.append((sequence, {"last_confirmed_stage": label, "next_expected_artifact": next_artifact, "evidence_path": str(root / path), **facts}))
+
+    def unreadable(path: str) -> None:
+        result["evidence_errors"].append({"code": "EVIDENCE_UNVERIFIED", "path": str(root / path)})
+
+    # Requirement gaps survive later empty warning arrays. Current-source drift must
+    # not erase an independently valid historical terminal result.
+    responses = [row for row in events if row["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    marker = next((row for row in responses if row.get("stage_instance_id") == "context-marker:baseline"), None)
+    model_outputs = {}
+    if marker:
+        marker_path = f"model-stage-artifacts/{attempt_id}/{marker['artifact_digest'][7:]}.json"
+        try:
+            publication = pilot.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", marker["artifact_digest"])
+            model_outputs[marker["artifact_digest"]] = publication
+            result["warnings"] = list(publication["artifact"]["warnings"])
+            result["warning_evidence_path"] = str(root / publication["path"])
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(marker_path)
+    if attempt["state"] == "TERMINAL":
+        terminal = pilot.read_terminal_result(root, attempt_id)
+        result.update(last_confirmed_stage="terminal", next_expected_artifact=None,
+                      evidence_path=str(root / "terminal-results" / f"{attempt_id}.json"),
+                      stop_reason=terminal.get("reason_code"))
+        result.update({key: terminal[key] for key in ("completion", "verification", "coverage", "accepted")})
+        return result
+
+    baseline_path = f"baselines/{attempt['baseline_digest'][7:]}.json"
+    try:
+        baseline = read_execution_baseline(root / baseline_path)
+        if baseline["digest"] != attempt["baseline_digest"]:
+            raise ValueError("baseline digest mismatch")
+        record(baseline["digest"], "baseline", "authorized context", baseline_path)
+    except (OSError, KeyError, TypeError, ValueError):
+        unreadable(baseline_path)
+    contexts = [row for row in events if row["event_type"] == "CONTEXT_SELECTED"]
+    if contexts:
+        context = contexts[-1]
+        path = f"context-selections/{attempt_id}/{context['artifact_digest'][7:]}.json"
+        try:
+            pilot.read_context_selection(root, attempt_id, context["artifact_digest"])
+            record(context["artifact_digest"], "authorized-context", "context-marker response", path)
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(path)
+    if responses:
+        response = responses[-1]
+        stage_id, digest = response["stage_instance_id"], response["artifact_digest"]
+        path = f"model-stage-artifacts/{attempt_id}/{digest[7:]}.json"
+        try:
+            publication = model_outputs.get(digest) or pilot.read_model_stage_artifact(root, attempt_id, stage_id, digest)
+            next_artifact = {
+                "context-marker": "generator fragments", "tc-generator": "remaining fragments or assembled candidate",
+                "tc-reviewer": "reviewer ledger and effective selection or negative closure",
+                "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization or rework",
+            }[stage_id.split(":", 1)[0]]
+            record(digest, stage_id, next_artifact, publication["path"])
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(path)
+    assembly = next((row for row in reversed(events) if row["event_type"] == "CANDIDATE_PUBLISHED" and row.get("stage_instance_id") == "assembly"), None)
+    if assembly:
+        # The journal has the candidate digest, but its bundle path arrives with
+        # reviewer evidence. Do not claim to have reread an unknown bundle here.
+        confirmed.append((assembly["seq"], {
+            "last_confirmed_stage": "assembly-publication-event",
+            "next_expected_artifact": "canonical reviewer package and boundary",
+            "evidence_path": str(root / "events" / f"{assembly['seq']:010d}.json"),
+        }))
+    ledger_events = [row for row in events if row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") == "reviewer-ledger-v1"]
+    if ledger_events:
+        digest = ledger_events[-1]["artifact_digest"]
+        path = f"reviewer-session-ledgers/{attempt_id}/{digest[7:]}.json"
+        try:
+            ledger = pilot.read_reviewer_session_ledger(root, attempt_id, digest)
+            lifecycle = pilot.reviewer_lifecycle_projection(ledger)
+            next_artifact = "reviewer evidence or verdict" if lifecycle["waiting"] else "effective canonical"
+            if lifecycle["pre_verdict_abort"] or lifecycle["authoritative_verdict"] == "REJECTED":
+                next_artifact = "negative branch trace and finalization"
+            record(digest, "canonical-review:" + ledger["status"], next_artifact, path, stop_reason=lifecycle["abort_reason"])
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(path)
+    # These readers are read-only; the similarly named recovery helpers may write events.
+    for kind, next_artifact in (
+        ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
+        ("execution-inputs", "materialization"), ("generated-delta", "execution receipt"),
+        ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
+        ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or child attempt"),
+    ):
+        path = pilot._receipt_target(root, attempt_id, kind)
+        if not path.exists():
+            continue
+        try:
+            receipt = pilot._read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")
+            value, facts = receipt["record"], {}
+            if kind == "generated-delta" and value["delta"]["facts"]["completion"] != "COMPLETE":
+                next_artifact, facts["stop_reason"] = "disposition and finalization", "MATERIALIZATION_INCOMPLETE"
+            if kind == "execution-receipt":
+                facts["verification"] = value["payload"]["verdict"]
+                facts["execution_diagnostics"] = value["payload"].get("diagnostics", [])
+            if kind == "resume-validation":
+                facts["stop_reason"] = value.get("reason_code")
+            record(receipt["digest"], kind, next_artifact, receipt["path"], **facts)
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(str(path.relative_to(root)))
+    for kind, next_artifact in (("pre_finalization_trace", "finalization receipt"), ("finalization_receipt", "terminal result and trace"), ("terminal_trace", "terminal event")):
+        path = root / "closure" / attempt_id / f"{kind}.json"
+        if not path.exists():
+            continue
+        try:
+            value = pilot._read_artifact(project, root, path, kind.replace("_", " "))
+            value = pilot.read_closure_artifact(root, attempt_id, kind, value["digest"])
+            facts = {"stop_reason": "FINALIZATION_INVALID"} if kind == "finalization_receipt" and not value["valid"] else {}
+            record(value["digest"], kind, next_artifact, str(path.relative_to(root)), **facts)
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(str(path.relative_to(root)))
+    if confirmed:
+        result.update(max(confirmed, key=lambda row: row[0])[1])
+    pending = [row for row in events if row["event_type"] == "MODEL_REQUESTED" and not any(response.get("stage_instance_id") == row.get("stage_instance_id") for response in responses)]
+    if pending:
+        request = pending[-1]
+        path = f"model-requests/{attempt_id}/{request['artifact_digest'][7:]}.json"
+        try:
+            pilot.read_model_request(root, attempt_id, request["stage_instance_id"], request["artifact_digest"])
+            result.update(next_expected_artifact=request["stage_instance_id"] + " response", pending_request_path=str(root / path))
+        except (OSError, KeyError, TypeError, ValueError):
+            unreadable(path)
+    if result["evidence_errors"]:
+        result.update(stop_reason="EVIDENCE_UNVERIFIED", next_expected_artifact="validated inputs or child attempt")
+    elif attempt["state"] == "WAITING_FOR_INPUT" and result["stop_reason"] is None:
+        result["stop_detail"] = "WAITING_FOR_INPUT has no persisted cause; consult the originating request."
+    return result
 
 
 def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
@@ -127,8 +272,8 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
 
     run = create_run(
         project,
-        "local-pilot-v1",
-        {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": True},
+        getattr(args, "profile", "local-pilot-v1"),
+        {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": getattr(args, "profile", "local-pilot-v1") == "local-pilot-v1"},
     )
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -217,6 +362,7 @@ def _scan_execution_baseline(
         build_execution_baseline,
         build_skillsrc_authority_receipt,
         runtime_identity,
+        system_maven_path,
     )
 
     files = inventory.get("files")
@@ -242,12 +388,23 @@ def _scan_execution_baseline(
         and item.get("opaque_id") != skillsrc.get("opaque_id")
         and item.get("opaque_id") not in parent_ids
     ]
-    test = module.get("test")
-    if not isinstance(test, Mapping):
-        raise InventoryError("selected module test configuration is invalid")
-    adapter_id = str(test.get("adapter_id"))
-    interpreter = str(test["interpreter"]) if isinstance(test.get("interpreter"), str) else None
-    wrapper = str(test["wrapper"]) if isinstance(test.get("wrapper"), str) else None
+    policy_profile = getattr(args, "profile", "local-pilot-v1")
+    runtime_facts: dict[str, Any] = {}
+    if policy_profile == "local-pilot-v1":
+        test = module.get("test")
+        if not isinstance(test, Mapping):
+            raise InventoryError("selected module test configuration is invalid")
+        adapter_id = str(test.get("adapter_id"))
+        runtime_facts.update(adapter_id=adapter_id, build_profile=str(test.get("build_profile")), adapter_parameters=dict(test.get("adapter_parameters") or {}))
+        if adapter_id == "maven:selected-symbols-v1":
+            executable = str(system_maven_path(test.get("executable")))
+            runtime_facts.update(executable_path=executable, executable_identity=runtime_identity(module_root, executable, adapter_id=adapter_id))
+        else:
+            interpreter = str(test["interpreter"]) if isinstance(test.get("interpreter"), str) else None
+            wrapper = str(test["wrapper"]) if isinstance(test.get("wrapper"), str) else None
+            runtime_facts.update(interpreter_path=interpreter, wrapper_path=wrapper,
+                interpreter_identity=runtime_identity(module_root, interpreter) if interpreter is not None else None,
+                wrapper_identity=runtime_identity(module_root, wrapper) if wrapper is not None else None)
     requirement = {
         "module_id": module.get("id"),
         "selected_target": getattr(args, "target", None),
@@ -264,13 +421,8 @@ def _scan_execution_baseline(
         skillsrc_authority=build_skillsrc_authority_receipt((project / ".skillsrc").read_bytes()),
         execution_file_ids=execution_ids,
         parent_build_file_ids=parent_ids,
-        interpreter_path=interpreter,
-        wrapper_path=wrapper,
-        adapter_id=adapter_id,
-        build_profile=str(test.get("build_profile")),
-        adapter_parameters=dict(test.get("adapter_parameters") or {}),
-        interpreter_identity=runtime_identity(module_root, interpreter) if interpreter is not None else None,
-        wrapper_identity=runtime_identity(module_root, wrapper) if wrapper is not None else None,
+        policy_profile=policy_profile,
+        **runtime_facts,
     )
 
 
@@ -281,6 +433,7 @@ def cmd_scan(args: Any) -> int:
     stopped = _skillsrc_receipt_exit(project, run_root, receipt)
     if stopped is not None:
         return stopped
+    scope: dict[str, Any] = {"module": None, "parent_files": None, "dependency_files": []}
     try:
         from tools.pilot_state import (
             append_event,
@@ -293,6 +446,7 @@ def cmd_scan(args: Any) -> int:
         skillsrc_document, _skillsrc_digest = _read_skillsrc_binding(project / ".skillsrc")
         module_root, module = _resolve_scan_module(project, getattr(args, "module", None), skillsrc_document)
         module_path = module_root.resolve().relative_to(project).as_posix() or "."
+        scope["module"] = module_path
         append_event(
             run_root,
             "MODULE_SELECTED",
@@ -305,13 +459,15 @@ def cmd_scan(args: Any) -> int:
             skill_pack_root=_scan_skill_pack_root(project),
             generated_roots=(project / ".pilot-runs",),
         )
+        prefix = "" if module_path == "." else module_path + "/"
+        scope["parent_files"] = [item["project_path"] for item in inventory["files"] if prefix and not item["project_path"].startswith(prefix)]
         baseline = _scan_execution_baseline(project, module_root, module, inventory, args)
         frozen = freeze_phase_two_inputs(run_root, project, module_root, baseline)
         frozen_inventory = frozen["inventory"]
         exclusion_receipt = frozen["exclusions"]
         attempt = create_attempt(
             run_root,
-            {"project": str(project), "module": module_path, "policy_profile": "local-pilot-v1"},
+            {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
             frozen["baseline"],
         )
         selected_ids = _context_scope_ids(frozen_inventory, project, module_root, getattr(args, "target", None))
@@ -324,10 +480,11 @@ def cmd_scan(args: Any) -> int:
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
     except ContextSelectionError:
-        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID"))
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", scope=scope))
         return 2
-    except (InventoryError, ValueError):
-        _print(_durable_status(project, run_root, stage="scan", status="error", reason="INVENTORY_INVALID"))
+    except (InventoryError, ValueError, OSError) as error:
+        detail = str(error) if isinstance(error, InventoryError) else "scan input is unreadable" if isinstance(error, OSError) else "scan input or receipt is invalid"
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason="INVENTORY_INVALID", detail=detail, scope=scope))
         return 2
     payload = _durable_status(
         project,
@@ -335,6 +492,7 @@ def cmd_scan(args: Any) -> int:
         stage="scan",
         status="ok",
         module_id=module.get("id"),
+        scope=scope,
         selected_target=getattr(args, "target", None),
         inventory_digest=frozen_inventory["digest"],
         exclusion_digest=exclusion_receipt["digest"],
@@ -471,7 +629,8 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
             build_profile=request.build_profile,
             adapter_parameters=dict(request.typed_parameters),
             runtime_identity_value=runtime_identity(
-                module_root, str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
+                module_root, request.executable if request.adapter_id == "maven:selected-symbols-v1" else str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
+                adapter_id=baseline.get("adapter_id"),
             ),
         )
     except (InventoryError, KeyError, TypeError, ValueError, OSError) as error:
@@ -487,7 +646,7 @@ def _reconstruct_started_request(
 ) -> tuple[Any, str]:
     """Rebuild the immutable closed request without inspecting generated bytes."""
     from tools.automation_validation import automation_sha256, required_symbol_pairs
-    from tools.execution_adapters import ExecutionRequest, PYTEST, request_digest
+    from tools.execution_adapters import ExecutionRequest, PYTEST, SYSTEM_MAVEN, request_digest
     from tools.pilot_state import derive_state, read_attempt_receipt, read_effective_canonical
     from tools.project_inventory import read_execution_baseline
 
@@ -527,10 +686,10 @@ def _reconstruct_started_request(
                 selectors.append(f"{locator['class_fqn']}#{locator['method_name']}")
         adapter_id = baseline["adapter_id"]
         runtime_path = Path(
-            baseline["interpreter_path"] if adapter_id == PYTEST else baseline["wrapper_path"]
+            baseline["interpreter_path"] if adapter_id == PYTEST else baseline["executable_path"] if adapter_id == SYSTEM_MAVEN else baseline["wrapper_path"]
         )
-        from tools.project_inventory import module_runtime_path
-        executable = str(module_runtime_path(module_root, runtime_path.as_posix()))
+        from tools.project_inventory import module_runtime_path, system_maven_path
+        executable = str(system_maven_path(str(runtime_path)) if adapter_id == SYSTEM_MAVEN else module_runtime_path(module_root, runtime_path.as_posix()))
         profile = str(baseline["build_profile"])
         typed = tuple(sorted((str(key), str(value)) for key, value in baseline["adapter_parameters"].items()))
         from tools.execution_adapters import command_for
@@ -619,7 +778,7 @@ def _reject_prestart_execution(
     autotest_review: Mapping[str, Any] | None = None,
 ) -> int:
     """Persist an attempt-bound pre-process rejection from durable facts only."""
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
     from tools.pilot_state import read_attempt_receipt, read_effective_canonical
     from tools.project_inventory import read_execution_baseline
     from tools.run_tests import _report, _request_is_attempt_local, _request_report_path
@@ -636,7 +795,7 @@ def _reject_prestart_execution(
         effective = read_effective_canonical(root, attempt_id)
         document = effective["document"]
         adapter_id = baseline["adapter_id"]
-        language = "python" if adapter_id == PYTEST else "java" if adapter_id in {MAVEN, GRADLE} else None
+        language = "python" if adapter_id == PYTEST else "java" if adapter_id in {MAVEN, SYSTEM_MAVEN, GRADLE} else None
         if language is None or delta.get("baseline_digest") != attempt["baseline_digest"]:
             raise ValueError("durable execution facts are invalid")
         source = {
@@ -1338,17 +1497,20 @@ def resume_phase_one_spine(run_root: Path) -> Mapping[str, Any]:
             generated_roots=(root.parent,),
             proved_dependency_files=baseline_external_input_paths(project, baseline),
         )
-        runtime_path = baseline.get("interpreter_path") or baseline.get("wrapper_path")
-        if not isinstance(runtime_path, str):
-            raise InventoryError("baseline runtime path is invalid")
-        current_runtime_identity = runtime_identity(module_root, runtime_path)
+        from tools.project_inventory import validate_execution_baseline_binding
+
+        policy_profile = str(attempt["policy_profile"])
+        validate_execution_baseline_binding(baseline, current_inventory, module_root, policy_profile=policy_profile)
+        runtime_path = baseline.get("interpreter_path") or baseline.get("wrapper_path") or baseline.get("executable_path")
+        current_runtime_identity = None
+        if policy_profile == "local-pilot-v1":
+            if not isinstance(runtime_path, str):
+                raise InventoryError("baseline runtime path is invalid")
+            current_runtime_identity = runtime_identity(module_root, runtime_path, adapter_id=baseline.get("adapter_id"))
         validation = validate_execution_baseline(
-            baseline,
-            current_inventory,
-            requirements=baseline["requirements"],
-            adapter_id=baseline["adapter_id"],
-            build_profile=baseline["build_profile"],
-            adapter_parameters=baseline["adapter_parameters"],
+            baseline, current_inventory, policy_profile=policy_profile,
+            requirements=baseline["requirements"], adapter_id=baseline.get("adapter_id"),
+            build_profile=baseline.get("build_profile"), adapter_parameters=baseline.get("adapter_parameters"),
             runtime_identity_value=current_runtime_identity,
         )
     except (InventoryError, KeyError, TypeError) as error:
@@ -1385,7 +1547,8 @@ def build_parser() -> JsonArgumentParser:
     parser = JsonArgumentParser(description="Deterministic helpers for the CLI-driven test-skills pack.")
     shared = argparse_parent()
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("scan", parents=[shared])
+    scan_parser = sub.add_parser("scan", parents=[shared])
+    scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     status_parser = sub.add_parser("status", parents=[shared])
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])

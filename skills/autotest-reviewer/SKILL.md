@@ -5,7 +5,7 @@ description: Use when selected effective canonical test cases and generated V5 a
 
 # Static automation review
 
-Consume the selected effective canonical document, V5 automation artifact, and declared generated files. Read the [review contract](references/autotest-review-contract.md), `schemas/autotest-reviewer-output.schema.json`, `tools.canonical_document`, and `tools.automation_validation`.
+Consume the selected effective canonical document, V5 automation artifact, and every declared generated file plus its required authorized dependencies. Read the [review contract](references/autotest-review-contract.md) and `schemas/autotest-reviewer-output.schema.json`. Execute canonical/automation validators; read their source only as needed to diagnose a failure.
 
 ## Procedure
 
@@ -25,6 +25,15 @@ insufficient. Do not inspect generator dialogue, transport logs or unrelated run
    Check deterministic data, fixture cleanup, independence from execution order, bounded
    condition waits, and Linux/Windows path assumptions. This is a source review; do not
    run mutation campaigns or claim that a relation digest proves behavioral coverage.
+   For every case, answer with concrete file and class/method evidence:
+   (a) what application boundary is declared, and does test → helper → boundary reach it;
+   (b) is the target behavior executed by real components rather than a stub or mock;
+   (c) does the assertion observe the response/state required by Expected?
+   An isolated class/method check, subject substitution or weakened Expected requires
+   rework. External API is preferred; MockMvc with real application components is allowed
+   unless this run requires external API. A single-request functional case is valid.
+   HTTP imports, JUnit annotations, absence of Mockito and correct digests cannot answer
+   these questions. Project imports may be the accepted client/configuration.
 3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
 4. One fresh role-isolated reviewer invocation serves each automation version. Before review, the controller must create and read back the exact attempt-owned `automation-review-boundary-r1` or `-r2`; bind its digest as `host_isolation_sha256`. A model statement or caller-supplied receipt is never sufficient. Return a V5 static-review verdict bound to that exact automation digest. `AUTO_FIX_APPLIED` permits only one complete revision-2 regeneration and fresh second review; it never authorizes the old artifact or regeneration after runtime `FAIL`.
 
@@ -32,6 +41,11 @@ This is static review. It does not compile, execute, or claim a runtime result.
 An accepted verdict permits the controller to form and materialize the generated delta;
 it is not terminal acceptance and cannot replace execution, trace, disposition, or
 finalization evidence.
+
+Record violations in existing findings with code evidence and affected case/relation IDs.
+For acceptance keep findings/corrections empty; retain concise answers to the three
+questions in the existing top-level warnings as `REVIEW_EVIDENCE` notes (format below).
+These notes document source review, not execution or proof of complete semantic coverage.
 
 ## Stop conditions
 

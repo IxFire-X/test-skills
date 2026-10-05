@@ -139,7 +139,7 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
         "maven": "maven-wrapper:selected-symbols-v1",
         "gradle": "gradle-wrapper:selected-symbols-v1",
     }
-    if language == "java" and framework == "junit5" and build_tool in adapter_ids and target is not None and target.is_file() and _ok(root, target) and not _is_reparse(target):
+    if language == "java" and framework == "junit5" and build_tool in adapter_ids and target is not None and target.is_file() and _ok(root, target) and not _is_reparse(target) and (os.name == "nt" or os.access(target, os.X_OK)):
         module["test"] = {
             "framework": "junit5",
             "adapter_id": adapter_ids[build_tool],
@@ -148,6 +148,19 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
             "adapter_parameters": {},
         }
         return
+    if language == "java" and framework == "junit5" and build_tool == "maven":
+        from tools.project_inventory import InventoryError, system_maven_path
+
+        try:
+            executable = system_maven_path("mvn")
+        except (InventoryError, OSError):
+            pass
+        else:
+            module["test"] = {
+                "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
+                "executable": str(executable), "build_profile": "default", "adapter_parameters": {},
+            }
+            return
     module.pop("test", None)
 
 

@@ -5,7 +5,7 @@ description: Use when the selected effective canonical test-case document must b
 
 # Project-native automation generation
 
-Use only the selected effective canonical document and its digest. Read the [automation contract](references/automation-output-contract.md), `tools.canonical_document`, `tools.automation_validation`, and `tools.execution_preflight`.
+Use only the selected effective canonical document and its digest. Read the [automation contract](references/automation-output-contract.md), output schema and required authorized project inputs. Execute canonical, automation and preflight validators; read their source only as needed to diagnose a failure.
 
 Emit a complete proposed generated file set; the controller alone materializes it in the
 selected module's active test root after accepted static review. This role does not use an
@@ -20,6 +20,13 @@ attempt-local/isolated project copy and never authorizes execution.
 4. Emit exactly one manual disposition for every manual step. Emit `BLOCKED` only for a canonical blocker with empty generated/relation/disposition arrays; a project-generation problem without a canonical blocker stops without fabricating a BLOCKED artifact.
 5. Validate via `tools.automation_validation`. Each `generated_files` row carries exact UTF-8 `content` and its matching SHA-256 `content_digest`; the complete artifact has one deterministic digest for independent review. Never write project files or claim execution. Never create a third version, a partial/destructive correction, or any regeneration after runtime `FAIL`.
 
+Generate functional application tests for the accepted cases. Use the declared application
+boundary: prefer the external API when both routes are available; MockMvc with real
+application components is also allowed unless this run explicitly requires the external
+API. Reuse the project's client, authentication, configuration and setup/cleanup. An
+isolated class or method test cannot substitute for an application case. One request is
+enough when it exercises that case and observes its required outcome.
+
 Each generated test must reach the real behavior named by its operation relation and
 assert the corresponding observed value or state. Do not replace the subject under test
 with its expected answer, assert a constant against itself, swallow an unexpected
@@ -30,6 +37,8 @@ setup and teardown through existing fixtures, order-independent tests, and bound
 for observed conditions instead of arbitrary sleeps. Missing fixtures/setup are rework.
 Keep generated paths and process assumptions valid on Linux and Windows; use the selected
 project runtime and native framework APIs, never a hardcoded host Python path.
+Missing URL, access, fixture or oracle is a concrete gap: identify its source, affected
+checks and required clarification. Do not invent it or replace the case with a unit test.
 
 Markdown/CSV and their human prose are never automation inputs.
 

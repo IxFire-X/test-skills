@@ -95,6 +95,45 @@ def test_pytest_baseline_binds_only_interpreter_identity(tmp_path: Path) -> None
         build_skillsrc_authority_receipt((project / ".skillsrc").read_bytes(), acceptance_kind="confirmed-replacement")
 
 
+def test_system_maven_launcher_drift_invalidates_execution_baseline(tmp_path: Path) -> None:
+    import json
+    import os
+    from tools.project_inventory import validate_execution_baseline_binding
+
+    project = tmp_path / "project"
+    project.mkdir()
+    launcher = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
+    launcher.write_bytes(b"maven-launcher-v1")
+    launcher.chmod(0o755)
+    (project / "pom.xml").write_text("<project/>\n", encoding="utf-8")
+    (project / ".skillsrc").write_text(json.dumps({
+        "schema_version": "5.0.0", "version": "3.0", "project": {"name": "fixture"},
+        "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+        "modules": [{"id": "root", "root": ".", "stack": {"language": "java", "build_tool": "maven"},
+            "paths": {"tests": ["src/test/java"]}, "detected_from": ["pom.xml"],
+            "test": {"framework": "junit5", "adapter_id": "maven:selected-symbols-v1", "executable": str(launcher), "build_profile": "default", "adapter_parameters": {}}}],
+    }), encoding="utf-8")
+    inventory = build_inventory(project, project)
+    baseline = build_execution_baseline(
+        inventory, project_root=project, requirements={"requirement_id": "system-maven", "digest": "sha256:" + "a" * 64},
+        skillsrc_file_id=_file_id(inventory, ".skillsrc"), skillsrc_authority=_authority(project),
+        execution_file_ids=[_file_id(inventory, "pom.xml")], parent_build_file_ids=[],
+        adapter_id="maven:selected-symbols-v1", build_profile="default", adapter_parameters={},
+        executable_path=str(launcher.resolve()), executable_identity=runtime_identity(project, str(launcher), adapter_id="maven:selected-symbols-v1"),
+    )
+    validate_execution_baseline_binding(baseline, inventory, project)
+    alternate = tmp_path / "alternate" / launcher.name
+    alternate.parent.mkdir()
+    alternate.write_bytes(launcher.read_bytes())
+    alternate.chmod(0o755)
+    alternate_identity = runtime_identity(project, str(alternate), adapter_id="maven:selected-symbols-v1")
+    assert validate_execution_baseline(baseline, inventory, runtime_identity_value=alternate_identity)["status"] == "DECLARED_INPUT_DRIFT"
+    launcher.write_bytes(b"maven-launcher-v2")
+
+    with pytest.raises(InventoryError, match="runtime binding"):
+        validate_execution_baseline_binding(baseline, inventory, project)
+
+
 def test_nested_maven_baseline_binds_root_skillsrc_and_detects_drift(tmp_path: Path) -> None:
     project = tmp_path / "project"
     module = project / "parent" / "child"

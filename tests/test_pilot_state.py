@@ -270,17 +270,30 @@ def test_event_append_rejects_fabricated_and_out_of_order_attempt_evidence_witho
 
 
 def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> None:
+    from tools.project_inventory import read_inventory_receipt, select_context_batches
+    from tests.test_automation_revision_budget import automated_document
+
     root = Path(create_run(tmp_path, "cases-only-v1", AUTHORIZATION)["run_root"])
     append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))
+    baseline = _baseline(root)
     attempt = pilot_state.create_attempt(
         root,
         {"project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1"},
-        _baseline(root),
+        baseline,
     )
     attempt_id = attempt["attempt_id"]
-    append_event(
-        root, "CONTEXT_SELECTED", actor="controller", attempt_id=attempt_id,
-        batch_id="review-0001", artifact_digest=DIGEST_A,
+    before = _snapshot(root)
+    with pytest.raises(ValueError, match="context-marker inputs"):
+        pilot_state.publish_model_request(
+            root, attempt_id, "context-marker:baseline",
+            model_id="model-context", invocation_id="missing-context",
+            input_digests=[DIGEST_A],
+        )
+    assert _snapshot(root) == before
+    inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
+    context = pilot_state.publish_context_selection(
+        root, attempt_id,
+        select_context_batches(inventory, tmp_path, [], byte_budget=64 * 1024)[0]["receipt"],
     )
     before = _snapshot(root)
     with pytest.raises(ValueError, match="publish_model_request"):
@@ -314,27 +327,44 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
     pilot_state.publish_model_request(
         root, attempt_id, "context-marker:baseline",
         model_id="model-context", invocation_id="invoke-context",
-        input_digests=[DIGEST_A],
+        input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], context["digest"]],
     )
-    append_event(
-        root, "MODEL_RESPONSE_RECEIVED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id="context-marker:baseline", artifact_digest=DIGEST_A,
-    )
+    marker = pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", {
+        "schema_version": "5.0.0", "stage": "context-marker",
+        "artifacts": {
+            "analytics_documentation": {"requirements": automated_document()["source_requirements"]},
+            "source_code_and_diff": {"sources": ["fixture — durable model input"]},
+        }, "warnings": [],
+    })
+    before = _snapshot(root)
+    with pytest.raises(ValueError, match="tc-generator input digests"):
+        pilot_state.publish_model_request(
+            root, attempt_id, "tc-generator:BATCH-fixture",
+            model_id="model-generator", invocation_id="invoke-generator",
+            input_digests=[DIGEST_A, context["digest"], "sha256:" + "1" * 64, "sha256:" + "2" * 64],
+        )
+    assert _snapshot(root) == before
     pilot_state.publish_model_request(
         root, attempt_id, "tc-generator:BATCH-fixture",
         model_id="model-generator", invocation_id="invoke-generator",
-        input_digests=[DIGEST_A],
+        input_digests=[marker["content_digest"], context["digest"], "sha256:" + "1" * 64, "sha256:" + "2" * 64],
     )
-    append_event(
-        root, "MODEL_RESPONSE_RECEIVED", actor="controller", attempt_id=attempt_id,
-        batch_id="BATCH-fixture", stage_instance_id="tc-generator:BATCH-fixture",
-        artifact_digest=DIGEST_B, transport_attempts=2,
-    )
-    append_event(
-        root, "CANDIDATE_PUBLISHED", actor="controller", attempt_id=attempt_id,
-        batch_id="BATCH-fixture", stage_instance_id="tc-generator:BATCH-fixture",
-        artifact_digest=DIGEST_B,
-    )
+    fragment = {
+        "schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "BATCH-fixture", "namespace": "B1",
+        "plan_digest": "sha256:" + "1" * 64, "header_digest": DIGEST_A,
+        "context_receipt_digest": context["digest"], "context_receipt": context,
+        "owned_source_requirement_ids": [automated_document()["source_requirements"][0]["source_requirement_id"]],
+        "requirements": [], "source_to_canonical_mappings": [], "operation_capabilities": [], "test_cases": [], "diagnostics": [],
+    }
+    fragment["digest"] = pilot_state._model_stage_artifact_digest(fragment)
+    before = _snapshot(root)
+    with pytest.raises(ValueError, match="fragment must match"):
+        pilot_state.publish_model_stage_artifact(root, attempt_id, "tc-generator:BATCH-fixture", fragment)
+    assert _snapshot(root) == before
+    fragment.pop("digest")
+    fragment["header_digest"] = "sha256:" + "2" * 64
+    fragment["digest"] = pilot_state._model_stage_artifact_digest(fragment)
+    pilot_state.publish_model_stage_artifact(root, attempt_id, "tc-generator:BATCH-fixture", fragment, transport_attempts=2)
     append_event(
         root, "CANDIDATE_PUBLISHED", actor="controller", attempt_id=attempt_id,
         stage_instance_id="assembly", artifact_digest=DIGEST_A,
@@ -343,23 +373,21 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
         root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
         stage_instance_id="tc-reviewer:canonical", artifact_digest=DIGEST_A,
     )
-    pilot_state.publish_model_request(
-        root, attempt_id, "tc-reviewer:canonical",
-        model_id="model-reviewer", invocation_id="invoke-reviewer",
-        input_digests=[DIGEST_A],
-    )
-    append_event(
-        root, "MODEL_RESPONSE_RECEIVED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id="tc-reviewer:canonical", artifact_digest=DIGEST_B,
-    )
+    before = _snapshot(root)
+    with pytest.raises(ValueError, match="receipt|boundary"):
+        pilot_state.publish_model_request(
+            root, attempt_id, "tc-reviewer:canonical",
+            model_id="model-reviewer", invocation_id="invoke-reviewer",
+            input_digests=[DIGEST_A, DIGEST_B],
+        )
+    assert _snapshot(root) == before
     assert [
-        event["event_type"] for event in derive_state(root)["events"][-7:]
+        event["event_type"] for event in derive_state(root)["events"][-5:]
     ] == [
         "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED",
-        "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "MODEL_REQUESTED",
-        "MODEL_RESPONSE_RECEIVED",
+        "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED",
     ]
-    assert derive_state(root)["events"][-6]["transport_attempts"] == 2
+    assert derive_state(root)["events"][-4]["transport_attempts"] == 2
 
 
 def test_direct_terminal_event_requires_completed_phase_seven_closure(tmp_path: Path) -> None:

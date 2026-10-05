@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from http import HTTPStatus
 from dataclasses import dataclass
 from types import MappingProxyType
 from pathlib import Path
@@ -81,6 +82,11 @@ def _rfc6901_tokens(pointer: str) -> tuple[str, ...]:
 _NO_JSON = object()
 _MISSING = object()
 _HUMAN_PLACEHOLDER = re.compile(r"^<[^<>]+>$")
+_SERVICE_EXPECTED = re.compile(
+    r"(?:проверено(?:\s+(?:автотестом|автоматически))?|(?:автотест|тест|проверка)\s+(?:успешно\s+)?(?:пройден[ао]?|прош[её]л[ао]?)|успешно|ok|pass(?:ed)?|fail(?:ed)?|—)[.!]?",
+    re.I,
+)
+_HTTP_RESULT = re.compile(r"^(.+?)\n[ \t]*\nHTTP ([1-5]\d\d) ([^\n]+)(?:\n|$)", re.S)
 
 
 def _trailing_json(text: str) -> Any:
@@ -134,6 +140,11 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
     ]
     request = _trailing_json(step["test_data"])
     inputs_blocked = any(item["field_path"] == "/inputs" for item in step["automation_blockers"])
+    if not inputs_blocked:
+        if request is _NO_JSON and not body_inputs and step["test_data"] != "Тело запроса отсутствует.":
+            diagnostics.append(_diagnostic(_pointer(*step_path, "test_data"), "SEMANTIC_HUMAN_HTTP_REQUEST_FORMAT", "HTTP request requires a full formatted JSON body or exactly «Тело запроса отсутствует.»"))
+        elif request is not _NO_JSON and (not step["test_data"].lstrip().startswith(("{", "[")) or (request and not re.search(r"\n[ \t]+\S", step["test_data"]))):
+            diagnostics.append(_diagnostic(_pointer(*step_path, "test_data"), "SEMANTIC_HUMAN_HTTP_REQUEST_FORMAT", "HTTP request body must be full JSON with indentation"))
     if body_inputs and request is _NO_JSON and not inputs_blocked:
         diagnostics.append(_diagnostic(
             _pointer(*step_path, "test_data"),
@@ -186,6 +197,17 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
                     ))
 
     for expectation_index, expectation in enumerate(step["expectations"]):
+        known_statuses = [
+            assertion["expected"]["value"] for assertion in expectation["assertions"]
+            if assertion["actual"]["kind"] == "http_status" and assertion["operator"] == "equals"
+            and assertion.get("expected", {}).get("kind") == "literal"
+        ]
+        if known_statuses:
+            status = _HTTP_RESULT.match(expectation["text"])
+            if status is None or not status[1].strip() or any(status[2] != str(value) for value in known_statuses):
+                diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_HTTP_RESULT_FORMAT", "describe the observable system result, then a blank line and the confirmed HTTP status/reason"))
+            elif int(status[2]) in HTTPStatus._value2member_map_ and status[3].strip() != HTTPStatus(int(status[2])).phrase:
+                diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_HTTP_RESULT_FORMAT", "HTTP reason must match the confirmed status"))
         body_assertions = [
             assertion for assertion in expectation["assertions"]
             if assertion["actual"]["kind"] == "http_body"
@@ -723,6 +745,11 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
         _secret_handle_hygiene(case, case_index, handles, diagnostics)
         for step_index, step in enumerate(case["steps"]):
             step_path = ("test_cases", case_index, "steps", step_index)
+            for expectation_index, expectation in enumerate(step["expectations"]):
+                http_result = _HTTP_RESULT.match(expectation["text"]) if step["operation"] and step["operation"]["kind"] == "http" else None
+                observable_text = http_result[1] if http_result else expectation["text"]
+                if _SERVICE_EXPECTED.fullmatch(observable_text.strip()):
+                    diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_EXPECTED_PLACEHOLDER", f"{case['case_id']} / {step['step_id']}: describe the observable system result instead of a test execution mark"))
             _blocker_and_readiness(step, step_path, diagnostics)
             capability = _data_flow_targets_and_contracts(index, case_index, step_index, step, diagnostics)
             _assertion_matrix(index, case_index, step_index, step, capability, diagnostics)

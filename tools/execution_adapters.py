@@ -17,8 +17,9 @@ from typing import Any, Literal, Mapping, Sequence
 
 PYTEST = "pytest:selected-symbols-v1"
 MAVEN = "maven-wrapper:selected-symbols-v1"
+SYSTEM_MAVEN = "maven:selected-symbols-v1"
 GRADLE = "gradle-wrapper:selected-symbols-v1"
-ADAPTER_IDS = frozenset({PYTEST, MAVEN, GRADLE})
+ADAPTER_IDS = frozenset({PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE})
 SAFE_ENVIRONMENT_LABELS = frozenset({"PROJECT_NATIVE_ENV"})
 _UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r")
 
@@ -76,7 +77,13 @@ def _safe_relative(value: Any, label: str) -> str:
 
 
 def _runtime(module_root: Path, test: Mapping[str, Any], adapter_id: str) -> Path:
-    from tools.project_inventory import InventoryError, module_runtime_path
+    from tools.project_inventory import InventoryError, module_runtime_path, system_maven_path
+
+    if adapter_id == SYSTEM_MAVEN:
+        try:
+            return system_maven_path(test.get("executable"))
+        except (InventoryError, OSError) as error:
+            raise AdapterRequestError("system Maven is unavailable or unsafe") from error
 
     key = "interpreter" if adapter_id == PYTEST else "wrapper"
     relative = _safe_relative(test.get(key), key)
@@ -120,7 +127,7 @@ def _test_config(module: Mapping[str, Any], adapter_id: str) -> Mapping[str, Any
     test = module.get("test")
     if not isinstance(test, Mapping) or test.get("adapter_id") != adapter_id:
         raise AdapterRequestError("selected module is not bound to requested adapter")
-    required = {"adapter_id", "build_profile", "adapter_parameters", "interpreter" if adapter_id == PYTEST else "wrapper"}
+    required = {"adapter_id", "build_profile", "adapter_parameters", "interpreter" if adapter_id == PYTEST else "executable" if adapter_id == SYSTEM_MAVEN else "wrapper"}
     if set(test) != required:
         raise AdapterRequestError("test configuration is not a closed adapter configuration")
     profile, parameters = test.get("build_profile"), test.get("adapter_parameters")
@@ -146,7 +153,7 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
     """One closed command policy for construction, recovery, and receipt validation."""
     if adapter_id == PYTEST:
         return ("test-results/pytest.xml",), (executable, "-m", "pytest", "--junitxml", "test-results/pytest.xml", *selectors)
-    elif adapter_id == MAVEN:
+    elif adapter_id in {MAVEN, SYSTEM_MAVEN}:
         return ("target/surefire-reports",), (executable, f"-P{profile}", f"-Dtest={','.join(selectors)}", "test")
     elif adapter_id == GRADLE:
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)

@@ -77,7 +77,7 @@ def _reviewer_protocol_inputs(
     publish_model_request(
         run_root, attempt_id, "context-marker:baseline",
         model_id="model-context", invocation_id=f"context-{attempt_id}",
-        input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]],
+        input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], context["digest"]],
     )
     marker_publication = publish_model_stage_artifact(
         run_root, attempt_id, "context-marker:baseline", marker,
@@ -163,7 +163,7 @@ def _reviewer_protocol_inputs(
     publish_model_request(
         run_root, attempt_id, "tc-reviewer:canonical",
         model_id="model-reviewer", invocation_id=reviewer_invocation_id,
-        input_digests=[package["package_digest"]],
+        input_digests=[package["candidate_digest"], package["package_digest"]],
     )
     publish_model_stage_artifact(run_root, attempt_id, "tc-reviewer:canonical", review)
     return session, package, review, candidate_receipt
@@ -325,13 +325,11 @@ def test_effective_selection_rejects_unpublished_or_nonterminal_reviewer_digest(
         publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), "sha256:" + "9" * 64)
 
 
-def test_effective_selection_rejects_terminal_ledger_without_attempt_boundary(tmp_path: Path):
-    from tools.pilot_state import publish_effective_canonical
-
+def test_reviewer_request_rejects_missing_attempt_boundary(tmp_path: Path):
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path, effective=False)
-    ledger_digest = _published_reviewer_ledger(run_root, attempt_id, document, bind_boundary=False)
-    with pytest.raises(ValueError, match="invalid effective canonical selection"):
-        publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), ledger_digest)
+    with pytest.raises(ValueError, match="receipt|boundary"):
+        _published_reviewer_ledger(run_root, attempt_id, document, bind_boundary=False)
+    assert not any(json.loads(path.read_text(encoding="utf-8"))["stage"] == "tc-reviewer" for path in (run_root / "model-requests").rglob("*.json"))
 
 
 def test_effective_selection_rejects_noncanonical_reviewer_ledger_bytes(tmp_path: Path):

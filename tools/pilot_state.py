@@ -1292,7 +1292,7 @@ def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mappin
         inventory_name = str(frozen_baseline["inventory_digest"]).removeprefix("sha256:") + ".json"
         frozen_inventory = read_inventory_receipt(root / "inventories" / inventory_name)
         module_root = project if module == "." else project.joinpath(*module.split("/"))
-        validate_execution_baseline_binding(frozen_baseline, frozen_inventory, module_root)
+        validate_execution_baseline_binding(frozen_baseline, frozen_inventory, module_root, policy_profile=manifest["policy_profile"])
     except InventoryError as error:
         raise ValueError("execution baseline proof is invalid") from error
     if (
@@ -1366,7 +1366,7 @@ def freeze_phase_two_inputs(run_root: Path, project_root: Path, module_root: Pat
         )
         if baseline.get("inventory_digest") != inventory["digest"]:
             raise ValueError("execution baseline does not bind the current inventory")
-        validate_execution_baseline_binding(baseline, inventory, module_root)
+        validate_execution_baseline_binding(baseline, inventory, module_root, policy_profile=read_run(root)["manifest"]["policy_profile"])
         inventory_target = root / "inventories" / (inventory["digest"].removeprefix("sha256:") + ".json")
         exclusion = build_exclusion_receipt(inventory)
         exclusion_target = root / "exclusions" / (exclusion["digest"].removeprefix("sha256:") + ".json")
@@ -1422,6 +1422,99 @@ def _model_request_target(root: Path, attempt_id: str, request_digest: str) -> P
     )
 
 
+def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, Any], inputs: Sequence[str]) -> list[dict[str, str]]:
+    from tools.build_context import _OPENSPEC_PATH
+    from tools.project_inventory import read_execution_baseline
+
+    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < 3:
+        raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
+    snapshots: dict[str, dict[str, str]] = {}
+    for digest in inputs[2:]:
+        receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
+        if receipt["inventory_digest"] != baseline["inventory_digest"]:
+            raise ValueError("context-marker receipt must bind the attempt inventory")
+        for item in receipt["files"]:
+            path = item["project_path"].replace("\\", "/")
+            if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/"):
+                continue
+            raw = read_confined_bytes(project, project, project / path)
+            if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != item["content_digest"]:
+                raise ValueError("context-marker OpenSpec source bytes drifted")
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ValueError("context-marker OpenSpec source is not UTF-8") from error
+            snapshots[path] = {"path": path, "sha256": item["content_digest"], "content": content}
+    return list(snapshots.values())
+
+
+def _validate_context_marker_sources(project: Path, root: Path, attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
+    from tools.build_context import openspec_diagnostics
+
+    snapshots = _context_marker_snapshots(project, root, attempt, request["input_digests"])
+    if snapshots:
+        diagnostics = openspec_diagnostics(dict(value), snapshots)
+        if diagnostics:
+            raise ValueError("context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
+
+
+def _validate_model_request_predecessors(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any],
+    stage_instance_id: str, invocation_id: str, inputs: Sequence[str],
+    request_seq: int | None = None,
+) -> None:
+    """Bind generator/reviewer requests to their exact durable predecessors."""
+    stage = stage_instance_id.split(":", 1)[0]
+    if stage not in {"tc-generator", "tc-reviewer"}:
+        return
+    attempt_id = str(attempt["attempt_id"])
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+    cutoff = request_seq if request_seq is not None else state["events"][-1]["seq"] + 1
+    if stage == "tc-generator":
+        from tools.project_inventory import read_execution_baseline
+
+        markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+        if len(inputs) != 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
+            raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
+        _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
+        context = read_context_selection(root, attempt_id, inputs[1])
+        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        selected = [event for event in events if event["event_type"] == "CONTEXT_SELECTED" and event.get("artifact_digest") == inputs[1] and event["seq"] < cutoff]
+        if baseline["digest"] != attempt["baseline_digest"] or context["inventory_digest"] != baseline["inventory_digest"] or not selected:
+            raise ValueError("tc-generator context must bind its prior attempt inventory selection")
+    else:
+        boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
+        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id)
+        package = ledger["package_binding"]
+        reviews = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
+        prior_boundary = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("artifact_digest") == boundary["digest"] and event["seq"] < cutoff for event in events)
+        prior_ledger = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("batch_id") == "reviewer-ledger-v1" and event["seq"] < cutoff for event in events)
+        if (
+            list(inputs) != [boundary["canonical_branch_digest"], boundary["package_digest"]]
+            or invocation_id != boundary["reviewer_invocation_id"]
+            or package.get("candidate_digest") != boundary["canonical_branch_digest"]
+            or package.get("package_digest") != boundary["package_digest"]
+            or len(reviews) != 1
+            or reviews[0].get("artifact_digest") != boundary["canonical_branch_digest"]
+            or reviews[0]["seq"] >= cutoff
+            or not prior_boundary or not prior_ledger
+        ):
+            raise ValueError("tc-reviewer input digests and invocation must bind its prior candidate and reviewer boundary")
+
+
+def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
+    if request["stage"] != "tc-generator":
+        return
+    inputs = request["input_digests"]
+    context = read_context_selection(root, attempt_id, inputs[1])
+    if (
+        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:]
+        or value.get("context_receipt") != context
+    ):
+        raise ValueError("generator fragment must match its request and stored context receipt")
+
+
 def publish_model_request(
     run_root: Path,
     attempt_id: str,
@@ -1452,6 +1545,9 @@ def publish_model_request(
         or any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs)
     ):
         raise ValueError("invalid model request")
+    if stage == "context-marker":
+        _context_marker_snapshots(project, root, attempt, inputs)
+    _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
         if stage == "tc-to-autotest":
             binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
@@ -1545,6 +1641,10 @@ def _read_model_request_with_state(
         or events[0].get("batch_id") != expected_batch
     ):
         raise ValueError("model request is unbound")
+    _validate_model_request_predecessors(
+        project, root, state, attempt, stage_instance_id, value["invocation_id"],
+        value["input_digests"], events[0]["seq"],
+    )
     return dict(value)
 
 
@@ -1655,9 +1755,12 @@ def publish_model_stage_artifact(
         )
     ):
         raise ValueError("model stage artifact requires its exact prior request")
-    read_model_request(
+    request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
+    if stage_instance_id == "context-marker:baseline":
+        _validate_context_marker_sources(project, root, attempt, request, value)
+    _validate_generator_artifact_binding(root, attempt_id, request, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
         create_confined_bytes_exclusive(project, root, target, data)
@@ -1736,11 +1839,14 @@ def _read_model_stage_artifact_with_state(
         or not event_binding_valid
     ):
         raise ValueError("model stage artifact is unbound")
-    _read_model_request_with_state(
+    request = _read_model_request_with_state(
         project, root, state, attempt_id, stage_instance_id,
         str(requests[0].get("artifact_digest", "")),
     )
     _validate_model_stage_artifact(stage_instance_id, value)
+    if stage_instance_id == "context-marker:baseline":
+        _validate_context_marker_sources(project, root, attempt, request, value)
+    _validate_generator_artifact_binding(root, attempt_id, request, value)
     return {
         "artifact": dict(value),
         "byte_count": len(raw),
@@ -2322,8 +2428,8 @@ def _validate_closed_execution_request(
     request: Any,
     delta: Mapping[str, Any],
 ) -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for, request_digest
-    from tools.project_inventory import module_runtime_path, read_execution_baseline
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for, request_digest
+    from tools.project_inventory import module_runtime_path, read_execution_baseline, system_maven_path
 
     execution = payload["execution"]
     environment = payload["environment"]
@@ -2332,9 +2438,9 @@ def _validate_closed_execution_request(
     try:
         module = module.resolve()
         baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
-        runtime_relative = baseline["interpreter_path"] if request.adapter_id == PYTEST else baseline["wrapper_path"]
-        expected_executable = module_runtime_path(module, runtime_relative)
-        executable = module_runtime_path(module, Path(request.executable).relative_to(module).as_posix())
+        runtime_relative = baseline["interpreter_path"] if request.adapter_id == PYTEST else baseline["executable_path"] if request.adapter_id == SYSTEM_MAVEN else baseline["wrapper_path"]
+        expected_executable = system_maven_path(runtime_relative) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, runtime_relative)
+        executable = system_maven_path(request.executable) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, Path(request.executable).relative_to(module).as_posix())
         cwd = Path(request.cwd).resolve()
         for report_path in request.report_paths:
             raw = Path(report_path)
@@ -2371,6 +2477,7 @@ def _validate_closed_execution_request(
     expected_target = {
         PYTEST: ("python", "pytest", "pytest"),
         MAVEN: ("java", "junit5", "maven"),
+        SYSTEM_MAVEN: ("java", "junit5", "maven"),
         GRADLE: ("java", "junit5", "gradle"),
     }
     if request.report_paths != expected_reports or (

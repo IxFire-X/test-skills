@@ -20,6 +20,7 @@ def build_phase_two_baseline(
     project = Path(project).resolve()
     module = project / identity["module"]
     interpreter = MODULE_PYTHON
+    policy_profile = identity.get("policy_profile", "local-pilot-v1")
     if skill_pack_root is not None:
         Path(skill_pack_root).mkdir(parents=True, exist_ok=True)
     skillsrc = project / ".skillsrc"
@@ -33,15 +34,16 @@ def build_phase_two_baseline(
                 "id": "fixture", "root": identity["module"],
                 "stack": {"language": "python", "build_tool": "pip"},
                 "paths": {"source": ["src"], "tests": ["tests"]},
-                "test": {"framework": "pytest", "adapter_id": "pytest:selected-symbols-v1", "interpreter": interpreter, "build_profile": "default", "adapter_parameters": {}},
+                **({"test": {"framework": "pytest", "adapter_id": "pytest:selected-symbols-v1", "interpreter": interpreter, "build_profile": "default", "adapter_parameters": {}}} if policy_profile == "local-pilot-v1" else {}),
                 "detected_from": ["pyproject.toml"],
             }],
         }, ensure_ascii=False) + "\n", encoding="utf-8")
-    runtime = module / interpreter
-    runtime.parent.mkdir(parents=True, exist_ok=True)
-    if not runtime.exists():
-        runtime.write_bytes(b"fixture-runtime-v1")
-        runtime.chmod(0o755)
+    if policy_profile == "local-pilot-v1":
+        runtime = module / interpreter
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        if not runtime.exists():
+            runtime.write_bytes(b"fixture-runtime-v1")
+            runtime.chmod(0o755)
     inventory = build_inventory(
         project,
         module,
@@ -66,22 +68,25 @@ def build_phase_two_baseline(
         if item["opaque_id"] != by_path[".skillsrc"] and item["opaque_id"] not in parent_ids
     ]
     from tools.project_inventory import runtime_identity
+    runtime_facts = {}
+    if policy_profile == "local-pilot-v1":
+        runtime_facts = {"interpreter_path": interpreter, "interpreter_identity": runtime_identity(module, interpreter), "adapter_id": "pytest:selected-symbols-v1", "build_profile": "default", "adapter_parameters": {}}
     return build_execution_baseline(
         inventory, project_root=project, requirements={"requirement_id": "fixture", "digest": "sha256:" + "a" * 64},
         skillsrc_file_id=by_path[".skillsrc"],
         skillsrc_authority=build_skillsrc_authority_receipt(skillsrc.read_bytes()),
         execution_file_ids=execution_ids, parent_build_file_ids=parent_ids,
-        interpreter_path=interpreter, interpreter_identity=runtime_identity(module, interpreter),
-        wrapper_path=None, wrapper_identity=None, adapter_id="pytest:selected-symbols-v1", build_profile="default", adapter_parameters={},
+        policy_profile=policy_profile, **runtime_facts,
     )
 
 
 def phase_two_baseline(root: Path, project: Path, identity: dict) -> dict:
     """Fixture-only real Phase 2 proof for tests that create durable attempts."""
-    from tools.pilot_state import freeze_phase_two_inputs
+    from tools.pilot_state import freeze_phase_two_inputs, read_run
 
     project = Path(project).resolve()
     module = project / identity["module"]
+    identity = {**identity, "policy_profile": read_run(root)["manifest"]["policy_profile"]}
     baseline = build_phase_two_baseline(project, identity, skill_pack_root=Path(root).parent)
     return dict(freeze_phase_two_inputs(root, project, module, baseline)["baseline"])
 

@@ -118,9 +118,9 @@ def _durable_evidence(manifest, run_root: Path, attempt_id: str):
     ]
     rows = [
         _executed("orchestrate", "controller", "orchestrate-v1", "orchestrate:attempt", digest=attempt["digest"], input_digests=[manifest["digest"]]),
-        _executed("context-marker", "generator", "context-marker-v1", "context-marker:baseline", model_id="model-context", invocation_id=f"context-{attempt_id}", kind="model-stage-artifact", digest=context_marker_digest, input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]], output_digests=[context_marker_digest]),
+        _executed("context-marker", "generator", "context-marker-v1", "context-marker:baseline", model_id="model-context", invocation_id=f"context-{attempt_id}", kind="model-stage-artifact", digest=context_marker_digest, input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], *package["context_receipt_digests"]], output_digests=[context_marker_digest]),
         *generator_rows,
-        _executed("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v1", "tc-reviewer:canonical", model_id="model-reviewer", invocation_id=ledger["reviewer_invocation_id"], kind="model-stage-artifact", digest=reviewer_output_digest, input_digests=[package["package_digest"]]),
+        _executed("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v1", "tc-reviewer:canonical", model_id="model-reviewer", invocation_id=ledger["reviewer_invocation_id"], kind="model-stage-artifact", digest=reviewer_output_digest, input_digests=[package["candidate_digest"], package["package_digest"]]),
         _executed("tc-to-autotest", "automation-generator", "tc-to-autotest-v1", f"tc-to-autotest:r{revision}", model_id="model-automation", invocation_id=auto_boundary["record"]["generator_invocation_id"], kind="execution-inputs", digest=inputs["digest"], input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]], output_digests=[automation_digest]),
         _executed("autotest-reviewer", "automation-reviewer", "autotest-static-reviewer-v1", f"autotest-reviewer:r{revision}", model_id="model-automation-reviewer", invocation_id=auto_boundary["record"]["reviewer_invocation_id"], kind=auto_kind, digest=auto_boundary["digest"], input_digests=[automation_digest, auto_boundary["digest"]], output_digests=[review_digest]),
     ]

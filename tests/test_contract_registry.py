@@ -70,7 +70,7 @@ def test_frozen_registries_are_complete_ordered_and_truthful(pack_root: Path) ->
     assert contract["artifact_registry"][7] == {"id": "finalization_receipt", "phase": 1, "implementation_status": "IMPLEMENTED", "semantic_ready": True}
     assert contract["controller_schemas"] == [row[0] for row in SCHEMA_ROWS]
     assert contract["core_skills"] == ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "orchestrate"]
-    assert [item["id"] for item in contract["adapter_registry"]] == ["pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"]
+    assert [item["id"] for item in contract["adapter_registry"]] == ["pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"]
     assert [item["id"] for item in contract["policy_profiles"]] == ["cases-only-v1", "local-pilot-v1"]
     assert all(item["implementation_status"] == "IMPLEMENTED" and item["semantic_ready"] is True for item in contract["adapter_registry"])
     assert all(item["semantic_ready"] is True for item in contract["policy_profiles"])

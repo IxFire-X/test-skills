@@ -40,7 +40,7 @@ def _patch_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(init_skillsrc, "discover_project", lambda _root: _discovery())
 
 
-def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_path: Path) -> None:
+def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_path: Path, monkeypatch) -> None:
     import os
     from tools.discover_project import discover_project
 
@@ -50,6 +50,7 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
     (tmp_path / "pom.xml").write_text('<project><modelVersion>4.0.0</modelVersion><groupId>sample</groupId><artifactId>sample</artifactId><version>1</version><dependencies><dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.0</version></dependency></dependencies></project>', encoding="utf-8")
     for name in ("mvnw", "mvnw.cmd"):
         (tmp_path / name).write_text("wrapper fixture", encoding="utf-8")
+        (tmp_path / name).chmod(0o755)
     discovery = discover_project(tmp_path)
     assert discovery["status"] == "ready", discovery
     from tools.schema_validation import schema_diagnostics
@@ -61,6 +62,7 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
     (tmp_path / "build.gradle").write_text("dependencies { testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0' }", encoding="utf-8")
     for name in ("gradlew", "gradlew.bat"):
         (tmp_path / name).write_text("wrapper fixture", encoding="utf-8")
+        (tmp_path / name).chmod(0o755)
     discovery = discover_project(tmp_path)
     assert discovery["status"] == "needs_input", discovery
     for build, wrapper in (("maven", "mvnw.cmd" if os.name == "nt" else "mvnw"),
@@ -68,6 +70,19 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
         compiled = init_skillsrc.compile_skillsrc(discovery, {"module:root:stack.build_tool": build}, tmp_path)
         assert compiled["modules"][0]["test"]["wrapper"] == wrapper
         assert compiled["modules"][0]["test"]["adapter_id"] == f"{build}-wrapper:selected-symbols-v1"
+
+    for name in ("mvnw", "mvnw.cmd"):
+        if os.name == "nt":
+            (tmp_path / name).unlink()
+        else:
+            (tmp_path / name).chmod(0o644)
+    launcher = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
+    launcher.write_text("system Maven fixture", encoding="utf-8")
+    launcher.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    compiled = init_skillsrc.compile_skillsrc(discovery, {"module:root:stack.build_tool": "maven"}, tmp_path)
+    assert compiled["modules"][0]["test"]["adapter_id"] == "maven:selected-symbols-v1"
+    assert compiled["modules"][0]["test"]["executable"] == str(launcher.resolve())
 
 
 def test_missing_skillsrc_is_created_atomically_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

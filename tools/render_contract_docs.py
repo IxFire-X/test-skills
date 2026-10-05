@@ -13,7 +13,7 @@ MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 RUNTIME_SIGNATURE_ORDER = ("create_run", "append_event", "create_attempt", "derive_state", "terminal_result", "exit_code")
 RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", "reason_code", "accepted")
 POLICY_ORDER = ("cases-only-v1", "local-pilot-v1")
-ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
+ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
 STAGE_ORDER = ("orchestrate", "context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
 
