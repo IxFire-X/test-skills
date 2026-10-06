@@ -826,10 +826,52 @@ def _review_payload(project: Path, run_root: Path, attempt: Mapping[str, Any], c
     snapshot = run_pipeline._docs_entries(project, list(config["docs"]))
     sources = [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in snapshot]
     del redact_text
+    # Only the case reviewer verifies capability provenance; automation parts stay as they were.
+    contexts = [] if automation is not None else _provenance_contexts(
+        project, run_root, attempt, document, exclude={row["path"] for row in sources},
+        budget=max(1, (int(config["review_input_bytes"]) - int(config["review_reserve_bytes"])) // 4))
     return {"document": dict(document), "automation": None if automation is None else dict(automation), "package_binding": None if package is None else dict(package),
-            "sources": sources, "contexts": [],
+            "sources": sources, "contexts": contexts,
             "requirements_binding": {"module_id": config.get("module_id"), "selected_target": config.get("target"),
                                      "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in sources]}}
+
+
+def _provenance_contexts(project: Path, run_root: Path, attempt: Mapping[str, Any], document: Mapping[str, Any], *, exclude: set[str], budget: int) -> list[dict[str, Any]]:
+    """Project files that capability provenance names, so a reviewer can verify it.
+
+    A file counts as named when its project path or its file name occurs in the
+    provenance text.  Files are taken in the order they are first named, from the
+    attempt's context receipts (already masked bytes), while their UTF-8 size fits
+    ``budget``; the rest stays out rather than overflowing every review part.
+    """
+    from tools.project_inventory import select_context_batches
+
+    text = "\n".join(str(line) for capability in document.get("operation_capabilities", []) for line in capability.get("provenance", []))
+    if not text:
+        return []
+    _baseline, inventory = _baseline_and_inventory(run_root, attempt)
+    files = {item["opaque_id"]: item for receipt in _context_receipts(run_root, str(attempt["attempt_id"])) for item in receipt["files"]}
+    named = []
+    for item in files.values():
+        path = str(item["project_path"])
+        if path in exclude:
+            continue
+        positions = [position for position in (text.find(path), text.find(path.rsplit("/", 1)[-1])) if position >= 0]
+        if positions:
+            named.append((min(positions), path, item["opaque_id"]))
+    contexts, used = [], 0
+    for _position, path, opaque_id in sorted(named):
+        batches = select_context_batches(inventory, project, [opaque_id], byte_budget=max(int(files[opaque_id].get("size") or 1), 1), include_closed_manifests=False)
+        for batch in batches:
+            for row in batch["files"]:
+                content = bytes(row["bytes"]).decode("utf-8", errors="strict") if isinstance(row.get("bytes"), (bytes, bytearray)) else None
+                digest = None if content is None else "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+                # The snapshot binds inventory bytes: a masked (redacted) file stays out.
+                if not content or digest != files[opaque_id].get("content_digest") or used + len(content.encode("utf-8")) > budget:
+                    continue
+                used += len(content.encode("utf-8"))
+                contexts.append({"path": row["project_path"], "sha256": digest, "content": content})
+    return contexts
 
 
 def _host_evidence(config: Mapping[str, Any], review_key: str) -> dict[str, Any]:

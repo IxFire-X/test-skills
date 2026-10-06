@@ -313,10 +313,30 @@ def _scan_skill_pack_root(project: Path) -> Path | None:
     return ROOT
 
 
+_WRAPPER_NAMES = {"mvnw", "mvnw.cmd", "gradlew", "gradlew.bat", ".gitattributes", ".gitignore"}
+_WRAPPER_DIRECTORIES = (".mvn/wrapper/", "gradle/wrapper/")
+_LAUNCH_SCRIPT_SUFFIXES = (".ps1", ".sh", ".bat", ".cmd")
+
+
+def is_model_context_noise(project_path: str) -> bool:
+    """Build wrappers, VCS metadata and top-level launch scripts: never model context.
+
+    They stay in the inventory and the execution baseline (the project runs with
+    its wrapper); the generator and reviewers only never read them as sources.
+    """
+    path = str(project_path).replace("\\", "/")
+    name = path.rsplit("/", 1)[-1]
+    lowered = path.lower()
+    return (name.lower() in _WRAPPER_NAMES
+            or any(lowered.startswith(prefix) or f"/{prefix}" in lowered for prefix in _WRAPPER_DIRECTORIES)
+            or ("/" not in path and lowered.endswith(_LAUNCH_SCRIPT_SUFFIXES)))
+
+
 def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root: Path, target: str | None) -> list[str]:
     files = inventory.get("files")
     if not isinstance(files, list):
         raise HostStop("INVENTORY_INVALID", "inventory files are invalid")
+    files = [item for item in files if not (isinstance(item, Mapping) and is_model_context_noise(str(item.get("project_path", ""))))]
     if target is None:
         return [str(item["opaque_id"]) for item in files if isinstance(item, Mapping) and isinstance(item.get("opaque_id"), str)]
     raw = str(target).replace("\\", "/").strip()

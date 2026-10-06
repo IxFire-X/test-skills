@@ -84,5 +84,7 @@ def test_replay_3e852e76_auto_fix_without_extra_parts(tmp_path: Path) -> None:
     assert review["output"]["artifacts"]["validation_report"]["verdict"] == "AUTO_FIX_APPLIED"
     effective = read_effective_canonical_if_present(root, task["attempt_id"])
     assert effective["document"]["test_cases"][10]["management"]["components"] == ["HelloWorldController"]
-    assert len(replay.tasks("tc-reviewer:")) == 2
+    from tools.pilot_state import read_review_plan
+
+    assert len(replay.tasks("tc-reviewer:")) == len(read_review_plan(root, task["attempt_id"])["parts"])
     assert review_bytes(review["aggregate"])  # the aggregate is sealed

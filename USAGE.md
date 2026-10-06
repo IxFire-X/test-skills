@@ -82,7 +82,12 @@ Linux и Windows используют один пайплайн и project-nativ
 `build_root` — корень сборки многомодульного Maven/Gradle-проекта относительно проекта
 (по умолчанию module root). `build_profile: "default"` означает, что профиль не объявлен.
 Необязательный раздел `limits` задаёт лимиты в байтах: `context_batch_bytes`,
-`docs_file_bytes`, `docs_total_bytes`. Linux venv может содержать
+`docs_file_bytes`, `docs_total_bytes`. В контекст модели не попадают обёртки сборки
+(`mvnw`, `mvnw.cmd`, `gradlew`, `gradlew.bat`, `.mvn/wrapper/`, `gradle/wrapper/`),
+`.gitattributes`, `.gitignore` и скрипты запуска в корне проекта (`*.ps1`, `*.sh`,
+`*.bat`, `*.cmd`); в инвентаре и baseline запуска они остаются. Файлы, которые называет
+provenance capability, драйвер добавляет в срез ревью (`contexts`) в пределах четверти
+бюджета части. Linux venv может содержать
 стандартный interpreter symlink: baseline связывает `pyvenv.cfg`, целевой interpreter
 и его bytes. Произвольные symlink wrappers и выходы пути за module запрещены. На Linux
 interpreter/wrapper должен уже иметь executable permission; пайплайн её не изменяет.

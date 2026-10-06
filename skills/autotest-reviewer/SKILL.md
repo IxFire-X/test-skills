@@ -25,7 +25,18 @@ and the zero-based input index of that first occurrence. Read the content throug
 reference; a `content_ref` entry is complete evidence, not a missing or truncated input.
 For each assigned original-source, local or cross-part scope:
 
-1. Independently verify source digest and attempt-owned `effective_bundle_receipt_digest`, every declared file's exact UTF-8 `content` and full-byte digest, the deterministic complete `automation_sha256`, the complete physical relation-array digest, project-native setup, and every locator variant. Confirm that each generated framework equals the selected `.skillsrc` module framework and that every Java path is the class FQN under its selected native test root. Call `tools.run_tests.validate_artifact_runner_compatibility(module_root, language, canonical, automation, materialized=False)` on the proposed inline content before accepting; generated files need not exist yet. The controller uses the default on-disk check after materialization and before execution.
+1. Controller-verified bindings: before any part is issued the controller has accepted the
+   snapshot only with a valid V5 artifact for the effective canonical
+   (`validate_automation_artifact`), the attempt-owned source digest and
+   `effective_bundle_receipt_digest`; it derives `automation_sha256` and the relation-array
+   digest itself when it publishes the aggregate and checks them again when it forms the
+   generated delta; it runs `tools.run_tests.validate_artifact_runner_compatibility` on
+   disk after materialization and before execution. A part envelope therefore does not
+   carry these global bindings, and their absence is neither missing evidence, nor an
+   UNCHECKED reason, nor a finding. Verify what your scopes carry: every declared file's
+   exact UTF-8 `content` and its digest, project-native setup, every locator variant, that
+   each generated framework equals the selected `.skillsrc` module framework when the
+   envelope shows it, and that every Java path is the class FQN under the native test root.
 2. Verify atomic operation/assertion relation ownership, order, and coverage for every operation and assertion, including canonical manual/blocker branches. A canonical blocker blocks only its own case: a `GENERATED` artifact must still automate every unblocked case, carry one manual disposition for every step of each blocked case, and have nonempty `diagnostics`; `BLOCKED` is valid only when no case can be automated. Compare every canonical input literal and binding to its actual generated symbol; drift requires rework even when relations and digests otherwise match.
    Follow each claimed relation into the actual symbol: the operation must execute and
    its assertion must inspect the observed result, with the canonical comparator/value.

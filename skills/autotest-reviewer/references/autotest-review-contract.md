@@ -40,6 +40,10 @@ and preservation of these answers before claiming the contract sufficient in pra
 Findings are static evidence only. A semantic issue, stale digest, missing declared
 content, invalid locator, absent pair or unconfirmed setup requires rework or an explicit
 unchecked gap. Review all remaining trustworthy parts after a content finding.
+Global bindings (source and effective bundle receipt digests, `automation_sha256`, the
+relation-array digest, runner compatibility) are verified by the controller, not per
+part: a part without them is complete, so do not report
+`REVIEW_PART_GLOBAL_BINDINGS_NOT_IN_ENVELOPE` or mark scopes unchecked for that reason.
 
 There is one logical review per immutable automation revision, with sequential fresh
 isolated invocations for original-source, local and cross-part scopes. Actual stage IDs
