@@ -26,10 +26,71 @@ def _rows(code: str, path: str = "") -> list[dict[str, str]]:
 
 def part_input(plan: Mapping[str, Any], part: Mapping[str, Any]) -> dict[str, Any]:
     """The exact UTF-8 JSON envelope sent to this fresh invocation."""
-    return {"plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
-            "review_kind": plan["snapshot"]["review_kind"], "revision": plan["snapshot"]["revision"],
-            "part_id": part["part_id"], "instructions": plan["snapshot"]["instructions"],
-            "scopes": _compact_scopes(part["scopes"])}
+    envelope = {"plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+                "review_kind": plan["snapshot"]["review_kind"], "revision": plan["snapshot"]["revision"],
+                "part_id": part["part_id"], "instructions": plan["snapshot"]["instructions"],
+                "scopes": _compact_scopes(part["scopes"])}
+    # Plans frozen before the index existed keep their exact envelopes.
+    if plan["snapshot"].get("document_index") is not None:
+        envelope["document_index"] = copy.deepcopy(plan["snapshot"]["document_index"])
+    return envelope
+
+
+def document_index(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Every case of the reviewed document with its requirements.
+
+    A part sees only its own scopes; the index lets the reviewer address a
+    required check to a case or requirement outside them (``case_ids``,
+    ``requirement_ids``), and the controller picks the scopes that hold them.
+    """
+    document = snapshot["document"]
+    return {"cases": [{"case_id": case["case_id"], "title": case["title"], "requirement_ids": list(case["requirement_ids"])}
+                      for case in document["test_cases"]]}
+
+
+def _local_requirement_ids(scope: Mapping[str, Any]) -> set[str]:
+    """Canonical and source requirement IDs a local scope carries as whole-object inputs."""
+    ids: set[str] = set()
+    for item in scope["inputs"]:
+        for prefix, key in (("/requirements/", "requirement_id"), ("/source_requirements/", "source_requirement_id")):
+            if item["pointer"].startswith(prefix) and item["pointer"].count("/") == 2:
+                try:
+                    value = json.loads(item["content"])
+                except ValueError:
+                    continue
+                if isinstance(value, dict) and isinstance(value.get(key), str):
+                    ids.add(value[key])
+    return ids
+
+
+def resolve_check(plan: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Normalize one required check to the exact base scopes it names, or None when it names unknown ones.
+
+    A reviewer sees only its own part, so it may address evidence by ``case_ids``
+    or ``requirement_ids``; the controller adds the local scopes holding them.  A
+    check given by ``scope_ids`` alone normalizes to itself, so earlier check
+    digests (and the scope IDs derived from them) stay the same.
+    """
+    base = [scope for part in plan["parts"] for scope in part["scopes"]]
+    known = {scope["scope_id"] for scope in base}
+    scope_ids = list(check.get("scope_ids") or [])
+    if any(scope_id not in known for scope_id in scope_ids):
+        return None
+    local = [scope for scope in base if scope["kind"] == "local"]
+    for case_id in check.get("case_ids") or []:
+        scope = next((scope for scope in local if scope["scope_id"] == "local-" + case_id), None)
+        if scope is None:
+            return None
+        if scope["scope_id"] not in scope_ids:
+            scope_ids.append(scope["scope_id"])
+    for requirement_id in check.get("requirement_ids") or []:
+        holders = [scope for scope in local if requirement_id in _local_requirement_ids(scope)]
+        if not holders:
+            return None
+        scope_ids.extend(scope["scope_id"] for scope in holders if scope["scope_id"] not in scope_ids)
+    if not scope_ids:
+        return None
+    return {"scope_ids": scope_ids, "reason": check["reason"]}
 
 
 def _compact_scopes(scopes: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -146,8 +207,7 @@ def validate_review_part(plan: Mapping[str, Any], part: Mapping[str, Any], resul
         rows.extend(_rows("REVIEW_PART_BINDING", part["part_id"]))
     if [row["scope_id"] for row in result["coverage"]] != [scope["scope_id"] for scope in part["scopes"]]:
         rows.extend(_rows("REVIEW_PART_COVERAGE", part["part_id"]))
-    base_scopes = {scope["scope_id"] for item in plan["parts"] for scope in item["scopes"]}
-    if any(not set(check["scope_ids"]) <= base_scopes for check in result["required_checks"]):
+    if any(resolve_check(plan, check) is None for check in result["required_checks"]):
         rows.extend(_rows("REVIEW_CHECK_SCOPE", part["part_id"]))
     if plan["snapshot"]["review_kind"] == "tc-reviewer" and any(
         not any(_contains_correction(scope, correction) for scope in part["scopes"])
@@ -180,7 +240,7 @@ def additional_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[s
 def _required_checks(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict]:
     parts = {part["part_id"]: part for part in [*plan["parts"], *plan.get("additions", [])]}
     valid = [result for result in results if result.get("part_id") in parts and not validate_review_part(plan, parts[result["part_id"]], result)]
-    checks = [check for result in valid for check in result["required_checks"]]
+    checks = [resolve_check(plan, check) for result in valid for check in result["required_checks"]]
     corrections = []
     correction_sets = []
     base_ids = {part["part_id"] for part in plan["parts"]}
@@ -227,8 +287,12 @@ def _check_part(plan: Mapping[str, Any], check: Mapping[str, Any], index: int) -
     return _part(plan, [scope], index, digest)
 
 
-def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Reconcile exact coverage claims; provenance is verified by pilot_state."""
+def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]], *, resolve_unchecked: bool = True) -> dict[str, Any]:
+    """Reconcile exact coverage claims; provenance is verified by pilot_state.
+
+    ``resolve_unchecked=False`` reproduces aggregates sealed before 2026-10-06, which
+    never closed an UNCHECKED scope through a later check part.
+    """
     diagnostics = validate_review_plan(plan)
     parts = [*plan["parts"], *plan.get("additions", [])]
     by_id: dict[str, list] = {}
@@ -237,21 +301,25 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
     unknown = set(by_id) - {part["part_id"] for part in parts}
     if unknown:
         diagnostics.extend(_rows("REVIEW_FOREIGN_PART"))
-    unchecked, findings, corrections, required_checks, checked, bindings = [], [], [], [], [], []
+    # Each open row: (part_id, unchecked row, digests of the checks its own answer requested).
+    open_rows: list[tuple[str, dict[str, Any], list[str]]] = []
+    findings, corrections, required_checks, checked, bindings = [], [], [], [], []
     for part in parts:
         candidates = by_id.get(part["part_id"], [])
         errors = validate_review_part(plan, part, candidates[0]) if len(candidates) == 1 else _rows("REVIEW_PART_MISSING_OR_DUPLICATE")
         if errors:
             diagnostics.extend(errors)
-            unchecked.extend({"scope_id": scope["scope_id"], "reason": plan.get("unavailable", {}).get(part["part_id"]) or part["blocked_reason"] or errors[0]["code"]} for scope in part["scopes"])
+            open_rows.extend((part["part_id"], {"scope_id": scope["scope_id"], "reason": plan.get("unavailable", {}).get(part["part_id"]) or part["blocked_reason"] or errors[0]["code"]}, [])
+                             for scope in part["scopes"])
             continue
         result = candidates[0]
         bindings.append({"part_id": part["part_id"], "result_digest": review_digest(result)})
+        own_checks = [review_digest(resolve_check(plan, check)) for check in result["required_checks"]]
         for coverage in result["coverage"]:
             if coverage["status"] == "CHECKED":
                 checked.append(coverage["scope_id"])
             else:
-                unchecked.append({"scope_id": coverage["scope_id"], "reason": coverage["assessment"]})
+                open_rows.append((part["part_id"], {"scope_id": coverage["scope_id"], "reason": coverage["assessment"]}, own_checks))
         findings.extend(result["findings"])
         corrections.extend(item for item in result["corrections"] if item not in corrections)
     required_checks = _required_checks(plan, results)
@@ -261,18 +329,37 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
             check = requested.get(part["requested_check"])
             if check is None or part != _check_part(plan, check, index):
                 diagnostics.extend(_rows("REVIEW_ADDITION_BINDING", part["part_id"]))
+    # A scope left UNCHECKED because its envelope lacked evidence is answered by the
+    # check parts its own answer requested.  When every such part came back CHECKED,
+    # the early UNCHECKED is closed and the link is kept in the aggregate.
+    resolved: list[dict[str, Any]] = []
+    while resolve_unchecked:
+        closing = {part["requested_check"]: part["part_id"] for part in parts
+                   if part["requested_check"] is not None and all(scope["scope_id"] in checked for scope in part["scopes"])}
+        ready = [row for row in open_rows if row[2] and all(digest in closing for digest in row[2])]
+        if not ready:
+            break
+        for row in ready:
+            open_rows.remove(row)
+            checked.append(row[1]["scope_id"])
+            resolved.append({"part_id": row[0], "scope_id": row[1]["scope_id"], "resolved_by": sorted({closing[digest] for digest in row[2]})})
+    unchecked = [row[1] for row in open_rows]
     closed = {part["requested_check"] for part in parts if all(scope["scope_id"] in checked for scope in part["scopes"])}
     for digest, check in requested.items():
         if digest not in closed:
             unchecked.append({"scope_id": "cross-" + digest[7:], "reason": check["reason"]})
     complete = not diagnostics and not unchecked
     blocked = bool(diagnostics or unchecked or any(item["severity"] == "BLOCKING" for item in findings))
-    return {"plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
-            "addition_digests": [review_digest(part) for part in plan.get("additions", [])],
-            "parts": bindings, "checked_scope_ids": checked, "unchecked": unchecked,
-            "findings": findings, "corrections": corrections, "required_checks": required_checks,
-            "complete": complete, "blocked": blocked, "eligible": complete and not blocked,
-            "diagnostics": diagnostics}
+    aggregate = {"plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+                 "addition_digests": [review_digest(part) for part in plan.get("additions", [])],
+                 "parts": bindings, "checked_scope_ids": checked, "unchecked": unchecked,
+                 "findings": findings, "corrections": corrections, "required_checks": required_checks,
+                 "complete": complete, "blocked": blocked, "eligible": complete and not blocked,
+                 "diagnostics": diagnostics}
+    if resolved:
+        # Present only when something was resolved: earlier aggregates recompute byte for byte.
+        aggregate["resolved_unchecked"] = resolved
+    return aggregate
 
 
 def _pointer_value(value: Any, pointer: str) -> Any:

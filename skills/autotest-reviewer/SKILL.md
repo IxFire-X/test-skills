@@ -46,7 +46,10 @@ For each assigned original-source, local or cross-part scope:
 3. Return exactly `coverage`, `findings`, `corrections` and `required_checks`. Coverage
    lists every assigned scope once in physical order, with status, exact code/source
    evidence and substantive assessment. Request additional bounded cross checks for
-   unresolved relationships. A finding does not stop later trustworthy parts. Missing
+   unresolved relationships, addressed by `case_ids` (from the envelope's
+   `document_index`) and/or `requirement_ids`; `scope_ids` may name only scopes you were
+   given. A scope left unchecked because its evidence is in another part is closed by
+   the controller once every check your answer requested comes back CHECKED. A finding does not stop later trustworthy parts. Missing
    or untrusted evidence stays unchecked; shared snapshot corruption prevents trusted
    continuation. Do not silently omit an oversized file or symbol.
 4. The controller validates saved parts and uses `finish-review` to publish one v6

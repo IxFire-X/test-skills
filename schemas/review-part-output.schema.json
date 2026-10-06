@@ -73,8 +73,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["scope_ids", "reason"],
-        "properties": {"scope_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}, "reason": {"type": "string", "minLength": 1}}
+        "required": ["reason"],
+        "anyOf": [{"required": ["scope_ids"]}, {"required": ["case_ids"]}, {"required": ["requirement_ids"]}],
+        "properties": {
+          "scope_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "case_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "requirement_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "reason": {"type": "string", "minLength": 1}
+        }
       }
     }
   }

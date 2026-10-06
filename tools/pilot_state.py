@@ -3940,6 +3940,9 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         plan = _review_plan_with_state(root, state, attempt_id, key)
         results = _review_results(root, state, attempt_id, key, plan)
         aggregate = aggregate_review_parts(plan, results)
+        if receipt["aggregate"] != aggregate:
+            # Sealed before late checks could close an UNCHECKED scope.
+            aggregate = aggregate_review_parts(plan, results, resolve_unchecked=False)
         snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
         ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=key)
         if receipt["plan_digest"] != plan["digest"] or receipt["aggregate"] != aggregate or receipt["output"] != review_output(snapshot, aggregate, ledger["session_id"]):
@@ -4102,8 +4105,10 @@ def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], 
     automation = payload.get("automation")
     key = "canonical" if automation is None else f"r{automation['artifacts']['automation_revision']}"
     snapshot = _publish_bound_attempt_receipt(run_root, attempt_id, f"review-snapshot-{key}", {"payload": dict(payload)})["record"]
+    from tools.review_parts import document_index
     specification = {"review_kind": "tc-reviewer" if key == "canonical" else "autotest-reviewer", "revision": 1 if key == "canonical" else int(key[1]),
-                     "snapshot_digest": snapshot["digest"], "instructions": instructions, "response_reserve_bytes": response_reserve_bytes}
+                     "snapshot_digest": snapshot["digest"], "instructions": instructions, "response_reserve_bytes": response_reserve_bytes,
+                     "document_index": document_index(payload)}
     scopes = review_scopes(payload, source_chunk_bytes=max(1, (input_byte_budget - response_reserve_bytes) // 4))
     plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget)
     _publish_bound_attempt_receipt(run_root, attempt_id, f"review-plan-{key}", {"plan": plan})

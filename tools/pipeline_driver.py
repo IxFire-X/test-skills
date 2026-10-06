@@ -681,7 +681,8 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
         inputs=[input_path], schema=_review_schema(),
         instructions=("Выполни эту задачу в свежем изолированном контексте (отдельный вызов без истории генерации). Единственный вход — точный конверт части ревью. "
                       "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
-                      "Верни только coverage, findings, corrections и required_checks. Если получить пригодную оценку не удалось — "
+                      "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
+                      "в required_checks по case_ids и requirement_ids из document_index, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
                       "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason."),
         extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": True},
     )

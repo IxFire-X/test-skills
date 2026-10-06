@@ -35,7 +35,15 @@ Never consume generator dialogue or reasoning.
    explicit status, exact evidence and substantive assessment. Findings identify the
    violated rule, source and affected case/step. Request a bounded cross check through
    `required_checks` when the assigned evidence reveals an unresolved relationship.
-4. Mark missing or untrusted evidence as unchecked and explain the gap. A substantive
+   Address a check by what it must see: `case_ids` (cases from the envelope's
+   `document_index`) and/or `requirement_ids` (`CREQ-…`/`SREQ-…`); `scope_ids` may name
+   only scopes you were given. The controller adds the scopes holding those cases and
+   requirements. Never name your own scopes to reach evidence outside this part.
+4. Mark missing or untrusted evidence as unchecked and explain the gap. If the answer is
+   elsewhere in the document, also add a `required_checks` entry addressed to the cases
+   or requirements that hold it: when every check your answer requested comes back
+   CHECKED, the controller closes your UNCHECKED scope and records the link. Such a gap
+   in your envelope is not a finding against the cases. A substantive
    defect does not stop later trustworthy parts. Damaged shared snapshot evidence
    makes further review untrustworthy; report it to the controller.
 

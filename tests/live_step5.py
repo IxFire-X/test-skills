@@ -58,9 +58,9 @@ def outputs(run: str) -> dict[str, Any]:
 
 
 def review_state(run: str, name: str) -> Any:
-    """One review-state receipt record of the run's single attempt (``review-plan-canonical`` ...)."""
+    """One review-state receipt of the run's single attempt (``review-plan-canonical`` ...)."""
     [attempt] = [path for path in (run_dir(run) / "review-state").iterdir() if path.is_dir()]
-    return load(attempt / f"{name}.json.gz")["record"]
+    return load(attempt / f"{name}.json.gz")
 
 
 def ledger(run: str, review_key: str = "canonical") -> dict[str, Any]:
