@@ -61,7 +61,8 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 
 Необязательные флаги первого вызова: `--module`, `--target`, `--document-id`,
 `--model-id`, `--host-cli`, `--host-cli-version`, `--host-settings`,
-`--reviewer-isolation fresh|none`, `--review-input-bytes`, `--review-reserve-bytes`.
+`--reviewer-isolation fresh|none`, `--review-input-bytes`, `--review-reserve-bytes`,
+`--review-context-bytes` (окно контекста, по умолчанию 500000), `--accept-self-review`.
 Укажи фактические модель и CLI: они записываются в журнал как сведения о вызовах.
 
 Каждый вызов печатает один JSON-объект. Дальше повторяй:
@@ -144,10 +145,17 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   фреймворк модуля). Передай вопрос пользователю как есть и отправь его ответ; драйвер
   сам запишет `.skillsrc` и продолжит тот же run. Не пиши `.skillsrc` вручную в обход
   драйвера.
-- `reviewer-isolation` — может ли хост выполнять каждую часть ревью в отдельном свежем
-  контексте. Отвечай по факту. При `none` драйвер останавливается с
-  `REVIEWER_ISOLATION_UNAVAILABLE`: кандидат остаётся `UNREVIEWED`. Не заявляй изоляцию,
-  которой нет.
+- `reviewer-isolation` — может ли хост выполнить каждую часть ревью в отдельном вызове
+  без истории генерации. Это `fresh` и тогда, когда отдельного субагента нет, но можно
+  запустить новый процесс CLI на каждую задачу ревью: `claude -p`, `codex exec` и т. п.
+  с промптом из задачи (`skill_path`, `inputs`, `instructions`, `schema_path`), с записью
+  ответа в `output_path`; затем `submit` из основной сессии. Такой процесс не видит
+  истории генерации — это полноценная изоляция. Отвечай по факту: при `none` ревью
+  идёт в этой же сессии, драйвер не останавливается, но результат помечается
+  `review_independence: SELF` и без `--accept-self-review` не принимается
+  (`REVIEW_NOT_INDEPENDENT`). Задача ревью при `none` может нести `warnings` с кодом
+  `SELF_REVIEW_CONTEXT_OVERFLOW`: входы частей больше одного окна контекста — передай
+  пользователю совет перейти на отдельные процессы.
 - `regenerate-after-gate` — сгенерированные тесты не прошли компиляцию или сбор
   (`GENERATED_TEST_INVALID`) и убраны из проекта. `regenerate` создаёт одну дочернюю
   попытку, в которой кейсы, ревью и автоматизация проходят заново; `stop` завершает с
@@ -156,12 +164,16 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 При `done` передай пользователю `result` без приукрашивания:
 
 - `status=terminal`: `completion`, `verification`, `coverage`, `accepted`,
-  `reason_code`, `exit_code` и пути `paths` (опубликованный набор кейсов, каталог run);
+  `reason_code`, `review_independence`, `exit_code`, `warnings` и пути `paths`
+  (опубликованный набор кейсов, каталог run). `review_independence: SELF` называй
+  прямо: ревью делала та же сессия, что генерировала;
 - `status=stopped` или `error`: `stop_reason`/`reason` и что нужно для продолжения.
 
 Что означает результат:
 
 - `verification=PASS` и `accepted=true` — тесты прошли; файлы оставлены в проекте;
+- `REVIEW_NOT_INDEPENDENT` — всё остальное могло пройти, но ревью было без изоляции
+  (`SELF`); принять такой результат можно только флагом `--accept-self-review`;
 - `FAIL` — упала продуктовая проверка: тест не перегенерируется и не правится;
 - `NOT_RUNNABLE` с `LAUNCH_FAILED` — тестовый процесс не запустился; с
   `TESTS_DESELECTED` — настройки проекта отфильтровали выбранные тесты. Тест не
@@ -185,8 +197,9 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 
 Остановись без догадок и сообщи пользователю, если: версия или схема источника не
 поддерживается; модуль неоднозначен; нужен домысел; недоступны инструмент или модель;
-в ответах появляется секрет; драйвер вернул `error` или `stopped`; изоляция ревьюера
-не доказана; задача требует выйти за разрешённую область. Не обходи остановку ручной
+в ответах появляется секрет; драйвер вернул `error` или `stopped`; задача требует
+выйти за разрешённую область. Отсутствие изоляции ревьюера — не повод для остановки:
+ответь `none`, и результат будет помечен `SELF`. Не обходи остановку ручной
 публикацией артефактов.
 
 ## 6. Диагностика

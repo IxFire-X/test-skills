@@ -28,6 +28,7 @@ SCHEMA_ROWS = [
     ("run-tests-output.schema.json", 6, "IMPLEMENTED", "5.0.0"), ("resume-validation-receipt.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("trace-document.schema.json", 7, "IMPLEMENTED", "5.0.0"),
     ("trace-audit-output.schema.json", 7, "IMPLEMENTED", "5.0.0"), ("pre-finalization-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
     ("derived-terminal-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
+    ("driver-summary.schema.json", 7, "IMPLEMENTED", "1.0.0"),
     ("compatibility-evidence.schema.json", 8, "IMPLEMENTED", "2.0.0"), ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-eval-run.schema.json", 8, "IMPLEMENTED", "1.0.0"),
     ("release-eval-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-manifest.schema.json", 8, "IMPLEMENTED", "1.0.0"),
 ]

@@ -19,6 +19,7 @@
     "finalization_valid": {"type": "boolean"},
     "operational_reliable": {"type": "boolean"},
     "evidence": {"$ref": "#/$defs/evidence"},
+    "review_independence": {"enum": ["ISOLATED", "SELF"]},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
   },
   "$defs": {
@@ -48,8 +49,11 @@
         "generated_retained_count": {"type": "integer", "minimum": 0},
         "exact_target_pass": {"type": "boolean"},
         "mixed_manual_traceable": {"type": "boolean"},
-        "operational_reliable": {"type": "boolean"}
-      }
+        "operational_reliable": {"type": "boolean"},
+        "review_independence": {"enum": ["ISOLATED", "SELF"]},
+        "self_review_accepted": {"type": "boolean"}
+      },
+      "dependentRequired": {"review_independence": ["self_review_accepted"], "self_review_accepted": ["review_independence"]}
     }
   },
   "allOf": [

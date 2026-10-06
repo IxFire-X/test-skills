@@ -11,7 +11,7 @@ from tools.json_cli import JsonArgumentParser
 
 MARKER = "Generated from `contracts/pipeline.json`. Do not edit manually."
 RUNTIME_SIGNATURE_ORDER = ("create_run", "append_event", "create_attempt", "derive_state", "terminal_result", "exit_code")
-RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", "reason_code", "accepted")
+RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", "review_independence", "reason_code", "accepted")
 POLICY_ORDER = ("cases-only-v1", "local-pilot-v1")
 ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
 STAGE_ORDER = ("orchestrate", "context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
@@ -32,6 +32,14 @@ def _rework_lines(rework: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _self_review_lines(self_review: Mapping[str, Any]) -> list[str]:
+    return [
+        f"- isolation `none`: `{self_review['isolation_none']}`; axis `{self_review['independence_axis']}`: `{', '.join(self_review['values'])}`",
+        f"- `SELF` without `{self_review['accept_flag']}`: accepted `false`, reason `{self_review['self_reason_code']}`",
+        f"- review inputs above `{self_review['default_context_bytes']}` bytes (run parameter) without isolation: warning `{self_review['context_warning']}`",
+    ]
+
+
 def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts = ["# Contract Reference", "", MARKER, "", "## Core Skills", ""]
     contracts.extend(f"- `{name}` — `{contract['skill_files'][name]}`" for name in contract["core_skills"])
@@ -41,13 +49,14 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts.extend(["", "## Model stage registry", "", *_table([stages[name] for name in STAGE_ORDER], [("Stage", "stage"), ("Role", "role"), ("Role policy", "role_policy"), ("Cardinality", "cardinality"), ("Profiles", "profiles")])])
     contracts.extend(["", "## Projection profiles", "", *_table(contract["projection_profiles"], [("Profile", "id"), ("Format", "format"), ("Mode", "mode"), ("Tenant status", "tenant_status")])])
     contracts.extend(["", "## Canonical rework", "", *_rework_lines(contract["reviewer_session_contract"]["rework"])])
+    contracts.extend(["", "## Review without isolation", "", *_self_review_lines(contract["reviewer_session_contract"]["self_review"])])
     contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
     pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
     pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
     pipeline.extend(["", "## Event order", "", " → ".join(f"`{event['event_type']}`" for event in contract["event_order"]), "", "## Global ordering constraints", ""])
     pipeline.extend(f"- `{constraint['before']} → {constraint['after']}`" + (" (narrow exception)" if constraint.get("narrow_exception") else "") for constraint in contract["global_event_constraints"])
     reviewer = contract["reviewer_session_contract"]
-    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", *_rework_lines(reviewer["rework"]), "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
+    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", *_rework_lines(reviewer["rework"]), *_self_review_lines(reviewer["self_review"]), "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
     for name in RESULT_AXIS_ORDER:
         axis = contract["result_axes"][name]
         if name in {"accepted", "reason_code"}:

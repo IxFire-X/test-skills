@@ -45,6 +45,9 @@ Version: `4.0`
 - rework: at most `1` per run as a `CANONICAL_REWORK` child attempt after `authoritative_verdict_rejected`
 - rework generator: input `canonical_r1, findings_blocking_warning, affected_case_ids`; output `changed_test_cases_only`; successor `canonical_r2_parent_sha256_r1`
 - rework review: `new_session_incremental_carry_identical_checked_inputs`; never reworked: `unchecked_scope, pre_verdict_abort`; after r2 rejected: `terminal_rework`
+- isolation `none`: `continue_same_parts_and_format`; axis `review_independence`: `ISOLATED, SELF`
+- `SELF` without `--accept-self-review`: accepted `false`, reason `REVIEW_NOT_INDEPENDENT`
+- review inputs above `500000` bytes (run parameter) without isolation: warning `SELF_REVIEW_CONTEXT_OVERFLOW`
 
 ## Physical lifecycle
 
@@ -56,6 +59,7 @@ Version: `4.0`
 - `completion`: `COMPLETE, PARTIAL, FATAL`; nullable `True`
 - `verification`: `PASS, FAIL, UNKNOWN, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - `coverage`: `FULL, MIXED, MANUAL_ONLY`; nullable `True`
+- `review_independence`: `ISOLATED, SELF`; nullable `True`
 - `reason_code`: preterminal `absent`; terminal `written_once`
 - `accepted`: preterminal `absent`; terminal `boolean`
 
@@ -87,7 +91,7 @@ Version: `4.0`
 ## Acceptance predicates
 
 - `cases-only-v1`: `coverage_full_mixed_or_manual_only, verification_not_applicable, canonical_schema_semantic_provenance_valid, successful_full_document_authoritative_review, exactly_one_authoritative_verdict, reviewer_isolation_verified, no_unresolved_blocker, branch_valid_trace, finalization_valid, materialization_not_applicable, execution_not_applicable, draft_artifact_only_not_accepted`
-- `local-pilot-v1`: `accepted_canonical, accepted_automation, complete_generated_delta_materialization, authoritative_exact_target_pass, valid_trace, every_required_generated_file_retained, finalization_valid, reviewer_isolation_verified, no_unresolved_blocker, mixed_manual_coverage_traceable`
+- `local-pilot-v1`: `accepted_canonical, accepted_automation, complete_generated_delta_materialization, authoritative_exact_target_pass, valid_trace, every_required_generated_file_retained, finalization_valid, reviewer_isolation_verified, review_isolated_or_self_review_accepted, no_unresolved_blocker, mixed_manual_coverage_traceable`
 
 ## Exit priority
 

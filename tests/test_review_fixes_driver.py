@@ -265,15 +265,17 @@ def test_submit_rejects_invalid_answer_and_accepts_the_corrected_one(tmp_path: P
         driver.submit(project, run_root, following["task_id"].replace("review", "../review"))
 
 
-def test_driver_asks_about_reviewer_isolation_and_stops_without_it(tmp_path: Path) -> None:
+def test_driver_asks_about_reviewer_isolation_and_continues_without_it(tmp_path: Path) -> None:
+    # D8: `none` no longer stops the run (REVIEWER_ISOLATION_UNAVAILABLE); the review runs as SELF.
     project = _project(tmp_path, local=False)
     model = SavedModel("cases-only-v1")
     question = _drive(project, _start(project, "cases-only-v1", reviewer_isolation=None), model, until=lambda task: task["action"] == "ask_user")
     assert question["task_id"].endswith("ask.reviewer-isolation") and {option["value"] for option in question["options"]} == {"fresh", "none"}
     assert driver._exit_code(question) == 3
-    stopped = driver.submit(project, _run_root(project, question), question["task_id"], answer="none")
-    assert stopped["action"] == "done" and stopped["result"]["stop_reason"] == "REVIEWER_ISOLATION_UNAVAILABLE"
-    assert driver._exit_code(stopped) == 2
+    review = driver.submit(project, _run_root(project, question), question["task_id"], answer="none")
+    assert review["action"] == "llm" and review["stage"].startswith("tc-reviewer:") and review["requires_fresh_context"] is False
+    done = _drive(project, review, model)
+    assert (done["result"]["review_independence"], done["result"]["reason_code"]) == ("SELF", "REVIEW_NOT_INDEPENDENT")
 
 
 def test_failed_review_call_is_retried_in_a_new_task(tmp_path: Path) -> None:

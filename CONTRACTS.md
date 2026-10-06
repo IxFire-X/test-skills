@@ -36,6 +36,12 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 - rework generator: input `canonical_r1, findings_blocking_warning, affected_case_ids`; output `changed_test_cases_only`; successor `canonical_r2_parent_sha256_r1`
 - rework review: `new_session_incremental_carry_identical_checked_inputs`; never reworked: `unchecked_scope, pre_verdict_abort`; after r2 rejected: `terminal_rework`
 
+## Review without isolation
+
+- isolation `none`: `continue_same_parts_and_format`; axis `review_independence`: `ISOLATED, SELF`
+- `SELF` without `--accept-self-review`: accepted `false`, reason `REVIEW_NOT_INDEPENDENT`
+- review inputs above `500000` bytes (run parameter) without isolation: warning `SELF_REVIEW_CONTEXT_OVERFLOW`
+
 ## Artifact registry
 
 | Artifact | Phase | Status | Semantic ready | Component state |
@@ -138,6 +144,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

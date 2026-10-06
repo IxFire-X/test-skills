@@ -148,7 +148,9 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 (путь внутри проекта, флаг можно повторять). Необязательные флаги: `--subject`,
 `--module <ID>`, `--target`, `--document-id`, `--model-id`, `--host-cli`,
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
-`--review-input-bytes N`, `--review-reserve-bytes N`. `run_id` берётся из первого ответа.
+`--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
+контекста модели в байтах, по умолчанию 500000), `--accept-self-review`. `run_id` берётся
+из первого ответа.
 
 Каждый вызов печатает один JSON-объект:
 
@@ -184,10 +186,16 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
   значение само (например, `module:root:test.framework`). Прогон уже создан; после
   ответа драйвер пишет `.skillsrc` и продолжает тот же `run_id`. Если `free_text: true`
   (вопрос о каталоге исходников), ответом может быть путь каталога внутри модуля;
-- `reviewer-isolation` — может ли хост выполнять каждую часть ревью в свежем
-  изолированном контексте. При ответе `none` драйвер останавливается с
-  `REVIEWER_ISOLATION_UNAVAILABLE`: кандидат остаётся `UNREVIEWED`. Вопрос не задаётся,
-  если ответ передан флагом `--reviewer-isolation` при создании run;
+- `reviewer-isolation` — может ли хост выполнить каждую часть ревью в отдельном вызове
+  без истории генерации: субагентом или новым процессом CLI (`claude -p`, `codex exec`
+  и т. п.). При ответе `none` ревью не останавливается: части проверяются тем же порядком и в
+  том же формате в текущей сессии, результат получает `review_independence: SELF` и
+  `accepted=false` с `reason_code: REVIEW_NOT_INDEPENDENT` (кейсы публикуются, в
+  `local-pilot-v1` автотесты проходят ревью и запускаются). Флаг `--accept-self-review`
+  разрешает принятие; пометка `SELF` остаётся. Если
+  сумма входов частей ревью больше `--review-context-bytes`, задачи ревью и сводка несут
+  предупреждение `SELF_REVIEW_CONTEXT_OVERFLOW`. Вопрос не задаётся, если ответ передан
+  флагом `--reviewer-isolation` при создании run;
 - `regenerate-after-gate` — после `NOT_RUNNABLE/GENERATED_TEST_INVALID`: `regenerate`
   создаёт одну дочернюю попытку, `stop` завершает с текущим результатом. Вопрос
   задаётся один раз.
@@ -313,7 +321,8 @@ evidence; событий `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` нет. Пра
 - generator dialogue/reasoning reviewer не получает;
 - без host isolation evidence каждой части записывается `independence_unverified`,
   acceptance запрещён. Драйвер при ответе `none` на вопрос `reviewer-isolation` ревью
-  не начинает и останавливается с `REVIEWER_ISOLATION_UNAVAILABLE`.
+  не останавливает: части проверяет та же сессия, результат получает
+  `review_independence: SELF` и `REVIEW_NOT_INDEPENDENT` (без `--accept-self-review`).
 
 При `AUTO_FIX_APPLIED` revision 2 строит controller из механических исправлений,
 предложенных в частях ревью; reviewer её не пишет.
@@ -479,9 +488,10 @@ Exit projection:
 
 Команды драйвера используют те же значения: `3` — выдана задача `llm` или `ask_user`;
 при `done` — код результата; `2` — ошибка драйвера (`action: "error"`). Остановка без
-terminal result (например, `REVIEWER_ISOLATION_UNAVAILABLE`) тоже даёт `2`. Если scan
-при создании run ждёт уточнения (`WAITING_FOR_INPUT`), драйвер возвращает `done` со
-`status=stopped` и кодом `3`.
+terminal result тоже даёт `2`. Если scan при создании run ждёт уточнения `.skillsrc`,
+драйвер выдаёт вопрос `ask_user` (код `3`) и после ответа продолжает тот же run.
+Результат без изоляции ревью (`review_independence: SELF`) без `--accept-self-review`
+не принимается: в `local-pilot-v1` это код `1`.
 
 ## 11. Проверка и release identity
 

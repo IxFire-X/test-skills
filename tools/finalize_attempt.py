@@ -537,6 +537,14 @@ def _durable_branch(
     }
     if any(facts.get(key) != value for key, value in reviewer_fact_bindings.items()):
         raise FinalizationError("terminal reviewer facts do not bind the durable ledger")
+    try:
+        independence = pilot_state.review_independence(run_root, attempt_id)
+    except (KeyError, TypeError, ValueError) as error:
+        raise FinalizationError("review part boundaries are unreadable") from error
+    claimed = {key: facts[key] for key in ("review_independence", "self_review_accepted") if key in facts}
+    # Facts may omit an isolated review (callers before D8), never a self-review.
+    if (claimed and claimed != independence) or (not claimed and independence.get("review_independence") == "SELF"):
+        raise FinalizationError("terminal review independence does not bind the part boundaries")
     verdict = reviewer["authoritative_verdict"]
     if effective is not None:
         if verdict != "ACCEPTED" or effective.get("reviewer_session_digest") != reviewer["digest"]:
@@ -1107,6 +1115,7 @@ def finalize_durable_execution_attempt(
         "operational_reliable": operational_reason_code is None,
         "prior_stage_cause": prior_stage_cause,
         "policy_profile": attempt["policy_profile"],
+        **pilot_state.review_independence(run_root, attempt_id),
     }
     branch = {
         "run_id": attempt["run_id"], "attempt_id": attempt_id,

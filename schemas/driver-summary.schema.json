@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/driver-summary.schema.json",
+  "description": "The `result` of a driver `done` payload for a terminal attempt (pipeline_driver._result_summary).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "run_id", "attempt_id", "policy_profile", "completion", "verification", "coverage", "accepted", "reason_code", "exit_code",
+               "review_independence", "warnings", "effective_document_digest", "paths"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "status": {"const": "terminal"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "completion": {"enum": ["COMPLETE", "PARTIAL", "FATAL"]},
+    "verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"]},
+    "coverage": {"enum": ["FULL", "MIXED", "MANUAL_ONLY", null]},
+    "accepted": {"type": "boolean"},
+    "reason_code": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "exit_code": {"enum": [0, 1, 2]},
+    "review_independence": {"enum": ["ISOLATED", "SELF", null]},
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "attempt_id", "review_key", "review_input_bytes", "context_bytes", "message"],
+        "properties": {
+          "code": {"const": "SELF_REVIEW_CONTEXT_OVERFLOW"},
+          "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "review_key": {"enum": ["canonical", "r1", "r2"]},
+          "review_input_bytes": {"type": "integer", "minimum": 1},
+          "context_bytes": {"type": "integer", "minimum": 1},
+          "message": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "effective_document_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"candidate_bundle": {"type": "string"}, "run_root": {"type": "string"}, "driver_dir": {"type": "string"}}
+    },
+    "exec": {"type": "object"}
+  }
+}

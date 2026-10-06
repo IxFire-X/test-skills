@@ -3939,8 +3939,7 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
                 or not _safe_model_label(receipt.get("reviewer_invocation_id"))
                 or receipt.get("model_id") is not None and not _safe_model_label(receipt["model_id"])
                 or any(not isinstance(receipt.get(field), str) or not receipt[field] for field in ("cli", "cli_version", "settings"))
-                or not isinstance(isolation, dict) or set(isolation) != {"fresh_context", "distinct_invocations", "role_policy", "evidence_digest"}
-                or isolation.get("fresh_context") is not True or isolation.get("distinct_invocations") is not True
+                or not isinstance(isolation, dict) or not _review_isolation_shape(isolation)
                 or isolation.get("role_policy") != _MODEL_STAGE_REGISTRY[stage.split(":")[0]][1]
                 or isolation.get("evidence_digest") != review_digest({field: value for field, value in isolation.items() if field != "evidence_digest"})):
             raise ValueError("invalid review part isolation boundary")
@@ -3977,6 +3976,48 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
             raise ValueError("invalid aggregate output schema")
         return
     raise ValueError("unsupported review receipt")
+
+
+def _review_isolation_shape(isolation: Mapping[str, Any]) -> bool:
+    """Host evidence of one review part: a fresh isolated call, or a self-review that says so.
+
+    ``fresh_context``/``distinct_invocations`` are both true (a subagent or a new CLI
+    process) or both false (the generating session reviews itself).  Only a
+    self-review carries ``self_review_accepted``: the run decision to accept it.
+    """
+    base = {"fresh_context", "distinct_invocations", "role_policy", "evidence_digest"}
+    fresh, distinct = isolation.get("fresh_context"), isolation.get("distinct_invocations")
+    if type(fresh) is not bool or fresh is not distinct:
+        return False
+    if fresh:
+        return set(isolation) == base
+    return set(isolation) == base | {"self_review_accepted"} and type(isolation.get("self_review_accepted")) is bool
+
+
+def review_independence(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """``review_independence`` (ISOLATED or SELF) and ``self_review_accepted`` from the part boundaries.
+
+    Every review part of the attempt counts (cases and automation); a rework attempt
+    also counts the parts of its parent, whose coverage it carries.  An attempt that
+    reviewed nothing has no independence to report: the mapping is empty.
+    """
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    attempts = {item["attempt_id"]: item for item in state["attempts"]}
+    lineage = [attempt_id]
+    if attempts.get(attempt_id, {}).get("retry_reason") == REWORK_RETRY_REASON:
+        lineage.append(str(attempts[attempt_id]["parent_attempt_id"]))
+    isolations = []
+    for owner in lineage:
+        directory = root / "review-state" / owner
+        for path in sorted(directory.glob("review-part-boundary-*.json")) if directory.is_dir() else []:
+            record = _read_attempt_receipt_with_state(project, root, state, owner, path.stem, "ARTIFACT_READ_BACK")["record"]
+            isolations.append(record["host_isolation"])
+    if not isolations:
+        return {}
+    self_parts = [isolation for isolation in isolations if isolation["fresh_context"] is False]
+    return {"review_independence": "SELF" if self_parts else "ISOLATED",
+            "self_review_accepted": bool(self_parts) and all(isolation["self_review_accepted"] is True for isolation in self_parts)}
 
 
 def _review_part_token(token: str) -> tuple[str, int]:
@@ -4442,6 +4483,8 @@ _RESULT_EVIDENCE_KEYS = {
     "generated_retained_count", "exact_target_pass", "mixed_manual_traceable", "operational_reliable",
 }
 _RESULT_BASE_KEYS = {"run_id", "attempt_id", "attempt_state", "completion", "verification", "coverage", "reason_code"}
+# Optional evidence (results written before D8 have neither): who reviewed, and whether a self-review was accepted.
+_RESULT_INDEPENDENCE_KEYS = {"review_independence", "self_review_accepted"}
 
 
 def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool = True) -> tuple[dict[str, Any], bool]:
@@ -4464,7 +4507,20 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
             "completion": None, "verification": None, "coverage": None,
         }, False
     allowed = _RESULT_BASE_KEYS | _RESULT_EVIDENCE_KEYS | {"prior_stage_cause"}
-    if set(facts) != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
+    present = set(facts) & _RESULT_INDEPENDENCE_KEYS
+    if present not in (set(), _RESULT_INDEPENDENCE_KEYS) or (present and (
+            facts["review_independence"] not in {"ISOLATED", "SELF"} or type(facts["self_review_accepted"]) is not bool
+            or facts["review_independence"] == "ISOLATED" and facts["self_review_accepted"])):
+        raise ValueError("invalid review independence facts")
+    facts = dict(facts)
+    # A self-review is not independent: unless the run accepted it explicitly, it is a
+    # reason not to accept, even when everything else holds.
+    self_unaccepted = present and facts["review_independence"] == "SELF" and not facts["self_review_accepted"]
+    if self_unaccepted and facts.get("reason_code") is None and facts.get("finalization_valid") is True:
+        facts["reason_code"] = "REVIEW_NOT_INDEPENDENT"
+    if facts.get("reason_code") == "REVIEW_NOT_INDEPENDENT" and not self_unaccepted:
+        raise ValueError("REVIEW_NOT_INDEPENDENT requires an unaccepted self-review")
+    if set(facts) - present != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
         raise ValueError("invalid result facts")
     if facts["completion"] not in {"COMPLETE", "PARTIAL", "FATAL"} or facts["verification"] not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", None} or facts["coverage"] not in {"FULL", "MIXED", "MANUAL_ONLY", None} or facts["reason_code"] is not None and not _safe_label(facts["reason_code"]) or not _safe_label(facts["prior_stage_cause"]):
         raise ValueError("invalid result facts")
@@ -4591,7 +4647,9 @@ def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_
         result["trace_valid"] = facts["trace_valid"]
         result["finalization_valid"] = facts["finalization_valid"]
         result["operational_reliable"] = facts["operational_reliable"]
-        result["evidence"] = {key: facts[key] for key in _RESULT_EVIDENCE_KEYS}
+        result["evidence"] = {key: facts[key] for key in _RESULT_EVIDENCE_KEYS | (_RESULT_INDEPENDENCE_KEYS & set(facts))}
+        if "review_independence" in facts:
+            result["review_independence"] = facts["review_independence"]
     return _sealed(result)
 
 

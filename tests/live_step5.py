@@ -149,12 +149,16 @@ class Replay:
         return code, payload
 
     def start(self) -> tuple[int, dict[str, Any]]:
+        return self.start_with()
+
+    def start_with(self, *extra: str) -> tuple[int, dict[str, Any]]:
+        """Start like the recorded run; ``extra`` flags come last and override (e.g. ``--reviewer-isolation none``)."""
         config = self.config
         return self.call(
             "next", "--project", str(self.project), "--profile", self.profile, "--docs", DOCS,
             "--subject", config["subject"], "--model-id", config["model_id"], "--reviewer-isolation", "fresh",
             "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"],
-            "--document-id", f"TCDOC-step5-java-demo-{self.run[:8]}",
+            "--document-id", f"TCDOC-step5-java-demo-{self.run[:8]}", *extra,
         )
 
     def run_root(self, payload: Mapping[str, Any]) -> Path:

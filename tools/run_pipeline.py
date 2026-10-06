@@ -126,6 +126,8 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
                       evidence_path=str(root / "terminal-results" / f"{attempt_id}.json"),
                       stop_reason=terminal.get("reason_code"))
         result.update({key: terminal[key] for key in ("completion", "verification", "coverage", "accepted")})
+        # Results written before D8 carry no review independence axis.
+        result["review_independence"] = terminal.get("review_independence")
         return result
 
     baseline_path = f"baselines/{attempt['baseline_digest'][7:]}.json"

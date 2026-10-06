@@ -48,6 +48,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("cases-only-v1", "local-pilot-v1")
 _DEFAULT_REVIEW_INPUT_BYTES = 200_000
 _DEFAULT_REVIEW_RESERVE_BYTES = 20_000
+# One model context window in UTF-8 bytes (about 200k tokens of Russian text and JSON).
+# Without isolation every review part lands in the same context, so their sum is compared with it.
+_DEFAULT_REVIEW_CONTEXT_BYTES = 500_000
 _REVIEW_INSTRUCTIONS = {
     "canonical": "Проверь назначенные области этой части по исходным требованиям: полноту, корректность шагов и ожидаемых результатов, "
                  "согласованность между кейсами. Верни только coverage, findings, corrections и required_checks.",
@@ -313,6 +316,8 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "reviewer_isolation": options.get("reviewer_isolation"),
         "review_input_bytes": int(options.get("review_input_bytes") or _DEFAULT_REVIEW_INPUT_BYTES),
         "review_reserve_bytes": int(options.get("review_reserve_bytes") or _DEFAULT_REVIEW_RESERVE_BYTES),
+        "review_context_bytes": int(options.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES),
+        "accept_self_review": bool(options.get("accept_self_review")),
         "context_gaps": payload.get("context_gaps", []),
     }
 
@@ -675,6 +680,8 @@ def start_rework(project: Path, run_root: Path, config: dict[str, Any], attempt:
     blocking = {identifier for item in findings if item["severity"] == "BLOCKING" for identifier in item["related_ids"]}
     affected = [case["case_id"] for case in document["test_cases"] if case["case_id"] in blocking or blocking & set(case["requirement_ids"])]
     baseline = read_execution_baseline_for_attempt(run_root, attempt_id)
+    config.clear()
+    config.update(_config(run_root))  # warnings or answers saved earlier in this call stay
     child = create_attempt(run_root, {"project": attempt["project"], "module": attempt["module"], "policy_profile": attempt["policy_profile"],
                                       "parent_attempt_id": attempt_id, "retry_reason": REWORK_RETRY_REASON}, baseline)
     _baseline, inventory = _baseline_and_inventory(run_root, child)
@@ -877,8 +884,11 @@ def _provenance_contexts(project: Path, run_root: Path, attempt: Mapping[str, An
 def _host_evidence(config: Mapping[str, Any], review_key: str) -> dict[str, Any]:
     from tools.review_parts import review_digest
 
-    isolation = {"fresh_context": config.get("reviewer_isolation") == "fresh", "distinct_invocations": config.get("reviewer_isolation") == "fresh",
-                 "role_policy": "canonical-reviewer-v2" if review_key == "canonical" else "autotest-static-reviewer-v2"}
+    fresh = config.get("reviewer_isolation") == "fresh"
+    isolation: dict[str, Any] = {"fresh_context": fresh, "distinct_invocations": fresh,
+                                 "role_policy": "canonical-reviewer-v2" if review_key == "canonical" else "autotest-static-reviewer-v2"}
+    if not fresh:
+        isolation["self_review_accepted"] = bool(config.get("accept_self_review"))
     isolation["evidence_digest"] = review_digest(isolation)
     return {"reviewer_invocation_id": f"review-{review_key}-{uuid.uuid4().hex[:16]}", "model_id": config.get("model_id"), "host_isolation": isolation,
             "cli": str(config["host_cli"]), "cli_version": str(config["host_cli_version"]), "settings": str(config["host_settings"])}
@@ -922,23 +932,64 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     attempt_id = str(attempt["attempt_id"])
     pending = _open_review_task(run_root, attempt_id, review_key)
     if pending is not None:
-        return pending
+        return {**pending, "warnings": _self_review_warnings(run_root, attempt_id, review_key)} if pending.get("warnings") is not None else pending
     envelope = next_review_part(run_root, attempt_id, review_key)
     if envelope is None:
         return None
     opened = open_review_part(run_root, attempt_id, review_key, _host_evidence(config, review_key))
     label = f"review.{review_key}.{opened['stage_instance_id'].rsplit(':', 1)[1]}"
     input_path = _write_json(work_dir(run_root) / "inputs" / f"{_task_id(attempt_id, label)}.input.json", opened["input"])
+    fresh = config.get("reviewer_isolation") == "fresh"
+    warnings = _self_review_warnings(run_root, attempt_id, review_key)
     return _llm_task(
         run_root, attempt_id, label, stage=opened["stage_instance_id"], skill="tc-reviewer" if review_key == "canonical" else "autotest-reviewer",
         inputs=[input_path], schema=_review_schema(),
-        instructions=("Выполни эту задачу в свежем изолированном контексте (отдельный вызов без истории генерации). Единственный вход — точный конверт части ревью. "
+        instructions=(("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
+                       "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
+                       "Результат будет помечен review_independence: SELF. ")
+                      + "Единственный вход — точный конверт части ревью. "
                       "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
                       "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
                       "в required_checks по case_ids (все кейсы — в document_index.case_ids) и requirement_ids, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
                       "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason."),
-        extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": True},
+        extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": fresh,
+               **({"warnings": warnings} if not fresh else {})},
     )
+
+
+def _self_review_warnings(run_root: Path, attempt_id: str, review_key: str) -> list[dict[str, Any]]:
+    """Without isolation every part shares one context: warn once the review inputs outgrow one window.
+
+    The sum covers every review plan of the attempt so far (cases, then automation),
+    because a self-reviewing session carries all of them.  Each review key is
+    measured once, when its first part is issued.
+    """
+    from tools.pilot_state import read_review_plan
+
+    config = _config(run_root)
+    if config.get("reviewer_isolation") != "none":
+        return []
+    measured = config.setdefault("context_measured", [])
+    if f"{attempt_id}:{review_key}" not in measured:
+        total = 0
+        for key in ("canonical", "r1", "r2"):
+            try:
+                plan = read_review_plan(run_root, attempt_id, key)
+            except (KeyError, TypeError, ValueError):
+                continue
+            total += sum(int(part["input_byte_count"]) for part in plan["parts"])
+        limit = int(config.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES)
+        if total > limit:
+            warning = {"code": "SELF_REVIEW_CONTEXT_OVERFLOW", "attempt_id": attempt_id, "review_key": review_key,
+                       "review_input_bytes": total, "context_bytes": limit,
+                       "message": (f"Без изоляции все части ревью попадут в один контекст: их входы уже {total} байт при окне {limit} байт. "
+                                   "Запускайте каждую часть отдельным вызовом — субагентом или новым процессом CLI (claude -p, codex exec) — "
+                                   "и начните run с --reviewer-isolation fresh.")}
+            config.setdefault("warnings", []).append(warning)
+            _log(_log_path(run_root.parents[1], run_root.name), {"event": "warning", **warning})
+        measured.append(f"{attempt_id}:{review_key}")
+        _save_config(run_root, config)
+    return [dict(item) for item in config.get("warnings", []) if item.get("attempt_id") == attempt_id]
 
 
 def _submit_review(run_root: Path, attempt: Mapping[str, Any], task: Mapping[str, Any], value: Any, *, failed: str | None, reason: str | None) -> None:
@@ -986,7 +1037,7 @@ def _package(run_root: Path, attempt_id: str, assembled: Mapping[str, Any]) -> d
 
 def _terminal_facts(run_root: Path, attempt: Mapping[str, Any], *, document: Mapping[str, Any] | None) -> dict[str, Any]:
     """Result facts of a branch that never executes project code, derived from the durable ledger."""
-    from tools.pilot_state import read_run, terminal_reviewer_evidence
+    from tools.pilot_state import read_run, review_independence, terminal_reviewer_evidence
 
     attempt_id = str(attempt["attempt_id"])
     reviewer = terminal_reviewer_evidence(run_root, attempt_id)
@@ -1010,6 +1061,7 @@ def _terminal_facts(run_root: Path, attempt: Mapping[str, Any], *, document: Map
         "exact_target_pass": False, "mixed_manual_traceable": False, "operational_reliable": True,
         "prior_stage_cause": "CANONICAL_COMPLETE" if accepted_review else reason,
         "policy_profile": attempt["policy_profile"],
+        **review_independence(run_root, attempt_id),
     }
 
 
@@ -1034,11 +1086,25 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         ("candidate_bundle", _bundle_dir(run_root, attempt)),
         ("run_root", run_root), ("driver_dir", directory)) if path.exists()}
     return {
-        "status": "terminal", "run_id": run_root.name, "attempt_id": attempt_id, "policy_profile": attempt["policy_profile"],
+        "schema_version": "1.0.0", "status": "terminal", "run_id": run_root.name, "attempt_id": attempt_id, "policy_profile": attempt["policy_profile"],
         "completion": terminal.get("completion"), "verification": terminal.get("verification"), "coverage": terminal.get("coverage"),
         "accepted": terminal.get("accepted"), "reason_code": terminal.get("reason_code"), "exit_code": exit_code(terminal),
+        "review_independence": terminal.get("review_independence"),
+        "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
     }
+
+
+def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
+    """Ancestor attempt IDs (a rework or regeneration child reports its parents' warnings too)."""
+    from tools.pilot_state import derive_state
+
+    attempts = {item["attempt_id"]: item for item in derive_state(run_root)["attempts"]}
+    lineage, parent = [], attempt.get("parent_attempt_id")
+    while parent is not None and parent in attempts:
+        lineage.append(str(parent))
+        parent = attempts[parent].get("parent_attempt_id")
+    return lineage
 
 
 # --------------------------------------------------------------------------------------
@@ -1086,13 +1152,10 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
     if ledger is None:
         if config.get("reviewer_isolation") not in {"fresh", "none"}:
             return _ask_task(run_root, attempt_id, "reviewer-isolation",
-                             "Может ли хост выполнять каждую часть ревью в свежем изолированном контексте (отдельный вызов без истории генерации)?",
-                             [{"value": "fresh", "label": "Да, каждая часть ревью пойдёт в отдельном свежем контексте"},
-                              {"value": "none", "label": "Нет, отдельного контекста нет — ревью не будет принято как независимое"}])
-        if config["reviewer_isolation"] == "none":
-            return _done(run_root, {"status": "stopped", "stop_reason": "REVIEWER_ISOLATION_UNAVAILABLE", "run_id": run_root.name, "attempt_id": attempt_id,
-                                    "detail": "Кандидат опубликован как UNREVIEWED; независимое ревью невозможно без свежего контекста.",
-                                    "paths": {"candidate_bundle": str(assembled["bundle"])}})
+                             "Может ли хост выполнить каждую часть ревью в отдельном вызове без истории генерации — субагентом или новым "
+                             "процессом CLI (`claude -p`, `codex exec` и т. п.)?",
+                             [{"value": "fresh", "label": "Да: каждая часть пойдёт отдельным вызовом (субагент или новый процесс CLI)"},
+                              {"value": "none", "label": "Нет: ревью пройдёт в этой же сессии; результат будет помечен review_independence: SELF и не принят без --accept-self-review"}])
         package = _package(run_root, attempt_id, assembled)
         prepare_review(run_root, attempt_id, _review_payload(project, run_root, attempt, config, assembled["document"], package=package, automation=None),
                        input_byte_budget=int(config["review_input_bytes"]), response_reserve_bytes=int(config["review_reserve_bytes"]),
@@ -1246,6 +1309,10 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--reviewer-isolation", choices=("fresh", "none"))
             command.add_argument("--review-input-bytes", type=int)
             command.add_argument("--review-reserve-bytes", type=int)
+            command.add_argument("--review-context-bytes", type=int,
+                                 help="One model context window in bytes; without reviewer isolation a larger review sum gets a warning (default 500000).")
+            command.add_argument("--accept-self-review", action="store_true",
+                                 help="Accept a review done without isolation (review_independence: SELF stays in the result).")
         if name == "submit":
             command.add_argument("--task-id", required=True)
             command.add_argument("--output", type=Path, help="Answer file; defaults to the task's output_path.")
@@ -1352,7 +1419,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes")})
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review")})
         else:
             run_root = _run_root(project, args.run)
             if args.command == "next":
