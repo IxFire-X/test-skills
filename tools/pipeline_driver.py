@@ -955,7 +955,12 @@ def _submit_review(run_root: Path, attempt: Mapping[str, Any], task: Mapping[str
     except ValueError as error:
         from tools.schema_validation import schema_diagnostics
 
-        rows = schema_diagnostics(value, Path(task["schema_path"]), ROOT) if False else []
+        # The pack schema of a bound part result; the driver-owned service fields are placeholders,
+        # so every diagnostic points at a field the model wrote.
+        placeholder = "sha256:" + "0" * 64
+        bound = {"schema_version": "1.0.0", "plan_digest": placeholder, "snapshot_digest": placeholder, "part_id": str(task["part_id"]),
+                 "input_digest": placeholder, **value}
+        rows = schema_diagnostics(bound, ROOT / "schemas" / "review-part-output.schema.json", ROOT)
         raise DriverError("TASK_OUTPUT_INVALID", f"review assessment was not accepted: {error}", rows or [
             {"path": "", "code": "REVIEW_ASSESSMENT_INVALID",
              "message": "Every scope of the part needs one coverage row with status CHECKED or UNCHECKED, non-empty evidence and assessment; "
