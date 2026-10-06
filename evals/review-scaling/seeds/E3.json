@@ -1,0 +1,27 @@
+{
+  "set": "E3",
+  "base": "step5 9340016c automation r1 (StudentControllerPipelineTest.java, recorded review snapshot)",
+  "note": "A1–A4 are the defects of the 2026-10-06 experiment; A5 adds a shared static field that makes TC-B1-004 depend on TC-B1-003 running first, A6 weakens a check.",
+  "defects": [
+    {"id": "A1", "class": "literal", "min_severity": "WARNING", "locus": ["TC-B1-006", "ASSERT-B1-006-01-1-1"],
+     "description": "TC-B1-006 asserts status 404 instead of 400.",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "as(\"ASSERT-B1-006-01-1-1\").isEqualTo(400);", "new": "as(\"ASSERT-B1-006-01-1-1\").isEqualTo(404);"}]},
+    {"id": "A2", "class": "request-input", "min_severity": "WARNING", "locus": ["TC-B1-009", "STEP-B1-009-01"],
+     "description": "TC-B1-009 calls PUT /students/42/update instead of /students/10/update.",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "exchange(\"PUT\", \"/students/10/update\", null, body);", "new": "exchange(\"PUT\", \"/students/42/update\", null, body);"}]},
+    {"id": "A3", "class": "request-input", "min_severity": "WARNING", "locus": ["TC-B1-008", "STEP-B1-008-01"],
+     "description": "The partial body of TC-B1-008 gets an explicit lastName: null.",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "        body.put(\"firstName\", \"Olga\");\n", "new": "        body.put(\"firstName\", \"Olga\");\n        body.put(\"lastName\", null);\n"}]},
+    {"id": "A4", "class": "shared-helper", "min_severity": "WARNING", "locus": ["TC-B1-002", "TC-B1-012", "FILE-B1-student-controller-pipeline-test"], "keywords": ["fourStudents", "трёх", "три студ", "3 студ", "three"],
+     "description": "The shared helper fourStudents() returns three students, which breaks TC-B1-002 and TC-B1-012.",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "                student(3, \"Ram\", \"Mishra\"),\n                student(4, \"Sanjay\", \"Mishra\"));", "new": "                student(3, \"Ram\", \"Mishra\"));"}]},
+    {"id": "A5", "class": "shared-static-state", "min_severity": "WARNING", "locus": ["TC-B1-004", "TC-B1-003", "FILE-B1-student-controller-pipeline-test"], "keywords": ["pathId", "static", "статич", "порядк", "order", "TC-B1-003"],
+     "description": "A static field pathId set by TC-B1-003 builds the path of TC-B1-004: TC-B1-004 passes only when TC-B1-003 ran first.",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "    private static final String APPLICATION_JSON = \"application/json\";\n", "new": "    private static final String APPLICATION_JSON = \"application/json\";\n\n    private static int pathId = 5;\n"},
+                   {"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "        MockHttpServletResponse response = exchange(\"GET\", \"/students/5\", null, null);\n", "new": "        MockHttpServletResponse response = exchange(\"GET\", \"/students/\" + pathId, null, null);\n        pathId = 0;\n"},
+                   {"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "        MockHttpServletResponse response = exchange(\"GET\", \"/students/0\", null, null);\n", "new": "        MockHttpServletResponse response = exchange(\"GET\", \"/students/\" + pathId, null, null);\n"}]},
+    {"id": "A6", "class": "weakened-check", "min_severity": "WARNING", "locus": ["TC-B1-011", "ASSERT-B1-011-01-1-2"],
+     "description": "TC-B1-011 checks only that the body is not null instead of «Hello World!».",
+     "mutations": [{"op": "code", "file": "FILE-B1-student-controller-pipeline-test", "old": "as(\"ASSERT-B1-011-01-1-2\").isEqualTo(\"Hello World!\");", "new": "as(\"ASSERT-B1-011-01-1-2\").isNotNull();"}]}
+  ]
+}

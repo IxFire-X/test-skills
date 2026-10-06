@@ -1001,6 +1001,22 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     return batch
 
 
+_LEGACY_INSTRUCTIONS = (
+    "Единственный вход — точный конверт части ревью. "
+    "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
+    "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
+    "в required_checks по case_ids (все кейсы — в document_index.case_ids) и requirement_ids, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
+    "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason.")
+
+
+def review_task_instructions(*, compact: bool, fresh: bool) -> str:
+    """The instructions of a review part task (also used by the review-scaling eval)."""
+    isolation = ("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
+                 "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
+                 "Результат будет помечен review_independence: SELF. ")
+    return isolation + (_COMPACT_INSTRUCTIONS if compact else _LEGACY_INSTRUCTIONS)
+
+
 def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
     from tools.pilot_state import open_review_part
 
@@ -1015,18 +1031,10 @@ def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mappi
         input_path = _write_json(work_dir(run_root) / "inputs" / f"{_task_id(attempt_id, label)}.input.json", opened["input"])
     fresh = config.get("reviewer_isolation") == "fresh"
     warnings = _self_review_warnings(run_root, attempt_id, review_key)
-    isolation = ("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
-                 "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
-                 "Результат будет помечен review_independence: SELF. ")
-    legacy = ("Единственный вход — точный конверт части ревью. "
-              "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
-              "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
-              "в required_checks по case_ids (все кейсы — в document_index.case_ids) и requirement_ids, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
-              "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason.")
     return _llm_task(
         run_root, attempt_id, label, stage=opened["stage_instance_id"], skill="tc-reviewer" if review_key == "canonical" else "autotest-reviewer",
         inputs=[input_path], schema=_review_schema("compact-v1" if compact else "pairs"),
-        instructions=isolation + (_COMPACT_INSTRUCTIONS if compact else legacy),
+        instructions=review_task_instructions(compact=compact, fresh=fresh),
         extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": fresh,
                **({"review_mode": "compact-v1"} if compact else {}),
                **({"warnings": warnings} if not fresh else {})},

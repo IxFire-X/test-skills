@@ -1,0 +1,216 @@
+{
+  "set": "E1",
+  "base": "step5 9340016c canonical r1 (recorded review snapshot)",
+  "note": "The six defects of the 2026-10-06 experiment; the wrong component moved from TC-B1-010 to TC-B1-007 so no case holds two defects.",
+  "defects": [
+    {
+      "id": "S1",
+      "class": "literal-vs-input-or-text",
+      "min_severity": "WARNING",
+      "locus": [
+        "TC-B1-005",
+        "ASSERT-B1-005-01-1-2",
+        "EXP-B1-005-01-1"
+      ],
+      "description": "The assertion literal of TC-B1-005 expects id 8 while the query input and the expectation text say 7.",
+      "mutations": [
+        {
+          "op": "set",
+          "case": "TC-B1-005",
+          "path": "steps/0/expectations/0/assertions/1/expected/value/id",
+          "value": 8
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "class": "contradicts-source-and-other-case",
+      "min_severity": "WARNING",
+      "locus": [
+        "TC-B1-004",
+        "ASSERT-B1-004-01-1-2",
+        "EXP-B1-004-01-1"
+      ],
+      "description": "TC-B1-004 expects firstName Ramesh for GET /students/{id}; SREQ-0006 and TC-B1-003 say Ramsesh.",
+      "mutations": [
+        {
+          "op": "replace",
+          "case": "TC-B1-004",
+          "path": "steps/0/expectations/0/text",
+          "old": "Ramsesh",
+          "new": "Ramesh"
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-004",
+          "path": "steps/0/expectations/0/assertions/1/expected/value/firstName",
+          "value": "Ramesh"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "class": "contradicts-source",
+      "min_severity": "WARNING",
+      "locus": [
+        "TC-B1-010",
+        "ASSERT-B1-010-01-1-2",
+        "EXP-B1-010-01-1"
+      ],
+      "description": "The DELETE confirmation text is changed consistently to «Student Deleted!»; the source says «Student Successfully Deleted!».",
+      "mutations": [
+        {
+          "op": "replace",
+          "case": "TC-B1-010",
+          "path": "steps/0/expectations/0/text",
+          "old": "Student Successfully Deleted!",
+          "new": "Student Deleted!"
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-010",
+          "path": "steps/0/expectations/0/assertions/1/expected/value",
+          "value": "Student Deleted!"
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "class": "shared-state-list",
+      "min_severity": "WARNING",
+      "locus": [
+        "TC-B1-012",
+        "CREQ-B1-012"
+      ],
+      "description": "TC-B1-012 is rewritten so the list grows to five students after POST, against the stateless requirement CREQ-B1-012 and TC-B1-002.",
+      "mutations": [
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "title",
+          "value": "Созданный студент появляется в списке GET /students"
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "objective",
+          "value": "Убедиться, что после создания студента список GET /students содержит нового студента."
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "steps/1/expectations/0/text",
+          "value": "В списке пять студентов: четверо исходных и созданный студент с id 9.\n\nHTTP 200 OK\n\n[\n  {\n    \"firstName\": \"Ramesh\",\n    \"id\": 1,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Umesh\",\n    \"id\": 2,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Ram\",\n    \"id\": 3,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Sanjay\",\n    \"id\": 4,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Pavel\",\n    \"id\": 9,\n    \"lastName\": \"Orlov\"\n  }\n]"
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "steps/1/expectations/0/assertions/1/expected/value",
+          "value": [
+            {
+              "firstName": "Ramesh",
+              "id": 1,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Umesh",
+              "id": 2,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Ram",
+              "id": 3,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Sanjay",
+              "id": 4,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Pavel",
+              "id": 9,
+              "lastName": "Orlov"
+            }
+          ]
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "steps/2/expectations/0/text",
+          "value": "В списке пять студентов: четверо исходных и созданный студент с id 9.\n\nHTTP 200 OK\n\n[\n  {\n    \"firstName\": \"Ramesh\",\n    \"id\": 1,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Umesh\",\n    \"id\": 2,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Ram\",\n    \"id\": 3,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Sanjay\",\n    \"id\": 4,\n    \"lastName\": \"Mishra\"\n  },\n  {\n    \"firstName\": \"Pavel\",\n    \"id\": 9,\n    \"lastName\": \"Orlov\"\n  }\n]"
+        },
+        {
+          "op": "set",
+          "case": "TC-B1-012",
+          "path": "steps/2/expectations/0/assertions/1/expected/value",
+          "value": [
+            {
+              "firstName": "Ramesh",
+              "id": 1,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Umesh",
+              "id": 2,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Ram",
+              "id": 3,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Sanjay",
+              "id": 4,
+              "lastName": "Mishra"
+            },
+            {
+              "firstName": "Pavel",
+              "id": 9,
+              "lastName": "Orlov"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "class": "wrong-component",
+      "min_severity": "INFO",
+      "mechanical": true,
+      "locus": [
+        "TC-B1-007"
+      ],
+      "description": "TC-B1-007 (POST /students/create) names HelloWorldController as its component.",
+      "mutations": [
+        {
+          "op": "set",
+          "case": "TC-B1-007",
+          "path": "management/components",
+          "value": [
+            "HelloWorldController"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "class": "requirement-without-case",
+      "min_severity": "WARNING",
+      "locus": [
+        "CREQ-B1-010",
+        "SREQ-0011",
+        "SREQ-0019",
+        "TC-B1-011"
+      ],
+      "description": "The only case of GET /hello-world (TC-B1-011) is removed; its requirement is left without a case.",
+      "mutations": [
+        {
+          "op": "delete_case",
+          "case": "TC-B1-011"
+        }
+      ]
+    }
+  ]
+}

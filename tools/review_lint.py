@@ -188,14 +188,15 @@ def rule_count_of_shared_resource(document: Mapping[str, Any]) -> list[dict[str,
                     else:
                         continue
                     reads.setdefault(resource, []).append((case["case_id"], assertion["assertion_id"], observed, resource in mutated))
-    rows = []
+    rows, seen = [], set()
     for resource, entries in reads.items():
         changed = [entry for entry in entries if entry[3]]
         for case_id, assertion_id, observed, after_mutation in entries:
             if after_mutation:
                 continue
             for other_case, other_assertion, other_observed, _ in changed:
-                if other_case != case_id and other_observed != observed:
+                if other_case != case_id and other_observed != observed and (case_id, other_case, resource) not in seen:
+                    seen.add((case_id, other_case, resource))
                     rows.append({"case_ids": [case_id, other_case], "related_ids": [assertion_id, other_assertion],
                                  "message": f"{case_id} проверяет абсолютное количество или полный список {resource} ({observed}), "
                                             f"а {other_case} после изменения ресурса ждёт {other_observed}: проверка зависит от состояния, которое меняют другие кейсы."})
