@@ -1054,7 +1054,7 @@ Markdown сверяется при публикации, но не входит 
 
 **Основные определения в коде:** `DriverError`, `work_dir`, `start_run`, `normalize_fragment_content`, `advance`, `submit`, `status`, `main`.
 
-Рабочие файлы лежат рядом с run: `<project>/.pilot-runs/<run_id>.driver/`. Код завершения 3 означает ожидание модели или человека.
+Рабочие файлы лежат рядом с run: `<project>/.pilot-runs/<run_id>.driver/`, включая служебный лог `driver-log.jsonl`. Код завершения 3 означает ожидание модели или человека.
 
 </details>
 

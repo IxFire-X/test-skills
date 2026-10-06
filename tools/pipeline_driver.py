@@ -35,9 +35,11 @@ import json
 import os
 import re
 import sys
+import time
+import traceback
 import uuid
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
@@ -987,12 +989,90 @@ def _exit_code(payload: Mapping[str, Any]) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------------------
+# service log: .driver/driver-log.jsonl
+# --------------------------------------------------------------------------------------
+
+def _log_path(project: Path, run_id: Any) -> Path | None:
+    """The service log of a run that exists; the log never enters a digest or the journal."""
+    if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        return None
+    root = Path(project).resolve() / ".pilot-runs" / run_id
+    return work_dir(root) / "driver-log.jsonl" if root.is_dir() else None
+
+
+def _log_rows(path: Path | None) -> list[dict[str, Any]]:
+    if path is None or not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _log(path: Path | None, entry: Mapping[str, Any]) -> None:
+    if path is None:
+        return
+    now = datetime.now(timezone.utc)
+    row = {"at": now.isoformat(timespec="milliseconds").replace("+00:00", "Z"), "epoch": round(now.timestamp(), 3), **dict(entry)}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError:
+        pass  # the log is a diagnostic aid; it never fails a command
+
+
+def _first_issue(rows: Sequence[Mapping[str, Any]], task_id: Any) -> float | None:
+    return next((float(row["epoch"]) for row in rows if row.get("event") == "task_issued" and row.get("task_id") == task_id), None)
+
+
+def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Mapping[str, Any], started: float) -> None:
+    """One line per command, plus one line when a task is issued or an open task is issued again."""
+    path = _log_path(project, run_id)
+    rows = _log_rows(path)
+    entry["duration_ms"] = int((time.monotonic() - started) * 1000)
+    result = {key: payload.get(key) for key in ("action", "task_id", "stage", "status", "code") if payload.get(key) is not None}
+    if payload.get("action") == "done":
+        result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason") if payload.get("result", {}).get(key) is not None})
+    entry["result"] = result
+    _log(path, entry)
+    if payload.get("action") in {"llm", "ask_user"}:
+        first = _first_issue(rows, payload.get("task_id"))
+        if first is None:
+            _log(path, {"event": "task_issued", "task_id": payload.get("task_id"), "stage": payload.get("stage"), "action": payload.get("action")})
+        else:
+            _log(path, {"event": "task_reissued", "task_id": payload.get("task_id"), "stage": payload.get("stage"),
+                        "since_first_issue_seconds": round(max(time.time() - first, 0.0), 3)})
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    started = time.monotonic()
+    project = Path(args.project).resolve()
+    entry: dict[str, Any] = {"event": "command", "command": args.command, "run_id": args.run}
+    if args.command == "submit":
+        first = _first_issue(_log_rows(_log_path(project, args.run)), args.task_id)
+        entry.update({"task_id": args.task_id, "failed": args.failed, "reason": args.reason, "transport_attempts": args.transport_attempts,
+                      "answer": args.answer, "task_age_seconds": None if first is None else round(max(time.time() - first, 0.0), 3)})
+
+    def failure(code: str, message: str, diagnostics: Sequence[Mapping[str, Any]] | None = None) -> int:
+        payload = {"action": "error", "code": code, "message": message}
+        if diagnostics is not None:
+            payload["errors"] = list(diagnostics)
+        path = _log_path(project, args.run)
+        _log(path, {"event": "error", "command": args.command, "run_id": args.run, "task_id": entry.get("task_id"), "code": code, "message": message,
+                    "traceback": traceback.format_exc()})
+        _log_command(project, args.run, entry, payload, started)
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 2
+
     try:
-        project = Path(args.project).resolve()
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
@@ -1007,11 +1087,10 @@ def main(argv: list[str] | None = None) -> int:
                 payload = submit(project, run_root, args.task_id, output=args.output, answer=args.answer, failed=args.failed, reason=args.reason,
                                  transport_attempts=args.transport_attempts)
     except DriverError as error:
-        print(json.dumps({"action": "error", "code": error.code, "message": str(error), "errors": error.diagnostics}, ensure_ascii=False, sort_keys=True))
-        return 2
-    except (ValueError, OSError, KeyError, TypeError) as error:
-        print(json.dumps({"action": "error", "code": "DRIVER_FAILURE", "message": f"{type(error).__name__}: {error}"}, ensure_ascii=False, sort_keys=True))
-        return 2
+        return failure(error.code, str(error), error.diagnostics)
+    except Exception as error:  # every other failure is a driver defect; its traceback goes to the service log
+        return failure("DRIVER_FAILURE", f"{type(error).__name__}: {error}")
+    _log_command(project, args.run or payload.get("run_id"), entry, payload, started)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return _exit_code(payload)
 

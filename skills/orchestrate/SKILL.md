@@ -192,4 +192,5 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 правила контракта — в [references/orchestration-contract.md](references/orchestration-contract.md).
 Драйвер продолжает только run, созданный его же `next`: рабочие файлы он хранит рядом
 с run, в `<project>/.pilot-runs/<run_id>.driver/` (задачи, входы, ответы, копия
-опубликованного набора кейсов).
+опубликованного набора кейсов, служебный лог `driver-log.jsonl`). При сбое драйвера
+причину и traceback ищи в этом логе.
