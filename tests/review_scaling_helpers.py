@@ -78,3 +78,42 @@ def synthetic_snapshot(document: dict[str, Any]) -> dict[str, Any]:
     content = "# Требования\nТребование.\n"
     return {"document": document, "automation": None, "package_binding": None, "contexts": [], "requirements_binding": None,
             "sources": [{"path": "docs/req.md", "sha256": _sha(content), "content": content}]}
+
+
+def part_text(task: dict[str, Any]) -> str:
+    return Path(task["inputs"][0]).read_text(encoding="utf-8")
+
+
+def answer_areas(text: str) -> list[str]:
+    """Area IDs of the «Области ответа» section, in order."""
+    section = text.split("## Области ответа", 1)[1].split("\n## ", 1)[0]
+    return [line[2:].split(" — ", 1)[0] for line in section.splitlines() if line.startswith("- ")]
+
+
+def lint_ids(text: str) -> list[str]:
+    if "## Подозрения" not in text:
+        return []
+    section = text.split("## Подозрения", 1)[1].split("\n## ", 1)[0]
+    return [line[1:].split("]", 1)[0] for line in section.splitlines() if line.startswith("[LINT-")]
+
+
+def clean_compact_answer(text: str) -> dict[str, Any]:
+    """A valid compact answer that checks every area and rejects every lint suspicion (no findings)."""
+    from tools.review_projection import anchors
+
+    defined = anchors(text)
+    coverage = []
+    for area in answer_areas(text):
+        code = "## Общий код (SUPPORT)" in text
+        if area.startswith("local-file-") or (code and area.startswith("cross-")):
+            refs = ["L1"]
+        elif area.startswith("local-"):
+            refs = [area.removeprefix("local-")]
+        elif area.startswith("source-"):
+            refs = [next(item for item in defined if item.startswith(("SRC-", "SREQ-", "CREQ-")))]
+        else:
+            refs = [next(item for item in defined if item.startswith("TC-"))]
+        coverage.append({"area_id": area, "status": "CHECKED", "refs": refs, "note": "Проверено."})
+    return {"coverage": coverage, "findings": [], "corrections": [],
+            "lint_dispositions": [{"lint_id": item, "decision": "rejected", "reason": "Не дефект."} for item in lint_ids(text)],
+            "required_checks": []}

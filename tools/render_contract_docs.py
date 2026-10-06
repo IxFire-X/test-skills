@@ -40,6 +40,17 @@ def _self_review_lines(self_review: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _mode_lines(modes: Mapping[str, Any]) -> list[str]:
+    compact = modes["compact-v1"]
+    return [
+        f"- review mode `{modes['setting']}`: `{', '.join(modes['values'])}`; default `{modes['default']}`",
+        f"- `compact-v1` model input: `{compact['model_input']}` (`{compact['projection']}`, `{compact['projection_binding']}`); never model inputs: `{', '.join(compact['not_model_inputs'])}`",
+        f"- `compact-v1` plan `{compact['plan_schema']}`, answer `{compact['answer_schema']}`; packing `{compact['packing']}`; `{compact['pair_guarantee']}`; areas `{', '.join(compact['areas'])}`",
+        f"- `compact-v1` order `{compact['invocation_order']}` (`{compact['batch_flag']}`); answer checks `{', '.join(compact['answer_checks'])}`",
+        f"- `compact-v1` corrections `{compact['corrections']}`; carry key `{', '.join(compact['carry_key'])}`",
+    ]
+
+
 def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts = ["# Contract Reference", "", MARKER, "", "## Core Skills", ""]
     contracts.extend(f"- `{name}` — `{contract['skill_files'][name]}`" for name in contract["core_skills"])
@@ -50,13 +61,14 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts.extend(["", "## Projection profiles", "", *_table(contract["projection_profiles"], [("Profile", "id"), ("Format", "format"), ("Mode", "mode"), ("Tenant status", "tenant_status")])])
     contracts.extend(["", "## Canonical rework", "", *_rework_lines(contract["reviewer_session_contract"]["rework"])])
     contracts.extend(["", "## Review without isolation", "", *_self_review_lines(contract["reviewer_session_contract"]["self_review"])])
+    contracts.extend(["", "## Review modes", "", *_mode_lines(contract["reviewer_session_contract"]["modes"])])
     contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
     pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
     pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
     pipeline.extend(["", "## Event order", "", " → ".join(f"`{event['event_type']}`" for event in contract["event_order"]), "", "## Global ordering constraints", ""])
     pipeline.extend(f"- `{constraint['before']} → {constraint['after']}`" + (" (narrow exception)" if constraint.get("narrow_exception") else "") for constraint in contract["global_event_constraints"])
     reviewer = contract["reviewer_session_contract"]
-    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", *_rework_lines(reviewer["rework"]), *_self_review_lines(reviewer["self_review"]), "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
+    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", *_rework_lines(reviewer["rework"]), *_self_review_lines(reviewer["self_review"]), *_mode_lines(reviewer["modes"]), "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
     for name in RESULT_AXIS_ORDER:
         axis = contract["result_axes"][name]
         if name in {"accepted", "reason_code"}:

@@ -594,7 +594,7 @@ def validate_answer(plan: Mapping[str, Any], part: Mapping[str, Any], result: Ma
             rows.append(_row("REVIEW_REF_UNKNOWN", f"/coverage/{index}/refs", f"refs are not anchors of this part: {', '.join(bad)}"))
             continue
         area = by_id.get(row["area_id"])
-        if area is not None and area["kind"] == "local" and not set(row["refs"]) & own.get(area["targets"][0], set()):
+        if area is not None and area["kind"] == "local" and not _own_ref(part, area["targets"][0], row["refs"], own):
             rows.append(_row("REVIEW_REF_FOREIGN", f"/coverage/{index}/refs",
                              f"a case area cites at least one anchor of its own case {area['targets'][0]}"))
     known = known_ids(plan, document, automation)
@@ -642,9 +642,19 @@ def _own_anchors(part: Mapping[str, Any], document: Mapping[str, Any], automatio
     from tools.review_projection import case_anchor_ids
 
     own = {case["case_id"]: set(case_anchor_ids(case)) for case in document["test_cases"] if case["case_id"] in set(part["case_ids"])}
-    for case_id, refs in (part.get("case_refs") or {}).items():
-        own.setdefault(case_id, set()).update(refs)
     return own
+
+
+def _own_ref(part: Mapping[str, Any], case_id: str, refs: Sequence[str], own: Mapping[str, set]) -> bool:
+    """A case area cites one of its own anchors, or a code line of its method or the helpers it calls."""
+    if set(refs) & own.get(case_id, set()):
+        return True
+    ranges = [tuple(row) for row in (part.get("case_ranges") or {}).get(case_id, [])]
+    for ref in refs:
+        match = _CODE_REF.fullmatch(ref)
+        if match and any(start <= int(match["line"]) <= end and match["file"] in (None, file_id) for start, end, file_id in ranges):
+            return True
+    return False
 
 
 # --------------------------------------------------------------------------------------

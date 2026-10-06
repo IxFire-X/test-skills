@@ -125,7 +125,8 @@ def _config(run_root: Path) -> dict[str, Any]:
 
 
 def _save_config(run_root: Path, config: Mapping[str, Any]) -> None:
-    _write_json(work_dir(run_root) / "config.json", dict(config))
+    # Keys starting with "_" belong to one command (e.g. the batch size) and are never saved.
+    _write_json(work_dir(run_root) / "config.json", {key: value for key, value in config.items() if not str(key).startswith("_")})
 
 
 def _task_path(run_root: Path, task_id: str) -> Path:
@@ -261,7 +262,7 @@ def _subschema(schema_name: str, keep: Sequence[str]) -> dict[str, Any]:
 # start: scan
 # --------------------------------------------------------------------------------------
 
-def start_run(project: Path, options: Mapping[str, Any]) -> dict[str, Any]:
+def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> dict[str, Any]:
     """Create the run with the existing ``scan`` command and remember driver options."""
     from tools import run_pipeline
 
@@ -292,13 +293,13 @@ def start_run(project: Path, options: Mapping[str, Any]) -> dict[str, Any]:
         # ask_user task and the same run continues after the answer.
         run_root = Path(payload["run_root"])
         _save_config(run_root, {**_start_config(project, run_root, options, payload), "scan_pending": True})
-        return advance(project, run_root)
+        return advance(project, run_root, max_tasks=max_tasks)
     if code != 0 or payload.get("status") != "ok":
         return {"action": "done", "result": {"status": "stopped" if code == 3 else "error", "stage": "scan", "exit_code": code if code else 2,
                                              **{key: payload.get(key) for key in ("reason", "detail", "message", "run_id", "stop_reason", "scope") if key in payload}}}
     run_root = Path(payload["run_root"])
     _save_config(run_root, _start_config(project, run_root, options, payload))
-    return advance(project, run_root)
+    return advance(project, run_root, max_tasks=max_tasks)
 
 
 def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -318,8 +319,19 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "review_reserve_bytes": int(options.get("review_reserve_bytes") or _DEFAULT_REVIEW_RESERVE_BYTES),
         "review_context_bytes": int(options.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES),
         "accept_self_review": bool(options.get("accept_self_review")),
+        "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
     }
+
+
+def _review_mode(value: Any) -> str:
+    from tools.review_modes import DEFAULT_MODE, MODES
+
+    if value is None:
+        return DEFAULT_MODE
+    if value not in MODES:
+        raise DriverError("DRIVER_INPUT", f"--review-mode must be one of: {', '.join(MODES)}")
+    return str(value)
 
 
 def _skillsrc_task(run_root: Path, question: Mapping[str, Any]) -> dict[str, Any]:
@@ -837,10 +849,16 @@ def _review_payload(project: Path, run_root: Path, attempt: Mapping[str, Any], c
     contexts = [] if automation is not None else _provenance_contexts(
         project, run_root, attempt, document, exclude={row["path"] for row in sources},
         budget=max(1, (int(config["review_input_bytes"]) - int(config["review_reserve_bytes"])) // 4))
-    return {"document": dict(document), "automation": None if automation is None else dict(automation), "package_binding": None if package is None else dict(package),
-            "sources": sources, "contexts": contexts,
-            "requirements_binding": {"module_id": config.get("module_id"), "selected_target": config.get("target"),
-                                     "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in sources]}}
+    payload = {"document": dict(document), "automation": None if automation is None else dict(automation), "package_binding": None if package is None else dict(package),
+               "sources": sources, "contexts": contexts,
+               "requirements_binding": {"module_id": config.get("module_id"), "selected_target": config.get("target"),
+                                        "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in sources]}}
+    if config.get("review_mode") == "compact-v1":
+        from tools.review_compact import compact_payload, review_policy
+
+        kind, key = ("tc-reviewer", "canonical") if automation is None else ("autotest-reviewer", "automation")
+        payload = compact_payload(payload, review_policy(kind, instructions=_REVIEW_INSTRUCTIONS[key], model_id=config.get("model_id")))
+    return payload
 
 
 def _provenance_contexts(project: Path, run_root: Path, attempt: Mapping[str, Any], document: Mapping[str, Any], *, exclude: set[str], budget: int) -> list[dict[str, Any]]:
@@ -894,9 +912,11 @@ def _host_evidence(config: Mapping[str, Any], review_key: str) -> dict[str, Any]
             "cli": str(config["host_cli"]), "cli_version": str(config["host_cli_version"]), "settings": str(config["host_settings"])}
 
 
-def _review_schema() -> dict[str, Any]:
-    schema = json.loads((ROOT / "schemas" / "review-part-output.schema.json").read_text(encoding="utf-8"))
-    keep = ["coverage", "findings", "corrections", "required_checks"]
+def _review_schema(mode: str = "pairs") -> dict[str, Any]:
+    from tools.review_modes import ANSWER_FIELDS, ANSWER_SCHEMA
+
+    schema = json.loads((ROOT / "schemas" / ANSWER_SCHEMA[mode]).read_text(encoding="utf-8"))
+    keep = list(ANSWER_FIELDS[mode])
     return {"$schema": schema.get("$schema"), "type": "object", "additionalProperties": False, "required": keep,
             "properties": {name: schema["properties"][name] for name in keep},
             "x-note": "Service fields (plan, snapshot, part and input digests) are bound by the driver on submit."}
@@ -911,48 +931,104 @@ def _ledger(run_root: Path, attempt_id: str, review_key: str) -> dict[str, Any] 
         return None
 
 
-def _open_review_task(run_root: Path, attempt_id: str, review_key: str) -> dict[str, Any] | None:
-    """The review task that is already open (requested, not answered), if any."""
+def _open_review_tasks(run_root: Path, attempt_id: str, review_key: str) -> list[dict[str, Any]]:
+    """Review tasks that are already open (requested, not answered), in part order."""
     directory = work_dir(run_root) / "tasks"
     events = _events(run_root, attempt_id)
+    tasks = []
     for path in sorted(directory.glob(f"{attempt_id[:8]}.review.{review_key}.*.json")):
         if path.name.endswith(".schema.json"):
             continue
         task = _read_json(path)
         stage_events = _stage_events(events, task["stage"])
         if "MODEL_REQUESTED" in stage_events and "MODEL_RESPONSE_RECEIVED" not in stage_events:
-            return dict(task)
-    return None
+            tasks.append(dict(task))
+    return tasks
+
+
+def _open_review_task(run_root: Path, attempt_id: str, review_key: str) -> dict[str, Any] | None:
+    """The review task that is already open (requested, not answered), if any."""
+    tasks = _open_review_tasks(run_root, attempt_id, review_key)
+    return tasks[0] if tasks else None
+
+
+_COMPACT_INSTRUCTIONS = (
+    "Единственный вход — текст части ревью compact-v1 (проекция кейсов с якорями [ID]). Другие файлы не читай. "
+    "Верни только coverage, findings, corrections, lint_dispositions и required_checks. coverage — строка на каждую область из раздела "
+    "«Области ответа», в том же порядке: status, refs — 1–3 якоря из этой части (у области кейса — хотя бы один якорь этого кейса; "
+    "строка исходника — SRC-n:Lk, строка кода — L<номер>), note — до 200 символов. Подробности пиши только в findings (message до 600 "
+    "символов, INFO не больше 5). corrections — target_id, field из словаря (title, objective, preconditions[N], management.*, action, "
+    "test_data, manual_reason, text), before (точное текущее значение), after, why. lint_dispositions — confirmed или rejected с причиной по "
+    "каждому [LINT-…] части. Проверку за пределами части адресуй в required_checks по case_ids и requirement_ids. Ссылки проверяет контроллер: "
+    "несуществующий якорь или чужой кейс — ответ отклоняется. Если получить пригодную оценку не удалось — вызови submit с --failed TRANSPORT "
+    "или --failed CONTENT и --reason.")
 
 
 def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str) -> dict[str, Any] | None:
-    """Return the next reviewer task, or None when every available part has been handled."""
-    from tools.pilot_state import next_review_part, open_review_part
+    """The next reviewer task, or None when every available part has been handled.
+
+    A compact plan's parts are independent: with ``next --max-tasks K`` up to K open
+    tasks come back at once as ``{"action": "batch", "tasks": [...]}``.  A legacy
+    plan stays sequential (one task).
+    """
+    from tools.pilot_state import available_review_parts
 
     attempt_id = str(attempt["attempt_id"])
-    pending = _open_review_task(run_root, attempt_id, review_key)
-    if pending is not None:
-        return {**pending, "warnings": _self_review_warnings(run_root, attempt_id, review_key)} if pending.get("warnings") is not None else pending
-    envelope = next_review_part(run_root, attempt_id, review_key)
-    if envelope is None:
+    limit = max(1, int(config.get("_max_tasks") or 1))
+    tasks = [{**task, "warnings": _self_review_warnings(run_root, attempt_id, review_key)} if task.get("warnings") is not None else task
+             for task in _open_review_tasks(run_root, attempt_id, review_key)]
+    available = available_review_parts(run_root, attempt_id, review_key)
+    if not available and not tasks:
         return None
-    opened = open_review_part(run_root, attempt_id, review_key, _host_evidence(config, review_key))
+    compact = bool(available) and available[0].get("mode") == "compact-v1"
+    room = limit if compact else 1
+    open_ids = {task["part_id"] for task in tasks}
+    for envelope in available:
+        if len(tasks) >= room:
+            break
+        if envelope["part_id"] in open_ids:
+            continue
+        tasks.append(_issue_review_task(run_root, attempt, config, review_key, envelope))
+        open_ids.add(envelope["part_id"])
+    tasks = tasks[:room]
+    if len(tasks) == 1:
+        return tasks[0]
+    batch = {"action": "batch", "run_id": run_root.name, "attempt_id": attempt_id, "review_key": review_key, "tasks": tasks,
+             "instructions": "Независимые части ревью: выполни каждую задачу в отдельном свежем вызове (по субагенту на часть, параллельно), "
+                             "затем отправь ответы по одному: submit --task-id <task_id> каждой задачи."}
+    _log(_log_path(run_root.parents[1], run_root.name), {"event": "batch_issued", "review_key": review_key,
+                                                         "task_ids": [task["task_id"] for task in tasks], "max_tasks": limit})
+    return batch
+
+
+def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
+    from tools.pilot_state import open_review_part
+
+    attempt_id = str(attempt["attempt_id"])
+    opened = open_review_part(run_root, attempt_id, review_key, _host_evidence(config, review_key), part_id=envelope["part_id"])
     label = f"review.{review_key}.{opened['stage_instance_id'].rsplit(':', 1)[1]}"
-    input_path = _write_json(work_dir(run_root) / "inputs" / f"{_task_id(attempt_id, label)}.input.json", opened["input"])
+    compact = opened["input"].get("mode") == "compact-v1"
+    if compact:
+        # The part text goes to the model as it is: no JSON escaping, anchors stay readable.
+        input_path = _write_text(work_dir(run_root) / "inputs" / f"{_task_id(attempt_id, label)}.input.md", opened["input"]["text"])
+    else:
+        input_path = _write_json(work_dir(run_root) / "inputs" / f"{_task_id(attempt_id, label)}.input.json", opened["input"])
     fresh = config.get("reviewer_isolation") == "fresh"
     warnings = _self_review_warnings(run_root, attempt_id, review_key)
+    isolation = ("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
+                 "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
+                 "Результат будет помечен review_independence: SELF. ")
+    legacy = ("Единственный вход — точный конверт части ревью. "
+              "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
+              "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
+              "в required_checks по case_ids (все кейсы — в document_index.case_ids) и requirement_ids, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
+              "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason.")
     return _llm_task(
         run_root, attempt_id, label, stage=opened["stage_instance_id"], skill="tc-reviewer" if review_key == "canonical" else "autotest-reviewer",
-        inputs=[input_path], schema=_review_schema(),
-        instructions=(("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
-                       "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
-                       "Результат будет помечен review_independence: SELF. ")
-                      + "Единственный вход — точный конверт части ревью. "
-                      "У повторяющихся входов вместо content стоит content_ref на первое вхождение в этой же части. "
-                      "Верни только coverage, findings, corrections и required_checks. Проверку за пределами своей части адресуй "
-                      "в required_checks по case_ids (все кейсы — в document_index.case_ids) и requirement_ids, а не по своим scope_ids. Если получить пригодную оценку не удалось — "
-                      "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason."),
+        inputs=[input_path], schema=_review_schema("compact-v1" if compact else "pairs"),
+        instructions=isolation + (_COMPACT_INSTRUCTIONS if compact else legacy),
         extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": fresh,
+               **({"review_mode": "compact-v1"} if compact else {}),
                **({"warnings": warnings} if not fresh else {})},
     )
 
@@ -1001,6 +1077,14 @@ def _submit_review(run_root: Path, attempt: Mapping[str, Any], task: Mapping[str
         return
     if not isinstance(value, dict):
         raise DriverError("TASK_OUTPUT_INVALID", "review assessment must be a JSON object")
+    if task.get("review_mode") == "compact-v1":
+        from tools.pilot_state import review_part_diagnostics
+
+        # Every ref, lint disposition and correction is checked before anything is written.
+        rows = review_part_diagnostics(run_root, attempt_id, task["review_key"], task["part_id"], value)
+        if rows:
+            raise DriverError("TASK_OUTPUT_INVALID", "review assessment was not accepted: " + "; ".join(f"{row['code']} {row.get('path', '')}" for row in rows[:8]),
+                              [{"path": row.get("path", ""), "code": row["code"], "message": row["message"]} for row in rows])
     try:
         submit_review_part(run_root, attempt_id, task["review_key"], task["part_id"], value, transport_attempts=int(task.get("transport_attempts", 1)))
     except ValueError as error:
@@ -1111,12 +1195,17 @@ def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
 # the state machine
 # --------------------------------------------------------------------------------------
 
-def advance(project: Path, run_root: Path) -> dict[str, Any]:
-    """Run deterministic steps until a model or a person has to act, or the attempt is terminal."""
+def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, Any]:
+    """Run deterministic steps until a model or a person has to act, or the attempt is terminal.
+
+    ``max_tasks`` > 1 lets a compact review return a batch of independent part tasks.
+    """
     from tools.pilot_state import finish_review, prepare_review, read_effective_canonical_if_present
 
     project = Path(project).resolve()
     config = _config(run_root)
+    limit = max(1, int(max_tasks or 1))
+    config["_max_tasks"] = limit
     if config.get("scan_pending"):
         waiting = _skillsrc_step(project, run_root, config)
         if waiting is not None:
@@ -1124,7 +1213,7 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
     attempt = _attempt(run_root)
     attempt_id = str(attempt["attempt_id"])
     if attempt["state"] == "TERMINAL" and start_rework(project, run_root, config, attempt):
-        return advance(project, run_root)
+        return advance(project, run_root, max_tasks=limit)
     if attempt["state"] == "TERMINAL":
         if attempt["policy_profile"] == "local-pilot-v1":
             from tools.pipeline_driver_automation import terminal_step
@@ -1174,7 +1263,7 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
     if effective is None or attempt["policy_profile"] == "cases-only-v1":
         _finalize_without_execution(project, run_root, attempt, document=None if effective is None else effective["document"])
         if start_rework(project, run_root, config, _attempt(run_root)):
-            return advance(project, run_root)
+            return advance(project, run_root, max_tasks=limit)
         return _done(run_root, _result_summary(run_root, _attempt(run_root)))
     from tools.pipeline_driver_automation import advance_automation
 
@@ -1313,6 +1402,10 @@ def _parser() -> argparse.ArgumentParser:
                                  help="One model context window in bytes; without reviewer isolation a larger review sum gets a warning (default 500000).")
             command.add_argument("--accept-self-review", action="store_true",
                                  help="Accept a review done without isolation (review_independence: SELF stays in the result).")
+            command.add_argument("--review-mode", choices=("pairs", "compact-v1"),
+                                 help="Review format of this run: pairs (default, legacy scopes) or compact-v1 (projection, whole cases per part).")
+            command.add_argument("--max-tasks", type=int, default=1,
+                                 help="Return up to K independent review part tasks at once (compact-v1); each still needs its own fresh call.")
         if name == "submit":
             command.add_argument("--task-id", required=True)
             command.add_argument("--output", type=Path, help="Answer file; defaults to the task's output_path.")
@@ -1327,7 +1420,7 @@ def _exit_code(payload: Mapping[str, Any]) -> int:
     if payload.get("action") == "done":
         result = payload.get("result", {})
         return int(result.get("exit_code", 0 if result.get("status") == "terminal" else 2))
-    if payload.get("action") in {"llm", "ask_user"}:
+    if payload.get("action") in {"llm", "ask_user", "batch"}:
         return 3  # waiting for a model or a person, same meaning as the pipeline's exit 3
     return 0
 
@@ -1383,12 +1476,14 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
         result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason") if payload.get("result", {}).get(key) is not None})
     entry["result"] = result
     _log(path, entry)
-    if payload.get("action") in {"llm", "ask_user"}:
-        first = _first_issue(rows, payload.get("task_id"))
+    for task in payload.get("tasks", [payload]) if payload.get("action") == "batch" else [payload]:
+        if task.get("action") not in {"llm", "ask_user"}:
+            continue
+        first = _first_issue(rows, task.get("task_id"))
         if first is None:
-            _log(path, {"event": "task_issued", "task_id": payload.get("task_id"), "stage": payload.get("stage"), "action": payload.get("action")})
+            _log(path, {"event": "task_issued", "task_id": task.get("task_id"), "stage": task.get("stage"), "action": task.get("action")})
         else:
-            _log(path, {"event": "task_reissued", "task_id": payload.get("task_id"), "stage": payload.get("stage"),
+            _log(path, {"event": "task_reissued", "task_id": task.get("task_id"), "stage": task.get("stage"),
                         "since_first_issue_seconds": round(max(time.time() - first, 0.0), 3)})
 
 
@@ -1419,16 +1514,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review")})
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode")},
+                                max_tasks=args.max_tasks)
         else:
+            from tools.pilot_state import run_lock
+
             run_root = _run_root(project, args.run)
-            if args.command == "next":
-                payload = advance(project, run_root)
-            elif args.command == "status":
+            if args.command == "status":
                 payload = status(project, run_root)
             else:
-                payload = submit(project, run_root, args.task_id, output=args.output, answer=args.answer, failed=args.failed, reason=args.reason,
-                                 transport_attempts=args.transport_attempts)
+                # One driver command is one operation: parallel submits of a batch run one after another.
+                with run_lock(run_root):
+                    if args.command == "next":
+                        payload = advance(project, run_root, max_tasks=args.max_tasks)
+                    else:
+                        payload = submit(project, run_root, args.task_id, output=args.output, answer=args.answer, failed=args.failed, reason=args.reason,
+                                         transport_attempts=args.transport_attempts)
     except DriverError as error:
         return failure(error.code, str(error), error.diagnostics)
     except Exception as error:  # every other failure is a driver defect; its traceback goes to the service log

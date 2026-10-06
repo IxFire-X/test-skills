@@ -48,6 +48,11 @@ Version: `4.0`
 - isolation `none`: `continue_same_parts_and_format`; axis `review_independence`: `ISOLATED, SELF`
 - `SELF` without `--accept-self-review`: accepted `false`, reason `REVIEW_NOT_INDEPENDENT`
 - review inputs above `500000` bytes (run parameter) without isolation: warning `SELF_REVIEW_CONTEXT_OVERFLOW`
+- review mode `--review-mode`: `pairs, compact-v1`; default `pairs`
+- `compact-v1` model input: `review_projection_text` (`review-projection-v1`, `canonical_document_digest_in_snapshot`); never model inputs: `html, markdown, csv`
+- `compact-v1` plan `review-plan-compact.schema.json`, answer `review-part-output-compact.schema.json`; packing `whole_cases_content_defined_blocks_block_pairs`; `every_case_pair_in_one_part`; areas `source, case_home_part, cross_per_part`
+- `compact-v1` order `independent_parts_batchable` (`--max-tasks`); answer checks `refs_are_part_anchors, case_area_cites_own_anchor, every_lint_suspicion_answered, info_findings_at_most_5, related_ids_known`
+- `compact-v1` corrections `closed_field_dictionary_one_pointer_before_checked`; carry key `area_fingerprint, role_policy, skill_digest, instructions_digest, model_id, mode`
 
 ## Physical lifecycle
 

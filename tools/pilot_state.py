@@ -2034,7 +2034,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
         ):
             raise ValueError("invalid generator fragment artifact")
     elif stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")):
-        schema_name = "review-part-output.schema.json"
+        # compact-v1 answers carry schema 2.0.0; the frozen plan decides which one a part accepts.
+        schema_name = "review-part-output-compact.schema.json" if value.get("schema_version") == "2.0.0" else "review-part-output.schema.json"
         if _review_part_token(stage_instance_id.rsplit(":", 1)[1])[0] != value.get("part_id"):
             raise ValueError("invalid review part identity")
     elif stage_instance_id.startswith("tc-to-autotest:"):
@@ -3864,9 +3865,14 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         from tools.canonical_document import require_valid_canonical_document
         key = kind.removeprefix("review-snapshot-")
         payload = receipt.get("payload")
-        if set(receipt) != common | {"payload"} or not isinstance(payload, dict) or set(payload) != {"document", "automation", "sources", "contexts", "requirements_binding", "package_binding"}:
+        base_keys = {"document", "automation", "sources", "contexts", "requirements_binding", "package_binding"}
+        if (set(receipt) != common | {"payload"} or not isinstance(payload, dict)
+                or set(payload) not in (base_keys, base_keys | {"review_mode", "projection", "review_policy"})):
             raise ValueError("invalid review snapshot")
         require_valid_canonical_document(payload["document"])
+        if "review_mode" in payload:
+            from tools.review_compact import validate_compact_payload
+            validate_compact_payload(payload)
         baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
         binding = payload["requirements_binding"]
         if (not isinstance(binding, dict) or set(binding) != {"module_id", "selected_target", "docs"}
@@ -3917,12 +3923,18 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         # done once per process for one (snapshot, plan) pair, not once per review part.
         proof = (snapshot["digest"], review_digest(plan))
         if proof not in _VERIFIED_REVIEW_PLANS:
-            scopes = review_scopes(snapshot["payload"], source_chunk_bytes=max(1, (plan["input_byte_budget"] - specification["response_reserve_bytes"]) // 4))
-            carried: list = []
-            if key == "canonical":
-                scopes, carried = _carried_plan_inputs(project, root, state, attempt_id, scopes)
-            if plan != build_review_plan(specification, scopes, input_byte_budget=plan["input_byte_budget"], carried=carried):
-                raise ValueError("review plan omits or changes required scope")
+            if snapshot["payload"].get("review_mode") is not None:
+                from tools.review_compact import build_compact_plan
+                if plan != build_compact_plan(_compact_specification(specification), snapshot["payload"], input_byte_budget=plan["input_byte_budget"],
+                                              carry=_compact_carry(project, root, state, attempt_id, key, snapshot["payload"])):
+                    raise ValueError("review plan omits or changes required scope")
+            else:
+                scopes = review_scopes(snapshot["payload"], source_chunk_bytes=max(1, (plan["input_byte_budget"] - specification["response_reserve_bytes"]) // 4))
+                carried: list = []
+                if key == "canonical":
+                    scopes, carried = _carried_plan_inputs(project, root, state, attempt_id, scopes)
+                if plan != build_review_plan(specification, scopes, input_byte_budget=plan["input_byte_budget"], carried=carried):
+                    raise ValueError("review plan omits or changes required scope")
             if len(_VERIFIED_REVIEW_PLANS) >= 256:
                 _VERIFIED_REVIEW_PLANS.clear()
             _VERIFIED_REVIEW_PLANS.add(proof)
@@ -3934,8 +3946,9 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         plan, part = _review_part_definition(root, state, attempt_id, stage)
         isolation = receipt.get("host_isolation")
         expected_keys = common | {"plan_digest", "part_id", "input_digest", "reviewer_invocation_id", "model_id", "host_isolation", "cli", "cli_version", "settings"}
+        from tools.review_modes import part_input as mode_part_input
         if (set(receipt) != expected_keys or receipt.get("plan_digest") != plan["digest"]
-                or receipt.get("part_id") != part_id or receipt.get("input_digest") != review_digest(part_input(plan, part))
+                or receipt.get("part_id") != part_id or receipt.get("input_digest") != review_digest(mode_part_input(plan, part))
                 or not _safe_model_label(receipt.get("reviewer_invocation_id"))
                 or receipt.get("model_id") is not None and not _safe_model_label(receipt["model_id"])
                 or any(not isinstance(receipt.get(field), str) or not receipt[field] for field in ("cli", "cli_version", "settings"))
@@ -3953,13 +3966,14 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         key = kind.removeprefix("review-aggregate-")
         if set(receipt) != common | {"plan_digest", "aggregate", "output"}:
             raise ValueError("invalid review aggregate")
+        from tools.review_modes import aggregate as mode_aggregate
         plan = _review_plan_with_state(root, state, attempt_id, key)
         results = _review_results(root, state, attempt_id, key, plan)
-        aggregate = aggregate_review_parts(plan, results)
+        snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+        aggregate = mode_aggregate(plan, results, snapshot)
         if receipt["aggregate"] != aggregate:
             # Sealed before late checks could close an UNCHECKED scope.
-            aggregate = aggregate_review_parts(plan, results, legacy=True)
-        snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+            aggregate = mode_aggregate(plan, results, snapshot, legacy=True)
         ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=key)
         if receipt["plan_digest"] != plan["digest"] or receipt["aggregate"] != aggregate or receipt["output"] != review_output(snapshot, aggregate, ledger["session_id"]):
             raise ValueError("review aggregate differs from exact durable part evidence")
@@ -4097,9 +4111,9 @@ def _review_block_classes(ledger: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str) -> tuple[dict, dict]:
-    from tools.review_parts import validate_review_plan
+    from tools.review_modes import validate_plan
     plan = _review_plan_with_state(root, state, attempt_id, _review_key(stage))
-    if validate_review_plan(plan):
+    if validate_plan(plan):
         raise ValueError("invalid durable review plan")
     part = next((part for part in [*plan["parts"], *plan["additions"]] if part["part_id"] == _review_part_token(stage.rsplit(":", 1)[1])[0]), None)
     if part is None or part["blocked_reason"] or part["part_id"] in plan["unavailable"]:
@@ -4108,7 +4122,8 @@ def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: st
 
 
 def _validate_review_request(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, invocation_id: str, inputs: Sequence[str], cutoff: int, *, model_id: str | None) -> None:
-    from tools.review_parts import part_input, review_digest
+    from tools.review_modes import parallel_parts, part_input
+    from tools.review_parts import review_digest
     review_key = _review_key(stage)
     plan, part = _review_part_definition(root, state, attempt_id, stage)
     try_number = _review_part_token(stage.rsplit(":", 1)[1])[1]
@@ -4128,6 +4143,9 @@ def _validate_review_request(project: Path, root: Path, state: Mapping[str, Any]
     candidate_digest = review_digest(snapshot["automation"] or snapshot["document"])
     if reviews[0]["artifact_digest"] != candidate_digest:
         raise ValueError("review request candidate differs")
+    if parallel_parts(plan) and part["requested_check"] is None:
+        # compact-v1 base parts are independent: a batch may run them in any order.
+        return
     for previous in [*plan["parts"], *plan["additions"]]:
         if previous["part_id"] == part["part_id"]:
             break
@@ -4139,9 +4157,11 @@ def _validate_review_request(project: Path, root: Path, state: Mapping[str, Any]
 
 
 def _validate_review_response(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, value: Mapping[str, Any]) -> None:
-    from tools.review_parts import validate_review_part
+    from tools.review_modes import validate_part
+    project, root = _run_root(root)
     plan, part = _review_part_definition(root, state, attempt_id, stage)
-    if validate_review_part(plan, part, value):
+    snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{_review_key(stage)}", "ARTIFACT_READ_BACK")["record"]["payload"]
+    if validate_part(plan, part, value, snapshot):
         raise ValueError("model response does not cover its exact declared review part")
 
 
@@ -4176,11 +4196,31 @@ def _carried_plan_inputs(project: Path, root: Path, state: Mapping[str, Any], at
     return carry_scopes(scopes, parent_plan, parent_aggregate, from_attempt_id=parent)
 
 
+def _compact_specification(specification: Mapping[str, Any]) -> dict[str, Any]:
+    """The plan specification a compact plan is built from (the projection digest is derived again)."""
+    return {key: value for key, value in specification.items() if key != "projection_digest"}
+
+
+def _compact_carry(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """What a compact rework review may carry: the parent's plan, aggregate and review policy (canonical only)."""
+    parent = _carry_source(root, state, attempt_id)
+    if parent is None or review_key != "canonical":
+        return None
+    parent_snapshot = _read_attempt_receipt_with_state(project, root, state, parent, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]
+    parent_plan = dict(_read_attempt_receipt_with_state(project, root, state, parent, "review-plan-canonical", "ARTIFACT_READ_BACK")["record"]["plan"])
+    parent_ledger = _read_reviewer_session_ledger_with_state(project, root, state, parent, review_key="canonical")
+    parent_plan["additions"] = [event["part"] for event in parent_ledger["events"] if event["event_type"] == "REVIEW_CHECK_ADDED"]
+    parent_aggregate = _read_attempt_receipt_with_state(project, root, state, parent, "review-aggregate-canonical", "ARTIFACT_READ_BACK")["record"]["aggregate"]
+    return {"plan": parent_plan, "aggregate": parent_aggregate, "from_attempt_id": parent,
+            "policy": payload.get("review_policy"), "parent_policy": parent_snapshot.get("review_policy")}
+
+
 def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], *, input_byte_budget: int, response_reserve_bytes: int, instructions: str, session_id: str) -> dict[str, Any]:
     """Freeze exact source/candidate bytes and one deterministic 1/N review plan.
 
     The canonical review of a rework attempt (r2) is incremental: scopes whose exact
-    inputs equal checked r1 scopes keep their coverage and are not sent again.
+    inputs equal checked r1 scopes keep their coverage and are not sent again.  A
+    snapshot with ``review_mode: compact-v1`` gets a compact plan (``tools.review_compact``).
     """
     from tools.review_parts import build_review_plan, review_scopes
     automation = payload.get("automation")
@@ -4190,12 +4230,17 @@ def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], 
     specification = {"review_kind": "tc-reviewer" if key == "canonical" else "autotest-reviewer", "revision": 1 if key == "canonical" else int(key[1]),
                      "snapshot_digest": snapshot["digest"], "instructions": instructions, "response_reserve_bytes": response_reserve_bytes,
                      "document_index": document_index(payload)}
-    scopes = review_scopes(payload, source_chunk_bytes=max(1, (input_byte_budget - response_reserve_bytes) // 4))
-    carried: list = []
-    if key == "canonical":
-        project, root = _run_root(run_root)
-        scopes, carried = _carried_plan_inputs(project, root, derive_state(run_root), attempt_id, scopes)
-    plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget, carried=carried)
+    project, root = _run_root(run_root)
+    if payload.get("review_mode") is not None:
+        from tools.review_compact import build_compact_plan
+        plan = build_compact_plan(specification, payload, input_byte_budget=input_byte_budget,
+                                  carry=_compact_carry(project, root, derive_state(run_root), attempt_id, key, payload))
+    else:
+        scopes = review_scopes(payload, source_chunk_bytes=max(1, (input_byte_budget - response_reserve_bytes) // 4))
+        carried: list = []
+        if key == "canonical":
+            scopes, carried = _carried_plan_inputs(project, root, derive_state(run_root), attempt_id, scopes)
+        plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget, carried=carried)
     _publish_bound_attempt_receipt(run_root, attempt_id, f"review-plan-{key}", {"plan": plan})
     if key == "canonical":
         facts = {"session_id": session_id, "canonical_branch_digest": payload["package_binding"]["candidate_digest"],
@@ -4222,16 +4267,25 @@ def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], 
     return {"plan": plan, "boundary": boundary, "review_key": key}
 
 
-def next_review_part(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any] | None:
-    """Register discovered cross checks and return the next available bounded input."""
-    from tools.review_parts import additional_review_parts, part_input, review_digest
+def _review_snapshot_payload(run_root: Path, attempt_id: str, review_key: str) -> dict[str, Any]:
+    return dict(read_attempt_receipt(run_root, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"])
+
+
+def available_review_parts(run_root: Path, attempt_id: str, review_key: str = "canonical") -> list[dict[str, Any]]:
+    """Register discovered checks and return every part input that still awaits an assessment, in plan order.
+
+    A part whose invocation is open (requested, no response yet) is listed too: the
+    host resumes it.  Legacy plans are sequential, so their callers take only the first.
+    """
+    from tools.review_modes import additional_parts, part_input
+    from tools.review_parts import review_digest
     state = derive_state(run_root)
     plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
     session = dict(read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key))
     if session["status"] != "WAITING":
-        return None
+        return []
     results = _review_results(run_root, state, attempt_id, review_key, plan)
-    additions = additional_review_parts(plan, results)
+    additions = additional_parts(plan, results, _review_snapshot_payload(run_root, attempt_id, review_key))
     if additions:
         for part in additions:
             session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "REVIEW_CHECK_ADDED", "part": part})
@@ -4239,10 +4293,14 @@ def next_review_part(run_root: Path, attempt_id: str, review_key: str = "canonic
         publish_reviewer_session_ledger(run_root, attempt_id, session)
         plan["additions"].extend(additions)
     completed = {result["part_id"] for result in results}
-    for part in [*plan["parts"], *plan["additions"]]:
-        if part["part_id"] not in completed and part["blocked_reason"] is None and part["part_id"] not in plan["unavailable"]:
-            return part_input(plan, part)
-    return None
+    return [part_input(plan, part) for part in [*plan["parts"], *plan["additions"]]
+            if part["part_id"] not in completed and part["blocked_reason"] is None and part["part_id"] not in plan["unavailable"]]
+
+
+def next_review_part(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any] | None:
+    """Register discovered cross checks and return the next available bounded input."""
+    available = available_review_parts(run_root, attempt_id, review_key)
+    return available[0] if available else None
 
 
 def _append_review_ledger_event(run_root: Path, attempt_id: str, review_key: str, event: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -4268,17 +4326,27 @@ def block_review_part(run_root: Path, attempt_id: str, review_key: str, part_id:
     return _append_review_ledger_event(run_root, attempt_id, review_key, {"event_type": "REVIEW_PART_BLOCKED", "part_id": part_id, "reason": reason, "failure_class": failure_class})
 
 
-def open_review_part(run_root: Path, attempt_id: str, review_key: str, host: Mapping[str, Any]) -> dict[str, Any]:
-    """Bind one real fresh invocation before the host sends its exact input."""
+def open_review_part(run_root: Path, attempt_id: str, review_key: str, host: Mapping[str, Any], *, part_id: str | None = None) -> dict[str, Any]:
+    """Bind one real fresh invocation before the host sends its exact input.
+
+    Without ``part_id`` the next available part is opened.  A compact plan may open
+    any available base part (a batch of independent parts); a legacy plan only the next.
+    """
     from tools.review_parts import review_digest
-    envelope = next_review_part(run_root, attempt_id, review_key)
+    available = available_review_parts(run_root, attempt_id, review_key)
+    if part_id is None:
+        envelope = available[0] if available else None
+    else:
+        envelope = next((item for item in available if item["part_id"] == part_id), None)
+        if envelope is not None and envelope is not available[0] and envelope.get("mode") is None:
+            raise ValueError("review parts must run sequentially")
     if envelope is None:
         raise ValueError("no review part awaits invocation")
     part_id = envelope["part_id"]
     project, root = _run_root(run_root)
     state = derive_state(run_root)
     tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
-    # One open request per declared part, sequentially.  Resume reads the original
+    # One open request per declared part.  Resume reads the original
     # boundary/request; a replacement invocation exists only after the previous try
     # was recorded as failed (fail_review_part), at most _MAX_REVIEW_PART_TRIES in total.
     if tries and tries[-1]["failure"] is None:
@@ -4313,7 +4381,8 @@ def fail_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: 
     with a new invocation; after the last try the part is blocked with the
     failure class, so a transport outage is never reported as a content defect.
     """
-    from tools.review_parts import part_input, review_digest
+    from tools.review_modes import OUTPUT_VERSION, part_input, plan_mode
+    from tools.review_parts import review_digest
     if failure_class not in _REVIEW_FAILURE_CLASSES:
         raise ValueError("review failure class must be TRANSPORT or CONTENT")
     if not isinstance(reason, str) or not reason.strip():
@@ -4333,7 +4402,7 @@ def fail_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: 
     if current["failure"] is None:
         if part_id in plan["unavailable"]:
             raise ValueError("review part has no open invocation to fail")
-        record = {"schema_version": "1.0.0", "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+        record = {"schema_version": OUTPUT_VERSION[plan_mode(plan)], "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
                   "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), "invocation_failure": failure}
         publish_model_stage_artifact(run_root, attempt_id, current["stage"], record)
     elif current["failure"] != failure:
@@ -4350,32 +4419,49 @@ def fail_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: 
     return {"part_id": part_id, "failed_try": current["try"], "failure_class": failure_class, "retry_allowed": retry_allowed, "tries_left": _MAX_REVIEW_PART_TRIES - current["try"]}
 
 
+def review_part_diagnostics(run_root: Path, attempt_id: str, review_key: str, part_id: str, assessment: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Why an assessment would be rejected (empty when it would be accepted); nothing is written."""
+    from tools.review_modes import ANSWER_FIELDS, OUTPUT_VERSION, part_input, plan_mode, validate_part
+    from tools.review_parts import review_digest
+    state = derive_state(run_root)
+    plan, part = _review_part_definition(run_root, state, attempt_id, _review_stage(review_key, part_id))
+    mode = plan_mode(plan)
+    if set(assessment) != set(ANSWER_FIELDS[mode]):
+        return [{"code": "REVIEW_ASSESSMENT_FIELDS", "path": "", "message": "the answer has exactly: " + ", ".join(ANSWER_FIELDS[mode])}]
+    result = {"schema_version": OUTPUT_VERSION[mode], "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+              "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), **dict(assessment)}
+    return validate_part(plan, part, result, _review_snapshot_payload(run_root, attempt_id, review_key))
+
+
 def submit_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: str, assessment: Mapping[str, Any], *, transport_attempts: int = 1) -> dict[str, Any]:
     """Bind unmodified substantive output to controller-owned envelope fields."""
-    from tools.review_parts import part_input, review_digest
-    if set(assessment) != {"coverage", "findings", "corrections", "required_checks"}:
-        raise ValueError("review assessment has unsupported fields")
+    from tools.review_modes import ANSWER_FIELDS, OUTPUT_VERSION, part_input, plan_mode
+    from tools.review_parts import review_digest
     project, root = _run_root(run_root)
     state = derive_state(run_root)
     plan, part = _review_part_definition(run_root, state, attempt_id, _review_stage(review_key, part_id))
+    mode = plan_mode(plan)
+    if set(assessment) != set(ANSWER_FIELDS[mode]):
+        raise ValueError("review assessment has unsupported fields")
     tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
     # The assessment belongs to the latest invocation try of this part.
     stage = tries[-1]["stage"] if tries else _review_stage(review_key, part_id)
-    result = {"schema_version": "1.0.0", "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+    result = {"schema_version": OUTPUT_VERSION[mode], "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
               "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), **dict(assessment)}
     return dict(publish_model_stage_artifact(run_root, attempt_id, stage, result, transport_attempts=transport_attempts))
 
 
 def finish_review(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:
     """Publish one controller aggregate and seal the logical review ledger."""
-    from tools.review_parts import aggregate_review_parts, review_output, review_digest
+    from tools.review_modes import aggregate as mode_aggregate
+    from tools.review_parts import review_output, review_digest
     if next_review_part(run_root, attempt_id, review_key) is not None:
         raise ValueError("review still has available unchecked parts")
     state = derive_state(run_root)
     plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
     results = _review_results(run_root, state, attempt_id, review_key, plan)
-    aggregate = aggregate_review_parts(plan, results)
     snapshot = read_attempt_receipt(run_root, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+    aggregate = mode_aggregate(plan, results, snapshot)
     session = dict(read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key))
     output = review_output(snapshot, aggregate, session["session_id"])
     receipt = _publish_bound_attempt_receipt(run_root, attempt_id, f"review-aggregate-{review_key}", {"plan_digest": plan["digest"], "aggregate": aggregate, "output": output})
