@@ -1,0 +1,552 @@
+[TCDOC-step5-java-demo-9340016c] StudentController REST API (generic)
+  project: step5-java-demo · author: pipeline-driver · date: 2026-10-06
+  documentation: docs/requirements/student-controller.md
+
+[SREQ-0001] src: docs/requirements/student-controller.md — Аналитика: StudentController (независимый прогон run2); docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: # Аналитика: StudentController (независимый прогон run2)
+    | 
+    | > Источник: исходный код `src/main/java/net/javaguides/springboot/controller/StudentController.java`,
+    | > `src/main/java/net/javaguides/springboot/bean/Student.java`,
+    | > `src/main/java/net/javaguides/springboot/controller/HelloWorldController.java`,
+    | > `pom.xml` (Spring Boot 3.4.2, Java 17).
+
+[SREQ-0002] src: docs/requirements/student-controller.md — 1. Общее описание; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ## 1. Общее описание
+    | 
+    | Проект `springboot-rest-api` — демонстрационное REST API на Spring Boot. Модуль `StudentController`
+    | предоставляет CRUD-подобные эндпоинты для ресурса `Student` (id, firstName, lastName),
+    | а `HelloWorldController` — простой GET-эндпоинт.
+    | 
+    | Стек тестирования: `spring-boot-starter-test` (JUnit 5, MockMvc, AssertJ). Сборка — Maven (`mvn test`).
+
+[SREQ-0003] src: docs/requirements/student-controller.md — 2. Модель данных; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ## 2. Модель данных
+    | 
+    | `Student` (`net.javaguides.springboot.bean.Student`):
+    | 
+    | | Поле | Тип | JSON |
+    | |---|---|---|
+    | | id | int | `"id"` |
+    | | firstName | String | `"firstName"` |
+    | | lastName | String | `"lastName"` |
+    | 
+    | Точный порядок полей JSON определяется сериализацией Jackson (по getter-методам):
+    | `id`, `firstName`, `lastName`.
+
+[SREQ-0004] src: docs/requirements/student-controller.md — 3.1. GET `/student`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.1. GET `/student`
+    | - Описание: возвращает один объект Student с фиксированными значениями.
+    | - Параметры: нет.
+    | - Ответ: `200 OK`, `Content-Type: application/json`.
+    | - Тело: `{"id": 1, "firstName": "Ramseh", "lastName": "Mishra"}`.
+    | - Примечание: в исходном коде firstName = `"Ramseh"` (с опечаткой), это важно для точной проверки.
+
+[SREQ-0005] src: docs/requirements/student-controller.md — 3.2. GET `/students`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.2. GET `/students`
+    | - Описание: возвращает список из 4 студентов.
+    | - Параметры: нет.
+    | - Ответ: `200 OK`, JSON-массив из 4 элементов.
+    | - Тело (детерминированный порядок):
+    |   1. `{"id": 1, "firstName": "Ramesh", "lastName": "Mishra"}`
+    |   2. `{"id": 2, "firstName": "Umesh", "lastName": "Mishra"}`
+    |   3. `{"id": 3, "firstName": "Ram", "lastName": "Mishra"}`
+    |   4. `{"id": 4, "firstName": "Sanjay", "lastName": "Mishra"}`
+
+[SREQ-0006] src: docs/requirements/student-controller.md — 3.3. GET `/students/{id}` (Path Variable); docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.3. GET `/students/{id}` (Path Variable)
+    | - Описание: возвращает Student по идентификатору из пути.
+    | - Параметры пути: `id` (int).
+    | - Ответ: `200 OK`, тело `{"id": <id>, "firstName": "Ramsesh", "lastName": "Mishra"}`.
+    | - Примечание: метод не проверяет существование — всегда возвращает объект с переданным id.
+
+[SREQ-0007] src: docs/requirements/student-controller.md — 3.4. GET `/students/query?id={id}` (Request Param); docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.4. GET `/students/query?id={id}` (Request Param)
+    | - Описание: возвращает Student по query-параметру `id`.
+    | - Query-параметры: `id` (int, обязательный).
+    | - Ответ: `200 OK`, тело `{"id": <id>, "firstName": "Ramesh", "lastName": "Mishra"}`.
+    | - Ошибка: отсутствие параметра `id` → `400 Bad Request` (Spring).
+
+[SREQ-0008] src: docs/requirements/student-controller.md — 3.5. POST `/students/create`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.5. POST `/students/create`
+    | - Описание: принимает Student в теле запроса, логирует поля и возвращает его же.
+    | - Тело запроса: `application/json` `{"id": int, "firstName": string, "lastName": string}`.
+    | - Ответ: `201 Created` (аннотация `@ResponseStatus(HttpStatus.CREATED)`), тело — эхо запроса.
+    | - Особенность: частично заполненный JSON (например, без lastName) даст `null` в соответствующем поле ответа.
+
+[SREQ-0009] src: docs/requirements/student-controller.md — 3.6. PUT `/students/{id}/update`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.6. PUT `/students/{id}/update`
+    | - Описание: принимает Student в теле и id в пути, логирует имя/фамилию, возвращает тело.
+    | - Параметры пути: `id` (int).
+    | - Тело запроса: `application/json` Student.
+    | - Ответ: `200 OK`, тело — эхо запроса.
+    | - Примечание: id из пути НЕ подставляется в возвращаемый объект — возвращается тело как есть.
+
+[SREQ-0010] src: docs/requirements/student-controller.md — 3.7. DELETE `/students/{id}/delete`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.7. DELETE `/students/{id}/delete`
+    | - Описание: логирует id и возвращает сообщение об удалении.
+    | - Параметры пути: `id` (int).
+    | - Ответ: `200 OK`, текст `Student Successfully Deleted!`.
+
+[SREQ-0011] src: docs/requirements/student-controller.md — 3.8. GET `/hello-world`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ### 3.8. GET `/hello-world`
+    | - Описание: возвращает строку приветствия.
+    | - Ответ: `200 OK`, текст `Hello World!`.
+
+[SREQ-0012] src: docs/requirements/student-controller.md — - AC-1: GET `/student` возвращает 200 и JSON `{"id":1,"firstName":"Ramseh","lastName":"Mishra"}`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-1: GET `/student` возвращает 200 и JSON `{"id":1,"firstName":"Ramseh","lastName":"Mishra"}`.
+
+[SREQ-0013] src: docs/requirements/student-controller.md — - AC-2: GET `/students` возвращает 200 и массив из 4 объектов с идентификаторами 1..4; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-2: GET `/students` возвращает 200 и массив из 4 объектов с идентификаторами 1..4.
+
+[SREQ-0014] src: docs/requirements/student-controller.md — - AC-3: GET `/students/5` возвращает 200 и объект с `id=5`, firstName `Ramsesh`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-3: GET `/students/5` возвращает 200 и объект с `id=5`, firstName `Ramsesh`.
+
+[SREQ-0015] src: docs/requirements/student-controller.md — - AC-4: GET `/students/query?id=7` возвращает 200 и объект с `id=7`, firstName `Ramesh`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-4: GET `/students/query?id=7` возвращает 200 и объект с `id=7`, firstName `Ramesh`.
+
+[SREQ-0016] src: docs/requirements/student-controller.md — - AC-5: POST `/students/create` с валидным JSON возвращает `201 Created` и эхо запроса; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-5: POST `/students/create` с валидным JSON возвращает `201 Created` и эхо запроса.
+
+[SREQ-0017] src: docs/requirements/student-controller.md — - AC-6: PUT `/students/10/update` с валидным JSON возвращает `200 OK` и эхо тела запроса; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-6: PUT `/students/10/update` с валидным JSON возвращает `200 OK` и эхо тела запроса.
+
+[SREQ-0018] src: docs/requirements/student-controller.md — - AC-7: DELETE `/students/3/delete` возвращает `200 OK` и текст `Student Successfully Deleted!`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-7: DELETE `/students/3/delete` возвращает `200 OK` и текст `Student Successfully Deleted!`.
+
+[SREQ-0019] src: docs/requirements/student-controller.md — - AC-8: GET `/hello-world` возвращает `200 OK` и текст `Hello World!`; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: - AC-8: GET `/hello-world` возвращает `200 OK` и текст `Hello World!`.
+
+[SREQ-0020] src: docs/requirements/student-controller.md — 5. Ограничения и риски; docs/requirements/student-controller.md — sha256:3c34a282e8c0e24da91120526a87c9ec8ea1d7b7d7b31292cd894966bc0e85e7
+  text: ## 5. Ограничения и риски
+    | 
+    | - Эндпоинты не используют БД и не хранят состояние: все ответы детерминированы кодом.
+    | - Опечатка `"Ramseh"` в GET `/student` — намеренно фиксируется как ожидаемое значение, чтобы тест проверял фактическое поведение.
+    | - Метод PUT не подставляет path-variable в объект — проверять именно эхо тела.
+    | - Приложение стартует на стандартном порту 8080 (для MockMvc порт не требуется).
+
+[CREQ-B1-001] GET /student возвращает 200 OK, Content-Type application/json и тело ровно {"id": 1, "firstName": "Ramseh", "lastName": "Mishra"}; значение firstName «Ramseh» (с опечаткой) является ожидаемым.
+  src: docs/requirements/student-controller.md — 3.1. GET `/student`; docs/requirements/student-controller.md — AC-1
+
+[CREQ-B1-002] GET /students возвращает 200 OK и JSON-массив ровно из четырёх студентов в фиксированном порядке: (1, Ramesh, Mishra), (2, Umesh, Mishra), (3, Ram, Mishra), (4, Sanjay, Mishra).
+  src: docs/requirements/student-controller.md — 3.2. GET `/students`; docs/requirements/student-controller.md — AC-2
+
+[CREQ-B1-003] GET /students/{id} с целочисленным id возвращает 200 OK и объект {"id": <id>, "firstName": "Ramsesh", "lastName": "Mishra"} для любого переданного id; существование студента не проверяется.
+  src: docs/requirements/student-controller.md — 3.3. GET `/students/{id}` (Path Variable); docs/requirements/student-controller.md — AC-3
+
+[CREQ-B1-004] GET /students/query?id=<id> с целочисленным query-параметром id возвращает 200 OK и объект {"id": <id>, "firstName": "Ramesh", "lastName": "Mishra"}.
+  src: docs/requirements/student-controller.md — 3.4. GET `/students/query?id={id}` (Request Param); docs/requirements/student-controller.md — AC-4
+
+[CREQ-B1-005] GET /students/query без параметра id возвращает 400 Bad Request.
+  src: docs/requirements/student-controller.md — 3.4. GET `/students/query?id={id}` (Request Param), строка «Ошибка: отсутствие параметра id → 400 Bad Request»
+
+[CREQ-B1-006] POST /students/create с полным JSON-телом студента (id, firstName, lastName) возвращает 201 Created и тело, равное телу запроса.
+  src: docs/requirements/student-controller.md — 3.5. POST `/students/create`; docs/requirements/student-controller.md — AC-5
+
+[CREQ-B1-007] POST /students/create с частично заполненным JSON-телом (без lastName) возвращает 201 Created и тело, в котором отсутствующее поле lastName равно null.
+  src: docs/requirements/student-controller.md — 3.5. POST `/students/create`, строка «Особенность: частично заполненный JSON …»
+
+[CREQ-B1-008] PUT /students/{id}/update с JSON-телом студента возвращает 200 OK и тело запроса без изменений; id из пути в возвращаемый объект не подставляется, даже если отличается от id в теле.
+  src: docs/requirements/student-controller.md — 3.6. PUT `/students/{id}/update`; docs/requirements/student-controller.md — AC-6
+
+[CREQ-B1-009] DELETE /students/{id}/delete с целочисленным id возвращает 200 OK и текст «Student Successfully Deleted!».
+  src: docs/requirements/student-controller.md — 3.7. DELETE `/students/{id}/delete`; docs/requirements/student-controller.md — AC-7
+
+[CREQ-B1-010] GET /hello-world возвращает 200 OK и текст «Hello World!».
+  src: docs/requirements/student-controller.md — 3.8. GET `/hello-world`; docs/requirements/student-controller.md — AC-8
+
+[CREQ-B1-011] JSON-представление студента содержит ровно три поля в порядке id (целое число), firstName (строка), lastName (строка); порядок определяется сериализацией Jackson по геттерам.
+  src: docs/requirements/student-controller.md — 2. Модель данных; src/main/java/net/javaguides/springboot/bean/Student.java — геттеры getId, getFirstName, getLastName
+
+[CREQ-B1-012] Эндпоинты не хранят состояние: POST /students/create не изменяет ответ GET /students, а повторный одинаковый запрос даёт тот же ответ.
+  src: docs/requirements/student-controller.md — 5. Ограничения и риски, строка «Эндпоинты не используют БД и не хранят состояние»; docs/requirements/student-controller.md — 1. Общее описание
+
+[CREQ-B1-013] Проверки выполняются через тестовый стек проекта: JUnit 5 и MockMvc из spring-boot-starter-test, сборка и запуск Maven; это ограничение тестовой работы, а не поведение приложения.
+  src: docs/requirements/student-controller.md — заголовок и список источников; docs/requirements/student-controller.md — 1. Общее описание, строка «Стек тестирования»; pom.xml — spring-boot-starter-test
+
+SREQ-0001 → CREQ-B1-013
+SREQ-0002 → CREQ-B1-012, CREQ-B1-013
+SREQ-0003 → CREQ-B1-011
+SREQ-0004 → CREQ-B1-001
+SREQ-0005 → CREQ-B1-002
+SREQ-0006 → CREQ-B1-003
+SREQ-0007 → CREQ-B1-004, CREQ-B1-005
+SREQ-0008 → CREQ-B1-006, CREQ-B1-007
+SREQ-0009 → CREQ-B1-008
+SREQ-0010 → CREQ-B1-009
+SREQ-0011 → CREQ-B1-010
+SREQ-0012 → CREQ-B1-001
+SREQ-0013 → CREQ-B1-002
+SREQ-0014 → CREQ-B1-003
+SREQ-0015 → CREQ-B1-004
+SREQ-0016 → CREQ-B1-006
+SREQ-0017 → CREQ-B1-008
+SREQ-0018 → CREQ-B1-009
+SREQ-0019 → CREQ-B1-010
+SREQ-0020 → CREQ-B1-012
+
+[CAP-B1-mockmvc_exchange] mockmvc_exchange(jsonBody?:object, method:string, path:string, query?:object) → contentType:string, jsonArray:array, jsonObject:object, status:integer, text:string · adapter=project_native_junit
+  src: Контракт композиции для будущего проектного JUnit-теста, а не существующий helper приложения; выполнение этим документом не подтверждается.
+  src: Граница: @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK) с @AutoConfigureMockMvc, реальные контроллеры приложения без заглушек; приложение не хранит состояние, база данных не нужна (pom.xml: только spring-boot-starter-web и spring-boot-starter-test; application.properties без источника данных).
+  src: Вызов: MockMvc.perform(MockMvcRequestBuilders.request(HttpMethod.valueOf(method), path)) с .queryParam(name, value) для каждой пары из query (строковое представление значений) и, при наличии jsonBody, .contentType(MediaType.APPLICATION_JSON).content(ObjectMapper.writeValueAsString(jsonBody)); .andReturn().getResponse() даёт MockHttpServletResponse.
+  src: Результаты: status = response.getStatus(); contentType = response.getContentType(); text = response.getContentAsString(StandardCharsets.UTF_8) — для текстовых ответов это сам текст, для JSON-ответов это компактная сериализация Jackson без пробелов в порядке геттеров (например {"id":1,"firstName":"Ramseh","lastName":"Mishra"}), по которой проверяется порядок полей; jsonObject и jsonArray — разбор того же текста через ObjectMapper.readValue в Map/List только для ответов с JSON; для текстового ответа они не используются.
+  src: Исходники маршрутов: src/main/java/net/javaguides/springboot/controller/StudentController.java (student, students, students/{id}, students/query, students/create, students/{id}/update, students/{id}/delete); src/main/java/net/javaguides/springboot/controller/HelloWorldController.java (/hello-world); модель src/main/java/net/javaguides/springboot/bean/Student.java с конструктором Student(int, String, String) и геттерами; существующий тест src/test/java/net/javaguides/springboot/SpringbootRestApiApplicationTests.java подтверждает @SpringBootTest.
+  src: Зависимости из pom.xml: spring-boot-starter-parent 3.4.2 (Java 17), spring-boot-starter-web (Spring MVC, Jackson), spring-boot-starter-test (JUnit 5, spring-test MockMvc, AssertJ, JSONassert).
+
+[TC-B1-001] Получение фиксированного студента по GET /student
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-001, CREQ-B1-011, CREQ-B1-013
+  objective: Убедиться, что эндпоинт отдаёт заранее заданного студента в формате JSON, включая закреплённое в требовании написание имени «Ramseh».
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-001-01] action: Отправить запрос GET /student.
+    data: Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-001-01-1] arg:method = "GET" :string
+    [INPUT-B1-001-01-2] arg:path = "/student" :string
+    [EXP-B1-001-01-1] expected: Приложение возвращает одного студента с фиксированными значениями; поля в теле идут в порядке id, firstName, lastName.
+      | 
+      | HTTP 200 OK
+      | Content-Type: application/json
+      | {
+      |   "id": 1,
+      |   "firstName": "Ramseh",
+      |   "lastName": "Mishra"
+      | }
+      [ASSERT-B1-001-01-1-1] project_result:status equals 200
+      [ASSERT-B1-001-01-1-2] project_result:contentType equals "application/json"
+      [ASSERT-B1-001-01-1-3] project_result:jsonObject equals {"firstName":"Ramseh","id":1,"lastName":"Mishra"}
+      [ASSERT-B1-001-01-1-4] project_result:text equals "{\"id\":1,\"firstName\":\"Ramseh\",\"lastName\":\"Mishra\"}"
+
+[TC-B1-002] Получение списка из четырёх студентов по GET /students
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-002, CREQ-B1-013
+  objective: Убедиться, что список содержит ровно четырёх студентов с идентификаторами 1..4 в заданном порядке и с заданными именами.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-002-01] action: Отправить запрос GET /students.
+    data: Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-002-01-1] arg:method = "GET" :string
+    [INPUT-B1-002-01-2] arg:path = "/students" :string
+    [EXP-B1-002-01-1] expected: Приложение возвращает JSON-массив из четырёх студентов в порядке идентификаторов 1, 2, 3, 4.
+      | 
+      | HTTP 200 OK
+      | Content-Type: application/json
+      | [
+      |   {
+      |     "id": 1,
+      |     "firstName": "Ramesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 2,
+      |     "firstName": "Umesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 3,
+      |     "firstName": "Ram",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 4,
+      |     "firstName": "Sanjay",
+      |     "lastName": "Mishra"
+      |   }
+      | ]
+      [ASSERT-B1-002-01-1-1] project_result:status equals 200
+      [ASSERT-B1-002-01-1-2] project_result:contentType equals "application/json"
+      [ASSERT-B1-002-01-1-3] project_result:jsonArray length_equals 4
+      [ASSERT-B1-002-01-1-4] project_result:jsonArray equals [{"firstName":"Ramesh","id":1,"lastName":"Mishra"},{"firstName":"Umesh","id":2,"lastName":"Mishra"},{"firstName":"Ram","id":3,"lastName":"Mishra"},{"firstName":"Sanjay","id":4,"lastName":"Mishra"}]
+
+[TC-B1-003] Получение студента по идентификатору из пути GET /students/5
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-003, CREQ-B1-013
+  objective: Убедиться, что идентификатор из пути попадает в ответ вместе с закреплённым именем «Ramsesh».
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-003-01] action: Отправить запрос GET /students/5.
+    data: Идентификатор в пути: 5. Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-003-01-1] arg:method = "GET" :string
+    [INPUT-B1-003-01-2] arg:path = "/students/5" :string
+    [EXP-B1-003-01-1] expected: Приложение возвращает студента с идентификатором 5 из пути.
+      | 
+      | HTTP 200 OK
+      | {
+      |   "id": 5,
+      |   "firstName": "Ramsesh",
+      |   "lastName": "Mishra"
+      | }
+      [ASSERT-B1-003-01-1-1] project_result:status equals 200
+      [ASSERT-B1-003-01-1-2] project_result:jsonObject equals {"firstName":"Ramsesh","id":5,"lastName":"Mishra"}
+
+[TC-B1-004] Получение студента по идентификатору 0 из пути GET /students/0
+  priority: MEDIUM · categories: boundary, functional
+  requirements: CREQ-B1-003, CREQ-B1-013
+  objective: Убедиться, что граничное целое значение 0 принимается и возвращается без проверки существования студента.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-004-01] action: Отправить запрос GET /students/0.
+    data: Идентификатор в пути: 0. Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-004-01-1] arg:method = "GET" :string
+    [INPUT-B1-004-01-2] arg:path = "/students/0" :string
+    [EXP-B1-004-01-1] expected: Приложение возвращает студента с идентификатором 0, не проверяя его существование.
+      | 
+      | HTTP 200 OK
+      | {
+      |   "id": 0,
+      |   "firstName": "Ramsesh",
+      |   "lastName": "Mishra"
+      | }
+      [ASSERT-B1-004-01-1-1] project_result:status equals 200
+      [ASSERT-B1-004-01-1-2] project_result:jsonObject equals {"firstName":"Ramsesh","id":0,"lastName":"Mishra"}
+
+[TC-B1-005] Получение студента по query-параметру GET /students/query?id=7
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-004, CREQ-B1-013
+  objective: Убедиться, что значение query-параметра id попадает в ответ вместе с закреплённым именем «Ramesh».
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-005-01] action: Отправить запрос GET /students/query с параметром id.
+    data: Параметр запроса: id=7. Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-005-01-1] arg:method = "GET" :string
+    [INPUT-B1-005-01-2] arg:path = "/students/query" :string
+    [INPUT-B1-005-01-3] arg:query = {"id":"7"} :object
+    [EXP-B1-005-01-1] expected: Приложение возвращает студента с идентификатором 7 из параметра запроса.
+      | 
+      | HTTP 200 OK
+      | {
+      |   "id": 7,
+      |   "firstName": "Ramesh",
+      |   "lastName": "Mishra"
+      | }
+      [ASSERT-B1-005-01-1-1] project_result:status equals 200
+      [ASSERT-B1-005-01-1-2] project_result:jsonObject equals {"firstName":"Ramesh","id":7,"lastName":"Mishra"}
+
+[TC-B1-006] Отказ в запросе студента без обязательного параметра id GET /students/query
+  priority: HIGH · categories: negative, functional
+  requirements: CREQ-B1-005, CREQ-B1-013
+  objective: Убедиться, что отсутствие обязательного параметра id приводит к ошибке клиента, а не к ответу со студентом.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-006-01] action: Отправить запрос GET /students/query без параметра id.
+    data: Параметры запроса отсутствуют. Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-006-01-1] arg:method = "GET" :string
+    [INPUT-B1-006-01-2] arg:path = "/students/query" :string
+    [INPUT-B1-006-01-3] arg:query = {} :object
+    [EXP-B1-006-01-1] expected: Приложение отклоняет запрос как некорректный; студент не возвращается.
+      | 
+      | HTTP 400 Bad Request
+      [ASSERT-B1-006-01-1-1] project_result:status equals 400
+
+[TC-B1-007] Создание студента с полным JSON-телом POST /students/create
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-006, CREQ-B1-013
+  objective: Убедиться, что полностью заполненное тело принимается со статусом 201 и возвращается без изменений.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-007-01] action: Отправить запрос POST /students/create с JSON-телом студента.
+    data: {
+      |   "id": 5,
+      |   "firstName": "Ivan",
+      |   "lastName": "Petrov"
+      | }
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-007-01-1] arg:method = "POST" :string
+    [INPUT-B1-007-01-2] arg:path = "/students/create" :string
+    [INPUT-B1-007-01-3] arg:jsonBody = {"firstName":"Ivan","id":5,"lastName":"Petrov"} :object
+    [EXP-B1-007-01-1] expected: Приложение подтверждает создание и возвращает тот же объект, что был отправлен.
+      | 
+      | HTTP 201 Created
+      | {
+      |   "id": 5,
+      |   "firstName": "Ivan",
+      |   "lastName": "Petrov"
+      | }
+      [ASSERT-B1-007-01-1-1] project_result:status equals 201
+      [ASSERT-B1-007-01-1-2] project_result:jsonObject equals {"firstName":"Ivan","id":5,"lastName":"Petrov"}
+
+[TC-B1-008] Создание студента с частично заполненным телом без lastName POST /students/create
+  priority: MEDIUM · categories: boundary, functional
+  requirements: CREQ-B1-007, CREQ-B1-013
+  objective: Убедиться, что отсутствующее поле lastName не мешает созданию и возвращается как null.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-008-01] action: Отправить запрос POST /students/create с JSON-телом без поля lastName.
+    data: {
+      |   "id": 6,
+      |   "firstName": "Olga"
+      | }
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-008-01-1] arg:method = "POST" :string
+    [INPUT-B1-008-01-2] arg:path = "/students/create" :string
+    [INPUT-B1-008-01-3] arg:jsonBody = {"firstName":"Olga","id":6} :object
+    [EXP-B1-008-01-1] expected: Приложение подтверждает создание; в ответе поле lastName равно null, остальные поля повторяют запрос.
+      | 
+      | HTTP 201 Created
+      | {
+      |   "id": 6,
+      |   "firstName": "Olga",
+      |   "lastName": null
+      | }
+      [ASSERT-B1-008-01-1-1] project_result:status equals 201
+      [ASSERT-B1-008-01-1-2] project_result:jsonObject equals {"firstName":"Olga","id":6,"lastName":null}
+
+[TC-B1-009] Обновление студента по PUT /students/10/update возвращает тело запроса без подстановки id из пути
+  priority: HIGH · categories: positive, functional
+  requirements: CREQ-B1-008, CREQ-B1-013
+  objective: Убедиться, что ответ повторяет отправленное тело, а идентификатор из пути (10) не заменяет идентификатор из тела (42).
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-009-01] action: Отправить запрос PUT /students/10/update с JSON-телом студента, у которого id отличается от id в пути.
+    data: Идентификатор в пути: 10.
+      | {
+      |   "id": 42,
+      |   "firstName": "Anna",
+      |   "lastName": "Sidorova"
+      | }
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-009-01-1] arg:method = "PUT" :string
+    [INPUT-B1-009-01-2] arg:path = "/students/10/update" :string
+    [INPUT-B1-009-01-3] arg:jsonBody = {"firstName":"Anna","id":42,"lastName":"Sidorova"} :object
+    [EXP-B1-009-01-1] expected: Приложение возвращает отправленное тело без изменений: id остаётся 42, а не 10 из пути.
+      | 
+      | HTTP 200 OK
+      | {
+      |   "id": 42,
+      |   "firstName": "Anna",
+      |   "lastName": "Sidorova"
+      | }
+      [ASSERT-B1-009-01-1-1] project_result:status equals 200
+      [ASSERT-B1-009-01-1-2] project_result:jsonObject equals {"firstName":"Anna","id":42,"lastName":"Sidorova"}
+
+[TC-B1-010] Удаление студента по DELETE /students/3/delete возвращает подтверждающий текст
+  priority: MEDIUM · categories: positive, functional
+  requirements: CREQ-B1-009, CREQ-B1-013
+  objective: Убедиться, что запрос на удаление принимается и возвращает фиксированное текстовое сообщение.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-010-01] action: Отправить запрос DELETE /students/3/delete.
+    data: Идентификатор в пути: 3. Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-010-01-1] arg:method = "DELETE" :string
+    [INPUT-B1-010-01-2] arg:path = "/students/3/delete" :string
+    [EXP-B1-010-01-1] expected: Приложение возвращает текст подтверждения удаления.
+      | 
+      | HTTP 200 OK
+      | Student Successfully Deleted!
+      [ASSERT-B1-010-01-1-1] project_result:status equals 200
+      [ASSERT-B1-010-01-1-2] project_result:text equals "Student Successfully Deleted!"
+
+[TC-B1-011] Получение приветствия по GET /hello-world
+  priority: LOW · categories: positive, functional
+  requirements: CREQ-B1-010, CREQ-B1-013
+  objective: Убедиться, что эндпоинт приветствия отвечает фиксированным текстом.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["HelloWorldController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-011-01] action: Отправить запрос GET /hello-world.
+    data: Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-011-01-1] arg:method = "GET" :string
+    [INPUT-B1-011-01-2] arg:path = "/hello-world" :string
+    [EXP-B1-011-01-1] expected: Приложение возвращает текст приветствия.
+      | 
+      | HTTP 200 OK
+      | Hello World!
+      [ASSERT-B1-011-01-1-1] project_result:status equals 200
+      [ASSERT-B1-011-01-1-2] project_result:text equals "Hello World!"
+
+[TC-B1-012] Неизменность списка студентов после создания студента
+  priority: MEDIUM · categories: positive, functional
+  requirements: CREQ-B1-002, CREQ-B1-012, CREQ-B1-013
+  objective: Убедиться, что создание студента не сохраняется: список GET /students после POST остаётся прежним, а повторный запрос списка даёт тот же ответ.
+  pre: Приложение springboot-rest-api поднято в тестовом контексте Spring Boot (MockMvc), внешние сервисы и база данных не требуются.
+  management: components=["StudentController"]; external_links={"issues":[],"pages":[]}; folder="StudentController REST API"
+  [STEP-B1-012-01] action: Отправить запрос POST /students/create с JSON-телом нового студента.
+    data: {
+      |   "id": 9,
+      |   "firstName": "Pavel",
+      |   "lastName": "Orlov"
+      | }
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-012-01-1] arg:method = "POST" :string
+    [INPUT-B1-012-01-2] arg:path = "/students/create" :string
+    [INPUT-B1-012-01-3] arg:jsonBody = {"firstName":"Pavel","id":9,"lastName":"Orlov"} :object
+    [EXP-B1-012-01-1] expected: Приложение подтверждает создание и возвращает отправленный объект.
+      | 
+      | HTTP 201 Created
+      | {
+      |   "id": 9,
+      |   "firstName": "Pavel",
+      |   "lastName": "Orlov"
+      | }
+      [ASSERT-B1-012-01-1-1] project_result:status equals 201
+      [ASSERT-B1-012-01-1-2] project_result:jsonObject equals {"firstName":"Pavel","id":9,"lastName":"Orlov"}
+  [STEP-B1-012-02] action: Отправить запрос GET /students после создания.
+    data: Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-012-02-1] arg:method = "GET" :string
+    [INPUT-B1-012-02-2] arg:path = "/students" :string
+    [EXP-B1-012-02-1] expected: Список студентов не изменился: те же четыре студента с идентификаторами 1..4, созданный студент с id 9 в списке отсутствует.
+      | 
+      | HTTP 200 OK
+      | [
+      |   {
+      |     "id": 1,
+      |     "firstName": "Ramesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 2,
+      |     "firstName": "Umesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 3,
+      |     "firstName": "Ram",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 4,
+      |     "firstName": "Sanjay",
+      |     "lastName": "Mishra"
+      |   }
+      | ]
+      [ASSERT-B1-012-02-1-1] project_result:status equals 200
+      [ASSERT-B1-012-02-1-2] project_result:jsonArray equals [{"firstName":"Ramesh","id":1,"lastName":"Mishra"},{"firstName":"Umesh","id":2,"lastName":"Mishra"},{"firstName":"Ram","id":3,"lastName":"Mishra"},{"firstName":"Sanjay","id":4,"lastName":"Mishra"}]
+  [STEP-B1-012-03] action: Повторно отправить запрос GET /students.
+    data: Тело запроса отсутствует.
+    call: CAP-B1-mockmvc_exchange
+    [INPUT-B1-012-03-1] arg:method = "GET" :string
+    [INPUT-B1-012-03-2] arg:path = "/students" :string
+    [EXP-B1-012-03-1] expected: Повторный запрос даёт тот же список из четырёх студентов.
+      | 
+      | HTTP 200 OK
+      | [
+      |   {
+      |     "id": 1,
+      |     "firstName": "Ramesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 2,
+      |     "firstName": "Umesh",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 3,
+      |     "firstName": "Ram",
+      |     "lastName": "Mishra"
+      |   },
+      |   {
+      |     "id": 4,
+      |     "firstName": "Sanjay",
+      |     "lastName": "Mishra"
+      |   }
+      | ]
+      [ASSERT-B1-012-03-1-1] project_result:status equals 200
+      [ASSERT-B1-012-03-1-2] project_result:jsonArray equals [{"firstName":"Ramesh","id":1,"lastName":"Mishra"},{"firstName":"Umesh","id":2,"lastName":"Mishra"},{"firstName":"Ram","id":3,"lastName":"Mishra"},{"firstName":"Sanjay","id":4,"lastName":"Mishra"}]
