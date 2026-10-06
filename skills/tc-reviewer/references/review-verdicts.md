@@ -28,7 +28,7 @@ The model returns only the assessment fields `coverage`, `findings`, `correction
 and saves the validated part output. `finish-review` recomputes exact original-source,
 local and cross-part coverage and publishes one aggregate, then seals the logical ledger.
 A required check is addressed by `scope_ids` of the reviewer's own envelope, `case_ids`
-or `requirement_ids` (the envelope's `document_index` lists every case); the controller
+or `requirement_ids` (the envelope's `document_index.case_ids` lists every case); the controller
 resolves cases and requirements to the local scopes holding them. An UNCHECKED scope
 whose answer requested checks is closed once every such check part comes back CHECKED;
 the aggregate lists the link in `resolved_unchecked`. Otherwise it stays unchecked and the

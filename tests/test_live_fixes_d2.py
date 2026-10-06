@@ -124,9 +124,7 @@ def test_part_envelope_lists_every_case_for_addressing() -> None:
     from tools.review_parts import document_index
 
     snapshot = review_state("d1834358", "review-snapshot-canonical")["payload"]
-    cases = document_index(snapshot)["cases"]
-    assert [row["case_id"] for row in cases] == [f"TC-B1-{number:03d}" for number in range(1, 13)]
-    assert "CREQ-B1-011" in next(row for row in cases if row["case_id"] == "TC-B1-001")["requirement_ids"]
+    assert document_index(snapshot) == {"case_ids": [f"TC-B1-{number:03d}" for number in range(1, 13)]}
 
 
 def test_replay_d1834358_reaches_automation_without_rework(tmp_path: Path) -> None:
@@ -135,7 +133,7 @@ def test_replay_d1834358_reaches_automation_without_rework(tmp_path: Path) -> No
     assert [row["payload"] for row in replay.log if row["payload"].get("action") == "error"] == []
     assert task.get("stage", "").startswith("tc-to-autotest:"), task
     envelope = json.loads(Path(replay.tasks("tc-reviewer:")[0]["inputs"][0]).read_text(encoding="utf-8"))
-    assert [row["case_id"] for row in envelope["document_index"]["cases"]][:2] == ["TC-B1-001", "TC-B1-002"]
+    assert envelope["document_index"]["case_ids"][:2] == ["TC-B1-001", "TC-B1-002"]
     from tools.pilot_state import read_review_aggregate
 
     aggregate = read_review_aggregate(replay.run_root(task), task["attempt_id"])["aggregate"]

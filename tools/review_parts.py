@@ -38,15 +38,14 @@ def part_input(plan: Mapping[str, Any], part: Mapping[str, Any]) -> dict[str, An
 
 
 def document_index(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Every case of the reviewed document with its requirements.
+    """Every case ID of the reviewed document (kept small: it travels in every part).
 
     A part sees only its own scopes; the index lets the reviewer address a
     required check to a case or requirement outside them (``case_ids``,
     ``requirement_ids``), and the controller picks the scopes that hold them.
     """
     document = snapshot["document"]
-    return {"cases": [{"case_id": case["case_id"], "title": case["title"], "requirement_ids": list(case["requirement_ids"])}
-                      for case in document["test_cases"]]}
+    return {"case_ids": [case["case_id"] for case in document["test_cases"]]}
 
 
 def _local_requirement_ids(scope: Mapping[str, Any]) -> set[str]:
@@ -599,12 +598,15 @@ def review_scopes(snapshot: Mapping[str, Any], *, source_chunk_bytes: int) -> li
             local.append(scope)
             scopes.append(scope)
     links = []
+    # Project source files (contexts) let a local scope verify capability provenance;
+    # comparing two cases does not need them, so cross scopes carry only case evidence.
+    context_digests = {source["sha256"] for source in snapshot["contexts"]}
     # ponytail: quadratic pairs avoid guessing semantic independence; replace only
     # with a reviewed dependency partition if pair volume becomes the bottleneck.
     for index, scope in enumerate(local):
         for other_index in range(index + 1, len(local)):
-            inputs = copy.deepcopy(local[index]["inputs"])
-            inputs.extend(item for item in local[other_index]["inputs"] if item not in inputs)
+            inputs = [copy.deepcopy(item) for item in local[index]["inputs"] if item["artifact_digest"] not in context_digests]
+            inputs.extend(item for item in local[other_index]["inputs"] if item not in inputs and item["artifact_digest"] not in context_digests)
             links.append({"scope_id": f"cross-{index:06d}-{other_index:06d}", "kind": "cross",
                           "targets": [*scope["targets"], *local[other_index]["targets"]], "inputs": inputs,
                           "question": "Compare shared requirements, state and operations across cases; detect inconsistent expectations and interactions."})

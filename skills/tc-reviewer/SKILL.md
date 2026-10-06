@@ -35,8 +35,8 @@ Never consume generator dialogue or reasoning.
    explicit status, exact evidence and substantive assessment. Findings identify the
    violated rule, source and affected case/step. Request a bounded cross check through
    `required_checks` when the assigned evidence reveals an unresolved relationship.
-   Address a check by what it must see: `case_ids` (cases from the envelope's
-   `document_index`) and/or `requirement_ids` (`CREQ-…`/`SREQ-…`); `scope_ids` may name
+   Address a check by what it must see: `case_ids` (every case ID is in the envelope's
+   `document_index.case_ids`) and/or `requirement_ids` (`CREQ-…`/`SREQ-…`); `scope_ids` may name
    only scopes you were given. The controller adds the scopes holding those cases and
    requirements. Never name your own scopes to reach evidence outside this part.
 4. Mark missing or untrusted evidence as unchecked and explain the gap. If the answer is
