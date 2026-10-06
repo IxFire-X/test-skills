@@ -1054,6 +1054,10 @@ def _self_review_warnings(run_root: Path, attempt_id: str, review_key: str) -> l
             except (KeyError, TypeError, ValueError):
                 continue
             total += sum(int(part["input_byte_count"]) for part in plan["parts"])
+            if plan.get("mode") == "compact-v1":
+                # compact-v1: answers are short and bounded by the plan's reserve, and one self-reviewing
+                # session keeps them next to the inputs; the legacy sum (inputs only) stays as it was.
+                total += len(plan["parts"]) * int(plan["snapshot"]["response_reserve_bytes"])
         limit = int(config.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES)
         if total > limit:
             warning = {"code": "SELF_REVIEW_CONTEXT_OVERFLOW", "attempt_id": attempt_id, "review_key": review_key,

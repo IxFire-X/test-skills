@@ -47,6 +47,47 @@ Never consume generator dialogue or reasoning.
    defect does not stop later trustworthy parts. Damaged shared snapshot evidence
    makes further review untrustworthy; report it to the controller.
 
+## compact-v1 parts
+
+When the task says `review_mode: compact-v1`, the only input is the part text (`.input.md`):
+a deterministic projection of the canonical document with ID anchors. A line that starts
+with `[ID]` defines that ID; a continuation of a text value starts with `| `. Original
+requirement documents are printed verbatim with line numbers (`[SRC-n]`, lines `L12| …`).
+The part lists its answer areas under «Области ответа»:
+
+- `source-NNNNNN` — compare every condition of the original text with SREQ and CREQ
+  (including prose without an SREQ, dropped acceptance criteria, requirements no case
+  covers — the case index lists every case with its CREQ) and the capabilities with
+  their sources;
+- `local-<case>` — this case alone: actions, data, calls and inputs, every expectation and
+  assertion against its CREQ/SREQ text and the capability contract (human scenario rules
+  apply as above);
+- `cross-…` — every pair of cases in this part: the same call with different expectations,
+  shared state, absolute counts or full lists of a resource other cases change, order.
+
+Answer with exactly `coverage`, `findings`, `corrections`, `lint_dispositions` and
+`required_checks`:
+
+- `coverage`: one row per listed area, in order — `area_id`, `status` (`CHECKED` or
+  `UNCHECKED`), `refs` (1–3 anchors of this part; a case area cites at least one anchor of
+  its own case — the case, a step, an expectation or an assertion; a source line is
+  `SRC-n:Lk`) and `note` (at most 200 characters). Areas listed as carried are not answered.
+- `findings`: `severity`, `code` (`UPPER_SNAKE`), `related_ids` (canonical IDs) and `message`
+  (at most 600 characters, the violated rule and the exact location). At most 5 INFO.
+- `corrections`: mechanical text fixes only — `target_id`, `field` from the dictionary
+  (case: `title`, `objective`, `preconditions[N]`, `management.folder|status|owner|estimated_time`,
+  `management.components[N]`, `management.labels[N]`; step: `action`, `test_data`,
+  `manual_reason`; expectation: `text`; requirement: `text`), `before` (the exact current
+  text), `after` and `why`. Behavior, literals, IDs and structure are never corrected.
+- `lint_dispositions`: one per `[LINT-…]` suspicion of the part — `confirmed` or `rejected`
+  with a short reason. A suspicion is a hint, not a finding: confirm it only after checking,
+  and write the finding yourself.
+- `required_checks`: `case_ids`/`requirement_ids` and `reason` for evidence outside the part.
+
+The controller rejects an answer whose refs are not anchors of the part, whose case area
+cites no anchor of its own case, that leaves a suspicion unanswered, has more than 5 INFO
+findings or names unknown IDs. Fix the answer and submit again.
+
 The controller binds the assessment using `submit-part`, validates all required parts,
 then `finish-review` produces the v6 output and one authoritative aggregate. That output
 is a controller projection, not a model response. The model never writes a session

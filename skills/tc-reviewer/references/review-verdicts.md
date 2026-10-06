@@ -39,6 +39,10 @@ review has exactly one authoritative verdict; a pre-verdict abort has zero. Cont
 findings do not stop later trustworthy parts. Unchecked, stale or untrusted required
 scope forbids acceptance; damage to the shared snapshot blocks trustworthy continuation.
 
+In `compact-v1` the part input is the review projection text instead of the JSON envelope: the same
+evidence with ID anchors, whole cases per part, every pair of cases together in at least one part,
+and an answer whose refs, lint dispositions and corrections the controller checks at submit.
+
 Use those authorized context receipts to compare against the original requirements,
 not only their model-normalized subset. Reject dropped acceptance criteria, requirements
 linked to irrelevant cases, and expected results weakened to match an implementation

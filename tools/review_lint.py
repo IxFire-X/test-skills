@@ -6,13 +6,228 @@ cases.  The reviewer answers each one in ``lint_dispositions`` (``confirmed`` or
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Callable, Mapping
 
 LINT_VERSION = "review-lint-v1"
 
 Rule = Callable[[Mapping[str, Any]], list[dict[str, Any]]]
-RULES: list[tuple[str, Rule]] = []
+
+
+# --------------------------------------------------------------------------------------
+# canonical documents
+# --------------------------------------------------------------------------------------
+
+def _json_fragments(text: str) -> list[Any]:
+    """JSON objects and arrays written inside a human text (an expected response body)."""
+    decoder = json.JSONDecoder()
+    found, index = [], 0
+    while index < len(text):
+        if text[index] in "{[":
+            try:
+                value, end = decoder.raw_decode(text, index)
+            except ValueError:
+                index += 1
+                continue
+            if isinstance(value, (dict, list)) and value:
+                found.append(value)
+            index = end
+        else:
+            index += 1
+    return found
+
+
+def _literal_assertions(expectation: Mapping[str, Any]) -> list[tuple[Mapping[str, Any], Any]]:
+    return [(assertion, assertion["expected"]["value"]) for assertion in expectation["assertions"]
+            if assertion["operator"] == "equals" and isinstance(assertion.get("expected"), Mapping) and assertion["expected"].get("kind") == "literal"]
+
+
+def _is_status(actual: Mapping[str, Any]) -> bool:
+    return actual.get("kind") == "http_status" or (actual.get("kind") == "project_result" and str(actual.get("name", "")).lower() in {"status", "statuscode", "status_code"})
+
+
+def _same_shape(left: Any, right: Any) -> bool:
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(_same_shape(a, b) for a, b in zip(left, right))
+    return False
+
+
+def rule_expectation_text(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The HTTP status or JSON body written in an expectation differs from the literal its assertion checks."""
+    rows = []
+    for case in document["test_cases"]:
+        for step in case["steps"]:
+            for expectation in step["expectations"]:
+                literals = _literal_assertions(expectation)
+                text = expectation["text"]
+                statuses = {int(value) for value in re.findall(r"\bHTTP\s+([1-5][0-9]{2})\b", text)}
+                for assertion, value in literals:
+                    if _is_status(assertion["actual"]) and isinstance(value, int) and statuses and value not in statuses:
+                        rows.append({"case_ids": [case["case_id"]], "related_ids": [expectation["expectation_id"], assertion["assertion_id"]],
+                                     "message": f"Текст ожидания называет статус {', '.join(map(str, sorted(statuses)))}, а проверка ждёт {value}."})
+                for fragment in _json_fragments(text):
+                    for assertion, value in literals:
+                        if _same_shape(fragment, value) and fragment != value:
+                            rows.append({"case_ids": [case["case_id"]], "related_ids": [expectation["expectation_id"], assertion["assertion_id"]],
+                                         "message": "JSON в тексте ожидания отличается от литерала проверки: "
+                                                    f"{json.dumps(fragment, ensure_ascii=False, sort_keys=True)[:160]} ≠ {json.dumps(value, ensure_ascii=False, sort_keys=True)[:160]}."})
+    return rows
+
+
+def rule_requirement_without_case(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A canonical requirement that no case links."""
+    linked = {requirement for case in document["test_cases"] for requirement in case["requirement_ids"]}
+    return [{"case_ids": [], "related_ids": [requirement["requirement_id"]],
+             "message": f"Требование {requirement['requirement_id']} не связано ни с одним кейсом."}
+            for requirement in document["requirements"] if requirement["requirement_id"] not in linked]
+
+
+def _call(step: Mapping[str, Any]) -> tuple[str, str | None, str | None, dict[str, Any]] | None:
+    """(operation, method, path, literal inputs) of a step, or None for a manual step."""
+    operation = step.get("operation")
+    if not operation:
+        return None
+    literals = {str(item["target"].get("name") or item["target"].get("pointer")): item["source"]["value"]
+                for item in step.get("inputs", []) if item["source"].get("kind") == "literal"}
+    if operation.get("kind") == "http":
+        return f"http:{operation.get('method')} {operation.get('path')}", operation.get("method"), operation.get("path"), literals
+    method = literals.get("method") if isinstance(literals.get("method"), str) else None
+    path = literals.get("path") if isinstance(literals.get("path"), str) else None
+    return str(operation.get("capability_id")), method, path, literals
+
+
+def _template(path: str | None) -> str | None:
+    return None if path is None else re.sub(r"/[0-9]+(?=/|$)", "/{n}", path.split("?", 1)[0])
+
+
+def _leaves(value: Any, prefix: str = "") -> dict[str, Any]:
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            out.update(_leaves(item, f"{prefix}/{key}"))
+        return out
+    return {prefix: value}
+
+
+def _input_values(literals: Mapping[str, Any], path: str | None) -> set[str]:
+    values = {json.dumps(leaf, sort_keys=True) for value in literals.values() for leaf in _leaves(value).values()}
+    for segment in re.findall(r"/([0-9]+)(?=/|$)", path or ""):
+        values.update({segment, json.dumps(int(segment)), json.dumps(segment)})
+    return values
+
+
+def rule_same_call_different_expectations(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Two cases make the same call (same operation, method and path template) but expect different values
+    for a response field that does not echo one of their own inputs."""
+    calls: dict[tuple, list[tuple[str, str, dict[str, Any], set[str]]]] = {}
+    for case in document["test_cases"]:
+        for step in case["steps"]:
+            call = _call(step)
+            if call is None or any(item["source"].get("kind") != "literal" for item in step.get("inputs", [])):
+                continue  # a call fed by earlier steps depends on its own case's data
+            operation, method, path, literals = call
+            # Same call: same operation, method, path template and every other input equal.
+            others = json.dumps({name: value for name, value in literals.items() if name != "path"}, sort_keys=True, ensure_ascii=False)
+            key = (operation, method, _template(path), others)
+            for expectation in step["expectations"]:
+                for assertion, value in _literal_assertions(expectation):
+                    actual = json.dumps(assertion["actual"], sort_keys=True)
+                    for leaf, item in _leaves(value).items():
+                        calls.setdefault((*key, actual, leaf), []).append((case["case_id"], assertion["assertion_id"], {"value": item},
+                                                                             _input_values(literals, path)))
+    rows, seen = [], set()
+    for (operation, method, template, _others, _actual, leaf), entries in calls.items():
+        for index, (case_a, assert_a, value_a, inputs_a) in enumerate(entries):
+            for case_b, assert_b, value_b, inputs_b in entries[index + 1:]:
+                if case_a == case_b or value_a == value_b:
+                    continue
+                encoded_a, encoded_b = json.dumps(value_a["value"], sort_keys=True), json.dumps(value_b["value"], sort_keys=True)
+                if encoded_a in inputs_a or encoded_b in inputs_b:
+                    continue  # the field echoes an input of its own case
+                pair = tuple(sorted((case_a, case_b)))
+                if (pair, leaf) in seen:
+                    continue
+                seen.add((pair, leaf))
+                where = " ".join(item for item in (method, template) if item) or operation
+                rows.append({"case_ids": list(pair), "related_ids": [assert_a, assert_b],
+                             "message": f"Одинаковый вызов {where}: поле {leaf or '/'} ожидается {encoded_a} в {case_a} и {encoded_b} в {case_b}."})
+    return rows
+
+
+_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def rule_count_of_shared_resource(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A case checks an absolute count or the full list of a resource, and another case shows that resource
+    changing after a mutating call (a different list or count for the same read)."""
+    reads: dict[str, list[tuple[str, str, Any, bool]]] = {}
+    for case in document["test_cases"]:
+        mutated: set[str] = set()
+        for step in case["steps"]:
+            call = _call(step)
+            if call is None:
+                continue
+            _operation, method, path, _literals = call
+            resource = _template(path)
+            if method in _MUTATING and resource:
+                mutated.update(prefix for prefix in [resource.rsplit("/", index)[0] for index in range(resource.count("/"))] if prefix)
+                mutated.add(resource)
+            if method != "GET" or not resource:
+                continue
+            for expectation in step["expectations"]:
+                for assertion in expectation["assertions"]:
+                    expected = assertion.get("expected") or {}
+                    value = expected.get("value") if expected.get("kind") == "literal" else None
+                    if assertion["operator"] == "length_equals" and isinstance(value, int):
+                        observed: Any = value
+                    elif assertion["operator"] == "equals" and isinstance(value, list):
+                        observed = len(value)
+                    else:
+                        continue
+                    reads.setdefault(resource, []).append((case["case_id"], assertion["assertion_id"], observed, resource in mutated))
+    rows = []
+    for resource, entries in reads.items():
+        changed = [entry for entry in entries if entry[3]]
+        for case_id, assertion_id, observed, after_mutation in entries:
+            if after_mutation:
+                continue
+            for other_case, other_assertion, other_observed, _ in changed:
+                if other_case != case_id and other_observed != observed:
+                    rows.append({"case_ids": [case_id, other_case], "related_ids": [assertion_id, other_assertion],
+                                 "message": f"{case_id} проверяет абсолютное количество или полный список {resource} ({observed}), "
+                                            f"а {other_case} после изменения ресурса ждёт {other_observed}: проверка зависит от состояния, которое меняют другие кейсы."})
+    return rows
+
+
+def rule_result_not_in_capability(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A step observes a project result its capability does not return."""
+    results = {capability["capability_id"]: {row["name"] for row in capability.get("results", [])} for capability in document["operation_capabilities"]}
+    rows = []
+    for case in document["test_cases"]:
+        for step in case["steps"]:
+            operation = step.get("operation") or {}
+            if operation.get("kind") != "project_action" or operation.get("capability_id") not in results:
+                continue
+            known = results[operation["capability_id"]]
+            observed = [(output["output_id"], output["source"]) for output in step.get("outputs", [])]
+            observed += [(assertion["assertion_id"], assertion["actual"]) for expectation in step["expectations"] for assertion in expectation["assertions"]]
+            for identifier, actual in observed:
+                if actual.get("kind") == "project_result" and actual.get("name") not in known:
+                    rows.append({"case_ids": [case["case_id"]], "related_ids": [step["step_id"], identifier, operation["capability_id"]],
+                                 "message": f"{identifier}: результата {actual.get('name')!r} нет у {operation['capability_id']} ({', '.join(sorted(known)) or 'нет результатов'})."})
+    return rows
+
+
+RULES: list[tuple[str, Rule]] = [
+    ("expectation-text-differs", rule_expectation_text),
+    ("requirement-without-case", rule_requirement_without_case),
+    ("same-call-different-expectations", rule_same_call_different_expectations),
+    ("count-of-shared-resource", rule_count_of_shared_resource),
+    ("result-not-in-capability", rule_result_not_in_capability),
+]
 
 
 def _number(item: dict[str, Any]) -> dict[str, Any]:

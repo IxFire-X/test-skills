@@ -45,6 +45,11 @@ relation-array digest, runner compatibility) are verified by the controller, not
 part: a part without them is complete, so do not report
 `REVIEW_PART_GLOBAL_BINDINGS_NOT_IN_ENVELOPE` or mark scopes unchecked for that reason.
 
+In `compact-v1` a part carries exact method slices (original line numbers), the SUPPORT code of
+their file once, a shared-state table and code-check suspicions; there are no pair scopes, and the
+SUPPORT and cross areas cover test interactions. Missing slices never shorten the evidence: a file
+that cannot be sliced is sent whole or its part is blocked.
+
 There is one logical review per immutable automation revision, with sequential fresh
 isolated invocations for original-source, local and cross-part scopes. Actual stage IDs
 are `autotest-reviewer:r1:part-000001` (current revision/ordinal); role policy is

@@ -62,7 +62,8 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 Необязательные флаги первого вызова: `--module`, `--target`, `--document-id`,
 `--model-id`, `--host-cli`, `--host-cli-version`, `--host-settings`,
 `--reviewer-isolation fresh|none`, `--review-input-bytes`, `--review-reserve-bytes`,
-`--review-context-bytes` (окно контекста, по умолчанию 500000), `--accept-self-review`.
+`--review-context-bytes` (окно контекста, по умолчанию 500000), `--accept-self-review`,
+`--review-mode pairs|compact-v1` (формат ревью; по умолчанию `pairs`).
 Укажи фактические модель и CLI: они записываются в журнал как сведения о вызовах.
 
 Каждый вызов печатает один JSON-объект. Дальше повторяй:
@@ -75,6 +76,16 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
    значение: `submit ... --task-id "$taskId" --answer <value>`. Не отвечай за пользователя.
 4. `done` — остановись и сообщи результат (раздел 4).
 5. `error` — прочитай `code` и `message`; не обходи ошибку ручными вызовами.
+6. `batch` — несколько независимых частей ревью `compact-v1` сразу (см. ниже).
+
+Пачки. При `--review-mode compact-v1` части ревью независимы. `next ... --max-tasks K`
+возвращает до K задач: `{"action": "batch", "tasks": [...]}`. Запусти по одному свежему
+субагенту на каждую задачу, параллельно; каждый пишет ответ в `output_path` своей задачи.
+Затем отправь ответы по одному: `submit ... --task-id <task_id>` для каждой задачи. Ответ
+`submit` может вернуть задачу, которая уже выполняется в пачке, — не запускай её второй
+раз, дождись своего субагента. Параллельные `submit` из разных процессов допустимы:
+драйвер выполняет их по очереди под замком run. Без пачек (`--max-tasks 1`) порядок
+обычный — одна задача за раз. В режиме `pairs` пачек нет: части идут по одной.
 
 `run_id` бери из первого ответа. Код завершения команды: 3 — драйвер ждёт модель или
 человека; при `done` — код результата (0, 1 или 2); 2 — ошибка.
@@ -84,9 +95,9 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 Повторный `submit` уже принятой задачи безопасен: он просто вернёт текущую задачу.
 `status --project ... --run ...` только читает состояние.
 
-Не запускай параллельно две команды драйвера для одного run. Ошибка
-`run is locked by another process` означает, что другая команда ещё работает: дождись
-её и не удаляй `.lock` и pending-маркеры вручную.
+Команды драйвера для одного run выполняются по очереди под замком. Ошибка
+`run is locked by another process` означает, что другая команда работает дольше двух
+минут: дождись её и не удаляй `.lock` и pending-маркеры вручную.
 
 ## 3. Как выполнять задачу `llm`
 
@@ -118,8 +129,11 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   кейс. Ясный Expected при дефекте приложения остаётся проверкой, которая упадёт.
 - `tc-reviewer:*` и `autotest-reviewer:*` — у задачи `requires_fresh_context=true`.
   Выполни её отдельным вызовом в свежем изолированном контексте без истории генерации:
-  единственный вход — конверт части ревью. У повторяющихся входов вместо `content`
-  стоит `content_ref` на первое вхождение в той же части. Если пригодную оценку получить
+  единственный вход — конверт части ревью. В режиме `pairs` это JSON, и у повторяющихся
+  входов вместо `content` стоит `content_ref` на первое вхождение в той же части. В режиме
+  `compact-v1` (`review_mode` в задаче) это текст `.input.md` с якорями `[ID]`; ответ —
+  `coverage` (`area_id`, `status`, `refs`, `note`), `findings`, `corrections`,
+  `lint_dispositions` и `required_checks` по схеме задачи. Если пригодную оценку получить
   не удалось, не выдумывай её:
   `submit ... --failed TRANSPORT --reason "<что случилось>"` (вызов не дошёл или
   оборвался) или `--failed CONTENT --reason "..."` (ответ непригоден). Драйвер выдаст

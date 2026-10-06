@@ -248,6 +248,19 @@ class _Context:
                          for number, source in enumerate(payload.get("contexts") or [], start=1)]
         self.lint = [dict(row) for row in lint]
         self.index = "\n".join(f"{case_id} · {', '.join(self.case_requirements[case_id])} · {self.case_titles[case_id]}" for case_id in self.case_order)
+        self.source_docs = [(f"SRC-{number}", source) for number, source in enumerate(payload["sources"], start=1)]
+        self.context_docs = [(f"CTX-{number}", source) for number, source in enumerate(payload.get("contexts") or [], start=1)]
+
+    def source_items(self) -> list[dict[str, Any]]:
+        """Everything the source area compares, as packable items in a fixed order."""
+        items = [{"group": "docs", "anchor": anchor, "text": text} for (anchor, _source), text in zip(self.source_docs, self.sources)]
+        items += [{"group": "sreq", "anchor": item["source_requirement_id"], "text": self.source_requirements[item["source_requirement_id"]]}
+                  for item in self.document["source_requirements"]]
+        items.append({"group": "mapping", "anchor": "SREQ→CREQ", "text": self.mapping})
+        items += [{"group": "capabilities", "anchor": item["capability_id"], "text": self.capabilities[item["capability_id"]]}
+                  for item in self.document["operation_capabilities"]]
+        items += [{"group": "contexts", "anchor": anchor, "text": text} for (anchor, _source), text in zip(self.context_docs, self.contexts)]
+        return items
 
     def lint_for(self, case_ids: Sequence[str], *, source: bool) -> list[dict[str, Any]]:
         wanted = set(case_ids)
@@ -276,8 +289,15 @@ def _area_line(area: Mapping[str, Any]) -> str:
             "общее состояние, количество и полные списки ресурса, который меняют другие кейсы.")
 
 
+_SOURCE_GROUPS = (("docs", "## Исходные требования (дословно, с номерами строк)"), ("sreq", "## SREQ — нормализованные исходные требования"),
+                  ("mapping", "## Связь SREQ → CREQ"), ("capabilities", "## Возможности (полностью)"),
+                  ("contexts", "## Файлы проекта из источников возможностей"))
+
+
 def _part_text(context: _Context, *, part_id: str, title: str, areas: Sequence[Mapping[str, Any]], carried_ids: Sequence[str],
-               case_ids: Sequence[str], source: bool, lint: Sequence[Mapping[str, Any]], notes: Sequence[str] = ()) -> str:
+               case_ids: Sequence[str], source_items: Sequence[Mapping[str, Any]] | None, lint: Sequence[Mapping[str, Any]],
+               notes: Sequence[str] = ()) -> str:
+    source = bool(source_items)
     spec = context.specification
     document = context.document
     answer = [area for area in areas if area["area_id"] not in set(carried_ids)]
@@ -295,34 +315,32 @@ def _part_text(context: _Context, *, part_id: str, title: str, areas: Sequence[M
     out += ["", "## Индекс всех кейсов документа", context.index]
     requirement_ids = [item["requirement_id"] for item in document["requirements"]] if source else context.requirement_ids_for(case_ids)
     out += ["", "## Требования CREQ" + ("" if source else " кейсов этой части"), *(context.requirements[item] for item in requirement_ids)]
-    if source:
-        out += ["", "## Возможности (полностью)", *(context.capabilities[item["capability_id"]] for item in document["operation_capabilities"])]
-    else:
-        out += ["", "## Возможности (сигнатуры)", *(context.signatures[item["capability_id"]] for item in document["operation_capabilities"])]
+    full = {item["anchor"] for item in source_items or [] if item["group"] == "capabilities"}
+    if len(full) < len(document["operation_capabilities"]):
+        out += ["", "## Возможности (сигнатуры)", *(context.signatures[item["capability_id"]] for item in document["operation_capabilities"]
+                                                   if item["capability_id"] not in full)]
     if lint:
         out += ["", "## Подозрения линтера (ответь lint_dispositions по каждому)"]
         out.extend(f"[{row['lint_id']}] {row['rule']} · {', '.join(row['related_ids'])}: {row['message']}" for row in lint)
-    if source:
-        out += ["", "## Исходные требования (дословно, с номерами строк)", *context.sources]
-        out += ["", "## SREQ — нормализованные исходные требования", *(context.source_requirements[item["source_requirement_id"]]
-                                                                      for item in document["source_requirements"])]
-        out += ["", "## Связь SREQ → CREQ", context.mapping]
-        if context.contexts:
-            out += ["", "## Файлы проекта из источников возможностей", *context.contexts]
+    for group, heading in _SOURCE_GROUPS:
+        texts = [item["text"] for item in source_items or [] if item["group"] == group]
+        if texts:
+            out += ["", heading, *texts]
     if case_ids:
         out += ["", "## Кейсы", *(context.cases[case_id] + "\n" for case_id in case_ids)]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
 def _part(context: _Context, budget: int, reserve: int, *, part_id: str, title: str, areas: list, carried_ids: Sequence[str],
-          case_ids: Sequence[str], source: bool, requested_check: str | None = None, notes: Sequence[str] = (),
-          blocks: Sequence[Sequence[str]] | None = None, with_lint: bool = True) -> dict[str, Any]:
-    lint = context.lint_for(case_ids, source=source) if with_lint else []
+          case_ids: Sequence[str], source_items: Sequence[Mapping[str, Any]] | None = None, requested_check: str | None = None,
+          notes: Sequence[str] = (), blocks: Sequence[Sequence[str]] | None = None, with_lint: bool = True,
+          source_lint: bool = True) -> dict[str, Any]:
+    lint = context.lint_for(case_ids, source=bool(source_items) and source_lint) if with_lint else []
     text = _part_text(context, part_id=part_id, title=title, areas=areas, carried_ids=carried_ids, case_ids=case_ids,
-                      source=source, lint=lint, notes=notes)
+                      source_items=source_items, lint=lint, notes=notes)
     size = len(text.encode("utf-8"))
     return {"part_id": part_id, "case_ids": list(case_ids), "blocks": [list(block) for block in (blocks or [case_ids])],
-            "source": source, "areas": copy.deepcopy(areas), "carried_area_ids": list(carried_ids),
+            "source": bool(source_items), "areas": copy.deepcopy(areas), "carried_area_ids": list(carried_ids),
             "lint_ids": [row["lint_id"] for row in lint], "text": text, "requested_check": requested_check,
             "input_byte_count": size, "blocked_reason": "REVIEW_CONTEXT_LIMIT" if size + reserve > budget else None}
 
@@ -337,12 +355,55 @@ def _local_area(context: _Context, case_id: str) -> dict[str, Any]:
     return {"area_id": _CASE_AREA + case_id, "kind": "local", "targets": [case_id], "fingerprint": context.case_fingerprint(case_id)}
 
 
-def _source_area(context: _Context) -> dict[str, Any]:
-    document = context.document
-    return {"area_id": "source-000001", "kind": "source", "targets": [source.split("\n", 1)[0] for source in context.sources] or [document["document_id"]],
-            "fingerprint": review_digest({"sources": context.sources, "contexts": context.contexts, "mapping": context.mapping,
-                                          "sreq": context.source_requirements, "creq": context.requirements, "capabilities": context.capabilities,
-                                          "index": context.index, "lint": context.lint_for([], source=True)})}
+def _source_area(context: _Context, items: Sequence[Mapping[str, Any]], number: int = 1) -> dict[str, Any]:
+    targets = list(dict.fromkeys(item["anchor"] for item in items)) or [context.document["document_id"]]
+    return {"area_id": f"source-{number:06d}", "kind": "source", "targets": targets,
+            "fingerprint": review_digest({"items": [dict(item) for item in items], "creq": context.requirements, "index": context.index,
+                                          "lint": context.lint_for([], source=True) if number == 1 else []})}
+
+
+def _chunks(item: Mapping[str, Any], limit: int) -> list[dict[str, Any]]:
+    """A numbered document split by whole lines into pieces of at most ``limit`` bytes.
+
+    Only the first piece carries the ``[SRC-n]``/``[CTX-n]`` anchor; a later piece names
+    the same document without brackets, so an anchor is still defined once per part.
+    """
+    lines = item["text"].split("\n")
+    head, body = lines[0], lines[1:]
+    pieces, current, used = [], [head], len(head.encode("utf-8")) + 1
+    for line in body:
+        size = len(line.encode("utf-8")) + 1
+        if len(current) > 1 and used + size > limit:
+            pieces.append(current)
+            current, used = [f"{item['anchor']} (продолжение)"], len(item["anchor"]) + 20
+        current.append(line)
+        used += size
+    pieces.append(current)
+    return [{**item, "text": "\n".join(piece), "piece": index} for index, piece in enumerate(pieces, start=1)]
+
+
+def _pack_source(context: _Context, budget: int, reserve: int) -> list[list[dict[str, Any]]]:
+    """Source items packed into as few source-only parts as fit; an indivisible oversize item stays alone (and blocks)."""
+    skeleton = _part(context, budget, reserve, part_id="part-000000", title="0 из 0", case_ids=[], areas=[_source_area(context, [])],
+                     carried_ids=(), source_items=[{"group": "mapping", "anchor": "x", "text": ""}])["input_byte_count"]
+    room = max(1, budget - reserve - skeleton - 512)
+    items: list[dict[str, Any]] = []
+    for item in context.source_items():
+        size = len(item["text"].encode("utf-8")) + 1
+        items.extend(_chunks(item, room) if item["group"] in {"docs", "contexts"} and size > room else [dict(item)])
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    used = 0
+    for item in items:
+        size = len(item["text"].encode("utf-8")) + 1
+        if current and used + size > room:
+            groups.append(current)
+            current, used = [], 0
+        current.append(item)
+        used += size
+    if current:
+        groups.append(current)
+    return groups
 
 
 def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, Any], *, input_byte_budget: int,
@@ -361,15 +422,15 @@ def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, A
     reserve = int(spec["response_reserve_bytes"])
     usable = input_byte_budget - reserve
     order = context.case_order
-    source_area = _source_area(context)
+    every_source = context.source_items()
     layouts: list[dict[str, Any]] = []
-    whole = _part(context, input_byte_budget, reserve, part_id="part-000001", title="1 из 1", case_ids=order, source=True,
-                  areas=[source_area, *(_local_area(context, case_id) for case_id in order), _cross_area(context, order)], carried_ids=())
+    whole = _part(context, input_byte_budget, reserve, part_id="part-000001", title="1 из 1", case_ids=order, source_items=every_source,
+                  areas=[_source_area(context, every_source), *(_local_area(context, case_id) for case_id in order), _cross_area(context, order)],
+                  carried_ids=())
     if whole["blocked_reason"] is None:
-        layouts.append({"case_ids": order, "blocks": [order], "source": True, "home": order})
+        layouts.append({"case_ids": order, "blocks": [order], "source": every_source, "source_number": 1, "home": order})
     else:
-        skeleton = _part(context, input_byte_budget, reserve, part_id="part-000000", title="0 из 0", case_ids=[], source=False,
-                         areas=[], carried_ids=())
+        skeleton = _part(context, input_byte_budget, reserve, part_id="part-000000", title="0 из 0", case_ids=[], areas=[], carried_ids=())
         # A requirement linked to many cases rides in every part once: it is overhead,
         # not a block weight.  The others are counted once per block that links them.
         linked: dict[str, int] = {}
@@ -388,33 +449,31 @@ def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, A
         blocks = content_blocks(items, cap, extra)
         pairs = block_pairs(len(blocks))
         homes = {block: home_pair(block, len(blocks)) for block in range(len(blocks))}
-        source_alone = True
         for pair in pairs:
             case_ids = [case_id for block in pair for case_id in blocks[block]]
             home = [case_id for block in range(len(blocks)) if homes[block] == pair for case_id in blocks[block]]
-            layouts.append({"case_ids": case_ids, "blocks": [blocks[block] for block in pair], "source": False, "home": home})
-        if layouts:
-            first = layouts[0]
-            trial = _part(context, input_byte_budget, reserve, part_id="part-000001", title="1", case_ids=first["case_ids"], source=True,
-                          areas=[source_area, *(_local_area(context, case_id) for case_id in first["home"]), _cross_area(context, first["case_ids"])],
-                          carried_ids=())
-            if trial["blocked_reason"] is None:
-                first["source"] = True
-                source_alone = False
-        if source_alone:
-            layouts.insert(0, {"case_ids": [], "blocks": [], "source": True, "home": []})
-    carried_rows, carried_ids = _carry(context, carry, layouts, source_area)
-    parts, total = [], sum(1 for layout in layouts if not _fully_carried(context, layout, source_area, carried_ids))
+            layouts.append({"case_ids": case_ids, "blocks": [blocks[block] for block in pair], "source": None, "source_number": 0, "home": home})
+        first = layouts[0] if layouts else None
+        trial = None if first is None else _part(
+            context, input_byte_budget, reserve, part_id="part-000001", title="1", case_ids=first["case_ids"], source_items=every_source,
+            areas=[_source_area(context, every_source), *(_local_area(context, case_id) for case_id in first["home"]), _cross_area(context, first["case_ids"])],
+            carried_ids=())
+        if trial is not None and trial["blocked_reason"] is None:
+            first.update(source=every_source, source_number=1)
+        else:
+            # The source goes into its own part(s), split by whole items and document lines when needed.
+            for number, group in enumerate(_pack_source(context, input_byte_budget, reserve), start=1):
+                layouts.insert(number - 1, {"case_ids": [], "blocks": [], "source": group, "source_number": number, "home": []})
+    carried_rows, carried_ids = _carry(context, carry, layouts)
+    parts, total = [], sum(1 for layout in layouts if not _fully_carried(context, layout, carried_ids))
     for layout in layouts:
-        if _fully_carried(context, layout, source_area, carried_ids):
+        if _fully_carried(context, layout, carried_ids):
             continue
-        areas = ([source_area] if layout["source"] else []) + [_local_area(context, case_id) for case_id in layout["home"]]
-        if layout["case_ids"]:
-            areas.append(_cross_area(context, layout["case_ids"]))
+        areas = _layout_areas(context, layout)
         part_id = f"part-{len(parts) + 1:06d}"
         parts.append(_part(context, input_byte_budget, reserve, part_id=part_id, title=f"{len(parts) + 1} из {total}", case_ids=layout["case_ids"],
-                           source=layout["source"], areas=areas, carried_ids=[area["area_id"] for area in areas if area["area_id"] in carried_ids],
-                           blocks=layout["blocks"]))
+                           source_items=layout["source"], areas=areas, carried_ids=[area["area_id"] for area in areas if area["area_id"] in carried_ids],
+                           blocks=layout["blocks"], source_lint=layout["source_number"] == 1))
     if not parts:
         # Nothing changed at all: the whole review is sent again rather than carried blind.
         return build_compact_plan(specification, payload, input_byte_budget=input_byte_budget, carry=None)
@@ -429,19 +488,19 @@ def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, A
     return plan
 
 
-def _layout_areas(context: _Context, layout: Mapping[str, Any], source_area: Mapping[str, Any]) -> list[dict[str, Any]]:
-    areas = ([dict(source_area)] if layout["source"] else []) + [_local_area(context, case_id) for case_id in layout["home"]]
+def _layout_areas(context: _Context, layout: Mapping[str, Any]) -> list[dict[str, Any]]:
+    areas = [_source_area(context, layout["source"], layout["source_number"])] if layout["source"] else []
+    areas += [_local_area(context, case_id) for case_id in layout["home"]]
     if layout["case_ids"]:
         areas.append(_cross_area(context, layout["case_ids"]))
     return areas
 
 
-def _fully_carried(context: _Context, layout: Mapping[str, Any], source_area: Mapping[str, Any], carried_ids: set) -> bool:
-    return bool(carried_ids) and all(area["area_id"] in carried_ids for area in _layout_areas(context, layout, source_area))
+def _fully_carried(context: _Context, layout: Mapping[str, Any], carried_ids: set) -> bool:
+    return bool(carried_ids) and all(area["area_id"] in carried_ids for area in _layout_areas(context, layout))
 
 
-def _carry(context: _Context, carry: Mapping[str, Any] | None, layouts: Sequence[Mapping[str, Any]],
-           source_area: Mapping[str, Any]) -> tuple[list[dict[str, Any]], set]:
+def _carry(context: _Context, carry: Mapping[str, Any] | None, layouts: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], set]:
     """Areas whose exact input, policy and checked r1 coverage carry over (rework r2 only).
 
     An area carries when the parent plan had the same area ID with the same
@@ -464,7 +523,7 @@ def _carry(context: _Context, carry: Mapping[str, Any] | None, layouts: Sequence
     blocking = {identifier for finding in parent_aggregate["findings"] if finding["severity"] == "BLOCKING" for identifier in finding["related_ids"]}
     rows, ids = [], set()
     for layout in layouts:
-        for area in _layout_areas(context, layout, source_area):
+        for area in _layout_areas(context, layout):
             before = parent.get(area["area_id"])
             if (before is None or area["area_id"] not in checked or before[0]["fingerprint"] != area["fingerprint"]
                     or set(area["targets"]) & blocking or area["area_id"] in ids):
@@ -519,22 +578,31 @@ _LINE_REF = re.compile(r"^(?P<anchor>(?:SRC|CTX)-[0-9]+):L(?P<line>[0-9]+)$")
 _CODE_REF = re.compile(r"^(?:(?P<file>[A-Za-z0-9_.:-]+):)?L(?P<line>[0-9]+)$")
 
 
-def _part_refs(part: Mapping[str, Any]) -> tuple[set, dict[str, int], list[tuple[int, int, str]]]:
-    """Anchors of a part, line counts of its numbered documents and code line ranges."""
+def _part_refs(part: Mapping[str, Any]) -> tuple[set, dict[str, set], list[tuple[int, int, str]]]:
+    """Anchors of a part, the shown lines of each numbered document and the code line ranges."""
     defined = set(anchors(part["text"]))
-    lines: dict[str, int] = {}
-    for match in re.finditer(r"^\[((?:SRC|CTX)-[0-9]+)\] .* \(([0-9]+) строк\)$", part["text"], re.MULTILINE):
-        lines[match.group(1)] = int(match.group(2))
+    lines: dict[str, set] = {}
+    current = None
+    for line in part["text"].split("\n"):
+        match = re.match(r"^(?:\[((?:SRC|CTX)-[0-9]+)\]|((?:SRC|CTX)-[0-9]+) \(продолжение\))", line)
+        if match:
+            current = match.group(1) or match.group(2)
+            continue
+        number = re.match(r"^L([0-9]+)\| ", line)
+        if current and number:
+            lines.setdefault(current, set()).add(int(number.group(1)))
+        elif not number:
+            current = None
     ranges = [tuple(row) for row in part.get("code_ranges", [])]
     return defined, lines, ranges
 
 
-def _ref_ok(ref: str, defined: set, lines: Mapping[str, int], ranges: Sequence[tuple]) -> bool:
+def _ref_ok(ref: str, defined: set, lines: Mapping[str, set], ranges: Sequence[tuple]) -> bool:
     if ref in defined:
         return True
     match = _LINE_REF.fullmatch(ref)
     if match:
-        return match["anchor"] in lines and 1 <= int(match["line"]) <= lines[match["anchor"]]
+        return int(match["line"]) in lines.get(match["anchor"], set())
     match = _CODE_REF.fullmatch(ref)
     if match and ranges:
         line = int(match["line"])
@@ -675,7 +743,7 @@ def check_part(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mappi
     for correction in check.get("corrections") or []:
         notes.append(f"Предложенная правка {correction['target_id']}.{correction['field']}: «{correction['before']}» → «{correction['after']}» ({correction['why']})")
     return _part(context, plan["input_byte_budget"], plan["snapshot"]["response_reserve_bytes"], part_id=f"part-{index:06d}", title="проверка",
-                 areas=[area], carried_ids=(), case_ids=check["case_ids"], source=False, requested_check=digest, notes=notes, with_lint=False)
+                 areas=[area], carried_ids=(), case_ids=check["case_ids"], requested_check=digest, notes=notes, with_lint=False)
 
 
 def _valid_results(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

@@ -83,6 +83,34 @@ Record violations with affected case/relation IDs and concrete source/code evide
 Retain positive boundary/call-path/oracle evidence in each scope's coverage assessment;
 format examples are in the review contract. A summary does not replace original code.
 
+## compact-v1 parts
+
+When the task says `review_mode: compact-v1`, the only input is the part text (`.input.md`).
+It holds the cases of the part (the canonical projection with ID anchors), the exact slice
+of each case's test method with original line numbers (`L0123| …`), the file's SUPPORT code
+(header, fields, setup, fixtures, helpers and nested types, also with line numbers) and a
+shared-state table built by code. Code checks run before you: a changed ASSERT ID, a
+literal that differs from the case, a request method, path or body field that differs
+from the step inputs arrive as `[LINT-…]` suspicions.
+
+Answer areas (in the order listed under «Области ответа»):
+
+- `local-file-<file_id>` (SUPPORT) — fields, setup and cleanup, fixtures, helpers, the
+  application boundary each helper reaches, and every row of the shared-state table;
+- `local-<case>` — the case's method and the helpers it calls against every step, input,
+  expectation and assertion of the case (questions a–c above);
+- `cross-…` — interactions of the tests of this part through the SUPPORT code and shared
+  state: order dependence, side effects one test relies on, broken shared helpers,
+  weakened checks.
+
+Answer with exactly `coverage`, `findings`, `corrections` (always empty: automation review
+corrects no case), `lint_dispositions` and `required_checks`. A coverage row has `area_id`,
+`status`, `refs` (1–3: an anchor of the part or a code line `L123`; a case area cites its
+own case or a line of its method or helpers) and `note` (at most 200 characters). Findings
+have `severity`, `code`, `related_ids` (case, assertion, file or symbol IDs) and `message`
+(at most 600 characters); at most 5 INFO. Answer every suspicion in `lint_dispositions`
+(`confirmed` or `rejected` with a reason) and write the finding yourself when it is real.
+
 ## Stop conditions
 
 Report invalid input, unavailable evidence/tool, required invention or work outside authorized scope as a blocker. Substantive defects require rework and continuation through the remaining trustworthy parts. Reject stale source digests, undeclared files, incomplete pairs and artifacts that require project modification.
