@@ -132,6 +132,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `reviewer-session.schema.json` | `4` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `review-plan.schema.json` | `4` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `review-part-output.schema.json` | `4` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `review-plan-compact.schema.json` | `4` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
+| `review-part-output-compact.schema.json` | `4` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `tc-to-autotest-output.schema.json` | `5` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `autotest-reviewer-output.schema.json` | `5` | `IMPLEMENTED` | `6.0.0` | `True` | `-` |
 | `execution-inputs-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
