@@ -52,10 +52,14 @@ def live_step5() -> dict:
 def replay_step5(mode: str | None) -> dict:
     """Планы ревью step5 на текущем коде: проигрывание до первой задачи ревью автотестов."""
     from tests.live_step5 import Replay
+    from tests.review_scaling_helpers import clean_compact_answer, part_text
     from tools.pilot_state import read_review_plan
 
+    def compact(task):  # compact parts get a valid clean answer; recorded legacy answers fit legacy parts only
+        return clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else None
+
     with tempfile.TemporaryDirectory() as tmp:
-        replay = Replay("9340016c", Path(tmp))
+        replay = Replay("9340016c", Path(tmp), override=compact)
         extra = () if mode is None else ("--review-mode", mode)
         code, task = replay.drive(replay.start_with(*extra)[1], until=lambda item: str(item.get("stage", "")).startswith("autotest-reviewer:"))
         run_root = replay.project / ".pilot-runs" / str(task["run_id"])

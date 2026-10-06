@@ -149,7 +149,9 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--module <ID>`, `--target`, `--document-id`, `--model-id`, `--host-cli`,
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
-контекста модели в байтах, по умолчанию 500000), `--accept-self-review`. `run_id` берётся
+контекста модели в байтах, по умолчанию 500000), `--accept-self-review`,
+`--review-mode pairs|compact-v1` (формат ревью, по умолчанию `pairs`), `--max-tasks K`
+(сколько независимых частей ревью `compact-v1` выдать сразу). `run_id` берётся
 из первого ответа.
 
 Каждый вызов печатает один JSON-объект:
@@ -158,6 +160,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 |---|---|---|
 | `llm` | `task_id`, `stage`, `skill_path`, `inputs`, `output_path`, `schema_path`, `instructions` | Прочитать `skill_path` и все файлы из `inputs`, записать ответ в `output_path` по `schema_path`, вызвать `submit` |
 | `ask_user` | `task_id`, `question`, `options` (`value`, `label`) | Задать вопрос пользователю и вызвать `submit ... --answer <value>` |
+| `batch` | `tasks` (каждая — как `llm`) | Только `compact-v1` с `--max-tasks K`: выполнить каждую задачу отдельным свежим вызовом (параллельно), затем `submit` по каждой |
 | `done` | `result` | Остановиться и передать результат пользователю |
 | `error` | `code`, `message` | Прочитать причину; не обходить ошибку ручными вызовами |
 
@@ -339,6 +342,12 @@ r2 даёт окончательный `REWORK`. Непроверенные об
 генератору не отдаются: это не вердикт REJECTED.
 Механическую правку ревьюера к r2 доработки применить нельзя (r3 не бывает): такое
 ревью отклоняется.
+
+В режиме `--review-mode compact-v1` вход части — текст проекции канона с якорями `[ID]`
+(файл `.input.md`), кейсы приходят целиком, ответ — короткие строки покрытия с проверяемыми
+ссылками, находки, правки по `target_id`/полю, решения по подозрениям линтера. Ревью
+автотестов идёт по срезам методов с общим кодом файла и таблицей общего состояния. Части
+независимы: `next --max-tasks K` выдаёт их пачкой. Подробно — `HOW-IT-WORKS.md`, раздел 5.
 
 Лимит части ревью задаётся при создании run флагами драйвера `--review-input-bytes`
 и `--review-reserve-bytes` (по умолчанию 200000 и 20000 байт). Значения можно получить

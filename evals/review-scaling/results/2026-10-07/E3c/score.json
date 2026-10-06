@@ -1,0 +1,207 @@
+{
+  "set": "E3",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 52394,
+  "answer_bytes": [
+    10778
+  ],
+  "answer_bytes_total": 10778,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "A1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "SYMBOL-B1-006",
+            "ASSERT-B1-006-01-1-1"
+          ],
+          "message": "L146: assertThat(response.getStatus()).isEqualTo(404), тогда как ASSERT-B1-006-01-1-1 и CREQ-B1-005 требуют 400 Bad Request (Spring MVC возвращает 400 при отсутствии обязательного @RequestParam). Тест проверяет другое ожидание: при корректном поведении приложения он упадёт, а при неверном (404) пройдёт. Требуется исправить литерал на 400."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A2",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUEST_INPUT_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "SYMBOL-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2"
+          ],
+          "message": "L179 запрос PUT /students/42/update вместо канонического /students/10/update (INPUT-B1-009-01-2). Поскольку id пути совпадает с id тела (42), проверка L182 не может отличить эхо тела от подстановки id из пути — именно это различие является целью кейса и CREQ-B1-008. Оракул ослаблен; требуется путь /students/10/update."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A3",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUEST_INPUT_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "SYMBOL-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3"
+          ],
+          "message": "L166 body.put(\"lastName\", null): ObjectMapper по умолчанию сериализует null-значения Map, поэтому отправляется {\"id\":6,\"firstName\":\"Olga\",\"lastName\":null}, а INPUT-B1-008-01-3 и шаг кейса задают тело без поля lastName. Явный null и отсутствующее поле — разные пути десериализации; отличительный вход кейса (частично заполненное тело, CREQ-B1-007) не воспроизведён. Требуется убрать строку L166."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A4",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "HELPER_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "SYMBOL-B1-002",
+            "SYMBOL-B1-012",
+            "ASSERT-B1-002-01-1-4",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Общий хелпер fourStudents() (L80-85) возвращает только трёх студентов (1 Ramesh, 2 Umesh, 3 Ram); студент (4, Sanjay, Mishra) из канонических ожиданий отсутствует. Он используется в L110, L214 и L219, поэтому ASSERT-B1-002-01-1-4, ASSERT-B1-012-02-1-2 и ASSERT-B1-012-03-1-2 сравнивают ответ с неверным ожиданием: против корректного приложения (CREQ-B1-002) тесты упадут, а hasSize(4) на L109 противоречит L110. Дрейф литерала ожидания — требуется доработка хелпера."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A5",
+      "class": "shared-static-state",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "STEP-B1-003-01",
+            "STEP-B1-004-01",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Статическое изменяемое поле pathId (L35, начальное 5). tcB1003 строит путь из него (L116) и затем пишет pathId=0 (L117); tcB1004 читает его (L126). TC-B1-004 проходит только если TC-B1-003 выполнился раньше в той же JVM; порядок JUnit 5 по умолчанию не гарантирован, при изолированном запуске tcB1004 шлёт /students/5 и падает на L129. Литералы INPUT-B1-003-01-2 (/students/5) и INPUT-B1-004-01-2 (/students/0) в коде отсутствуют, запись L117 не соответствует ни одному шагу кейса. Требуется доработка: литеральные пути в каждом методе, удалить pathId."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A6",
+      "class": "weakened-check",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "SYMBOL-B1-011",
+            "ASSERT-B1-011-01-1-2"
+          ],
+          "message": "L200: assertThat(text(response)).isNotNull() вместо isEqualTo(\"Hello World!\"). getContentAsString никогда не возвращает null, проверка тавтологична: ASSERT-B1-011-01-1-2 и EXP-B1-011-01-1 (текст «Hello World!», CREQ-B1-010) не наблюдаются; любой текст ответа проходит. Требуется восстановить сравнение с литералом."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 0,
+    "BLOCKING": 6
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-542CFAB338",
+      "decision": "confirmed",
+      "reason": "L116 строит путь из static pathId вместо литерала /students/5; L117 меняет общее состояние. См. SHARED_STATE_ORDER_DEPENDENCE."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EE64C7CCAC",
+      "decision": "confirmed",
+      "reason": "L126 читает pathId; значение 0 есть только после TC-B1-003. Литерал /students/0 отсутствует, порядок не гарантирован."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-BF1FB0A36A",
+      "decision": "confirmed",
+      "reason": "L146 ожидает 404, канон ASSERT-B1-006-01-1-1 и CREQ-B1-005 — 400."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-FC54E69D5E",
+      "decision": "confirmed",
+      "reason": "L166 добавляет lastName=null, сериализуется как явное поле; INPUT-B1-008-01-3 поля не содержит."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-688AA3DA9D",
+      "decision": "confirmed",
+      "reason": "L179 использует /students/42/update вместо /students/10/update; различие id пути и тела утрачено."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-F795BD7551",
+      "decision": "confirmed",
+      "reason": "L200 isNotNull() вместо isEqualTo(\"Hello World!\"); текст ответа не проверяется."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324095.039769,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324110.5854082,
+        "accepted": false,
+        "codes": [
+          "REVIEW_REF_UNKNOWN"
+        ]
+      },
+      {
+        "at": 1791324120.8400578,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

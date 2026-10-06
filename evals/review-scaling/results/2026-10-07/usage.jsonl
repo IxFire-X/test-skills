@@ -1,0 +1,11 @@
+{"run":"E1c-clean","part":"part-000001","tokens":93762,"tool_uses":11,"ms":130528}
+{"run":"E1c","part":"part-000001","tokens":94273,"tool_uses":10,"ms":131371}
+{"run":"E3c","part":"part-000001","tokens":91798,"tool_uses":13,"ms":160946}
+{"run":"E1L","part":"part-000002","tokens":131559,"tool_uses":18,"ms":215304}
+{"run":"E3L","part":"part-000006","tokens":132209,"tool_uses":15,"ms":226262}
+{"run":"E3L","part":"part-000005","tokens":141790,"tool_uses":16,"ms":251114}
+{"run":"E3L","part":"part-000003","tokens":167359,"tool_uses":15,"ms":253528}
+{"run":"E3L","part":"part-000001","tokens":181256,"tool_uses":18,"ms":277506}
+{"run":"E3L","part":"part-000002","tokens":190556,"tool_uses":23,"ms":317223}
+{"run":"E3L","part":"part-000004","tokens":174762,"tool_uses":17,"ms":322846}
+{"run":"E1L","part":"part-000001","tokens":151273,"tool_uses":34,"ms":323212}

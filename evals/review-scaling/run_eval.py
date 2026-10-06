@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -133,6 +134,10 @@ def _read_gz(path: Path) -> Any:
     return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
 
 
+def _seeds_path(directory: Path) -> Path:
+    return directory.parent / f"{directory.name}.seeds.json"
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     from tools import pipeline_driver
     from tools.review_modes import build_offline_plan, part_input
@@ -149,7 +154,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         snapshot = compact_payload(snapshot, review_policy("tc-reviewer" if key == "canonical" else "autotest-reviewer", instructions=instructions, model_id=None))
     _gz(out / "plan.json.gz", plan)
     _gz(out / "snapshot.json.gz", snapshot)
-    (out / "seeds.json").write_text(json.dumps(seeds, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # The seeds stay outside the reviewer's directory: a reviewer never sees them.
+    _seeds_path(out).write_text(json.dumps(seeds, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     schema = out / "answer.schema.json"
     schema.write_text(json.dumps(pipeline_driver._review_schema(args.mode), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     skill = ROOT / "skills" / ("tc-reviewer" if key == "canonical" else "autotest-reviewer") / "SKILL.md"
@@ -208,7 +214,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     rows = diagnostics(directory, args.part)
     log = directory / f"{args.part}.tries.jsonl"
     with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"accepted": not rows, "codes": sorted({row["code"] for row in rows})}, ensure_ascii=False) + "\n")
+        handle.write(json.dumps({"at": time.time(), "accepted": not rows, "codes": sorted({row["code"] for row in rows})}, ensure_ascii=False) + "\n")
     print(json.dumps({"status": "accepted" if not rows else "rejected", "errors": rows[:30]}, ensure_ascii=False, indent=1))
     return 0 if not rows else 1
 
@@ -227,7 +233,7 @@ def cmd_score(args: argparse.Namespace) -> int:
 
     directory = Path(args.dir)
     meta, plan, snapshot = _load(directory)
-    seeds = json.loads((directory / "seeds.json").read_text(encoding="utf-8"))
+    seeds = json.loads(_seeds_path(directory).read_text(encoding="utf-8"))
     results, missing, answer_bytes = [], [], []
     for part in plan["parts"]:
         path = directory / f"{part['part_id']}.answer.json"

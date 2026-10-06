@@ -83,7 +83,7 @@ class _Code:
 
         file = self.files[file_id]
         lines = self.lines(file_id)
-        head = f"### {file_id} · {file.get('path')} · {file.get('language')}/{file.get('framework')} · {len(lines)} строк · {file.get('content_digest')}"
+        head = f"[{file_id}] · {file.get('path')} · {file.get('language')}/{file.get('framework')} · {len(lines)} строк · {file.get('content_digest')}"
         out = [head]
         if file_id in self.failed:
             reason = next(row["reason"] for row in self.failures if row["file_id"] == file_id)

@@ -1,0 +1,318 @@
+{
+  "set": "E1",
+  "mode": "pairs",
+  "clean": false,
+  "parts": 2,
+  "missing_answers": [],
+  "input_bytes": 299636,
+  "answer_bytes": [
+    31888,
+    27581
+  ],
+  "answer_bytes_total": 59469,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "cross-271f196f1180f24cccdd08af7a68fa87bdca90087b7602898106c768e3db40c9",
+      "reason": "TC-B1-004 ожидает firstName «Ramesh» вопреки CREQ-B1-003 («Ramsesh»). Нужно проверить, использует ли TC-B1-003 (GET /students/5, AC-3) тот же неверный литерал или согласован с требованием, чтобы доработка охватила все кейсы CREQ-B1-003."
+    },
+    {
+      "scope_id": "cross-dea2b176f9834c2f11d93d7db09686e220b6ec7e65b1b3315d975f1424232a86",
+      "reason": "TC-B1-012 ожидает пять элементов в GET /students, тогда как CREQ-B1-002 требует ровно четыре. Нужно подтвердить, что TC-B1-002 (GET /students) ожидает четыре студента, и зафиксировать конфликт ожиданий одного вызова между TC-B1-002 и TC-B1-012; также проверить, остаётся ли CREQ-B1-012 без корректного покрытия вне этой части."
+    }
+  ],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "S1",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_NOT_COVERED_BY_EXPECTED_RESULT",
+          "related_ids": [
+            "TC-B1-005",
+            "STEP-B1-005-01",
+            "INPUT-B1-005-01-3",
+            "ASSERT-B1-005-01-1-2",
+            "EXP-B1-005-01-1",
+            "CREQ-B1-004",
+            "SREQ-0015"
+          ],
+          "message": "TC-B1-005, шаг STEP-B1-005-01: запрос GET /students/query с query id=7 (INPUT-B1-005-01-3, test_data «id=7»), текст EXP-B1-005-01-1 обещает объект с id 7, но assertion ASSERT-B1-005-01-1-2 ожидает {id 8, Ramesh, Mishra}. Нарушено правило «каждый assertion покрыт Expected Result шага»; assertion противоречит CREQ-B1-004 и AC-4 (SREQ-0015: id=7) и при выполнении даст ложный FAIL. Литерал assertion механически не правится."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_INPUT",
+          "related_ids": [
+            "TC-B1-005",
+            "STEP-B1-005-01",
+            "INPUT-B1-005-01-3",
+            "EXP-B1-005-01-1",
+            "ASSERT-B1-005-01-1-2",
+            "CREQ-B1-004",
+            "SREQ-0015"
+          ],
+          "message": "TC-B1-005, шаг STEP-B1-005-01: INPUT-B1-005-01-3 передаёт query id=\"7\", текст EXP-B1-005-01-1 и test_data говорят об id 7 (как AC-4/SREQ-0015), но ASSERT-B1-005-01-1-2 ожидает объект с id 8. Структурированный оракул противоречит входу и человеческому ожиданию; при выполнении проверка заведомо не пройдёт. Литерал ассерта механически не исправляется — требуется доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S2",
+      "class": "contradicts-source-and-other-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-004",
+            "STEP-B1-004-01",
+            "ASSERT-B1-004-01-1-2",
+            "EXP-B1-004-01-1",
+            "CREQ-B1-003",
+            "SREQ-0006"
+          ],
+          "message": "TC-B1-004, шаг STEP-B1-004-01: assertion ASSERT-B1-004-01-1-2 (jsonObject equals {id 0, firstName «Ramesh», lastName Mishra}) и текст EXP-B1-004-01-1 ожидают firstName «Ramesh», тогда как CREQ-B1-003 и SREQ-0006 (3.3 GET /students/{id}) требуют «Ramsesh» для любого id. Оракул противоречит привязанному требованию и кейсу TC-B1-003 на том же маршруте. Литерал ожидания — поведение, механической правке не подлежит; требуется доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-004",
+            "STEP-B1-004-01",
+            "EXP-B1-004-01-1",
+            "ASSERT-B1-004-01-1-2",
+            "CREQ-B1-003",
+            "SREQ-0006",
+            "SREQ-0014"
+          ],
+          "message": "TC-B1-004, шаг STEP-B1-004-01, EXP-B1-004-01-1 / ASSERT-B1-004-01-1-2: ожидается firstName «Ramesh», тогда как CREQ-B1-003, SREQ-0006 (3.3, тело ответа) и SREQ-0014 (AC-3) требуют «Ramsesh». Явное требование — авторитет ожидаемого результата (case-generation-contract, human scenario rules); оракул кейса противоречит требованию и не может быть исправлен механически (литерал)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S3",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-010",
+            "STEP-B1-010-01",
+            "ASSERT-B1-010-01-1-2",
+            "EXP-B1-010-01-1",
+            "CREQ-B1-009",
+            "SREQ-0010",
+            "SREQ-0018"
+          ],
+          "message": "TC-B1-010, шаг STEP-B1-010-01: assertion ASSERT-B1-010-01-1-2 (text equals «Student Deleted!») и текст EXP-B1-010-01-1 ожидают «Student Deleted!», тогда как CREQ-B1-009, SREQ-0010 (3.7) и AC-7 (SREQ-0018) требуют точный текст «Student Successfully Deleted!». Ожидаемый результат изменяет требуемое поведение; явный литерал требования авторитетен. Правка оракула — не механическая, требуется доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-010",
+            "STEP-B1-010-01",
+            "EXP-B1-010-01-1",
+            "ASSERT-B1-010-01-1-2",
+            "CREQ-B1-009",
+            "SREQ-0010",
+            "SREQ-0018"
+          ],
+          "message": "TC-B1-010, шаг STEP-B1-010-01, EXP-B1-010-01-1 / ASSERT-B1-010-01-1-2: ожидается текст «Student Deleted!», тогда как CREQ-B1-009, SREQ-0010 (3.7) и SREQ-0018 (AC-7) требуют «Student Successfully Deleted!». Ожидаемый результат ослаблен/изменён относительно явного требования; литерал механически не исправляется."
+        },
+        {
+          "severity": "WARNING",
+          "code": "CROSS_CASE_ABSOLUTE_LIST_DEPENDENCY",
+          "related_ids": [
+            "TC-B1-012",
+            "TC-B1-007",
+            "TC-B1-008",
+            "TC-B1-010",
+            "CREQ-B1-012"
+          ],
+          "message": "Кросс-проверка: TC-B1-012 утверждает полный абсолютный список GET /students после собственного POST. При его же предпосылке о сохранении состояния этот список зависел бы от порядка прогона с TC-B1-007 и TC-B1-008 (создают id 5 и 6) и TC-B1-010 (удаляет id 3); по требованиям (SREQ-0020) состояния нет и список всегда из четырёх. В обоих случаях литерал из пяти элементов недостоверен; закрывается доработкой TC-B1-012 по BLOCKING-находке."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S4",
+      "class": "shared-state-list",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "STEP-B1-012-03",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "EXP-B1-012-02-1",
+            "EXP-B1-012-03-1",
+            "CREQ-B1-012",
+            "CREQ-B1-002",
+            "CREQ-B1-011",
+            "SREQ-0020"
+          ],
+          "message": "TC-B1-012: название «Созданный студент появляется в списке GET /students», цель и шаги STEP-B1-012-02/03 (ASSERT-B1-012-02-1-2, ASSERT-B1-012-03-1-2: массив из 5 студентов с {9, Pavel, Orlov}) утверждают изменение состояния после POST /students/create, что прямо противоречит привязанным CREQ-B1-012 (POST не изменяет ответ GET /students; SREQ-0020: эндпоинты без состояния) и CREQ-B1-002 (ровно четыре студента), а также TC-B1-002. Выдуманный оракул; CREQ-B1-012 остаётся без корректного покрытия. Также EXP-B1-012-02-1/03-1 печатают поля в порядке firstName, id, lastName вопреки CREQ-B1-011."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CASE_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "STEP-B1-012-03",
+            "EXP-B1-012-02-1",
+            "EXP-B1-012-03-1",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "CREQ-B1-002",
+            "CREQ-B1-012",
+            "SREQ-0005",
+            "SREQ-0013",
+            "SREQ-0020"
+          ],
+          "message": "TC-B1-012 (title, objective, STEP-B1-012-02/03, EXP-B1-012-02-1, EXP-B1-012-03-1, ASSERT-B1-012-02-1-2, ASSERT-B1-012-03-1-2) ожидает, что после POST /students/create список GET /students содержит пять студентов, включая созданного id 9. Это противоречит CREQ-B1-002 и SREQ-0005/SREQ-0013 (ровно четыре студента с id 1..4) и CREQ-B1-012/SREQ-0020 (эндпоинты не хранят состояние, POST не меняет ответ GET /students). Кейс привязан к CREQ-B1-002 и CREQ-B1-012, но проверяет противоположное поведение; требование об отсутствии состояния остаётся без корректного кейса. Требуется доработка (поведение, не механическая правка)."
+        },
+        {
+          "severity": "WARNING",
+          "code": "CROSS_CASE_ABSOLUTE_LIST_DEPENDENCY",
+          "related_ids": [
+            "TC-B1-012",
+            "TC-B1-007",
+            "TC-B1-008",
+            "TC-B1-010",
+            "CREQ-B1-012"
+          ],
+          "message": "Кросс-проверка: TC-B1-012 утверждает полный абсолютный список GET /students после собственного POST. При его же предпосылке о сохранении состояния этот список зависел бы от порядка прогона с TC-B1-007 и TC-B1-008 (создают id 5 и 6) и TC-B1-010 (удаляет id 3); по требованиям (SREQ-0020) состояния нет и список всегда из четырёх. В обоих случаях литерал из пяти элементов недостоверен; закрывается доработкой TC-B1-012 по BLOCKING-находке."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S5",
+      "class": "wrong-component",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "WRONG_COMPONENT",
+          "related_ids": [
+            "TC-B1-007",
+            "CREQ-B1-006",
+            "SREQ-0008"
+          ],
+          "message": "TC-B1-007: management.components = [«HelloWorldController»], тогда как тестируемый маршрут POST /students/create принадлежит StudentController (SREQ-0008, провенанс CAP-B1-mockmvc_exchange: StudentController.java — students/create); все остальные кейсы документа используют «StudentController». Ошибочная метапривязка компонента; имеет единственное механическое значение — предложена правка FIX-TC-B1-007-components."
+        },
+        {
+          "severity": "WARNING",
+          "code": "CROSS_CASE_ABSOLUTE_LIST_DEPENDENCY",
+          "related_ids": [
+            "TC-B1-012",
+            "TC-B1-007",
+            "TC-B1-008",
+            "TC-B1-010",
+            "CREQ-B1-012"
+          ],
+          "message": "Кросс-проверка: TC-B1-012 утверждает полный абсолютный список GET /students после собственного POST. При его же предпосылке о сохранении состояния этот список зависел бы от порядка прогона с TC-B1-007 и TC-B1-008 (создают id 5 и 6) и TC-B1-010 (удаляет id 3); по требованиям (SREQ-0020) состояния нет и список всегда из четырёх. В обоих случаях литерал из пяти элементов недостоверен; закрывается доработкой TC-B1-012 по BLOCKING-находке."
+        },
+        {
+          "severity": "WARNING",
+          "code": "WRONG_COMPONENT",
+          "related_ids": [
+            "TC-B1-007"
+          ],
+          "message": "TC-B1-007 management.components[0] = «HelloWorldController», хотя кейс вызывает POST /students/create контроллера StudentController (SREQ-0001/SREQ-0002, маршруты в CAP-B1-mockmvc_exchange). Остальные кейсы части указывают «StudentController». Однозначное механическое исправление предложено в corrections."
+        }
+      ],
+      "corrections": [
+        {
+          "path": "/test_cases/6/management/components/0",
+          "after": "StudentController"
+        },
+        {
+          "path": "/test_cases/6/management/components/0",
+          "after": "StudentController"
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-010",
+            "SREQ-0011",
+            "SREQ-0019"
+          ],
+          "message": "Критерий приёмки AC-8 / раздел 3.8 (SREQ-0011, SREQ-0019) нормализован в CREQ-B1-010 (GET /hello-world → 200 OK, текст «Hello World!»), но ни один кейс документа не ссылается на CREQ-B1-010: document_index.case_ids = TC-B1-001…010, TC-B1-012, все они в этой части, и в их requirement_ids CREQ-B1-010 отсутствует. Нарушено правило контракта: каждое поведенческое каноническое условие должно быть прослежено к действиям и assertions кейса или к явному manual/blocker-пробелу; отброшенный критерий приёмки."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 1,
+    "WARNING": 3,
+    "BLOCKING": 9
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [
+    {
+      "path": "/test_cases/6/management/components/0",
+      "related_ids": [
+        "TC-B1-007",
+        "CREQ-B1-006",
+        "SREQ-0008"
+      ],
+      "after": "StudentController"
+    },
+    {
+      "path": "/test_cases/6/management/components/0",
+      "related_ids": [
+        "TC-B1-007"
+      ],
+      "after": "StudentController"
+    }
+  ],
+  "lint_dispositions": [],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324250.5935414,
+        "accepted": false,
+        "codes": [
+          "REVIEW_CHECK_SCOPE"
+        ]
+      },
+      {
+        "at": 1791324277.4675474,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [
+      {
+        "at": 1791324168.8014262,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}
