@@ -631,6 +631,56 @@ def test_r13_posix_proof_covers_a_daemon_that_left_the_process_group(tmp_path):
                 pass
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # access denied: alive but foreign; anything else: gone
+    try:
+        code = ctypes.c_ulong()
+        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object stop path")
+def test_r13_windows_job_stop_covers_a_detached_grandchild(tmp_path):
+    """A detached grandchild (the Gradle daemon pattern on Windows) dies with the job."""
+    from tools.run_tests import run_subprocess
+
+    pid_file = tmp_path / "grandchild.pid"
+    grandchild = tmp_path / "grandchild.py"
+    grandchild.write_text(
+        f"import os, time\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(120)\n", encoding="utf-8",
+    )
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, {str(grandchild)!r}], "
+        "creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    outcome = run_subprocess([sys.executable, str(child)], tmp_path, timeout=3)
+    try:
+        assert outcome.kind == "TIMEOUT"
+        assert pid_file.is_file(), "the grandchild must have started before the timeout"
+        grandchild_pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 2
+        while _windows_pid_alive(grandchild_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not _windows_pid_alive(grandchild_pid), "a process of the launched scope outlived the stop"
+        assert (outcome.process_scope_stopped, outcome.stop_proof) == (True, "WINDOWS_JOB_TERMINATED")
+    finally:
+        if pid_file.is_file():
+            subprocess.run(
+                ["taskkill", "/PID", pid_file.read_text(), "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX stop path")
 def test_r13_posix_proof_is_withheld_when_the_scope_cannot_be_verified(tmp_path, monkeypatch):
     from tools import run_tests
@@ -788,7 +838,9 @@ def test_r13_windows_job_proof_is_a_valid_controller_stop_proof():
     assert consume_controller_process_stop_proof(payload) is False
 
 
-@pytest.mark.skipif(os.name == "nt", reason="uses the POSIX stop path of this host")
+HOST_STOP_PROOF = "WINDOWS_JOB_TERMINATED" if os.name == "nt" else "POSIX_PROCESS_GROUP"
+
+
 def test_r13_unknown_with_valid_proof_finalizes_and_allows_a_child_attempt(tmp_path, monkeypatch):
     from tools.pilot_state import derive_state
     from tools.run_tests import run_subprocess
@@ -802,7 +854,7 @@ def test_r13_unknown_with_valid_proof_finalizes_and_allows_a_child_attempt(tmp_p
 
     assert report["verdict"] == "UNKNOWN"
     assert _kinds(report) == ["TIMEOUT"]
-    assert report["process_evidence"][0]["stop_proof"] == "POSIX_PROCESS_GROUP"
+    assert report["process_evidence"][0]["stop_proof"] == HOST_STOP_PROOF
     finalized = run.finalize(report)
     events = [row["event_type"] for row in derive_state(run.run_root)["events"] if row.get("attempt_id") == run.attempt_id]
     assert "PROCESS_STOPPED" in events and events[-1] == "ATTEMPT_TERMINAL"
@@ -828,7 +880,13 @@ def test_m15_output_tail_keeps_64_kib_and_decodes_the_windows_console_code_page(
 
     lines = "".join(f"line {index:05d} of the build output\n" for index in range(1500))
     assert 40_000 < len(lines) < PROCESS_OUTPUT_TAIL_BYTES
-    outcome = run_subprocess([sys.executable, "-c", f"import sys; sys.stdout.write({lines!r})"], tmp_path, timeout=30)
+    # The text goes through a script file: a 48 KB ``-c`` argument exceeds the Windows
+    # command-line limit and the launch fails before anything is written.
+    script = tmp_path / "emit.py"
+    # Bytes, not text: a text-mode stdout on Windows would turn every LF into CRLF.
+    script.write_text(f"import sys; sys.stdout.buffer.write({lines.encode('utf-8')!r})", encoding="utf-8")
+    outcome = run_subprocess([sys.executable, str(script)], tmp_path, timeout=30)
+    assert (outcome.kind, outcome.exit_code) == ("EXIT", 0), (outcome.kind, outcome.exit_code, outcome.stderr)
     assert outcome.stdout == lines
     published = _canonical_runner_output(lines)
     assert published == lines.encode("utf-8")

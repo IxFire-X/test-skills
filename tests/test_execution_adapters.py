@@ -4,11 +4,19 @@ import os
 import pytest
 
 
+def _host_runtime(tmp_path: Path, adapter_id: str, runtime: str) -> Path:
+    """The file a logical ``.skillsrc`` runtime name resolves to on this host (``mvnw.cmd`` on Windows)."""
+    from tools.execution_adapters import runtime_candidates
+
+    return tmp_path / runtime_candidates(adapter_id, runtime)[0]
+
+
 def _module(tmp_path: Path, adapter_id: str, runtime: str) -> dict:
-    (tmp_path / runtime).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / runtime).write_text("runtime", encoding="utf-8")
+    host_runtime = _host_runtime(tmp_path, adapter_id, runtime)
+    host_runtime.parent.mkdir(parents=True, exist_ok=True)
+    host_runtime.write_text("runtime", encoding="utf-8")
     if os.name != "nt":
-        (tmp_path / runtime).chmod(0o755)
+        host_runtime.chmod(0o755)
     return {
         "module_root": str(tmp_path),
         "test": {
@@ -34,7 +42,7 @@ def test_closed_adapters_build_module_native_argv_only(tmp_path: Path, adapter_i
     request = build_request(adapter_id, _module(tmp_path, adapter_id, runtime), [{"selector": value} for value in selectors])
     assert request.adapter_id == adapter_id
     assert request.cwd == str(tmp_path.resolve())
-    assert request.executable == str((tmp_path / runtime).resolve())
+    assert request.executable == str(_host_runtime(tmp_path, adapter_id, runtime).resolve())
     assert request.selectors == selectors
     assert request.argv[0] == request.executable
     assert all(token not in {"|", ">", "<", "&&", ";"} for token in request.argv)

@@ -65,6 +65,7 @@
 - Сессия идёт в облачной Linux-среде без командной строки на Windows-машине. Репозиторий (вместе с `.git`) скопирован в облако, правки и адресные тесты выполняются там на Python 3.13.16, pytest 9.1.1, jsonschema 4.26.0. Изменённые файлы записываются обратно в `D:\AI-Projects\test-skills` в конце фазы.
 - Полный прогон на Windows запускается через управление компьютером (PowerShell, лог в файл) — решение пользователя от 2026-10-05.
 - PyPI в облаке закрыт: Python 3.11 и 3.12 в облаке не проверяются (нет `rpds-py`). 3.12 покрывается Windows-venv, 3.11 — только CI. Решение пользователя от 2026-10-05.
+- Сессия 2026-10-06 (F7) идёт прямо на Windows-машине из Claude Code: PowerShell, venv `D:\AI-Projects\.runtime\test-skills-venv` (Python 3.12.14, pytest 9.1.1, jsonschema 4.26.0), логи полных прогонов — вне репозитория (`D:\AI-Projects\windows-full-20261006.log`, `D:\AI-Projects\windows-ci-gate-20261006.log`).
 - В шести файлах рабочего дерева были окончания CRLF (`schemas/event.schema.json`, `schemas/model-request.schema.json`, `tests/test_reviewer_protocol.py`, `tools/orchestrate_test_case_revision.py`, `tools/pilot_state.py`, `tools/run_pipeline.py`). `.gitattributes` требует LF, поэтому затронутые файлы записываются с LF.
 
 ## Замеры
@@ -74,7 +75,7 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 | Что | До | После |
 | --- | --- | --- |
 | Полный сьют, Linux (два шарда параллельно) | 1 ч 18 мин одним процессом (из ревью); первый шард старого кода — 20 мин 45 с, 3 падения | 700 passed, 1 skipped; шарды 2 мин 39 с и 7 мин 40 с, по часам 7 мин 40 с. Одним процессом через `tools.ci_gate`: 9 мин 30 с, код 0 |
-| Полный сьют, Windows, Python 3.12 | 1 ч 44 мин (лог пользователя `reliability-full-20261005-r2`) | см. F7 |
+| Полный сьют, Windows, Python 3.12 | 1 ч 44 мин (лог пользователя `reliability-full-20261005-r2`) | 26 мин 44 с одним процессом на `a5c735a` (4 падения тестов под POSIX, см. F7); после правок через `tools.ci_gate`: 697 passed, 5 skipped, 26 мин 23 с, код 0 |
 | 400 событий подряд в один журнал | 62,3 с | 6,3 с |
 | Запись одного события при 400 событиях в журнале | 279 мс | 19 мс |
 | `derive_state` при 400 событиях | 353 мс | 11 мс |
@@ -91,12 +92,12 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 - [x] F3 `test_pipeline_acceptance.py::test_release_loader_uses_controller_owned_terminal_retry_receipt` — **fixed**: фикстура `complete_review_parts` давала ревьюеру автотестов model_id ревьюера кейсов; исправлена фикстура.
 - [x] F4 `test_release_eval_policy.py::test_retained_native_rerun_observation_is_produced_by_public_controller` — **fixed**: проходит на текущем дереве (тот же корень, что F2).
 - [x] F5 `test_schema_closed_world.py` — 2 теста (ждут 1.0.0, схемы 2.0.0) — **fixed**: ожидаемая версия схемы берётся из `contracts/pipeline.json` (`target_version`), а не из литерала 1.0.0.
-- [x] F6 `test_run_and_module_reparse_components_never_escape` — вывод `cmd.exe mklink` читается как UTF-8 — **fixed**: вывод `mklink` читается байтами (`tests/helpers.py::make_junction`). Тест: `tests/test_pilot_state.py::test_junction_helper_survives_console_output_in_the_oem_code_page`. На Windows ещё не запускалось.
-- [ ] F7 Полный прогон на Windows и классификация падений
+- [x] F6 `test_run_and_module_reparse_components_never_escape` — вывод `cmd.exe mklink` читается как UTF-8 — **fixed**: вывод `mklink` читается байтами (`tests/helpers.py::make_junction`). Тест: `tests/test_pilot_state.py::test_junction_helper_survives_console_output_in_the_oem_code_page`. На Windows прошёл вместе с настоящими junction-тестами `test_pilot_state.py` (F7).
+- [x] F7 Полный прогон на Windows и классификация падений — **fixed**: прогон 2026-10-06 на коммите `a5c735a` (Python 3.12.14): 4 падения, 691 прошёл, 6 пропущено за 26 мин 44 с. Все четыре — тесты под POSIX, не код пакета: `test_execution_adapters.py` (3 теста: фикстура создавала `mvnw`/`gradlew`, а на Windows ищется `mvnw.cmd`/`gradlew.bat`) и `test_m15_output_tail_*` (48 КБ через `python -c` → `WinError 206`, лимит командной строки; плюс CRLF текстового stdout). Исправлены фикстуры; добавлен Windows-тест Job Object с отсоединённым внуком, тест дочерней попытки после UNKNOWN снят со skip на Windows. После правок `tools.ci_gate`: 697 прошли, 5 пропущено (POSIX-only и symlink-тесты), 26 мин 23 с, код 0. Тесты: `tests/test_execution_adapters.py`, `tests/test_review_fixes_execution.py::test_m15_*`, `::test_r13_windows_job_stop_covers_a_detached_grandchild`, `::test_r13_unknown_with_valid_proof_*`.
 
 ## Фаза 2. Баги высокой критичности
 
-- [x] B1 Чтение статуса удаляет чужое событие (`pilot_state._events`) — **fixed**: межпроцессная блокировка `.pilot-runs/<run>/.lock` (fcntl.flock / msvcrt.locking, реентерабельная, ожидание до 120 с); читатели не удаляют pending-маркеры, восстановление — только у писателя под блокировкой. Windows-ветка блокировки не исполнялась. Тест: `tests/test_review_fixes_state.py::test_b1_*` (5 тестов, 3 межпроцессных).
+- [x] B1 Чтение статуса удаляет чужое событие (`pilot_state._events`) — **fixed**: межпроцессная блокировка `.pilot-runs/<run>/.lock` (fcntl.flock / msvcrt.locking, реентерабельная, ожидание до 120 с); читатели не удаляют pending-маркеры, восстановление — только у писателя под блокировкой. Windows-ветка (`msvcrt.locking`) исполнена на Windows: три межпроцессных теста прошли (F7). Тест: `tests/test_review_fixes_state.py::test_b1_*` (5 тестов, 3 межпроцессных).
 - [x] B2 Второй писатель оставляет pending-маркер (`_PublicationUnknown`) — **fixed**: писатель, обнаруживший чужое изменение журнала, снимает свой маркер перед `_PublicationUnknown`; маркер после сбоя уже совершённого коммита сохраняется как доказательство (как и раньше). Тест: `test_review_fixes_state.py::test_b2_*`.
 - [x] B3 Побочные файлы сборки превращают PASS в UNKNOWN (дрейф, `.gitignore`) — **fixed**: инвентарь через `git ls-files -co --exclude-standard` с откатом на обход ФС, новые исключения по умолчанию; дрейф после старта — только изменённые/удалённые входы baseline. Тесты: `test_review_fixes_specs.py::test_b3_*`, `test_review_fixes_execution.py::test_b3_*`.
 - [x] B4 Некомпилируемый тест остаётся в проекте (шлюз компиляции/сбора) — **fixed**: шлюз (pytest --collect-only / test-compile / testClasses) после `EXECUTION_STARTED`; провал → `NOT_RUNNABLE/GENERATED_TEST_INVALID`, очистка, вывод в run root; ошибка компиляции в основном запуске → `NOT_RUNNABLE`. Ревизия r2: попытка запускает проект один раз, поэтому исправленная ревизия генерируется в дочерней попытке с `retry_reason=GENERATED_TEST_INVALID`; `create_attempt` разрешает её один раз, если родитель не потратил r2 в статическом ревью и сам не является такой дочерней (решение вне зафиксированных: r2 реализована дочерней попыткой, а не внутри той же). Maven/Gradle-шлюз проверен только на argv. Тесты: `tests/test_review_fixes_execution.py::test_b4_*`, `tests/test_review_fixes_state.py::test_b4_*`.
@@ -112,7 +113,7 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 Сопутствующие зафиксированные решения (закрываются вместе с пунктами M):
 
 - [x] R12 Exit-коды cases-only (FATAL / `FINALIZATION_INVALID` / невалидный trace / `operational_reliable=false` → 2), параметр `controller_error` — **fixed**: cases-only: FATAL / `FINALIZATION_INVALID` / невалидный trace / `operational_reliable=false` → exit 2, валидный терминал → exit 1; в контракт добавлено правило `cases_only_fatal_invalid_closure_or_unreliable_evidence`; параметр `controller_error` работает и соответствует контракту (ревью назвало его неиспользуемым: его не передаёт ни один вызывающий, но сигнатура закреплена в `runtime_signatures`). Тест: `tests/test_review_fixes_state.py::test_r12_*`.
-- [x] R13 Остановка процессов: Windows Job Object, POSIX-проверка группы, дочерняя попытка после `UNKNOWN` с proof — **fixed**: Windows Job Object (`WINDOWS_JOB_TERMINATED`), POSIX — проверка группы и ушедших через setsid; дочерняя попытка после UNKNOWN с proof. ctypes-ветка на Windows НЕ исполнялась. Тест: `test_review_fixes_execution.py::test_r13_*`.
+- [x] R13 Остановка процессов: Windows Job Object, POSIX-проверка группы, дочерняя попытка после `UNKNOWN` с proof — **fixed**: Windows Job Object (`WINDOWS_JOB_TERMINATED`), POSIX — проверка группы и ушедших через setsid; дочерняя попытка после UNKNOWN с proof. ctypes-ветка исполнена на Windows (F7): настоящий таймаут даёт `WINDOWS_JOB_TERMINATED`, отсоединённый внук (`DETACHED_PROCESS`) умирает вместе с Job Object — новый тест `test_r13_windows_job_stop_covers_a_detached_grandchild`; тест дочерней попытки после UNKNOWN больше не пропускается на Windows (`HOST_STOP_PROOF`). Тест: `test_review_fixes_execution.py::test_r13_*`.
 
 ## Фаза 3. Средние и низкие баги
 
@@ -122,7 +123,7 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 - [x] M02 Прерванный `create_attempt` оставляет незафиксированный файл попытки — **fixed**: откат файла попытки и при `KeyboardInterrupt`/`SystemExit`; читатель пропускает ровно одну запечатанную незафиксированную попытку, не удаляя её. Тест: `tests/test_review_fixes_state.py::test_m02_*`.
 - [x] M03 Дедупликация событий игнорирует позицию — **fixed**: повтор `WAITING_*` идемпотентен только пока попытка в этом состоянии; после прогресса записывается новое событие (решение: правка ограничена событиями ожидания, остальная дедупликация по содержимому сохранена). Тест: `tests/test_review_fixes_state.py::test_m03_*`.
 - [x] M04 Нет fsync каталогов — **fixed**: fsync родительского каталога после create/replace/unlink на POSIX (`confined_output._sync_parent_directory`). Тест: `test_review_fixes_state.py::test_m04_*`.
-- [x] M05 Windows: замена журнала без повтора; длинный временный путь (MAX_PATH) — **fixed**: повтор замены при `PermissionError` (5 попыток, 20–400 мс); временные имена `.<12hex>.tmp` не длиннее целевых. На Windows не исполнялось. Тест: `test_review_fixes_state.py::test_m05_*`.
+- [x] M05 Windows: замена журнала без повтора; длинный временный путь (MAX_PATH) — **fixed**: повтор замены при `PermissionError` (5 попыток, 20–400 мс); временные имена `.<12hex>.tmp` не длиннее целевых. На Windows исполнено (F7): тесты M05 прошли с настоящей политикой повтора. Тест: `test_review_fixes_state.py::test_m05_*`.
 - [x] M06 `_validate_authorization`: `KeyError` вместо `ValueError`; конфликт содержимого как «unsafe path» — **fixed**: неполная авторизация → `ValueError`; конфликт содержимого → «already exists with different content» (`OutputConflictError`). Тест: `tests/test_review_fixes_state.py::test_m06_*`.
 - [x] M07 `git` отсутствует в PATH → `FileNotFoundError`; вызов без таймаута и с `safe.directory` — **fixed**: `git status` с таймаутом 120 с, без `safe.directory`; отсутствие git → `ValueError` «project Git state is unavailable». Тест: `tests/test_review_fixes_state.py::test_m07_*`.
 - [x] M08 terminal-result, closure и disposition не проверяются схемой при повторном чтении — **fixed**: `_read_artifact` проверяет схемой тот же набор, что и публикация (terminal result, closure, disposition). Тест: `tests/test_review_fixes_state.py::test_m08_*`.
@@ -162,7 +163,7 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 
 Конфигурация и инструменты
 
-- [x] M33 `.skillsrc` привязан к ОС — **fixed**: `.skillsrc` хранит логические имена `python`/`mvnw`/`gradlew`/`mvn`, путь разрешается при запуске; старые пути читаются. Windows-раскладка покрыта только чистой функцией. Тест: `test_review_fixes_adapters.py::test_logical_*`, `test_legacy_*`.
+- [x] M33 `.skillsrc` привязан к ОС — **fixed**: `.skillsrc` хранит логические имена `python`/`mvnw`/`gradlew`/`mvn`, путь разрешается при запуске; старые пути читаются. Windows-раскладка проверена на Windows через адаптеры: `tests/test_execution_adapters.py` создаёт `mvnw.cmd`/`gradlew.bat` по `runtime_candidates` (F7). Тест: `test_review_fixes_adapters.py::test_logical_*`, `test_legacy_*`.
 - [x] M34 Создание `.skillsrc` без эксклюзивного создания; слияние/миграция v2 недостижимы — **fixed**: эксклюзивное создание `.skillsrc`; мёртвый код слияния/миграции v2 удалён. Тест: `tests/test_review_fixes_specs.py::test_m34_*`.
 - [x] M35 `orchestrate_test_case_revision` скрывает сообщения argparse — **fixed**: сообщение argparse в `diagnostics[0].message` и stderr, exit 2. Тест: `test_review_fixes_adapters.py::test_orchestration_cli_*`.
 - [x] M36 `ci_gate` без pytest возвращает 1 вместо 2; дочерние процессы без таймаута — **fixed**: без pytest и при таймауте exit 2; таймауты дочерних процессов. Тест: `test_review_fixes_adapters.py::test_ci_gate_*`.
@@ -220,7 +221,7 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 - T01 отложен: размер машинной модели шага — следствие общего canonical (A3 вне объёма).
 - M19: `company_runner.py` приведён к валидатору, но остаётся неподключённым. Удалять или подключать — решение пользователя.
 - `evidence_pairs` удалён из контракта и схемы: поле нигде не читалось.
-- R13/M11: Job Object на Windows сделан через `ctypes`; ветка покрыта тестами с подменой, на Windows не выполнялась.
+- R13/M11: Job Object на Windows сделан через `ctypes`; ветка покрыта тестами с подменой и, с 2026-10-06, настоящими процессами на Windows (таймаут, отсоединённый внук, дочерняя попытка после UNKNOWN).
 - Фаза 5: документы приведены к коду, а не наоборот. D01 — описаны сессии ревью по частям и состояния `EVIDENCE_*`; D02 — r2 строит controller из исправлений; D03 — envelope генератора; D04 — run создаёт `scan`; D05 — перечислено, у каких шагов есть команда; D06 — retry только при доказанной остановке процессов; D07 — перечислены все места записи; D08 — системный `mvn` разрешён закрытым адаптером; D09 — порядок `SREQ`; D10 — Python 3.11–3.13; D11 — оговорка у примера Petclinic.
 - A1: драйвер хранит рабочие файлы рядом с run (`<run_id>.driver/`), а не внутри него: каталог run остаётся только журналом и квитанциями. Драйвер продолжает только run, созданный его же `next`.
 - A1: порядок кейсов и требований задаёт модель (это содержание); `display_order`, порядок категорий, capabilities, блокеров и связей автоматизации расставляет код.
@@ -228,18 +229,19 @@ Linux: облачная машина, 2 ядра, Python 3.13.16. «До» — �
 - A1: для отказа статического ревью автотестов введены отдельные причины `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`, `AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED`: причины `REWORK` и `REVIEW_CONTEXT_LIMIT` по правилам результата относятся к ревью кейсов, которое в этой ветке принято.
 - A1: если хост не может дать ревьюеру свежий контекст, драйвер останавливается с `REVIEWER_ISOLATION_UNAVAILABLE` и не ведёт ревью, которое заведомо не будет принято как независимое.
 - A1: вопрос о дочерней попытке после `GENERATED_TEST_INVALID` задаётся пользователю, а не решается автоматически: попытка повторяет все вызовы модели.
-- F7: терминалы на компьютере пользователя доступны управлению только для кликов, без ввода текста. Обходить это ограничение запуском скрипта через Проводник не стал: команду полного прогона запускает пользователь, лог разбирается после.
+- F7 (2026-10-05): терминалы на компьютере пользователя доступны управлению только для кликов, без ввода текста. Обходить это ограничение запуском скрипта через Проводник не стал: команду полного прогона запускает пользователь, лог разбирается после.
+- F7 (2026-10-06): полный прогон запущен из Claude Code на Windows. Все четыре падения — тесты, написанные под POSIX, а не код пакета: (1) `test_execution_adapters.py` создавал файл `mvnw`/`gradlew`, тогда как `runtime_candidates` на Windows по правилу M33 ищет `mvnw.cmd`/`gradlew.bat` — фикстура создаёт host-специфичный файл; (2) `test_m15` передавал 48 КБ текста через `python -c` — на Windows это `WinError 206` (лимит командной строки 32 767 символов), `run_subprocess` честно вернул `OS_ERROR`; текст теперь идёт через файл скрипта и `sys.stdout.buffer`, потому что текстовый stdout на Windows превращает LF в CRLF. Код пакета не менялся. Добавлен Windows-тест Job Object с отсоединённым внуком; тест дочерней попытки после UNKNOWN теперь идёт и на Windows.
 
 Не проверено:
 
-- Windows: блокировка через `msvcrt`, повтор `os.replace`, Job Object, junction в тестах, драйвер — до полного прогона на Windows.
+- Windows: проверено полным прогоном 2026-10-06 (блокировка через `msvcrt`, повтор `os.replace`, Job Object с настоящими процессами, junction в тестах, драйвер на pytest-фикстуре). Не проверено на Windows: Maven/Gradle с реальными сборками.
 - Maven: только состав команды и разбор отчётов (Maven Central из облака закрыт). Gradle проверен офлайн на 8.14.3.
-- Python 3.11 и 3.12: только компиляция файлов на 3.11; тесты шли на 3.13.
+- Python 3.11: только компиляция файлов и CI. Python 3.12 проверен полным прогоном на Windows 2026-10-06, 3.13 — на Linux.
 - Драйвер на живой модели и на Java-проекте не запускался.
 
 ## Предлагаемые коммиты по фазам
 
-Коммиты не создавались. Предлагаемые сообщения (по одному на фазу):
+2026-10-06: по решению пользователя фазы 1–6 закоммичены одним коммитом `a5c735a` (`fix: close pipeline review findings and add deterministic driver`) в ветке `review-fixes-2026-10-05`; исправления по F7 — отдельным коммитом в той же ветке. Push и merge в `main` — только после разрешения пользователя. Ранее предлагавшиеся сообщения (по одному на фазу) сохранены для истории:
 
 1. `test: make the suite green on Linux and Windows (LF, junction helper, contract-driven versions)`
 2. `fix: run lock, journal recovery by writer only, compile/collect gate, drift and reason-phrase bugs (B1–B12, R12, R13)`

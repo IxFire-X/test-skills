@@ -314,7 +314,7 @@ SHA-256, readback и append-only защищают от порчи файлов, 
 
 Состояние на 2026-10-06. Подробности, замеры и принятые решения — в `docs/superpowers/plans/2026-10-05-review-fixes.md`.
 Колонка «Файл» называет основные изменённые модули области; у нескольких находок одной области она общая.
-Проверено на Linux, Python 3.13: 700 тестов прошли, 1 пропущен. На Windows полный прогон ещё не выполнен (F7).
+Проверено на Linux, Python 3.13: 700 тестов прошли, 1 пропущен. На Windows, Python 3.12.14 (2026-10-06): первый полный прогон дал 4 падения тестов, написанных под POSIX (F7); после правки фикстур `tools.ci_gate` — 697 прошли, 5 пропущено (POSIX-only и symlink-тесты), 26 мин 23 с, код 0.
 
 | ID | Статус | Тест | Файл |
 | --- | --- | --- | --- |
@@ -324,7 +324,7 @@ SHA-256, readback и append-only защищают от порчи файлов, 
 | F4 | исправлено | tests/test_release_eval_policy.py | см. B3 |
 | F5 | исправлено | tests/test_schema_closed_world.py | tests/test_schema_closed_world.py |
 | F6 | исправлено | tests/test_pilot_state.py | tests/helpers.py |
-| F7 | не закрыто | — | — |
+| F7 | исправлено | tests/test_execution_adapters.py, tests/test_review_fixes_execution.py | tests/test_execution_adapters.py, tests/test_review_fixes_execution.py |
 | B1 | исправлено | tests/test_review_fixes_state.py | tools/confined_output.py, tools/pilot_state.py |
 | B2 | исправлено | tests/test_review_fixes_state.py | tools/confined_output.py, tools/pilot_state.py |
 | B3 | исправлено | tests/test_review_fixes_execution.py, tests/test_review_fixes_specs.py | tools/automation_validation.py, tools/company_runner.py, tools/execution_adapters.py, tools/finalize_attempt.py, tools/generated_delta.py, tools/pilot_state.py, tools/project_inventory.py, tools/run_pipeline.py, tools/run_tests.py, tools/build_context.py, tools/discover_project.py, tools/init_skillsrc.py, tools/scan_project.py, tools/schema_validation.py, tools/skillsrc_manifest.py, tools/stack_catalog.py |
