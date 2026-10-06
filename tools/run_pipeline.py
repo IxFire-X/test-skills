@@ -444,6 +444,25 @@ def cmd_scan(args: Any) -> int:
     stopped = _skillsrc_receipt_exit(project, run_root, receipt)
     if stopped is not None:
         return stopped
+    return _scan_run(project, run_root, run, args)
+
+
+def resume_scan(args: Any, run_root: Path) -> int:
+    """Finish ``scan`` for a run that stopped on ``.skillsrc``, once the manifest exists.
+
+    The run keeps its ID: module selection, inventory, baseline, attempt and context
+    receipts are written into the run that asked the question.
+    """
+    from tools.pilot_state import read_run
+
+    project = Path(args.project).resolve()
+    if not (project / ".skillsrc").is_file():
+        raise HostStop("SKILLSRC_MISSING", ".skillsrc is still missing")
+    _read_skillsrc_binding(project / ".skillsrc")
+    return _scan_run(project, Path(run_root), read_run(run_root), args)
+
+
+def _scan_run(project: Path, run_root: Path, run: Mapping[str, Any], args: Any) -> int:
     scope: dict[str, Any] = {"module": None, "parent_files": None, "dependency_files": []}
     try:
         from tools.pilot_state import (

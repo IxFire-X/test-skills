@@ -284,14 +284,27 @@ def start_run(project: Path, options: Mapping[str, Any]) -> dict[str, Any]:
         payload = json.loads(buffer.getvalue())
     except json.JSONDecodeError:
         payload = {}
+    if code == 3 and payload.get("reason") == "needs_input" and payload.get("run_root"):
+        # .skillsrc needs a person: the run exists, so the question becomes an
+        # ask_user task and the same run continues after the answer.
+        run_root = Path(payload["run_root"])
+        _save_config(run_root, {**_start_config(project, run_root, options, payload), "scan_pending": True})
+        return advance(project, run_root)
     if code != 0 or payload.get("status") != "ok":
-        # exit 3 from scan means .skillsrc needs a human decision (needs_input / conflict)
         return {"action": "done", "result": {"status": "stopped" if code == 3 else "error", "stage": "scan", "exit_code": code if code else 2,
                                              **{key: payload.get(key) for key in ("reason", "detail", "message", "run_id", "stop_reason", "scope") if key in payload}}}
     run_root = Path(payload["run_root"])
-    snapshot = run_pipeline._docs_entries(project, docs)
-    config = {
-        "schema_version": "1.0.0", "profile": profile, "module_id": payload.get("module_id"), "target": options.get("target"),
+    _save_config(run_root, _start_config(project, run_root, options, payload))
+    return advance(project, run_root)
+
+
+def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    from tools import run_pipeline
+
+    snapshot = run_pipeline._docs_entries(project, list(options.get("docs") or []))
+    return {
+        "schema_version": "1.0.0", "profile": options.get("profile"), "module_id": payload.get("module_id"), "module_request": options.get("module"),
+        "target": options.get("target"),
         "docs": [row["path"] for row in snapshot],
         "subject": options.get("subject") or project.name, "document_id": options.get("document_id"),
         "author": options.get("author") or "pipeline-driver", "date": options.get("date") or date.today().isoformat(),
@@ -302,8 +315,60 @@ def start_run(project: Path, options: Mapping[str, Any]) -> dict[str, Any]:
         "review_reserve_bytes": int(options.get("review_reserve_bytes") or _DEFAULT_REVIEW_RESERVE_BYTES),
         "context_gaps": payload.get("context_gaps", []),
     }
+
+
+def _skillsrc_task(run_root: Path, question: Mapping[str, Any]) -> dict[str, Any]:
+    """One `.skillsrc` discovery question as an ask_user task of a run that has no attempt yet."""
+    question_id = str(question["id"])
+    task_id = f"{run_root.name[:8]}.ask.skillsrc.{re.sub(r'[^A-Za-z0-9._-]', '.', question_id)}"
+    options = [{"value": str(option["value"]), "label": str(option["value"]) + (f" ({', '.join(option['evidence'])})" if option.get("evidence") else "")}
+               for option in question.get("options", []) if isinstance(option, Mapping) and option.get("value") is not None]
+    # A source-root question is answered with a directory, not only with an offered option.
+    free_text = str(question.get("field", "")).endswith(".paths.source")
+    task = {"action": "ask_user", "task_id": task_id, "question": f"{question.get('impact') or 'Нужен ответ для .skillsrc'} — поле `{question.get('field')}`.",
+            "options": options, "free_text": free_text, "skillsrc_question_id": question_id, "run_id": run_root.name, "attempt_id": None}
+    _write_json(_task_path(run_root, task_id), task)
+    return task
+
+
+def _skillsrc_step(project: Path, run_root: Path, config: dict[str, Any]) -> dict[str, Any] | None:
+    """Ask the open `.skillsrc` question, or write the manifest and finish ``scan`` in this run."""
+    from tools import run_pipeline
+    from tools.init_skillsrc import ensure_skillsrc
+
+    answers = dict(config.get("skillsrc_answers") or {})
+    if not (project / ".skillsrc").is_file():
+        receipt = ensure_skillsrc(project, answers, write=True)
+        status = receipt.get("status")
+        if status == "needs_input":
+            question = next((item for item in receipt.get("questions", []) if isinstance(item, Mapping) and item.get("id") not in answers), None)
+            if question is not None:
+                return _skillsrc_task(run_root, question)
+            return _done(run_root, {"status": "error", "stage": "skillsrc", "exit_code": 2, "reason": "SKILLSRC_ANSWERS_INSUFFICIENT", "run_id": run_root.name})
+        if status not in {"created", "updated", "unchanged"}:
+            return _done(run_root, {"status": "error", "stage": "skillsrc", "exit_code": 2, "reason": status or "error", "errors": list(receipt.get("errors") or []),
+                                    "run_id": run_root.name})
+    arguments = SimpleNamespace(project=str(project), profile=config["profile"], docs=list(config["docs"]), module=config.get("module_request"), target=config.get("target"))
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            code = run_pipeline.resume_scan(arguments, run_root)
+    except Exception as error:  # the same stops the `scan` command line reports as exit 2
+        from tools.skillsrc_manifest import SkillsrcError
+
+        if not isinstance(error, (run_pipeline.HostStop, SkillsrcError, RuntimeError, FileNotFoundError, ValueError)):
+            raise
+        return _done(run_root, {"status": "error", "stage": "scan", "exit_code": 2, "reason": getattr(error, "code", None) or type(error).__name__, "message": str(error)})
+    try:
+        payload = json.loads(buffer.getvalue())
+    except json.JSONDecodeError:
+        payload = {}
+    if code != 0 or payload.get("status") != "ok":
+        return _done(run_root, {"status": "error", "stage": "scan", "exit_code": code if code else 2,
+                                **{key: payload.get(key) for key in ("reason", "detail", "message", "stop_reason", "scope") if key in payload}})
+    config.update({"module_id": payload.get("module_id"), "context_gaps": payload.get("context_gaps", []), "scan_pending": False})
     _save_config(run_root, config)
-    return advance(project, run_root)
+    return None
 
 
 # --------------------------------------------------------------------------------------
@@ -795,6 +860,10 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
 
     project = Path(project).resolve()
     config = _config(run_root)
+    if config.get("scan_pending"):
+        waiting = _skillsrc_step(project, run_root, config)
+        if waiting is not None:
+            return waiting
     attempt = _attempt(run_root)
     attempt_id = str(attempt["attempt_id"])
     if attempt["state"] == "TERMINAL":
@@ -875,6 +944,15 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
         raise DriverError("DRIVER_INPUT", "unknown task id")
     task = dict(_read_json(path))
     config = _config(run_root)
+    if task.get("skillsrc_question_id") is not None:
+        allowed = [option["value"] for option in task["options"]]
+        if answer is None or (answer not in allowed and not (task.get("free_text") and answer.strip())):
+            raise DriverError("DRIVER_INPUT", f"--answer must be one of: {', '.join(allowed)}" + (" or a source directory" if task.get("free_text") else ""))
+        answers = config.setdefault("skillsrc_answers", {})
+        if task["skillsrc_question_id"] not in answers:  # already answered: submit is idempotent
+            answers[task["skillsrc_question_id"]] = answer
+            _save_config(run_root, config)
+        return advance(project, run_root)
     attempt = _attempt(run_root)
     if task.get("attempt_id") != attempt["attempt_id"]:
         return advance(project, run_root)

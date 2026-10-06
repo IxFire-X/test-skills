@@ -175,6 +175,10 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 
 Вопросы `ask_user`:
 
+- `skillsrc.<вопрос>` — в проекте нет `.skillsrc`, и обнаружение не может выбрать
+  значение само (например, `module:root:test.framework`). Прогон уже создан; после
+  ответа драйвер пишет `.skillsrc` и продолжает тот же `run_id`. Если `free_text: true`
+  (вопрос о каталоге исходников), ответом может быть путь каталога внутри модуля;
 - `reviewer-isolation` — может ли хост выполнять каждую часть ревью в свежем
   изолированном контексте. При ответе `none` драйвер останавливается с
   `REVIEWER_ISOLATION_UNAVAILABLE`: кандидат остаётся `UNREVIEWED`. Вопрос не задаётся,
