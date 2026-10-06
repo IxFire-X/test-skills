@@ -72,7 +72,7 @@ def resolve_check(plan: Mapping[str, Any], check: Mapping[str, Any]) -> dict[str
     check given by ``scope_ids`` alone normalizes to itself, so earlier check
     digests (and the scope IDs derived from them) stay the same.
     """
-    base = [scope for part in plan["parts"] for scope in part["scopes"]]
+    base = base_scopes(plan)
     known = {scope["scope_id"] for scope in base}
     scope_ids = list(check.get("scope_ids") or [])
     if any(scope_id not in known for scope_id in scope_ids):
@@ -130,14 +130,76 @@ def _part(plan: Mapping[str, Any], scopes: list, index: int, requested_check: st
     return part
 
 
-def build_review_plan(snapshot: Mapping[str, Any], scopes: Sequence[Mapping[str, Any]], *, input_byte_budget: int) -> dict[str, Any]:
-    """Pack already bound scopes in stable order; an oversized scope stays explicit."""
+def base_scopes(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Every scope of the plan: the ones packed into parts and the ones carried from r1."""
+    return [*(scope for part in plan["parts"] for scope in part["scopes"]), *(row["scope"] for row in plan.get("carried", []))]
+
+
+def scope_fingerprint(scope: Mapping[str, Any]) -> str:
+    """Identity of what a reviewer sees in a scope, without the digest of the whole parent document.
+
+    A revision changes the document digest every input carries, so carrying coverage
+    compares the exact pointers, ranges and bytes instead.
+    """
+    return review_digest({"kind": scope["kind"], "targets": scope["targets"], "question": scope.get("question"),
+                          "inputs": [{key: item[key] for key in ("pointer", "start", "end", "content")} for item in scope["inputs"]]})
+
+
+def _scope_ids(scope: Mapping[str, Any]) -> set[str]:
+    """Targets plus the case, requirement and capability IDs of the whole objects a scope carries."""
+    ids = set(scope["targets"])
+    for item in scope["inputs"]:
+        if item["start"] is None and item["pointer"]:
+            try:
+                value = json.loads(item["content"])
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                ids.update(value[key] for key in ("case_id", "requirement_id", "source_requirement_id", "capability_id") if isinstance(value.get(key), str))
+    return ids
+
+
+def carry_scopes(scopes: Sequence[Mapping[str, Any]], parent_plan: Mapping[str, Any], parent_aggregate: Mapping[str, Any], *,
+                 from_attempt_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split the scopes of a rework revision into those to review and those whose r1 coverage carries over.
+
+    A scope carries when r1 had a scope with the same ID and fingerprint, r1 checked it,
+    and no BLOCKING r1 finding names any of its cases, requirements or capabilities
+    (an unchanged case the rejection was about is reviewed again).  When nothing
+    would be sent the whole revision is reviewed.
+    """
+    parent = {scope["scope_id"]: scope for scope in base_scopes(parent_plan)}
+    checked = set(parent_aggregate["checked_scope_ids"])
+    blocking = {identifier for finding in parent_aggregate["findings"] if finding["severity"] == "BLOCKING" for identifier in finding["related_ids"]}
+    sent, carried = [], []
+    for scope in scopes:
+        before = parent.get(scope["scope_id"])
+        fingerprint = scope_fingerprint(scope)
+        if before is not None and scope["scope_id"] in checked and scope_fingerprint(before) == fingerprint and not _scope_ids(scope) & blocking:
+            carried.append({"scope": copy.deepcopy(dict(scope)), "fingerprint": fingerprint, "from_attempt_id": from_attempt_id, "from_plan_digest": parent_plan["digest"]})
+        else:
+            sent.append(dict(scope))
+    if not sent:
+        return [dict(scope) for scope in scopes], []
+    return sent, carried
+
+
+def build_review_plan(snapshot: Mapping[str, Any], scopes: Sequence[Mapping[str, Any]], *, input_byte_budget: int,
+                      carried: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """Pack already bound scopes in stable order; an oversized scope stays explicit.
+
+    ``carried`` scopes keep their r1 coverage (see ``carry_scopes``): they are part of
+    the plan's ownership but are never sent to a reviewer.
+    """
     plan = {"schema_version": "1.0.0", "snapshot": copy.deepcopy(dict(snapshot)),
             "input_byte_budget": input_byte_budget, "parts": [], "digest": "sha256:" + "0" * 64}
-    if not scopes or {scope.get("kind") for scope in scopes} != {"source", "local", "cross"}:
+    every = [*scopes, *(row["scope"] for row in carried)]
+    if not scopes or {scope.get("kind") for scope in every} != {"source", "local", "cross"}:
         raise ValueError("review requires original-source, local and cross scopes")
-    if len({scope.get("scope_id") for scope in scopes}) != len(scopes):
+    if len({scope.get("scope_id") for scope in every}) != len(every):
         raise ValueError("review scope ownership must be unique")
+    if carried:
+        plan["carried"] = copy.deepcopy([dict(row) for row in carried])
     current: list = []
     for scope in scopes:
         proposed = _part(plan, [*current, scope], len(plan["parts"]) + 1)
@@ -183,10 +245,11 @@ def _validate_review_plan(plan: Mapping[str, Any]) -> list[dict[str, str]]:
     rows = schema_diagnostics({**base, "parts": parts}, ROOT / "schemas/review-plan.schema.json", ROOT)
     if rows:
         return rows
-    scopes = [scope for part in parts for scope in part["scopes"]]
+    scopes = [scope for part in parts for scope in part["scopes"]] + [row["scope"] for row in base.get("carried", [])]
     if ([part["part_id"] for part in parts] != [f"part-{index:06d}" for index in range(1, len(parts) + 1)]
             or len({scope["scope_id"] for scope in scopes}) != len(scopes)
-            or {scope["kind"] for scope in scopes} != {"source", "local", "cross"}):
+            or {scope["kind"] for scope in scopes} != {"source", "local", "cross"}
+            or any(row["fingerprint"] != scope_fingerprint(row["scope"]) for row in base.get("carried", []))):
         rows.extend(_rows("REVIEW_PLAN_OWNERSHIP"))
     for part in parts:
         expected = _part(base, part["scopes"], int(part["part_id"].split("-")[1]), part["requested_check"])
@@ -325,7 +388,7 @@ def _correction_checks(plan: Mapping[str, Any], proposed: Sequence[Mapping[str, 
 
 
 def _check_part(plan: Mapping[str, Any], check: Mapping[str, Any], index: int) -> dict:
-    scopes = {scope["scope_id"]: scope for part in plan["parts"] for scope in part["scopes"]}
+    scopes = {scope["scope_id"]: scope for scope in base_scopes(plan)}
     inputs, targets = [], []
     for scope_id in check["scope_ids"]:
         for item in scopes[scope_id]["inputs"]:
@@ -380,6 +443,10 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
             check = requested.get(part["requested_check"])
             if check is None or part != _check_part(plan, check, index):
                 diagnostics.extend(_rows("REVIEW_ADDITION_BINDING", part["part_id"]))
+    # Scopes carried from r1 keep their checked coverage (identical inputs, no blocking finding).
+    carried = [{key: row[key] for key in ("fingerprint", "from_attempt_id", "from_plan_digest")} | {"scope_id": row["scope"]["scope_id"]}
+               for row in plan.get("carried", [])]
+    checked.extend(row["scope_id"] for row in carried)
     # A scope left UNCHECKED because its envelope lacked evidence is answered by the
     # check parts its own answer requested.  When every such part came back CHECKED,
     # the early UNCHECKED is closed and the link is kept in the aggregate.
@@ -410,6 +477,8 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
     if resolved:
         # Present only when something was resolved: earlier aggregates recompute byte for byte.
         aggregate["resolved_unchecked"] = resolved
+    if carried:
+        aggregate["carried"] = carried
     return aggregate
 
 

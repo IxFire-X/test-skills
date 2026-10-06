@@ -42,6 +42,9 @@ Version: `4.0`
 - coverage `original_source, local, cross_part`; aggregation `controller`; incomplete `never_accepted`
 - terminal pre-verdict abort verdicts `0`
 - forbidden: `shared_growing_context, hierarchical_reviewers, multiple_authoritative_aggregates`
+- rework: at most `1` per run as a `CANONICAL_REWORK` child attempt after `authoritative_verdict_rejected`
+- rework generator: input `canonical_r1, findings_blocking_warning, affected_case_ids`; output `changed_test_cases_only`; successor `canonical_r2_parent_sha256_r1`
+- rework review: `new_session_incremental_carry_identical_checked_inputs`; never reworked: `unchecked_scope, pre_verdict_abort`; after r2 rejected: `terminal_rework`
 
 ## Physical lifecycle
 

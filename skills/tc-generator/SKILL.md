@@ -37,6 +37,17 @@ Use equivalence classes and boundary values for input rules, feasible decision-r
 combinations for interacting conditions, and transitions for stateful behavior when
 applicable. These guide selection within the authorized scope, not mandatory extra cases.
 
+## Rework mode
+
+A task with `rework: true` follows a REJECTED canonical review. Its first input is the
+brief: `findings` (BLOCKING and WARNING only), `affected_case_ids` and the batch's
+`r1_cases`; the second is the whole r1 document. Fix what the findings name, then return
+only `test_cases` with every changed case in full: keep its `case_id` (and the IDs of
+unchanged steps, inputs and assertions where they still apply); a new case uses the
+brief's `id_prefixes`. Do not return unchanged cases, requirements, mappings or
+capabilities: the controller keeps them from r1 and builds canonical r2 with
+`parent_sha256` of r1. There is one rework per run.
+
 ## Projection rule
 
 JSON is the sole machine source. The standalone HTML preview takes human wording from `action`, `test_data`, and `expectations[].text`, and uses structured literal path/query inputs only to resolve the displayed URL in its three-column table `Шаг`, `Тестовые данные / запрос`, `Ожидаемый результат`. Machine outputs/assertions and binding expressions remain available to automation but never render in those cells. A non-literal path/query value is shown as a readable placeholder such as `<ownerId из шага 1>` or `<переменная окружения X>`. HTML preview and Zephyr CSV are human/export projections: they are never automation inputs and no second editable semantic copy exists. The default CSV profile is `zephyr-scale-step-row-24-v5`, which carries only the human fields (the action with the resolved URL, `test_data` and the expectation text); v4 is produced only on an explicit `--csv-profile zephyr-scale-step-row-24-v4`.

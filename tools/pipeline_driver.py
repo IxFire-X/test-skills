@@ -419,7 +419,12 @@ def _context_marker_task(project: Path, run_root: Path, attempt: Mapping[str, An
     stage = "context-marker:baseline"
     baseline, _inventory = _baseline_and_inventory(run_root, attempt)
     receipts = _context_receipts(run_root, attempt_id)
+    rework = _rework_of(config, attempt)
     draft = _context_draft(project, run_root, config)
+    if rework is not None:
+        parent_marker = _marker_artifact(run_root, rework["parent_attempt_id"])
+        if parent_marker is not None:
+            draft = dict(parent_marker["artifact"])
     draft_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-draft.json", draft)
     inputs = [draft_path, *_context_inputs(project, run_root, attempt)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
@@ -429,9 +434,11 @@ def _context_marker_task(project: Path, run_root: Path, attempt: Mapping[str, An
     return _llm_task(
         run_root, attempt_id, "context-marker", stage=stage, skill="context-marker", inputs=inputs, schema=schema,
         instructions=("Первый файл — готовый черновик ответа: требования уже нормализованы кодом, их нельзя менять, удалять или переставлять. "
-                      "Дополни `artifacts.source_code_and_diff.sources` наблюдениями по коду и `warnings` пробелами требований "
+                      + ("Это доработка после отклонённого ревью: черновик — ответ прошлой попытки; если код и требования не менялись, сохрани его без изменений. "
+                         if rework is not None else "")
+                      + "Дополни `artifacts.source_code_and_diff.sources` наблюдениями по коду и `warnings` пробелами требований "
                       "(каждая строка в виде «источник — наблюдение») и сохрани весь объект в output_path."),
-        extra={"draft_path": str(draft_path)},
+        extra={"draft_path": str(draft_path), **({"rework": True} if rework is not None else {})},
     )
 
 
@@ -463,11 +470,14 @@ def _marker_artifact(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
 # batches and generation
 # --------------------------------------------------------------------------------------
 
-def _header(project: Path, run_root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
+def _header(project: Path, run_root: Path, config: Mapping[str, Any], attempt: Mapping[str, Any] | None = None) -> dict[str, Any]:
     slug = re.sub(r"[^a-z0-9]+", "-", str(config.get("document_id") or project.name).lower()).strip("-") or "project"
     document_id = config.get("document_id") or f"TCDOC-{slug}-{run_root.name[:8]}"
+    # A rework attempt produces canonical r2 of the rejected r1.
+    rework = _rework_of(config, attempt)
     return {
-        "schema_version": "1.0.0", "document_id": document_id, "revision": 1, "parent_sha256": None, "content_locale": "ru-RU",
+        "schema_version": "1.0.0", "document_id": document_id, "revision": 1 if rework is None else 2,
+        "parent_sha256": None if rework is None else rework["r1_sha256"], "content_locale": "ru-RU",
         "metadata": {"subject": {"kind": "generic", "name": str(config["subject"])}, "documentation": list(config["docs"]),
                      "project": project.name, "author": str(config["author"]), "date": str(config["date"])},
     }
@@ -477,7 +487,7 @@ def _plan(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Map
     """Deterministic batch plan: one batch unless the configuration proves independent groups."""
     from tools.batch_assembly import plan_batches
 
-    header = _header(project, run_root, config)
+    header = _header(project, run_root, config, attempt)
     context = _generation_context(project, run_root, attempt)
     requirements = marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"]
     plan = plan_batches(requirements, {"header_digest": _sha(header), "context_receipt_digest": context["digest"]})
@@ -610,10 +620,15 @@ def _submit_generator(project: Path, run_root: Path, attempt: Mapping[str, Any],
     batch = next((item for item in plan["batches"] if item["batch_id"] == task.get("batch_id")), None)
     if batch is None:
         raise DriverError("DRIVER_STATE", "the task batch is not in the current plan")
-    unknown = sorted(set(value) - {"requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics"})
+    rework = _rework_of(config, attempt)
+    allowed = {"test_cases", "diagnostics"} if rework is not None else {"requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics"}
+    unknown = sorted(set(value) - allowed)
     if unknown:
         raise DriverError("TASK_OUTPUT_INVALID", "generator output has fields the driver owns", [
-            {"path": "/" + name, "code": "DRIVER_OWNED_FIELD", "message": "Remove this field: the driver fills service fields and digests."} for name in unknown])
+            {"path": "/" + name, "code": "DRIVER_OWNED_FIELD", "message": "Remove this field: the driver fills service fields and digests."
+             + (" A rework answer carries only the changed test_cases (and optional diagnostics)." if rework is not None else "")} for name in unknown])
+    if rework is not None:
+        value = _merge_rework(run_root, rework, batch, value)
     fragment = _build_fragment(value, plan, context, batch)
     try:
         validate_fragment(fragment, plan, header, context)
@@ -622,6 +637,135 @@ def _submit_generator(project: Path, run_root: Path, attempt: Mapping[str, Any],
     except BatchAssemblyError as error:
         raise DriverError("TASK_OUTPUT_INVALID", str(error), error.diagnostics or [{"path": "", "code": error.code, "message": str(error)}]) from error
     publish_model_stage_artifact(run_root, attempt_id, f"tc-generator:{batch['batch_id']}", fragment, transport_attempts=int(task.get("transport_attempts", 1)))
+
+
+# --------------------------------------------------------------------------------------
+# canonical rework: one CANONICAL_REWORK child attempt after a REJECTED r1
+# --------------------------------------------------------------------------------------
+
+def _rework_of(config: Mapping[str, Any], attempt: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if attempt is None:
+        return None
+    rework = config.get("rework", {}).get(str(attempt["attempt_id"]))
+    return None if rework is None else dict(rework)
+
+
+def start_rework(project: Path, run_root: Path, config: dict[str, Any], attempt: Mapping[str, Any]) -> bool:
+    """After a REJECTED canonical r1, create the run's one rework attempt and give it its context.
+
+    The generator of that attempt gets r1, the BLOCKING and WARNING findings and the
+    affected cases, and returns only the cases it changes; the driver assembles r2.
+    """
+    from tools.canonical_document import document_sha256
+    from tools.pilot_state import (REWORK_RETRY_REASON, create_attempt, derive_state, publish_context_selection, read_attempt_receipt,
+                                   read_execution_baseline_for_attempt, read_review_aggregate, read_terminal_result)
+    from tools.project_inventory import select_context_batches
+
+    attempt_id = str(attempt["attempt_id"])
+    if attempt["state"] != "TERMINAL" or any(item.get("retry_reason") == REWORK_RETRY_REASON for item in derive_state(run_root)["attempts"]):
+        return False
+    try:
+        terminal = read_terminal_result(run_root, attempt_id)
+    except (KeyError, TypeError, ValueError):
+        return False
+    if terminal.get("reason_code") != "REWORK" or terminal.get("evidence", {}).get("authoritative_verdict") != "REJECTED":
+        return False
+    document = read_attempt_receipt(run_root, attempt_id, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]["document"]
+    findings = [dict(item) for item in read_review_aggregate(run_root, attempt_id)["aggregate"]["findings"] if item["severity"] in {"BLOCKING", "WARNING"}]
+    blocking = {identifier for item in findings if item["severity"] == "BLOCKING" for identifier in item["related_ids"]}
+    affected = [case["case_id"] for case in document["test_cases"] if case["case_id"] in blocking or blocking & set(case["requirement_ids"])]
+    baseline = read_execution_baseline_for_attempt(run_root, attempt_id)
+    child = create_attempt(run_root, {"project": attempt["project"], "module": attempt["module"], "policy_profile": attempt["policy_profile"],
+                                      "parent_attempt_id": attempt_id, "retry_reason": REWORK_RETRY_REASON}, baseline)
+    _baseline, inventory = _baseline_and_inventory(run_root, child)
+    for receipt in _context_receipts(run_root, attempt_id):
+        ids = [item["opaque_id"] for item in receipt["files"]]
+        budget = max(int(receipt.get("byte_budget") or 0), int(receipt.get("byte_count") or 0), 1)
+        for batch in select_context_batches(inventory, project, ids, byte_budget=budget, include_closed_manifests=False):
+            publish_context_selection(run_root, str(child["attempt_id"]), batch["receipt"])
+    config.setdefault("rework", {})[str(child["attempt_id"])] = {
+        "parent_attempt_id": attempt_id, "r1_sha256": document_sha256(document), "findings": findings, "affected_case_ids": affected}
+    _save_config(run_root, config)
+    _write_json(work_dir(run_root) / "inputs" / f"rework-{str(child['attempt_id'])[:8]}-r1.json", document)
+    return True
+
+
+def _parent_fragment(run_root: Path, parent_attempt_id: str, namespace: str) -> dict[str, Any]:
+    """The r1 fragment of one namespace, as the parent attempt published it."""
+    from tools.pilot_state import read_model_stage_artifact
+
+    for event in _events(run_root, parent_attempt_id):
+        stage = str(event.get("stage_instance_id") or "")
+        if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and stage.startswith("tc-generator:"):
+            artifact = read_model_stage_artifact(run_root, parent_attempt_id, stage, event["artifact_digest"])["artifact"]
+            if artifact.get("namespace") == namespace:
+                return dict(artifact)
+    raise DriverError("DRIVER_STATE", f"the rejected attempt has no fragment for namespace {namespace}")
+
+
+def _merge_rework(run_root: Path, rework: Mapping[str, Any], batch: Mapping[str, Any], value: Mapping[str, Any]) -> dict[str, Any]:
+    """r1 content of the batch with the returned cases replaced (same case_id) or appended (new ID of the batch)."""
+    parent = _parent_fragment(run_root, rework["parent_attempt_id"], batch["namespace"])
+    merged = {key: deepcopy(parent.get(key, [])) for key in ("requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics")}
+    cases = value.get("test_cases")
+    if not isinstance(cases, list) or not all(isinstance(case, dict) and isinstance(case.get("case_id"), str) for case in cases):
+        raise DriverError("TASK_OUTPUT_INVALID", "rework output must carry test_cases with case_id", [
+            {"path": "/test_cases", "code": "REWORK_CASES_INVALID", "message": "Return only the changed cases, each a whole canonical test case with its case_id."}])
+    returned = [case["case_id"] for case in cases]
+    if len(set(returned)) != len(returned):
+        raise DriverError("TASK_OUTPUT_INVALID", "a rework case is returned twice", [
+            {"path": "/test_cases", "code": "REWORK_CASE_DUPLICATE", "message": "Return each changed case once."}])
+    index = {case["case_id"]: position for position, case in enumerate(merged["test_cases"])}
+    for case in cases:
+        if case["case_id"] in index:
+            merged["test_cases"][index[case["case_id"]]] = deepcopy(case)
+        elif case["case_id"].startswith(f"TC-{batch['namespace']}-"):
+            merged["test_cases"].append(deepcopy(case))
+        else:
+            raise DriverError("TASK_OUTPUT_INVALID", f"rework case {case['case_id']} is outside this batch", [
+                {"path": "/test_cases", "code": "REWORK_CASE_FOREIGN", "message": f"Keep an r1 case_id or use the prefix TC-{batch['namespace']}- for a new case."}])
+    if "diagnostics" in value:
+        merged["diagnostics"] = deepcopy(value["diagnostics"])
+    return merged
+
+
+def _rework_task(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], marker: Mapping[str, Any],
+                 plan: Mapping[str, Any], context: Mapping[str, Any], batch: Mapping[str, Any], rework: Mapping[str, Any]) -> dict[str, Any]:
+    from tools.pilot_state import publish_model_request
+
+    attempt_id = str(attempt["attempt_id"])
+    stage = f"tc-generator:{batch['batch_id']}"
+    namespace = batch["namespace"]
+    r1_path = work_dir(run_root) / "inputs" / f"rework-{attempt_id[:8]}-r1.json"
+    r1 = _read_json(r1_path)
+    cases = [case for case in r1["test_cases"] if case["case_id"].startswith(f"TC-{namespace}-")]
+    brief = {
+        "batch_id": batch["batch_id"], "namespace": namespace, "mode": "rework",
+        "affected_case_ids": [case_id for case_id in rework["affected_case_ids"] if case_id.startswith(f"TC-{namespace}-")],
+        "findings": list(rework["findings"]), "r1_cases": cases,
+        "id_prefixes": {"case_id": f"TC-{namespace}-", "step_id": f"STEP-{namespace}-", "input_id": f"INPUT-{namespace}-", "expectation_id": f"EXP-{namespace}-",
+                        "assertion_id": f"ASSERT-{namespace}-", "blocker_id": f"BLOCK-{namespace}-"},
+        "filled_by_driver": ["requirements", "source_to_canonical_mappings", "operation_capabilities", "unchanged cases", "revision", "parent_sha256",
+                             "digests", "display_order", "ordering"],
+    }
+    brief_path = _write_json(work_dir(run_root) / "inputs" / f"rework-{batch['batch_id']}.json", brief)
+    marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
+    inputs = [brief_path, r1_path, marker_path, *_context_inputs(project, run_root, attempt, only=context)]
+    if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
+        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"rework-{uuid.uuid4().hex[:16]}",
+                              input_digests=[marker["content_digest"], context["digest"], plan["digest"], plan["header_digest"]])  # r1 is bound through the r2 header
+    schema = _subschema("candidate-fragment.schema.json", ["test_cases"])
+    items = schema["properties"]["test_cases"].get("items")
+    if isinstance(items, dict) and str(items.get("$ref", "")).startswith("canonical-test-document.schema.json"):
+        schema["properties"]["test_cases"] = {"type": "array", "items": {"$ref": str(ROOT / "schemas" / items["$ref"])}}
+    return _llm_task(
+        run_root, attempt_id, f"tc-generator.{batch['batch_id']}", stage=stage, skill="tc-generator", inputs=inputs, schema=schema,
+        instructions=("Доработка после отклонённого ревью. Первый файл — задание: находки ревью (BLOCKING и WARNING), затронутые кейсы и кейсы r1 этого батча; "
+                      "второй — весь документ r1. Исправь то, на что указывают находки, и верни в test_cases только изменённые кейсы целиком "
+                      "(тот же case_id; новый кейс — с префиксом из id_prefixes). Неизменённые кейсы, требования, связи, capability, "
+                      "ревизию и дайджесты драйвер возьмёт из r1 сам."),
+        extra={"batch_id": batch["batch_id"], "rework": True},
+    )
 
 
 def _fragments(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -866,6 +1010,8 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
             return waiting
     attempt = _attempt(run_root)
     attempt_id = str(attempt["attempt_id"])
+    if attempt["state"] == "TERMINAL" and start_rework(project, run_root, config, attempt):
+        return advance(project, run_root)
     if attempt["state"] == "TERMINAL":
         if attempt["policy_profile"] == "local-pilot-v1":
             from tools.pipeline_driver_automation import terminal_step
@@ -883,6 +1029,9 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
     fragments = _fragments(run_root, attempt_id, plan)
     for batch in plan["batches"]:
         if batch["batch_id"] not in fragments:
+            rework = _rework_of(config, attempt)
+            if rework is not None:
+                return _rework_task(project, run_root, attempt, config, marker, plan, context, batch, rework)
             return _generator_task(project, run_root, attempt, config, marker, header, plan, context, batch)
 
     assembled = _assembled(project, run_root, attempt, config)
@@ -914,6 +1063,8 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
         effective = _select(project, run_root, attempt, assembled, ledger)
     if effective is None or attempt["policy_profile"] == "cases-only-v1":
         _finalize_without_execution(project, run_root, attempt, document=None if effective is None else effective["document"])
+        if start_rework(project, run_root, config, _attempt(run_root)):
+            return advance(project, run_root)
         return _done(run_root, _result_summary(run_root, _attempt(run_root)))
     from tools.pipeline_driver_automation import advance_automation
 

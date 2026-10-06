@@ -77,13 +77,15 @@ class Replay:
     """Drive a fresh run of the driver with the recorded answers of one live run."""
 
     def __init__(self, run: str, tmp_path: Path, *, profile: str | None = None,
-                 review: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None) -> None:
+                 review: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
+                 override: Callable[[Mapping[str, Any]], Any] | None = None) -> None:
         self.run = RUNS.get(run, run)
         self.config = load(run_dir(run) / "driver" / "config.json")
         self.profile = profile or self.config["profile"]
         self.recorded = outputs(run)
         self.project = copy_project(tmp_path / "project")
         self.review = review
+        self.override = override  # answers a task itself when it returns anything but None
         self.used: set[str] = set()
         self.log: list[dict[str, Any]] = []
 
@@ -121,6 +123,10 @@ class Replay:
         return answer
 
     def answer(self, task: Mapping[str, Any]) -> Any:
+        if self.override is not None:
+            value = self.override(task)
+            if value is not None:
+                return value
         stage = task["stage"]
         if stage == "context-marker:baseline":
             return self.recorded["context-marker"]

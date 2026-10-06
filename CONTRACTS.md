@@ -30,6 +30,12 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `zephyr-scale-step-row-24-v4` | `csv` | `opt_in_compatibility` | `N_A` |
 | `zephyr-scale-xml-observed-v1` | `xml` | `opt_in_observed` | `N_A` |
 
+## Canonical rework
+
+- rework: at most `1` per run as a `CANONICAL_REWORK` child attempt after `authoritative_verdict_rejected`
+- rework generator: input `canonical_r1, findings_blocking_warning, affected_case_ids`; output `changed_test_cases_only`; successor `canonical_r2_parent_sha256_r1`
+- rework review: `new_session_incremental_carry_identical_checked_inputs`; never reworked: `unchecked_scope, pre_verdict_abort`; after r2 rejected: `terminal_rework`
+
 ## Artifact registry
 
 | Artifact | Phase | Status | Semantic ready | Component state |

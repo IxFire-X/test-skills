@@ -70,10 +70,15 @@ def test_rejected_canonical_review_publishes_terminal_rework(tmp_path: Path) -> 
         return answer
 
     replay = Replay("2c10d733", tmp_path, review=blocking)
-    code, done = replay.drive()
+    # Since D4 a REJECTED r1 continues into the run's one rework attempt; the rejected attempt itself is terminal REWORK.
+    code, task = replay.drive(until=lambda task: bool(task.get("rework")) and str(task.get("stage", "")).startswith("tc-generator:"))
     _no_driver_failure(replay)
-    result = done["result"]
-    assert (result["status"], result["completion"], result["reason_code"], result["accepted"]) == ("terminal", "PARTIAL", "REWORK", False)
+    from tools.pilot_state import derive_state
+
+    parent = derive_state(replay.run_root(task))["attempts"][0]
+    result = read_terminal_result(replay.run_root(task), parent["attempt_id"])
+    assert (result["completion"], result["reason_code"], result["accepted"]) == ("PARTIAL", "REWORK", False)
+    assert result["evidence"]["authoritative_verdict"] == "REJECTED"
 
 
 def test_pre_verdict_abort_reason_is_never_rework() -> None:

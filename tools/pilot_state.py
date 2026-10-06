@@ -1532,6 +1532,20 @@ def _validate_attempt_creation_candidate(project: Path, root: Path, manifest: Ma
 
 
 _REGENERATION_RETRY_REASON = "GENERATED_TEST_INVALID"
+# One canonical rework per run: a child attempt that regenerates the rejected cases as r2.
+REWORK_RETRY_REASON = "CANONICAL_REWORK"
+
+
+def _rework_budget_error(attempts: Sequence[Mapping[str, Any]], parent_terminal: Mapping[str, Any] | None, retry_reason: str) -> str | None:
+    """A rework child needs a parent whose canonical review was REJECTED, and the run gets one."""
+    if retry_reason != REWORK_RETRY_REASON:
+        return None
+    evidence = parent_terminal.get("evidence") if isinstance(parent_terminal, Mapping) else None
+    if not isinstance(evidence, Mapping) or parent_terminal.get("reason_code") != "REWORK" or evidence.get("authoritative_verdict") != "REJECTED":
+        return f"retry_reason {REWORK_RETRY_REASON} requires a parent whose canonical review ended REJECTED (REWORK)"
+    if any(attempt.get("retry_reason") == REWORK_RETRY_REASON for attempt in attempts):
+        return f"{REWORK_RETRY_REASON} budget is exhausted: a run gets one canonical rework"
+    return None
 _AUTOMATION_REVISION_BUDGET = 2
 
 
@@ -1624,7 +1638,7 @@ def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mappin
             parent_terminal: Mapping[str, Any] | None = read_terminal_result(root, str(parent))
         except (KeyError, TypeError, ValueError):
             parent_terminal = None
-        budget_error = _regeneration_budget_error(previous, parent_terminal, events, str(retry))
+        budget_error = _regeneration_budget_error(previous, parent_terminal, events, str(retry)) or _rework_budget_error(state["attempts"], parent_terminal, str(retry))
         if budget_error is not None:
             raise ValueError(budget_error)
     from tools.project_inventory import InventoryError, project_identity, read_execution_baseline, read_inventory_receipt, validate_execution_baseline_binding
@@ -3904,7 +3918,10 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         proof = (snapshot["digest"], review_digest(plan))
         if proof not in _VERIFIED_REVIEW_PLANS:
             scopes = review_scopes(snapshot["payload"], source_chunk_bytes=max(1, (plan["input_byte_budget"] - specification["response_reserve_bytes"]) // 4))
-            if plan != build_review_plan(specification, scopes, input_byte_budget=plan["input_byte_budget"]):
+            carried: list = []
+            if key == "canonical":
+                scopes, carried = _carried_plan_inputs(project, root, state, attempt_id, scopes)
+            if plan != build_review_plan(specification, scopes, input_byte_budget=plan["input_byte_budget"], carried=carried):
                 raise ValueError("review plan omits or changes required scope")
             if len(_VERIFIED_REVIEW_PLANS) >= 256:
                 _VERIFIED_REVIEW_PLANS.clear()
@@ -4099,8 +4116,31 @@ def _review_results(root: Path, state: Mapping[str, Any], attempt_id: str, revie
     return results
 
 
+def _carry_source(root: Path, state: Mapping[str, Any], attempt_id: str) -> str | None:
+    """The parent whose canonical coverage a rework attempt may carry, or None."""
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None or attempt.get("retry_reason") != REWORK_RETRY_REASON:
+        return None
+    return str(attempt["parent_attempt_id"])
+
+
+def _carried_plan_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, scopes: Sequence[Mapping[str, Any]]) -> tuple[list, list]:
+    """Scopes to send and scopes carried from the parent r1 review (rework attempts only)."""
+    from tools.review_parts import carry_scopes
+    parent = _carry_source(root, state, attempt_id)
+    if parent is None:
+        return list(scopes), []
+    parent_plan = _read_attempt_receipt_with_state(project, root, state, parent, "review-plan-canonical", "ARTIFACT_READ_BACK")["record"]["plan"]
+    parent_aggregate = _read_attempt_receipt_with_state(project, root, state, parent, "review-aggregate-canonical", "ARTIFACT_READ_BACK")["record"]["aggregate"]
+    return carry_scopes(scopes, parent_plan, parent_aggregate, from_attempt_id=parent)
+
+
 def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], *, input_byte_budget: int, response_reserve_bytes: int, instructions: str, session_id: str) -> dict[str, Any]:
-    """Freeze exact source/candidate bytes and one deterministic 1/N review plan."""
+    """Freeze exact source/candidate bytes and one deterministic 1/N review plan.
+
+    The canonical review of a rework attempt (r2) is incremental: scopes whose exact
+    inputs equal checked r1 scopes keep their coverage and are not sent again.
+    """
     from tools.review_parts import build_review_plan, review_scopes
     automation = payload.get("automation")
     key = "canonical" if automation is None else f"r{automation['artifacts']['automation_revision']}"
@@ -4110,7 +4150,11 @@ def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], 
                      "snapshot_digest": snapshot["digest"], "instructions": instructions, "response_reserve_bytes": response_reserve_bytes,
                      "document_index": document_index(payload)}
     scopes = review_scopes(payload, source_chunk_bytes=max(1, (input_byte_budget - response_reserve_bytes) // 4))
-    plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget)
+    carried: list = []
+    if key == "canonical":
+        project, root = _run_root(run_root)
+        scopes, carried = _carried_plan_inputs(project, root, derive_state(run_root), attempt_id, scopes)
+    plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget, carried=carried)
     _publish_bound_attempt_receipt(run_root, attempt_id, f"review-plan-{key}", {"plan": plan})
     if key == "canonical":
         facts = {"session_id": session_id, "canonical_branch_digest": payload["package_binding"]["candidate_digest"],

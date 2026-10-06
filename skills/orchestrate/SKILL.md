@@ -174,6 +174,9 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   проект не записаны;
 - `REWORK`, `REVIEW_CONTEXT_LIMIT`, `REVIEW_TRANSPORT_FAILED`, `REVIEW_INCOMPLETE` — ревью
   кейсов не завершилось принятием (`REVIEW_INCOMPLETE` — остались непроверенные области).
+  После первого `REWORK` драйвер сам продолжает run одной доработкой
+  (`CANONICAL_REWORK`): задача генератору с `rework: true` — верни только изменённые
+  кейсы. Не перезапускай run и не дорабатывай кейсы вне драйвера.
 
 Завершённая попытка неизменяема. Состояние релиза пакета — `implemented_unverified`:
 не выдавай результат одного запуска за подтверждённую готовность пакета.

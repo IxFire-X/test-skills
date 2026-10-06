@@ -24,6 +24,14 @@ def _table(rows: list[Mapping[str, Any]], columns: list[tuple[str, str]]) -> lis
     return [header, divider, *body]
 
 
+def _rework_lines(rework: Mapping[str, Any]) -> list[str]:
+    return [
+        f"- rework: at most `{rework['max_per_run']}` per run as a `{rework['retry_reason']}` child attempt after `{rework['trigger']}`",
+        f"- rework generator: input `{', '.join(rework['generator_input'])}`; output `{rework['generator_output']}`; successor `{rework['successor']}`",
+        f"- rework review: `{rework['r2_review']}`; never reworked: `{', '.join(rework['not_reworked'])}`; after r2 rejected: `{rework['after_r2_rejected']}`",
+    ]
+
+
 def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts = ["# Contract Reference", "", MARKER, "", "## Core Skills", ""]
     contracts.extend(f"- `{name}` — `{contract['skill_files'][name]}`" for name in contract["core_skills"])
@@ -32,13 +40,14 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     stages = {row["stage"]: {**row, "profiles": ", ".join(row["profiles"])} for row in contract["stage_registry"]}
     contracts.extend(["", "## Model stage registry", "", *_table([stages[name] for name in STAGE_ORDER], [("Stage", "stage"), ("Role", "role"), ("Role policy", "role_policy"), ("Cardinality", "cardinality"), ("Profiles", "profiles")])])
     contracts.extend(["", "## Projection profiles", "", *_table(contract["projection_profiles"], [("Profile", "id"), ("Format", "format"), ("Mode", "mode"), ("Tenant status", "tenant_status")])])
+    contracts.extend(["", "## Canonical rework", "", *_rework_lines(contract["reviewer_session_contract"]["rework"])])
     contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
     pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
     pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
     pipeline.extend(["", "## Event order", "", " → ".join(f"`{event['event_type']}`" for event in contract["event_order"]), "", "## Global ordering constraints", ""])
     pipeline.extend(f"- `{constraint['before']} → {constraint['after']}`" + (" (narrow exception)" if constraint.get("narrow_exception") else "") for constraint in contract["global_event_constraints"])
     reviewer = contract["reviewer_session_contract"]
-    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
+    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", *_rework_lines(reviewer["rework"]), "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
     for name in RESULT_AXIS_ORDER:
         axis = contract["result_axes"][name]
         if name in {"accepted", "reason_code"}:
