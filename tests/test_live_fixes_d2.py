@@ -79,7 +79,7 @@ def test_sealed_d1834358_aggregate_still_verifies_in_legacy_mode() -> None:
     plan = live_plan("d1834358")
     recorded = review_state("d1834358", "review-aggregate-canonical")["aggregate"]
     assert recorded["blocked"] and not recorded["complete"]
-    assert aggregate_review_parts(plan, live_results("d1834358", plan), resolve_unchecked=False) == recorded
+    assert aggregate_review_parts(plan, live_results("d1834358", plan), legacy=True) == recorded
 
 
 def _schema_rows(check: dict[str, Any]) -> list[dict[str, Any]]:

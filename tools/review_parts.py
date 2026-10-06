@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -223,6 +224,10 @@ def _contains_correction(scope: Mapping[str, Any], correction: Mapping[str, Any]
                for ref in scope["inputs"])
 
 
+# Fields that never change behavior or the oracle: a correction there needs no cross re-check.
+_SERVICE_PATH = re.compile(r"^/test_cases/[0-9]+/management(?:/|$)")
+
+
 def additional_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Register flat, exact-source cross checks requested by completed parts."""
     parts = [*plan["parts"], *plan.get("additions", [])]
@@ -237,7 +242,7 @@ def additional_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[s
     return additions
 
 
-def _required_checks(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict]:
+def _required_checks(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]], *, legacy: bool = False) -> list[dict]:
     parts = {part["part_id"]: part for part in [*plan["parts"], *plan.get("additions", [])]}
     valid = [result for result in results if result.get("part_id") in parts and not validate_review_part(plan, parts[result["part_id"]], result)]
     checks = [resolve_check(plan, check) for result in valid for check in result["required_checks"]]
@@ -258,6 +263,9 @@ def _required_checks(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any
         completed = {result["part_id"] for result in results}
         if all(part["part_id"] in completed or part["blocked_reason"] or part["part_id"] in plan.get("unavailable", {}) for part in plan["parts"]):
             for proposed in correction_sets:
+                if not legacy:
+                    checks.extend(_correction_checks(plan, proposed))
+                    continue
                 for part in plan["parts"]:
                     for scope in part["scopes"]:
                         if scope["kind"] == "cross":
@@ -270,6 +278,49 @@ def _required_checks(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any
                                 if original["scope_id"] not in scope_ids:
                                     scope_ids.append(original["scope_id"])
                             checks.append({"scope_ids": scope_ids, "reason": "Verify these exact proposed corrections preserve cross-case meaning and introduce no conflict: " + review_bytes(related).decode("utf-8")})
+    return checks
+
+
+def _correction_checks(plan: Mapping[str, Any], proposed: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Cross re-checks for one set of proposed corrections, packed by the part byte budget.
+
+    Corrections of service fields (``management.*``) change neither behavior nor the
+    oracle and need no re-check.  Any other correction is re-checked only against the
+    cross scopes that hold an affected case (``related_ids``) or the corrected object
+    (its pointer); those scopes are packed greedily into as few check parts as fit.
+    """
+    behavioral = [item for item in proposed if not _SERVICE_PATH.match(item["path"])]
+    if not behavioral:
+        return []
+    selected = []
+    for part in plan["parts"]:
+        for scope in part["scopes"]:
+            if scope["kind"] != "cross":
+                continue
+            related = [item for item in behavioral if set(item["related_ids"]) & set(scope["targets"])
+                       or any(item["path"] == ref["pointer"] or item["path"].startswith(ref["pointer"] + "/") for ref in scope["inputs"] if ref["pointer"])]
+            if related:
+                selected.append((scope["scope_id"], related))
+
+    def check(batch: Sequence[tuple[str, list]]) -> dict:
+        related: list = []
+        for _scope_id, items in batch:
+            related.extend(item for item in items if item not in related)
+        scope_ids = [scope_id for scope_id, _items in batch]
+        for correction in related:
+            original = next(item for base in plan["parts"] for item in base["scopes"] if _contains_correction(item, correction))
+            if original["scope_id"] not in scope_ids:
+                scope_ids.append(original["scope_id"])
+        return {"scope_ids": scope_ids, "reason": "Verify these exact proposed corrections preserve cross-case meaning and introduce no conflict: " + review_bytes(related).decode("utf-8")}
+
+    checks, batch = [], []
+    for entry in selected:
+        if batch and _check_part(plan, check([*batch, entry]), 1)["blocked_reason"]:
+            checks.append(check(batch))
+            batch = []
+        batch.append(entry)
+    if batch:
+        checks.append(check(batch))
     return checks
 
 
@@ -287,11 +338,11 @@ def _check_part(plan: Mapping[str, Any], check: Mapping[str, Any], index: int) -
     return _part(plan, [scope], index, digest)
 
 
-def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]], *, resolve_unchecked: bool = True) -> dict[str, Any]:
+def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[str, Any]], *, legacy: bool = False) -> dict[str, Any]:
     """Reconcile exact coverage claims; provenance is verified by pilot_state.
 
-    ``resolve_unchecked=False`` reproduces aggregates sealed before 2026-10-06, which
-    never closed an UNCHECKED scope through a later check part.
+    ``legacy=True`` reproduces aggregates sealed before 2026-10-06: no UNCHECKED scope
+    closed by a later check part, one correction check per cross scope.
     """
     diagnostics = validate_review_plan(plan)
     parts = [*plan["parts"], *plan.get("additions", [])]
@@ -322,7 +373,7 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
                 open_rows.append((part["part_id"], {"scope_id": coverage["scope_id"], "reason": coverage["assessment"]}, own_checks))
         findings.extend(result["findings"])
         corrections.extend(item for item in result["corrections"] if item not in corrections)
-    required_checks = _required_checks(plan, results)
+    required_checks = _required_checks(plan, results, legacy=legacy)
     requested = {review_digest(check): check for check in required_checks}
     for index, part in enumerate(parts, start=1):
         if part["requested_check"] is not None:
@@ -333,7 +384,7 @@ def aggregate_review_parts(plan: Mapping[str, Any], results: Sequence[Mapping[st
     # check parts its own answer requested.  When every such part came back CHECKED,
     # the early UNCHECKED is closed and the link is kept in the aggregate.
     resolved: list[dict[str, Any]] = []
-    while resolve_unchecked:
+    while not legacy:
         closing = {part["requested_check"]: part["part_id"] for part in parts
                    if part["requested_check"] is not None and all(scope["scope_id"] in checked for scope in part["scopes"])}
         ready = [row for row in open_rows if row[2] and all(digest in closing for digest in row[2])]

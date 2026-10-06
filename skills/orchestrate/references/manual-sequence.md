@@ -280,7 +280,9 @@ bytes, недостоверные inputs и слишком большой неп
 к содержимому. Иначе незавершённое ревью закрывается с `REVIEW_INCOMPLETE`, но не `REWORK`. Неделимая oversized единица остаётся
 явным context gap. Cross scopes консервативно включают все пары единиц; независимость
 не угадывается. Предложения canonical corrections получают дополнительные bounded
-cross checks с exact proposals в reason до выбора r2. Дополнительные
+cross checks с exact proposals в reason до выбора r2: только для cross scopes, где есть
+затронутый кейс (`related_ids`) или исправленный объект (pointer), упакованные в части по
+байтовому бюджету. Правка служебных полей `management.*` перепроверки не требует. Дополнительные
 cross checks регистрируются в том же ledger. `finish-review` собирает один controller
 aggregate из точного состава saved parts; это не model response. Неполный aggregate
 не принимается. При resume читай имеющиеся plan/boundary/request/output, не создавай

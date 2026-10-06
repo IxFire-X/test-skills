@@ -107,8 +107,15 @@ class Replay:
         for label, part in parts:
             if label not in self.used and part["coverage"][0]["scope_id"] in ids:
                 self.used.add(label)
-                for key in ("findings", "corrections", "required_checks"):
+                for key in ("findings", "required_checks"):
                     answer[key].extend(part[key])
+        # A correction goes to the part whose evidence holds its path (the controller requires it).
+        pointers = [item["pointer"] for scope in envelope["scopes"] for item in scope["inputs"] if item["pointer"] and item["start"] is None]
+        for _label, part in parts:
+            for correction in part["corrections"]:
+                if correction["id"] not in self.used and any(correction["path"] == pointer or correction["path"].startswith(pointer + "/") for pointer in pointers):
+                    self.used.add(correction["id"])
+                    answer["corrections"].append(correction)
         if self.review is not None:
             answer = self.review(dict(task), envelope, answer)
         return answer

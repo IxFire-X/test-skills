@@ -3942,7 +3942,7 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         aggregate = aggregate_review_parts(plan, results)
         if receipt["aggregate"] != aggregate:
             # Sealed before late checks could close an UNCHECKED scope.
-            aggregate = aggregate_review_parts(plan, results, resolve_unchecked=False)
+            aggregate = aggregate_review_parts(plan, results, legacy=True)
         snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
         ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=key)
         if receipt["plan_digest"] != plan["digest"] or receipt["aggregate"] != aggregate or receipt["output"] != review_output(snapshot, aggregate, ledger["session_id"]):
