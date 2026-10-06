@@ -45,7 +45,7 @@ _MESSAGES = {
     "AUTOMATION_UNKNOWN_STEP": "step_id does not belong to case_id",
     "AUTOMATION_UNKNOWN_EXPECTATION": "expectation_id does not belong to step_id",
     "AUTOMATION_UNKNOWN_ASSERTION": "assertion_id does not belong to expectation_id",
-    "AUTOMATION_NONREADY_TARGET": "relations may target only ready steps",
+    "AUTOMATION_NONREADY_TARGET": "relations may target only ready steps of cases without blockers",
     "AUTOMATION_MISSING_OPERATION_COVERAGE": "ready step requires an operation relation",
     "AUTOMATION_MISSING_ASSERTION_COVERAGE": "ready assertion requires an assertion relation",
     "AUTOMATION_ORPHAN_SYMBOL": "generated symbol must occur in a relation",
@@ -53,13 +53,15 @@ _MESSAGES = {
     "AUTOMATION_DUPLICATE_MANUAL_DISPOSITION": "manual disposition must be unique",
     "AUTOMATION_UNKNOWN_MANUAL_STEP": "manual disposition step_id does not belong to case_id",
     "AUTOMATION_MANUAL_DISPOSITION_READY": "manual disposition may target only manual-only steps",
-    "AUTOMATION_MANUAL_DISPOSITION_BLOCKED": "manual disposition may not target blocked steps",
+    "AUTOMATION_MISSING_BLOCKED_DISPOSITION": "every step of a blocked case requires one manual disposition",
     "AUTOMATION_MISSING_MANUAL_DISPOSITION": "manual-only step requires one manual disposition",
     "AUTOMATION_MANUAL_ORDER": "manual dispositions must use canonical case and step order",
-    "AUTOMATION_BLOCKER_REQUIRES_BLOCKED": "canonical blockers require BLOCKED automation status",
+    "AUTOMATION_BLOCKER_REQUIRES_BLOCKED": "canonical blockers with no automatable case require BLOCKED automation status",
+    "AUTOMATION_BLOCKED_HAS_AUTOMATABLE_CASE": "BLOCKED status is allowed only when no case can be automated; generate the unblocked cases",
+    "AUTOMATION_BLOCKED_CASE_DIAGNOSTICS": "GENERATED artifacts that leave blocked cases out require diagnostics",
     "AUTOMATION_BLOCKED_WITHOUT_BLOCKER": "BLOCKED status requires a canonical blocker",
     "AUTOMATION_BLOCKED_CONTENT": "BLOCKED artifacts require diagnostics and four empty coverage arrays",
-    "AUTOMATION_GENERATED_DIAGNOSTICS": "GENERATED artifacts require empty diagnostics",
+    "AUTOMATION_GENERATED_DIAGNOSTICS": "GENERATED artifacts without canonical blockers require empty diagnostics",
     "AUTOMATION_REVISION_BUDGET": "automation permits an initial version and at most one complete correction",
     "AUTOMATION_REVIEW_BUDGET": "automation permits one static review per version and at most two reviews",
     "AUTOMATION_REVIEW_CADENCE": "each automation version requires exactly one static review",
@@ -156,6 +158,15 @@ def _document_index(document: Mapping[str, Any]) -> tuple[dict[str, tuple[int, M
     return cases, steps
 
 
+def blocked_case_ids(document: Mapping[str, Any]) -> frozenset[str]:
+    """Return the cases that cannot be automated because one of their steps has a blocker."""
+    return frozenset(
+        case["case_id"]
+        for case in document["test_cases"]
+        if any(step["automation_blockers"] for step in case["steps"])
+    )
+
+
 def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> list[dict[str, str]]:
     """Return deterministic V5 schema and atomic-relation diagnostics."""
     canonical = validate_canonical_document(document)
@@ -235,6 +246,9 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
                 diagnostics.append(_diagnostic("AUTOMATION_INVALID_JAVA_IDENTIFIER", base + "/locator/method_name"))
 
     cases, steps = _document_index(document)
+    # A blocker blocks its whole case and nothing else: the case is left to manual execution
+    # (one disposition per step) while every other case is automated as usual.
+    blocked_cases = blocked_case_ids(document)
     relations = artifacts["implementation_relations"]
     relation_keys: set[tuple[Any, ...]] = set()
     valid_relation_rows: list[tuple[tuple[Any, ...], Mapping[str, Any]]] = []
@@ -258,7 +272,7 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
             diagnostics.append(_diagnostic("AUTOMATION_UNKNOWN_STEP", base + "/step_id"))
             continue
         step_index, step = step_data
-        if step["manual_only"] or step["automation_blockers"]:
+        if step["manual_only"] or row["case_id"] in blocked_cases:
             diagnostics.append(_diagnostic("AUTOMATION_NONREADY_TARGET", base + "/step_id"))
             row_valid = False
         expectation_index = assertion_index = -1
@@ -313,35 +327,43 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
             continue
         step_index, step = step_data
         manual_order.append((case[0], step_index))
-        if step["automation_blockers"]:
-            diagnostics.append(_diagnostic("AUTOMATION_MANUAL_DISPOSITION_BLOCKED", base))
-        elif not step["manual_only"]:
+        if not step["manual_only"] and row["case_id"] not in blocked_cases:
             diagnostics.append(_diagnostic("AUTOMATION_MANUAL_DISPOSITION_READY", base))
     if manual_order != sorted(manual_order):
         diagnostics.append(_diagnostic("AUTOMATION_MANUAL_ORDER", "/artifacts/manual_dispositions"))
 
-    blocked = any(step["automation_blockers"] for _, step in steps.values())
+    blocked = bool(blocked_cases)
+    automatable = any(
+        not step["manual_only"] and case_id not in blocked_cases
+        for (case_id, _step_id), (_step_index, step) in steps.items()
+    )
     status = artifacts["automation_status"]
     arrays = ("generated_files", "generated_symbols", "implementation_relations", "manual_dispositions")
-    if blocked:
+    if blocked and not automatable:
+        # Nothing can be automated: the whole artifact is the BLOCKED branch.
         if status != "BLOCKED":
             diagnostics.append(_diagnostic("AUTOMATION_BLOCKER_REQUIRES_BLOCKED", "/artifacts/automation_status"))
         if not artifacts["diagnostics"] or any(artifacts[name] for name in arrays):
             diagnostics.append(_diagnostic("AUTOMATION_BLOCKED_CONTENT", "/artifacts"))
     elif status == "BLOCKED":
-        diagnostics.append(_diagnostic("AUTOMATION_BLOCKED_WITHOUT_BLOCKER", "/artifacts/automation_status"))
-    elif artifacts["diagnostics"]:
+        code = "AUTOMATION_BLOCKED_HAS_AUTOMATABLE_CASE" if blocked else "AUTOMATION_BLOCKED_WITHOUT_BLOCKER"
+        diagnostics.append(_diagnostic(code, "/artifacts/automation_status"))
+    elif blocked and not artifacts["diagnostics"]:
+        diagnostics.append(_diagnostic("AUTOMATION_BLOCKED_CASE_DIAGNOSTICS", "/artifacts/diagnostics"))
+    elif not blocked and artifacts["diagnostics"]:
         diagnostics.append(_diagnostic("AUTOMATION_GENERATED_DIAGNOSTICS", "/artifacts/diagnostics"))
 
-    if status == "GENERATED" and not blocked:
+    if status == "GENERATED" and (automatable or not blocked):
         for (case_id, step_id), (step_index, step) in steps.items():
             case_index = cases[case_id][0]
             step_path = _pointer("test_cases", case_index, "steps", step_index)
+            if case_id in blocked_cases:
+                if (case_id, step_id) not in manual_keys:
+                    diagnostics.append(_diagnostic("AUTOMATION_MISSING_BLOCKED_DISPOSITION", step_path))
+                continue
             if step["manual_only"]:
                 if (case_id, step_id) not in manual_keys:
                     diagnostics.append(_diagnostic("AUTOMATION_MISSING_MANUAL_DISPOSITION", step_path))
-                continue
-            if step["automation_blockers"]:
                 continue
             if (case_id, step_id) not in target_operations:
                 diagnostics.append(_diagnostic("AUTOMATION_MISSING_OPERATION_COVERAGE", step_path))
@@ -411,23 +433,38 @@ def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], h
             )["record"]
         except (ValueError, KeyError, TypeError):
             boundary = None
+    aggregate = None
+    ledger = None
+    if run_root is not None and isinstance(attempt_id, str):
+        try:
+            from tools.pilot_state import read_review_aggregate, read_reviewer_session_ledger
+            key = f"r{reviewed['automation_revision']}"
+            aggregate = read_review_aggregate(run_root, attempt_id, key)
+            ledger = read_reviewer_session_ledger(run_root, attempt_id, review_key=key)
+        except (ValueError, KeyError, TypeError):
+            pass
+    binding = review["artifacts"]["review_aggregate"]
     expected = {
         "automation_digest": automation_sha256(artifact), "automation_revision": reviewed["automation_revision"],
-        "reviewer_session_id": reviewed["reviewer_session_id"], "generator_invocation_id": reviewed["generator_invocation_id"],
-        "reviewer_invocation_id": reviewed["reviewer_invocation_id"], "role_policy": "autotest-static-reviewer-v1",
+        "reviewer_session_id": reviewed["reviewer_session_id"], "plan_digest": binding["plan_digest"],
+        "effective_canonical_digest": document_sha256(document),
+        "effective_bundle_receipt_digest": expected_source.get("effective_bundle_receipt_digest"),
     }
     if (
         not isinstance(boundary, Mapping)
         or not isinstance(receipt, Mapping)
         or dict(receipt) != dict(boundary)
         or any(boundary.get(key) != value for key, value in expected.items())
-        or boundary.get("host_isolation", {}).get("fresh_context") is not True
-        or boundary.get("host_isolation", {}).get("distinct_invocations") is not True
-        or reviewed["host_isolation_sha256"] != boundary.get("digest")
-        or boundary.get("effective_canonical_digest") != document_sha256(document)
-        or boundary.get("effective_bundle_receipt_digest") != expected_source.get("effective_bundle_receipt_digest")
+        or not isinstance(aggregate, Mapping)
+        or aggregate.get("output") != review
+        or aggregate.get("plan_digest") != binding["plan_digest"]
+        or aggregate.get("aggregate", {}).get("complete") is not True
+        or not isinstance(ledger, Mapping)
+        or ledger.get("status") != "COMPLETED"
+        or ledger.get("session_id") != reviewed["reviewer_session_id"]
+        or ledger.get("boundary_digest") != boundary.get("digest")
     ):
-        rows.append(_diagnostic("AUTOTEST_REVIEW_ISOLATION", "/artifacts/autotest_review/host_isolation_sha256"))
+        rows.append(_diagnostic("AUTOTEST_REVIEW_ISOLATION", "/artifacts/review_aggregate"))
     if run_root is not None and isinstance(attempt_id, str):
         try:
             from tools.pilot_state import _read_effective_canonical_with_state
@@ -468,7 +505,6 @@ def validate_automation_revision_chain(versions: Sequence[Any], reviews: Sequenc
         rows.append(_diagnostic("AUTOMATION_REVIEW_CADENCE", "/reviews"))
     usable = min(len(versions), len(reviews), len(host_isolation_receipts), 2)
     session_ids: set[str] = set()
-    reviewer_invocations: set[str] = set()
     for index in range(usable):
         artifact, review, receipt = versions[index], reviews[index], host_isolation_receipts[index]
         artifact_rows = validate_automation_artifact(artifact, document)
@@ -479,14 +515,13 @@ def validate_automation_revision_chain(versions: Sequence[Any], reviews: Sequenc
             continue
         generated = artifact["artifacts"]
         reviewed = review["artifacts"]["autotest_review"]
-        if "automation_revision" not in generated or "reviewer_session_id" not in reviewed or "reviewer_invocation_id" not in reviewed:
+        if "automation_revision" not in generated or "reviewer_session_id" not in reviewed:
             continue
         if generated["automation_revision"] != index + 1:
             rows.append(_diagnostic("AUTOMATION_REVISION_BUDGET", _pointer("versions", index, "artifacts", "automation_revision")))
-        if reviewed["reviewer_session_id"] in session_ids or reviewed["reviewer_invocation_id"] in reviewer_invocations:
+        if reviewed["reviewer_session_id"] in session_ids:
             rows.append(_diagnostic("AUTOTEST_REVIEW_SESSION", _pointer("reviews", index, "artifacts", "autotest_review", "reviewer_session_id")))
         session_ids.add(reviewed["reviewer_session_id"])
-        reviewer_invocations.add(reviewed["reviewer_invocation_id"])
         if index == 1:
             previous, previous_review = versions[0], reviews[0]
             if not isinstance(previous, Mapping) or not isinstance(previous_review, Mapping) or not isinstance(previous_review.get("artifacts"), Mapping) or not isinstance(previous_review["artifacts"].get("autotest_review"), Mapping) or "predecessor_automation_sha256" not in generated or "correction_review_sha256" not in generated:

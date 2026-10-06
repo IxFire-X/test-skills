@@ -24,6 +24,18 @@ from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, 
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
 
 
+def _run_operation(function):
+    """Hold the run lock for the whole command (imported lazily to avoid an import cycle)."""
+    from functools import wraps
+
+    @wraps(function)
+    def operation(*args, **kwargs):
+        from tools.pilot_state import run_operation
+        return run_operation(function)(*args, **kwargs)
+    return operation
+
+
+
 ROOT = Path(__file__).resolve().parents[1]
 REVIEW_SCHEMA = ROOT / "schemas" / "tc-reviewer-output.schema.json"
 REVIEWER_SESSION_SCHEMA = ROOT / "schemas" / "reviewer-session.schema.json"
@@ -34,8 +46,9 @@ OUTPUT_SCHEMA = ROOT / "schemas" / "orchestrator-output.schema.json"
 AUTOMATION_REVIEW_SCHEMA = ROOT / "schemas" / "autotest-reviewer-output.schema.json"
 TRACE_AUDIT_SCHEMA = ROOT / "schemas" / "trace-audit-output.schema.json"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
-_PROFILE = _PROFILE_V4
-_PROFILES = frozenset({_PROFILE_V4})
+_PROFILE_V5 = "zephyr-scale-step-row-24-v5"
+_PROFILE = _PROFILE_V5
+_PROFILES = frozenset({_PROFILE_V4, _PROFILE_V5})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -99,7 +112,7 @@ class OrchestrationError(ValueError):
 
 def _expected_paths(document: Mapping[str, Any], output_dir: str | os.PathLike[str], profile: str) -> tuple[str, str, str]:
     base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}"
-    return str(base) + ".json", str(base) + (".html" if profile == _PROFILE_V4 else ".md"), str(base) + ".zephyr-scale.csv"
+    return str(base) + ".json", str(base) + (".html" if profile in _PROFILES else ".md"), str(base) + ".zephyr-scale.csv"
 
 
 def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | os.PathLike[str] | None, profile: str) -> list[dict[str, str]]:
@@ -223,7 +236,6 @@ def reviewer_package_binding(
         raise ValueError("REVIEWER_PROTOCOL: generator fragments are invalid")
     contexts_by_digest = {item["digest"]: item for item in contexts}
     generator_batches = []
-    model_bytes = marker_publication["byte_count"]
     for expected in assembly_batches:
         fragment = fragments_by_batch.get(expected.get("batch_id"))
         context_digest = fragment.get("context_receipt_digest") if isinstance(fragment, dict) else None
@@ -240,7 +252,6 @@ def reviewer_package_binding(
         )
         if publication["content_digest"] != expected.get("digest") or publication.get("artifact") != fragment:
             raise ValueError("REVIEWER_PROTOCOL: generator fragment does not match assembly")
-        model_bytes += publication["byte_count"]
         generator_batches.append({
             "batch_id": fragment["batch_id"],
             "digest": publication["content_digest"],
@@ -256,171 +267,48 @@ def reviewer_package_binding(
     if len(assembly_events) != 1:
         raise ValueError("REVIEWER_PROTOCOL: assembled candidate publication is unbound")
     raw = [canonical_bytes(candidate_value), canonical_bytes(_receipt_value(candidate_receipt)), canonical_bytes(assembly), canonical_bytes(inventory), *(canonical_bytes(item) for item in contexts)]
-    binding = {"candidate_digest": document_sha256(candidate_value), "candidate_receipt_digest": "sha256:" + hashlib.sha256(raw[1]).hexdigest(), "assembly_digest": assembly["digest"], "context_marker_output_digest": marker_publication["content_digest"], "generator_batches": generator_batches, "inventory_digest": inventory["digest"], "context_receipt_digests": [item["digest"] for item in contexts], "base_package_byte_count": sum(len(item) for item in raw) + model_bytes + sum(item["byte_count"] for item in contexts)}
+    binding = {"candidate_digest": document_sha256(candidate_value), "candidate_receipt_digest": "sha256:" + hashlib.sha256(raw[1]).hexdigest(), "assembly_digest": assembly["digest"], "context_marker_output_digest": marker_publication["content_digest"], "generator_batches": generator_batches, "inventory_digest": inventory["digest"], "context_receipt_digests": [item["digest"] for item in contexts], "base_package_byte_count": 0}
     binding["package_digest"] = "sha256:" + hashlib.sha256(canonical_bytes(binding)).hexdigest()
     return binding
 
 
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
-    """Reserve the only canonical reviewer session for an active attempt before invocation."""
-    from tools.pilot_state import append_event, publish_attempt_receipt, read_attempt_receipt
-
-    package = _plain(package_binding)
-    start = _plain(session_start)
-    required = {"session_id", "generator_role", "reviewer_role", "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "context_budget_bytes"}
-    isolation = start.get("host_isolation")
-    if (
-        set(start) != required
-        or package.get("package_digest") != "sha256:" + hashlib.sha256(canonical_bytes({key: item for key, item in package.items() if key != "package_digest"})).hexdigest()
-        or not isinstance(isolation, dict)
-        or isolation.get("evidence_digest") != _host_isolation_digest(isolation)
-    ):
-        raise ValueError("REVIEWER_PROTOCOL: invalid reviewer session start")
-    facts = {
-        **start,
-        "canonical_branch_digest": package["candidate_digest"],
-        "package_digest": package["package_digest"],
-    }
-    published = publish_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
-    append_event(Path(run_root), "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    append_event(Path(run_root), "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    boundary = dict(read_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"])
-    created = {
-        "schema_version": "1.0.0",
-        "session_id": start["session_id"],
-        "boundary_digest": boundary["digest"],
-        "package_binding": package,
-        "context_budget_bytes": start["context_budget_bytes"],
-        "generator_role": start["generator_role"],
-        "reviewer_role": start["reviewer_role"],
-        "generator_invocation_id": start["generator_invocation_id"],
-        "reviewer_invocation_id": start["reviewer_invocation_id"],
-        "host_isolation": start["host_isolation"],
-        "events": [{"ordinal": 1, "event_type": "REVIEW_SESSION_STARTED"}],
-        "status": "WAITING",
-    }
-    created["digest"] = _session_digest(created)
-    _publish_reviewer_ledger(Path(run_root), attempt_id, created)
-    return boundary
-
-
-def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[str, Any], session: Mapping[str, Any]) -> dict[str, Any]:
-    from tools.pilot_state import read_attempt_receipt
-
-    record = dict(read_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"])
-    expected = {
-        "session_id": session.get("session_id"),
-        "canonical_branch_digest": package.get("candidate_digest"),
-        "package_digest": package.get("package_digest"),
-        "generator_role": session.get("generator_role"),
-        "reviewer_role": session.get("reviewer_role"),
-        "generator_invocation_id": session.get("generator_invocation_id"),
-        "reviewer_invocation_id": session.get("reviewer_invocation_id"),
-        "host_isolation": session.get("host_isolation"),
-        "context_budget_bytes": session.get("context_budget_bytes"),
-    }
-    if session.get("boundary_digest") != record.get("digest") or any(record.get(key) != item for key, item in expected.items()):
-        raise ValueError("REVIEWER_PROTOCOL: reviewer session does not match its immutable attempt boundary")
-    return record
-
-
-def _publish_reviewer_ledger(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> str:
-    from tools.pilot_state import publish_reviewer_session_ledger
-
-    receipt = publish_reviewer_session_ledger(Path(run_root), attempt_id, session)
-    if receipt.get("record") != dict(session) or receipt.get("digest") != session.get("digest"):
-        raise ValueError("REVIEWER_PROTOCOL: reviewer session ledger readback failed")
-    return str(receipt["digest"])
+    """Reserve one logical review; invocation identities belong to its parts."""
+    from tools.pilot_state import _publish_bound_attempt_receipt
+    if set(session_start) != {"session_id", "plan_digest"}:
+        raise ValueError("unsupported active review protocol; use prepare-review")
+    return dict(_publish_bound_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary", {
+        **dict(session_start), "canonical_branch_digest": package_binding["candidate_digest"],
+        "package_digest": package_binding["package_digest"],
+    })["record"])
 
 
 def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mapping[str, Any], review_artifact: Mapping[str, Any] | None = None, *, run_root: Path, attempt_id: str, evidence_receipts: Sequence[Mapping[str, Any]] = (), effective_canonical: bool = False) -> dict[str, Any]:
-    """Validate the single fresh reviewer ledger and its bounded evidence sequence."""
+    """Verify the logical ledger against the controller aggregate and real parts."""
+    from tools.pilot_state import read_reviewer_session_ledger, read_review_aggregate, read_attempt_receipt, reviewer_lifecycle_projection
     value = _plain(session)
-    rows = schema_diagnostics(value, REVIEWER_SESSION_SCHEMA, ROOT)
-    if rows or value.get("digest") != _session_digest(value):
-        raise ValueError("REVIEWER_PROTOCOL: invalid reviewer session receipt")
-    package = _plain(package_binding)
-    if value["package_binding"] != package or package.get("package_digest") != "sha256:" + hashlib.sha256(canonical_bytes({key: item for key, item in package.items() if key != "package_digest"})).hexdigest():
-        raise ValueError("REVIEWER_PROTOCOL: package binding is invalid")
-    _read_reviewer_boundary(Path(run_root), attempt_id, package, value)
-    events = value["events"]
-    from tools.pilot_state import reviewer_lifecycle_projection
-
-    try:
-        lifecycle = reviewer_lifecycle_projection(value)
-    except ValueError as error:
-        raise ValueError("REVIEWER_PROTOCOL: event order is invalid") from error
-    evidence = [_plain(item) for item in evidence_receipts]
-    if len({item.get("digest") for item in evidence}) != len(evidence):
-        raise ValueError("REVIEWER_PROTOCOL: evidence receipts are duplicated")
-    for item in evidence:
-        try:
-            from tools.pilot_state import read_context_selection
-            readback = read_context_selection(Path(run_root), attempt_id, str(item.get("digest", "")))
-        except ValueError:
-            readback = None
-        if schema_diagnostics(item, CONTEXT_RECEIPT_SCHEMA, ROOT) or item.get("digest") != _session_digest(item) or item.get("inventory_digest") != package["inventory_digest"] or item.get("digest") in package["context_receipt_digests"] or readback != item:
-            raise ValueError("REVIEWER_PROTOCOL: evidence receipt is invalid")
-    pending: tuple[str, int] | None = None
-    evidence_digests: list[str] = []
-    evidence_bytes = package["base_package_byte_count"]
-    evidence_index = 0
-    for event in events[1:]:
-        kind = event["event_type"]
-        if kind == "EVIDENCE_REQUESTED":
-            if pending is not None or not isinstance(event.get("request_digest"), str) or type(event.get("byte_count")) is not int or event["byte_count"] < 0:
-                raise ValueError("REVIEWER_PROTOCOL: invalid evidence request")
-            pending = (event["request_digest"], event["byte_count"])
-        elif kind == "EVIDENCE_PROVIDED":
-            if pending is None or event.get("request_digest") != pending[0] or evidence_index >= len(evidence):
-                raise ValueError("REVIEWER_PROTOCOL: invalid evidence response")
-            receipt = evidence[evidence_index]
-            if event.get("provided_digest") != receipt["digest"] or event.get("byte_count") != receipt["byte_count"] or receipt["byte_count"] > pending[1]:
-                raise ValueError("REVIEWER_PROTOCOL: evidence response is not bound to exact receipt bytes")
-            evidence_bytes += receipt["byte_count"]
-            evidence_digests.append(receipt["digest"])
-            expected_cumulative = "sha256:" + hashlib.sha256(canonical_bytes({"package_digest": package["package_digest"], "evidence_digests": evidence_digests})).hexdigest()
-            if evidence_bytes > value["context_budget_bytes"]:
-                raise ValueError("REVIEWER_PROTOCOL: evidence was transferred beyond the context ceiling")
-            if event.get("cumulative_package_digest") != expected_cumulative:
-                raise ValueError("REVIEWER_PROTOCOL: cumulative evidence package digest is invalid")
-            pending = None
-            evidence_index += 1
-        elif kind in {"AUTHORITATIVE_VERDICT", "REVIEW_SESSION_COMPLETED", "REVIEW_SESSION_ABORTED"}:
-            continue
+    if schema_diagnostics(value, REVIEWER_SESSION_SCHEMA, ROOT) or value.get("digest") != _session_digest(value):
+        raise ValueError("REVIEWER_PROTOCOL: unsupported or invalid reviewer session receipt")
+    durable = read_reviewer_session_ledger(run_root, attempt_id)
+    snapshot = read_attempt_receipt(run_root, attempt_id, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]
+    if durable != value or snapshot["package_binding"] != _plain(package_binding) or evidence_receipts:
+        raise ValueError("REVIEWER_PROTOCOL: immutable attempt boundary differs")
+    lifecycle = reviewer_lifecycle_projection(value)
     if lifecycle["waiting"]:
-        ledger_digest = _publish_reviewer_ledger(Path(run_root), attempt_id, value)
-        return {"attempt_state": "WAITING_FOR_MODEL", "completion": None, "verification": None, "coverage": None, "independence": "independence_unverified", "acceptance_eligible": False, "verdict_count": 0, "reviewer_session_digest": ledger_digest}
-    if evidence_index != len(evidence):
-        raise ValueError("REVIEWER_PROTOCOL: evidence receipt was not transferred")
-    if effective_canonical and lifecycle["authoritative_verdict_count"] != 1:
-        raise ValueError("REVIEWER_PROTOCOL: terminal verdict invariant is invalid")
-    isolation = value["host_isolation"]
-    invocation_distinct = value["generator_invocation_id"] != value["reviewer_invocation_id"]
-    if isolation["distinct_invocations"] != invocation_distinct or isolation.get("evidence_digest") != _host_isolation_digest(isolation):
-        raise ValueError("REVIEWER_PROTOCOL: contradictory invocation isolation evidence")
-    verified = bool(isolation["fresh_context"] and isolation["distinct_invocations"] and isolation["role_policy"] == "canonical-reviewer-v1")
+        return {"attempt_state": "WAITING_FOR_MODEL", "completion": None, "verification": None, "coverage": None,
+                "independence": "independence_unverified", "acceptance_eligible": False, "verdict_count": 0, "reviewer_session_digest": value["digest"]}
+    aggregate = read_review_aggregate(run_root, attempt_id)
+    if review_artifact is not None and aggregate["output"] != _plain(review_artifact):
+        raise ValueError("REVIEWER_PROTOCOL: aggregate output differs from durable evidence")
     if lifecycle["pre_verdict_abort"]:
-        if review_artifact is not None:
-            raise ValueError("REVIEWER_PROTOCOL: aborted session cannot have review artifact")
-        reason = lifecycle["abort_reason"]
-        if evidence_bytes > value["context_budget_bytes"] and reason != "REVIEW_CONTEXT_LIMIT":
-            raise ValueError("REVIEWER_PROTOCOL: base package exceeds the context ceiling")
-        ledger_digest = _publish_reviewer_ledger(Path(run_root), attempt_id, value)
-        return {"attempt_state": "TERMINAL", "coverage": None, "independence": "independence_unverified", "acceptance_eligible": False, "verdict_count": 0, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "accepted": False, "reason_code": reason, "reviewer_session_digest": ledger_digest}
-    if evidence_bytes > value["context_budget_bytes"]:
-        raise ValueError("REVIEW_CONTEXT_LIMIT")
-    if review_artifact is None:
-        raise ValueError("REVIEWER_PROTOCOL: completed session needs review artifact")
-    if _review_rows(review_artifact):
-        raise ValueError("REVIEWER_PROTOCOL: completed session review artifact is invalid")
-    report = _plain(review_artifact).get("artifacts", {}).get("validation_report")
-    verdict_event = next(event for event in events if event["event_type"] == "AUTHORITATIVE_VERDICT")
-    if not reviewer_verdict_is_bound(report, verdict_event):
-        raise ValueError("REVIEWER_PROTOCOL: verdict is not bound to review report")
-    ledger_digest = _publish_reviewer_ledger(Path(run_root), attempt_id, value)
-    verdict_count = lifecycle["authoritative_verdict_count"]
-    return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": verified and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
+        return {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None,
+                "independence": "independence_unverified", "acceptance_eligible": False, "accepted": False,
+                "verdict_count": 0, "reason_code": lifecycle["abort_reason"], "reviewer_session_digest": value["digest"]}
+    report = aggregate["output"]["artifacts"]["validation_report"]
+    verdict = next(event for event in value["events"] if event["event_type"] == "AUTHORITATIVE_VERDICT")
+    if not aggregate["aggregate"]["complete"] or not reviewer_verdict_is_bound(report, verdict):
+        raise ValueError("REVIEWER_PROTOCOL: verdict is not bound to a complete review")
+    return {"independence": "verified", "acceptance_eligible": True, "verdict_count": 1, "reviewer_session_digest": value["digest"]}
 
 
 def publish_unreviewed_candidate(
@@ -447,6 +335,7 @@ def publish_unreviewed_candidate(
     return _receipt_copy(receipt)
 
 
+@_run_operation
 def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receipt, package_binding: Mapping[str, Any], reviewer_session: Mapping[str, Any], review_artifact: Mapping[str, Any] | None, output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, *, run_root: Path, attempt_id: str, reviewer_evidence_receipts: Sequence[Mapping[str, Any]] = (), publisher=publish_bundle, verifier=verify_bundle) -> OrchestrationResult:
     """Select the published r1 and publish reviewer-produced r2 only when needed."""
     _validate_profile(csv_profile)
@@ -642,7 +531,12 @@ def finalize_orchestration(candidate_document: Mapping[str, Any], tc_review_arti
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_ARGUMENT")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        # A usage error must name the offending flag: one JSON line on stdout for
+        # the caller, argparse's own usage text on stderr for a human; exit code 2.
+        text = f"argument error: {message}"
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_ARGUMENT", text)], "message": text, "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         raise SystemExit(2)
 
 
@@ -672,104 +566,99 @@ def _read_existing_context_receipts(paths: Sequence[Path], run_root: Path, attem
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _Parser(description=__doc__)
+    parser = _Parser(description="Prepare bounded review inputs, bind real invocations, and publish one aggregate.")
     commands = parser.add_subparsers(dest="command", required=True)
-    publish = commands.add_parser("publish", help="Publish and read back revision 1 as UNREVIEWED.")
-    publish.add_argument("--candidate", required=True, type=Path)
-    publish.add_argument("--output-dir", required=True, type=Path)
-    publish.add_argument("--run-root", required=True, type=Path)
-    publish.add_argument("--attempt-id", required=True)
-    publish.add_argument("--csv-profile", default=_PROFILE)
-    evidence = commands.add_parser("publish-evidence", help="Persist and read back one reviewer C-lite evidence receipt.")
-    evidence.add_argument("--context-receipt", required=True, type=Path)
-    evidence.add_argument("--run-root", required=True, type=Path)
-    evidence.add_argument("--attempt-id", required=True)
-    open_session = commands.add_parser("open-session", help="Reserve the attempt's only host-owned canonical reviewer session.")
-    open_session.add_argument("--candidate", required=True, type=Path)
-    open_session.add_argument("--candidate-receipt", required=True, type=Path)
-    open_session.add_argument("--assembly-receipt", required=True, type=Path)
-    open_session.add_argument("--inventory-receipt", required=True, type=Path)
-    open_session.add_argument("--context-receipt", required=True, action="append", type=Path)
-    open_session.add_argument("--context-marker-output", required=True, type=Path)
-    open_session.add_argument("--generator-fragment", required=True, action="append", type=Path)
-    open_session.add_argument("--session-start", required=True, type=Path)
-    open_session.add_argument("--run-root", required=True, type=Path)
-    open_session.add_argument("--attempt-id", required=True)
-    open_session.add_argument("--csv-profile", default=_PROFILE)
-    select = commands.add_parser("select", help="Validate one host-owned reviewer session and select the effective revision.")
-    select.add_argument("--candidate", required=True, type=Path)
-    select.add_argument("--candidate-receipt", required=True, type=Path)
-    select.add_argument("--assembly-receipt", required=True, type=Path)
-    select.add_argument("--inventory-receipt", required=True, type=Path)
-    select.add_argument("--context-receipt", required=True, action="append", type=Path)
-    select.add_argument("--context-marker-output", required=True, type=Path)
-    select.add_argument("--generator-fragment", required=True, action="append", type=Path)
-    select.add_argument("--reviewer-session", required=True, type=Path)
-    select.add_argument("--evidence-receipt", action="append", default=[], type=Path)
-    select.add_argument("--review", type=Path)
-    select.add_argument("--run-root", required=True, type=Path)
-    select.add_argument("--attempt-id", required=True)
-    select.add_argument("--output-dir", required=True, type=Path)
-    select.add_argument("--csv-profile", default=_PROFILE)
+    for name in ("publish", "prepare-review", "next-part", "open-part", "submit-part", "fail-part", "block-part", "finish-review", "select"):
+        command = commands.add_parser(name)
+        command.add_argument("--run-root", required=True, type=Path)
+        command.add_argument("--attempt-id", required=True)
+        if name in {"next-part", "open-part", "submit-part", "fail-part", "block-part", "finish-review"}:
+            command.add_argument("--review-key", choices=("canonical", "r1", "r2"), default="canonical")
+        if name in {"publish", "prepare-review"}:
+            command.add_argument("--candidate", required=True, type=Path)
+        if name in {"publish", "select"}:
+            command.add_argument("--output-dir", required=True, type=Path)
+            command.add_argument("--csv-profile", default=_PROFILE)
+        if name in {"prepare-review", "select"}:
+            command.add_argument("--candidate-receipt", required=name == "select", type=Path)
+        if name == "prepare-review":
+            for field in ("assembly-receipt", "inventory-receipt", "context-marker-output", "automation"):
+                command.add_argument("--" + field, type=Path)
+            for field in ("context-receipt", "generator-fragment"):
+                command.add_argument("--" + field, action="append", default=[], type=Path)
+            command.add_argument("--source", required=True, action="append", help="Original requirement path relative to the project, in frozen baseline order.")
+            command.add_argument("--module-id", required=True)
+            command.add_argument("--target")
+            command.add_argument("--session-id", required=True)
+            command.add_argument("--input-byte-budget", required=True, type=int)
+            command.add_argument("--response-reserve-bytes", required=True, type=int)
+            command.add_argument("--instructions-file", required=True, type=Path)
+        if name == "open-part":
+            command.add_argument("--host-evidence", required=True, type=Path)
+        if name == "submit-part":
+            command.add_argument("--part-id", required=True)
+            command.add_argument("--assessment", required=True, type=Path)
+            command.add_argument("--transport-attempts", type=int, choices=(1, 2, 3), default=1)
+        if name in {"block-part", "fail-part"}:
+            command.add_argument("--part-id", required=True)
+            command.add_argument("--reason", required=True)
+            command.add_argument("--failure-class", choices=("TRANSPORT", "CONTENT"), required=name == "fail-part", default="CONTENT",
+                                 help="TRANSPORT: the reviewer could not be reached; CONTENT: it returned no usable assessment.")
     args = parser.parse_args(argv)
-    if hasattr(args, "csv_profile") and args.csv_profile not in _PROFILES:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("/csv_profile", "ORCHESTRATION_PROFILE")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     try:
-        if args.command == "publish-evidence":
-            from tools.pilot_state import publish_context_selection
-
-            receipt = publish_context_selection(args.run_root, args.attempt_id, load_json_strict(args.context_receipt))
-            print(json.dumps({"context_receipt": receipt, "status": "published"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
-        candidate = load_json_strict(args.candidate)
+        from tools import pilot_state as pilot
         if args.command == "publish":
-            receipt = publish_unreviewed_candidate(
-                candidate, args.output_dir, args.csv_profile,
-                run_root=args.run_root, attempt_id=args.attempt_id,
-            )
-            print(json.dumps({"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
-        receipt = _load_receipt(args.candidate_receipt)
-        base_contexts = [load_json_strict(path) for path in args.context_receipt]
-        if args.command == "open-session":
-            from tools.pilot_state import publish_context_selection
-
-            base_contexts = [publish_context_selection(args.run_root, args.attempt_id, value) for value in base_contexts]
+            receipt = publish_unreviewed_candidate(load_json_strict(args.candidate), args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
+            output = {"status": "UNREVIEWED", "candidate_bundle_receipt": _receipt_json(receipt)}
+        elif args.command == "prepare-review":
+            from tools.confined_output import read_confined_bytes
+            attempt = next(row for row in pilot.derive_state(args.run_root)["attempts"] if row["attempt_id"] == args.attempt_id)
+            project = Path(attempt["project"])
+            def source(path):
+                raw = read_confined_bytes(project, project, project / path)
+                if raw is None:
+                    raise ValueError("review source is unavailable")
+                return {"path": path, "sha256": "sha256:" + hashlib.sha256(raw).hexdigest(), "content": raw.decode("utf-8")}
+            sources = [source(path) for path in args.source]
+            contexts = _read_existing_context_receipts(args.context_receipt, args.run_root, args.attempt_id)
+            context_paths = list(dict.fromkeys(item["project_path"] for receipt in contexts for item in receipt["files"]))
+            candidate = load_json_strict(args.candidate)
+            automation = None if args.automation is None else load_json_strict(args.automation)
+            package = None
+            if automation is None:
+                if any(value is None for value in (args.candidate_receipt, args.assembly_receipt, args.inventory_receipt, args.context_marker_output)) or not args.generator_fragment:
+                    raise ValueError("canonical review requires candidate, assembly, inventory and generator provenance")
+                package = reviewer_package_binding(candidate, _load_receipt(args.candidate_receipt), load_json_strict(args.assembly_receipt), load_json_strict(args.inventory_receipt), contexts,
+                                                   context_marker_output=load_json_strict(args.context_marker_output), generator_fragments=[load_json_strict(path) for path in args.generator_fragment], run_root=args.run_root, attempt_id=args.attempt_id)
+            payload = {"document": candidate, "automation": automation, "package_binding": package, "sources": sources,
+                       "contexts": [source(path) for path in context_paths if path not in args.source],
+                       "requirements_binding": {"module_id": args.module_id, "selected_target": args.target, "docs": [{"path": item["path"], "sha256": item["sha256"]} for item in sources]}}
+            prepared = pilot.prepare_review(args.run_root, args.attempt_id, payload, input_byte_budget=args.input_byte_budget,
+                                            response_reserve_bytes=args.response_reserve_bytes, instructions=args.instructions_file.read_text(encoding="utf-8"), session_id=args.session_id)
+            output = {"status": "prepared", "review_key": prepared["review_key"], "plan_digest": prepared["plan"]["digest"],
+                      "parts": [{key: part[key] for key in ("part_id", "input_byte_count", "blocked_reason")} for part in prepared["plan"]["parts"]]}
+        elif args.command == "next-part":
+            output = {"status": "next", "input": pilot.next_review_part(args.run_root, args.attempt_id, args.review_key)}
+        elif args.command == "open-part":
+            output = pilot.open_review_part(args.run_root, args.attempt_id, args.review_key, load_json_strict(args.host_evidence))
+        elif args.command == "submit-part":
+            output = pilot.submit_review_part(args.run_root, args.attempt_id, args.review_key, args.part_id, load_json_strict(args.assessment), transport_attempts=args.transport_attempts)
+        elif args.command == "block-part":
+            output = pilot.block_review_part(args.run_root, args.attempt_id, args.review_key, args.part_id, args.reason, failure_class=args.failure_class)
+        elif args.command == "fail-part":
+            output = pilot.fail_review_part(args.run_root, args.attempt_id, args.review_key, args.part_id, args.failure_class, args.reason)
+        elif args.command == "finish-review":
+            output = pilot.finish_review(args.run_root, args.attempt_id, args.review_key)
         else:
-            base_contexts = _read_existing_context_receipts(args.context_receipt, args.run_root, args.attempt_id)
-        package = reviewer_package_binding(
-            candidate,
-            receipt,
-            load_json_strict(args.assembly_receipt),
-            load_json_strict(args.inventory_receipt),
-            base_contexts,
-            context_marker_output=load_json_strict(args.context_marker_output),
-            generator_fragments=[load_json_strict(path) for path in args.generator_fragment],
-            run_root=args.run_root,
-            attempt_id=args.attempt_id,
-        )
-        if args.command == "open-session":
-            boundary = open_reviewer_session(args.run_root, args.attempt_id, package, load_json_strict(args.session_start))
-            print(json.dumps({"package_binding": package, "reviewer_session_boundary": boundary, "status": "opened"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
-        result = orchestrate_revision(
-            candidate,
-            receipt,
-            package,
-            load_json_strict(args.reviewer_session),
-            None if args.review is None else load_json_strict(args.review),
-            args.output_dir,
-            args.csv_profile,
-            run_root=args.run_root,
-            attempt_id=args.attempt_id,
-            reviewer_evidence_receipts=_read_existing_context_receipts(args.evidence_receipt, args.run_root, args.attempt_id),
-        )
-    except OrchestrationError as error:
-        exit_code = 2 if error.code in {"ORCHESTRATION_PUBLICATION", "ORCHESTRATION_VERIFICATION"} else 1
-        print(json.dumps({"candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt), "code": error.code, "diagnostics": [dict(row) for row in error.diagnostics], "status": "error", "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
-    except (StrictJsonError, OSError, ValueError):
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_IO")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    output = {"candidate_bundle_receipt": _receipt_json(result.candidate_bundle_receipt), "diagnostics": [], "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt), "effective_source": None if result.effective_document is None else _source(result.effective_document), "facts": _plain(result.facts), "status": result.status, "successor_bundle_receipt": _receipt_json(result.successor_bundle_receipt)}
+            snapshot = pilot.read_attempt_receipt(args.run_root, args.attempt_id, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]
+            session = pilot.read_reviewer_session_ledger(args.run_root, args.attempt_id)
+            review = pilot.read_review_aggregate(args.run_root, args.attempt_id)["output"] if session["status"] == "COMPLETED" else None
+            result = orchestrate_revision(snapshot["document"], _load_receipt(args.candidate_receipt), snapshot["package_binding"], session, review, args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
+            output = {"status": result.status, "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt), "facts": _plain(result.facts)}
+    except (OrchestrationError, StrictJsonError, OSError, ValueError, KeyError, TypeError, StopIteration) as error:
+        output = {"status": "error", "code": "REVIEWER_PROTOCOL", "message": str(error)}
+        print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 2
     print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0
 

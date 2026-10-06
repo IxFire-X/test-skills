@@ -1,0 +1,167 @@
+{
+  "requirements": [
+    {
+      "requirement_id": "${requirement_id}002",
+      "display_order": 99,
+      "text": "Пользователь видит карточку товара.",
+      "provenance": [
+        "${source:2}"
+      ]
+    },
+    {
+      "requirement_id": "${requirement_id}001",
+      "display_order": 99,
+      "text": "Пользователь может открыть список товаров.",
+      "provenance": [
+        "${source:1}"
+      ]
+    }
+  ],
+  "source_to_canonical_mappings": [
+    {
+      "source_requirement_id": "${source:2}",
+      "canonical_requirement_ids": [
+        "${requirement_id}002"
+      ]
+    },
+    {
+      "source_requirement_id": "${source:1}",
+      "canonical_requirement_ids": [
+        "${requirement_id}001"
+      ]
+    }
+  ],
+  "operation_capabilities": [],
+  "test_cases": [
+    {
+      "case_id": "${case_id}002",
+      "display_order": 99,
+      "requirement_ids": [
+        "${requirement_id}002"
+      ],
+      "title": "Просмотр карточки товара",
+      "objective": "Подтвердить выполнение требования.",
+      "categories": [
+        "functional"
+      ],
+      "priority": "MEDIUM",
+      "preconditions": [
+        "Система доступна пользователю."
+      ],
+      "management": {
+        "status": null,
+        "folder": null,
+        "components": [],
+        "labels": [],
+        "owner": null,
+        "estimated_time": null,
+        "external_keys": {},
+        "external_links": {
+          "issues": [],
+          "pages": []
+        },
+        "custom_fields": {}
+      },
+      "steps": [
+        {
+          "step_id": "${step_id}002",
+          "display_order": 99,
+          "action": "Выполнить действие по требованию.",
+          "test_data": "—",
+          "manual_only": true,
+          "manual_reason": "Автоматизация не входит в этот сценарий.",
+          "automation_blockers": [],
+          "operation": null,
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "${expectation_id}002",
+              "display_order": 99,
+              "text": "Результат соответствует требованию.",
+              "assertions": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "${case_id}001",
+      "display_order": 99,
+      "requirement_ids": [
+        "${requirement_id}001"
+      ],
+      "title": "Открытие списка товаров",
+      "objective": "Подтвердить выполнение требования.",
+      "categories": [
+        "functional"
+      ],
+      "priority": "MEDIUM",
+      "preconditions": [
+        "Система доступна пользователю."
+      ],
+      "management": {
+        "status": null,
+        "folder": null,
+        "components": [],
+        "labels": [],
+        "owner": null,
+        "estimated_time": null,
+        "external_keys": {},
+        "external_links": {
+          "issues": [],
+          "pages": []
+        },
+        "custom_fields": {}
+      },
+      "steps": [
+        {
+          "step_id": "${step_id}001",
+          "display_order": 99,
+          "action": "Выполнить действие по требованию.",
+          "test_data": "Тело запроса отсутствует.",
+          "manual_only": false,
+          "manual_reason": null,
+          "automation_blockers": [],
+          "operation": {
+            "kind": "http",
+            "binding_profile": "http-binding-v1",
+            "base_url_source": {
+              "kind": "environment",
+              "name": "BASE_URL",
+              "provenance": [
+                "${source:1}"
+              ]
+            },
+            "method": "GET",
+            "path": "/products"
+          },
+          "inputs": [],
+          "outputs": [],
+          "expectations": [
+            {
+              "expectation_id": "${expectation_id}001",
+              "display_order": 99,
+              "text": "Отображается список доступных товаров.\n\nHTTP 200 OK",
+              "assertions": [
+                {
+                  "assertion_id": "${assertion_id}001",
+                  "display_order": 1,
+                  "actual": {
+                    "kind": "http_status"
+                  },
+                  "operator": "equals",
+                  "expected": {
+                    "kind": "literal",
+                    "value": 200
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

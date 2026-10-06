@@ -69,7 +69,7 @@ def host_evidence(session_id: str, *, generator: str = "generator-1", reviewer: 
 def durable_boundary(tmp_path, artifact: dict, session_id: str, evidence: dict, *, run_root: Path | None = None, attempt_id: str | None = None, generator: str = "generator-1", reviewer: str = "reviewer-1", policy_profile: str = "cases-only-v1", document: dict | None = None) -> tuple[Path, str, dict]:
     from tests.test_reviewer_protocol import _new_run
     from tools.automation_validation import automation_sha256
-    from tools.pilot_state import open_automation_review_boundary, publish_model_request, publish_model_stage_artifact
+    from tools.pilot_state import prepare_review, read_effective_canonical, publish_model_request, publish_model_stage_artifact
 
     if run_root is None or attempt_id is None:
         if policy_profile == "cases-only-v1":
@@ -95,46 +95,36 @@ def durable_boundary(tmp_path, artifact: dict, session_id: str, evidence: dict, 
         else:
             if selected.get("document") != document:
                 raise ValueError("test fixture effective selection mismatch")
-    body = {key: evidence[key] for key in ("fresh_context", "distinct_invocations")}
-    body["evidence_digest"] = _digest(body)
     revision = artifact["artifacts"]["automation_revision"]
     generator_stage = f"tc-to-autotest:r{revision}"
-    publish_model_request(
-        run_root, attempt_id, generator_stage,
-        model_id="model-automation", invocation_id=generator,
-        input_digests=[
-            artifact["artifacts"]["source"]["source_digest"],
-            artifact["artifacts"]["source"]["effective_bundle_receipt_digest"],
-        ],
-    )
+    publish_model_request(run_root, attempt_id, generator_stage, model_id="model-automation", invocation_id=f"{generator}-r{revision}",
+                          input_digests=[artifact["artifacts"]["source"]["source_digest"], artifact["artifacts"]["source"]["effective_bundle_receipt_digest"]])
     publish_model_stage_artifact(run_root, attempt_id, generator_stage, artifact)
-    receipt = open_automation_review_boundary(run_root, attempt_id, {
-        "automation_digest": automation_sha256(artifact), "automation_revision": artifact["artifacts"]["automation_revision"],
-        "effective_canonical_digest": artifact["artifacts"]["source"]["source_digest"],
-        "effective_bundle_receipt_digest": artifact["artifacts"]["source"]["effective_bundle_receipt_digest"],
-        "reviewer_session_id": session_id, "generator_invocation_id": generator, "reviewer_invocation_id": reviewer,
-        "role_policy": "autotest-static-reviewer-v1", "host_isolation": body,
-    })
-    return run_root, attempt_id, dict(receipt["record"])
+    from tests.helpers import review_payload
+    from tools.pilot_state import read_run
+    selected = read_effective_canonical(run_root, attempt_id)
+    prepared = prepare_review(run_root, attempt_id, review_payload(Path(read_run(run_root)["manifest"]["project"]), selected["document"], automation=artifact),
+                              input_byte_budget=100000, response_reserve_bytes=1000, instructions="Synthetic automation protocol fixture.", session_id=session_id)
+    return run_root, attempt_id, dict(prepared["boundary"])
 
 
-def review(document: dict, artifact: dict, evidence: dict, verdict: str, *, session_id: str) -> dict:
+def review(document: dict, artifact: dict, evidence: dict, verdict: str, *, session_id: str, run_root: Path | None = None, attempt_id: str | None = None) -> dict:
     from tools.automation_validation import (
         automation_sha256,
         implementation_relations_sha256,
     )
 
+    if run_root is not None and attempt_id is not None:
+        from tests.helpers import complete_review_parts
+        corrections = [] if verdict == "ПРИНЯТО" else [{"id": "FIX-products", "correction_kind": "MECHANICAL", "path": "/generated_files/0/content", "before": "", "after": "", "related_ids": ["FILE-products"], "description": "Перегенерировать полный набор.", "evidence": ["relation"]}]
+        return complete_review_parts(run_root, attempt_id, f"r{artifact['artifacts']['automation_revision']}", corrections=corrections)["output"]
     generated = artifact["artifacts"]
     return {
-        "schema_version": "5.0.0", "stage": "autotest-reviewer", "warnings": [],
-        "artifacts": {"autotest_review": {
+        "schema_version": "6.0.0", "stage": "autotest-reviewer", "warnings": [],
+        "artifacts": {"review_aggregate": {"plan_digest": evidence.get("plan_digest", "sha256:" + "0" * 64), "aggregate_digest": "sha256:" + "1" * 64}, "autotest_review": {
             "source": generated["source"], "automation_revision": generated["automation_revision"],
             "automation_sha256": automation_sha256(artifact),
             "reviewer_session_id": session_id,
-            "generator_invocation_id": evidence["generator_invocation_id"],
-            "reviewer_invocation_id": evidence["reviewer_invocation_id"],
-            "role_policy": "autotest-static-reviewer-v1",
-            "host_isolation_sha256": evidence.get("digest", _digest(evidence)),
             "reviewed_files": [{"file_id": row["file_id"], "content_digest": row["content_digest"]} for row in generated["generated_files"]],
             "reviewed_symbol_pairs": [{"file_id": row["file_id"], "symbol_id": row["symbol_id"]} for row in generated["generated_symbols"]],
             "reviewed_relations_sha256": implementation_relations_sha256(generated["implementation_relations"]),
@@ -162,11 +152,11 @@ def test_accepts_initial_and_one_complete_controller_bound_correction(tmp_path: 
     first = automation(document, effective_bundle_receipt_digest=bundle_digest)
     first_evidence = host_evidence("session-1")
     run_root, attempt_id, first_boundary = durable_boundary(tmp_path, first, "session-1", first_evidence, policy_profile="local-pilot-v1", document=document)
-    first_review = review(document, first, first_boundary, "AUTO_FIX_APPLIED", session_id="session-1")
+    first_review = review(document, first, first_boundary, "AUTO_FIX_APPLIED", session_id="session-1", run_root=run_root, attempt_id=attempt_id)
     second_evidence = host_evidence("session-2")
     second = automation(document, 2, predecessor=automation_sha256(first), correction_review=autotest_review_sha256(first_review), effective_bundle_receipt_digest=bundle_digest)
     _run_root, _attempt_id, second_boundary = durable_boundary(tmp_path, second, "session-2", second_evidence, run_root=run_root, attempt_id=attempt_id, reviewer="reviewer-2", document=document)
-    second_review = review(document, second, second_boundary, "ПРИНЯТО", session_id="session-2")
+    second_review = review(document, second, second_boundary, "ПРИНЯТО", session_id="session-2", run_root=run_root, attempt_id=attempt_id)
 
     assert validate_automation_revision_chain([first, second], [first_review, second_review], document, host_isolation_receipts=[first_boundary, second_boundary], run_root=run_root, attempt_id=attempt_id) == []
     assert validate_accepted_autotest_review(second_review, second, document, host_isolation_receipt=second_boundary, run_root=run_root, attempt_id=attempt_id) == []
@@ -233,18 +223,18 @@ def test_rejects_tampered_attempt_owned_static_review_boundary(tmp_path: Path) -
     document = automated_document()
     artifact = automation(document, effective_bundle_receipt_digest=_effective_bundle_digest(document))
     run_root, attempt_id, boundary = durable_boundary(tmp_path, artifact, "session-1", host_evidence("session-1"), policy_profile="local-pilot-v1", document=document)
-    accepted = review(document, artifact, boundary, "ПРИНЯТО", session_id="session-1")
-    boundary["reviewer_invocation_id"] = "forged-reviewer"
+    accepted = review(document, artifact, boundary, "ПРИНЯТО", session_id="session-1", run_root=run_root, attempt_id=attempt_id)
+    boundary["plan_digest"] = "sha256:" + "f" * 64
 
     assert "AUTOTEST_REVIEW_ISOLATION" in codes(
         validate_accepted_autotest_review(accepted, artifact, document, host_isolation_receipt=boundary, run_root=run_root, attempt_id=attempt_id)
     )
 
 
-def test_static_review_boundary_rejects_wrong_effective_selection_before_publication(tmp_path: Path) -> None:
+def test_static_review_boundary_rejects_wrong_effective_selection_before_publication(tmp_path: Path, monkeypatch) -> None:
     from tests.helpers import build_phase_two_baseline
     from tests.test_generated_delta import _effective_bundle, _effective_bundle_digest, _published_reviewer_ledger
-    from tools.automation_validation import automation_sha256
+    from tools import pilot_state
     from tools.pilot_state import open_automation_review_boundary, publish_effective_canonical
     from tools.run_pipeline import run_phase_one_spine
 
@@ -257,18 +247,11 @@ def test_static_review_boundary_rejects_wrong_effective_selection_before_publica
     attempt_id = run["state"]["attempts"][0]["attempt_id"]
     publish_effective_canonical(run_root, attempt_id, document, _effective_bundle(document), _published_reviewer_ledger(run_root, attempt_id, document))
     artifact = automation(document, effective_bundle_receipt_digest=_effective_bundle_digest(document))
-    isolation = {"fresh_context": True, "distinct_invocations": True}
-    isolation["evidence_digest"] = _digest(isolation)
-
+    def wrong_selection(root, attempt, facts):
+        return open_automation_review_boundary(root, attempt, facts | {"effective_canonical_digest": "sha256:" + "f" * 64})
+    monkeypatch.setattr(pilot_state, "open_automation_review_boundary", wrong_selection)
     with pytest.raises(ValueError, match="invalid automation review boundary"):
-        open_automation_review_boundary(run_root, attempt_id, {
-            "automation_digest": automation_sha256(artifact), "automation_revision": 1,
-            "effective_canonical_digest": "sha256:" + "f" * 64,
-            "effective_bundle_receipt_digest": artifact["artifacts"]["source"]["effective_bundle_receipt_digest"],
-            "reviewer_session_id": "wrong-effective", "generator_invocation_id": "generator-1",
-            "reviewer_invocation_id": "reviewer-1", "role_policy": "autotest-static-reviewer-v1",
-            "host_isolation": isolation,
-        })
+        durable_boundary(tmp_path, artifact, "wrong-effective", host_evidence("wrong-effective"), run_root=run_root, attempt_id=attempt_id)
     assert not (run_root / "automation-review-boundaries" / f"{attempt_id}.r1.json").exists()
 
 

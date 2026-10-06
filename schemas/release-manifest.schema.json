@@ -18,7 +18,7 @@
     "policy_profiles": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/versioned_id"}},
     "adapter_registry": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/versioned_id"}},
     "stage_registry": {"type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true, "items": {"$ref": "#/$defs/stage"}},
-    "projection_profiles": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/projection_profile"}},
+    "projection_profiles": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/projection_profile"}},
     "release_eval": {
       "type": "object", "additionalProperties": false,
       "required": ["suite_id", "suite_digest", "policy"],
@@ -50,7 +50,7 @@
       "required": ["stage", "role", "role_policy", "cardinality", "profiles"],
       "properties": {
         "stage": {"$ref": "#/$defs/label"}, "role": {"$ref": "#/$defs/label"}, "role_policy": {"$ref": "#/$defs/label"},
-        "cardinality": {"enum": ["once", "per_batch", "once_per_canonical_branch", "per_automation_revision"]},
+        "cardinality": {"enum": ["once", "per_batch", "per_review_part", "per_automation_revision"]},
         "profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["cases-only-v1", "local-pilot-v1"]}}
       }
     },
@@ -58,9 +58,9 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "format", "mode", "tenant_status"],
       "properties": {
-        "id": {"enum": ["zephyr-scale-step-row-24-v4", "zephyr-scale-xml-observed-v1"]},
+        "id": {"enum": ["zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4", "zephyr-scale-xml-observed-v1"]},
         "format": {"enum": ["csv", "xml"]},
-        "mode": {"enum": ["default", "opt_in_observed"]},
+        "mode": {"enum": ["default", "opt_in_compatibility", "opt_in_observed"]},
         "tenant_status": {"const": "N_A"}
       }
     }

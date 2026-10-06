@@ -20,7 +20,7 @@ def _receipt(status: str, output: Path, profile: str, payload: bytes, warnings: 
         "path": str(output),
         "profile": profile,
         "profile_status": "observed_unverified",
-        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha256": "sha256:" + hashlib.sha256(payload).hexdigest(),
         "status": status,
         "warnings": list(warnings),
     }

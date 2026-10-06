@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from http import HTTPStatus
 from dataclasses import dataclass
 from types import MappingProxyType
 from pathlib import Path
 from typing import Any, Sequence
 
+from tools.assertion_dsl import portable_regex_problem
+from tools.http_reason import accepted_reason_phrases
 from tools.schema_validation import load_json_strict, schema_diagnostics
 
 
@@ -53,10 +54,17 @@ def _json_type(value: Any) -> dict[str, str]:
     return {"kind": "json", "type": name}
 
 
-def _compatible(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
-    """Return whether an actual descriptor can be used where expected is declared."""
+def _compatible(actual: dict[str, Any], expected: dict[str, Any], *, literal: bool = False) -> bool:
+    """Return whether an actual descriptor can be used where expected is declared.
+
+    A JSON *literal* has no named type of its own, so it is accepted for a named type
+    whose representation it satisfies (``"2024-01-01"`` for ``LocalDate``/string).
+    Non-literal JSON sources stay incompatible with named types.
+    """
     if actual.get("kind") == expected.get("kind") == "named":
         return actual.get("name") == expected.get("name") and actual.get("representation") == expected.get("representation")
+    if literal and actual.get("kind") == "json" and expected.get("kind") == "named":
+        expected = {"kind": "json", "type": expected.get("representation")}
     if actual.get("kind") != "json" or expected.get("kind") != "json":
         return False
     return actual.get("type") == expected.get("type") or (
@@ -141,9 +149,10 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
     request = _trailing_json(step["test_data"])
     inputs_blocked = any(item["field_path"] == "/inputs" for item in step["automation_blockers"])
     if not inputs_blocked:
-        if request is _NO_JSON and not body_inputs and step["test_data"] != "Тело запроса отсутствует.":
-            diagnostics.append(_diagnostic(_pointer(*step_path, "test_data"), "SEMANTIC_HUMAN_HTTP_REQUEST_FORMAT", "HTTP request requires a full formatted JSON body or exactly «Тело запроса отсутствует.»"))
-        elif request is not _NO_JSON and (not step["test_data"].lstrip().startswith(("{", "[")) or (request and not re.search(r"\n[ \t]+\S", step["test_data"]))):
+        # A body-less request needs no fixed wording: any prose without a JSON body is acceptable
+        # ("—", «Тело запроса отсутствует.», a note about URL parameters).  Unbound JSON is
+        # still reported below as SEMANTIC_HUMAN_BODY_UNBOUND.
+        if request is not _NO_JSON and (not step["test_data"].lstrip().startswith(("{", "[")) or (request and not re.search(r"\n[ \t]+\S", step["test_data"]))):
             diagnostics.append(_diagnostic(_pointer(*step_path, "test_data"), "SEMANTIC_HUMAN_HTTP_REQUEST_FORMAT", "HTTP request body must be full JSON with indentation"))
     if body_inputs and request is _NO_JSON and not inputs_blocked:
         diagnostics.append(_diagnostic(
@@ -206,7 +215,7 @@ def _human_http_alignment(step: dict[str, Any], step_path: tuple[object, ...], d
             status = _HTTP_RESULT.match(expectation["text"])
             if status is None or not status[1].strip() or any(status[2] != str(value) for value in known_statuses):
                 diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_HTTP_RESULT_FORMAT", "describe the observable system result, then a blank line and the confirmed HTTP status/reason"))
-            elif int(status[2]) in HTTPStatus._value2member_map_ and status[3].strip() != HTTPStatus(int(status[2])).phrase:
+            elif accepted_reason_phrases(int(status[2])) and status[3].strip() not in accepted_reason_phrases(int(status[2])):
                 diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_HTTP_RESULT_FORMAT", "HTTP reason must match the confirmed status"))
         body_assertions = [
             assertion for assertion in expectation["assertions"]
@@ -485,7 +494,10 @@ def _blocker_and_readiness(step: dict[str, Any], step_path: tuple[object, ...], 
             if not expectation["assertions"] and not any(item["field_path"] == f"/expectations/{expectation_index}/assertions" for item in blockers):
                 diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "assertions"), "SEMANTIC_MISSING_ASSERTION_BLOCKER", "empty blocked expectation requires its exact assertion blocker"))
         blocker_paths = {item["field_path"] for item in blockers}
-        input_binding_is_omitted = _has_blocker_backed_http_input_omission(step)
+        # An /inputs blocker on an HTTP step names an input the specification does not resolve:
+        # an unbound path placeholder or an unknown request-body/query/header field.  Like
+        # /outputs, an omitted binding leaves no structural trace to cross-check.
+        input_binding_is_omitted = "/inputs" in blocker_paths and step["operation"] is not None and step["operation"].get("kind") == "http"
         output_binding_is_omitted = "/outputs" in blocker_paths
         if (
             step["operation"] is not None
@@ -540,7 +552,7 @@ def _data_flow_targets_and_contracts(index: _DocumentIndex, case_index: int, ste
                 argument = arguments.get(target["name"])
                 if argument is None:
                     diagnostics.append(_diagnostic(_pointer(*input_path, "target", "name"), "SEMANTIC_UNDECLARED_CAPABILITY_ARGUMENT", "input target is not a declared capability argument"))
-                elif not _compatible(resolved or stored, argument["semantic_type"]):
+                elif not _compatible(resolved or stored, argument["semantic_type"], literal=binding["source"]["kind"] == "literal"):
                     diagnostics.append(_diagnostic(_pointer(*input_path, "semantic_type"), "SEMANTIC_CAPABILITY_TYPE_MISMATCH", "input type is incompatible with capability argument"))
     if operation_kind == "http" and not _has_blocker_backed_http_input_omission(step, path_inputs):
         placeholders = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_.-]*)\}", operation["path"]))
@@ -605,20 +617,25 @@ def _assertion_matrix(index: _DocumentIndex, case_index: int, step_index: int, s
             expected_type = _source_type(index, case_index, step_index, expected, (*assertion_path, "expected"), diagnostics) if expected and expected["kind"] not in {"regex", "schema_ref"} else None
             actual_representation, expected_representation = _representation(actual_type or {}), _representation(expected_type or {})
             invalid = False
+            literal_expected = expected is not None and expected["kind"] == "literal"
             if operator in {"equals", "not_equals"}:
-                invalid = expected is None or expected["kind"] not in _VALUE_SOURCE_KINDS or not _compatible(expected_type or {}, actual_type or {})
+                invalid = expected is None or expected["kind"] not in _VALUE_SOURCE_KINDS or not _compatible(expected_type or {}, actual_type or {}, literal=literal_expected)
             elif operator == "contains":
                 invalid = actual_representation != "string" or expected is None or expected["kind"] not in _VALUE_SOURCE_KINDS or expected_representation != "string"
             elif operator == "matches":
                 invalid = actual_representation != "string" or expected is None or expected["kind"] != "regex"
             elif operator in {"greater_than", "greater_or_equal", "less_than", "less_or_equal"}:
-                invalid = actual_representation not in {"integer", "number"} or expected is None or expected["kind"] not in _VALUE_SOURCE_KINDS or expected_representation not in {"integer", "number"} or not _compatible(expected_type or {}, actual_type or {})
+                invalid = actual_representation not in {"integer", "number"} or expected is None or expected["kind"] not in _VALUE_SOURCE_KINDS or expected_representation not in {"integer", "number"} or not _compatible(expected_type or {}, actual_type or {}, literal=literal_expected)
             elif operator == "length_equals":
                 invalid = actual_representation not in {"string", "array", "object"} or expected is None or expected["kind"] != "literal" or _json_type(expected["value"]).get("type") != "integer" or expected["value"] < 0
             elif operator == "schema_matches":
                 invalid = actual_representation not in {"object", "array"} or expected is None or expected["kind"] != "schema_ref"
             if invalid:
                 diagnostics.append(_diagnostic(_pointer(*assertion_path), "SEMANTIC_OPERATOR_TYPE", "operator operands are incompatible"))
+            if expected is not None and expected["kind"] == "regex":
+                problem = portable_regex_problem(expected["pattern"])
+                if problem is not None:
+                    diagnostics.append(_diagnostic(_pointer(*assertion_path, "expected", "pattern"), "SEMANTIC_PORTABLE_REGEX", problem))
 
 
 def _secret_handles(document: dict[str, Any]) -> frozenset[str]:
@@ -671,7 +688,39 @@ def _secret_handle_hygiene(case: dict[str, Any], case_index: int, handles: froze
     """Keep private locator values out of every human-facing case field."""
     if not handles:
         return
+    for path, value in _case_human_fields(case, case_index):
+        if any(handle in value for handle in handles):
+            diagnostics.append(_diagnostic(
+                _pointer(*path),
+                "SEMANTIC_SECRET_HANDLE_IN_HUMAN_FIELD",
+                "human-facing fields must use safe_label, never a secret handle",
+            ))
 
+
+def _xml_incompatible(value: str) -> bool:
+    """True when *value* holds a character XML 1.0 (and thus the Zephyr XML export) cannot carry."""
+    return any(
+        ord(character) not in (0x09, 0x0A, 0x0D)
+        and not 0x20 <= ord(character) <= 0xD7FF
+        and not 0xE000 <= ord(character) <= 0xFFFD
+        and not 0x10000 <= ord(character) <= 0x10FFFF
+        for character in value
+    )
+
+
+def _human_control_characters(case: dict[str, Any], case_index: int, diagnostics: list[dict[str, str]]) -> None:
+    """Reject control characters at validation time instead of at projection/export time."""
+    for path, value in _case_human_fields(case, case_index):
+        if _xml_incompatible(value):
+            diagnostics.append(_diagnostic(
+                _pointer(*path),
+                "SEMANTIC_HUMAN_CONTROL_CHARACTER",
+                "human-facing fields must not contain control characters other than tab and line breaks",
+            ))
+
+
+def _case_human_fields(case: dict[str, Any], case_index: int) -> list[tuple[tuple[object, ...], str]]:
+    """Every human-facing string of one case with its JSON-pointer parts."""
     fields: list[tuple[tuple[object, ...], str]] = [
         (("test_cases", case_index, "title"), case["title"]),
         (("test_cases", case_index, "objective"), case["objective"]),
@@ -723,14 +772,7 @@ def _secret_handle_hygiene(case: dict[str, Any], case_index: int, handles: froze
             ((*step_path, "expectations", index, "text"), expectation["text"])
             for index, expectation in enumerate(step["expectations"])
         )
-
-    for path, value in fields:
-        if any(handle in value for handle in handles):
-            diagnostics.append(_diagnostic(
-                _pointer(*path),
-                "SEMANTIC_SECRET_HANDLE_IN_HUMAN_FIELD",
-                "human-facing fields must use safe_label, never a secret handle",
-            ))
+    return fields
 
 
 def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
@@ -743,6 +785,7 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
     _metadata_secret_handle_hygiene(document, handles, diagnostics)
     for case_index, case in enumerate(index.cases):
         _secret_handle_hygiene(case, case_index, handles, diagnostics)
+        _human_control_characters(case, case_index, diagnostics)
         for step_index, step in enumerate(case["steps"]):
             step_path = ("test_cases", case_index, "steps", step_index)
             for expectation_index, expectation in enumerate(step["expectations"]):
@@ -757,8 +800,31 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(diagnostics, key=lambda item: (item["path"], item["code"], item["message"]))
 
 
+_VALIDATION_RESULTS: dict[str, tuple[tuple[tuple[str, str], ...], ...]] = {}
+_VALIDATION_RESULTS_LIMIT = 64
+
+
 def validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]]:
-    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0."""
+    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0.
+
+    The result is a pure function of the document bytes, so an identical
+    document (the pipeline validates the same revision at every stage) is
+    validated once per process and afterwards answered by its digest.
+    """
+    try:
+        identity = hashlib.sha256(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return _validate_canonical_document(document)
+    cached = _VALIDATION_RESULTS.get(identity)
+    if cached is None:
+        cached = tuple(tuple(row.items()) for row in _validate_canonical_document(document))
+        if len(_VALIDATION_RESULTS) >= _VALIDATION_RESULTS_LIMIT:
+            _VALIDATION_RESULTS.pop(next(iter(_VALIDATION_RESULTS)))
+        _VALIDATION_RESULTS[identity] = cached
+    return [dict(row) for row in cached]
+
+
+def _validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]]:
     diagnostics = schema_diagnostics(document, _CANONICAL_DOCUMENT_SCHEMA, _ROOT)
     if diagnostics:
         return diagnostics

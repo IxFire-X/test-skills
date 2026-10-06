@@ -72,7 +72,8 @@ def test_cases_only_valid_terminal_results_are_draft_artifacts_only() -> None:
         result = terminal_result(facts, "cases-only-v1")
         assert result["accepted"] is False
         assert result["verification"] == "NOT_APPLICABLE"
-        assert exit_code(result) == 1
+        # Review 2026-10-05 (decision 12): only a valid terminal is exit 1; a broken run is exit 2.
+        assert exit_code(result) == (1 if facts == _facts() else 2)
 
 
 def test_local_acceptance_requires_each_predicate_and_file_cardinality() -> None:

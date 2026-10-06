@@ -254,17 +254,46 @@ def _java_companions(project_dir: str, target_abs: str) -> list[str]:
     return companions
 
 
+def _secret_filter(project_dir: str, absolute_path: str) -> bool:
+    """True when the inventory secret filter rejects a file; failing closed."""
+    try:
+        if __package__:
+            from .project_inventory import file_secret_rule
+        else:  # direct CLI execution: the package root is the parent of tools/
+            pack_root = str(Path(__file__).resolve().parents[1])
+            if pack_root not in sys.path:
+                sys.path.insert(0, pack_root)
+            from tools.project_inventory import file_secret_rule
+    except ImportError:
+        return True
+    return file_secret_rule(Path(project_dir), Path(absolute_path)) is not None
+
+
+def _java_source_index(project_dir: str) -> dict[str, list[str]]:
+    """Index project Java files by simple file name with one confined walk."""
+    root = Path(project_dir)
+    index: dict[str, list[str]] = {}
+    for path in confined_files(root):
+        if path.suffix == ".java":
+            index.setdefault(path.name, []).append(path.relative_to(root).as_posix())
+    return index
+
+
 def _java_imported_sources(project_dir: str, target_abs: str) -> list[str]:
     """Resolve direct project-local Java imports without leaving project_dir."""
     source = _read_text(target_abs) or ""
     mask = _strip_java_comments_and_text_blocks(source)
     imported_types = sorted(set(re.findall(r"^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", mask, re.MULTILINE)))
     resolved: list[str] = []
+    if not imported_types:
+        return resolved
+    # One walk for all imports instead of one repository walk per import.
+    index = _java_source_index(project_dir)
     for imported in imported_types:
         suffix = imported.replace(".", "/") + ".java"
-        for rel in sorted(_find_files_by_suffix(project_dir, suffix)):
+        for rel in sorted(rel for rel in index.get(suffix.rsplit("/", 1)[-1], []) if rel == suffix or rel.endswith("/" + suffix)):
             candidate = _confined_path(project_dir, os.path.join(project_dir, rel))
-            if not candidate:
+            if not candidate or _secret_filter(project_dir, candidate):
                 continue
             text = _read_text(candidate) or ""
             package = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.MULTILINE)
@@ -327,7 +356,10 @@ def extract_companions(project_dir: str, target_abs: str, language: str) -> list
     """
     companions: list[str] = []
     if language == "java":
-        companions = _java_companions(project_dir, target_abs)
+        companions = [
+            path for path in _java_companions(project_dir, target_abs)
+            if not _secret_filter(project_dir, os.path.join(project_dir, path))
+        ]
         imports = _java_imported_sources(project_dir, target_abs)
         return companions + [path for path in imports if path not in companions]
     if language not in COMPANION_FILES or not COMPANION_FILES[language]:

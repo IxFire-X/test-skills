@@ -5,12 +5,12 @@
   "additionalProperties": false,
   "required": ["schema_version", "stage", "artifacts", "warnings"],
   "properties": {
-    "schema_version": {"const": "5.0.0"},
+    "schema_version": {"const": "6.0.0"},
     "stage": {"const": "autotest-reviewer"},
     "artifacts": {
       "type": "object", "additionalProperties": false,
-      "required": ["autotest_review"],
-      "properties": {"autotest_review": {"$ref": "#/$defs/review"}}
+      "required": ["autotest_review", "review_aggregate"],
+      "properties": {"autotest_review": {"$ref": "#/$defs/review"}, "review_aggregate": {"type": "object", "additionalProperties": false, "required": ["plan_digest", "aggregate_digest"], "properties": {"plan_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "aggregate_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}}}}
     },
     "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
@@ -79,16 +79,12 @@
     },
     "review": {
       "type": "object", "additionalProperties": false,
-      "required": ["source", "automation_revision", "automation_sha256", "reviewer_session_id", "generator_invocation_id", "reviewer_invocation_id", "role_policy", "host_isolation_sha256", "reviewed_files", "reviewed_symbol_pairs", "reviewed_relations_sha256", "verdict", "findings", "corrections"],
+      "required": ["source", "automation_revision", "automation_sha256", "reviewer_session_id", "reviewed_files", "reviewed_symbol_pairs", "reviewed_relations_sha256", "verdict", "findings", "corrections"],
       "properties": {
         "source": {"$ref": "#/$defs/source"},
         "automation_revision": {"type": "integer", "minimum": 1, "maximum": 2},
         "automation_sha256": {"$ref": "#/$defs/digest"},
         "reviewer_session_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "generator_invocation_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "reviewer_invocation_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "role_policy": {"const": "autotest-static-reviewer-v1"},
-        "host_isolation_sha256": {"$ref": "#/$defs/digest"},
         "reviewed_files": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/reviewed_file"}},
         "verdict": {"enum": ["ПРИНЯТО", "AUTO_FIX_APPLIED", "ТРЕБУЕТ ДОРАБОТКИ"]},
         "reviewed_symbol_pairs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/symbol_pair"}},

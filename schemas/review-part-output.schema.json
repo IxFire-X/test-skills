@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/review-part-output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_digest", "snapshot_digest", "part_id", "input_digest"],
+  "oneOf": [
+    {"required": ["coverage", "findings", "corrections", "required_checks"], "not": {"required": ["invocation_failure"]}},
+    {"required": ["invocation_failure"], "not": {"anyOf": [{"required": ["coverage"]}, {"required": ["findings"]}, {"required": ["corrections"]}, {"required": ["required_checks"]}]}}
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "invocation_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_class", "reason", "try"],
+      "properties": {"failure_class": {"enum": ["TRANSPORT", "CONTENT"]}, "reason": {"type": "string", "minLength": 1}, "try": {"enum": [1, 2, 3]}}
+    },
+    "plan_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "snapshot_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "part_id": {"type": "string", "pattern": "^part-[0-9]{6}$"},
+    "input_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope_id", "status", "evidence", "assessment"],
+        "properties": {
+          "scope_id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["CHECKED", "UNCHECKED"]},
+          "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "assessment": {"type": "string", "minLength": 1}
+        }
+      },
+      "minItems": 1
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "code", "message", "evidence", "related_ids"],
+        "additionalProperties": false,
+        "properties": {
+          "severity": {"enum": ["BLOCKING", "WARNING", "INFO"]},
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "related_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "correction_kind", "path", "before", "after", "related_ids", "description", "evidence"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^FIX-[A-Za-z0-9_.:-]+$"},
+          "correction_kind": {"enum": ["MECHANICAL", "DESTRUCTIVE", "PARTIAL", "CHOICE"]},
+          "path": {"type": "string"},
+          "before": {"type": "string"},
+          "after": {"type": "string"},
+          "related_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "description": {"type": "string", "minLength": 1},
+          "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}
+        }
+      }
+    },
+    "required_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope_ids", "reason"],
+        "properties": {"scope_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}, "reason": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

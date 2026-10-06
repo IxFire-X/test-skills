@@ -44,12 +44,6 @@ class NeedsInput(InitError):
         self.questions = questions
 
 
-class Conflict(InitError):
-    def __init__(self, questions: list[dict[str, Any]]):
-        super().__init__("conflict", "existing manifest requires an explicit decision")
-        self.questions = questions
-
-
 def _set_field(module: dict[str, Any], field: str, value: object) -> None:
     parts = field.split(".")
     if len(parts) < 4 or parts[0] != "modules":
@@ -125,16 +119,19 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
         module["test"] = {
             "framework": "pytest",
             "adapter_id": "pytest:selected-symbols-v1",
-            "interpreter": ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python",
+            "interpreter": "python",
             "build_profile": "default",
             "adapter_parameters": {},
         }
         return
     wrapper_names = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}
     names = wrapper_names.get(build_tool)
-    wrapper = names[os.name == "nt"] if names else None
+    # The manifest keeps the logical wrapper name; the host launcher is chosen at run time.
+    wrapper = names[0] if names else None
     root = project_dir.resolve()
-    target = root / str(module.get("root", ".")) / wrapper if wrapper else None
+    build_root = _detected_build_root(root, str(module.get("root", ".")), build_tool) if names else None
+    target = root / build_root / names[os.name == "nt"] if names and build_root is not None else None
+    multi_module = {} if build_root in {None, str(module.get("root", "."))} else {"build_root": build_root}
     adapter_ids = {
         "maven": "maven-wrapper:selected-symbols-v1",
         "gradle": "gradle-wrapper:selected-symbols-v1",
@@ -146,190 +143,97 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
             "wrapper": wrapper,
             "build_profile": "default",
             "adapter_parameters": {},
+            **multi_module,
         }
         return
     if language == "java" and framework == "junit5" and build_tool == "maven":
         from tools.project_inventory import InventoryError, system_maven_path
 
         try:
-            executable = system_maven_path("mvn")
+            system_maven_path("mvn")
         except (InventoryError, OSError):
             pass
         else:
             module["test"] = {
                 "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
-                "executable": str(executable), "build_profile": "default", "adapter_parameters": {},
+                "executable": "mvn", "build_profile": "default", "adapter_parameters": {},
+                **multi_module,
             }
             return
     module.pop("test", None)
 
 
-def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
-    """Public reconciliation question: deliberately contains no manifest values."""
-    return {
-        "id": question_id,
-        "field": field,
-        "impact": "An existing manifest value would change",
-        "options": [
-            {"id": "keep-existing", "value": "keep-existing", "evidence": []},
-            {"id": "use-detected", "value": "use-detected", "evidence": []},
-        ],
-        "operation": operation,
-    }
+def _maven_child_dirs(directory: Path) -> set[Path]:
+    """Directories a reactor ``pom.xml`` aggregates, including profile-scoped modules."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        tree = ET.fromstring((directory / "pom.xml").read_bytes())
+    except (OSError, ET.ParseError):
+        return set()
+    children: set[Path] = set()
+    for element in tree.iter():
+        if element.tag.rsplit("}", 1)[-1] != "module" or not (element.text or "").strip():
+            continue
+        child = directory / element.text.strip().replace("\\", "/")
+        children.add((child.parent if child.name.endswith(".xml") else child).resolve())
+    return children
 
 
-def _merge_additive(existing: Any, proposed: Any, field: str, questions: list[dict[str, Any]], path: list[str]) -> Any:
-    if isinstance(existing, dict) and isinstance(proposed, dict):
-        result = copy.deepcopy(existing)
-        for key, value in proposed.items():
-            result[key] = _merge_additive(result[key], value, f"{field}.{key}", questions, path + [key]) if key in result else copy.deepcopy(value)
-        return result
-    if existing == proposed or field.endswith(".detected_from"):
-        return copy.deepcopy(existing if existing != proposed else proposed)
-    question = _question(f"replace:{field}", field, "replace")
-    question["_path"] = path
-    question["_existing"] = copy.deepcopy(existing)
-    question["_detected"] = copy.deepcopy(proposed)
-    questions.append(question)
-    return copy.deepcopy(existing)
+def _detected_build_root(project_root: Path, module_root: str, build_tool: Any) -> str | None:
+    """Project-relative directory the build must start from for this module.
+
+    Gradle: the nearest directory, from the module upwards, holding ``settings.gradle(.kts)``.
+    Maven: the outermost reactor whose ``<modules>`` chain reaches the module.
+    Without such an ancestor the module is its own build root.
+    """
+    parts = [part for part in module_root.replace("\\", "/").split("/") if part not in {"", "."}]
+    chain = [project_root.joinpath(*parts[:size]) for size in range(len(parts), -1, -1)]
+    chosen = chain[0]
+    if any(_is_reparse(directory) for directory in chain[:-1]):
+        return None
+    if build_tool == "gradle":
+        chosen = next((directory for directory in chain if any((directory / name).is_file() for name in ("settings.gradle", "settings.gradle.kts"))), chain[0])
+    elif build_tool == "maven":
+        for directory in chain[1:]:
+            if chosen.resolve() in _maven_child_dirs(directory):
+                chosen = directory
+    else:
+        return None
+    return chosen.relative_to(project_root).as_posix() or "."
 
 
-def reconcile_skillsrc(existing: dict[str, Any] | None, proposed: dict[str, Any], answers: Mapping[str, str]) -> dict[str, Any]:
-    if existing is None:
-        if answers:
-            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-        return {"status": "created", "document": proposed, "questions": []}
-    normalized = normalize_skillsrc(existing)
-    existing_modules = normalized["modules"]
-    proposed_modules = proposed["modules"]
-    if existing.get("version") != "3.0":
-        unsupported = _v2_unsupported_fields(existing)
-        if unsupported:
-            question = _question("migrate-v2-preservation", "version", "replace")
-            question["impact"] = "This v2 manifest contains fields without a lossless v3 representation"
-            question["options"] = [{"id": "keep-existing", "value": "keep-existing", "evidence": []}]
-            if set(answers) - {question["id"]}:
-                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-            if question["id"] in answers:
-                if answers[question["id"]] != "keep-existing":
-                    raise InitError("answer_unknown", "unknown preservation option")
-                return {"status": "unchanged", "document": existing, "questions": []}
-            return {"status": "conflict", "document": existing, "questions": [question]}
-        if len(proposed_modules) == 1 and _v2_matches_detected(existing_modules[0], proposed_modules[0]):
-            if answers:
-                raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-            return {"status": "unchanged", "document": existing, "questions": []}
-        migration = _question("migrate-v2-to-v3", "version", "replace")
-        if set(answers) - {migration["id"]}:
-            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-        answer = answers.get(migration["id"])
-        if answer is None:
-            return {"status": "conflict", "document": existing, "questions": [migration]}
-        if answer not in {"keep-existing", "use-detected"}:
-            raise InitError("answer_unknown", "unknown migration option")
-        if answer == "keep-existing":
-            return {"status": "unchanged", "document": existing, "questions": []}
-        migrated = copy.deepcopy(proposed)
-        migrated["project"]["name"] = existing["project"]["name"]
-        if "methodology" in existing:
-            migrated["project"]["methodology"] = copy.deepcopy(existing["methodology"])
-        for key in ("resolution", "contracts", "skills_registry"):
-            if key in existing:
-                migrated[key] = copy.deepcopy(existing[key])
-        return {"status": "updated", "document": migrated, "questions": []}
-    known = {module["id"]: module for module in existing_modules}
-    merged = copy.deepcopy(existing)
-    questions: list[dict[str, Any]] = []
-    output = []
-    for module in proposed_modules:
-        old = known.pop(module["id"], None)
-        output.append(copy.deepcopy(module) if old is None else _merge_additive(old, module, f"modules.{module['id']}", questions, ["modules", module["id"]]))
-    if known:
-        for module_id, module in known.items():
-            question = _question(f"remove:modules.{module_id}", f"modules.{module_id}", "remove")
-            question["_module_id"] = module_id
-            questions.append(question)
-            output.append(copy.deepcopy(module))
-    if questions:
-        if set(answers) - {question["id"] for question in questions}:
-            raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-        for question in questions:
-            if question["id"] in answers and answers[question["id"]] not in {"keep-existing", "use-detected"}:
-                raise InitError("answer_unknown", f"unknown option for {question['id']}")
-        unanswered = [q for q in questions if q["id"] not in answers]
-        if unanswered:
-            return {"status": "conflict", "document": existing, "questions": [_explained_question(unanswered[0])]}
-        for question in questions:
-            if answers[question["id"]] == "use-detected":
-                if question["operation"] == "remove":
-                    output = [item for item in output if item["id"] != question["_module_id"]]
-                else:
-                    _set_document_path(output, question["_path"], question["_detected"])
-    elif answers:
-        raise InitError("answer_unknown", "answer does not match a current reconciliation question")
-    merged["modules"] = output
-    return {"status": "unchanged" if merged == existing else "updated", "document": merged, "questions": []}
+_LEGACY_RUNTIME_NAMES = {
+    "interpreter": ({".venv/bin/python", ".venv/Scripts/python.exe"}, "python"),
+    "wrapper": ({"mvnw.cmd"}, "mvnw"),
+}
 
 
-def _public_question(question: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: copy.deepcopy(value) for key, value in question.items() if not key.startswith("_")}
-
-
-def _safe_summary(value: Any) -> str:
-    text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    if len(text) > 120:
-        text = text[:117] + "..."
-    return text
-
-
-def _explained_question(question: Mapping[str, Any]) -> dict[str, Any]:
-    public = _public_question(question)
-    existing = question.get("_existing")
-    detected = question.get("_detected")
-    if detected is not None:
-        public["options"] = [
-            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep existing {question.get('field')}: {_safe_summary(existing)}"]},
-            {"id": "use-detected", "value": "use-detected", "evidence": [f"use detected {question.get('field')}: {_safe_summary(detected)}"]},
-        ]
-    elif question.get("operation") == "remove":
-        public["options"] = [
-            {"id": "keep-existing", "value": "keep-existing", "evidence": [f"keep module {question.get('_module_id')}"]},
-            {"id": "use-detected", "value": "use-detected", "evidence": [f"remove module {question.get('_module_id')}"]},
-        ]
-    return public
-
-
-def _set_document_path(modules: list[dict[str, Any]], path: list[str], value: Any) -> None:
-    module = next(item for item in modules if item["id"] == path[1])
-    target: dict[str, Any] = module
-    for part in path[2:-1]:
-        target = target[part]
-    target[path[-1]] = copy.deepcopy(value)
-
-
-def _v2_matches_detected(old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
-    """V2 has no module envelope; retain it when its core stack agrees."""
-    if old.get("id") != "root" or new.get("id") != "root" or old.get("root") != new.get("root"):
+def _runtime_names_equivalent(key: str, existing: Any, proposed: Any) -> bool:
+    """An OS-specific name written by an older pack names the same runtime as the logical one."""
+    if not isinstance(existing, str) or not isinstance(proposed, str) or existing == proposed:
         return False
-    for group in ("stack", "test", "paths", "feature_sources"):
-        old_group = old.get(group, {})
-        new_group = new.get(group, {})
-        if not isinstance(old_group, Mapping) or not isinstance(new_group, Mapping):
-            return False
-        if any(new_group.get(key) != value for key, value in old_group.items()):
-            return False
-    return True
+    if key == "executable":
+        name = PureWindowsPath(existing).name.casefold()
+        return proposed == "mvn" and name in {"mvn", "mvn.cmd"} and (PureWindowsPath(existing).is_absolute() or existing.startswith("/"))
+    if key == "wrapper" and (existing, proposed) == ("gradlew.bat", "gradlew"):
+        return True
+    legacy, logical = _LEGACY_RUNTIME_NAMES.get(key, (set(), None))
+    return proposed == logical and existing in legacy
 
 
-def _v2_unsupported_fields(document: Mapping[str, Any]) -> list[str]:
-    unsupported: list[str] = []
-    if "type" in document.get("project", {}):
-        unsupported.append("project.type")
-    for group, keys in (("paths", ("docs",)), ("test", ("api_client", "database")), ("sdd", ("asyncapi", "domain"))):
-        for key in keys:
-            if key in document.get(group, {}):
-                unsupported.append(f"{group}.{key}")
-    return unsupported
+def _keep_equivalent_runtime_names(existing: Mapping[str, Any], proposed: dict[str, Any]) -> None:
+    """Do not report a legacy OS-specific runtime path as configuration drift."""
+    if existing.get("version") != "3.0" or not isinstance(existing.get("modules"), list):
+        return
+    known = {module.get("id"): module.get("test") for module in existing["modules"] if isinstance(module, Mapping)}
+    for module in proposed.get("modules", []):
+        old, new = known.get(module.get("id")), module.get("test")
+        if not isinstance(old, Mapping) or not isinstance(new, dict) or old.get("adapter_id") != new.get("adapter_id"):
+            continue
+        for key in ("interpreter", "wrapper", "executable"):
+            if _runtime_names_equivalent(key, old.get(key), new.get(key)):
+                new[key] = old[key]
 
 
 def _payload(document: Mapping[str, Any]) -> bytes:
@@ -416,6 +320,38 @@ def _preserve_immutable_evidence(project_root: Path, directory: Path | None, ori
         raise InitError("evidence_write_error", "immutable evidence read-back failed")
 
 
+def _install_exclusive(temporary: Path, destination: Path) -> None:
+    """Publish a complete new file without replacing an existing destination.
+
+    A hard link is atomic and fails if the name exists. Where links are unsupported
+    (some network or FAT volumes) an O_EXCL create keeps the exclusivity guarantee.
+    """
+    try:
+        os.link(temporary, destination)
+        return
+    except FileExistsError as error:
+        raise InitError("destination_changed", ".skillsrc changed during initialization") from error
+    except (OSError, NotImplementedError, AttributeError):
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(destination, flags, 0o600)
+    except FileExistsError as error:
+        raise InitError("destination_changed", ".skillsrc changed during initialization") from error
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(temporary.read_bytes())
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        # Only this call created the file, so removing a partial write is safe.
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None, *, before_replace: Any = None) -> bytes:
     handle, temporary_name = tempfile.mkstemp(prefix=".skillsrc.", suffix=".tmp", dir=project_dir)
     temporary = Path(temporary_name)
@@ -433,7 +369,11 @@ def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mappin
             raise InitError("destination_changed", ".skillsrc changed during initialization")
         if before_replace is not None:
             before_replace()
-        os.replace(temporary, destination)
+        if expected_destination is None:
+            # Creation must never overwrite a manifest that appeared after the check.
+            _install_exclusive(temporary, destination)
+        else:
+            os.replace(temporary, destination)
         read_back = destination.read_bytes()
         load_skillsrc(destination)
         return read_back
@@ -564,6 +504,24 @@ def _valid_explicit_target(root: Path, modules: list[dict[str, Any]], value: str
     return False
 
 
+def _apply_source_answer(root: Path, discovery: dict[str, Any], question: Mapping[str, Any], answer: str) -> bool:
+    """Record an answered source root on its module; reject anything unsafe or empty."""
+    parts = str(question.get("field", "")).split(".")
+    module = next((item for item in discovery.get("modules", []) if isinstance(item, dict) and len(parts) == 4 and item.get("id") == parts[1]), None)
+    portable = answer.replace("\\", "/").strip("/") if isinstance(answer, str) else ""
+    if module is None or not portable:
+        return False
+    module_root = str(module.get("root") or ".")
+    resolved = _resolve_explicit_target(root, portable if module_root == "." else f"{module_root}/{portable}")
+    language = (module.get("stack") or {}).get("language") if isinstance(module.get("stack"), Mapping) else None
+    suffixes = SOURCE_SUFFIXES.get(language, frozenset().union(*SOURCE_SUFFIXES.values()))
+    if resolved is None or not resolved.is_dir() or not _source_dir_has_code(root, resolved, suffixes):
+        return False
+    module.setdefault("paths", {})["source"] = [portable]
+    module["readiness"] = "source_ready"
+    return True
+
+
 def _existing_discovery_answers(existing: Mapping[str, Any] | None, discovery: Mapping[str, Any], answers: Mapping[str, str]) -> dict[str, str]:
     effective = dict(answers)
     if existing is None:
@@ -654,7 +612,24 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, 
             and str(question.get("field", "")).split(".")[1] in declared_existing
         )
     ]
+    # A source root the manifest already declares answers the suppressed question, so a
+    # manifest written from that answer is stable on the next run instead of "drifting".
+    existing_sources = {str(module.get("id")): list((module.get("paths") or {}).get("source") or []) for module in existing_modules}
+    for module in working_discovery.get("modules", []):
+        if isinstance(module, dict) and module.get("readiness") != "source_ready" and existing_sources.get(str(module.get("id"))):
+            module.setdefault("paths", {})["source"] = list(existing_sources[str(module.get("id"))])
     source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping) and str(question.get("field", "")).endswith(".paths.source")]
+    answers = dict(answers)
+    for question in list(source_questions):
+        # The answer to a source question is the source directory itself, relative to the module root.
+        answer = answers.get(str(question.get("id")))
+        if answer is None or answer == "provide-source-root":
+            continue
+        if not _apply_source_answer(root, working_discovery, question, answer):
+            return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
+        answers.pop(str(question.get("id")))
+        source_questions.remove(question)
+        working_discovery["questions"] = [item for item in working_discovery["questions"] if item is not question]
     if source_questions:
         questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)]
         if not questions:
@@ -672,6 +647,7 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, 
     except InitError as error:
         return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
     if existing is not None:
+        _keep_equivalent_runtime_names(existing, proposed)
         proposal = _proposal(existing, original, proposed)
         if not proposal["structural_diff"]:
             return _receipt("unchanged", root, False, normalize_skillsrc(existing)["modules"], [], [], fingerprint, proposal=proposal)
@@ -693,25 +669,21 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, 
         except Exception as error:
             return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
         return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back)
+    # No manifest exists here: an existing one always takes the authority branch above,
+    # so there is nothing to merge or migrate and every remaining answer is unknown.
+    discovery_ids = {question["id"] for question in working_discovery.get("questions", []) if isinstance(question, Mapping)}
+    if any(key not in discovery_ids for key in effective_answers):
+        return _receipt("error", root, False, modules, [], ["answer_unknown"], fingerprint, _input_exit_code("answer_unknown"))
     try:
-        discovery_ids = {question["id"] for question in working_discovery.get("questions", [])}
-        reconciled = reconcile_skillsrc(existing, proposed, {key: value for key, value in effective_answers.items() if key not in discovery_ids})
-    except (InitError, SkillsrcError, TypeError, ValueError, KeyError) as error:
-        if not isinstance(error, InitError):
-            return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
-        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
-    try:
-        actual_modules = normalize_skillsrc(reconciled["document"])["modules"]
+        actual_modules = normalize_skillsrc(proposed)["modules"]
     except (SkillsrcError, TypeError, ValueError, KeyError) as error:
         return _receipt("error", root, False, modules, [], [getattr(error, "code", "invalid_shape")], fingerprint, 2)
-    if reconciled["status"] == "conflict": return _receipt("conflict", root, False, actual_modules, reconciled["questions"], [], fingerprint)
-    if reconciled["status"] == "unchanged": return _receipt("unchanged", root, False, actual_modules, [], [], fingerprint)
     if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
     try:
-        read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
+        read_back = atomic_write_skillsrc(root, destination, proposed, fingerprint, original)
     except Exception as error:
         return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
-    return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
+    return _receipt("created", root, True, actual_modules, [], [], fingerprint, read_back=read_back)
 
 
 def main() -> int:

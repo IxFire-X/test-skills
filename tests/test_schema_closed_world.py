@@ -96,13 +96,31 @@ def _known_boundaries_are_closed(value: object) -> bool:
         return all(_known_boundaries_are_closed(child) for child in value)
     return True
 
+def _contract_target_version(pack_root: Path, name: str) -> str:
+    """Schema versions are owned by contracts/pipeline.json, not by test literals."""
+    contract = json.loads((pack_root / "contracts" / "pipeline.json").read_text(encoding="utf-8"))
+    found = [entry["target_version"] for entry in _walk_schema_entries(contract) if entry.get("id") == name]
+    assert len(found) == 1, (name, found)
+    return found[0]
+
+
+def _walk_schema_entries(node):
+    if isinstance(node, dict):
+        if "target_version" in node and "id" in node:
+            yield node
+        for value in node.values():
+            yield from _walk_schema_entries(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _walk_schema_entries(value)
+
 
 @pytest.mark.parametrize("name", ["pilot-common.schema.json", "run-manifest.schema.json", "event.schema.json", "attempt.schema.json", "run-authorization-receipt.schema.json", "terminal-result.schema.json", "finalization-receipt.schema.json"])
 def test_phase_one_schemas_are_versioned_draft_closed(pack_root: Path, name: str) -> None:
     schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == f"schemas/{name}"
-    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
+    assert schema["properties"]["schema_version"]["const"] == _contract_target_version(pack_root, name)
     assert schema["additionalProperties"] is False
     assert _known_boundaries_are_closed(schema)
 
@@ -130,7 +148,7 @@ def test_phase_eight_schemas_are_versioned_draft_closed(pack_root: Path, name: s
     schema = json.loads((pack_root / "schemas" / name).read_text(encoding="utf-8"))
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == f"schemas/{name}"
-    assert schema["properties"]["schema_version"]["const"] == "1.0.0"
+    assert schema["properties"]["schema_version"]["const"] == _contract_target_version(pack_root, name)
     assert schema["additionalProperties"] is False
     assert _known_boundaries_are_closed(schema)
 

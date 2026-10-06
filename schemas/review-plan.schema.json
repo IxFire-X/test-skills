@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/review-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "snapshot", "input_byte_budget", "parts", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_kind", "revision", "snapshot_digest", "instructions", "response_reserve_bytes"],
+      "properties": {
+        "review_kind": {"enum": ["tc-reviewer", "autotest-reviewer"]},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 2},
+        "snapshot_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "instructions": {"type": "string", "minLength": 1},
+        "response_reserve_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "input_byte_budget": {"type": "integer", "minimum": 1},
+    "parts": {"type": "array", "items": {"$ref": "#/$defs/part"}, "minItems": 1},
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_id", "kind", "targets", "inputs"],
+      "properties": {
+        "scope_id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["source", "local", "cross"]},
+        "targets": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact_digest", "pointer", "start", "end", "content"],
+            "properties": {
+              "artifact_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+              "pointer": {"type": "string"},
+              "start": {"type": ["integer", "null"], "minimum": 0},
+              "end": {"type": ["integer", "null"], "minimum": 0},
+              "content": {"type": "string"}
+            }
+          },
+          "minItems": 1
+        },
+        "question": {"type": "string", "minLength": 1}
+      }
+    },
+    "part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part_id", "scopes", "requested_check", "input_byte_count", "blocked_reason"],
+      "properties": {
+        "part_id": {"type": "string", "pattern": "^part-[0-9]{6}$"},
+        "scopes": {"type": "array", "items": {"$ref": "#/$defs/scope"}, "minItems": 1},
+        "requested_check": {"oneOf": [{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, {"type": "null"}]},
+        "input_byte_count": {"type": "integer", "minimum": 1},
+        "blocked_reason": {"enum": [null, "REVIEW_CONTEXT_LIMIT"]}
+      }
+    }
+  }
+}

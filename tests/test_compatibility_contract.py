@@ -41,12 +41,12 @@ def _evidence(manifest, *, verified_fields=False):
         _executed("orchestrate", "controller", "orchestrate-v1", "orchestrate:attempt"),
         _executed("context-marker", "generator", "context-marker-v1", "context-marker:baseline"),
         _executed("tc-generator", "generator", "tc-generator-v1", "tc-generator:BATCH-fixture", model_id="model-generator" if verified_fields else None, invocation_id="generator-1", kind="effective-canonical"),
-        _executed("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v1", "tc-reviewer:canonical", model_id="model-reviewer" if verified_fields else None, invocation_id="reviewer-1", kind="model-stage-artifact"),
+        _executed("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v2", "tc-reviewer:canonical:part-000001", model_id="model-reviewer" if verified_fields else None, invocation_id="reviewer-1", kind="model-stage-artifact"),
         _not_applicable("tc-to-autotest", "tc-to-autotest:na", "PROFILE_CASES_ONLY"),
         _not_applicable("autotest-reviewer", "autotest-reviewer:na", "PROFILE_CASES_ONLY"),
     ]
     value = {
-        "schema_version": "1.0.0", "compatibility_version": "portable-cli-v1",
+        "schema_version": "2.0.0", "compatibility_version": "portable-cli-v1",
         "release_manifest_digest": manifest["digest"],
         "host": {"host_id": "host-1" if verified_fields else None, "runtime_version": "cli-1.0" if verified_fields else None, "os": "windows" if verified_fields else None, "language_runtime": "python-3.12" if verified_fields else None},
         "role_policy": "portable-pilot-roles-v1", "profile": "cases-only-v1",
@@ -55,85 +55,51 @@ def _evidence(manifest, *, verified_fields=False):
         "durable_context": {"project": "C:/forged", "run_id": "run-forged", "attempt_id": "a" * 32, "module": ".", "policy_profile": "cases-only-v1", "baseline_digest": "sha256:" + "6" * 64, "reviewer_session_digest": "sha256:" + "7" * 64},
         "stages": rows,
         "resume": {"attempt_id": "a" * 32, "resume_validation_digest": None},
-        "review_bindings": [{"kind": "canonical", "generator_stage_instance_ids": ["tc-generator:BATCH-fixture"], "reviewer_stage_instance_id": "tc-reviewer:canonical", "reviewer_session_digest": "sha256:" + "7" * 64, "reviewer_boundary_digest": "sha256:" + "8" * 64}],
+        "review_bindings": [{"kind": "canonical", "generator_stage_instance_ids": ["tc-generator:BATCH-fixture"], "reviewer_stage_instance_ids": ["tc-reviewer:canonical:part-000001"], "reviewer_session_digest": "sha256:" + "7" * 64, "reviewer_boundary_digest": "sha256:" + "8" * 64, "review_aggregate_receipt_digest": "sha256:" + "9" * 64}],
     }
     value["digest"] = _digest(value)
     return value
 
 
 def _durable_evidence(manifest, run_root: Path, attempt_id: str):
-    from tools.pilot_state import (
-        derive_state,
-        read_attempt_receipt,
-        read_effective_canonical,
-        read_execution_inputs,
-        read_reviewer_session_ledger,
-        read_run,
-    )
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
-    from tools.project_inventory import read_execution_baseline
-
+    from tools.pilot_state import (derive_state, read_attempt_receipt, read_reviewer_session_ledger,
+                                   read_run, read_model_request, read_review_aggregate, read_review_plan)
     run, state = read_run(run_root), derive_state(run_root)
     attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
     ledger = read_reviewer_session_ledger(run_root, attempt_id)
-    boundary = read_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")
-    effective = read_effective_canonical(run_root, attempt_id)
-    inputs = read_execution_inputs(run_root, attempt_id)
-    revision = inputs["autotest_review"]["artifacts"]["autotest_review"]["automation_revision"]
-    auto_kind = f"automation-review-boundary-r{revision}"
-    auto_boundary = read_attempt_receipt(run_root, attempt_id, auto_kind, "ARTIFACT_READ_BACK")
-    baseline = read_execution_baseline(
-        run_root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json")
-    )
-    package = ledger["package_binding"]
-    context_marker_digest = package["context_marker_output_digest"]
-    from tools.pilot_state import read_model_stage_artifact
-    fragments = {
-        batch["batch_id"]: read_model_stage_artifact(
-            run_root, attempt_id, f"tc-generator:{batch['batch_id']}", batch["digest"],
-        )["artifact"]
-        for batch in package["generator_batches"]
-    }
-    automation_digest = automation_sha256(inputs["automation_artifact"])
-    review_digest = autotest_review_sha256(inputs["autotest_review"])
-    reviewer_output_digest = next(
-        event["artifact_digest"] for event in state["events"]
-        if event.get("attempt_id") == attempt_id
-        and event.get("stage_instance_id") == "tc-reviewer:canonical"
-        and event.get("event_type") == "MODEL_RESPONSE_RECEIVED"
-    )
-    generator_rows = [
-        _executed(
-            "tc-generator", "generator", "tc-generator-v1", f"tc-generator:{batch['batch_id']}",
-            model_id="model-generator", invocation_id=(ledger["generator_invocation_id"] if index == 0 else f"{ledger['generator_invocation_id']}-{index + 1}"),
-            kind="model-stage-artifact", digest=batch["digest"],
-            input_digests=[
-                context_marker_digest, batch["context_receipt_digest"],
-                fragments[batch["batch_id"]]["plan_digest"],
-                fragments[batch["batch_id"]]["header_digest"],
-            ],
-            output_digests=[batch["digest"]],
-        )
-        for index, batch in enumerate(package["generator_batches"])
-    ]
-    rows = [
-        _executed("orchestrate", "controller", "orchestrate-v1", "orchestrate:attempt", digest=attempt["digest"], input_digests=[manifest["digest"]]),
-        _executed("context-marker", "generator", "context-marker-v1", "context-marker:baseline", model_id="model-context", invocation_id=f"context-{attempt_id}", kind="model-stage-artifact", digest=context_marker_digest, input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], *package["context_receipt_digests"]], output_digests=[context_marker_digest]),
-        *generator_rows,
-        _executed("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v1", "tc-reviewer:canonical", model_id="model-reviewer", invocation_id=ledger["reviewer_invocation_id"], kind="model-stage-artifact", digest=reviewer_output_digest, input_digests=[package["candidate_digest"], package["package_digest"]]),
-        _executed("tc-to-autotest", "automation-generator", "tc-to-autotest-v1", f"tc-to-autotest:r{revision}", model_id="model-automation", invocation_id=auto_boundary["record"]["generator_invocation_id"], kind="execution-inputs", digest=inputs["digest"], input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]], output_digests=[automation_digest]),
-        _executed("autotest-reviewer", "automation-reviewer", "autotest-static-reviewer-v1", f"autotest-reviewer:r{revision}", model_id="model-automation-reviewer", invocation_id=auto_boundary["record"]["reviewer_invocation_id"], kind=auto_kind, digest=auto_boundary["digest"], input_digests=[automation_digest, auto_boundary["digest"]], output_digests=[review_digest]),
-    ]
+    package = read_attempt_receipt(run_root, attempt_id, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]["package_binding"]
+    rows = [_executed("orchestrate", "controller", "orchestrate-v1", "orchestrate:attempt", digest=attempt["digest"], input_digests=[manifest["digest"]])]
+    for event in state["events"]:
+        if event.get("attempt_id") != attempt_id or event["event_type"] != "MODEL_REQUESTED":
+            continue
+        instance = event["stage_instance_id"]
+        request = read_model_request(run_root, attempt_id, instance, event["artifact_digest"])
+        response = next(item for item in state["events"] if item.get("attempt_id") == attempt_id and item.get("stage_instance_id") == instance and item["event_type"] == "MODEL_RESPONSE_RECEIVED")
+        rows.append(_executed(request["stage"], request["role"], request["role_policy"], instance,
+            model_id=request["model_id"], invocation_id=request["invocation_id"], kind="model-stage-artifact",
+            digest=response["artifact_digest"], input_digests=request["input_digests"]))
+    revisions = sorted({int(row["stage_instance_id"].split(":")[1][1:]) for row in rows if row["stage"] == "tc-to-autotest"})
+    bindings = []
+    for key in ["canonical", *[f"r{revision}" for revision in revisions]]:
+        session = read_reviewer_session_ledger(run_root, attempt_id, review_key=key)
+        plan = read_review_plan(run_root, attempt_id, key)
+        parts = [*plan["parts"], *[event["part"] for event in session["events"] if event["event_type"] == "REVIEW_CHECK_ADDED"]]
+        stage = "tc-reviewer" if key == "canonical" else "autotest-reviewer"
+        boundary = read_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary" if key == "canonical" else f"automation-review-boundary-{key}", "ARTIFACT_READ_BACK")
+        binding = {"kind": "canonical" if key == "canonical" else "automation",
+            "reviewer_stage_instance_ids": [f"{stage}:{key}:{part['part_id']}" for part in parts],
+            "reviewer_boundary_digest": boundary["digest"], "review_aggregate_receipt_digest": read_review_aggregate(run_root, attempt_id, key)["digest"]}
+        if key == "canonical":
+            binding.update(generator_stage_instance_ids=[f"tc-generator:{item['batch_id']}" for item in package["generator_batches"]], reviewer_session_digest=session["digest"])
+        else:
+            binding.update(revision=int(key[1]), generator_stage_instance_id=f"tc-to-autotest:{key}")
+        bindings.append(binding)
     value = {
-        "schema_version": "1.0.0", "compatibility_version": "portable-cli-v1", "release_manifest_digest": manifest["digest"],
+        "schema_version": "2.0.0", "compatibility_version": "portable-cli-v1", "release_manifest_digest": manifest["digest"],
         "host": {"host_id": "host-1", "runtime_version": "cli-1.0", "os": "windows", "language_runtime": "python-3.12"}, "role_policy": "portable-pilot-roles-v1",
-        "profile": attempt["policy_profile"], "branch": {"canonical_status": "EFFECTIVE", "batch_ids": [item["batch_id"] for item in package["generator_batches"]], "automation_eligible": True, "automation_revisions": [revision]}, "registry": manifest["registry"],
+        "profile": attempt["policy_profile"], "branch": {"canonical_status": "EFFECTIVE", "batch_ids": [item["batch_id"] for item in package["generator_batches"]], "automation_eligible": True, "automation_revisions": revisions}, "registry": manifest["registry"],
         "durable_context": {"project": run["manifest"]["project"], "run_id": run["manifest"]["run_id"], "attempt_id": attempt_id, "module": attempt["module"], "policy_profile": attempt["policy_profile"], "baseline_digest": attempt["baseline_digest"], "reviewer_session_digest": ledger["digest"]},
-        "stages": rows, "resume": {"attempt_id": attempt_id, "resume_validation_digest": None},
-        "review_bindings": [
-            {"kind": "canonical", "generator_stage_instance_ids": [f"tc-generator:{item['batch_id']}" for item in package["generator_batches"]], "reviewer_stage_instance_id": "tc-reviewer:canonical", "reviewer_session_digest": ledger["digest"], "reviewer_boundary_digest": boundary["digest"]},
-            {"kind": "automation", "revision": revision, "generator_stage_instance_id": f"tc-to-autotest:r{revision}", "reviewer_stage_instance_id": f"autotest-reviewer:r{revision}", "reviewer_boundary_digest": auto_boundary["digest"]},
-        ],
+        "stages": rows, "resume": {"attempt_id": attempt_id, "resume_validation_digest": None}, "review_bindings": bindings,
     }
     value["digest"] = _digest(value)
     return value

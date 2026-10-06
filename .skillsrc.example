@@ -23,9 +23,18 @@ modules:
     test:
       framework: "pytest"
       adapter_id: "pytest:selected-symbols-v1"
-      interpreter: ".venv/Scripts/python.exe"
+      # Логическое имя: "python" — интерпретатор из .venv модуля на текущей ОС
+      # (.venv/bin/python или .venv\Scripts\python.exe). Для Java: wrapper "mvnw" /
+      # "gradlew" или executable "mvn". Старые пути конкретной ОС читаются как раньше.
+      interpreter: "python"
+      # "default" означает «профиль не объявлен»: -P<профиль> в команду не добавляется.
       build_profile: "default"
       adapter_parameters: {}
+      # Необязательно: таймаут тестового процесса в секундах (по умолчанию 600).
+      # timeout_seconds: 600
+      # Необязательно, только Maven/Gradle: корень сборки относительно проекта
+      # (корень реактора Maven или каталог с settings.gradle); "." — корень проекта.
+      # build_root: "."
     feature_sources:
       requirements: ["docs/requirements"]
     detected_from: ["backend/pyproject.toml"]

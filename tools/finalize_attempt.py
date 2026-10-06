@@ -16,6 +16,18 @@ from tools.generated_delta import GeneratedDeltaError, apply_dispositions, inspe
 from tools import pilot_state
 
 
+def _run_operation(function):
+    """Hold the run lock for the whole command (imported lazily to avoid an import cycle)."""
+    from functools import wraps
+
+    @wraps(function)
+    def operation(*args, **kwargs):
+        from tools.pilot_state import run_operation
+        return run_operation(function)(*args, **kwargs)
+    return operation
+
+
+
 class FinalizationError(ValueError):
     """A closure input is incomplete, contradictory, or not safely readable."""
 
@@ -59,6 +71,16 @@ def _files(delta: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return rows
 
 
+def _started_not_runnable_kind(report: Mapping[str, Any]) -> str | None:
+    """Process kind that made a started execution NOT_RUNNABLE, if that is what happened."""
+    from tools.run_tests import _not_runnable_process_kind
+
+    if not isinstance(report, Mapping) or report.get("verdict") != "NOT_RUNNABLE" or report.get("run_id") is None:
+        return None
+    return _not_runnable_process_kind(report.get("execution_evidence") or (), report.get("process_evidence") or ())
+
+
+@_run_operation
 def decide_dispositions(
     project: Path,
     delta: Mapping[str, Any],
@@ -68,8 +90,12 @@ def decide_dispositions(
     run_root: Path,
     attempt_id: str,
     execution_unknown_evidence_digest: str | None = None,
+    tests_deselected: bool = False,
 ) -> Mapping[str, Any]:
     """Apply the frozen complete-file disposition matrix without executing code.
+
+    ``tests_deselected`` is the NOT_RUNNABLE/TESTS_DESELECTED outcome: the tests
+    are valid and only the project configuration skipped them, so they are kept.
 
     The returned delta is resealed.  For UNKNOWN the current bytes are inspected
     solely to distinguish preservation with no drift from content conflict; no
@@ -106,6 +132,7 @@ def decide_dispositions(
                 verification,
                 materialization,
                 retain_pass=verification == "PASS" and pre_trace_valid,
+                keep_deselected=verification == "NOT_RUNNABLE" and tests_deselected,
             )
         except GeneratedDeltaError as error:
             raise FinalizationError(str(error)) from error
@@ -673,6 +700,7 @@ def _durable_branch(
     return branch, unknown_evidence
 
 
+@_run_operation
 def finalize_attempt(
     branch: Mapping[str, Any], delta: Mapping[str, Any] | None, *, project: Path, verification: str,
     facts: Mapping[str, Any], publish: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None,
@@ -914,6 +942,7 @@ def finalize_attempt(
     return outcome
 
 
+@_run_operation
 def finalize_durable_execution_attempt(
     run_root: Path,
     attempt_id: str,
@@ -1009,6 +1038,7 @@ def finalize_durable_execution_attempt(
                 pre_trace_valid=trace_valid and operational_reason_code is None,
                 run_root=run_root, attempt_id=attempt_id,
                 execution_unknown_evidence_digest=unknown_digest,
+                tests_deselected=_started_not_runnable_kind(report) == "TESTS_DESELECTED",
             )
     except (KeyError, StopIteration, TypeError, ValueError, OSError) as error:
         raise FinalizationError("durable execution closure evidence is unavailable") from error
@@ -1046,11 +1076,14 @@ def finalize_durable_execution_attempt(
         isinstance(row, Mapping) and row.get("kind") == "NO_TESTS_COLLECTED"
         for row in report.get("process_evidence", ())
     )
+    started_not_runnable = _started_not_runnable_kind(report) if verification == "NOT_RUNNABLE" else None
     reason_code = (
         "EXECUTION_UNKNOWN" if verification == "UNKNOWN"
         else "NO_TESTS_COLLECTED" if verification == "FAIL" and zero_collect
         else "BASELINE_INCOMPLETE" if "BASELINE_INCOMPLETE" in diagnostic_codes
-        else operational_reason_code
+        else operational_reason_code if operational_reason_code is not None
+        # GENERATED_TEST_INVALID, LAUNCH_FAILED or TESTS_DESELECTED from a started run.
+        else started_not_runnable
     )
     facts = {
         "run_id": attempt["run_id"], "attempt_id": attempt_id, "attempt_state": "TERMINAL",

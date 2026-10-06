@@ -1,0 +1,47 @@
+{
+  "automation_status": "GENERATED",
+  "generated_files": [
+    {
+      "file_id": "FILE-products",
+      "path": "tests/test_generated.py",
+      "language": "python",
+      "framework": "pytest",
+      "content": "import module_that_does_not_exist\n\n\ndef test_selected() -> None:\n    assert True\n"
+    }
+  ],
+  "generated_symbols": [
+    {
+      "file_id": "FILE-products",
+      "symbol_id": "SYMBOL-products",
+      "locator": {
+        "kind": "python_module_function",
+        "function_name": "test_selected"
+      }
+    }
+  ],
+  "implementation_relations": [
+    {
+      "kind": "assertion",
+      "case_id": "${case:1}",
+      "step_id": "${step:1}",
+      "expectation_id": "${expectation:1}",
+      "assertion_id": "${assertion:1}",
+      "file_id": "FILE-products",
+      "symbol_id": "SYMBOL-products"
+    },
+    {
+      "kind": "operation",
+      "case_id": "${case:1}",
+      "step_id": "${step:1}",
+      "file_id": "FILE-products",
+      "symbol_id": "SYMBOL-products"
+    }
+  ],
+  "manual_dispositions": [
+    {
+      "case_id": "${case:2}",
+      "step_id": "${step:2}"
+    }
+  ],
+  "diagnostics": []
+}

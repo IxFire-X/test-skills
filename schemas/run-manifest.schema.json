@@ -26,8 +26,8 @@
           "required": ["kind", "status", "files", "digest"],
           "properties": {
             "kind": {"const": "GIT_TREE"},
-            "status": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/file"}},
+            "status": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "files": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/file"}},
             "digest": {"$ref": "#/$defs/digest"}
           }
         }

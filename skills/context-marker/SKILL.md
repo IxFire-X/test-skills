@@ -15,7 +15,7 @@ not rescan the project, create a run/attempt, or widen feature/module scope.
 ## Procedure
 
 1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.
-2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
+2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. IDs follow the order of `tools.build_context`: files by normalized path, requirements inside a file in document order, a duplicate at its first occurrence. A heading without its own text, a glossary and a table of contents are not requirements. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
 3. Explicit authorized requirements define expected behavior; code and runtime reports describe the current implementation. Preserve both when they disagree, with a source-bound warning. Never replace a required outcome with the observed defect. When requirements leave an outcome undefined, trace its end-to-end control flow through reachable throws, exception translation, and HTTP mapping; label the observation and preserve an unresolved oracle as a warning.
 4. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
 5. Validate the 5.0.0 envelope with `tools/validate_artifact.py` and its schema before return.
@@ -31,9 +31,16 @@ and complete scenario bodies. Keep its source identity/digest provenance when sp
 normalized rows. Proposal/design/tasks provide context, not behavioral requirements.
 The controller reconciles the actual model output at publication and readback against
 the exact authorized context receipts with `tools.build_context.openspec_diagnostics`.
+Standard OpenSpec may live in any project directory (`**/openspec/`); each such
+directory is an independent root. Its `Requirement:`, delta and `Scenario:` headings are
+matched regardless of case and spacing.
 Archived documents may remain historical context; they are never reapplied as pending
 changes. A custom schema needs
 its actual contract established first; this check does not claim arbitrary-schema support.
+
+Documents and specifications arrive with secret-like lines masked as
+`[REDACTED:<rule>]`. Such a line is not a requirement gap: do not restore, guess or
+report it as missing content.
 
 Preserve an unresolved requirement in the source set. Each gap warning states the
 requirement/scenario and source, what is missing, which checks it blocks, and the concrete

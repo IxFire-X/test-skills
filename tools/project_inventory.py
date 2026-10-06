@@ -12,10 +12,11 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from tools.stack_catalog import MANIFEST_LANGUAGES
+from tools.stack_catalog import MANIFEST_LANGUAGES, is_ambiguous_output_dir_name, is_source_package_dir
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
 
@@ -33,18 +34,30 @@ class ContextSelectionError(ValueError):
 _VCS_DIRS = frozenset({".git", ".hg", ".svn"})
 _DEPENDENCY_DIRS = frozenset({".tox", ".venv", "node_modules", "site-packages", "vendor", "venv"})
 _BUILD_OUTPUT_DIRS = frozenset({
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "build", "coverage", "dist",
+    ".gradle", ".kotlin", ".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "build", "coverage", "dist",
     "generated", "generated-sources", "htmlcov", "target", "test-results",
 })
+_IDE_DIRS = frozenset({".idea", ".vscode"})
 _SECRET_DIRS = frozenset({".credentials", ".secrets", "credentials", "secrets"})
 _BINARY_SUFFIXES = frozenset({
     ".7z", ".a", ".bin", ".class", ".dll", ".dylib", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg",
     ".jpg", ".lock", ".mp3", ".mp4", ".o", ".pdf", ".png", ".pyc", ".so", ".tar", ".war", ".webp", ".zip",
 })
 _GENERATED_SUFFIXES = frozenset({".coverage", ".map", ".min.js"})
-_PRIVATE_SUFFIXES = frozenset({".cer", ".crt", ".der", ".kdbx", ".key", ".p12", ".pfx", ".pem"})
-_PRIVATE_NAMES = frozenset({"id_dsa", "id_ecdsa", "id_ed25519", "id_rsa"})
-_SECRET_NAME = re.compile(r"(?:^|[._-])(credential|credentials|password|passwd|private|secret|token|api[_-]?key)(?:$|[._-])", re.I)
+# Only unmistakable secret containers are excluded by name. Words such as
+# "password" or "token" in a file name say nothing about its content.
+_PRIVATE_SUFFIXES = frozenset({".kdbx", ".key", ".p12", ".pfx", ".pem"})
+_PRIVATE_NAME = re.compile(r"id_[a-z0-9_-]+(?:\.pub)?", re.I)
+_DOCUMENT_SUFFIXES = frozenset({".md", ".markdown", ".rst", ".txt", ".adoc"})
+# coverage.py / .coveragerc / coverage.yml are source and configuration, not output.
+_COVERAGE_OUTPUT_SUFFIXES = frozenset({".xml", ".json", ".lcov", ".info", ".out", ".txt", ".html", ".db", ".dat", ".ec"})
+_CONTEXT_GAP_REASON = "FILE_EXCEEDS_BYTE_BUDGET"
+DEFAULT_CONTEXT_LIMITS = {"context_batch_bytes": 256 * 1024, "docs_file_bytes": 256 * 1024, "docs_total_bytes": 1024 * 1024}
+_SPECIFICATION_DATA_SUFFIXES = frozenset({".yaml", ".yml", ".json"})
+_DOCUMENT_DIRS = frozenset({"docs", "doc", "openspec"})
+_GIT_TIMEOUT_SECONDS = 30
+# Legacy output scrubber: intentionally broad, because over-redacting a runner log is
+# harmless. Inventory decisions use _CONTENT_SIGNATURES below instead.
 _TOKEN_SIGNATURES = (
     ("token-assignment-v1", re.compile(rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)\s*[:=]\s*['\"]?[A-Za-z0-9_./+=-]{8,}")),
     ("github-token-v1", re.compile(rb"\b(?:ghp|github_pat)_[A-Za-z0-9_]{16,}\b")),
@@ -54,6 +67,28 @@ _TOKEN_SIGNATURES = (
     ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{20,}")),
     ("jwt-v1", re.compile(rb"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")),
     ("url-credentials-v1", re.compile(rb"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")),
+)
+_PRIVATE_KEY_BEGIN = re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")
+_PRIVATE_KEY_END = re.compile(rb"-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")
+# Inventory content rules. Every pattern is confined to one line and is either a
+# vendor token format or the assignment of a quoted literal of at least 16
+# characters. Identifiers, function calls, placeholders and prose do not match.
+_CONTENT_SIGNATURES = (
+    ("private-key-block-v1", _PRIVATE_KEY_BEGIN),
+    ("aws-key-v1", re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("github-token-v1", re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b")),
+    ("openai-key-v1", re.compile(rb"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("service-token-v1", re.compile(
+        rb"\b(?:glpat-[A-Za-z0-9_-]{20,}|[sr]k_live_[A-Za-z0-9]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}"
+        rb"|hf_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{36}|pypi-AgE[A-Za-z0-9_-]{20,})"
+    )),
+    ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{35}")),
+    ("jwt-v1", re.compile(rb"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
+    ("url-credentials-v1", re.compile(rb"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@$<{]+:[^/\s@$<{]+@")),
+    ("token-assignment-v1", re.compile(
+        rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|secret|token)"
+        rb"[\"']?[ \t]*[:=][ \t]*(?:\"[A-Za-z0-9_./+=!@#%^&*~-]{16,}\"|'[A-Za-z0-9_./+=!@#%^&*~-]{16,}')"
+    )),
 )
 _CLOSED_MANIFESTS = frozenset({
     "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "pipfile", "pom.xml",
@@ -258,26 +293,144 @@ def _kind(project_path: str, path: Path) -> str:
 
 
 def token_signature_rule(contents: bytes) -> str | None:
-    """Return the existing scanner rule for a credential-like byte sequence."""
+    """Return the legacy output-scrubbing rule for a credential-like byte sequence."""
     # Shell ${NAME:+word} substitutes word; it does not assign word to NAME.
     # Keep word visible, including any real assignment or service token inside it.
     assignments = re.sub(rb"(\$\{[A-Za-z_][A-Za-z0-9_]*):\+", rb"\1 ", contents)
     return next((rule_id for rule_id, signature in _TOKEN_SIGNATURES if signature.search(assignments if rule_id == "token-assignment-v1" else contents)), None)
 
 
-def _secret_rule(path: Path, contents: bytes) -> tuple[str, str] | None:
+def content_secret_rule(contents: bytes) -> str | None:
+    """Return the high-confidence inventory rule matched by file bytes, if any."""
+    return next((rule_id for rule_id, signature in _CONTENT_SIGNATURES if signature.search(contents)), None)
+
+
+def redact_document(contents: bytes) -> tuple[bytes, list[dict[str, Any]]]:
+    """Mask every secret-bearing line of a document, keeping its line structure.
+
+    Returns the masked bytes and a value-free receipt: ``[{"line", "scanner_rule_id"}]``.
+    A private-key block is masked through its END marker (or the end of the file).
+    """
+    if content_secret_rule(contents) is None:
+        return contents, []
+    masked: list[bytes] = []
+    redactions: list[dict[str, Any]] = []
+    in_key_block = False
+    for number, line in enumerate(contents.splitlines(keepends=True), start=1):
+        body = line.rstrip(b"\r\n")
+        ending = line[len(body):]
+        if in_key_block:
+            rule = "private-key-block-v1"
+            in_key_block = _PRIVATE_KEY_END.search(body) is None
+        else:
+            rule = content_secret_rule(body)
+            if rule == "private-key-block-v1":
+                in_key_block = _PRIVATE_KEY_END.search(body) is None
+        if rule is None:
+            masked.append(line)
+            continue
+        masked.append(f"[REDACTED:{rule}]".encode("ascii") + ending)
+        redactions.append({"line": number, "scanner_rule_id": rule})
+    return b"".join(masked), redactions
+
+
+def redact_text(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Text variant of redact_document for already-decoded requirement documents."""
+    masked, redactions = redact_document(text.encode("utf-8"))
+    return (masked.decode("utf-8"), redactions) if redactions else (text, [])
+
+
+def _is_document(path: Path, relative_parts: Iterable[str] = ()) -> bool:
+    """Documents and specifications are masked line by line instead of being excluded.
+
+    Prose formats, Gherkin features, OpenAPI/AsyncAPI descriptions and structured files
+    kept in a documentation or OpenSpec directory routinely carry example tokens.
+    """
     name = path.name.casefold()
-    parts = {part.casefold() for part in path.parts}
-    if name == ".env" or name.startswith(".env."):
+    suffix = path.suffix.casefold()
+    if name in _CLOSED_MANIFESTS:
+        return False
+    if suffix in _DOCUMENT_SUFFIXES or suffix == ".feature":
+        return True
+    if suffix not in _SPECIFICATION_DATA_SUFFIXES:
+        return False
+    return name.startswith(("openapi", "swagger", "asyncapi")) or bool(_DOCUMENT_DIRS & {part.casefold() for part in relative_parts})
+
+
+def _secret_name_rule(path: Path, relative_parts: Iterable[str] = ()) -> tuple[str, str] | None:
+    """Exclude by name only explicit secret containers (decision 8)."""
+    name = path.name.casefold()
+    if name.startswith(".env"):
         return "filename-dotenv-v1", "dotenv"
-    if path.suffix.casefold() in _PRIVATE_SUFFIXES or name in _PRIVATE_NAMES:
+    if path.suffix.casefold() in _PRIVATE_SUFFIXES or _PRIVATE_NAME.fullmatch(name):
         return "private-extension-v1", "private-material"
-    if {".secrets", "secrets", ".credentials", "credentials"} & parts or _SECRET_NAME.search(path.stem):
-        return "secret-filename-v1", "credential-material"
-    rule_id = token_signature_rule(contents)
+    if _SECRET_DIRS & {part.casefold() for part in relative_parts}:
+        return "secret-directory-v1", "credential-material"
+    return None
+
+
+def _secret_rule(path: Path, contents: bytes, relative_parts: Iterable[str] = ()) -> tuple[str, str] | None:
+    named = _secret_name_rule(path, relative_parts)
+    if named is not None:
+        return named
+    rule_id = content_secret_rule(contents)
     if rule_id is not None:
         return rule_id, "token-signature"
     return None
+
+
+def file_secret_rule(project_root: Path, path: Path) -> str | None:
+    """Apply the inventory secret filter to one project file; unreadable is unsafe."""
+    relative = _lexical_rel(Path(project_root), Path(path))
+    parts = Path(relative).parts[:-1] if relative else ()
+    named = _secret_name_rule(Path(path), parts)
+    if named is not None:
+        return named[0]
+    try:
+        contents = Path(path).read_bytes()
+    except OSError:
+        return "readability-v1"
+    return content_secret_rule(contents)
+
+
+_CONTENT_FACTS: dict[tuple[str, bool], tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_CONTENT_FACTS_LIMIT = 50_000
+_CONTENT_SETTLE_NS = 50_000_000
+
+
+def _content_facts(path: Path, is_document: bool) -> dict[str, Any]:
+    """Size, digest and secret findings of one file, re-read only when the file changed.
+
+    One ``exec`` builds the inventory several times around the test process;
+    unchanged files are recognised by size, mtime and inode.  A file modified
+    within the last moments is always read again, because a rewrite inside the
+    timestamp granularity could keep the same signature.
+    """
+    import time
+
+    key = (os.path.normcase(str(path)), is_document)
+    details = os.stat(path)
+    signature = (details.st_size, details.st_mtime_ns, details.st_ino)
+    cached = _CONTENT_FACTS.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    observed_ns = time.time_ns()
+    contents = path.read_bytes()
+    facts: dict[str, Any] = {"binary": b"\0" in contents[:8192], "secret_rule": None, "redactions": [], "size": len(contents),
+                             "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest()}
+    if not facts["binary"]:
+        if is_document:
+            _masked, facts["redactions"] = redact_document(contents)
+        else:
+            facts["secret_rule"] = content_secret_rule(contents)
+    after = os.stat(path)
+    if (after.st_size, after.st_mtime_ns, after.st_ino) == signature and signature[1] <= observed_ns - _CONTENT_SETTLE_NS:
+        if len(_CONTENT_FACTS) >= _CONTENT_FACTS_LIMIT:
+            _CONTENT_FACTS.clear()
+        _CONTENT_FACTS[key] = (signature, facts)
+    else:
+        _CONTENT_FACTS.pop(key, None)
+    return facts
 
 
 def _is_binary_or_generated(path: Path) -> bool:
@@ -288,17 +441,85 @@ def _is_binary_or_generated(path: Path) -> bool:
     )
 
 
-def _directory_reason(name: str) -> tuple[str, str] | None:
+def _output_file_rule(path: Path) -> tuple[str, str] | None:
+    """Recognize run by-products that would otherwise look like baseline drift."""
+    name = path.name.casefold()
+    suffix = path.suffix.casefold()
+    if suffix == ".log":
+        return "log-file-v1", "log-file"
+    if name == ".coverage" or name.startswith(".coverage.") or name == "lcov.info" or (name.startswith("coverage") and suffix in _COVERAGE_OUTPUT_SUFFIXES):
+        return "coverage-output-v1", "coverage-output"
+    return None
+
+
+def _directory_reason(name: str, path: Path | None = None, project_root: Path | None = None) -> tuple[str, str] | None:
     folded = name.casefold()
     if folded in _VCS_DIRS:
         return "VCS", "vcs-directory-v1"
     if folded in _DEPENDENCY_DIRS:
         return "DEPENDENCY", "dependency-directory-v1"
-    if folded in _BUILD_OUTPUT_DIRS:
+    if folded in _IDE_DIRS:
+        return "EXCLUDED_DIRECTORY", "ide-directory-v1"
+    if folded in _BUILD_OUTPUT_DIRS or folded.startswith("coverage"):
+        # build/generated/coverage are also ordinary package names (M32).
+        ambiguous = is_ambiguous_output_dir_name(folded) or folded.startswith("coverage")
+        if ambiguous and path is not None and is_source_package_dir(path, project_root):
+            return None
         return "BUILD_OUTPUT", "output-directory-v1"
     if folded in _SECRET_DIRS:
         return "SECRET_SUSPECTED", "secret-directory-v1"
     return None
+
+
+def _git_listing(project_root: Path, module_root: Path) -> tuple[set[str], set[str], set[str]] | None:
+    """Return git-visible files below module_root, or None to use the plain walk.
+
+    Uses ``git ls-files -co --exclude-standard`` so ``.gitignore``, ``.git/info/exclude``
+    and the user's global excludes apply. Never overrides ``safe.directory``; a missing
+    executable, a refused repository, a timeout or any error falls back to the walk.
+    """
+    if not (project_root / ".git").exists():
+        return None
+    environment = {key: value for key, value in os.environ.items() if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_NAMESPACE"}}
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        completed = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "-co", "--exclude-standard"],
+            cwd=str(module_root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=_GIT_TIMEOUT_SECONDS, env=environment, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if completed.returncode != 0 or not isinstance(completed.stdout, bytes):
+        return None
+    try:
+        module = module_root.relative_to(project_root).as_posix()
+    except ValueError:
+        return None
+    prefix = "" if module == "." else module + "/"
+    fold = (lambda value: value.casefold()) if os.name == "nt" else (lambda value: value)
+    files: set[str] = set()
+    directories: set[str] = set()
+    opaque: set[str] = set()
+    for raw in completed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            entry = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if entry.startswith(("/", "../")) or "/../" in entry:
+            return None
+        nested_repository = entry.endswith("/")
+        project_path = fold(prefix + entry.rstrip("/"))
+        # A submodule (gitlink) or an untracked nested repository is listed as one
+        # entry; git does not describe its files, so it is walked without the filter.
+        (opaque if nested_repository else files).add(project_path)
+        parts = project_path.split("/")
+        for index in range(1, len(parts)):
+            directories.add("/".join(parts[:index]))
+    return files, directories, opaque
 
 
 def _exclusion(project_path: str, reason_code: str, scanner_rule_id: str, safe_label: str) -> dict[str, str]:
@@ -354,6 +575,38 @@ def build_inventory(
         relative = _lexical_rel(project_root, Path(error.filename)) if error.filename else None
         raise InventoryError(f"inventory directory is unreadable: {relative or module}") from error
 
+    listing = _git_listing(project_root, module_root)
+    fold = (lambda value: value.casefold()) if os.name == "nt" else (lambda value: value)
+    opaque_roots: list[str] = []
+
+    def git_ignored(project_path: str, *, directory: bool) -> bool:
+        """True when git proves the path is ignored; nested repositories are not filtered."""
+        if listing is None:
+            return False
+        git_files, git_directories, git_opaque = listing
+        key = fold(project_path)
+        if any(key == root or key.startswith(root + "/") for root in opaque_roots):
+            return False
+        if directory:
+            if key in git_opaque or key in git_files:
+                opaque_roots.append(key)
+                return False
+            return key not in git_directories
+        return key not in git_files
+
+    def file_entry(project_path: str, path: Path, contents: bytes, *, kind: str | None = None, redactions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            "opaque_id": _opaque_id(project_identity, module, project_path),
+            "project_path": project_path,
+            "kind": kind or _kind(project_path, path),
+            "language": _language(path),
+            "size": len(contents),
+            "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
+        }
+        if redactions:
+            entry["redactions"] = redactions
+        return entry
+
     for current, dir_names, file_names in os.walk(module_root, topdown=True, followlinks=False, onerror=walk_error):
         current_path = Path(current)
         admitted_dirs: list[str] = []
@@ -369,10 +622,13 @@ def build_inventory(
             if root_exclusion is not None:
                 exclusions.append(_exclusion(project_path, *root_exclusion))
                 continue
-            excluded = _directory_reason(name)
+            excluded = _directory_reason(name, candidate, project_root)
             if excluded is not None:
                 reason_code, rule = excluded
                 exclusions.append(_exclusion(project_path, reason_code, rule, "excluded-directory"))
+                continue
+            if git_ignored(project_path, directory=True):
+                exclusions.append(_exclusion(project_path, "GIT_IGNORED", "gitignore-v1", "git-ignored"))
                 continue
             admitted_dirs.append(name)
         dir_names[:] = admitted_dirs
@@ -392,34 +648,38 @@ def build_inventory(
             if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
                 exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
                 continue
-            secret = _secret_rule(path, b"")
+            secret = _secret_name_rule(path)
             if secret is not None:
                 rule, label = secret
                 exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
                 continue
+            output = _output_file_rule(path)
+            if output is not None:
+                exclusions.append(_exclusion(project_path, "BUILD_OUTPUT", *output))
+                continue
+            # The authoritative manifest is a baseline input even when a project ignores it.
+            if name != ".skillsrc" and git_ignored(project_path, directory=False):
+                exclusions.append(_exclusion(project_path, "GIT_IGNORED", "gitignore-v1", "git-ignored"))
+                continue
+            is_document = _is_document(path, Path(project_path).parts[:-1])
             try:
-                contents = path.read_bytes()
+                facts = _content_facts(path, is_document)
             except OSError as error:
-                if _kind(project_path, path) in {"source", "config"} or suffix in {".md", ".markdown", ".rst", ".txt", ".adoc"}:
+                if _kind(project_path, path) in {"source", "config"} or suffix in _DOCUMENT_SUFFIXES:
                     raise InventoryError(f"required inventory file is unreadable: {project_path}") from error
                 exclusions.append(_exclusion(project_path, "UNREADABLE", "readability-v1", "unreadable"))
                 continue
-            if b"\0" in contents[:8192]:
+            if facts["binary"]:
                 exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-content-v1", "binary-or-generated"))
                 continue
-            secret = _secret_rule(path, contents)
-            if secret is not None:
-                rule, label = secret
-                exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
+            # Documents and specifications stay visible: only the matching lines are
+            # masked when bytes are handed out, and the receipt records which lines.
+            if facts["secret_rule"] is not None:
+                exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", facts["secret_rule"], "token-signature"))
                 continue
-            files.append({
-                "opaque_id": _opaque_id(project_identity, module, project_path),
-                "project_path": project_path,
-                "kind": _kind(project_path, path),
-                "language": _language(path),
-                "size": len(contents),
-                "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
-            })
+            entry = file_entry(project_path, path, b"", redactions=[dict(row) for row in facts["redactions"]])
+            entry["size"], entry["content_digest"] = facts["size"], facts["content_digest"]
+            files.append(entry)
     for declared_dependency in proved_dependency_files:
         raw = Path(declared_dependency)
         candidate = raw if raw.is_absolute() else project_root / raw
@@ -431,7 +691,11 @@ def build_inventory(
             probe /= part
             if _is_reparse(probe):
                 raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is a reparse path")
-        if not candidate.is_file() or excluded_root(candidate) is not None or any(_directory_reason(part) for part in Path(lexical_path).parts[:-1]):
+        dependency_parts = Path(lexical_path).parts
+        if not candidate.is_file() or excluded_root(candidate) is not None or any(
+            _directory_reason(part, project_root.joinpath(*dependency_parts[:index + 1]), project_root)
+            for index, part in enumerate(dependency_parts[:-1])
+        ):
             raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is not eligible")
         try:
             candidate.resolve(strict=True).relative_to(module_root)
@@ -445,18 +709,11 @@ def build_inventory(
             contents = candidate.read_bytes()
         except OSError as error:
             raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is unreadable") from error
-        if b"\0" in contents[:8192] or _secret_rule(candidate, contents) is not None:
+        if b"\0" in contents[:8192] or _secret_rule(candidate, contents, dependency_parts[:-1]) is not None:
             raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is unsafe")
         if any(item["project_path"] == lexical_path for item in files):
             raise InventoryError("proved local dependency duplicates an inventory input")
-        files.append({
-            "opaque_id": _opaque_id(project_identity, module, lexical_path),
-            "project_path": lexical_path,
-            "kind": _kind(lexical_path, candidate),
-            "language": _language(candidate),
-            "size": len(contents),
-            "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
-        })
+        files.append(file_entry(lexical_path, candidate, contents))
     # A nested module executes under its own root, but its parent build manifests
     # can alter resolution and therefore belong to the same declared baseline.
     ancestor = module_root.parent
@@ -472,16 +729,12 @@ def build_inventory(
                 contents = path.read_bytes()
             except OSError as error:
                 raise InventoryError(f"required parent configuration is unreadable: {project_path}") from error
-            secret = _secret_rule(path, contents)
+            secret = _secret_rule(path, contents, Path(project_path).parts[:-1])
             if secret is not None:
                 rule, label = secret
                 exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
                 continue
-            files.append({
-                "opaque_id": _opaque_id(project_identity, module, project_path), "project_path": project_path,
-                "kind": "config", "language": _language(path), "size": len(contents),
-                "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
-            })
+            files.append(file_entry(project_path, path, contents, kind="config"))
         if ancestor == project_root:
             break
         ancestor = ancestor.parent
@@ -541,7 +794,7 @@ def _secret_exclusion_is_execution_significant(item: Mapping[str, Any], module: 
     except ValueError:
         return False
     relative_parts = {part.casefold() for part in module_relative.parts[:-1]}
-    if name == ".env" or name.startswith(".env."):
+    if name.startswith(".env"):
         return bool(relative_parts & {"test", "tests", "fixture", "fixtures", "resource", "resources"})
     return (
         path.suffix.casefold() in _EXECUTION_SOURCE_SUFFIXES | _EXECUTION_CONFIG_SUFFIXES
@@ -770,8 +1023,26 @@ def validate_execution_baseline_binding(
         if not isinstance(test, Mapping) or test.get("adapter_id") != baseline["adapter_id"] or str(system_maven_path(test.get("executable"))) != runtime_path:
             raise InventoryError("execution baseline system Maven path binding is invalid")
     identity_key = "interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1" else "executable_identity" if baseline.get("adapter_id") == "maven:selected-symbols-v1" else "wrapper_identity"
-    if not isinstance(runtime_path, str) or runtime_identity(module_root, runtime_path, adapter_id=baseline.get("adapter_id")) != baseline.get(identity_key):
+    if not isinstance(runtime_path, str) or runtime_identity(_runtime_base(module_root, document, inventory), runtime_path, adapter_id=baseline.get("adapter_id")) != baseline.get(identity_key):
         raise InventoryError("execution baseline runtime binding is invalid")
+
+
+def _runtime_base(module_root: Path, document: Mapping[str, Any], inventory: Mapping[str, Any]) -> Path:
+    """Directory a module-local runtime path is relative to.
+
+    A wrapper of a multi-module build lives in the build root declared by
+    ``test.build_root``; without that field it is the module root as before.
+    """
+    selected = [item for item in document["modules"] if item.get("root") == inventory.get("module")]
+    test = selected[0].get("test") if len(selected) == 1 else None
+    if not isinstance(test, Mapping) or "build_root" not in test:
+        return Path(module_root)
+    from tools.execution_adapters import AdapterRequestError, launch_layout
+
+    try:
+        return launch_layout({**selected[0], "module_root": str(module_root)}).build_root
+    except AdapterRequestError as error:
+        raise InventoryError("execution baseline build root binding is invalid") from error
 
 
 def _safe_immutable_target(path: Path, error_type: type[ValueError]) -> Path:
@@ -983,22 +1254,60 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
     return result
 
 
-def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes) -> dict[str, Any]:
+def context_limits(skillsrc_document: Mapping[str, Any] | None) -> dict[str, int]:
+    """Resolve context limits from an optional ``.skillsrc`` ``limits`` object.
+
+    Manifests written before the field existed carry no ``limits`` and get the defaults.
+    """
+    limits = dict(DEFAULT_CONTEXT_LIMITS)
+    declared = skillsrc_document.get("limits") if isinstance(skillsrc_document, Mapping) else None
+    if isinstance(declared, Mapping):
+        for key in limits:
+            value = declared.get(key)
+            if type(value) is int and value > 0:
+                limits[key] = value
+    return limits
+
+
+def _context_receipt(
+    inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes,
+    *, gaps: list[dict[str, Any]] | None = None, byte_budget: int | None = None,
+) -> dict[str, Any]:
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0", "inventory_digest": inventory["digest"], "batch_index": batch_index,
         "files": [{key: item[key] for key in ("opaque_id", "project_path", "content_digest", "size")} for item in files],
         "byte_count": byte_count, "byte_set_digest": "sha256:" + hashlib.sha256(byte_set).hexdigest(),
     }
+    if gaps:
+        # Additive fields: present only when a file was skipped, so receipts for
+        # selections without gaps keep their previous bytes and digests.
+        receipt["byte_budget"] = byte_budget
+        receipt["gaps"] = gaps
     receipt["digest"] = _digest(receipt)
     _validate_receipt_schema(receipt, "context-selection-receipt.schema.json", ContextSelectionError)
     return receipt
+
+
+def _delivered_bytes(item: Mapping[str, Any], contents: bytes) -> bytes:
+    """Return the bytes a model may see: documents with redactions are masked."""
+    declared = item.get("redactions")
+    if not declared:
+        return contents
+    masked, redactions = redact_document(contents)
+    if redactions != declared:
+        raise ContextSelectionError("context redaction receipt does not match file bytes")
+    return masked
 
 
 def select_context_batches(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
     include_closed_manifests: bool = True,
 ) -> list[dict[str, Any]]:
-    """Read verified eligible files into bounded, non-truncated C-lite batches."""
+    """Read verified eligible files into bounded, non-truncated C-lite batches.
+
+    A file larger than the budget is never truncated and never fails the whole
+    selection: it is skipped and recorded as an explicit gap in the first receipt.
+    """
     if type(byte_budget) is not int or byte_budget <= 0:
         raise ContextSelectionError("byte budget must be a positive integer")
     project_root = Path(project_root).resolve()
@@ -1024,7 +1333,8 @@ def select_context_batches(
         seen.add(opaque_id)
         selected.append(item)
     selected.sort(key=lambda item: item["project_path"])
-    batches: list[dict[str, Any]] = []
+    groups: list[tuple[list[dict[str, Any]], int, bytes]] = []
+    gaps: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
     current_count = 0
     current_bytes = bytearray()
@@ -1043,21 +1353,29 @@ def select_context_batches(
             raise ContextSelectionError("context bytes are unreadable") from error
         if "sha256:" + hashlib.sha256(contents).hexdigest() != item["content_digest"]:
             raise ContextSelectionError("context digest drift")
+        contents = _delivered_bytes(item, contents)
         if len(contents) > byte_budget:
-            raise ContextSelectionError("context file exceeds byte budget without truncation")
+            gaps.append({
+                "opaque_id": item["opaque_id"], "project_path": item["project_path"],
+                "size": item["size"], "reason_code": _CONTEXT_GAP_REASON,
+            })
+            continue
         prepared = {**dict(item), "bytes": contents}
         if current and current_count + len(contents) > byte_budget:
-            index_number = len(batches) + 1
-            receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes))
-            batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
+            groups.append((current, current_count, bytes(current_bytes)))
             current, current_count, current_bytes = [], 0, bytearray()
         current.append(prepared)
         current_count += len(contents)
         current_bytes.extend(item["opaque_id"].encode("ascii") + b"\0" + contents)
-    if current:
-        index_number = len(batches) + 1
-        receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes))
-        batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
+    if current or (gaps and not groups):
+        groups.append((current, current_count, bytes(current_bytes)))
+    batches: list[dict[str, Any]] = []
+    for index_number, (files, byte_count, byte_set) in enumerate(groups, start=1):
+        receipt = _context_receipt(
+            inventory, index_number, files, byte_count, byte_set,
+            gaps=gaps if index_number == 1 else None, byte_budget=byte_budget,
+        )
+        batches.append({"files": files, "byte_count": byte_count, "receipt": receipt})
     return batches
 
 
@@ -1110,8 +1428,27 @@ def validate_context_receipt_binding(inventory: Mapping[str, Any], project_root:
     _validate_receipt_schema(value, "context-selection-receipt.schema.json", ContextSelectionError)
     index = _inventory_index(inventory)
     files = value.get("files")
-    if not isinstance(files, list) or not files:
+    gaps = value.get("gaps", [])
+    if not isinstance(files, list) or not isinstance(gaps, list) or not (files or gaps):
         raise ContextSelectionError("context receipt must bind at least one eligible file")
+    byte_budget = value.get("byte_budget")
+    if ("gaps" in value) != ("byte_budget" in value) or ("gaps" in value and (not gaps or type(byte_budget) is not int or byte_budget <= 0)):
+        raise ContextSelectionError("context receipt gaps are invalid")
+    listed = {row.get("opaque_id") for row in files if isinstance(row, Mapping)}
+    gap_ids: set[str] = set()
+    for gap in gaps:
+        opaque_id = gap.get("opaque_id") if isinstance(gap, Mapping) else None
+        item = index.get(opaque_id)
+        if (
+            item is None or opaque_id in gap_ids or opaque_id in listed
+            or gap.get("project_path") != item.get("project_path") or gap.get("size") != item.get("size")
+            or gap.get("reason_code") != _CONTEXT_GAP_REASON
+            # Masking only ever replaces a line, so an unmasked size at or below the
+            # budget can be a real gap only for a document that carries redactions.
+            or (item["size"] <= byte_budget and not item.get("redactions"))
+        ):
+            raise ContextSelectionError("context receipt gap ownership is invalid")
+        gap_ids.add(opaque_id)
     byte_set = bytearray()
     byte_count = 0
     seen: set[str] = set()
@@ -1131,6 +1468,7 @@ def validate_context_receipt_binding(inventory: Mapping[str, Any], project_root:
             raise ContextSelectionError("context receipt file readback failed") from error
         if _is_reparse(candidate) or "sha256:" + hashlib.sha256(contents).hexdigest() != item["content_digest"] or len(contents) != item["size"]:
             raise ContextSelectionError("context receipt file bytes drifted")
+        contents = _delivered_bytes(item, contents)
         byte_count += len(contents)
         byte_set.extend(str(opaque_id).encode("ascii") + b"\0" + contents)
     if value.get("byte_count") != byte_count or value.get("byte_set_digest") != "sha256:" + hashlib.sha256(bytes(byte_set)).hexdigest():

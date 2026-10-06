@@ -50,7 +50,7 @@ _CONTROLLER_STOP_ROWS: set[str] = set()
 DURABLE_NATIVE_REPORT_MAX_BYTES = 1024 * 1024
 NATIVE_REPORT_MAX_BYTES = 8 * 1024 * 1024
 NATIVE_REPORT_SET_MAX_BYTES = 32 * 1024 * 1024
-PROCESS_OUTPUT_TAIL_BYTES = 32768
+PROCESS_OUTPUT_TAIL_BYTES = 64 * 1024
 DURABLE_NATIVE_REPORT_NORMALIZATION = "junit-semantic-v1"
 _PROCESS_ERROR_CLASSES = {
     "TIMEOUT": "TimeoutExpired",
@@ -62,7 +62,42 @@ _PROCESS_ERROR_CLASSES = {
     "SOURCE_CHANGED": "SourceChanged",
     "BASELINE_DRIFT": "BaselineDrift",
     "NO_TESTS_COLLECTED": "NoTestsCollected",
+    "GENERATED_TEST_INVALID": "GeneratedTestInvalid",
+    "LAUNCH_FAILED": "LaunchFailed",
+    "TESTS_DESELECTED": "TestsDeselected",
+    "NONZERO_EXIT_GREEN_REPORT": "NonzeroExitGreenReport",
+    "ARTIFACT_PERSISTENCE_FAILED": "ArtifactPersistenceFailed",
 }
+# Process outcomes that prove the reviewed tests never ran: the attempt is
+# NOT_RUNNABLE (cleanup or regeneration is safe), never an ambiguous UNKNOWN.
+NOT_RUNNABLE_PROCESS_KINDS = frozenset({"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED"})
+_NOT_RUNNABLE_MESSAGES = {
+    "GENERATED_TEST_INVALID": "Generated tests failed the compile/collect gate or did not compile or import in the run.",
+    "LAUNCH_FAILED": "The test process could not be launched.",
+    "TESTS_DESELECTED": "The explicitly selected tests were deselected by the project's pytest configuration or environment.",
+}
+STOP_PROOFS = frozenset({
+    "WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP", "WINDOWS_JOB_TERMINATED",
+})
+# Variables that change what the test process does.  Only their names and value
+# digests are recorded; the values themselves never reach a receipt or a log.
+LAUNCH_ENVIRONMENT_NAMES = (
+    "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "MAVEN_OPTS", "MAVEN_ARGS",
+    "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "GRADLE_OPTS", "JAVA_HOME",
+)
+_SCOPE_MARKER_NAME = "TEST_SKILLS_PROCESS_SCOPE"
+
+
+def launch_environment_inputs(environment: Mapping[str, str] | None = None) -> list[dict[str, str]]:
+    """Name and digest every launch-significant variable that is set; never its value."""
+    source = os.environ if environment is None else environment
+    rows: list[dict[str, str]] = []
+    for name in sorted(LAUNCH_ENVIRONMENT_NAMES):
+        value = source.get(name)
+        if isinstance(value, str):
+            digest = hashlib.sha256(value.encode("utf-8", errors="surrogateescape")).hexdigest()
+            rows.append({"name": name, "value_digest": "sha256:" + digest})
+    return rows
 
 
 class DurableNativeReportError(ValueError):
@@ -85,7 +120,7 @@ class ProcessOutcome:
     stderr: str
     kind: Literal["EXIT", "TIMEOUT", "OS_ERROR"] = "EXIT"
     process_scope_stopped: bool = False
-    stop_proof: Literal["WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP"] | None = None
+    stop_proof: Literal["WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP", "WINDOWS_JOB_TERMINATED"] | None = None
     _stop_attestation: object | None = None
 
     def __iter__(self):
@@ -395,9 +430,7 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
             and not (
                 kind == "TIMEOUT"
                 and scope_stopped is True
-                and stop_proof in {
-                    "WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP",
-                }
+                and stop_proof in STOP_PROOFS
             )
         ):
             rows.append(_diag(
@@ -407,9 +440,13 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
         cause = row.get("exit_cause")
         if kind == "TIMEOUT":
             exit_valid = type(exit_code) is int and exit_code == 124 and cause == "TIMEOUT"
-        elif kind == "OS_ERROR":
+        elif kind in {"OS_ERROR", "LAUNCH_FAILED"}:
             exit_valid = type(exit_code) is int and exit_code == 127 and cause == "OS_ERROR"
-        elif kind == "NO_TESTS_COLLECTED":
+        elif kind == "GENERATED_TEST_INVALID":
+            exit_valid = type(exit_code) is int and exit_code > 0 and cause == "NONZERO_EXIT"
+        elif kind == "NONZERO_EXIT_GREEN_REPORT":
+            exit_valid = type(exit_code) is int and exit_code > 0 and cause == "NONZERO_EXIT"
+        elif kind in {"NO_TESTS_COLLECTED", "TESTS_DESELECTED"}:
             exit_valid = type(exit_code) is int and exit_code >= 0 and (
                 (exit_code == 0 and cause == "ZERO_EXIT")
                 or (exit_code > 0 and cause == "NONZERO_EXIT")
@@ -429,7 +466,7 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
             affected = row.get("affected_file_ids")
             if not isinstance(affected, list) or not affected or any(not isinstance(file_id, str) for file_id in affected) or len(set(affected)) != len(affected) or (known_file_ids and not set(affected).issubset(known_file_ids)):
                 rows.append(_diag("/process_evidence", f"{prefix}_PROCESS_SOURCE_CHANGED", "Source change evidence must name distinct executed generated files."))
-        elif kind == "BASELINE_DRIFT":
+        elif kind in {"BASELINE_DRIFT", "ARTIFACT_PERSISTENCE_FAILED"}:
             exit_valid = type(exit_code) is int and (
                 (exit_code == 124 and cause == "TIMEOUT")
                 or (exit_code == 127 and cause == "OS_ERROR")
@@ -450,6 +487,14 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
     return rows
 
 
+def _not_runnable_process_kind(evidence: Sequence[Mapping[str, Any]], process_evidence: Sequence[Mapping[str, Any]]) -> str | None:
+    """Return the one process kind that makes a started execution NOT_RUNNABLE."""
+    if evidence or len(process_evidence) != 1:
+        return None
+    kind = process_evidence[0].get("kind") if isinstance(process_evidence[0], Mapping) else None
+    return kind if kind in NOT_RUNNABLE_PROCESS_KINDS else None
+
+
 def validate_execution_evidence(verdict: str, run_id: str | None, source: Mapping[str, Any], evidence: Sequence[Mapping[str, Any]], authoritative: bool, required_pairs: Sequence[tuple[str, str]], verified_file_digests: Mapping[str, str] | None = None, exit_code: int | None = None, stats: Mapping[str, Any] | None = None, reported_diagnostics: Sequence[Mapping[str, Any]] | None = None, process_evidence: Sequence[Mapping[str, Any]] = (), target: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
     required, diagnostics, seen = set(required_pairs), [], {}
     if verdict == "NOT_RUNNABLE" and run_id is None:
@@ -460,6 +505,9 @@ def validate_execution_evidence(verdict: str, run_id: str | None, source: Mappin
             "/execution", "EXECUTION_RESULT_LOST",
             "Execution started, but no authoritative framework or process result was durably recovered.",
         ))
+    not_runnable_kind = _not_runnable_process_kind(evidence, process_evidence)
+    if verdict == "NOT_RUNNABLE" and not_runnable_kind is not None:
+        factual_diagnostics.append(_diag("/execution", not_runnable_kind, _NOT_RUNNABLE_MESSAGES[not_runnable_kind]))
     source_changed = _source_changed_file_ids(process_evidence)
     for row in evidence:
         if row.get("run_id") != run_id:
@@ -495,6 +543,10 @@ def validate_execution_evidence(verdict: str, run_id: str | None, source: Mappin
         derived = "FAIL"
     elif complete and exit_code in (None, 0):
         derived = "PASS"
+    elif not diagnostics and not_runnable_kind is not None:
+        # The process ran, but the reviewed tests provably did not: there is
+        # nothing ambiguous to preserve, so this is not UNKNOWN.
+        derived = "NOT_RUNNABLE"
     else:
         # Once execution has started, incomplete or process-only evidence proves
         # neither product success nor exact-test failure.  The frozen contract
@@ -524,6 +576,38 @@ def run_subprocess(command: list[str], project: Path, environment: Mapping[str, 
         return _run_subprocess(command, project, environment, timeout, stdout_file, stderr_file)
 
 
+def _windows_console_encodings() -> tuple[str, ...]:
+    """Code pages a Windows console child writes when its output is not UTF-8."""
+    if os.name != "nt":
+        return ()
+    names: list[str] = []
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        for reader in (kernel32.GetConsoleOutputCP, kernel32.GetOEMCP):
+            code_page = int(reader())
+            if code_page and code_page != 65001 and f"cp{code_page}" not in names:
+                names.append(f"cp{code_page}")
+    except (AttributeError, OSError, ValueError):
+        pass
+    return tuple(names)
+
+
+def _decode_process_output(data: bytes, fallback_encodings: Sequence[str] | None = None) -> str:
+    """Decode as UTF-8, then as the Windows console code page, never failing."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in (_windows_console_encodings() if fallback_encodings is None else fallback_encodings):
+        try:
+            return data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def _output_tail(stream: Any) -> str:
     size = stream.seek(0, os.SEEK_END)
     stream.seek(max(0, size - PROCESS_OUTPUT_TAIL_BYTES))
@@ -531,45 +615,40 @@ def _output_tail(stream: Any) -> str:
     if size > PROCESS_OUTPUT_TAIL_BYTES:
         # Never publish the suffix of a truncated credential-bearing line.
         data = data.partition(b"\n")[2]
-    return data.decode("utf-8", errors="replace")
+    return _decode_process_output(data)
 
 
 def _run_subprocess(command: list[str], project: Path, environment: Mapping[str, str] | None, timeout: int, stdout_file: Any, stderr_file: Any) -> ProcessOutcome:
+    scope_marker = uuid.uuid4().hex
+    child_environment = dict(environment) if environment is not None else dict(os.environ)
+    # The marker is inherited by every descendant, including one that leaves the
+    # process group with setsid, so a POSIX stop proof can account for it.
+    child_environment[_SCOPE_MARKER_NAME] = scope_marker
     kwargs: dict[str, Any] = {
         "cwd": project,
         "stdout": stdout_file,
         "stderr": stderr_file,
-        "env": dict(environment) if environment is not None else dict(os.environ),
+        "env": child_environment,
         "shell": False,
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    else:
-        kwargs["start_new_session"] = True
+    windows_job: int | None = None
     try:
-        process = subprocess.Popen(command, **kwargs)
+        if os.name == "nt":
+            process, windows_job = _start_windows_scoped_process(command, kwargs)
+        else:
+            kwargs["start_new_session"] = True
+            process = subprocess.Popen(command, **kwargs)
     except OSError:
         return ProcessOutcome(127, "", "", "OS_ERROR")
-    windows_job = _assign_windows_kill_job(process) if os.name == "nt" else None
     try:
         process.wait(timeout=timeout)
         return ProcessOutcome(process.returncode, _output_tail(stdout_file), _output_tail(stderr_file))
     except subprocess.TimeoutExpired:
-        stop_proof = _terminate_process_tree(process, windows_job=windows_job)
-        windows_job = None
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            stop_proof = None
-        if stop_proof == "POSIX_PROCESS_GROUP":
-            try:
-                os.killpg(process.pid, 0)
-            except ProcessLookupError:
-                pass
-            except OSError:
-                stop_proof = None
-            else:
-                stop_proof = None
+        if os.name == "nt":
+            stop_proof = _stop_windows_scope(process, windows_job)
+            windows_job = None
+        else:
+            stop_proof = _stop_posix_scope(process, scope_marker)
         return ProcessOutcome(
             124, _output_tail(stdout_file), _output_tail(stderr_file), "TIMEOUT",
             process_scope_stopped=stop_proof is not None, stop_proof=stop_proof,
@@ -580,19 +659,183 @@ def _run_subprocess(command: list[str], project: Path, environment: Mapping[str,
             _close_windows_handle(windows_job)
 
 
+# --- POSIX process scope -----------------------------------------------------
+
+_STOP_WAIT_SECONDS = 5.0
+_STOP_POLL_SECONDS = 0.05
+
+
+def _posix_process_table(scope_marker: str | None = None) -> list[tuple[int, int, int, bool]] | None:
+    """Return ``(pid, ppid, pgid, carries_marker)`` for every live process.
+
+    Zombies are not live.  ``None`` means the host cannot enumerate processes, in
+    which case no stop proof may be issued.
+    """
+    proc = Path("/proc")
+    rows: list[tuple[int, int, int, bool]] = []
+    if (proc / "self" / "stat").is_file():
+        needle = f"{_SCOPE_MARKER_NAME}={scope_marker}".encode("ascii") if scope_marker else None
+        try:
+            entries = [entry for entry in os.listdir(proc) if entry.isdigit()]
+        except OSError:
+            return None
+        for entry in entries:
+            try:
+                stat = (proc / entry / "stat").read_bytes().decode("ascii", errors="replace")
+                fields = stat.rpartition(")")[2].split()
+                state, ppid, pgid = fields[0], int(fields[1]), int(fields[2])
+            except (OSError, ValueError, IndexError):
+                continue  # the process exited while the table was being read
+            if state in {"Z", "X", "x"}:
+                continue
+            marked = False
+            if needle is not None:
+                try:
+                    marked = needle in (proc / entry / "environ").read_bytes().split(b"\0")
+                except OSError:
+                    marked = False
+            rows.append((int(entry), ppid, pgid, marked))
+        return rows
+    try:
+        listing = subprocess.run(
+            ["ps", "-A", "-o", "pid=,ppid=,pgid=,stat="], stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, check=False, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if listing.returncode != 0:
+        return None
+    for line in listing.stdout.decode("ascii", errors="replace").splitlines():
+        parts = line.split()
+        try:
+            pid, ppid, pgid = int(parts[0]), int(parts[1]), int(parts[2])
+        except (ValueError, IndexError):
+            continue
+        if len(parts) > 3 and parts[3].startswith("Z"):
+            continue
+        rows.append((pid, ppid, pgid, False))
+    return rows
+
+
+def _posix_scope_pids(table: Sequence[tuple[int, int, int, bool]], pgid: int, known: Sequence[int] = ()) -> set[int]:
+    """Live members of the launched scope: the group, marked processes, and their descendants."""
+    remembered = set(known)
+    scope = {pid for pid, _ppid, group, marked in table if group == pgid or marked or pid in remembered}
+    changed = True
+    while changed:
+        changed = False
+        for pid, ppid, _group, _marked in table:
+            if ppid in scope and pid not in scope:
+                scope.add(pid)
+                changed = True
+    scope.discard(os.getpid())
+    return scope
+
+
+def _stop_posix_scope(process: Any, scope_marker: str) -> Literal["POSIX_PROCESS_GROUP"] | None:
+    """Kill the launched scope and prove that nothing of it is still alive.
+
+    The process group alone is not the scope: a daemon that called ``setsid``
+    leaves the group and keeps running.  The proof is issued only after a fresh
+    process table shows no live member of the group, no process carrying this
+    launch's marker, and no descendant of either.
+    """
+    pgid = process.pid
+    seen: set[int] = set()
+    table = _posix_process_table(scope_marker)
+    enumerable = table is not None
+    if table is not None:
+        seen |= _posix_scope_pids(table, pgid)
+    deadline = time.monotonic() + _STOP_WAIT_SECONDS
+    while True:
+        try:
+            os.killpg(pgid, 9)
+        except OSError:
+            pass
+        for pid in sorted(seen):
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=_STOP_POLL_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        except OSError:
+            return None
+        table = _posix_process_table(scope_marker)
+        if table is None:
+            enumerable = False
+            break
+        alive = _posix_scope_pids(table, pgid, tuple(seen))
+        seen |= alive
+        if not alive and process.poll() is not None:
+            break
+        if time.monotonic() >= deadline:
+            return None
+    if not enumerable or process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        return None
+    # Only unreaped zombies may remain in the group; they hold no resources
+    # and cannot run, which is exactly what the process table just proved.
+    return "POSIX_PROCESS_GROUP"
+
+
+# --- Windows Job Object scope ------------------------------------------------
+#
+# The process is created suspended, assigned to a kill-on-close Job Object and
+# only then resumed, so no child can exist outside the job.  Every kernel call
+# lives in its own small function; tests replace them to exercise the proof
+# logic on any host.
+
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
+_WAIT_OBJECT_0 = 0
+
+
+def _kernel32() -> Any:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p)
+    kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.ResumeThread.argtypes = (wintypes.HANDLE,)
+    kernel32.ResumeThread.restype = wintypes.DWORD
+    return kernel32
+
+
 def _close_windows_handle(handle: int) -> bool:
     if os.name != "nt":
         return False
-    import ctypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return bool(kernel32.CloseHandle(ctypes.c_void_p(handle)))
+    return bool(_kernel32().CloseHandle(handle))
 
 
-def _assign_windows_kill_job(process: subprocess.Popen[str]) -> int | None:
-    """Put one trusted-project process tree in a kill-on-close Windows job."""
+def _windows_create_kill_job() -> int | None:
+    """Create an anonymous Job Object whose processes die when its handle closes."""
     if os.name != "nt":
         return None
     import ctypes
@@ -627,43 +870,193 @@ def _assign_windows_kill_job(process: subprocess.Popen[str]) -> int | None:
             ("PeakJobMemoryUsed", ctypes.c_size_t),
         ]
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-    kernel32.SetInformationJobObject.argtypes = (
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
-    )
-    kernel32.AssignProcessToJobObject.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+    kernel32 = _kernel32()
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         return None
     info = ExtendedLimitInformation()
-    info.BasicLimitInformation.LimitFlags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    configured = kernel32.SetInformationJobObject(
-        job, 9, ctypes.byref(info), ctypes.sizeof(info),
-    )
-    assigned = configured and kernel32.AssignProcessToJobObject(job, int(process._handle))
-    if not assigned:
-        _close_windows_handle(int(job))
+    info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info),
+    ):
+        kernel32.CloseHandle(job)
         return None
     return int(job)
 
 
-def _terminate_process_tree(
-    process: subprocess.Popen[str],
-    *,
-    windows_job: int | None = None,
-) -> Literal["WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP"] | None:
+def _windows_assign_job(job: int, process: Any) -> bool:
     if os.name != "nt":
+        return False
+    return bool(_kernel32().AssignProcessToJobObject(job, int(process._handle)))
+
+
+def _assign_windows_kill_job(process: Any) -> int | None:
+    """Put one still-suspended process in a new kill-on-close job; ``None`` if that failed."""
+    job = _windows_create_kill_job()
+    if job is None:
+        return None
+    if not _windows_assign_job(job, process):
+        _close_windows_handle(job)
+        return None
+    return job
+
+
+def _windows_resume_process(process: Any) -> bool:
+    """Resume a process created with ``CREATE_SUSPENDED``.
+
+    ``subprocess.Popen`` closes the primary thread handle, so the thread is
+    found again through a Toolhelp thread snapshot filtered by the owning
+    process ID and resumed with the documented ``OpenThread``/``ResumeThread``
+    pair.  A suspended process has exactly its primary thread.  If no thread
+    could be resumed that way, ``NtResumeProcess`` on the process handle is the
+    fallback.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    class ThreadEntry32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+            ("th32ThreadID", wintypes.DWORD), ("th32OwnerProcessID", wintypes.DWORD),
+            ("tpBasePri", wintypes.LONG), ("tpDeltaPri", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    kernel32 = _kernel32()
+    invalid_handle = ctypes.c_void_p(-1).value
+    failed = 0xFFFFFFFF
+    resumed = 0
+    snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+    if snapshot and snapshot != invalid_handle:
         try:
-            os.killpg(process.pid, 9)
-            return "POSIX_PROCESS_GROUP"
-        except OSError:
+            kernel32.Thread32First.argtypes = (wintypes.HANDLE, ctypes.POINTER(ThreadEntry32))
+            kernel32.Thread32First.restype = wintypes.BOOL
+            kernel32.Thread32Next.argtypes = (wintypes.HANDLE, ctypes.POINTER(ThreadEntry32))
+            kernel32.Thread32Next.restype = wintypes.BOOL
+            entry = ThreadEntry32()
+            entry.dwSize = ctypes.sizeof(ThreadEntry32)
+            more = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+            while more:
+                if entry.th32OwnerProcessID == process.pid:
+                    thread = kernel32.OpenThread(_THREAD_SUSPEND_RESUME, False, entry.th32ThreadID)
+                    if thread:
+                        try:
+                            if kernel32.ResumeThread(thread) != failed:
+                                resumed += 1
+                        finally:
+                            kernel32.CloseHandle(thread)
+                more = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snapshot)
+    if resumed:
+        return True
+    try:
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+        ntdll.NtResumeProcess.restype = ctypes.c_long
+        return ntdll.NtResumeProcess(int(process._handle)) == 0
+    except (AttributeError, OSError):
+        return False
+
+
+def _windows_terminate_job(job: int) -> bool:
+    if os.name != "nt":
+        return False
+    return bool(_kernel32().TerminateJobObject(job, 1))
+
+
+def _windows_job_active_processes(job: int) -> int | None:
+    """Number of live processes in the job, or ``None`` when it cannot be queried."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicAccountingInformation(ctypes.Structure):
+        _fields_ = [
+            ("TotalUserTime", ctypes.c_longlong), ("TotalKernelTime", ctypes.c_longlong),
+            ("ThisPeriodTotalUserTime", ctypes.c_longlong), ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+            ("TotalPageFaultCount", wintypes.DWORD), ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD), ("TotalTerminatedProcesses", wintypes.DWORD),
+        ]
+
+    info = BasicAccountingInformation()
+    if not _kernel32().QueryInformationJobObject(
+        job, _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION, ctypes.byref(info), ctypes.sizeof(info), None,
+    ):
+        return None
+    return int(info.ActiveProcesses)
+
+
+def _windows_wait_process(process: Any, milliseconds: int) -> bool:
+    if os.name != "nt":
+        return False
+    return _kernel32().WaitForSingleObject(int(process._handle), milliseconds) == _WAIT_OBJECT_0
+
+
+def _start_windows_scoped_process(command: list[str], kwargs: Mapping[str, Any]) -> tuple[Any, int | None]:
+    """Start suspended, contain in a Job Object, then resume.
+
+    Returns the process and its job handle.  A failed job assignment still lets
+    the process run, but without a job there can be no stop proof later.  A
+    process that cannot be resumed is killed and reported as a launch failure.
+    """
+    options = dict(kwargs)
+    options["creationflags"] = (
+        int(options.get("creationflags", 0))
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        | _CREATE_SUSPENDED
+    )
+    process = subprocess.Popen(command, **options)
+    job = _assign_windows_kill_job(process)
+    if not _windows_resume_process(process):
+        if job is not None:
+            _windows_terminate_job(job)
+            _close_windows_handle(job)
+        try:
+            process.kill()
+            process.wait(timeout=_STOP_WAIT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
             pass
-    else:
-        if windows_job is not None and _close_windows_handle(windows_job):
-            # Popen cannot assign the Job Object before the process starts;
-            # cleanup is useful, but not a proof that no child escaped first.
-            return None
+        raise OSError("suspended test process could not be resumed")
+    return process, job
+
+
+def _stop_windows_scope(process: Any, job: int | None) -> Literal["WINDOWS_JOB_TERMINATED"] | None:
+    """Terminate the whole job and prove it is empty; without a job only best-effort kill."""
+    if job is None:
+        _terminate_process_tree(process)
+        return None
+    proof: Literal["WINDOWS_JOB_TERMINATED"] | None = None
+    try:
+        terminated = _windows_terminate_job(job)
+        _windows_wait_process(process, int(_STOP_WAIT_SECONDS * 1000))
+        try:
+            process.wait(timeout=_STOP_WAIT_SECONDS)
+            exited = True
+        except (OSError, subprocess.TimeoutExpired):
+            exited = False
+        active: int | None = None
+        deadline = time.monotonic() + _STOP_WAIT_SECONDS
+        while True:
+            active = _windows_job_active_processes(job)
+            if active is None or active == 0 or time.monotonic() >= deadline:
+                break
+            time.sleep(_STOP_POLL_SECONDS)
+        if terminated and exited and active == 0:
+            proof = "WINDOWS_JOB_TERMINATED"
+    finally:
+        _close_windows_handle(job)  # KILL_ON_JOB_CLOSE reaps anything still inside
+    if proof is None:
+        _terminate_process_tree(process)
+    return proof
+
+
+def _terminate_process_tree(process: Any) -> None:
+    """Best-effort kill without any proof (used when no Job Object contains the tree)."""
+    if os.name == "nt":
         try:
             subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=5)
         except (OSError, subprocess.TimeoutExpired):
@@ -676,7 +1069,6 @@ def _terminate_process_tree(
             process.kill()
         except OSError:
             pass
-    return None
 
 
 @dataclass(frozen=True)
@@ -748,13 +1140,44 @@ def _case_matches_pair(case: JUnitCase, binding: Mapping[str, Any], java: bool) 
     if java:
         base_name = case.name.split("[", 1)[0].split("(", 1)[0]
         return case.classname == loc["class_fqn"] and base_name == loc["method_name"]
+    return _pytest_case_rootdir_prefix(case, binding) is not None
+
+
+def _pytest_rootdir_prefixes(binding: Mapping[str, Any]) -> tuple[str, ...]:
+    """Module-root paths relative to every directory pytest may pick as rootdir.
+
+    pytest reports node IDs relative to its rootdir, which is the launch
+    directory or one of its ancestors (the nearest one holding the effective
+    ``pytest.ini``/``pyproject.toml``/``tox.ini``/``setup.cfg``).  The empty
+    prefix is the module root itself.
+    """
+    relative = str(binding.get("relative_path") or "").replace("\\", "/")
+    raw_path = binding.get("path")
+    if not relative or raw_path is None:
+        return ("",)
+    file_parts = Path(raw_path).parts
+    depth = len([part for part in relative.split("/") if part])
+    module_parts = file_parts[:len(file_parts) - depth]
+    if module_parts and Path(module_parts[0]).anchor == module_parts[0]:
+        module_parts = module_parts[1:]
+    return ("",) + tuple("/".join(module_parts[-count:]) for count in range(1, len(module_parts) + 1))
+
+
+def _pytest_case_rootdir_prefix(case: JUnitCase, binding: Mapping[str, Any]) -> str | None:
+    """Return the rootdir prefix under which this testcase is the bound symbol, if any."""
+    loc = binding["locator"]
     base_name = case.name.split("[", 1)[0]
-    relative = str(binding.get("relative_path") or Path(binding["path"]).as_posix()).replace("\\", "/")
-    expected_module = relative.removesuffix(".py").replace("/", ".")
-    class_module = expected_module if loc["kind"] == "python_module_function" else expected_module + "." + loc["qualified_class_name"]
-    same_file = case.file == relative or (case.file is None and case.classname == class_module)
     expected_name = loc["function_name"] if loc["kind"] == "python_module_function" else loc["method_name"]
-    return same_file and case.classname == class_module and base_name == expected_name
+    if base_name != expected_name:
+        return None
+    module_relative = str(binding.get("relative_path") or Path(binding["path"]).as_posix()).replace("\\", "/")
+    for prefix in _pytest_rootdir_prefixes(binding):
+        relative = f"{prefix}/{module_relative}" if prefix else module_relative
+        expected_module = relative.removesuffix(".py").replace("/", ".")
+        class_module = expected_module if loc["kind"] == "python_module_function" else expected_module + "." + loc["qualified_class_name"]
+        if case.classname == class_module and case.file in {None, relative}:
+            return prefix
+    return None
 
 
 def match_junit_cases(
@@ -774,16 +1197,22 @@ def match_junit_cases(
     observed: dict[tuple[str, str], list[str]] = {pair: [] for pair in compatibility.required_pairs}
     unmatched: list[JUnitCase] = []
     ambiguous = False
+    rootdir_prefixes: set[str] = set()
     for case in parsed.cases:
         matches = [pair for pair, binding in compatibility.bindings.items() if _case_matches_pair(case, binding, java)]
         if len(matches) == 1:
             observed[matches[0]].append(case.status)
+            if not java:
+                rootdir_prefixes.add(str(_pytest_case_rootdir_prefix(case, compatibility.bindings[matches[0]])))
         elif len(matches) > 1:
             ambiguous = True
         else:
             unmatched.append(case)
     if ambiguous:
         errors.append("ambiguous JUnit testcase")
+    if len(rootdir_prefixes) > 1:
+        # One pytest process has one rootdir; mixed prefixes are not one run.
+        errors.append("inconsistent pytest rootdir")
     if strict and unmatched:
         errors.append("unmatched JUnit testcase")
     if strict:
@@ -1050,8 +1479,12 @@ def _stats(evidence: Sequence[Mapping[str, Any]], duration_sec: float | None = N
     return {"total": sum(count.values()), "passed": count["PASSED"], "failed": count["FAILED"], "errors": count["ERROR"], "skipped": count["SKIPPED"], "duration_sec": duration_sec}
 
 
-def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]], artifact_evidence: Sequence[Mapping[str, str]], *, run_root: Path | None = None, attempt_id: str | None = None) -> dict[str, Any]:
-    """Project only launch-safe request facts into a portable V5 execution receipt."""
+def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]], artifact_evidence: Sequence[Mapping[str, str]], *, run_root: Path | None = None, attempt_id: str | None = None, environment_inputs: Sequence[Mapping[str, str]] | None = None) -> dict[str, Any]:
+    """Project only launch-safe request facts into a portable V5 execution receipt.
+
+    ``environment_inputs`` are the names and value digests of the launch-significant
+    variables the started process inherited; it is recorded only for a started run.
+    """
     from tools.execution_adapters import ExecutionRequest, request_digest
 
     if not isinstance(request, ExecutionRequest):
@@ -1081,10 +1514,11 @@ def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]
         "request_digest": request_digest(request),
         "report_evidence": [dict(row) for row in report_evidence],
         "artifact_evidence": [dict(row) for row in artifact_evidence],
+        **({} if environment_inputs is None else {"environment_inputs": [dict(row) for row in environment_inputs]}),
     }
 
 
-def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None) -> dict[str, Any]:
+def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, environment_inputs: Sequence[Mapping[str, str]] | None = None) -> dict[str, Any]:
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     prestart = verdict == "NOT_RUNNABLE" and run_id is None
@@ -1100,7 +1534,7 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
         safe_key_labels = request.environment_labels
     source = dict(source)
     source.setdefault("effective_bundle_receipt_digest", "sha256:" + "0" * 64)
-    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
+    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
     from tools.schema_validation import schema_diagnostics
     if schema_diagnostics(report, _ROOT / "schemas" / "run-tests-output.schema.json", _ROOT):
         raise RuntimeError("RUNNER_REPORT_SCHEMA")
@@ -1202,23 +1636,24 @@ def _attempt_execution_scope(run_root: Path | None, attempt_id: str | None) -> t
 
 def _request_is_attempt_local(request: Any, project: Path, module: Path) -> bool:
     """Reject cross-project replay and undeclared host tools before a process can start."""
-    from tools.execution_adapters import ExecutionRequest, SYSTEM_MAVEN
+    from tools.execution_adapters import ExecutionRequest, SYSTEM_MAVEN, request_scope_is_closed
     from tools.project_inventory import module_runtime_path, system_maven_path
 
     if not isinstance(request, ExecutionRequest):
         return False
     try:
+        # The launch cwd is the module or its declared build root (B5); a wrapper lives there.
         cwd = Path(request.cwd).resolve(strict=True)
         if request.adapter_id == SYSTEM_MAVEN:
             executable = system_maven_path(request.executable)
             if str(executable) != request.executable:
                 return False
         else:
-            relative = Path(request.executable).relative_to(module).as_posix()
-            executable = module_runtime_path(module, relative)
+            relative = Path(request.executable).relative_to(cwd).as_posix()
+            executable = module_runtime_path(cwd, relative)
     except (OSError, ValueError):
         return False
-    return cwd == module and executable.is_file() and module.is_relative_to(project)
+    return request_scope_is_closed(request, project, module) and executable.is_file() and module.is_relative_to(project)
 
 
 def validate_execution_eligibility(
@@ -1307,6 +1742,8 @@ def build_closed_execution_request(
             "build_profile": test["build_profile"],
             "adapter_parameters": test["adapter_parameters"],
             runtime_key: test[runtime_key],
+            # Optional launch facts from .skillsrc: build root (B5) and timeout (P07).
+            **{key: test[key] for key in ("build_root", "timeout_seconds") if key in test},
         }
         return build_request(adapter_id, request_module, selectors), compatibility
     except AdapterRequestError as error:
@@ -1317,7 +1754,7 @@ def build_closed_execution_request(
 
 
 def _request_report_path(request: Any) -> Path | None:
-    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, ExecutionRequest, command_for
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, ExecutionRequest, command_for_request, request_module_root
 
     if not isinstance(request, ExecutionRequest) or request.adapter_id not in {PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE}:
         return None
@@ -1336,12 +1773,15 @@ def _request_report_path(request: Any) -> Path | None:
     raw_report = Path(request.report_paths[0])
     if "\x00" in request.report_paths[0] or raw_report.is_absolute() or ".." in raw_report.parts:
         return None
-    report = (cwd / raw_report).resolve()
     try:
-        report.relative_to(cwd)
+        # Reports are module-relative; the module may sit below the launch cwd (B5).
+        module_root = request_module_root(request).resolve()
+        module_root.relative_to(cwd)
+        report = (module_root / raw_report).resolve()
+        report.relative_to(module_root)
+        reports, expected = command_for_request(request)
     except ValueError:
         return None
-    reports, expected = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors)
     return report if request.argv == expected and request.report_paths == reports and request.selectors else None
 
 
@@ -1350,6 +1790,172 @@ def _invoke_closed_request(argv: tuple[str, ...], *, cwd: str, timeout: int, she
     if shell is not False:
         raise RunnerInputError("RUNNER_REQUEST", [_diag("/request", "RUNNER_REQUEST", "Shell execution is forbidden.")])
     return run_subprocess(list(argv), Path(cwd), timeout=timeout)
+
+
+def gate_request_is_closed(gate_request: Any, request: Any) -> bool:
+    """The gate may differ from the reviewed request only by its closed gate argv."""
+    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, gate_command_for, request_module_path
+
+    if not isinstance(gate_request, ExecutionRequest) or not isinstance(request, ExecutionRequest):
+        return False
+    try:
+        expected = gate_command_for(
+            request.adapter_id, request.executable, request.build_profile, request.selectors,
+            module_path=request_module_path(request),
+        )
+    except (AdapterRequestError, TypeError, ValueError):
+        return False
+    return (
+        gate_request.argv == expected
+        and gate_request.report_paths == ()
+        and all(
+            getattr(gate_request, name) == getattr(request, name)
+            for name in (
+                "adapter_id", "executable", "cwd", "selectors", "timeout_seconds",
+                "environment_labels", "build_profile", "typed_parameters",
+            )
+        )
+    )
+
+
+def build_closed_gate_request(request: Any) -> Any:
+    """Derive the compile/collect gate of an already built closed execution request.
+
+    The argv is the adapter's own gate policy (``gate_command_for``, the function
+    behind ``build_gate_command``) applied to the request's runtime, profile,
+    selectors and module path, so the gate can never name another runtime, cwd
+    or selector set than the reviewed request.
+    """
+    from dataclasses import replace
+
+    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, gate_command_for, request_module_path
+
+    failure = RunnerInputError(
+        "RUNNER_REQUEST",
+        [_diag("/request", "RUNNER_REQUEST", "Closed module gate request is unavailable.")],
+    )
+    if not isinstance(request, ExecutionRequest):
+        raise failure
+    try:
+        argv = gate_command_for(
+            request.adapter_id, request.executable, request.build_profile, request.selectors,
+            module_path=request_module_path(request),
+        )
+    except (AdapterRequestError, TypeError, ValueError) as error:
+        raise failure from error
+    return replace(request, argv=tuple(argv), report_paths=())
+
+
+def gate_failure_kind(adapter_id: str | None, outcome: ProcessOutcome) -> str | None:
+    """Classify the compile/collect gate; ``None`` means the gate passed."""
+    from tools.execution_adapters import PYTEST
+
+    if outcome.kind == "TIMEOUT":
+        return "TIMEOUT"
+    if outcome.kind == "OS_ERROR":
+        return "LAUNCH_FAILED"
+    if outcome.exit_code == 0:
+        return None
+    if outcome.exit_code < 0:
+        return "JUNIT_MISSING"  # killed by a signal: nothing is known about the tests
+    if adapter_id == PYTEST and outcome.exit_code == 5:
+        return "TESTS_DESELECTED"  # explicit node IDs, zero collected
+    return "GENERATED_TEST_INVALID"
+
+
+_PYTEST_IMPORT_FAILURE = re.compile(
+    r"(?m)^(?:_* ?ERROR collecting |ImportError while (?:importing|loading) |ERROR: not found: |E\s+(?:ModuleNotFoundError|ImportError|SyntaxError|IndentationError)\b)"
+)
+_GRADLE_COMPILE_FAILURE = re.compile(r"Execution failed for task '[^'\r\n]*:compile[A-Za-z]*'")
+
+
+def _output_reports_build_failure(adapter_id: str | None, exit_code: int, output: str) -> bool:
+    """True when the runner itself says the tests did not compile or import."""
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
+
+    if exit_code <= 0 or not output:
+        return False
+    if adapter_id == PYTEST:
+        return exit_code in {2, 4} and (
+            _PYTEST_IMPORT_FAILURE.search(output) is not None
+            or "error during collection" in output
+            or "errors during collection" in output
+        )
+    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        return "COMPILATION ERROR" in output or "Compilation failure" in output
+    if adapter_id == GRADLE:
+        return _GRADLE_COMPILE_FAILURE.search(output) is not None or "Compilation failed; see the compiler error output" in output
+    return False
+
+
+def _reports_collection_failure(snapshots: Mapping[Path, bytes]) -> bool:
+    """pytest writes a module that failed to import as an errored ``collection failure`` case."""
+    for content in snapshots.values():
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            continue
+        for case in root.iter("testcase"):
+            error = case.find("error")
+            if error is not None and error.get("message") == "collection failure":
+                return True
+    return False
+
+
+def classify_process_result(
+    *,
+    adapter_id: str | None,
+    outcome_kind: str,
+    exit_code: int,
+    required_count: int,
+    evidence_statuses: Sequence[str],
+    match_errors: Sequence[str],
+    has_report: bool,
+    zero_report: bool,
+    collection_error: bool = False,
+    output: str = "",
+    gate_kind: str | None = None,
+    post_execution_reason: str | None = None,
+) -> tuple[Literal["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE"], str | None]:
+    """Map one finished process to a verdict and its process-evidence kind.
+
+    ``NOT_RUNNABLE`` is reserved for outcomes that prove the reviewed tests did
+    not run (launch failure, compile/import failure, deselection).  A failed
+    product check is ``FAIL``; anything ambiguous stays ``UNKNOWN``.
+    """
+    from tools.execution_adapters import PYTEST
+
+    complete = required_count > 0 and len(evidence_statuses) == required_count and not match_errors
+    failed = complete and any(status in {"FAILED", "ERROR"} for status in evidence_statuses)
+    if post_execution_reason:
+        return "UNKNOWN", "TIMEOUT" if outcome_kind == "TIMEOUT" else "BASELINE_DRIFT"
+    if outcome_kind == "OS_ERROR":
+        return "NOT_RUNNABLE", "LAUNCH_FAILED"
+    if outcome_kind == "TIMEOUT":
+        if gate_kind is None and failed:
+            return "FAIL", None  # an exact framework failure outranks the controller timeout
+        return "UNKNOWN", "TIMEOUT"
+    if gate_kind is not None:
+        return ("NOT_RUNNABLE" if gate_kind in NOT_RUNNABLE_PROCESS_KINDS else "UNKNOWN"), gate_kind
+    if exit_code < 0:
+        return "UNKNOWN", "JUNIT_INVALID" if has_report else "JUNIT_MISSING"
+    if zero_report:
+        if adapter_id == PYTEST:
+            # Explicit node IDs with a valid empty report: pytest could not find the
+            # node (usage error 4) or the project configuration deselected it.
+            return "NOT_RUNNABLE", "GENERATED_TEST_INVALID" if exit_code == 4 else "TESTS_DESELECTED"
+        return "FAIL", "NO_TESTS_COLLECTED"
+    if complete:
+        if failed:
+            return "FAIL", None
+        if any(status == "SKIPPED" for status in evidence_statuses):
+            return "UNKNOWN", "JUNIT_INVALID"
+        if exit_code != 0:
+            return "UNKNOWN", "NONZERO_EXIT_GREEN_REPORT"
+        return "PASS", None
+    if exit_code > 0 and (collection_error or (not has_report and _output_reports_build_failure(adapter_id, exit_code, output))):
+        return "NOT_RUNNABLE", "GENERATED_TEST_INVALID"
+    return "UNKNOWN", "JUNIT_INVALID" if has_report else "JUNIT_MISSING"
 
 
 def _durable_execution_start_events(run_root: Path | None, attempt_id: str | None) -> tuple[Mapping[str, Any], ...] | None:
@@ -1386,11 +1992,15 @@ def _has_one_new_durable_execution_start(run_root: Path | None, attempt_id: str 
     return starts is not None and len(starts) == 1 and starts[0].get("artifact_digest") == expected
 
 
-def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], *, host_isolation_receipt: Mapping[str, Any] | None = None, generated_delta_receipt: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None, on_execution_start: Callable[[Any], None] | None = None, post_execution_check: Callable[[], str | None] | None = None) -> dict[str, Any]:
-    """Execute exactly one closed project-native adapter request after authorization."""
+def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], *, host_isolation_receipt: Mapping[str, Any] | None = None, generated_delta_receipt: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None, on_execution_start: Callable[[Any], None] | None = None, post_execution_check: Callable[[], str | None] | None = None, gate_request: Any = None) -> dict[str, Any]:
+    """Execute exactly one closed project-native adapter request after authorization.
+
+    ``gate_request`` is the controller-built compile/collect gate for the same
+    request; when present it runs first, under the same execution-start claim.
+    """
     from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
     from tools.execution_adapters import (
-        GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, classify_execution, invoke_request, is_zero_test_report,
+        GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, invoke_request, is_zero_test_report,
     )
 
     artifacts = automation_artifact.get("artifacts", {}) if isinstance(automation_artifact, Mapping) else {}
@@ -1435,6 +2045,8 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     if set(request.selectors) != expected_selectors:
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/selectors", "RUNNER_SELECTORS", "Request selectors must equal exact reviewed node IDs.")], request=request, run_root=run_root, attempt_id=attempt_id)
 
+    if gate_request is not None and not gate_request_is_closed(gate_request, request):
+        return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/gate_request", "RUNNER_REQUEST", "Gate request is not the closed compile/collect gate of the execution request.")], request=request, run_root=run_root, attempt_id=attempt_id)
     if on_execution_start is None:
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/execution", "RUNNER_EXECUTION_GATE", "Execution requires the controller's atomic execution-start gate.")], request=request, run_root=run_root, attempt_id=attempt_id)
     if _durable_execution_start_events(run_root, attempt_id):
@@ -1446,67 +2058,61 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     if not _has_one_new_durable_execution_start(run_root, attempt_id, request):
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/execution", "RUNNER_EXECUTION_GATE", "Execution-start claim is absent, ambiguous, or bound to another request.")], request=request, run_root=run_root, attempt_id=attempt_id)
     run_id, started = "RUN-" + uuid.uuid4().hex, time.monotonic()
+    environment_inputs = launch_environment_inputs()
     before = _report_inventory(report_path)
-    outcome = _outcome(invoke_request(request, _invoke_closed_request))
+    gate_kind: str | None = None
+    outcome: ProcessOutcome | None = None
+    if gate_request is not None:
+        # Compile/collect gate: the same closed runtime and selectors, no test body.
+        gate_outcome = _outcome(invoke_request(gate_request, _invoke_closed_request))
+        gate_kind = gate_failure_kind(adapter_id, gate_outcome)
+        if gate_kind is not None:
+            outcome = gate_outcome
+    if outcome is None:
+        outcome = _outcome(invoke_request(request, _invoke_closed_request))
     duration_sec = time.monotonic() - started
-    after = _report_inventory(report_path)
-    fresh = {path for path, fingerprint in after.items() if before.get(path) != fingerprint}
-    snapshots = _report_snapshots(tuple(fresh))
+    snapshots: dict[Path, bytes] = {}
+    if gate_kind is None:
+        after = _report_inventory(report_path)
+        fresh = {path for path, fingerprint in after.items() if before.get(path) != fingerprint}
+        snapshots = _report_snapshots(tuple(fresh))
     evidence, match_errors = _records_from_snapshots(snapshots, compatibility, run_id, source, java=language == "java")
     zero_report = bool(snapshots) and all(
         is_zero_test_report(content) for content in snapshots.values()
     )
-    if zero_report:
-        report_bytes = next(iter(snapshots.values()))
-        classified = classify_execution(
-            controller_timed_out=outcome.kind == "TIMEOUT",
-            process_returncode=outcome.exit_code if outcome.kind == "EXIT" else None,
-            report_bytes=report_bytes,
-            selectors=request.selectors,
-        )
-    elif len(evidence) == len(compatibility.required_pairs) and not match_errors:
-        if any(row["status"] in {"FAILED", "ERROR"} for row in evidence):
-            classified = "FAIL"
-        elif outcome.kind == "TIMEOUT" or any(row["status"] == "SKIPPED" for row in evidence):
-            classified = "UNKNOWN"
-        else:
-            classified = "PASS"
-        report_bytes = b"framework-evidence"
-    else:
-        classified, report_bytes = "UNKNOWN", None
     post_execution_reason = None
     if post_execution_check is not None:
         try:
             post_execution_reason = post_execution_check()
         except Exception:
             post_execution_reason = "BASELINE_DRIFT"
-    if outcome.kind == "OS_ERROR" or outcome.exit_code < 0 or (match_errors and not zero_report) or post_execution_reason:
-        classified = "UNKNOWN"
-    if outcome.kind == "EXIT" and outcome.exit_code != 0 and classified == "PASS":
-        classified = "UNKNOWN"
+    classified, process_kind = classify_process_result(
+        adapter_id=adapter_id,
+        outcome_kind=outcome.kind,
+        exit_code=outcome.exit_code,
+        required_count=len(compatibility.required_pairs),
+        evidence_statuses=[row["status"] for row in evidence],
+        match_errors=match_errors,
+        has_report=bool(snapshots),
+        zero_report=zero_report,
+        collection_error=adapter_id == PYTEST and _reports_collection_failure(snapshots),
+        output=f"{outcome.stdout or ''}\n{outcome.stderr or ''}",
+        gate_kind=gate_kind,
+        post_execution_reason=post_execution_reason,
+    )
+    if classified == "NOT_RUNNABLE":
+        evidence = []
     process_evidence: list[dict[str, Any]] = []
-    if outcome.kind == "TIMEOUT" and classified == "UNKNOWN":
-        process_evidence.append(_process_row("TIMEOUT", outcome, run_id, source, target[1], duration_sec))
-    elif outcome.kind == "OS_ERROR":
-        process_evidence.append(_process_row("OS_ERROR", outcome, run_id, source, target[1], duration_sec))
-    elif post_execution_reason:
-        process_evidence.append(_process_row("BASELINE_DRIFT", outcome, run_id, source, target[1], duration_sec))
-    elif match_errors and not zero_report:
-        process_evidence.append(_process_row("JUNIT_INVALID", outcome, run_id, source, target[1], duration_sec))
+    if process_kind is not None:
+        process_evidence.append(_process_row(process_kind, outcome, run_id, source, target[1], duration_sec))
     post_run_digests = _post_run_file_digests(compatibility)
     changed_file_ids = _changed_file_ids(compatibility, post_run_digests)
     if changed_file_ids:
         evidence = [row for row in evidence if row["file_id"] not in changed_file_ids]
+        process_evidence = [row for row in process_evidence if row["kind"] != "NO_TESTS_COLLECTED"]
         process_evidence.append(_process_row("SOURCE_CHANGED", outcome, run_id, source, target[1], duration_sec, changed_file_ids))
         classified = "UNKNOWN"
-    zero_collect = (
-        classified == "FAIL"
-        and not evidence
-        and zero_report
-        and outcome.kind == "EXIT"
-    )
-    if zero_collect and not process_evidence:
-        process_evidence.append(_process_row("NO_TESTS_COLLECTED", outcome, run_id, source, target[1], duration_sec))
+    zero_collect = classified == "FAIL" and process_kind == "NO_TESTS_COLLECTED"
     authoritative = (
         classified in {"PASS", "FAIL"}
         and (not match_errors or zero_collect)
@@ -1517,24 +2123,46 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
         )
     )
     if classified == "UNKNOWN" and not process_evidence:
-        process_evidence.append(_process_row("JUNIT_MISSING" if report_bytes is None else "JUNIT_INVALID", outcome, run_id, source, target[1], duration_sec))
+        process_evidence.append(_process_row("JUNIT_INVALID" if snapshots else "JUNIT_MISSING", outcome, run_id, source, target[1], duration_sec))
+
+    def without_artifacts(kind: str) -> None:
+        """Keep the result when its durable copies could not be written."""
+        nonlocal classified, evidence, authoritative, process_evidence
+        if classified == "NOT_RUNNABLE":
+            return  # the tests provably did not run; lost copies do not change that
+        classified, evidence, authoritative = "UNKNOWN", [], False
+        process_evidence = [
+            row for row in process_evidence if row.get("kind") == "SOURCE_CHANGED"
+        ]
+        process_evidence.append(
+            _process_row(kind, outcome, run_id, source, target[1], duration_sec)
+        )
+
     try:
         report_evidence, artifact_evidence = _durable_execution_artifacts(
             snapshots, scope[1], generated_delta_receipt, outcome, run_root, attempt_id,
         )
     except DurableNativeReportError:
         report_evidence = _report_digest_evidence(snapshots, scope[1])
-        _unused, artifact_evidence = _durable_execution_artifacts(
-            {}, scope[1], generated_delta_receipt, outcome, run_root, attempt_id,
-        )
-        classified, evidence, authoritative = "UNKNOWN", [], False
-        process_evidence = [
-            row for row in process_evidence if row.get("kind") == "SOURCE_CHANGED"
-        ]
-        process_evidence.append(
-            _process_row("JUNIT_INVALID", outcome, run_id, source, target[1], duration_sec)
-        )
-    return _report(classified, project, language, source, automation_digest, review_digest, (), run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id)
+        try:
+            _unused, artifact_evidence = _durable_execution_artifacts(
+                {}, scope[1], generated_delta_receipt, outcome, run_root, attempt_id,
+            )
+            without_artifacts("JUNIT_INVALID")
+        except Exception:
+            artifact_evidence = []
+            without_artifacts("ARTIFACT_PERSISTENCE_FAILED")
+    except Exception:
+        # The process already ran: losing this result would leave the attempt
+        # with a started execution and nothing to finalize.
+        report_evidence = _report_digest_evidence(snapshots, scope[1])
+        artifact_evidence = []
+        without_artifacts("ARTIFACT_PERSISTENCE_FAILED")
+    diagnostics = (
+        [_diag("/execution", process_kind, _NOT_RUNNABLE_MESSAGES[process_kind])]
+        if classified == "NOT_RUNNABLE" and process_kind in NOT_RUNNABLE_PROCESS_KINDS else ()
+    )
+    return _report(classified, project, language, source, automation_digest, review_digest, diagnostics, run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs)
 
 
 def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], provider_resolver: Any | None = None, adapter_registry: Any | None = None, *, runner_profile: str | None = None) -> dict[str, Any]:
@@ -1612,7 +2240,17 @@ def main(argv: list[str] | None = None) -> int:
             request, authorization, document, automation, review,
             host_isolation_receipt=host_isolation, generated_delta_receipt=generated_delta,
             run_root=Path(args.run_root), attempt_id=args.attempt_id, on_execution_start=claim_start,
+            gate_request=build_closed_gate_request(request),
         )
+        if report.get("run_id") is not None:
+            # The attempt's single execution was consumed: its result must be durable,
+            # otherwise the controller could only record EXECUTION_RESULT_LOST.
+            # ``run_pipeline exec`` then finalizes the attempt from this receipt.
+            from tools.run_pipeline import _publish_execution_receipt
+
+            _publish_execution_receipt(
+                {"run_root": Path(args.run_root).resolve(), "attempt": {"attempt_id": args.attempt_id}}, report,
+            )
         print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         return {"PASS": 0, "FAIL": 1, "UNKNOWN": 2, "NOT_RUNNABLE": 2}[report["verdict"]]
     except Exception as error:

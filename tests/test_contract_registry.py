@@ -11,8 +11,8 @@ from tools.contract_check import validate_pipeline_contract
 
 SCHEMA_ROWS = [
     ("pipeline.schema.json", 1, "IMPLEMENTED", "4.0"), ("pilot-common.schema.json", 1, "IMPLEMENTED", "1.0.0"),
-    ("run-manifest.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("event.schema.json", 1, "IMPLEMENTED", "1.0.0"),
-    ("model-request.schema.json", 1, "IMPLEMENTED", "1.0.0"),
+    ("run-manifest.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("event.schema.json", 1, "IMPLEMENTED", "2.0.0"),
+    ("model-request.schema.json", 1, "IMPLEMENTED", "2.0.0"),
     ("attempt.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("run-authorization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("terminal-result.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("finalization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.0.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),
@@ -21,14 +21,14 @@ SCHEMA_ROWS = [
     ("context-marker-output.schema.json", 3, "IMPLEMENTED", "5.0.0"), ("tc-generator-output.schema.json", 3, "IMPLEMENTED", "5.0.0"),
     ("canonical-test-document.schema.json", 3, "IMPLEMENTED", "1.0.0"), ("batch-plan.schema.json", 3, "IMPLEMENTED", "1.0.0"),
     ("candidate-fragment.schema.json", 3, "IMPLEMENTED", "1.0.0"), ("assembly-receipt.schema.json", 3, "IMPLEMENTED", "1.0.0"),
-    ("tc-reviewer-output.schema.json", 4, "IMPLEMENTED", "5.0.0"), ("orchestrator-output.schema.json", 4, "IMPLEMENTED", "5.0.0"),
-    ("reviewer-session.schema.json", 4, "IMPLEMENTED", "1.0.0"), ("tc-to-autotest-output.schema.json", 5, "IMPLEMENTED", "5.0.0"),
-    ("autotest-reviewer-output.schema.json", 5, "IMPLEMENTED", "5.0.0"), ("execution-inputs-receipt.schema.json", 5, "IMPLEMENTED", "1.0.0"), ("generated-delta.schema.json", 5, "IMPLEMENTED", "1.0.0"),
+    ("tc-reviewer-output.schema.json", 4, "IMPLEMENTED", "6.0.0"), ("orchestrator-output.schema.json", 4, "IMPLEMENTED", "5.0.0"),
+    ("reviewer-session.schema.json", 4, "IMPLEMENTED", "2.0.0"), ("review-plan.schema.json", 4, "IMPLEMENTED", "1.0.0"), ("review-part-output.schema.json", 4, "IMPLEMENTED", "1.0.0"), ("tc-to-autotest-output.schema.json", 5, "IMPLEMENTED", "5.0.0"),
+    ("autotest-reviewer-output.schema.json", 5, "IMPLEMENTED", "6.0.0"), ("execution-inputs-receipt.schema.json", 5, "IMPLEMENTED", "1.0.0"), ("generated-delta.schema.json", 5, "IMPLEMENTED", "1.0.0"),
     ("materialization-receipt.schema.json", 5, "IMPLEMENTED", "1.0.0"), ("disposition-receipt.schema.json", 5, "IMPLEMENTED", "1.0.0"),
     ("run-tests-output.schema.json", 6, "IMPLEMENTED", "5.0.0"), ("resume-validation-receipt.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("trace-document.schema.json", 7, "IMPLEMENTED", "5.0.0"),
     ("trace-audit-output.schema.json", 7, "IMPLEMENTED", "5.0.0"), ("pre-finalization-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
     ("derived-terminal-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
-    ("compatibility-evidence.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-eval-run.schema.json", 8, "IMPLEMENTED", "1.0.0"),
+    ("compatibility-evidence.schema.json", 8, "IMPLEMENTED", "2.0.0"), ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-eval-run.schema.json", 8, "IMPLEMENTED", "1.0.0"),
     ("release-eval-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-manifest.schema.json", 8, "IMPLEMENTED", "1.0.0"),
 ]
 
@@ -36,7 +36,7 @@ ARTIFACT_IDS = [
     "run_manifest", "run_authorization_receipt", "attempt", "event_journal", "event", "model_request", "structured_result", "finalization_receipt",
     "skillsrc_configuration", "skillsrc_proposal_receipt", "inventory_receipt", "exclusion_receipt", "context_selection_receipt", "execution_baseline",
     "normalized_requirements", "canonical_candidate", "batch_plan", "candidate_fragment", "canonical_header", "assembly_receipt", "pre_review_audit",
-    "authoritative_verdict", "candidate_bundle_receipt", "successor_bundle_receipt", "effective_canonical", "effective_bundle_receipt", "projection_bundle", "reviewer_session", "reviewer_evidence_transfer",
+    "authoritative_verdict", "candidate_bundle_receipt", "successor_bundle_receipt", "effective_canonical", "effective_bundle_receipt", "projection_bundle", "reviewer_session", "reviewer_evidence_transfer", "review_plan", "review_part_output", "review_aggregate",
     "automation", "automation_static_review", "execution_inputs", "generated_delta", "generated_file", "materialization_receipt", "disposition_receipt",
     "execution_receipt", "framework_evidence", "environment_receipt", "resume_validation_receipt", "execution_trace", "trace_audit", "orchestrator_output", "pre_finalization_trace", "terminal_result", "derived_terminal_trace", "compatibility_evidence", "retained_native_rerun_receipt", "scenario_observation_receipt", "release_eval_run", "release_eval_receipt", "release_manifest",
 ]
@@ -45,9 +45,9 @@ STAGE_ROWS = [
     {"stage": "orchestrate", "role": "controller", "role_policy": "orchestrate-v1", "cardinality": "once", "profiles": ["cases-only-v1", "local-pilot-v1"]},
     {"stage": "context-marker", "role": "generator", "role_policy": "context-marker-v1", "cardinality": "once", "profiles": ["cases-only-v1", "local-pilot-v1"]},
     {"stage": "tc-generator", "role": "generator", "role_policy": "tc-generator-v1", "cardinality": "per_batch", "profiles": ["cases-only-v1", "local-pilot-v1"]},
-    {"stage": "tc-reviewer", "role": "canonical-reviewer", "role_policy": "canonical-reviewer-v1", "cardinality": "once_per_canonical_branch", "profiles": ["cases-only-v1", "local-pilot-v1"]},
+    {"stage": "tc-reviewer", "role": "canonical-reviewer", "role_policy": "canonical-reviewer-v2", "cardinality": "per_review_part", "profiles": ["cases-only-v1", "local-pilot-v1"]},
     {"stage": "tc-to-autotest", "role": "automation-generator", "role_policy": "tc-to-autotest-v1", "cardinality": "per_automation_revision", "profiles": ["local-pilot-v1"]},
-    {"stage": "autotest-reviewer", "role": "automation-reviewer", "role_policy": "autotest-static-reviewer-v1", "cardinality": "per_automation_revision", "profiles": ["local-pilot-v1"]},
+    {"stage": "autotest-reviewer", "role": "automation-reviewer", "role_policy": "autotest-static-reviewer-v2", "cardinality": "per_review_part", "profiles": ["local-pilot-v1"]},
 ]
 
 
@@ -76,8 +76,16 @@ def test_frozen_registries_are_complete_ordered_and_truthful(pack_root: Path) ->
     assert all(item["semantic_ready"] is True for item in contract["policy_profiles"])
     assert {item["version"] for item in contract["adapter_registry"] + contract["policy_profiles"]} == {"v1"}
     assert contract["stage_registry"] == STAGE_ROWS
+    review = contract["reviewer_session_contract"]
+    assert review["logical_review_count"] == "one_per_branch_or_revision"
+    assert review["session_count"] == "one_per_declared_part"
+    assert review["invocation_order"] == "sequential"
+    assert review["coverage"] == ["original_source", "local", "cross_part"]
+    assert review["aggregation"] == "controller" and review["successful_verdicts"] == 1
+    assert review["incomplete"] == "never_accepted"
     assert contract["projection_profiles"] == [
-        {"id": "zephyr-scale-step-row-24-v4", "format": "csv", "mode": "default", "tenant_status": "N_A"},
+        {"id": "zephyr-scale-step-row-24-v5", "format": "csv", "mode": "default", "tenant_status": "N_A"},
+        {"id": "zephyr-scale-step-row-24-v4", "format": "csv", "mode": "opt_in_compatibility", "tenant_status": "N_A"},
         {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
     ]
     assert contract["release_qualification"] == {

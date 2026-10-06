@@ -38,7 +38,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     pipeline.extend(["", "## Event order", "", " → ".join(f"`{event['event_type']}`" for event in contract["event_order"]), "", "## Global ordering constraints", ""])
     pipeline.extend(f"- `{constraint['before']} → {constraint['after']}`" + (" (narrow exception)" if constraint.get("narrow_exception") else "") for constraint in contract["global_event_constraints"])
     reviewer = contract["reviewer_session_contract"]
-    pipeline.extend(["", "## Reviewer session", "", f"- one session; evidence pairs `{reviewer['evidence_pairs']['minimum']}..{reviewer['evidence_pairs']['maximum']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
+    pipeline.extend(["", "## Reviewer session", "", f"- logical reviews `{reviewer['logical_review_count']}`; fresh contexts `{reviewer['session_count']}`; order `{reviewer['invocation_order']}`; successful verdicts `{reviewer['successful_verdicts']}`", f"- coverage `{', '.join(reviewer['coverage'])}`; aggregation `{reviewer['aggregation']}`; incomplete `{reviewer['incomplete']}`", f"- terminal pre-verdict abort verdicts `{reviewer['pre_verdict_abort']['verdicts']}`", f"- forbidden: `{', '.join(reviewer['forbidden'])}`", "", "## Physical lifecycle", "", " → ".join(f"`{step}`" for step in contract["physical_lifecycle"]), "", "## Result axes", ""])
     for name in RESULT_AXIS_ORDER:
         axis = contract["result_axes"][name]
         if name in {"accepted", "reason_code"}:

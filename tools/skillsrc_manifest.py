@@ -147,6 +147,19 @@ def select_module(normalized: Mapping[str, Any], module_id: str | None) -> dict[
     return matches[0][1]
 
 
+def load_module_by_root(project_root: Path, module_root: str) -> dict[str, Any]:
+    """Return the one ``.skillsrc`` module whose project-relative root is ``module_root``."""
+    try:
+        document = normalize_skillsrc(load_skillsrc(Path(project_root) / ".skillsrc"))
+    except OSError as error:
+        raise SkillsrcError("read_error", ".skillsrc is unavailable") from error
+    wanted = _path_segments(module_root)
+    matches = [module for module in document["modules"] if isinstance(module.get("root"), str) and _path_segments(module["root"]) == wanted]
+    if len(matches) != 1:
+        raise SkillsrcError("module_unknown" if not matches else "module_ambiguous", f"no single module has root: {module_root}")
+    return matches[0]
+
+
 def resolve_module_root(project_root: Path, module: Mapping[str, Any]) -> Path:
     """Resolve an existing module root confined without symlink/reparse hops."""
     root = module.get("root")
@@ -275,9 +288,12 @@ def _validate_v3_paths(document: Mapping[str, Any], details: list[dict[str, obje
                 _append_path_error(details, f"{base}/detected_from/{value_index}", value)
         test = module.get("test")
         if isinstance(test, Mapping):
-            for key in ("wrapper", "interpreter"):
+            for key in ("wrapper", "interpreter", "build_root"):
                 if key in test:
                     _append_path_error(details, f"{base}/test/{key}", test[key])
+            build_root, module_root = test.get("build_root"), module.get("root")
+            if isinstance(build_root, str) and isinstance(module_root, str) and not _is_same_or_ancestor(build_root, module_root):
+                details.append({"path": f"{base}/test/build_root", "message": "build root must be the module root or one of its ancestors"})
 
 
 def _validate_registry_paths(document: Mapping[str, Any], details: list[dict[str, object]]) -> None:
@@ -290,6 +306,16 @@ def _validate_registry_paths(document: Mapping[str, Any], details: list[dict[str
         for key in ("path", "skill_file", "input_contract", "output_contract"):
             if key in skill:
                 _append_path_error(details, f"/skills_registry/{skill_id}/{key}", skill[key])
+
+
+def _path_segments(value: str) -> list[str]:
+    return [part for part in value.replace("\\", "/").split("/") if part not in {"", "."}]
+
+
+def _is_same_or_ancestor(ancestor: str, path: str) -> bool:
+    """Lexical containment of two project-relative portable paths."""
+    outer, inner = _path_segments(ancestor), _path_segments(path)
+    return inner[:len(outer)] == outer
 
 
 def _append_path_error(details: list[dict[str, object]], path: str, value: Any) -> None:

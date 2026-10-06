@@ -152,7 +152,7 @@ def test_assemble_candidate_rejects_same_capability_id_with_different_semantics(
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
     fragments[1]["operation_capabilities"][0]["action"] = "different"
     _refresh(fragments[1])
-    with pytest.raises(BatchAssemblyError, match="BATCH_ID_CONFLICT"):
+    with pytest.raises(BatchAssemblyError, match="BATCH_CAPABILITY_CONFLICT"):
         assemble_candidate(header, plan, fragments)
 
 

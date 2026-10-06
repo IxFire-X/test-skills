@@ -281,8 +281,8 @@ def test_runner_output_writer_and_helper_share_one_canonical_utf8_representation
     assert canonicalize(source) == expected
     assert canonicalize(expected.decode("utf-8")) == expected
 
-    limited = canonicalize("safe unicode\n" + "🙂" * 1000)
-    assert len(limited) <= 2000
+    limited = canonicalize("safe unicode\n" + "🙂" * 20000)
+    assert 60_000 < len(limited) <= 64 * 1024  # review decision 16: the published tail is 64 KiB
     limited.decode("utf-8")
     assert canonicalize(limited.decode("utf-8")) == limited
 

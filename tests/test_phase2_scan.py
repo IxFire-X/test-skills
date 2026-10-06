@@ -113,23 +113,26 @@ def test_scan_target_narrows_only_context_and_never_executes(tmp_path: Path, mon
     assert payloads[-1]["status"] == "ok"
 
 
-def test_scan_rejects_an_oversized_context_file_without_silent_truncation(tmp_path: Path, monkeypatch) -> None:
+def test_scan_reports_an_oversized_context_file_as_a_gap_without_silent_truncation(tmp_path: Path, monkeypatch) -> None:
+    # Review decision 20 (M31): an oversized file is skipped with an explicit gap; the scan does not fail.
     project, module = _project(tmp_path)
     source = module / "src"
     (source / "large.py").write_bytes(b"x" * (run_pipeline._SCAN_CONTEXT_BYTE_BUDGET + 1))
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
 
-    assert run_pipeline.cmd_scan(_args(project, "src/large.py")) == 2
-    from tools.pilot_state import derive_state
+    assert run_pipeline.cmd_scan(_args(project, "src/large.py")) == 0
 
     run_root, attempt_id = _durable(payloads[-1])
-    assert not (run_root / "context-selections" / attempt_id).exists()
-    assert [event["event_type"] for event in derive_state(run_root)["events"]] == [
-        "RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND",
-        "EXECUTION_BASELINE_FROZEN", "ATTEMPT_CREATED",
-    ]
-    assert payloads[-1]["reason"] == "CONTEXT_SELECTION_INVALID"
+    receipts = [json.loads(path.read_text(encoding="utf-8")) for path in sorted((run_root / "context-selections" / attempt_id).glob("*.json"))]
+    assert receipts
+    assert all(item["project_path"] != "services/api/src/large.py" for receipt in receipts for item in receipt["files"])
+    assert [gap["project_path"] for receipt in receipts for gap in receipt.get("gaps", [])] == ["services/api/src/large.py"]
+    assert payloads[-1]["status"] == "ok"
+    assert payloads[-1]["context_gaps"] == [{
+        "project_path": "services/api/src/large.py", "reason_code": "FILE_EXCEEDS_BYTE_BUDGET",
+        "size": run_pipeline._SCAN_CONTEXT_BYTE_BUDGET + 1,
+    }]
 
 
 def test_scan_denied_directory_keeps_diagnostic_run_without_inventory_ready(tmp_path: Path, monkeypatch) -> None:

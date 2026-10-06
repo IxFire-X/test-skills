@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import stat
+import time
 import uuid
 from ctypes import wintypes
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Final, Self
 __all__ = [
     "ConfinedOutputTarget",
     "OutputConfinementError",
+    "OutputConflictError",
     "acquire_confined_output",
     "atomic_write_confined_bytes",
     "atomic_write_confined_bytes_at_root",
@@ -26,6 +28,10 @@ __all__ = [
 
 class OutputConfinementError(ValueError):
     """The requested output cannot be safely confined to ``docs/to_do``."""
+
+
+class OutputConflictError(OutputConfinementError):
+    """The path is safe, but an immutable target already holds different bytes."""
 
 
 _REPARSE: Final = 0x400
@@ -220,7 +226,69 @@ def _nt_set_information_file():
     return native
 
 
+_WRITE_LISTENERS: list = []
+
+
+def on_confined_write(listener) -> None:
+    """Register a callback invoked after every confined create, replace or removal attempt."""
+    if listener not in _WRITE_LISTENERS:
+        _WRITE_LISTENERS.append(listener)
+
+
+def _notify_write() -> None:
+    for listener in _WRITE_LISTENERS:
+        listener()
+
+
+def _notifying(function):
+    import functools
+
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _notify_write()
+    return wrapped
+
+
+_REPLACE_RETRY_ALWAYS = False  # test hook: exercise the Windows retry policy on any host
+_REPLACE_RETRY_DELAYS: Final = (0.02, 0.05, 0.1, 0.2, 0.4)
+
+
 def _replace_output(target: ConfinedOutputTarget, temporary: Path, replacement_handle: int | None) -> None:
+    """Replace the target; on Windows retry a bounded number of transient sharing violations.
+
+    An antivirus scanner or a concurrent reader may hold the destination open
+    for a moment, which makes the rename fail with ``PermissionError``.
+    """
+    delays = _REPLACE_RETRY_DELAYS if (os.name == "nt" or _REPLACE_RETRY_ALWAYS) else ()
+    for delay in delays:
+        try:
+            _replace_output_once(target, temporary, replacement_handle)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    _replace_output_once(target, temporary, replacement_handle)
+
+
+def _sync_parent_directory(target: ConfinedOutputTarget) -> None:
+    """Make a create, rename or unlink durable on POSIX by syncing the pinned parent directory."""
+    if os.name == "nt":
+        return
+    try:
+        os.fsync(target.parent_guard)
+    except OSError:
+        # Some filesystems do not support directory fsync; the entry is still correct, only less durable.
+        pass
+
+
+def _temporary_name() -> Path:
+    """Short sibling name: a temporary path is never longer than a typical final one (Windows MAX_PATH)."""
+    return Path(f".{uuid.uuid4().hex[:12]}.tmp")
+
+
+def _replace_output_once(target: ConfinedOutputTarget, temporary: Path, replacement_handle: int | None) -> None:
     if os.name != "nt":
         os.replace(temporary.name, target.name, src_dir_fd=target.parent_guard, dst_dir_fd=target.parent_guard)
         return
@@ -279,7 +347,7 @@ def acquire_confined_output(project_root: Path, value: str | Path) -> ConfinedOu
 
 def _write_bytes(target: ConfinedOutputTarget, data: bytes) -> None:
     _verify_output_parent(target)
-    temporary = Path(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    temporary = _temporary_name()
     replacement_handle: int | None = None
     temporary_identity: tuple[int, int] | None = None
     descriptor: int | None = None
@@ -301,6 +369,7 @@ def _write_bytes(target: ConfinedOutputTarget, data: bytes) -> None:
             temporary_identity = details.st_dev, details.st_ino
         _verify_output_parent(target)
         _replace_output(target, temporary, replacement_handle)
+        _sync_parent_directory(target)
         if os.name != "nt":
             try:
                 _verify_output_parent(target)
@@ -324,11 +393,13 @@ def _write_bytes(target: ConfinedOutputTarget, data: bytes) -> None:
             pass
 
 
+@_notifying
 def atomic_write_confined_bytes(project_root: Path, value: str | Path, data: bytes) -> None:
     with acquire_confined_output(project_root, value) as target:
         target.write_bytes(data)
 
 
+@_notifying
 def atomic_write_confined_bytes_at_root(project_root: Path, confined_root: Path, target: Path, data: bytes) -> None:
     """Atomically replace one mutable journal below an explicitly pinned confined root."""
     with _acquire_confined_native_output(project_root, confined_root, target, create_parents=True) as record:
@@ -524,7 +595,7 @@ def _remove_owned_target(
         _mark_windows_delete(descriptor)
         return True
     else:
-        quarantine = f".{target.name}.{uuid.uuid4().hex}.rollback"
+        quarantine = f".{uuid.uuid4().hex[:12]}.rollback"
         try:
             os.rename(target.name, quarantine, src_dir_fd=target.parent_guard, dst_dir_fd=target.parent_guard)
         except FileNotFoundError:
@@ -533,6 +604,7 @@ def _remove_owned_target(
         if not _regular_details(moved) or (moved.st_dev, moved.st_ino, getattr(moved, "st_file_attributes", None)) != identity:
             return False
         os.unlink(quarantine, dir_fd=target.parent_guard)
+        _sync_parent_directory(target)
         return True
 
 
@@ -558,6 +630,7 @@ def _read_regular_confined(target: ConfinedOutputTarget, *, delete: bool = False
             os.close(descriptor)
 
 
+@_notifying
 def create_confined_bytes_exclusive(
     project_root: Path,
     confined_root: Path,
@@ -571,9 +644,9 @@ def create_confined_bytes_exclusive(
         existing = _read_regular_confined(record)
         if existing is not None:
             if existing[0] != data:
-                raise OutputConfinementError("existing target differs from accepted output")
+                raise OutputConflictError("existing target differs from accepted output")
             return (False, None) if return_identity else False
-        temporary = Path(f".{record.name}.{uuid.uuid4().hex}.tmp")
+        temporary = _temporary_name()
         descriptor: int | None = None
         temporary_identity: tuple[int, int, int | None] | None = None
         installed_identity: tuple[int, int, int | None] | None = None
@@ -593,9 +666,10 @@ def create_confined_bytes_exclusive(
             except FileExistsError:
                 existing = _read_regular_confined(record)
                 if existing is None or existing[0] != data:
-                    raise OutputConfinementError("existing target differs from accepted output")
+                    raise OutputConflictError("existing target differs from accepted output")
                 return (False, None) if return_identity else False
             installed_identity = temporary_identity
+            _sync_parent_directory(record)
             os.close(descriptor)
             descriptor = None
             installed = _read_regular_confined(record)
@@ -704,6 +778,7 @@ def read_confined_bytes(project_root: Path, confined_root: Path, target: Path) -
         return None
 
 
+@_notifying
 def remove_confined_bytes_if_equal(
     project_root: Path,
     confined_root: Path,

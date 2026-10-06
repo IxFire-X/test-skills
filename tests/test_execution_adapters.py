@@ -24,8 +24,8 @@ def _module(tmp_path: Path, adapter_id: str, runtime: str) -> dict:
     ("adapter_id", "runtime", "selectors", "expected"),
     [
         ("pytest:selected-symbols-v1", ".venv/python", ("tests/test_a.py::test_a",), ("-m", "pytest", "--junitxml")),
-        ("maven-wrapper:selected-symbols-v1", "mvnw", ("pkg.SampleTest#works",), ("-Pdefault", "-Dtest=pkg.SampleTest#works", "test")),
-        ("gradle-wrapper:selected-symbols-v1", "gradlew", ("pkg.SampleTest.works",), ("test", "-Pprofile=default", "--tests", "pkg.SampleTest.works")),
+        ("maven-wrapper:selected-symbols-v1", "mvnw", ("pkg.SampleTest#works",), ("-Dtest=pkg.SampleTest#works", "-B", "-ntp", "test")),
+        ("gradle-wrapper:selected-symbols-v1", "gradlew", ("pkg.SampleTest.works",), (":cleanTest", ":test", "--tests", "pkg.SampleTest.works", "--no-daemon")),
     ],
 )
 def test_closed_adapters_build_module_native_argv_only(tmp_path: Path, adapter_id: str, runtime: str, selectors: tuple[str, ...], expected: tuple[str, ...]):
@@ -86,12 +86,12 @@ def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tm
     )
 
     assert request.selectors == ("pkg.SampleTest#works",)
-    assert request.argv[-2:] == ("--tests", "pkg.SampleTest.works")
-    assert "--rerun-tasks" in request.argv
+    assert request.argv[-3:] == ("--tests", "pkg.SampleTest.works", "--no-daemon")
+    assert "--rerun-tasks" not in request.argv
     from tools.run_tests import _request_report_path
     assert _request_report_path(request) == tmp_path.resolve() / "build/test-results/test"
     from dataclasses import replace
-    assert _request_report_path(replace(request, build_profile="", argv=tuple("-Pprofile=" if part == "-Pprofile=default" else part for part in request.argv))) is None
+    assert _request_report_path(replace(request, build_profile="")) is None
 
 
 def test_many_to_many_case_links_execute_each_exact_symbol_once(tmp_path: Path):
@@ -194,7 +194,7 @@ def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path
     }, [{"selector": "pkg.SampleTest#works"}])
 
     assert request.executable == str(executable.resolve())
-    assert request.argv == (str(executable.resolve()), "-Pdefault", "-Dtest=pkg.SampleTest#works", "test")
+    assert request.argv == (str(executable.resolve()), "-Dtest=pkg.SampleTest#works", "-B", "-ntp", "test")
     assert _request_is_attempt_local(request, tmp_path, module)
     assert _request_report_path(request) == module / "target/surefire-reports"
     from tools.run_tests import ProcessOutcome, _process_row, validate_process_evidence

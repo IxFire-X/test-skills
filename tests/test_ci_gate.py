@@ -16,9 +16,9 @@ def test_ci_gate_runs_the_required_checks_in_order(pack_root: Path, monkeypatch)
 
     assert ci_gate.main(["--root", str(pack_root)]) == 0
     assert calls == [
-        ([sys.executable, "-m", "tools.contract_check", "--root", str(pack_root), "--full"], {"cwd": pack_root, "check": False}),
-        ([sys.executable, "-m", "tools.render_contract_docs", "--root", str(pack_root), "--check"], {"cwd": pack_root, "check": False}),
-        ([sys.executable, "-m", "pytest", "-q"], {"cwd": pack_root, "check": False}),
+        ([sys.executable, "-m", "tools.contract_check", "--root", str(pack_root), "--full"], {"cwd": pack_root, "check": False, "timeout": ci_gate.CHECK_TIMEOUT_SECONDS}),
+        ([sys.executable, "-m", "tools.render_contract_docs", "--root", str(pack_root), "--check"], {"cwd": pack_root, "check": False, "timeout": ci_gate.CHECK_TIMEOUT_SECONDS}),
+        ([sys.executable, "-m", "pytest", "-q"], {"cwd": pack_root, "check": False, "timeout": ci_gate.PYTEST_TIMEOUT_SECONDS}),
     ]
 
 

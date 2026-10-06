@@ -19,6 +19,7 @@ if __package__:
         PYTHON_FRAMEWORK_MARKERS,
         PYTHON_TEST_MARKERS,
         confined_files,
+        is_ignored_dir,
         is_ignored_dir_name,
         manifest_language,
     )
@@ -36,6 +37,7 @@ else:
         PYTHON_FRAMEWORK_MARKERS,
         PYTHON_TEST_MARKERS,
         confined_files,
+        is_ignored_dir,
         is_ignored_dir_name,
         manifest_language,
     )
@@ -44,6 +46,12 @@ else:
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
 SOURCE_SUFFIXES = {"python": frozenset({".py"}), "java": frozenset({".java"}), "typescript": frozenset({".ts", ".tsx", ".js", ".jsx"}), "go": frozenset({".go"})}
+# Recognized, but no closed execution adapter exists: such a module is never asked for a source root.
+NON_EXECUTABLE_LANGUAGES = frozenset({"go"})
+_REQUIREMENTS_ONLY_MANIFESTS = frozenset({"requirements.txt", "requirements-dev.txt"})
+_NON_SOURCE_DIR_NAMES = frozenset({"tests", "test", "docs", "doc", "resources"})
+# Build/tooling entry points that live in a module root without being its source.
+_ROOT_TOOLING_FILES = frozenset({"setup.py", "conftest.py", "manage.py", "noxfile.py", "fabfile.py", "tasks.py"})
 def _rel(root: Path, p: Path) -> str: return p.relative_to(root).as_posix() or "."
 def _ok(root: Path, p: Path) -> bool:
     try: p.resolve().relative_to(root); return True
@@ -119,7 +127,7 @@ def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
 def _source_dir_has_code(root: Path, directory: Path, suffixes: frozenset[str]) -> bool:
     for current, directories, files in os.walk(directory, followlinks=False):
         parent = Path(current)
-        directories[:] = sorted(name for name in directories if not is_ignored_dir_name(name) and _usable_dir(root, parent / name))
+        directories[:] = sorted(name for name in directories if not is_ignored_dir(parent / name, root) and _usable_dir(root, parent / name))
         for name in sorted(files):
             path = parent / name
             if path.suffix in suffixes and not _is_reparse(path) and _ok(root, path) and path.is_file():
@@ -132,6 +140,39 @@ def _paths(root:Path, base:Path)->dict[str,list[str]]:
         vals=sorted(name.replace("\\", "/") for name in names if _usable_dir(root, base/name))
         if vals: out[k]=vals
     return out
+def _layout_source_dirs(root: Path, base: Path, suffixes: frozenset[str], other_bases: set[Path]) -> list[str]:
+    """Find source roots of a module that has no conventional ``src`` directory.
+
+    Top-level directories holding code of the module language are source roots
+    (a Django-style ``shop/``, ``orders/``); tests, docs, ignored directories and
+    directories owned by another module are not. A module whose code sits directly
+    in its root (flat layout, or Go packages anywhere) uses ``.``.
+    """
+    found: list[str] = []
+    try:
+        names = sorted(entry.name for entry in os.scandir(base))
+    except OSError:
+        return found
+    for name in names:
+        candidate = base / name
+        if name.startswith(".") or name.casefold() in _NON_SOURCE_DIR_NAMES or is_ignored_dir(candidate, root):
+            continue
+        if not _usable_dir(root, candidate) or any(other == candidate or candidate in other.parents for other in other_bases):
+            continue
+        if _source_dir_has_code(root, candidate, suffixes):
+            found.append(name)
+    if found:
+        return found
+    for name in names:
+        path = base / name
+        if path.suffix in suffixes and name not in _ROOT_TOOLING_FILES and not _is_reparse(path) and _ok(root, path) and path.is_file():
+            return ["."]
+    return found
+def _tree_has_code(root: Path, base: Path, suffixes: frozenset[str]) -> bool:
+    return _usable_dir(root, base) and _source_dir_has_code(root, base, suffixes)
+def _is_pom_packaging(data: Any) -> bool:
+    """A Maven module with ``<packaging>pom</packaging>`` builds nothing runnable."""
+    return isinstance(data, ET.Element) and any(_xml_name(child) == "packaging" and (child.text or "").strip().casefold() == "pom" for child in data)
 def _has_code(root:Path,p:Path)->bool:
     suffixes=frozenset().union(*SOURCE_SUFFIXES.values())
     return any(_source_dir_has_code(root,p/name,suffixes) for name in ("src","src/main/java","src/main/kotlin") if _usable_dir(root,p/name))
@@ -139,6 +180,8 @@ def _module_readiness(module: dict[str, Any]) -> str:
     paths = module.get("paths") if isinstance(module.get("paths"), dict) else {}
     if module.get("_source_ready"):
         return "source_ready"
+    if (module.get("stack") or {}).get("language") in NON_EXECUTABLE_LANGUAGES:
+        return "manifest_detected"
     if paths.get("source") or paths.get("tests") or paths.get("resources"):
         return "needs_source"
     return "manifest_detected"
@@ -156,7 +199,7 @@ def _source_question(module: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": f"module:{mid}:paths.source",
         "field": f"modules.{mid}.paths.source",
-        "impact": "Следующий этап не может собрать непустой source snapshot без объявленного source root",
+        "impact": "Следующий этап не может собрать непустой source snapshot без объявленного source root. Ответ на вопрос — относительный путь каталога с исходниками внутри модуля (например app или lib/core)",
         "options": [
             {"id": "provide-source-root", "value": "provide-source-root", "evidence": sorted(set(evidence))},
         ],
@@ -171,6 +214,11 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
         # A workspace declaration with no real confined code is evidence-only even when nested.
         all_here=[p for p in parsed if p.parent==base]
         if any(_refs(p,parsed[p]) for p in all_here) and not _has_code(root,base): continue
+        # A POM-only module (parent, BOM, aggregator) is not executable: drop its manifest.
+        owned=[p for p in owned if not (p.name=="pom.xml" and _is_pom_packaging(parsed[p]))]
+        if not owned: continue
+        # A stray requirements file (docs/requirements.txt) is not a Python module.
+        if all(p.name in _REQUIREMENTS_ONLY_MANIFESTS for p in owned) and not _tree_has_code(root,base,SOURCE_SUFFIXES["python"]): continue
         rel=_rel(root,base); mid=_id(rel); languages={}
         for p in owned:
             lang=manifest_language(p.name); languages.setdefault(lang,[]).append(f"{_rel(root,p)}:manifest")
@@ -187,8 +235,13 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
             field=f"modules.{mid}.stack.build_tool"; qs.append(_question(mid,"stack.build_tool",tool_values)); unresolved.add(field)
         module={"id":mid,"root":rel,"stack":stack,"detected_from":sorted(_rel(root,p) for p in owned)}
         paths=_paths(root,base)
-        if paths: module["paths"]=paths
         suffixes=SOURCE_SUFFIXES.get(lang, frozenset().union(*SOURCE_SUFFIXES.values()))
+        if lang and not any(_source_dir_has_code(root,base/name,suffixes) for name in paths.get("source",[])):
+            # No conventional src/ with code: a package layout without src/ (B11).
+            if lang=="go": layout=["."] if _tree_has_code(root,base,suffixes) else []
+            else: layout=_layout_source_dirs(root,base,suffixes,{other for other in by if other!=base})
+            if layout: paths["source"]=sorted(set(paths.get("source",[]))|set(layout)) if lang!="go" else layout
+        if paths: module["paths"]=paths
         module["_source_ready"]=any(_source_dir_has_code(root,base/name,suffixes) for name in paths.get("source",[]))
         if lang:
             fm,tm,_=MARKERS[lang]; texts={p:_read(p).lower() for p in owned}; text="\n".join(texts.values()); vals={}
@@ -287,7 +340,7 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
     if not modules: errors.append(f"{status} report has no modules")
     if status=="ready":
         if questions or expected: errors.append("ready report has unresolved critical field")
-        if any(module.get("readiness") != "source_ready" for module in modules.values()): errors.append("ready report has module without source")
+        if any(module.get("readiness") != "source_ready" and module.get("stack", {}).get("language") not in NON_EXECUTABLE_LANGUAGES for module in modules.values()): errors.append("ready report has module without source")
     if status in {"needs_input","needs_source"} and not questions: errors.append(f"{status} report has no questions")
     return errors
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
@@ -302,7 +355,7 @@ def discover_project(project_dir:Path)->dict[str,Any]:
         module["readiness"]=_module_readiness(module)
         module.pop("_source_ready",None)
     evidence=list(evidence)+_module_evidence(modules)
-    source_blockers=[module for module in modules if module.get("readiness")!="source_ready"]
+    source_blockers=[module for module in modules if module.get("readiness")!="source_ready" and module.get("stack",{}).get("language") not in NON_EXECUTABLE_LANGUAGES]
     fingerprint=project_fingerprint(root,evidence)
     source_questions=[_source_question(module) for module in source_blockers]
     questions=sorted(qs+source_questions,key=lambda q:q["id"])

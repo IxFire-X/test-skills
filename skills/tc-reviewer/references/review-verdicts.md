@@ -1,8 +1,36 @@
 # Pilot reviewer-session and verdict contract
 
-The controller publishes/reads back canonical revision 1 as `UNREVIEWED`, creates the exact reviewer package binding, and keeps the host-owned `reviewer-session` ledger separate from model-produced `tc-reviewer-output`. The allowed sequence is `STARTED -> (REQUESTED -> PROVIDED)* -> AUTHORITATIVE_VERDICT -> COMPLETED`, or `STARTED -> ... -> ABORTED` before a verdict. At most one verdict exists. A completed/effective canonical has exactly one verdict; only an explicit pre-verdict abort, including `REVIEW_CONTEXT_LIMIT`, has zero.
+The controller publishes/reads back canonical r1 as `UNREVIEWED`, freezes the exact
+original sources, context and candidate in a review snapshot, and publishes one plan.
+One logical reviewer-session ledger owns all declared parts and any additional bounded
+cross checks. Each part uses a sequential fresh isolated invocation with
+`tc-reviewer:canonical:part-000001` (its actual ordinal) and `canonical-reviewer-v2`.
+The same path handles a one-part input. Host evidence is verified for every invocation;
+self-attestation, generator reasoning, growing shared dialogue and silent truncation
+cannot establish isolation or completeness.
 
-Each package binds candidate, normalized requirements, source/canonical/case mappings, inventory/context receipts, and exact evidence digests. Retrieval is C-lite and budgeted. Per-batch reviewers, reviewer trees, a second session, a second verdict, generator reasoning, and silent context truncation are forbidden. Host evidence proves isolation; missing proof is `independence_unverified` and makes acceptance false.
+Scopes of one part overlap, so the part envelope carries each distinct input once:
+the first occurrence has `content`, and an exact repeat carries
+`content_ref: {scope_id, input}` (the scope and zero-based input index of the first
+occurrence in the same part) instead of `content`. The reviewer resolves the reference
+and treats the entry as fully supplied evidence.
+
+A part whose invocation produced no valid assessment may be reopened with a new
+invocation, at most three invocations per part. The controller records the failure with
+`fail-part --failure-class TRANSPORT|CONTENT`; retried invocations use stage IDs ending
+in `-try2` and `-try3` and require a new `reviewer_invocation_id`. An incomplete review
+whose blocked parts are all `TRANSPORT` failures ends as `REVIEW_SESSION_ABORTED` with
+`REVIEW_TRANSPORT_FAILED`, not `REWORK`.
+
+The model returns only the assessment fields `coverage`, `findings`, `corrections` and
+`required_checks` for the supplied scopes. Controller `submit-part` binds service fields
+and saves the validated part output. `finish-review` recomputes exact original-source,
+local and cross-part coverage and publishes one aggregate, then seals the logical ledger.
+The v6 `tc-reviewer-output` is its controller projection, never a model response. It binds
+`artifacts.review_aggregate.plan_digest` and `aggregate_digest`. A completed logical
+review has exactly one authoritative verdict; a pre-verdict abort has zero. Content
+findings do not stop later trustworthy parts. Unchecked, stale or untrusted required
+scope forbids acceptance; damage to the shared snapshot blocks trustworthy continuation.
 
 Use those authorized context receipts to compare against the original requirements,
 not only their model-normalized subset. Reject dropped acceptance criteria, requirements
@@ -33,10 +61,10 @@ requires generated-delta, execution, and disposition evidence.
 | Verdict | Required output |
 |---|---|
 | `ПРИНЯТО` | candidate is selected; no successor |
-| `AUTO_FIX_APPLIED` | one complete successor document, incremented lineage, preserved identity graph |
+| `AUTO_FIX_APPLIED` | one complete successor document built by the controller from the mechanical `corrections`, incremented lineage, preserved identity graph |
 | `ТРЕБУЕТ ДОРАБОТКИ` | blocking findings; no successor |
 
-`reviewed_case_ids` lists all candidate cases exactly once in physical order. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
+`reviewed_case_ids` in a complete accepted aggregate lists all candidate cases exactly once in physical order; a partial report exposes only checked cases and never authorizes selection. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
 
 Review every human Action/Test Data/Expected Result triple against the mandatory
 [human scenario rules](../../tc-generator/references/case-generation-contract.md#human-scenario-rules),

@@ -10,6 +10,7 @@ from tests.test_requirement_traceability import canonical_fixture
 
 V3 = "zephyr-scale-step-row-24-v3"
 V4 = "zephyr-scale-step-row-24-v4"
+V5 = "zephyr-scale-step-row-24-v5"
 
 
 def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(tmp_path: Path) -> None:
@@ -33,7 +34,7 @@ def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(t
     assert markdown.read_text(encoding="utf-8") == "Изменённая вручную копия"
 
 
-def test_new_projection_public_defaults_are_exact_v4_and_receipts_use_preview_names(tmp_path: Path) -> None:
+def test_new_projection_public_defaults_are_exact_v5_and_receipts_use_preview_names(tmp_path: Path) -> None:
     from tools.publish_test_case_bundle import _parser, build_bundle, publish_bundle
     from tools.test_case_projections import render_zephyr_csv
 
@@ -42,9 +43,9 @@ def test_new_projection_public_defaults_are_exact_v4_and_receipts_use_preview_na
     assert bundle.preview_bytes.startswith(b"<!doctype html>")
     assert bundle.csv_bytes == render_zephyr_csv(document).payload
     assert bundle.markdown_bytes.startswith(b"# ")
-    assert next(action.default for action in _parser()._actions if action.dest == "csv_profile") == V4
+    assert next(action.default for action in _parser()._actions if action.dest == "csv_profile") == V5
     receipt = publish_bundle(document, tmp_path)
-    assert receipt.csv_profile == V4
+    assert receipt.csv_profile == V5
     assert receipt.preview_path.endswith(".html")
     assert receipt.preview_sha256.startswith("sha256:")
     assert "markdown" not in " ".join(receipt.__dataclass_fields__)
@@ -69,7 +70,7 @@ def test_v4_csv_preserves_v3_transport_bytes_and_xml_receipt_is_observed_unverif
     from tools.test_case_projections import render_zephyr_csv
 
     document = canonical_fixture()
-    assert render_zephyr_csv(document).payload == build_bundle(document, V3, _allow_historical=True).csv_bytes
+    assert render_zephyr_csv(document, V4).payload == build_bundle(document, V3, _allow_historical=True).csv_bytes
     source = tmp_path / "canonical.json"
     source.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
     assert export_xml(["--input", str(source), "--output", str(tmp_path / "candidate.xml")]) == 0

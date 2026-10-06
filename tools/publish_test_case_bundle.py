@@ -24,7 +24,10 @@ from tools.test_case_projections import (
 
 
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
-_PROFILE = _PROFILE_V4
+_PROFILE_V5 = "zephyr-scale-step-row-24-v5"
+_PROFILE = _PROFILE_V5
+# V5 (human-only CSV) is the default; V4 stays publishable as an explicit compatibility opt-in.
+_CURRENT_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _ORDER = ("json", "preview", "csv", "markdown")
 _MESSAGES = {
     "OUTPUT_DIRECTORY_ERROR": "Output directory is unavailable.",
@@ -93,7 +96,7 @@ def _digest(payload: bytes) -> str:
 
 def _reject_unknown_profile(csv_profile: str, *, allow_historical: bool = False) -> None:
     _reject_projection_profile(csv_profile)
-    if not allow_historical and csv_profile != _PROFILE_V4:
+    if not allow_historical and csv_profile not in _CURRENT_PROFILES:
         raise ValueError("historical Zephyr profiles are verification-only and require an explicit receipt profile")
 
 
@@ -112,9 +115,9 @@ def _validate_once(document: dict[str, Any], csv_profile: str, *, allow_historic
 def build_bundle(document: dict[str, Any], csv_profile: str = _PROFILE, *, _allow_historical: bool = False) -> BundlePayloads:
     """Build all exact bytes after one canonical validation pass."""
     _validate_once(document, csv_profile, allow_historical=_allow_historical)
-    preview = _render_html_preview_validated(document, csv_profile) if csv_profile == _PROFILE_V4 else _render_markdown_validated(document, csv_profile)
+    preview = _render_html_preview_validated(document, csv_profile) if csv_profile in _CURRENT_PROFILES else _render_markdown_validated(document, csv_profile)
     csv = _render_zephyr_csv_validated(document, csv_profile)
-    markdown = _render_markdown_validated(document, csv_profile).payload if csv_profile == _PROFILE_V4 else b""
+    markdown = _render_markdown_validated(document, csv_profile).payload if csv_profile in _CURRENT_PROFILES else b""
     return BundlePayloads(canonical_bytes(document), preview.payload, csv.payload, preview.warnings + csv.warnings, markdown)
 
 
@@ -135,7 +138,7 @@ def _targets(document: dict[str, Any], directory: Path, csv_profile: str = _PROF
     prefix = f"{document['document_id']}.r{document['revision']}"
     return (
         ("json", directory / f"{prefix}.json"),
-        ("preview", directory / f"{prefix}.{'html' if csv_profile == _PROFILE_V4 else 'md'}"),
+        ("preview", directory / f"{prefix}.{'html' if csv_profile in _CURRENT_PROFILES else 'md'}"),
         ("csv", directory / f"{prefix}.zephyr-scale.csv"),
     )
 

@@ -1,6 +1,6 @@
 # 5.0.0 batch-fragment generation contract
 
-The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
+The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The stage output is the bare fragment (`schemas/candidate-fragment.schema.json`) with its `batch_id` and self-digest, not a `tc-generator-output` envelope. The controller deterministically assembles fragments into the bare canonical 1.0.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
 
 The fragment preserves `SREQ-*` source requirements with exact provenance/digests,
 `CREQ-*` canonical requirements within the controller-owned batch namespace, and
@@ -93,13 +93,19 @@ For catalog prerequisites, check the entries needed by the scenario. Require the
 entire catalog or its order only when that is part of the required behavior; source
 seed contents alone do not make catalog equality a requirement.
 
-The v4 projection displays `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
+The human projection displays `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL, and a non-literal path/query value is shown as a readable placeholder such as `<ownerId из шага 1>` or `<переменная окружения X>`. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
 
 ## Canonical physical order
 
-Canonical order recipe: operation_capabilities by capability_id; arguments and results by name; both use ascending Unicode code-point order. Order categories by the precedence enforced by the current canonical validator. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
+Canonical order recipe: operation_capabilities by capability_id; arguments and results by name; both use ascending Unicode code-point order. During assembly the controller sorts capabilities itself and merges the same capability declared by different batches when only provenance differs; a difference in its semantics is `BATCH_CAPABILITY_CONFLICT` with both batch IDs. Order categories by the precedence enforced by the current canonical validator. For source requirements, canonical requirements, test cases, steps, inputs, outputs, expectations, and assertions, display_order matches physical array order.
 
 Never invent capability arguments, values, operations, assertions, roles, or environment facts. Validate before publication; a projection cannot repair invalid semantics.
+
+Typing and assertion rules checked at document validation:
+
+- A JSON literal is compatible with a named type of the same JSON representation (for example the string literal `"2024-01-01"` for a named string-represented date type). A non-literal JSON source is still incompatible with a named type.
+- A `matches` assertion uses the `portable-regex-v1` dialect, which always matches the whole value. Do not write a leading `^` or a trailing `$`: there they are literal characters, not anchors. For a literal character write `(^)`, `($)` or `[$]`. Host-regex spellings such as `\d` and non-ASCII ranges are not part of the dialect; use explicit ASCII classes such as `[0-9]`. A violation is reported as `SEMANTIC_PORTABLE_REGEX`.
+- Human-facing case fields must not contain control characters that XML cannot carry (anything other than tab and line breaks); a violation is `SEMANTIC_HUMAN_CONTROL_CHARACTER`.
 
 For project-native generated tests, an `operation_capability` describes the exact
 operation the reviewed test source must implement. It need not name an existing
@@ -168,7 +174,7 @@ and bind that exact output structurally. Human wording is a view of those bindin
 never a source from which automation reconstructs missing values. The direct `http`
 body-format rules below remain specific to that operation kind.
 
-For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A no-body request says exactly `Тело запроса отсутствует.`; a manual or undefined body says `—`. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings.
+For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A request without a body needs no fixed wording: `Тело запроса отсутствует.`, `—` or a short note without JSON (for example about URL parameters) are all valid; JSON that no structured body input owns is still an error. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings.
 
 The Expected Result first states the observable system result, then, for HTTP, a blank line, exact `HTTP <status> <reason>`, and only confirmed response fields as pretty-printed JSON. Omit an unconfirmed body rather than inventing it. Do not print `Выход:`, `Проверка:`, `http_body:/...`, assertion expressions, «успешно», `ok`, or a bare HTTP code. Do not fork `200 или 201`. Data is deterministic: no `random` / `faker` / «любое значение». A source-proven non-secret helper/default with one safe deterministic value is a canonical literal, visible in the URL or body. Use a fixture only when authorized sources do not safely determine that value. Secret values and handles never render; only `safe_label` may appear, and it is not a resolved value.
 
@@ -244,7 +250,7 @@ A non-literal object/array cannot own concrete human JSON leaves through a fixtu
 
 Use human placeholders for previous-step values without exposing internal step/output IDs. An `exists` assertion renders `<значение присутствующего поля>`, not a sample or a claim of nonempty data: presence alone permits null and empty values. Non-null, nonempty and exact-value requirements need separate supported assertions. When a lookup requirement identifies the requested entity and evidence exposes its response identity, assert and show that identity; a status-only check is incomplete.
 
-Remember an id from step N and use it later (`step_output`). After create or change, read the result back. A gap is `manual_only` or a canonical blocker, not an invented URL.
+Remember an id from step N and use it later (`step_output`). After create or change, read the result back. A gap is `manual_only` or a canonical blocker, not an invented URL. For an HTTP step, an automation blocker on `/inputs` is the valid way to mark an input the specification does not resolve, including an unknown request-body field; do not invent a binding for it. A blocker blocks only its own case: the other cases of the document are still automated.
 
 Do not invent a catalog of one-shot handle checks or list every route. Apply the
 behavior/prerequisite/testing-instruction distinction above to inventory requirements.

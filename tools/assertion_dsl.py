@@ -316,6 +316,26 @@ class _NfaCompiler:
         return start, end
 
 
+def portable_regex_problem(pattern: Any) -> str | None:
+    """Explain why *pattern* would fail or mislead at runtime, or return ``None``.
+
+    Document validation calls this so an author sees the defect before execution:
+    host-regex spellings (``\\d``, non-ASCII ranges, quantified groups) are parse
+    errors in ``portable-regex-v1``, and ``^``/``$`` are literal characters because
+    the dialect always matches the whole value.
+    """
+    try:
+        _RegexParser(pattern).parse()
+    except ValueError as error:
+        return f"pattern is not portable-regex-v1: {error}"
+    if pattern.startswith("^") or pattern.endswith("$"):
+        return (
+            "portable-regex-v1 always matches the whole value, so a leading ^ or trailing $ is a literal "
+            "character, not an anchor; remove it, or write (^) / ($) for the literal character"
+        )
+    return None
+
+
 def portable_fullmatch(pattern: str, value: str) -> bool:
     """Return whether *value* matches the exact V1 grammar over Unicode scalars."""
     return _portable_fullmatch_metrics(pattern, value)[0]

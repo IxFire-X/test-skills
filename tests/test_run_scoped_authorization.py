@@ -106,6 +106,7 @@ def test_runner_v5_unknown_preserves_non_authoritative_timeout_receipt() -> None
 
 
 def test_subprocess_preserves_non_locale_output_with_bounded_memory_tail(tmp_path: Path) -> None:
+    import os
     import sys
     from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES, run_subprocess
 
@@ -114,7 +115,12 @@ def test_subprocess_preserves_non_locale_output_with_bounded_memory_tail(tmp_pat
         tmp_path, timeout=10,
     )
     assert outcome.kind == "EXIT" and outcome.exit_code == 0
-    assert outcome.stdout == "\ufffddone\n" and outcome.stderr == "Привет"
+    if os.name == "nt":
+        # Review decision 16: non-UTF-8 output is decoded with the Windows console code page.
+        assert outcome.stdout.endswith("done\n") and len(outcome.stdout) == 6
+    else:
+        assert outcome.stdout == "\ufffddone\n"
+    assert outcome.stderr == "Привет"
     assert len(outcome.stdout.encode()) <= PROCESS_OUTPUT_TAIL_BYTES
 
 
@@ -132,7 +138,8 @@ def test_controller_timeout_records_os_process_scope_stop(tmp_path: Path) -> Non
 
     assert outcome.kind == "TIMEOUT"
     if os.name == "nt":
-        assert (outcome.process_scope_stopped, outcome.stop_proof) == (False, None)
+        # Review decision 13: suspended start + Job Object gives a real proof on Windows.
+        assert (outcome.process_scope_stopped, outcome.stop_proof) == (True, "WINDOWS_JOB_TERMINATED")
     else:
         assert (outcome.process_scope_stopped, outcome.stop_proof) == (True, "POSIX_PROCESS_GROUP")
 

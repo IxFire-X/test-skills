@@ -1041,6 +1041,40 @@ Markdown сверяется при публикации, но не входит 
 </details>
 
 
+### `tools/pipeline_driver.py`
+
+**Драйвер запуска: `next`, `submit`, `status`.**
+
+Ведёт запуск от начала до конца. Сам выполняет все шаги, не требующие модели, и останавливается, когда нужен ответ модели или человека. Принимая ответ, проверяет его, сам считает контрольные суммы, расставляет порядок и служебные поля, публикует результат и выдаёт следующую задачу. Модель не вызывает.
+
+[Открыть файл](../tools/pipeline_driver.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `DriverError`, `work_dir`, `start_run`, `normalize_fragment_content`, `advance`, `submit`, `status`, `main`.
+
+Рабочие файлы лежат рядом с run: `<project>/.pilot-runs/<run_id>.driver/`. Код завершения 3 означает ожидание модели или человека.
+
+</details>
+
+
+### `tools/pipeline_driver_automation.py`
+
+**Часть драйвера для профиля с автотестами.**
+
+Выдаёт задачу на создание автотестов, ведёт их статическое ревью и одну исправленную ревизию, записывает принятые файлы в проект, запускает тесты и предлагает одну повторную попытку, если тесты не собрались.
+
+[Открыть файл](../tools/pipeline_driver_automation.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `normalize_automation`, `submit_automation`, `advance_automation`, `finish_execution`, `terminal_step`, `start_regeneration`.
+
+</details>
+
+
 ### `tools/run_pipeline.py`
 
 **Команды управления работой.**
@@ -2773,7 +2807,8 @@ flowchart LR
 | Качество создаваемого Java- или Python-кода | Инструкция генератора автотестов, языковые памятки и правила ревью кода |
 | Запись, сохранение или очистку новых тестов | generated_delta.py и confined_output.py |
 | Команду запуска и разбор отчёта | execution_adapters.py и run_tests.py |
-| Продолжение после обрыва | pilot_state.py и run_pipeline.py |
+| Продолжение после обрыва | pipeline_driver.py, pilot_state.py и run_pipeline.py |
+| Порядок шагов запуска и формат задач для модели | pipeline_driver.py и pipeline_driver_automation.py |
 | Окончательный статус работы | finalize_attempt.py, pilot_state.py и общие правила |
 | Подключение отдельного сервиса компании | Сначала узнать API и правила этого сервиса, затем оценить company_runner.py |
 | Проверку другой модели или среды | compatibility_contract.py и evals/release_eval.py |

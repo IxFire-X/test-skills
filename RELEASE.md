@@ -17,7 +17,7 @@ Maven, Gradle or model compatibility.
 
 ## Local implementation gate
 
-Use one Python 3.11+ environment with `requirements-dev.txt` already installed:
+Use one Python 3.11, 3.12 or 3.13 environment with `requirements-dev.txt` already installed:
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -42,7 +42,9 @@ git diff --check
 
 The repository workflow `.github/workflows/portable.yml` checks Ubuntu 24.04 with
 Python 3.11/3.12 and Windows with Python 3.12. `ci_gate` runs contract validation,
-projection checks and pytest once; do not prepend a second full test run. A configured
+projection checks and pytest once; do not prepend a second full test run. It exits `2`
+when pytest is not installed or a step times out (`--check-timeout`, default 900 seconds
+per contract check; `--pytest-timeout`, default 4 hours). A configured
 workflow is not a successful Linux run: record the actual OS/runtime and gate result
 before making a platform verification claim.
 

@@ -24,9 +24,9 @@ _STAGES = (
     ("orchestrate", "controller", "orchestrate-v1"),
     ("context-marker", "generator", "context-marker-v1"),
     ("tc-generator", "generator", "tc-generator-v1"),
-    ("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v1"),
+    ("tc-reviewer", "canonical-reviewer", "canonical-reviewer-v2"),
     ("tc-to-autotest", "automation-generator", "tc-to-autotest-v1"),
-    ("autotest-reviewer", "automation-reviewer", "autotest-static-reviewer-v1"),
+    ("autotest-reviewer", "automation-reviewer", "autotest-static-reviewer-v2"),
 )
 _STAGE_REGISTRY = {stage: (role, policy) for stage, role, policy in _STAGES}
 
@@ -76,6 +76,8 @@ def _durable(
             read_model_request,
             read_model_stage_artifact,
             read_reviewer_session_ledger,
+            read_review_aggregate,
+            read_review_plan,
             read_resume_validation_if_present,
             read_run,
             terminal_reviewer_evidence,
@@ -96,6 +98,11 @@ def _durable(
         ledger = read_reviewer_session_ledger(root, attempt_id, str(context.get("reviewer_session_digest", "")))
         return attempt, ledger, {
             "root": root,
+            "aggregate": read_review_aggregate(root, attempt_id),
+            "snapshot": read_attempt_receipt(root, attempt_id, "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"],
+            "read_aggregate": read_review_aggregate,
+            "read_plan": read_review_plan,
+            "read_ledger": read_reviewer_session_ledger,
             "state": state,
             "model_lifecycle": model_lifecycle_projection(root, attempt_id),
             "boundary": read_attempt_receipt(root, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK"),
@@ -200,11 +207,7 @@ def _model_event_errors(
             or request_receipt.get("invocation_id") != row.get("invocation_id")
             or request_receipt.get("input_digests") != inputs
             or response[1].get("artifact_digest") != outputs[0]
-            or (
-                response[1].get("transport_attempts") not in {1, 2}
-                if row.get("stage") == "tc-generator"
-                else response[1].get("transport_attempts") != 1
-            )
+            or response[1].get("transport_attempts") not in {1, 2, 3}
         ):
             _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
             continue
@@ -242,59 +245,31 @@ def _model_event_errors(
                 automation_candidates[instance] = (candidate[0], outputs[0])
 
     assembly = one("CANDIDATE_PUBLISHED", "assembly")
-    reviewer = next((row for row in executed if row.get("stage") == "tc-reviewer"), None)
-    canonical_review = one("REVIEW_REQUESTED", "tc-reviewer:canonical")
-    reviewer_request = one("MODEL_REQUESTED", "tc-reviewer:canonical")
-    reviewer_response = one("MODEL_RESPONSE_RECEIVED", "tc-reviewer:canonical")
-    boundary_publish = one_artifact_event("ARTIFACT_PUBLISHED", durable["boundary"].get("digest"))
-    boundary_readback = one_artifact_event("ARTIFACT_READ_BACK", durable["boundary"].get("digest"))
-    ledger_publish = one_artifact_event(
-        "ARTIFACT_PUBLISHED", durable["reviewer"].get("digest"), batch_id="reviewer-ledger-v1",
-    )
-    if (
-        assembly is None or not generator_candidates
-        or assembly[1].get("artifact_digest") != package.get("candidate_digest")
-        or boundary_publish is None or boundary_publish[0] <= assembly[0]
-        or boundary_readback is None or boundary_readback[0] <= boundary_publish[0]
-        or reviewer is None or canonical_review is None
-        or canonical_review[0] <= boundary_readback[0]
-        or canonical_review[1].get("artifact_digest") != package.get("candidate_digest")
-        or reviewer_request is None
-        or reviewer_response is None
-        or ledger_publish is None or ledger_publish[0] <= reviewer_response[0]
-    ):
+    if assembly is None or not generator_candidates or assembly[1].get("artifact_digest") != package.get("candidate_digest"):
         _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
-
+    review_keys = {"canonical"}
     for row in executed:
-        if row.get("stage") != "autotest-reviewer":
-            continue
-        reviewer_instance = str(row.get("stage_instance_id"))
-        generator_instance = reviewer_instance.replace("autotest-reviewer:", "tc-to-autotest:", 1)
-        candidate = automation_candidates.get(generator_instance)
-        review = one("REVIEW_REQUESTED", reviewer_instance)
-        request = one("MODEL_REQUESTED", reviewer_instance)
-        response = one("MODEL_RESPONSE_RECEIVED", reviewer_instance)
-        ref = row.get("artifact_ref")
-        boundary_digest = ref.get("digest") if isinstance(ref, Mapping) else None
-        boundary_publish = one_artifact_event("ARTIFACT_PUBLISHED", boundary_digest)
-        boundary_readback = one_artifact_event("ARTIFACT_READ_BACK", boundary_digest)
-        generator_row = next(
-            (item for item in executed if item.get("stage_instance_id") == generator_instance),
-            None,
-        )
-        generator_ref = generator_row.get("artifact_ref") if isinstance(generator_row, Mapping) else None
-        inputs_digest = generator_ref.get("digest") if isinstance(generator_ref, Mapping) else None
-        inputs_publish = one_artifact_event("ARTIFACT_PUBLISHED", inputs_digest)
-        if (
-            candidate is None or boundary_publish is None or boundary_readback is None
-            or boundary_publish[0] <= candidate[0]
-            or boundary_readback[0] <= boundary_publish[0]
-            or review is None or request is None or response is None
-            or review[0] <= boundary_readback[0]
-            or review[1].get("artifact_digest") != candidate[1]
-            or inputs_publish is None or inputs_publish[0] <= response[0]
-        ):
+        if row.get("stage") == "autotest-reviewer":
+            match = re.fullmatch(r"autotest-reviewer:(r[12]):part-[0-9]{6}(?:-try[23])?", str(row.get("stage_instance_id")))
+            if match is None:
+                _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
+            else:
+                review_keys.add(match[1])
+    for key in sorted(review_keys):
+        try:
+            aggregate = durable["read_aggregate"](durable["root"], attempt_id, key)
+            publish = one_artifact_event("ARTIFACT_PUBLISHED", aggregate["digest"])
+            readback = one_artifact_event("ARTIFACT_READ_BACK", aggregate["digest"])
+            session = durable["read_ledger"](durable["root"], attempt_id, review_key=key)
+            ledger_publish = one_artifact_event("ARTIFACT_PUBLISHED", session["digest"], batch_id=f"reviewer-ledger-v2-{key}")
+            responses = [one("MODEL_RESPONSE_RECEIVED", str(row["stage_instance_id"])) for row in executed if str(row["stage_instance_id"]).startswith(f"{'tc-reviewer' if key == 'canonical' else 'autotest-reviewer'}:{key}:")]
+            if (publish is None or readback is None or ledger_publish is None or not responses
+                    or any(response is None or response[0] >= publish[0] for response in responses)
+                    or readback[0] <= publish[0] or ledger_publish[0] <= readback[0]):
+                _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
+        except (KeyError, TypeError, ValueError):
             _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
+
 
 
 def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledger: Mapping[str, Any], durable: Mapping[str, Any], errors: list[str]) -> str:
@@ -332,9 +307,9 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             continue
         grouped[stage].append(row)
         role, policy = _STAGE_REGISTRY[stage]
-        if row.get("role") != role or row.get("role_policy") != policy:
+        if row.get("status") == "EXECUTED" and (row.get("role") != role or row.get("role_policy") != policy):
             _error(errors, "STAGE_REGISTRY_MISMATCH")
-    if any(len(grouped[stage]) != 1 for stage in _STAGE_REGISTRY if stage != "tc-generator") or not grouped["tc-generator"]:
+    if any(len(grouped[stage]) != 1 for stage in ("orchestrate", "context-marker")) or any(not grouped[stage] for stage in _STAGE_REGISTRY):
         _error(errors, "STAGE_EVIDENCE_INVALID")
         return "independence_unverified"
 
@@ -345,7 +320,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
     baseline = read_execution_baseline(
         durable["root"] / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")
     )
-    package = ledger.get("package_binding")
+    package = durable["snapshot"].get("package_binding")
     if not isinstance(package, Mapping):
         _error(errors, "STAGE_READBACK_INVALID")
         return "independence_unverified"
@@ -381,22 +356,12 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
         _error(errors, "STAGE_READBACK_INVALID")
         return "independence_unverified"
     marker_artifact = context_marker.get("artifact")
-    reviewer_event = durable["model_lifecycle"].get("stages", {}).get("tc-reviewer:canonical", {}).get("MODEL_RESPONSE_RECEIVED")
-    reviewer_output_digest = reviewer_event.get("artifact_digest") if isinstance(reviewer_event, Mapping) else None
-    try:
-        reviewer_output = durable["read_model_stage_artifact"](
-            durable["root"], str(attempt["attempt_id"]),
-            "tc-reviewer:canonical", str(reviewer_output_digest),
-        )
-    except (KeyError, TypeError, ValueError):
-        reviewer_output = None
     effective_document = effective.get("document")
     if (
         context_marker.get("content_digest") != context_marker_digest
         or not isinstance(marker_artifact, Mapping)
         or not isinstance(effective_document, Mapping)
-        or not isinstance(reviewer_output, Mapping)
-        or reviewer_output.get("content_digest") != reviewer_output_digest
+        or durable["aggregate"].get("aggregate", {}).get("complete") is not True
         or marker_artifact.get("artifacts", {}).get("analytics_documentation", {}).get("requirements")
         != effective_document.get("source_requirements")
     ):
@@ -454,10 +419,6 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             "context-marker:baseline", "model-stage-artifact", context_marker_digest, None,
             marker_request["input_digests"], [context_marker_digest],
         ),
-        "tc-reviewer": (
-            "tc-reviewer:canonical", "model-stage-artifact", reviewer_output_digest, ledger["reviewer_invocation_id"],
-            [package["candidate_digest"], package["package_digest"]], [reviewer_output_digest],
-        ),
     }
     exact_keys = {"stage_instance_id", "stage", "status", "role", "role_policy", "model_id", "invocation_id", "input_digests", "output_digests", "artifact_ref"}
     model_invocations: list[str] = []
@@ -486,7 +447,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
     for index, (instance, batch, publication) in enumerate(zip(generator_instances, generator_batches, fragments)):
         row = generator_by_instance.get(instance)
         fragment = publication.get("artifact") if isinstance(publication, Mapping) else None
-        expected_invocation = ledger.get("generator_invocation_id") if index == 0 else None
+        expected_invocation = None
         if (
             not isinstance(row, Mapping)
             or not isinstance(fragment, Mapping)
@@ -510,6 +471,8 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
 
     automation, revisions = bool(branch.get("automation_eligible")), list(branch.get("automation_revisions", []))
     if not automation:
+        if any(len(grouped[stage]) != 1 for stage in ("tc-to-autotest", "autotest-reviewer")):
+            _error(errors, "BRANCH_EVIDENCE_INVALID")
         for stage in ("tc-to-autotest", "autotest-reviewer"):
             row = grouped[stage][0]
             if (
@@ -528,57 +491,103 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
         except (KeyError, TypeError, ValueError):
             _error(errors, "AUTOMATION_DURABLE_EVIDENCE_INVALID")
             return "independence_unverified"
-        if revisions != [revision]:
+        if revision != revisions[-1]:
             _error(errors, "AUTOMATION_DURABLE_EVIDENCE_INVALID")
-        expected_auto = {
-            "tc-to-autotest": (
-                f"tc-to-autotest:r{revision}", "execution-inputs", inputs["digest"],
-                auto_boundary["record"]["generator_invocation_id"],
-                [effective["document_digest"], effective["effective_bundle_receipt_digest"]],
-                [automation_sha256(inputs["automation_artifact"])],
-            ),
-            "autotest-reviewer": (
-                f"autotest-reviewer:r{revision}", kind, auto_boundary["digest"],
-                auto_boundary["record"]["reviewer_invocation_id"],
-                [automation_sha256(inputs["automation_artifact"]), auto_boundary["digest"]],
-                [autotest_review_sha256(inputs["autotest_review"])],
-            ),
-        }
-        for stage, (instance, ref_kind, digest, invocation, input_digests, output_digests) in expected_auto.items():
-            row = grouped[stage][0]
-            if (
-                set(row) != exact_keys or row.get("status") != "EXECUTED" or row.get("stage_instance_id") != instance
-                or row.get("invocation_id") != invocation or not _receipt_ref(row, kind=ref_kind, digest=digest)
-                or not _label(row.get("model_id"))
-                or row.get("input_digests") != input_digests
-                or row.get("output_digests") != output_digests
-            ):
-                _error(errors, "AUTOMATION_DURABLE_EVIDENCE_INVALID")
-            elif isinstance(row.get("invocation_id"), str):
+        for revision in revisions:
+            instance = f"tc-to-autotest:r{revision}"
+            try:
+                request_event = durable["model_lifecycle"]["stages"][instance]["MODEL_REQUESTED"]
+                auto_request = durable["read_model_request"](durable["root"], str(attempt["attempt_id"]), instance, request_event["artifact_digest"])
+                aggregate = durable["read_aggregate"](durable["root"], str(attempt["attempt_id"]), f"r{revision}")
+                snapshot = durable["read_receipt"](durable["root"], str(attempt["attempt_id"]), f"review-snapshot-r{revision}", "ARTIFACT_READ_BACK")["record"]["payload"]
+                automation_digest = automation_sha256(snapshot["automation"])
+                generated = durable["read_model_stage_artifact"](durable["root"], str(attempt["attempt_id"]), instance, automation_digest)
+                row = next(item for item in grouped["tc-to-autotest"] if item.get("stage_instance_id") == instance)
+                if (set(row) != exact_keys or row.get("status") != "EXECUTED"
+                        or row.get("invocation_id") != auto_request["invocation_id"] or row.get("model_id") != auto_request["model_id"]
+                        or not _label(row.get("model_id"))
+                        or not _receipt_ref(row, kind="model-stage-artifact", digest=automation_digest)
+                        or row.get("input_digests") != auto_request["input_digests"] or row.get("output_digests") != [automation_digest]
+                        or generated["artifact"] != snapshot["automation"]):
+                    raise ValueError("automation generator readback differs")
                 model_invocations.append(row["invocation_id"])
+            except (KeyError, StopIteration, TypeError, ValueError):
+                _error(errors, "AUTOMATION_DURABLE_EVIDENCE_INVALID")
 
-    if len(model_invocations) != len(set(model_invocations)):
-        _error(errors, "INVOCATION_REUSED")
+    def review_parts(key: str, stage: str) -> tuple[list[str], Mapping[str, Any]]:
+        try:
+            aggregate = durable["read_aggregate"](durable["root"], str(attempt["attempt_id"]), key)
+            plan = durable["read_plan"](durable["root"], str(attempt["attempt_id"]), key)
+            session = durable["read_ledger"](durable["root"], str(attempt["attempt_id"]), review_key=key)
+            additions = [event["part"] for event in session["events"] if event["event_type"] == "REVIEW_CHECK_ADDED"]
+            parts = [*plan["parts"], *additions]
+            report = aggregate["output"]["artifacts"]["validation_report" if key == "canonical" else "autotest_review"]
+            allowed_verdicts = {"ПРИНЯТО", "AUTO_FIX_APPLIED"} if key == "canonical" else {"ПРИНЯТО"} if int(key[1]) == revisions[-1] else {"AUTO_FIX_APPLIED"}
+            if report.get("verdict") not in allowed_verdicts:
+                raise ValueError("review verdict does not authorize selected branch")
+            def answered_instance(part_id: str) -> str:
+                # A part whose invocation failed is re-invoked as ``<part>-try2`` / ``-try3``;
+                # the evidence names the try that produced the assessment (the latest one).
+                tries = [f"{stage}:{key}:{part_id}", f"{stage}:{key}:{part_id}-try2", f"{stage}:{key}:{part_id}-try3"]
+                recorded = [instance for instance in tries if "MODEL_RESPONSE_RECEIVED" in durable["model_lifecycle"]["stages"].get(instance, {})]
+                return recorded[-1] if recorded else tries[0]
 
+            planned = [answered_instance(part["part_id"]) for part in parts]
+            selected = [row for row in grouped[stage] if str(row.get("stage_instance_id", "")).startswith(f"{stage}:{key}:")]
+            if ([row.get("stage_instance_id") for row in selected] != planned
+                    or aggregate["aggregate"].get("complete") is not True or session.get("status") != "COMPLETED"):
+                raise ValueError("review part coverage differs")
+            for row, part in zip(selected, parts):
+                instance = row["stage_instance_id"]
+                boundary = durable["read_receipt"](durable["root"], str(attempt["attempt_id"]), f"review-part-boundary-{key}-{instance.rsplit(':', 1)[1]}", "ARTIFACT_READ_BACK")["record"]
+                event = durable["model_lifecycle"]["stages"][instance]["MODEL_RESPONSE_RECEIVED"]
+                output = durable["read_model_stage_artifact"](durable["root"], str(attempt["attempt_id"]), instance, event["artifact_digest"])
+                if (set(row) != exact_keys or row.get("status") != "EXECUTED"
+                        or row.get("invocation_id") != boundary["reviewer_invocation_id"]
+                        or row.get("model_id") != boundary["model_id"] or not _label(row.get("model_id"))
+                        or not _receipt_ref(row, kind="model-stage-artifact", digest=output["content_digest"])
+                        or row.get("output_digests") != [output["content_digest"]]):
+                    raise ValueError("review part readback differs")
+                model_invocations.append(row["invocation_id"])
+            return planned, aggregate
+        except (KeyError, TypeError, ValueError):
+            _error(errors, "STAGE_READBACK_INVALID")
+            return [], {}
+
+    canonical_instances, canonical_aggregate = review_parts("canonical", "tc-reviewer")
+    if len(grouped["tc-reviewer"]) != len(canonical_instances):
+        _error(errors, "STAGE_EVIDENCE_INVALID")
     bindings = evidence.get("review_bindings")
     expected_canonical = {
         "kind": "canonical", "generator_stage_instance_ids": generator_instances,
-        "reviewer_stage_instance_id": "tc-reviewer:canonical", "reviewer_session_digest": ledger["digest"],
-        "reviewer_boundary_digest": boundary["digest"],
+        "reviewer_stage_instance_ids": canonical_instances, "reviewer_session_digest": ledger["digest"],
+        "reviewer_boundary_digest": boundary["digest"], "review_aggregate_receipt_digest": canonical_aggregate.get("digest"),
     }
     canonical = [row for row in bindings if isinstance(row, Mapping) and row.get("kind") == "canonical"] if isinstance(bindings, list) else []
-    if len(canonical) != 1 or canonical[0] != expected_canonical:
+    if canonical != [expected_canonical]:
         _error(errors, "REVIEWER_BINDING_INVALID")
     automation_bindings = [row for row in bindings if isinstance(row, Mapping) and row.get("kind") == "automation"] if isinstance(bindings, list) else []
+    expected_bindings = []
+    planned_automation = []
     if automation:
-        if len(automation_bindings) != 1 or set(automation_bindings[0]) != {"kind", "revision", "generator_stage_instance_id", "reviewer_stage_instance_id", "reviewer_boundary_digest"} or automation_bindings[0].get("revision") != revisions[0] or automation_bindings[0].get("generator_stage_instance_id") != f"tc-to-autotest:r{revisions[0]}" or automation_bindings[0].get("reviewer_stage_instance_id") != f"autotest-reviewer:r{revisions[0]}":
-            _error(errors, "AUTOMATION_REVIEW_BINDING_INVALID")
-    elif automation_bindings:
+        for revision in revisions:
+            key = f"r{revision}"
+            planned, aggregate = review_parts(key, "autotest-reviewer")
+            planned_automation.extend(planned)
+            boundary_receipt = durable["read_receipt"](durable["root"], str(attempt["attempt_id"]), f"automation-review-boundary-{key}", "ARTIFACT_READ_BACK")
+            expected_bindings.append({"kind": "automation", "revision": revision,
+                "generator_stage_instance_id": f"tc-to-autotest:{key}", "reviewer_stage_instance_ids": planned,
+                "reviewer_boundary_digest": boundary_receipt["digest"], "review_aggregate_receipt_digest": aggregate.get("digest")})
+        if len(grouped["autotest-reviewer"]) != len(planned_automation) or len(grouped["tc-to-autotest"]) != len(revisions):
+            _error(errors, "STAGE_EVIDENCE_INVALID")
+    if automation_bindings != expected_bindings:
         _error(errors, "AUTOMATION_REVIEW_BINDING_INVALID")
+    if len(model_invocations) != len(set(model_invocations)):
+        _error(errors, "INVOCATION_REUSED")
     if all(isinstance(row, Mapping) for row in stages):
         _model_event_errors(stages, attempt, durable, baseline, package, errors)
-    isolation = durable["reviewer"].get("isolation")
-    return "verified" if isolation == "verified" else "independence_unverified"
+    return "verified" if canonical_instances and not errors else "independence_unverified"
+
 
 
 def validate_compatibility_evidence(

@@ -18,15 +18,16 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `orchestrate` | `controller` | `orchestrate-v1` | `once` | `cases-only-v1, local-pilot-v1` |
 | `context-marker` | `generator` | `context-marker-v1` | `once` | `cases-only-v1, local-pilot-v1` |
 | `tc-generator` | `generator` | `tc-generator-v1` | `per_batch` | `cases-only-v1, local-pilot-v1` |
-| `tc-reviewer` | `canonical-reviewer` | `canonical-reviewer-v1` | `once_per_canonical_branch` | `cases-only-v1, local-pilot-v1` |
+| `tc-reviewer` | `canonical-reviewer` | `canonical-reviewer-v2` | `per_review_part` | `cases-only-v1, local-pilot-v1` |
 | `tc-to-autotest` | `automation-generator` | `tc-to-autotest-v1` | `per_automation_revision` | `local-pilot-v1` |
-| `autotest-reviewer` | `automation-reviewer` | `autotest-static-reviewer-v1` | `per_automation_revision` | `local-pilot-v1` |
+| `autotest-reviewer` | `automation-reviewer` | `autotest-static-reviewer-v2` | `per_review_part` | `local-pilot-v1` |
 
 ## Projection profiles
 
 | Profile | Format | Mode | Tenant status |
 |---|---|---|---|
-| `zephyr-scale-step-row-24-v4` | `csv` | `default` | `N_A` |
+| `zephyr-scale-step-row-24-v5` | `csv` | `default` | `N_A` |
+| `zephyr-scale-step-row-24-v4` | `csv` | `opt_in_compatibility` | `N_A` |
 | `zephyr-scale-xml-observed-v1` | `xml` | `opt_in_observed` | `N_A` |
 
 ## Artifact registry
@@ -62,6 +63,9 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `projection_bundle` | `4` | `IMPLEMENTED` | `True` | `-` |
 | `reviewer_session` | `4` | `IMPLEMENTED` | `True` | `-` |
 | `reviewer_evidence_transfer` | `4` | `IMPLEMENTED` | `True` | `-` |
+| `review_plan` | `4` | `IMPLEMENTED` | `True` | `-` |
+| `review_part_output` | `4` | `IMPLEMENTED` | `True` | `-` |
+| `review_aggregate` | `4` | `IMPLEMENTED` | `True` | `-` |
 | `automation` | `5` | `IMPLEMENTED` | `True` | `-` |
 | `automation_static_review` | `5` | `IMPLEMENTED` | `True` | `-` |
 | `execution_inputs` | `5` | `IMPLEMENTED` | `True` | `-` |
@@ -93,8 +97,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `pipeline.schema.json` | `1` | `IMPLEMENTED` | `4.0` | `False` | `-` |
 | `pilot-common.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `False` | `-` |
 | `run-manifest.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `event.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `model-request.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `event.schema.json` | `1` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
+| `model-request.schema.json` | `1` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `attempt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `run-authorization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `terminal-result.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
@@ -111,11 +115,13 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `batch-plan.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `candidate-fragment.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `assembly-receipt.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `tc-reviewer-output.schema.json` | `4` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
+| `tc-reviewer-output.schema.json` | `4` | `IMPLEMENTED` | `6.0.0` | `True` | `-` |
 | `orchestrator-output.schema.json` | `4` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
-| `reviewer-session.schema.json` | `4` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `reviewer-session.schema.json` | `4` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
+| `review-plan.schema.json` | `4` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `review-part-output.schema.json` | `4` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `tc-to-autotest-output.schema.json` | `5` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
-| `autotest-reviewer-output.schema.json` | `5` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
+| `autotest-reviewer-output.schema.json` | `5` | `IMPLEMENTED` | `6.0.0` | `True` | `-` |
 | `execution-inputs-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `generated-delta.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `materialization-receipt.schema.json` | `5` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
@@ -126,7 +132,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `release-eval-run.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

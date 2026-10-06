@@ -24,8 +24,18 @@ _CONTEXT_SCHEMA = _ROOT / "schemas" / "context-selection-receipt.schema.json"
 class BatchAssemblyError(ValueError):
     """A stable controller-contract failure which must not invoke review."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, diagnostics: list[dict[str, str]] | None = None) -> None:
         self.code = code
+        # Every underlying finding with its RFC 6901 pointer, so a generator can fix all of them at once.
+        self.diagnostics: tuple[dict[str, str], ...] = tuple(
+            {"path": str(item.get("path", "")), "code": str(item.get("code", code)), "message": str(item.get("message", ""))}
+            for item in (diagnostics or [])
+        )
+        if self.diagnostics:
+            message = message + ": " + "; ".join(
+                f"{item['code']} at {item['path'] or '/'}" + (f" ({item['message']})" if item["message"] else "")
+                for item in self.diagnostics
+            )
         super().__init__(f"{code}: {message}")
 
 
@@ -46,7 +56,7 @@ def _with_digest(value: dict[str, Any]) -> dict[str, Any]:
 def _schema_valid(value: dict[str, Any], schema: Path, label: str) -> None:
     diagnostics = schema_diagnostics(value, schema, _ROOT)
     if diagnostics:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} schema is invalid: {diagnostics[0]['code']}")
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} schema is invalid", diagnostics)
 
 
 def _self_digest_valid(value: dict[str, Any], label: str) -> None:
@@ -269,6 +279,46 @@ def _unique_by_id(items: list[dict[str, Any]], key: str, code: str, *, permit_eq
     return result
 
 
+def _merge_capabilities(ordered: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge capabilities named by several batches and return them in code-point order.
+
+    Independent model calls cannot agree on provenance wording, so provenance is
+    united in batch order.  Any other difference changes what the capability
+    means and is reported as a conflict naming both batches.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    owners: dict[str, str] = {}
+    conflicts: list[tuple[str, str, str]] = []
+    for fragment in ordered:
+        for item in fragment["operation_capabilities"]:
+            capability_id = item.get("capability_id")
+            if not isinstance(capability_id, str):
+                raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "missing capability_id")
+            existing = merged.get(capability_id)
+            if existing is None:
+                merged[capability_id] = deepcopy(item)
+                owners[capability_id] = fragment["batch_id"]
+                continue
+            semantics = lambda value: canonical_bytes({key: field for key, field in value.items() if key != "provenance"})
+            if semantics(existing) != semantics(item):
+                conflicts.append((capability_id, owners[capability_id], fragment["batch_id"]))
+                continue
+            for entry in item.get("provenance", []):
+                if entry not in existing["provenance"]:
+                    existing["provenance"].append(entry)
+    result = [merged[capability_id] for capability_id in sorted(merged)]
+    if conflicts:
+        positions = {item["capability_id"]: index for index, item in enumerate(result)}
+        raise BatchAssemblyError(
+            "BATCH_CAPABILITY_CONFLICT",
+            "one capability_id has different semantics in two batches",
+            [{"path": f"/operation_capabilities/{positions[capability_id]}", "code": "BATCH_CAPABILITY_CONFLICT",
+              "message": f"{capability_id} differs between {first} and {second}"}
+             for capability_id, first, second in sorted(set(conflicts))],
+        )
+    return result
+
+
 def _case_fingerprint(case: dict[str, Any]) -> str:
     def without_identity(value: Any) -> Any:
         if isinstance(value, list):
@@ -296,7 +346,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     ordered = [by_batch[item["batch_id"]] for item in sorted(batches.values(), key=lambda item: item["ordinal"])]
     if any(fragment["status"] == "FAILED" for fragment in ordered):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "failed fragment cannot assemble a canonical candidate")
-    capabilities = _unique_by_id([item for fragment in ordered for item in fragment["operation_capabilities"]], "capability_id", "BATCH_ID_CONFLICT", permit_equal=True)
+    capabilities = _merge_capabilities(ordered)
     requirements = _unique_by_id([item for fragment in ordered for item in fragment["requirements"]], "requirement_id", "BATCH_ID_CONFLICT")
     cases = _unique_by_id([item for fragment in ordered for item in fragment["test_cases"]], "case_id", "BATCH_ID_CONFLICT")
     canonical_owners: dict[str, str] = {}
@@ -311,7 +361,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     document.update({
         "source_requirements": deepcopy(plan["source_requirements"]),
         "source_to_canonical_mappings": mappings,
-        "operation_capabilities": list(capabilities.values()),
+        "operation_capabilities": capabilities,
         "requirements": list(requirements.values()),
         "test_cases": list(cases.values()),
     })
@@ -320,7 +370,7 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
             item["display_order"] = index
     diagnostics = validate_canonical_document(document)
     if diagnostics:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {diagnostics[0]['code']}")
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "canonical pre-review audit failed", diagnostics)
     fingerprints: dict[str, list[str]] = defaultdict(list)
     for case in document["test_cases"]:
         fingerprints[_case_fingerprint(case)].append(case["case_id"])

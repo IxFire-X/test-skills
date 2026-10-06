@@ -57,7 +57,8 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
     pack = Path(__file__).resolve().parents[1]
     assert schema_diagnostics(discovery, pack / "schemas/project-discovery-output.schema.json", pack) == []
     compiled = init_skillsrc.compile_skillsrc(discovery, {}, tmp_path)
-    assert compiled["modules"][0]["test"]["wrapper"] == ("mvnw.cmd" if os.name == "nt" else "mvnw")
+    # Decision 17: the manifest keeps the logical wrapper name on every host.
+    assert compiled["modules"][0]["test"]["wrapper"] == "mvnw"
 
     (tmp_path / "build.gradle").write_text("dependencies { testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0' }", encoding="utf-8")
     for name in ("gradlew", "gradlew.bat"):
@@ -65,8 +66,7 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
         (tmp_path / name).chmod(0o755)
     discovery = discover_project(tmp_path)
     assert discovery["status"] == "needs_input", discovery
-    for build, wrapper in (("maven", "mvnw.cmd" if os.name == "nt" else "mvnw"),
-                           ("gradle", "gradlew.bat" if os.name == "nt" else "gradlew")):
+    for build, wrapper in (("maven", "mvnw"), ("gradle", "gradlew")):
         compiled = init_skillsrc.compile_skillsrc(discovery, {"module:root:stack.build_tool": build}, tmp_path)
         assert compiled["modules"][0]["test"]["wrapper"] == wrapper
         assert compiled["modules"][0]["test"]["adapter_id"] == f"{build}-wrapper:selected-symbols-v1"
@@ -82,7 +82,7 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
     monkeypatch.setenv("PATH", str(tmp_path))
     compiled = init_skillsrc.compile_skillsrc(discovery, {"module:root:stack.build_tool": "maven"}, tmp_path)
     assert compiled["modules"][0]["test"]["adapter_id"] == "maven:selected-symbols-v1"
-    assert compiled["modules"][0]["test"]["executable"] == str(launcher.resolve())
+    assert compiled["modules"][0]["test"]["executable"] == "mvn"
 
 
 def test_missing_skillsrc_is_created_atomically_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

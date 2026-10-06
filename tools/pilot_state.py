@@ -2,22 +2,39 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 import re
 import subprocess
+import threading
+import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from functools import lru_cache
+from contextvars import ContextVar
+from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
+from tools.confined_output import OutputConfinementError, OutputConflictError, on_confined_write, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
+
+_OPERATIONS: dict[str, dict[Any, Any]] = {}
+
+
+def _forget_validated_evidence() -> None:
+    """Any file created, replaced or removed ends what the current operations may reuse."""
+    for memo in _OPERATIONS.values():
+        memo.clear()
+
+
+on_confined_write(_forget_validated_evidence)
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
+_REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
 _AUTH_KEYS = {"request_id", "execution_requested", "host_id"}
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -25,25 +42,208 @@ _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:baseline|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
+    r"^(?:context-marker:baseline|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12]|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
 )
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _MODEL_STAGE_REGISTRY = {
     "context-marker": ("generator", "context-marker-v1"),
     "tc-generator": ("generator", "tc-generator-v1"),
-    "tc-reviewer": ("canonical-reviewer", "canonical-reviewer-v1"),
+    "tc-reviewer": ("canonical-reviewer", "canonical-reviewer-v2"),
     "tc-to-autotest": ("automation-generator", "tc-to-autotest-v1"),
-    "autotest-reviewer": ("automation-reviewer", "autotest-static-reviewer-v1"),
+    "autotest-reviewer": ("automation-reviewer", "autotest-static-reviewer-v2"),
 }
 _EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _ACTORS = {"controller"}
 _ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_PROGRESS_EVENTS = {*_MODEL_EVENT_TYPES, "CONTEXT_SELECTED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "PROCESS_STOPPED"}
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
 _PACK_ROOT = _SCHEMA_ROOT.parent
 _CLOSURE_KINDS = {"pre_finalization_trace", "finalization_receipt", "terminal_trace"}
 _DEDICATED_RECEIPT_TOKEN = object()
 class _PublicationUnknown(ValueError):
     """A journal writer failed after an unclassifiable durable-state transition."""
+
+
+_GIT_STATUS_TIMEOUT_SECONDS = 120
+_MAX_TRANSPORT_ATTEMPTS = 3
+_VERIFIED_REVIEW_PLANS: set[tuple[str, str]] = set()
+_MAX_REVIEW_PART_TRIES = 3
+_REVIEW_FAILURE_CLASSES = ("TRANSPORT", "CONTENT")
+_RUN_LOCK_NAME = ".lock"
+_RUN_LOCK_TIMEOUT_SECONDS = 120.0
+_RUN_LOCK_POLL_SECONDS = 0.02
+
+
+class _RunLockState:
+    __slots__ = ("thread_lock", "depth", "descriptor")
+
+    def __init__(self) -> None:
+        self.thread_lock = threading.RLock()
+        self.depth = 0
+        self.descriptor: int | None = None
+
+
+_RUN_LOCK_STATES: dict[str, _RunLockState] = {}
+_RUN_LOCK_STATES_GUARD = threading.Lock()
+
+
+def _acquire_os_run_lock(path: Path) -> int:
+    """Take the exclusive inter-process lock on ``<run root>/.lock`` or raise after a bounded wait."""
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        if path.is_symlink() or (path.exists() and _is_reparse(path)):
+            raise ValueError("unsafe run lock")
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as error:
+        raise ValueError("run lock is unavailable") from error
+    deadline = time.monotonic() + _RUN_LOCK_TIMEOUT_SECONDS
+    try:
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return descriptor
+            except OSError as error:
+                if time.monotonic() >= deadline:
+                    raise ValueError("run is locked by another process") from error
+                time.sleep(_RUN_LOCK_POLL_SECONDS)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _release_os_run_lock(descriptor: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the descriptor releases the lock in every case
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def run_lock(run_root: Path):
+    """Serialize every reader and writer of one run across processes and threads.
+
+    The lock is re-entrant inside one process, so public operations may nest.
+    Writers hold it for the whole operation; readers hold it while they take a
+    consistent snapshot and never repair anything.
+    """
+    key = _run_key(run_root)
+    with _RUN_LOCK_STATES_GUARD:
+        state = _RUN_LOCK_STATES.setdefault(key, _RunLockState())
+    with state.thread_lock:
+        if state.depth == 0:
+            state.descriptor = _acquire_os_run_lock(Path(key) / _RUN_LOCK_NAME)
+            # One outermost lock hold is one operation: nobody else can write while it lasts,
+            # so evidence validated inside it is reused until this operation itself writes.
+            _OPERATIONS[key] = {}
+        state.depth += 1
+        try:
+            yield
+        finally:
+            state.depth -= 1
+            if state.depth == 0 and state.descriptor is not None:
+                _OPERATIONS.pop(key, None)
+                descriptor, state.descriptor = state.descriptor, None
+                _release_os_run_lock(descriptor)
+
+
+def run_operation(function):
+    """Run a whole multi-step command as one operation on its ``run_root`` argument.
+
+    The command holds the run lock from start to end, so the state it derived
+    and the evidence it validated stay valid until the command itself writes.
+    Commands that wait on an external process must not be decorated: a held
+    lock would block ``status`` for the whole wait.
+    """
+    import inspect
+
+    signature = inspect.signature(function)
+
+    @wraps(function)
+    def operation(*args, **kwargs):
+        try:
+            run_root = signature.bind_partial(*args, **kwargs).arguments.get("run_root")
+            _project, root = _run_root(run_root)
+        except (ValueError, OSError, TypeError):
+            return function(*args, **kwargs)
+        with run_lock(root):
+            return function(*args, **kwargs)
+    return operation
+
+
+def _run_key(run_root: Path) -> str:
+    return os.path.normcase(os.path.abspath(str(run_root)))
+
+
+def _operation_memo_store(root: Path) -> dict[Any, Any] | None:
+    """Per-operation memo of validated reads, or None outside an operation."""
+    return _OPERATIONS.get(_run_key(root))
+
+
+def _operation_wrote(root: Path) -> None:
+    """Forget everything validated so far in this operation: the run has just changed."""
+    memo = _OPERATIONS.get(_run_key(root))
+    if memo:
+        memo.clear()
+
+
+def _state_fingerprint(state: Mapping[str, Any]) -> tuple[int, Any, int]:
+    events = state["events"]
+    return len(events), events[-1]["digest"] if events else None, len(state["attempts"])
+
+
+def _operation_memo(function):
+    """Validate one piece of durable evidence once per operation and journal state.
+
+    The memo never outlives the outermost run-lock hold and is dropped on every
+    write, so each new operation re-reads and re-validates its evidence.
+    """
+    @wraps(function)
+    def memoized(project, root, state, attempt_id, *args, **kwargs):
+        memo = _operation_memo_store(root)
+        if memo is None:
+            return function(project, root, state, attempt_id, *args, **kwargs)
+        try:
+            key = (function.__name__, _state_fingerprint(state), attempt_id, args, tuple(sorted(kwargs.items())))
+            hash(key)
+        except (KeyError, IndexError, TypeError):
+            return function(project, root, state, attempt_id, *args, **kwargs)
+        if key in memo:
+            return copy.deepcopy(memo[key])
+        result = function(project, root, state, attempt_id, *args, **kwargs)
+        memo[key] = copy.deepcopy(result)
+        return result
+    return memoized
+
+
+def _run_writer(function):
+    """Hold the run lock for a whole public operation whose first argument is the run root."""
+    @wraps(function)
+    def locked(run_root, *args, **kwargs):
+        try:
+            _project, root = _run_root(run_root)
+        except (ValueError, OSError, TypeError):
+            return function(run_root, *args, **kwargs)  # the operation reports the invalid root itself
+        with run_lock(root):
+            return function(run_root, *args, **kwargs)
+    return locked
 
 
 def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
@@ -86,22 +286,60 @@ def _check_sealed(value: Mapping[str, Any], label: str) -> dict[str, Any]:
     return dict(value)
 
 
-@lru_cache(maxsize=64)
-def _artifact_validator(schema_text: str) -> Draft202012Validator:
-    return Draft202012Validator(json.loads(schema_text), format_checker=FormatChecker())
+_STAT_SETTLE_NS = 50_000_000
+_SCHEMA_VALIDATORS: dict[str, tuple[tuple[int, int, int], Draft202012Validator]] = {}
+_SCHEMA_RESULTS: dict[tuple[str, tuple[int, int, int], str], bool] = {}
+_SCHEMA_RESULTS_LIMIT = 50_000
 
 
-@lru_cache(maxsize=64)
-def _artifact_schema_valid(schema_text: str, serialized: str) -> bool:
-    return _artifact_validator(schema_text).is_valid(json.loads(serialized))
+def _stat_signature(path: Path) -> tuple[int, int, int] | None:
+    """Cheap identity of a regular file's current bytes: size, mtime and inode (no symlink following)."""
+    try:
+        details = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    if not (details.st_mode & 0o170000) == 0o100000 or getattr(details, "st_file_attributes", 0) & 0x400:
+        return None
+    return details.st_size, details.st_mtime_ns, details.st_ino
+
+
+def _signature_is_settled(signature: tuple[int, int, int], observed_ns: int) -> bool:
+    """A signature proves unchanged bytes only when the file was already at rest when it was read.
+
+    A rewrite inside the timestamp granularity could keep size and mtime; such
+    fresh files are simply read again instead of being trusted.
+    """
+    return signature[1] <= observed_ns - _STAT_SETTLE_NS
+
+
+def _artifact_validator(name: str) -> tuple[tuple[int, int, int], Draft202012Validator]:
+    """Compile each schema once per process; recompile only if the schema file changes."""
+    path = _SCHEMA_ROOT / name
+    signature = _stat_signature(path) or (-1, -1, -1)
+    cached = _SCHEMA_VALIDATORS.get(name)
+    if cached is not None and cached[0] == signature:
+        return cached
+    validator = Draft202012Validator(json.loads(path.read_text(encoding="utf-8")), format_checker=FormatChecker())
+    _SCHEMA_VALIDATORS[name] = (signature, validator)
+    return _SCHEMA_VALIDATORS[name]
 
 
 def _validate_schema(name: str, value: Mapping[str, Any]) -> None:
     from tools.schema_validation import _json_validation_key
 
-    schema_text = (_SCHEMA_ROOT / name).read_text(encoding="utf-8")
+    signature, validator = _artifact_validator(name)
     serialized = _json_validation_key(value)
-    valid = _artifact_schema_valid(schema_text, serialized) if serialized is not None else _artifact_validator(schema_text).is_valid(value)
+    if serialized is None:
+        valid = validator.is_valid(value)
+    else:
+        key = (name, signature, hashlib.sha256(serialized.encode("utf-8")).hexdigest())
+        cached = _SCHEMA_RESULTS.get(key)
+        if cached is None:
+            cached = validator.is_valid(json.loads(serialized))
+            if len(_SCHEMA_RESULTS) >= _SCHEMA_RESULTS_LIMIT:
+                _SCHEMA_RESULTS.clear()
+            _SCHEMA_RESULTS[key] = cached
+        valid = cached
     if not valid:
         raise ValueError(f"schema validation failed: {name}")
 
@@ -137,21 +375,24 @@ def _run_root(run_root: Path) -> tuple[Path, Path]:
     return project, resolved
 
 
+_ARTIFACT_SCHEMA_NAMES = {
+    "run manifest": "run-manifest.schema.json",
+    "authorization receipt": "run-authorization-receipt.schema.json",
+    "attempt": "attempt.schema.json",
+    "terminal result": "terminal-result.schema.json",
+    "scenario observation": "scenario-observation-receipt.schema.json",
+    "retained native rerun": "retained-native-rerun-receipt.schema.json",
+    "disposition receipt": "disposition-receipt.schema.json",
+    "finalization receipt": "finalization-receipt.schema.json",
+    "pre finalization trace": "pre-finalization-trace.schema.json",
+    "terminal trace": "derived-terminal-trace.schema.json",
+}
+
+
 def _publish(project: Path, root: Path, target: Path, value: Mapping[str, Any], label: str, *, return_created: bool = False) -> Any:
     sealed = _sealed(value)
     data = _canonical_bytes(sealed)
-    schema_names = {
-        "run manifest": "run-manifest.schema.json",
-        "authorization receipt": "run-authorization-receipt.schema.json",
-        "attempt": "attempt.schema.json",
-        "terminal result": "terminal-result.schema.json",
-        "scenario observation": "scenario-observation-receipt.schema.json",
-        "retained native rerun": "retained-native-rerun-receipt.schema.json",
-        "disposition receipt": "disposition-receipt.schema.json",
-        "finalization receipt": "finalization-receipt.schema.json",
-        "pre finalization trace": "pre-finalization-trace.schema.json",
-        "terminal trace": "derived-terminal-trace.schema.json",
-    }
+    schema_names = _ARTIFACT_SCHEMA_NAMES
     if label in schema_names:
         _validate_schema(schema_names[label], sealed)
     created = False
@@ -177,13 +418,42 @@ def _publish(project: Path, root: Path, target: Path, value: Mapping[str, Any], 
                 raise ValueError(f"{label} controller rollback error") from cleanup_error
             if not removed:
                 raise ValueError(f"{label} controller rollback error") from error
+        if isinstance(error, OutputConflictError):
+            raise ValueError(f"{label} already exists with different content") from error
         if isinstance(error, OutputConfinementError):
             raise ValueError(f"unsafe {label} path") from error
         raise
     return (parsed, created, installed_identity) if return_created else parsed
 
 
+_ARTIFACT_READS: dict[tuple[str, str], tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_ARTIFACT_READS_LIMIT = 512
+
+
 def _read_artifact(project: Path, root: Path, target: Path, label: str) -> dict[str, Any]:
+    """Read, unseal and schema-check one immutable artifact.
+
+    A fully validated artifact is remembered per process and reused while its
+    file is provably the same bytes; every new process validates from scratch.
+    """
+    cache_key = (os.path.normcase(str(target)), label)
+    signature = _stat_signature(target)
+    cached = _ARTIFACT_READS.get(cache_key)
+    if cached is not None and signature is not None and cached[0] == signature:
+        return copy.deepcopy(cached[1])
+    observed_ns = time.time_ns()
+    value = _read_artifact_uncached(project, root, target, label)
+    after = _stat_signature(target)
+    if signature is not None and after == signature and _signature_is_settled(signature, observed_ns):
+        if len(_ARTIFACT_READS) >= _ARTIFACT_READS_LIMIT:
+            _ARTIFACT_READS.clear()
+        _ARTIFACT_READS[cache_key] = (signature, copy.deepcopy(value))
+    else:
+        _ARTIFACT_READS.pop(cache_key, None)
+    return value
+
+
+def _read_artifact_uncached(project: Path, root: Path, target: Path, label: str) -> dict[str, Any]:
     try:
         data = read_confined_bytes(project, root, target)
     except OutputConfinementError as error:
@@ -192,15 +462,11 @@ def _read_artifact(project: Path, root: Path, target: Path, label: str) -> dict[
         raise ValueError(f"missing {label}")
     value = _parse_json_bytes(data, label)
     _check_sealed(value, label)
-    schema_names = {
-        "run manifest": "run-manifest.schema.json",
-        "authorization receipt": "run-authorization-receipt.schema.json",
-        "attempt": "attempt.schema.json",
-        "scenario observation": "scenario-observation-receipt.schema.json",
-        "retained native rerun": "retained-native-rerun-receipt.schema.json",
-    }
-    if label in schema_names:
-        _validate_schema(schema_names[label], value)
+    # The same closed set as on publication: a re-read artifact is trusted no more than a new one.
+    if label in _ARTIFACT_SCHEMA_NAMES:
+        _validate_schema(_ARTIFACT_SCHEMA_NAMES[label], value)
+    if label == "terminal result" and not _validate_result_record(value):
+        raise ValueError("terminal result is invalid")
     return value
 
 
@@ -238,7 +504,7 @@ def _credential_like(value: str) -> bool:
     )
 
 
-def _canonical_runner_output(text: str, *, limit: int = 2000) -> bytes:
+def _canonical_runner_output(text: str, *, limit: int = 64 * 1024) -> bytes:
     """Return the only publishable UTF-8 runner-output representation."""
     from tools.project_inventory import token_signature_rule
 
@@ -266,7 +532,7 @@ def _safe_model_label(value: Any) -> bool:
 
 
 def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any]) -> dict[str, Any]:
-    if policy_profile not in _PROFILES or set(authorization) - _AUTH_KEYS or set(authorization) < {"request_id", "execution_requested"}:
+    if not isinstance(authorization, Mapping) or policy_profile not in _PROFILES or set(authorization) - _AUTH_KEYS or not {"request_id", "execution_requested"} <= set(authorization):
         raise ValueError("unsafe authorization")
     if not _safe_label(authorization["request_id"]) or not isinstance(authorization["execution_requested"], bool):
         raise ValueError("unsafe authorization")
@@ -468,6 +734,7 @@ def _process_scope_stop_is_proved(payload: Mapping[str, Any]) -> bool:
         and row.get("process_scope_stopped") is True
         and row.get("stop_proof") in {
             "WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP",
+            "WINDOWS_JOB_TERMINATED",
         }
     ] if isinstance(rows, list) else []
     return payload.get("verdict") == "UNKNOWN" and len(proved) == 1
@@ -515,7 +782,27 @@ def _validate_process_stopped_bindings(
             raise ValueError("unproved process-stop event")
 
 
-def _events(project: Path, root: Path) -> list[dict[str, Any]]:
+_JOURNAL_CACHE: dict[str, dict[str, Any]] = {}
+_JOURNAL_CACHE_LIMIT = 8
+
+
+def _events(project: Path, root: Path, *, recover: bool = False) -> list[dict[str, Any]]:
+    """Return the committed journal.
+
+    Readers (``recover=False``) never change the run: an in-flight or crashed
+    writer's pending marker is validated and otherwise ignored.  Only a writer,
+    which already holds the run lock, passes ``recover=True`` to roll a crashed
+    predecessor's marker back or forward.
+    """
+    with run_lock(root):
+        try:
+            return _events_locked(project, root, recover=recover)
+        except BaseException:
+            _JOURNAL_CACHE.pop(os.path.normcase(str(root)), None)
+            raise
+
+
+def _events_locked(project: Path, root: Path, *, recover: bool) -> list[dict[str, Any]]:
     journal = root / "events.jsonl"
     try:
         journal_bytes = read_confined_bytes(project, root, journal)
@@ -553,15 +840,37 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
         raise ValueError("invalid event journal")
     previous: str | None = None
     result: list[dict[str, Any]] = []
-    for seq, line in enumerate(lines, 1):
+    cache_key = os.path.normcase(str(root))
+    cached = _JOURNAL_CACHE.get(cache_key)
+    signatures: dict[int, tuple[tuple[int, int, int] | None, int]] = {}
+    if cached is not None and cached["run_id"] == manifest["run_id"] and len(cached["events"]) <= len(lines) and journal_bytes.startswith(cached["journal"]):
+        # The validated prefix is reused only while the journal still starts with exactly the
+        # bytes validated before and every per-event counterpart is provably unchanged.
+        for seq, line in enumerate(lines[: len(cached["events"])], 1):
+            path = event_dir / f"{seq:010d}.json"
+            observed_ns = time.time_ns()
+            signature = _stat_signature(path)
+            known_signature, known_at = cached["signatures"].get(seq, (None, 0))
+            if signature is None or signature != known_signature or not _signature_is_settled(signature, known_at):
+                if read_confined_bytes(project, root, path) != line:
+                    raise ValueError("invalid event journal")
+                signature = _stat_signature(path)
+            else:
+                observed_ns = known_at
+            signatures[seq] = (signature, observed_ns)
+        result = [dict(event) for event in cached["events"]]
+        previous = result[-1]["digest"] if result else None
+    for seq, line in enumerate(lines[len(result):], len(result) + 1):
         path = event_dir / f"{seq:010d}.json"
+        observed_ns = time.time_ns()
         event_bytes = read_confined_bytes(project, root, path)
         if event_bytes != line:
             raise ValueError("invalid event journal")
+        signatures[seq] = (_stat_signature(path), observed_ns)
         event = _parse_json_bytes(line, "event journal")
         _check_sealed(event, "event")
         _validate_schema("event.schema.json", event)
-        if event.get("schema_version") != "1.0.0" or event.get("seq") != seq or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
+        if event.get("schema_version") != "2.0.0" or event.get("seq") != seq or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
             raise ValueError("invalid event journal")
         stamp = event.get("observed_at")
         if not isinstance(stamp, str) or not stamp.endswith("Z"):
@@ -576,6 +885,9 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
         raise ValueError("invalid event journal")
     _validate_event_transitions(result)
     _validate_process_stopped_bindings(project, root, result)
+    if len(_JOURNAL_CACHE) >= _JOURNAL_CACHE_LIMIT and cache_key not in _JOURNAL_CACHE:
+        _JOURNAL_CACHE.pop(next(iter(_JOURNAL_CACHE)))
+    _JOURNAL_CACHE[cache_key] = {"run_id": manifest["run_id"], "journal": journal_bytes, "events": [dict(event) for event in result], "signatures": signatures}
     if pending is not None:
         marker, marker_bytes, marker_path = pending
         event_path = root / marker["event_path"]
@@ -585,6 +897,8 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
             if marker["run_id"] != manifest["run_id"] or marker["prior_digest"] != previous or marker["prior_bytes_digest"] != journal_digest or marker["prior_bytes_length"] != len(journal_bytes):
                 raise ValueError("invalid event journal")
             if event_bytes is None:
+                if not recover:
+                    return result
                 try:
                     removed_marker = remove_confined_bytes_if_equal(project, root, marker_path, marker_bytes)
                 except OutputConfinementError as error:
@@ -600,6 +914,8 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
             if event.get("digest") != marker["event_digest"] or event.get("seq") != marker["seq"] or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
                 raise ValueError("invalid event journal")
             _validate_event_transitions(result + [event])
+            if not recover:
+                return result
             try:
                 removed_event = remove_confined_bytes_if_equal(project, root, event_path, event_bytes)
             except OutputConfinementError as error:
@@ -619,6 +935,8 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
             prior_event_digest = result[-2]["digest"] if len(result) > 1 else None
             if marker["run_id"] != manifest["run_id"] or marker["prior_digest"] != prior_event_digest or marker["prior_bytes_digest"] != "sha256:" + hashlib.sha256(prior_bytes).hexdigest() or marker["prior_bytes_length"] != len(prior_bytes) or marker["event_digest"] != committed["digest"] or marker["bytes_length"] != len(committed_bytes) or marker["bytes_digest"] != "sha256:" + hashlib.sha256(committed_bytes).hexdigest() or event_bytes != committed_bytes:
                 raise ValueError("invalid event journal")
+            if not recover:
+                return result
             try:
                 removed_marker = remove_confined_bytes_if_equal(project, root, marker_path, marker_bytes)
             except OutputConfinementError as error:
@@ -690,7 +1008,17 @@ def _attempts(project: Path, root: Path, events: list[dict[str, Any]], allow_unc
     allowed = set(created)
     if allow_uncommitted_id is not None:
         allowed.add(allow_uncommitted_id)
-    if len(paths) != len(allowed) or {path.stem for path in paths} != allowed:
+    found = {path.stem for path in paths}
+    uncommitted = found - allowed
+    if len(uncommitted) == 1 and allow_uncommitted_id is None and allowed <= found:
+        # A process killed between publishing the attempt and committing ATTEMPT_CREATED leaves
+        # one sealed attempt without an event.  It is not part of the state: readers skip it
+        # (and never delete it); the next create_attempt removes it under the run lock.
+        orphan = _read_artifact(project, root, directory / f"{next(iter(uncommitted))}.json", "attempt")
+        if orphan.get("attempt_id") != next(iter(uncommitted)):
+            raise ValueError("invalid attempt")
+        found -= uncommitted
+    if len(paths) != len(found | uncommitted) or found != allowed:
         raise ValueError("invalid attempt")
     manifest, _receipt = _run_boundary(project, root)
     result: list[dict[str, Any]] = []
@@ -710,12 +1038,17 @@ def _state_for(attempt_id: str, events: list[dict[str, Any]]) -> str:
     for event in events:
         if event.get("attempt_id") != attempt_id:
             continue
+        if state == "TERMINAL":
+            continue  # terminal retry observations never reopen an attempt
         if event["event_type"] == "WAITING_FOR_INPUT":
             state = "WAITING_FOR_INPUT"
         elif event["event_type"] == "WAITING_FOR_MODEL":
             state = "WAITING_FOR_MODEL"
         elif event["event_type"] == "ATTEMPT_TERMINAL":
             state = "TERMINAL"
+        elif event["event_type"] in _PROGRESS_EVENTS:
+            # The wait is over once the controller records real progress for this attempt.
+            state = "ACTIVE"
     return state
 
 
@@ -757,6 +1090,18 @@ def _recover_single_uncommitted_attempt(project: Path, root: Path, events: list[
 
 def derive_state(run_root: Path) -> Mapping[str, Any]:
     project, root = _run_root(run_root)
+    memo = _operation_memo_store(root)
+    if memo is not None and "derive_state" in memo:
+        cached = memo["derive_state"]
+        return {"events": [dict(event) for event in cached["events"]], "attempts": [dict(attempt) for attempt in cached["attempts"]]}
+    state = _derive_state_uncached(project, root)
+    memo = _operation_memo_store(root)
+    if memo is not None:
+        memo["derive_state"] = {"events": [dict(event) for event in state["events"]], "attempts": [dict(attempt) for attempt in state["attempts"]]}
+    return state
+
+
+def _derive_state_uncached(project: Path, root: Path) -> dict[str, Any]:
     events = _events(project, root)
     attempts = _attempts(project, root, events)
     known = {attempt["attempt_id"] for attempt in attempts}
@@ -794,109 +1139,46 @@ def model_lifecycle_projection(
 
 
 def _validate_automation_model_lifecycle(
-    run_root: Path,
-    attempt_id: str,
-    automation: Mapping[str, Any],
-    review: Mapping[str, Any],
-    boundary: Mapping[str, Any],
-    state: Mapping[str, Any],
+    run_root: Path, attempt_id: str, automation: Mapping[str, Any], review: Mapping[str, Any],
+    boundary: Mapping[str, Any], state: Mapping[str, Any],
 ) -> None:
-    """Require the exact automation generator/reviewer lifecycle and readbacks."""
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
-
-    try:
-        final_revision = automation["artifacts"]["automation_revision"]
-        lifecycle = _model_lifecycle_projection_with_state(state, attempt_id)["stages"]
-        prior_seq = 0
-        for revision in range(1, final_revision + 1):
-            generator_stage = f"tc-to-autotest:r{revision}"
-            reviewer_stage = f"autotest-reviewer:r{revision}"
-            generator_events = lifecycle[generator_stage]
-            reviewer_events = lifecycle[reviewer_stage]
-            if set(generator_events) != {
-                "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED",
-            } or set(reviewer_events) != {
-                "REVIEW_REQUESTED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED",
-            }:
-                raise ValueError
-            generator_digest = str(generator_events["MODEL_RESPONSE_RECEIVED"]["artifact_digest"])
-            reviewer_digest = str(reviewer_events["MODEL_RESPONSE_RECEIVED"]["artifact_digest"])
-            project, root = _run_root(run_root)
-            generator_request = _read_model_request_with_state(
-                project, root, state, attempt_id, generator_stage,
-                str(generator_events["MODEL_REQUESTED"]["artifact_digest"]),
-            )
-            generated = _read_model_stage_artifact_with_state(
-                project, root, state, attempt_id, generator_stage, generator_digest,
-            )["artifact"]
-            reviewer_request = _read_model_request_with_state(
-                project, root, state, attempt_id, reviewer_stage,
-                str(reviewer_events["MODEL_REQUESTED"]["artifact_digest"]),
-            )
-            reviewed = _read_model_stage_artifact_with_state(
-                project, root, state, attempt_id, reviewer_stage, reviewer_digest,
-            )["artifact"]
-            revision_boundary = boundary if revision == final_revision else _read_attempt_receipt_with_state(
-                project, root, state, attempt_id,
-                f"automation-review-boundary-r{revision}", "ARTIFACT_READ_BACK",
-            )["record"]
-            boundary_events = [
-                event for event in state["events"]
-                if event.get("attempt_id") == attempt_id
-                and event.get("artifact_digest") == revision_boundary.get("digest")
-                and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-            ]
-            ordered = [
-                generator_events["MODEL_REQUESTED"],
-                generator_events["MODEL_RESPONSE_RECEIVED"],
-                generator_events["CANDIDATE_PUBLISHED"],
-                *boundary_events,
-                reviewer_events["REVIEW_REQUESTED"],
-                reviewer_events["MODEL_REQUESTED"],
-                reviewer_events["MODEL_RESPONSE_RECEIVED"],
-            ]
-            generated_digest = automation_sha256(generated)
-            reviewed_digest = autotest_review_sha256(reviewed)
-            source = generated["artifacts"]["source"]
-            if (
-                [event["event_type"] for event in boundary_events]
-                != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-                or ordered[0]["seq"] <= prior_seq
-                or [event["seq"] for event in ordered] != sorted(event["seq"] for event in ordered)
-                or revision_boundary.get("automation_digest") != generated_digest
-                or revision_boundary.get("automation_revision") != revision
-                or revision_boundary.get("effective_canonical_digest") != source["source_digest"]
-                or revision_boundary.get("effective_bundle_receipt_digest") != source["effective_bundle_receipt_digest"]
-                or generator_digest != generated_digest
-                or generator_events["CANDIDATE_PUBLISHED"].get("artifact_digest") != generated_digest
-                or generator_request.get("invocation_id") != revision_boundary.get("generator_invocation_id")
-                or generator_request.get("input_digests") != [
-                    source["source_digest"], source["effective_bundle_receipt_digest"],
-                ]
-                or reviewer_events["REVIEW_REQUESTED"].get("artifact_digest") != generated_digest
-                or reviewer_digest != reviewed_digest
-                or reviewed["artifacts"]["autotest_review"].get("automation_sha256") != generated_digest
-                or reviewer_request.get("invocation_id") != revision_boundary.get("reviewer_invocation_id")
-                or reviewer_request.get("input_digests") != [generated_digest, revision_boundary.get("digest")]
-                or revision == final_revision and (
-                    generated != dict(automation) or reviewed != dict(review)
-                )
-            ):
-                raise ValueError
-            prior_seq = ordered[-1]["seq"]
-        if final_revision not in {1, 2}:
-            raise ValueError
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("automation model lifecycle is absent or mismatched") from error
+    """Read every revision's real generator, reviewer parts and controller aggregate."""
+    from tools.review_parts import review_digest
+    project, root = _run_root(run_root)
+    revision = automation["artifacts"]["automation_revision"]
+    for number in range(1, revision + 1):
+        key = f"r{number}"
+        aggregate = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-aggregate-{key}", "ARTIFACT_READ_BACK")["record"]
+        snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+        generated = snapshot["automation"]
+        publication = _read_model_stage_artifact_with_state(project, root, state, attempt_id, f"tc-to-autotest:{key}", review_digest(generated))
+        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=key)
+        if (publication["artifact"] != generated or not aggregate["aggregate"]["complete"] or ledger["status"] != "COMPLETED"
+                or number == revision and (generated != dict(automation) or aggregate["output"] != dict(review))
+                or number < revision and aggregate["output"]["artifacts"]["autotest_review"]["verdict"] != "AUTO_FIX_APPLIED"):
+            raise ValueError("automation model lifecycle is absent or mismatched")
 
 
 def _append_event(project: Path, root: Path, event_type: str, *, actor: str, attempt_id: str | None, batch_id: str | None, artifact_digest: str | None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> dict[str, Any]:
-    events = _events(project, root) if (root / "events.jsonl").exists() else []
+    """Append one event while holding the run lock; a crashed predecessor is recovered first."""
+    with run_lock(root):
+        try:
+            return _append_event_locked(project, root, event_type, actor=actor, attempt_id=attempt_id, batch_id=batch_id, artifact_digest=artifact_digest, stage_instance_id=stage_instance_id, transport_attempts=transport_attempts)
+        finally:
+            _operation_wrote(root)
+
+
+def _append_event_locked(project: Path, root: Path, event_type: str, *, actor: str, attempt_id: str | None, batch_id: str | None, artifact_digest: str | None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> dict[str, Any]:
+    events = _events(project, root, recover=True) if (root / "events.jsonl").exists() else []
     manifest, _receipt = _run_boundary(project, root)
     if event_type == "MODEL_RESPONSE_RECEIVED" and transport_attempts is None:
         transport_attempts = 1
     identity = (event_type, actor, attempt_id, batch_id, stage_instance_id, transport_attempts, artifact_digest)
-    existing = next((event for event in events if (event["event_type"], event["actor"], event.get("attempt_id"), event.get("batch_id"), event.get("stage_instance_id"), event.get("transport_attempts"), event.get("artifact_digest")) == identity), None)
+    existing = next((event for event in reversed(events) if (event["event_type"], event["actor"], event.get("attempt_id"), event.get("batch_id"), event.get("stage_instance_id"), event.get("transport_attempts"), event.get("artifact_digest")) == identity), None)
+    if existing is not None and event_type in {"WAITING_FOR_INPUT", "WAITING_FOR_MODEL"} and _state_for(str(attempt_id), events) != event_type:
+        # Idempotency covers a retried append only.  Once the attempt has moved on, an
+        # identical wait is a new fact with its own position in the journal.
+        existing = None
     if event_type != "RUN_CREATED" and event_type not in _EVENT_TYPES or actor not in _ACTORS or (artifact_digest is not None and not _DIGEST.fullmatch(artifact_digest)):
         raise ValueError("invalid event")
     if event_type == "TERMINAL_RETRY_OBSERVED" and artifact_digest is None:
@@ -919,10 +1201,8 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
         if artifact_digest is None:
             raise ValueError("model event requires an artifact digest")
         if event_type == "MODEL_RESPONSE_RECEIVED":
-            if type(transport_attempts) is not int or transport_attempts not in {1, 2}:
+            if type(transport_attempts) is not int or transport_attempts not in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
                 raise ValueError("invalid model transport attempt count")
-            if not stage_instance_id.startswith("tc-generator:") and transport_attempts != 1:
-                raise ValueError("model transport retry is not allowed for this stage")
         elif transport_attempts is not None:
             raise ValueError("transport attempt count belongs only to model response")
     elif stage_instance_id is not None:
@@ -961,7 +1241,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
             raise ValueError("terminal attempt is immutable")
     elif existing is not None:
         return existing
-    value: dict[str, Any] = {"schema_version": "1.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"), "prev_digest": events[-1]["digest"] if events else None}
+    value: dict[str, Any] = {"schema_version": "2.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"), "prev_digest": events[-1]["digest"] if events else None}
     if attempt_id is not None:
         value["attempt_id"] = attempt_id
     if batch_id is not None:
@@ -1027,6 +1307,14 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
                 return event
             raise _PublicationUnknown("committed event counterpart is unavailable") from error
         if actual_journal != prior:
+            # Another writer changed the journal after this writer read it, so this event was
+            # never committed.  Withdraw this writer's own marker: left behind, it would name a
+            # sequence number that now belongs to someone else and make the run unreadable.
+            if pending_created:
+                try:
+                    remove_confined_bytes_if_equal(project, root, pending_path, pending_data)
+                except (OSError, OutputConfinementError, ValueError):
+                    pass
             raise _PublicationUnknown("event publication state is unknown") from error
         if journal_committed:
             raise _PublicationUnknown("event publication state changed after commit") from error
@@ -1243,6 +1531,54 @@ def _validate_attempt_creation_candidate(project: Path, root: Path, manifest: Ma
     return candidate
 
 
+_REGENERATION_RETRY_REASON = "GENERATED_TEST_INVALID"
+_AUTOMATION_REVISION_BUDGET = 2
+
+
+def _regeneration_budget_error(parent: Mapping[str, Any], parent_terminal: Mapping[str, Any] | None, events: Sequence[Mapping[str, Any]], retry_reason: str) -> str | None:
+    """Enforce the r1+r2 automation budget across a compile/collect-gate retry.
+
+    One attempt runs the project once, so the corrected revision after
+    ``NOT_RUNNABLE/GENERATED_TEST_INVALID`` is generated in a child attempt that
+    declares this reason.  It is allowed once: not when the parent already spent
+    r2 in static review, and not when the parent is itself such a child.  A
+    failed product check (``FAIL``) can never be retried under this reason.
+    """
+    invalid_generated_test = (
+        isinstance(parent_terminal, Mapping)
+        and parent_terminal.get("verification") == "NOT_RUNNABLE"
+        and parent_terminal.get("reason_code") == _REGENERATION_RETRY_REASON
+    )
+    if retry_reason != _REGENERATION_RETRY_REASON:
+        if invalid_generated_test:
+            return f"a child of a {_REGENERATION_RETRY_REASON} attempt must declare retry_reason {_REGENERATION_RETRY_REASON}"
+        return None
+    if not invalid_generated_test:
+        return f"retry_reason {_REGENERATION_RETRY_REASON} requires a parent that ended NOT_RUNNABLE/{_REGENERATION_RETRY_REASON}"
+    generated = {
+        event.get("stage_instance_id") for event in events
+        if event.get("attempt_id") == parent.get("attempt_id") and event.get("event_type") == "MODEL_REQUESTED"
+        and str(event.get("stage_instance_id", "")).startswith("tc-to-autotest:")
+    }
+    if parent.get("retry_reason") == _REGENERATION_RETRY_REASON or len(generated) >= _AUTOMATION_REVISION_BUDGET:
+        return "automation revision budget is exhausted: no further corrected revision is allowed"
+    return None
+
+
+def read_execution_baseline_for_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+    """Return the frozen execution baseline an attempt was created from (for its child attempt)."""
+    from tools.project_inventory import InventoryError, read_execution_baseline
+
+    _project, root = _run_root(run_root)
+    attempt = next((item for item in derive_state(root)["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None:
+        raise ValueError("unknown attempt")
+    try:
+        return read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    except InventoryError as error:
+        raise ValueError("execution baseline is unavailable") from error
+
+
 def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mapping[str, Any]) -> Mapping[str, Any]:
     project, root = _run_root(run_root)
     events = _events(project, root)
@@ -1284,6 +1620,13 @@ def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mappin
         old_types = [event["event_type"] for event in events if event.get("attempt_id") == parent]
         if "EXECUTION_UNKNOWN" in old_types and "PROCESS_STOPPED" not in old_types:
             raise ValueError("process-stop evidence required")
+        try:
+            parent_terminal: Mapping[str, Any] | None = read_terminal_result(root, str(parent))
+        except (KeyError, TypeError, ValueError):
+            parent_terminal = None
+        budget_error = _regeneration_budget_error(previous, parent_terminal, events, str(retry))
+        if budget_error is not None:
+            raise ValueError(budget_error)
     from tools.project_inventory import InventoryError, project_identity, read_execution_baseline, read_inventory_receipt, validate_execution_baseline_binding
 
     try:
@@ -1316,7 +1659,17 @@ def create_attempt(run_root: Path, identity: Mapping[str, Any], baseline: Mappin
         _append_event(project, root, "ATTEMPT_CREATED", actor="controller", attempt_id=attempt_id, batch_id=None, artifact_digest=attempt["digest"])
     except _PublicationUnknown:
         raise
-    except Exception:
+    except BaseException:
+        # Also on KeyboardInterrupt/SystemExit: an attempt without its creation event must not stay behind.
+        try:
+            committed = any(
+                event["event_type"] == "ATTEMPT_CREATED" and event.get("attempt_id") == attempt_id
+                for event in _events(project, root)
+            )
+        except ValueError:
+            committed = False
+        if committed:
+            raise  # the interruption arrived after the commit; the attempt is real
         try:
             removed = remove_confined_bytes_if_equal(project, root, target, data)
         except OutputConfinementError as error:
@@ -1383,13 +1736,13 @@ def freeze_phase_two_inputs(run_root: Path, project_root: Path, module_root: Pat
     return {"inventory": frozen_inventory, "exclusions": frozen_exclusions, "baseline": frozen_baseline}
 
 
-def _frozen_inventory(project: Path, root: Path, inventory_digest: str) -> dict[str, Any]:
+def _frozen_inventory(project: Path, root: Path, inventory_digest: str, events: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     from tools.project_inventory import read_inventory_receipt
 
     if not _DIGEST.fullmatch(inventory_digest):
         raise ValueError("invalid frozen inventory digest")
     receipt = read_inventory_receipt(root / "inventories" / (inventory_digest.removeprefix("sha256:") + ".json"))
-    events = _events(project, root)
+    events = _events(project, root) if events is None else events
     if receipt.get("digest") != inventory_digest or not any(event["event_type"] == "INVENTORY_READY" and event.get("artifact_digest") == inventory_digest for event in events):
         raise ValueError("unbound frozen inventory")
     return receipt
@@ -1463,10 +1816,11 @@ def _validate_model_request_predecessors(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any],
     stage_instance_id: str, invocation_id: str, inputs: Sequence[str],
     request_seq: int | None = None,
+    *, model_id: str | None = None,
 ) -> None:
     """Bind generator/reviewer requests to their exact durable predecessors."""
     stage = stage_instance_id.split(":", 1)[0]
-    if stage not in {"tc-generator", "tc-reviewer"}:
+    if stage not in {"tc-generator", "tc-reviewer", "autotest-reviewer"}:
         return
     attempt_id = str(attempt["attempt_id"])
     events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
@@ -1484,23 +1838,7 @@ def _validate_model_request_predecessors(
         if baseline["digest"] != attempt["baseline_digest"] or context["inventory_digest"] != baseline["inventory_digest"] or not selected:
             raise ValueError("tc-generator context must bind its prior attempt inventory selection")
     else:
-        boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
-        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id)
-        package = ledger["package_binding"]
-        reviews = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
-        prior_boundary = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("artifact_digest") == boundary["digest"] and event["seq"] < cutoff for event in events)
-        prior_ledger = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("batch_id") == "reviewer-ledger-v1" and event["seq"] < cutoff for event in events)
-        if (
-            list(inputs) != [boundary["canonical_branch_digest"], boundary["package_digest"]]
-            or invocation_id != boundary["reviewer_invocation_id"]
-            or package.get("candidate_digest") != boundary["canonical_branch_digest"]
-            or package.get("package_digest") != boundary["package_digest"]
-            or len(reviews) != 1
-            or reviews[0].get("artifact_digest") != boundary["canonical_branch_digest"]
-            or reviews[0]["seq"] >= cutoff
-            or not prior_boundary or not prior_ledger
-        ):
-            raise ValueError("tc-reviewer input digests and invocation must bind its prior candidate and reviewer boundary")
+        _validate_review_request(project, root, state, attempt_id, stage_instance_id, invocation_id, inputs, cutoff, model_id=model_id)
 
 
 def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
@@ -1547,24 +1885,21 @@ def publish_model_request(
         raise ValueError("invalid model request")
     if stage == "context-marker":
         _context_marker_snapshots(project, root, attempt, inputs)
-    _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
-    if stage in {"tc-to-autotest", "autotest-reviewer"}:
-        if stage == "tc-to-autotest":
-            binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
-            expected_inputs = [binding["document_digest"], binding["effective_bundle_receipt_digest"]]
-        else:
-            binding = _read_attempt_receipt_with_state(
-                project, root, state, attempt_id,
-                f"automation-review-boundary-{stage_instance_id.split(':', 1)[1]}",
-                "ARTIFACT_READ_BACK",
-            )["record"]
-            expected_inputs = [binding["automation_digest"], binding["digest"]]
-        if inputs != expected_inputs:
-            raise ValueError(f"{stage} input digests must match its exact ordered artifact bindings")
+    _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs, model_id=model_id)
+    if stage == "tc-to-autotest":
+        binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
+        if inputs != [binding["document_digest"], binding["effective_bundle_receipt_digest"]]:
+            raise ValueError("automation generator inputs do not match effective selection")
+        if stage_instance_id.endswith(":r2"):
+            if any(event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in state["events"]) or _receipt_target(root, attempt_id, "materialization-ownership").exists():
+                raise ValueError("automation revision two is forbidden after materialization")
+            previous = read_review_aggregate(root, attempt_id, "r1")
+            if previous["output"]["artifacts"]["autotest_review"]["verdict"] != "AUTO_FIX_APPLIED":
+                raise ValueError("automation r2 requires its complete correction review")
     run_id = read_run(root)["manifest"]["run_id"]
     role, role_policy = declaration
     receipt = _sealed({
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "run_id": run_id,
         "attempt_id": attempt_id,
         "stage_instance_id": stage_instance_id,
@@ -1595,6 +1930,7 @@ def publish_model_request(
     return read_model_request(root, attempt_id, stage_instance_id, receipt["digest"])
 
 
+@_operation_memo
 def _read_model_request_with_state(
     project: Path,
     root: Path,
@@ -1643,7 +1979,7 @@ def _read_model_request_with_state(
         raise ValueError("model request is unbound")
     _validate_model_request_predecessors(
         project, root, state, attempt, stage_instance_id, value["invocation_id"],
-        value["input_digests"], events[0]["seq"],
+        value["input_digests"], events[0]["seq"], model_id=value["model_id"],
     )
     return dict(value)
 
@@ -1683,18 +2019,15 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             or context.get("digest") != _model_stage_artifact_digest(context_body)
         ):
             raise ValueError("invalid generator fragment artifact")
-    elif stage_instance_id == "tc-reviewer:canonical":
-        schema_name = "tc-reviewer-output.schema.json"
+    elif stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")):
+        schema_name = "review-part-output.schema.json"
+        if _review_part_token(stage_instance_id.rsplit(":", 1)[1])[0] != value.get("part_id"):
+            raise ValueError("invalid review part identity")
     elif stage_instance_id.startswith("tc-to-autotest:"):
         schema_name = "tc-to-autotest-output.schema.json"
         revision = value.get("artifacts", {}).get("automation_revision")
         if stage_instance_id != f"tc-to-autotest:r{revision}":
             raise ValueError("invalid automation generator artifact")
-    elif stage_instance_id.startswith("autotest-reviewer:"):
-        schema_name = "autotest-reviewer-output.schema.json"
-        revision = value.get("artifacts", {}).get("autotest_review", {}).get("automation_revision")
-        if stage_instance_id != f"autotest-reviewer:r{revision}":
-            raise ValueError("invalid automation reviewer artifact")
     else:
         raise ValueError("unsupported model stage artifact")
     if schema_diagnostics(dict(value), _SCHEMA_ROOT / schema_name, _PACK_ROOT):
@@ -1761,6 +2094,8 @@ def publish_model_stage_artifact(
     if stage_instance_id == "context-marker:baseline":
         _validate_context_marker_sources(project, root, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
+        _validate_review_response(root, state, attempt_id, stage_instance_id, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
         create_confined_bytes_exclusive(project, root, target, data)
@@ -1786,6 +2121,7 @@ def publish_model_stage_artifact(
     return read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest)
 
 
+@_operation_memo
 def _read_model_stage_artifact_with_state(
     project: Path,
     root: Path,
@@ -1847,6 +2183,8 @@ def _read_model_stage_artifact_with_state(
     if stage_instance_id == "context-marker:baseline":
         _validate_context_marker_sources(project, root, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
+        _validate_review_response(root, state, attempt_id, stage_instance_id, value)
     return {
         "artifact": dict(value),
         "byte_count": len(raw),
@@ -1935,12 +2273,14 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
     session_digest = "sha256:" + hashlib.sha256(json.dumps(session_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if not _DIGEST.fullmatch(digest or "") or digest != session_digest:
         raise ValueError("invalid reviewer session ledger")
-    ledger_root = root / "reviewer-session-ledgers" / attempt_id
+    review_key = value["review_key"]
+    reviewer_lifecycle_projection(value)
+    ledger_root = root / "reviewer-session-ledgers" / attempt_id / review_key
     target = ledger_root / (digest.removeprefix("sha256:") + ".json")
     history: list[tuple[int, dict[str, Any]]] = []
     events = state["events"]
-    recorded_published = [event for event in events if event["event_type"] == "ARTIFACT_PUBLISHED" and event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1"]
-    recorded_read_back = [event for event in events if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1"]
+    recorded_published = [event for event in events if event["event_type"] == "ARTIFACT_PUBLISHED" and event.get("attempt_id") == attempt_id and event.get("batch_id") == f"reviewer-ledger-v2-{review_key}"]
+    recorded_read_back = [event for event in events if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == f"reviewer-ledger-v2-{review_key}"]
     recorded_publish_digests = [event.get("artifact_digest") for event in recorded_published]
     recorded_readback_digests = [event.get("artifact_digest") for event in recorded_read_back]
     if len(recorded_publish_digests) != len(set(recorded_publish_digests)) or len(recorded_readback_digests) != len(set(recorded_readback_digests)):
@@ -2001,17 +2341,19 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
         raise ValueError("reviewer session ledger readback failed") from error
     if readback != value or raw != data:
         raise ValueError("reviewer session ledger readback mismatch")
-    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
-    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
+    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, batch_id=f"reviewer-ledger-v2-{review_key}", artifact_digest=digest)
+    append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, batch_id=f"reviewer-ledger-v2-{review_key}", artifact_digest=digest)
     return {"record": readback, "digest": digest, "created": created, "path": str(target.relative_to(root)).replace("\\", "/")}
 
 
+@_operation_memo
 def _read_reviewer_session_ledger_with_state(
     project: Path,
     root: Path,
     state: Mapping[str, Any],
     attempt_id: str,
     digest: str | None = None,
+    *, review_key: str = "canonical",
 ) -> Mapping[str, Any]:
     from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
@@ -2019,13 +2361,13 @@ def _read_reviewer_session_ledger_with_state(
     published = [
         event for event in state["events"]
         if event.get("attempt_id") == attempt_id
-        and event.get("batch_id") == "reviewer-ledger-v1"
+        and event.get("batch_id") == f"reviewer-ledger-v2-{review_key}"
         and event.get("event_type") == "ARTIFACT_PUBLISHED"
     ]
     readbacks = [
         event for event in state["events"]
         if event.get("attempt_id") == attempt_id
-        and event.get("batch_id") == "reviewer-ledger-v1"
+        and event.get("batch_id") == f"reviewer-ledger-v2-{review_key}"
         and event.get("event_type") == "ARTIFACT_READ_BACK"
     ]
     selected = digest if digest is not None else (published[-1].get("artifact_digest") if published else None)
@@ -2033,7 +2375,7 @@ def _read_reviewer_session_ledger_with_state(
         raise ValueError("reviewer session ledger is unavailable")
     if len([event for event in published if event.get("artifact_digest") == selected]) != 1 or len([event for event in readbacks if event.get("artifact_digest") == selected]) != 1:
         raise ValueError("reviewer session ledger is unbound")
-    target = root / "reviewer-session-ledgers" / attempt_id / f"{selected.removeprefix('sha256:')}.json"
+    target = root / "reviewer-session-ledgers" / attempt_id / review_key / f"{selected.removeprefix('sha256:')}.json"
     try:
         raw = read_confined_bytes(project, root, target)
         value = loads_json_strict(raw.decode("utf-8")) if raw is not None else None
@@ -2041,20 +2383,22 @@ def _read_reviewer_session_ledger_with_state(
         raise ValueError("reviewer session ledger is unreadable") from error
     body = {key: item for key, item in value.items() if key != "digest"} if isinstance(value, Mapping) else {}
     canonical_digest = "sha256:" + hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    if not isinstance(value, Mapping) or value.get("digest") != selected or canonical_digest != selected or schema_diagnostics(dict(value), _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT):
+    if (not isinstance(value, Mapping) or value.get("digest") != selected or canonical_digest != selected
+            or raw != json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            or schema_diagnostics(dict(value), _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT)):
         raise ValueError("reviewer session ledger is invalid")
     boundary = _read_attempt_receipt_with_state(
         project, root, state, attempt_id,
-        "reviewer-session-boundary", "ARTIFACT_READ_BACK",
+        _review_boundary_kind(review_key), "ARTIFACT_READ_BACK",
     )["record"]
     if (
         value.get("boundary_digest") != boundary.get("digest")
-        or value.get("session_id") != boundary.get("session_id")
-        or value.get("generator_invocation_id") != boundary.get("generator_invocation_id")
-        or value.get("reviewer_invocation_id") != boundary.get("reviewer_invocation_id")
-        or value.get("host_isolation") != boundary.get("host_isolation")
+        or value.get("session_id") != boundary.get("session_id", boundary.get("reviewer_session_id"))
+        or value.get("plan_digest") != boundary.get("plan_digest")
+        or value.get("review_key") != review_key
     ):
         raise ValueError("reviewer session ledger boundary is invalid")
+    reviewer_lifecycle_projection(value)
     return dict(value)
 
 
@@ -2062,11 +2406,12 @@ def read_reviewer_session_ledger(
     run_root: Path,
     attempt_id: str,
     digest: str | None = None,
+    *, review_key: str = "canonical",
 ) -> Mapping[str, Any]:
     """Read the exact latest or named reviewer ledger only after paired events."""
     project, root = _run_root(run_root)
     return _read_reviewer_session_ledger_with_state(
-        project, root, derive_state(root), attempt_id, digest,
+        project, root, derive_state(root), attempt_id, digest, review_key=review_key,
     )
 
 
@@ -2081,7 +2426,6 @@ def reviewer_lifecycle_projection(session: Mapping[str, Any]) -> Mapping[str, An
         or events[0].get("event_type") != "REVIEW_SESSION_STARTED"
     ):
         raise ValueError("reviewer lifecycle is invalid")
-    pending_request: str | None = None
     verdict_seen = False
     terminal: str | None = None
     for index, event in enumerate(events[1:], start=1):
@@ -2089,29 +2433,19 @@ def reviewer_lifecycle_projection(session: Mapping[str, Any]) -> Mapping[str, An
         terminal_position = index == len(events) - 1
         if terminal is not None:
             raise ValueError("reviewer lifecycle is invalid")
-        if kind == "EVIDENCE_REQUESTED":
-            if pending_request is not None or verdict_seen or not isinstance(event.get("request_digest"), str):
-                raise ValueError("reviewer lifecycle is invalid")
-            pending_request = str(event.get("request_digest"))
-        elif kind == "EVIDENCE_PROVIDED":
-            if pending_request is None or event.get("request_digest") != pending_request or verdict_seen:
-                raise ValueError("reviewer lifecycle is invalid")
-            pending_request = None
+        if kind in {"REVIEW_CHECK_ADDED", "REVIEW_PART_BLOCKED", "REVIEW_PART_RETRY"}:
+            if verdict_seen:
+                raise ValueError("reviewer addition follows verdict")
         elif kind == "AUTHORITATIVE_VERDICT":
-            if pending_request is not None or verdict_seen:
+            if verdict_seen:
                 raise ValueError("reviewer lifecycle is invalid")
             verdict_seen = True
         elif kind == "REVIEW_SESSION_COMPLETED":
-            if not terminal_position or pending_request is not None or not verdict_seen:
+            if not terminal_position or not verdict_seen:
                 raise ValueError("reviewer lifecycle is invalid")
             terminal = kind
         elif kind == "REVIEW_SESSION_ABORTED":
-            if (
-                not terminal_position
-                or verdict_seen
-                or pending_request is not None
-                and event.get("reason_code") != "REVIEW_CONTEXT_LIMIT"
-            ):
+            if not terminal_position or verdict_seen:
                 raise ValueError("reviewer lifecycle is invalid")
             terminal = kind
         else:
@@ -2142,6 +2476,7 @@ def reviewer_lifecycle_projection(session: Mapping[str, Any]) -> Mapping[str, An
     }
 
 
+@_operation_memo
 def _terminal_reviewer_evidence_with_state(
     project: Path,
     root: Path,
@@ -2158,13 +2493,8 @@ def _terminal_reviewer_evidence_with_state(
     lifecycle = reviewer_lifecycle_projection(ledger)
     if lifecycle["waiting"]:
         raise ValueError("reviewer terminal evidence is invalid")
-    isolation = ledger.get("host_isolation")
-    verified = bool(
-        isinstance(isolation, Mapping)
-        and isolation.get("fresh_context") is True
-        and isolation.get("distinct_invocations") is True
-        and isolation.get("role_policy") == "canonical-reviewer-v1"
-    )
+    aggregate = _read_attempt_receipt_with_state(project, root, state, attempt_id, "review-aggregate-canonical", "ARTIFACT_READ_BACK")["record"]
+    verified = bool(aggregate["aggregate"]["complete"])
     return {
         "canonical_digest": boundary["canonical_branch_digest"],
         "digest": ledger["digest"],
@@ -2194,6 +2524,10 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
+    if re.fullmatch(r"review-(?:snapshot|plan|aggregate)-(?:canonical|r[12])|review-part-boundary-(?:canonical|r[12])-part-[0-9]{6}(?:-try[23])?", kind):
+        if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+            raise ValueError("invalid review receipt attempt")
+        return root / "review-state" / attempt_id / f"{kind}.json"
     directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts"}
     if kind not in directories or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
         raise ValueError("invalid factual receipt")
@@ -2428,7 +2762,7 @@ def _validate_closed_execution_request(
     request: Any,
     delta: Mapping[str, Any],
 ) -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for, request_digest
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for_request, request_digest, request_launch_is_closed
     from tools.project_inventory import module_runtime_path, read_execution_baseline, system_maven_path
 
     execution = payload["execution"]
@@ -2439,9 +2773,10 @@ def _validate_closed_execution_request(
         module = module.resolve()
         baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         runtime_relative = baseline["interpreter_path"] if request.adapter_id == PYTEST else baseline["executable_path"] if request.adapter_id == SYSTEM_MAVEN else baseline["wrapper_path"]
-        expected_executable = system_maven_path(runtime_relative) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, runtime_relative)
-        executable = system_maven_path(request.executable) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(module, Path(request.executable).relative_to(module).as_posix())
+        # The launch cwd is the module or its declared build root; a wrapper lives there.
         cwd = Path(request.cwd).resolve()
+        expected_executable = system_maven_path(runtime_relative) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(cwd, runtime_relative)
+        executable = system_maven_path(request.executable) if request.adapter_id == SYSTEM_MAVEN else module_runtime_path(cwd, Path(request.executable).relative_to(cwd).as_posix())
         for report_path in request.report_paths:
             raw = Path(report_path)
             if raw.is_absolute() or ".." in raw.parts or "\x00" in report_path:
@@ -2454,8 +2789,7 @@ def _validate_closed_execution_request(
         or request.build_profile != baseline.get("build_profile")
         or dict(request.typed_parameters) != baseline.get("adapter_parameters")
         or executable != expected_executable
-        or cwd != module
-        or request.timeout_seconds != 600
+        or not request_launch_is_closed(request, project, module)
         or not request.selectors
         or len(request.selectors) != len(set(request.selectors))
         or set(request.environment_labels) - SAFE_ENVIRONMENT_LABELS
@@ -2473,7 +2807,7 @@ def _validate_closed_execution_request(
         or target.get("command") != request.adapter_id
     ):
         raise ValueError("invalid execution receipt")
-    expected_reports, expected_argv = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors)
+    expected_reports, expected_argv = command_for_request(request)
     expected_target = {
         PYTEST: ("python", "pytest", "pytest"),
         MAVEN: ("java", "junit5", "maven"),
@@ -2526,132 +2860,39 @@ def _validate_factual_receipt(
         }, attempt["policy_profile"])
         if dict(receipt) != dict(expected):
             raise ValueError("invalid structured result")
+    elif kind.startswith(("review-snapshot-", "review-plan-", "review-part-boundary-", "review-aggregate-")):
+        if not identity_matches:
+            raise ValueError("foreign review receipt")
+        _validate_review_receipt(project, root, state, attempt, kind, receipt, common)
     elif kind == "reviewer-session-boundary":
-        expected_keys = common | {
-            "session_id", "canonical_branch_digest", "package_digest", "generator_role", "reviewer_role",
-            "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "context_budget_bytes",
-        }
-        isolation = receipt.get("host_isolation")
-        isolation_body = {key: value for key, value in isolation.items() if key != "evidence_digest"} if isinstance(isolation, Mapping) else {}
-        isolation_digest = "sha256:" + hashlib.sha256(json.dumps(isolation_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-        if (
-            set(receipt) != expected_keys
-            or not identity_matches
-            or not _safe_label(receipt.get("session_id"))
-            or not _DIGEST.fullmatch(receipt.get("canonical_branch_digest", ""))
-            or not _DIGEST.fullmatch(receipt.get("package_digest", ""))
-            or type(receipt.get("context_budget_bytes")) is not int
-            or receipt.get("context_budget_bytes") < 1
-            or receipt.get("generator_role") != "generator"
-            or receipt.get("reviewer_role") != "canonical-reviewer"
-            or not _safe_label(receipt.get("generator_invocation_id"))
-            or not _safe_label(receipt.get("reviewer_invocation_id"))
-            or not isinstance(isolation, Mapping)
-            or set(isolation) != {"fresh_context", "distinct_invocations", "role_policy", "evidence_digest"}
-            or not isinstance(isolation.get("fresh_context"), bool)
-            or not isinstance(isolation.get("distinct_invocations"), bool)
-            or isolation.get("distinct_invocations") != (receipt.get("generator_invocation_id") != receipt.get("reviewer_invocation_id"))
-            or isolation.get("role_policy") != "canonical-reviewer-v1"
-            or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
-            or isolation.get("evidence_digest") != isolation_digest
-        ):
+        plan = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "review-plan-canonical", "ARTIFACT_READ_BACK")["record"]["plan"]
+        snapshot = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]
+        package = snapshot["package_binding"]
+        if (set(receipt) != common | {"session_id", "canonical_branch_digest", "package_digest", "plan_digest"}
+                or not identity_matches or not _safe_label(receipt.get("session_id"))
+                or receipt.get("plan_digest") != plan["digest"]
+                or receipt.get("canonical_branch_digest") != package["candidate_digest"]
+                or receipt.get("package_digest") != package["package_digest"]):
             raise ValueError("invalid reviewer session boundary")
     elif kind == "effective-canonical":
         expected_keys = common | {"document", "document_digest", "effective_bundle_receipt", "effective_bundle_receipt_digest", "reviewer_session_digest"}
         document = receipt.get("document")
         bundle = receipt.get("effective_bundle_receipt")
-        ledger = None
-        terminal_reviewer = None
         try:
             from tools.canonical_document import document_sha256, validate_canonical_document
             from tools.revision_selection import effective_review_is_bound
-            from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
-
-            reviewer_digest = str(receipt.get("reviewer_session_digest", ""))
-            ledger_target = root / "reviewer-session-ledgers" / str(attempt["attempt_id"]) / (reviewer_digest.removeprefix("sha256:") + ".json")
-            ledger_bytes = read_confined_bytes(project, root, ledger_target)
-            ledger = loads_json_strict(ledger_bytes.decode("utf-8")) if ledger_bytes is not None else None
-            terminal_reviewer = _terminal_reviewer_evidence_with_state(
-                project, root, state, str(attempt["attempt_id"]),
-            )
-            reviewer_boundary = _read_attempt_receipt_with_state(
-                project, root, state, str(attempt["attempt_id"]), "reviewer-session-boundary",
-                "ARTIFACT_READ_BACK",
-            )["record"]
-            package_binding = ledger.get("package_binding") if isinstance(ledger, Mapping) else None
-            reviewer_responses = [
-                event for event in state["events"]
-                if event.get("attempt_id") == attempt["attempt_id"]
-                and event.get("stage_instance_id") == "tc-reviewer:canonical"
-                and event.get("event_type") == "MODEL_RESPONSE_RECEIVED"
-            ]
-            reviewer_publication = _read_model_stage_artifact_with_state(
-                project, root, state, str(attempt["attempt_id"]), "tc-reviewer:canonical",
-                str(reviewer_responses[0].get("artifact_digest", "")),
-            ) if len(reviewer_responses) == 1 else None
-            reviewer_output = reviewer_publication.get("artifact") if isinstance(reviewer_publication, Mapping) else None
-            report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
-            successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
-            verdict_event = next(
-                (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
-                None,
-            ) if isinstance(ledger, Mapping) else None
-            review_bound = (
-                isinstance(package_binding, Mapping)
-                and effective_review_is_bound(
-                    package_binding.get("candidate_digest"),
-                    dict(document) if isinstance(document, Mapping) else document,
-                    dict(report) if isinstance(report, Mapping) else report,
-                    dict(successor) if isinstance(successor, Mapping) else successor,
-                    dict(verdict_event) if isinstance(verdict_event, Mapping) else verdict_event,
-                )
-            )
-            ledger_events = [event for event in state["events"] if event.get("attempt_id") == attempt["attempt_id"] and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == reviewer_digest]
-            ledger_body = {key: value for key, value in ledger.items() if key != "digest"} if isinstance(ledger, Mapping) else {}
-            canonical_ledger_bytes = json.dumps(ledger, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") if isinstance(ledger, Mapping) else None
-            canonical_ledger_digest = "sha256:" + hashlib.sha256(json.dumps(ledger_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-            boundary_events = [
-                event for event in state["events"]
-                if event.get("attempt_id") == attempt["attempt_id"]
-                and event.get("artifact_digest") == reviewer_boundary.get("digest")
-                and event.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-            ]
-            ledger_bound = (
-                isinstance(ledger, Mapping)
-                and isinstance(reviewer_boundary, Mapping)
-                and isinstance(package_binding, Mapping)
-                and ledger.get("digest") == reviewer_digest
-                and ledger.get("digest") == canonical_ledger_digest
-                and ledger_bytes == canonical_ledger_bytes
-                and not schema_diagnostics(dict(ledger), _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT)
-                and [event["event_type"] for event in ledger_events] == ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-                and [event["event_type"] for event in boundary_events] == ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-                and ledger.get("boundary_digest") == reviewer_boundary.get("digest")
-                and ledger.get("session_id") == reviewer_boundary.get("session_id")
-                and ledger.get("generator_role") == reviewer_boundary.get("generator_role")
-                and ledger.get("reviewer_role") == reviewer_boundary.get("reviewer_role")
-                and ledger.get("generator_invocation_id") == reviewer_boundary.get("generator_invocation_id")
-                and ledger.get("reviewer_invocation_id") == reviewer_boundary.get("reviewer_invocation_id")
-                and ledger.get("host_isolation") == reviewer_boundary.get("host_isolation")
-                and ledger.get("context_budget_bytes") == reviewer_boundary.get("context_budget_bytes")
-                and package_binding.get("candidate_digest") == reviewer_boundary.get("canonical_branch_digest")
-                and package_binding.get("package_digest") == reviewer_boundary.get("package_digest")
-                and ledger.get("status") == "COMPLETED"
-                and terminal_reviewer.get("digest") == reviewer_digest
-                and terminal_reviewer.get("authoritative_verdict") == "ACCEPTED"
-                and isinstance(ledger.get("host_isolation"), Mapping)
-                and ledger["host_isolation"].get("fresh_context") is True
-                and ledger["host_isolation"].get("distinct_invocations") is True
-                and ledger["host_isolation"].get("role_policy") == "canonical-reviewer-v1"
-                and isinstance(ledger.get("events"), list)
-                and sum(event.get("event_type") == "AUTHORITATIVE_VERDICT" for event in ledger["events"] if isinstance(event, Mapping)) == 1
-                and next(event for event in ledger["events"] if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT").get("verdict") == "ACCEPTED"
-                and bool(ledger["events"])
-                and isinstance(ledger["events"][-1], Mapping)
-                and ledger["events"][-1].get("event_type") == "REVIEW_SESSION_COMPLETED"
-            )
-        except (ImportError, UnicodeDecodeError, StrictJsonError, ValueError, OutputConfinementError):
-            ledger_bound = False
+            ledger = _read_reviewer_session_ledger_with_state(project, root, state, str(attempt["attempt_id"]))
+            aggregate = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "review-aggregate-canonical", "ARTIFACT_READ_BACK")["record"]
+            boundary = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
+            output = aggregate["output"]
+            report = output["artifacts"]["validation_report"]
+            verdict_event = next((event for event in ledger["events"] if event["event_type"] == "AUTHORITATIVE_VERDICT"), None)
+            review_bound = effective_review_is_bound(boundary["canonical_branch_digest"], dict(document), report, output["artifacts"].get("successor_document"), verdict_event)
+            ledger_bound = (receipt.get("reviewer_session_digest") == ledger["digest"]
+                            and ledger["status"] == "COMPLETED" and aggregate["aggregate"]["complete"]
+                            and reviewer_lifecycle_projection(ledger)["authoritative_verdict"] == "ACCEPTED")
+        except (KeyError, TypeError, ValueError, OutputConfinementError):
+            ledger_bound = review_bound = False
         normalized_bundle_keys = ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")
         normalized_bundle = {key: bundle.get(key) for key in normalized_bundle_keys} if isinstance(bundle, Mapping) else {}
         bundle_digest = "sha256:" + hashlib.sha256(_canonical_bytes(normalized_bundle)).hexdigest()
@@ -2666,7 +2907,7 @@ def _validate_factual_receipt(
             or bundle.get("document_id") != document.get("document_id")
             or bundle.get("revision") != document.get("revision")
             or bundle.get("document_sha256") != receipt.get("document_digest")
-            or bundle.get("csv_profile") != "zephyr-scale-step-row-24-v4"
+            or bundle.get("csv_profile") not in {"zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4"}
             or any(not isinstance(bundle.get(key), str) or not bundle.get(key) for key in ("json_path", "preview_path", "csv_path"))
             or any(not _DIGEST.fullmatch(str(bundle.get(key, ""))) for key in ("document_sha256", "preview_sha256", "csv_sha256"))
             or receipt.get("effective_bundle_receipt_digest") != bundle_digest
@@ -2676,40 +2917,19 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid effective canonical receipt")
     elif kind in {"automation-review-boundary-r1", "automation-review-boundary-r2"}:
-        expected_keys = common | {
-            "automation_digest", "automation_revision", "reviewer_session_id", "generator_invocation_id",
-            "reviewer_invocation_id", "role_policy", "host_isolation", "effective_canonical_digest", "effective_bundle_receipt_digest",
-        }
-        isolation = receipt.get("host_isolation")
-        isolation_body = {key: value for key, value in isolation.items() if key != "evidence_digest"} if isinstance(isolation, Mapping) else {}
-        isolation_digest = "sha256:" + hashlib.sha256(json.dumps(isolation_body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-        try:
-            effective = _read_effective_canonical_with_state(
-                project, root, state, str(attempt["attempt_id"]),
-            )
-        except (KeyError, TypeError, ValueError):
-            effective = None
-        if (
-            set(receipt) != expected_keys
-            or not identity_matches
-            or not _DIGEST.fullmatch(receipt.get("automation_digest", ""))
-            or type(receipt.get("automation_revision")) is not int
-            or receipt.get("automation_revision") != int(kind[-1])
-            or not all(_safe_label(receipt.get(key)) for key in ("reviewer_session_id", "generator_invocation_id", "reviewer_invocation_id"))
-            or receipt.get("generator_invocation_id") == receipt.get("reviewer_invocation_id")
-            or receipt.get("role_policy") != "autotest-static-reviewer-v1"
-            or not _DIGEST.fullmatch(receipt.get("effective_canonical_digest", ""))
-            or not _DIGEST.fullmatch(receipt.get("effective_bundle_receipt_digest", ""))
-            or not isinstance(effective, Mapping)
-            or receipt.get("effective_canonical_digest") != effective.get("document_digest")
-            or receipt.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest")
-            or not isinstance(isolation, Mapping)
-            or set(isolation) != {"fresh_context", "distinct_invocations", "evidence_digest"}
-            or isolation.get("fresh_context") is not True
-            or isolation.get("distinct_invocations") is not True
-            or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
-            or isolation.get("evidence_digest") != isolation_digest
-        ):
+        key = kind[-2:]
+        plan = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), f"review-plan-{key}", "ARTIFACT_READ_BACK")["record"]["plan"]
+        snapshot = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+        automation = snapshot["automation"]
+        effective = _read_effective_canonical_with_state(project, root, state, str(attempt["attempt_id"]))
+        from tools.review_parts import review_digest
+        if (set(receipt) != common | {"automation_digest", "automation_revision", "reviewer_session_id", "effective_canonical_digest", "effective_bundle_receipt_digest", "plan_digest"}
+                or not identity_matches or not _safe_label(receipt.get("reviewer_session_id"))
+                or receipt.get("automation_revision") != int(key[1])
+                or receipt.get("automation_digest") != review_digest(automation)
+                or receipt.get("plan_digest") != plan["digest"]
+                or receipt.get("effective_canonical_digest") != effective["document_digest"]
+                or receipt.get("effective_bundle_receipt_digest") != effective["effective_bundle_receipt_digest"]):
             raise ValueError("invalid automation review boundary")
     elif kind == "execution-inputs":
         from tools.automation_validation import (
@@ -2836,8 +3056,15 @@ def _validate_factual_receipt(
             if request is not None:
                 _validate_closed_execution_request(project, root, attempt, payload, request, delta)
         else:
-            if payload.get("verdict") not in {"PASS", "FAIL", "UNKNOWN"} or request is None:
+            if payload.get("verdict") not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE"} or request is None:
                 raise ValueError("invalid execution receipt")
+            if payload.get("verdict") == "NOT_RUNNABLE":
+                # A started run is NOT_RUNNABLE only when its one process outcome proves
+                # the reviewed tests did not run (launch failure, compile/collect gate, deselection).
+                from tools.run_tests import _not_runnable_process_kind
+
+                if _not_runnable_process_kind(payload.get("execution_evidence") or (), payload.get("process_evidence") or ()) is None:
+                    raise ValueError("invalid execution receipt")
             _validate_closed_execution_request(project, root, attempt, payload, request, delta)
             if len(starts) != 1 or starts[0].get("artifact_digest") != request_digest(request):
                 raise ValueError("invalid execution receipt")
@@ -3058,6 +3285,7 @@ def _validate_factual_receipt(
                             str(verification),
                             str(expected.get("materialization")),
                             retain_pass=verification == "PASS" and actual.get("requested_disposition") == "RETAINED",
+                            keep_deselected=verification == "NOT_RUNNABLE" and actual.get("requested_disposition") == "RETAINED",
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-plan receipt") from error
@@ -3092,6 +3320,7 @@ def _validate_factual_receipt(
                         operation, requested, outcomes = resolve_disposition_policy(
                             str(verification), str(plan_row.get("materialization")),
                             retain_pass=verification == "PASS" and plan_row.get("requested_disposition") == "RETAINED",
+                            keep_deselected=verification == "NOT_RUNNABLE" and plan_row.get("requested_disposition") == "RETAINED",
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-receipt receipt") from error
@@ -3151,7 +3380,34 @@ def publish_attempt_receipt(
     return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": data, "digest": receipt["digest"], "record": receipt, "created": created, "installed_identity": installed_identity}
 
 
+@_operation_memo
 def _read_attempt_receipt_with_state(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str,
+    kind: str, event_type: str,
+) -> Mapping[str, Any]:
+    # Validate shared immutable review dependencies once per root readback. Never
+    # retain this memo between operations; every later admission re-reads evidence.
+    memo = _REVIEW_READBACKS.get()
+    token = _REVIEW_READBACKS.set({}) if memo is None else None
+    memo = _REVIEW_READBACKS.get()
+    key = (str(root), id(state), attempt_id, kind, event_type)
+    cacheable = kind.startswith(("review-", "automation-review-boundary-")) or kind in {"reviewer-session-boundary", "effective-canonical"}
+    try:
+        if cacheable and key in memo and memo[key][0] is state:
+            result = memo[key][1]
+            if read_confined_bytes(project, root, _receipt_target(root, attempt_id, kind)) != result["bytes"]:
+                raise ValueError("factual receipt read-back mismatch")
+            return copy.deepcopy(result)
+        result = _read_attempt_receipt_uncached(project, root, state, attempt_id, kind, event_type)
+        if cacheable:
+            memo[key] = (state, copy.deepcopy(result))
+        return result
+    finally:
+        if token is not None:
+            _REVIEW_READBACKS.reset(token)
+
+
+def _read_attempt_receipt_uncached(
     project: Path,
     root: Path,
     state: Mapping[str, Any],
@@ -3500,6 +3756,7 @@ def read_resume_validation_if_present(
     return _recover_attempt_receipt_events(root, attempt_id, "resume-validation")["record"]
 
 
+@_operation_memo
 def _read_effective_canonical_with_state(
     project: Path,
     root: Path,
@@ -3581,6 +3838,484 @@ def recover_phase5_receipt_events(run_root: Path, attempt_id: str, kind: str) ->
 def recover_execution_receipt_events(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Finish binding an installed execution receipt without replaying execution."""
     return _recover_attempt_receipt_events(run_root, attempt_id, "execution-receipt")
+
+
+def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], common: set[str]) -> None:
+    from tools.review_parts import (aggregate_review_parts, build_review_plan, part_input,
+                                    review_digest, review_output, review_scopes, validate_scope_inputs)
+    from tools.project_inventory import read_execution_baseline
+    attempt_id = str(attempt["attempt_id"])
+    if kind.startswith("review-snapshot-"):
+        from tools.canonical_document import require_valid_canonical_document
+        key = kind.removeprefix("review-snapshot-")
+        payload = receipt.get("payload")
+        if set(receipt) != common | {"payload"} or not isinstance(payload, dict) or set(payload) != {"document", "automation", "sources", "contexts", "requirements_binding", "package_binding"}:
+            raise ValueError("invalid review snapshot")
+        require_valid_canonical_document(payload["document"])
+        baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"].removeprefix("sha256:") + ".json"))
+        binding = payload["requirements_binding"]
+        if (not isinstance(binding, dict) or set(binding) != {"module_id", "selected_target", "docs"}
+                or review_digest(binding) != baseline["requirements"]["digest"]
+                or not payload["sources"]
+                or binding["docs"] != [{"path": item["path"], "sha256": item["sha256"]} for item in payload["sources"]]):
+            raise ValueError("original requirements do not match the frozen baseline")
+        inventory = _frozen_inventory(project, root, baseline["inventory_digest"], state["events"])
+        files = {item["project_path"]: item for item in inventory["files"]}
+        for source in [*payload["sources"], *payload["contexts"]]:
+            if (not isinstance(source, dict) or set(source) != {"path", "sha256", "content"}
+                    or not isinstance(source["content"], str) or not source["content"]
+                    or "sha256:" + hashlib.sha256(source["content"].encode("utf-8")).hexdigest() != source["sha256"]):
+                raise ValueError("original review source bytes differ")
+        if len({item["path"] for item in payload["sources"]}) != len(payload["sources"]) or any(files.get(item["path"], {}).get("content_digest") != item["sha256"] for item in payload["contexts"]):
+            raise ValueError("review source/context ownership differs")
+        if key == "canonical":
+            package = payload["package_binding"]
+            if (payload["automation"] is not None or not isinstance(package, dict)
+                    or package.get("candidate_digest") != review_digest(payload["document"])
+                    or package.get("package_digest") != review_digest({key: value for key, value in package.items() if key != "package_digest"})
+                    or not any(event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == "assembly" and event["event_type"] == "CANDIDATE_PUBLISHED" and event["artifact_digest"] == package["candidate_digest"] for event in state["events"])):
+                raise ValueError("review snapshot has no exact published candidate")
+        else:
+            from tools.automation_validation import validate_automation_artifact
+            automation = payload["automation"]
+            effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
+            if (effective["document"] != payload["document"] or payload["package_binding"] is not None
+                    or validate_automation_artifact(automation, payload["document"])
+                    or automation["artifacts"]["automation_revision"] != int(key[1])
+                    or automation["artifacts"]["source"]["effective_bundle_receipt_digest"] != effective["effective_bundle_receipt_digest"]
+                    or _read_model_stage_artifact_with_state(project, root, state, attempt_id, f"tc-to-autotest:{key}", review_digest(automation))["artifact"] != automation):
+                raise ValueError("automation review snapshot is unbound")
+        return
+    if kind.startswith("review-plan-"):
+        key = kind.removeprefix("review-plan-")
+        plan = receipt.get("plan")
+        snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]
+        if set(receipt) != common | {"plan"} or not isinstance(plan, dict):
+            raise ValueError("invalid review plan receipt")
+        specification = plan["snapshot"]
+        if (specification["snapshot_digest"] != snapshot["digest"]
+                or specification["review_kind"] != ("tc-reviewer" if key == "canonical" else "autotest-reviewer")
+                or specification["revision"] != (1 if key == "canonical" else int(key[1]))):
+            raise ValueError("review plan snapshot differs")
+        # Deriving the plan again from the snapshot is the expensive proof that no scope was
+        # dropped.  Snapshot and plan are immutable and content-addressed, so the proof is
+        # done once per process for one (snapshot, plan) pair, not once per review part.
+        proof = (snapshot["digest"], review_digest(plan))
+        if proof not in _VERIFIED_REVIEW_PLANS:
+            scopes = review_scopes(snapshot["payload"], source_chunk_bytes=max(1, (plan["input_byte_budget"] - specification["response_reserve_bytes"]) // 4))
+            if plan != build_review_plan(specification, scopes, input_byte_budget=plan["input_byte_budget"]):
+                raise ValueError("review plan omits or changes required scope")
+            if len(_VERIFIED_REVIEW_PLANS) >= 256:
+                _VERIFIED_REVIEW_PLANS.clear()
+            _VERIFIED_REVIEW_PLANS.add(proof)
+        return
+    if kind.startswith("review-part-boundary-"):
+        key, part_token = kind.removeprefix("review-part-boundary-").split("-part-", 1)
+        part_id, try_number = _review_part_token("part-" + part_token)
+        stage = _review_stage(key, part_id, try_number)
+        plan, part = _review_part_definition(root, state, attempt_id, stage)
+        isolation = receipt.get("host_isolation")
+        expected_keys = common | {"plan_digest", "part_id", "input_digest", "reviewer_invocation_id", "model_id", "host_isolation", "cli", "cli_version", "settings"}
+        if (set(receipt) != expected_keys or receipt.get("plan_digest") != plan["digest"]
+                or receipt.get("part_id") != part_id or receipt.get("input_digest") != review_digest(part_input(plan, part))
+                or not _safe_model_label(receipt.get("reviewer_invocation_id"))
+                or receipt.get("model_id") is not None and not _safe_model_label(receipt["model_id"])
+                or any(not isinstance(receipt.get(field), str) or not receipt[field] for field in ("cli", "cli_version", "settings"))
+                or not isinstance(isolation, dict) or set(isolation) != {"fresh_context", "distinct_invocations", "role_policy", "evidence_digest"}
+                or isolation.get("fresh_context") is not True or isolation.get("distinct_invocations") is not True
+                or isolation.get("role_policy") != _MODEL_STAGE_REGISTRY[stage.split(":")[0]][1]
+                or isolation.get("evidence_digest") != review_digest({field: value for field, value in isolation.items() if field != "evidence_digest"})):
+            raise ValueError("invalid review part isolation boundary")
+        for event in state["events"]:
+            if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") != stage:
+                request = _read_artifact(project, root, _model_request_target(root, attempt_id, event["artifact_digest"]), "model request")
+                if request.get("invocation_id") == receipt["reviewer_invocation_id"]:
+                    raise ValueError("review invocation reuses another context")
+        return
+    if kind.startswith("review-aggregate-"):
+        key = kind.removeprefix("review-aggregate-")
+        if set(receipt) != common | {"plan_digest", "aggregate", "output"}:
+            raise ValueError("invalid review aggregate")
+        plan = _review_plan_with_state(root, state, attempt_id, key)
+        results = _review_results(root, state, attempt_id, key, plan)
+        aggregate = aggregate_review_parts(plan, results)
+        snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=key)
+        if receipt["plan_digest"] != plan["digest"] or receipt["aggregate"] != aggregate or receipt["output"] != review_output(snapshot, aggregate, ledger["session_id"]):
+            raise ValueError("review aggregate differs from exact durable part evidence")
+        if ledger["status"] != "WAITING":
+            from tools.revision_selection import reviewer_verdict_is_bound
+            report = receipt["output"]["artifacts"]["validation_report" if key == "canonical" else "autotest_review"]
+            verdicts = [event for event in ledger["events"] if event["event_type"] == "AUTHORITATIVE_VERDICT"]
+            if (ledger["status"] == "COMPLETED" and (not aggregate["complete"] or len(verdicts) != 1 or not reviewer_verdict_is_bound(report, verdicts[0]))
+                    or ledger["status"] == "ABORTED" and aggregate["complete"]):
+                raise ValueError("review aggregate terminal verdict differs")
+        from tools.schema_validation import schema_diagnostics
+        schema = "tc-reviewer-output.schema.json" if key == "canonical" else "autotest-reviewer-output.schema.json"
+        if schema_diagnostics(receipt["output"], _SCHEMA_ROOT / schema, _PACK_ROOT):
+            raise ValueError("invalid aggregate output schema")
+        return
+    raise ValueError("unsupported review receipt")
+
+
+def _review_part_token(token: str) -> tuple[str, int]:
+    """Split ``part-000001`` / ``part-000001-try2`` into the plan part id and its invocation try."""
+    match = re.fullmatch(r"(part-[0-9]{6})(?:-try([23]))?", token)
+    if match is None:
+        raise ValueError("unsupported active review protocol; start a fresh attempt")
+    return match[1], int(match[2] or 1)
+
+
+def _review_key(stage_instance_id: str) -> str:
+    fields = stage_instance_id.split(":")
+    if len(fields) != 3 or fields[1] not in {"canonical", "r1", "r2"}:
+        raise ValueError("unsupported active review protocol; start a fresh attempt")
+    _review_part_token(fields[2])
+    return fields[1]
+
+
+def _review_stage(review_key: str, part_id: str, try_number: int = 1) -> str:
+    suffix = "" if try_number == 1 else f"-try{try_number}"
+    return f"{'tc-reviewer' if review_key == 'canonical' else 'autotest-reviewer'}:{review_key}:{part_id}{suffix}"
+
+
+def _review_boundary_kind(review_key: str) -> str:
+    return "reviewer-session-boundary" if review_key == "canonical" else f"automation-review-boundary-{review_key}"
+
+
+def _review_part_boundary_kind(review_key: str, part_id: str, try_number: int = 1) -> str:
+    return f"review-part-boundary-{review_key}-{part_id}" + ("" if try_number == 1 else f"-try{try_number}")
+
+
+def _review_part_tries(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str, part_id: str) -> list[dict[str, Any]]:
+    """Every journalled invocation try of one part: request, response and whether it failed."""
+    tries: list[dict[str, Any]] = []
+    for number in range(1, _MAX_REVIEW_PART_TRIES + 1):
+        stage = _review_stage(review_key, part_id, number)
+        events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage]
+        requests = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
+        responses = [event for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+        if len(responses) > 1:
+            raise ValueError("duplicate review part response")
+        if not requests:
+            break
+        row: dict[str, Any] = {"try": number, "stage": stage, "requested": True, "responded": bool(responses), "failure": None, "result": None}
+        if responses:
+            try:
+                artifact = dict(_read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, responses[0]["artifact_digest"])["artifact"])
+            except (KeyError, TypeError, ValueError):
+                artifact = {"part_id": part_id, "error": "REVIEW_PART_UNREADABLE"}
+            if isinstance(artifact.get("invocation_failure"), Mapping):
+                row["failure"] = dict(artifact["invocation_failure"])
+            else:
+                row["result"] = artifact
+        tries.append(row)
+        if row["failure"] is None:
+            break
+    return tries
+
+
+def read_review_plan(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:
+    """Read the immutable initial plan; additions live only in its append-only ledger."""
+    return dict(read_attempt_receipt(run_root, attempt_id, f"review-plan-{review_key}", "ARTIFACT_READ_BACK")["record"]["plan"])
+
+
+def _review_plan_with_state(root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str) -> dict[str, Any]:
+    project, root = _run_root(root)
+    plan = dict(_read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-plan-{review_key}", "ARTIFACT_READ_BACK")["record"]["plan"])
+    ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=review_key)
+    plan["additions"] = [event["part"] for event in ledger["events"] if event["event_type"] == "REVIEW_CHECK_ADDED"]
+    plan["unavailable"] = {event["part_id"]: event["reason"] for event in ledger["events"] if event["event_type"] == "REVIEW_PART_BLOCKED"}
+    return plan
+
+
+def _review_block_classes(ledger: Mapping[str, Any]) -> dict[str, str]:
+    """Failure class per blocked part; ledgers written before the class existed count as CONTENT."""
+    return {event["part_id"]: event.get("failure_class", "CONTENT") for event in ledger["events"] if event["event_type"] == "REVIEW_PART_BLOCKED"}
+
+
+def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str) -> tuple[dict, dict]:
+    from tools.review_parts import validate_review_plan
+    plan = _review_plan_with_state(root, state, attempt_id, _review_key(stage))
+    if validate_review_plan(plan):
+        raise ValueError("invalid durable review plan")
+    part = next((part for part in [*plan["parts"], *plan["additions"]] if part["part_id"] == _review_part_token(stage.rsplit(":", 1)[1])[0]), None)
+    if part is None or part["blocked_reason"] or part["part_id"] in plan["unavailable"]:
+        raise ValueError("undeclared or blocked review part")
+    return plan, part
+
+
+def _validate_review_request(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, invocation_id: str, inputs: Sequence[str], cutoff: int, *, model_id: str | None) -> None:
+    from tools.review_parts import part_input, review_digest
+    review_key = _review_key(stage)
+    plan, part = _review_part_definition(root, state, attempt_id, stage)
+    try_number = _review_part_token(stage.rsplit(":", 1)[1])[1]
+    boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, _review_part_boundary_kind(review_key, part["part_id"], try_number), "ARTIFACT_READ_BACK")["record"]
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+    if try_number > 1:
+        # A new invocation of the same part is allowed only after the previous try was recorded as failed.
+        earlier = [row for row in _review_part_tries(project, root, {**state, "events": [event for event in state["events"] if event["seq"] < cutoff]}, attempt_id, review_key, part["part_id"]) if row["try"] < try_number]
+        if len(earlier) != try_number - 1 or any(row["failure"] is None for row in earlier):
+            raise ValueError("review part retry requires its recorded failed invocation")
+    prior_boundary = [event for event in events if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("artifact_digest") == boundary["digest"] and event["seq"] < cutoff]
+    reviews = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage and event["seq"] < cutoff]
+    if (list(inputs) != [plan["snapshot"]["snapshot_digest"], plan["digest"], review_digest(part_input(plan, part)), boundary["digest"]]
+            or invocation_id != boundary["reviewer_invocation_id"] or model_id != boundary["model_id"] or len(prior_boundary) != 1 or len(reviews) != 1):
+        raise ValueError("review request does not bind exact prior part boundary")
+    snapshot = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+    candidate_digest = review_digest(snapshot["automation"] or snapshot["document"])
+    if reviews[0]["artifact_digest"] != candidate_digest:
+        raise ValueError("review request candidate differs")
+    for previous in [*plan["parts"], *plan["additions"]]:
+        if previous["part_id"] == part["part_id"]:
+            break
+        if previous["blocked_reason"] or previous["part_id"] in plan["unavailable"]:
+            continue
+        previous_stages = {_review_stage(review_key, previous["part_id"], number) for number in range(1, _MAX_REVIEW_PART_TRIES + 1)}
+        if not any(event.get("stage_instance_id") in previous_stages and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event["seq"] < cutoff for event in events):
+            raise ValueError("review parts must run sequentially")
+
+
+def _validate_review_response(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, value: Mapping[str, Any]) -> None:
+    from tools.review_parts import validate_review_part
+    plan, part = _review_part_definition(root, state, attempt_id, stage)
+    if validate_review_part(plan, part, value):
+        raise ValueError("model response does not cover its exact declared review part")
+
+
+def _review_results(root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str, plan: Mapping[str, Any]) -> list[dict]:
+    project, root = _run_root(root)
+    results = []
+    for part in [*plan["parts"], *plan.get("additions", [])]:
+        # Failed invocation tries are journal facts, not assessments: only a try that
+        # produced a real model output contributes a result.
+        for row in _review_part_tries(project, root, state, attempt_id, review_key, part["part_id"]):
+            if row["result"] is not None:
+                results.append(row["result"])
+    return results
+
+
+def prepare_review(run_root: Path, attempt_id: str, payload: Mapping[str, Any], *, input_byte_budget: int, response_reserve_bytes: int, instructions: str, session_id: str) -> dict[str, Any]:
+    """Freeze exact source/candidate bytes and one deterministic 1/N review plan."""
+    from tools.review_parts import build_review_plan, review_scopes
+    automation = payload.get("automation")
+    key = "canonical" if automation is None else f"r{automation['artifacts']['automation_revision']}"
+    snapshot = _publish_bound_attempt_receipt(run_root, attempt_id, f"review-snapshot-{key}", {"payload": dict(payload)})["record"]
+    specification = {"review_kind": "tc-reviewer" if key == "canonical" else "autotest-reviewer", "revision": 1 if key == "canonical" else int(key[1]),
+                     "snapshot_digest": snapshot["digest"], "instructions": instructions, "response_reserve_bytes": response_reserve_bytes}
+    scopes = review_scopes(payload, source_chunk_bytes=max(1, (input_byte_budget - response_reserve_bytes) // 4))
+    plan = build_review_plan(specification, scopes, input_byte_budget=input_byte_budget)
+    _publish_bound_attempt_receipt(run_root, attempt_id, f"review-plan-{key}", {"plan": plan})
+    if key == "canonical":
+        facts = {"session_id": session_id, "canonical_branch_digest": payload["package_binding"]["candidate_digest"],
+                 "package_digest": payload["package_binding"]["package_digest"], "plan_digest": plan["digest"]}
+        boundary = _publish_bound_attempt_receipt(run_root, attempt_id, "reviewer-session-boundary", facts)["record"]
+    else:
+        generated = automation["artifacts"]
+        from tools.review_parts import review_digest
+        facts = {"reviewer_session_id": session_id, "automation_digest": review_digest(automation), "automation_revision": generated["automation_revision"],
+                 "effective_canonical_digest": generated["source"]["source_digest"], "effective_bundle_receipt_digest": generated["source"]["effective_bundle_receipt_digest"], "plan_digest": plan["digest"]}
+        boundary = open_automation_review_boundary(run_root, attempt_id, facts)["record"]
+    session = {"schema_version": "2.0.0", "session_id": session_id, "review_key": key,
+               "boundary_digest": boundary["digest"], "plan_digest": plan["digest"],
+               "events": [{"ordinal": 1, "event_type": "REVIEW_SESSION_STARTED"}], "status": "WAITING"}
+    from tools.review_parts import review_digest
+    session["digest"] = review_digest(session)
+    try:
+        existing = read_reviewer_session_ledger(run_root, attempt_id, review_key=key)
+    except ValueError:
+        publish_reviewer_session_ledger(run_root, attempt_id, session)
+    else:
+        if any(existing[field] != session[field] for field in ("session_id", "review_key", "boundary_digest", "plan_digest")):
+            raise ValueError("review resume snapshot or settings differ")
+    return {"plan": plan, "boundary": boundary, "review_key": key}
+
+
+def next_review_part(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any] | None:
+    """Register discovered cross checks and return the next available bounded input."""
+    from tools.review_parts import additional_review_parts, part_input, review_digest
+    state = derive_state(run_root)
+    plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
+    session = dict(read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key))
+    if session["status"] != "WAITING":
+        return None
+    results = _review_results(run_root, state, attempt_id, review_key, plan)
+    additions = additional_review_parts(plan, results)
+    if additions:
+        for part in additions:
+            session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "REVIEW_CHECK_ADDED", "part": part})
+        session["digest"] = review_digest({key: value for key, value in session.items() if key != "digest"})
+        publish_reviewer_session_ledger(run_root, attempt_id, session)
+        plan["additions"].extend(additions)
+    completed = {result["part_id"] for result in results}
+    for part in [*plan["parts"], *plan["additions"]]:
+        if part["part_id"] not in completed and part["blocked_reason"] is None and part["part_id"] not in plan["unavailable"]:
+            return part_input(plan, part)
+    return None
+
+
+def _append_review_ledger_event(run_root: Path, attempt_id: str, review_key: str, event: Mapping[str, Any]) -> Mapping[str, Any]:
+    from tools.review_parts import review_digest
+    session = dict(read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key))
+    session["events"] = [*session["events"], {"ordinal": len(session["events"]) + 1, **dict(event)}]
+    session["digest"] = review_digest({key: value for key, value in session.items() if key != "digest"})
+    return publish_reviewer_session_ledger(run_root, attempt_id, session)
+
+
+def block_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: str, reason: str, *, failure_class: str = "CONTENT") -> Mapping[str, Any]:
+    """Record a technical gap without inventing a model response or stopping siblings.
+
+    ``failure_class`` says whether the host could not reach the reviewer
+    (``TRANSPORT``) or the reviewer could not produce a usable assessment
+    (``CONTENT``); only the latter is a content defect.
+    """
+    if failure_class not in _REVIEW_FAILURE_CLASSES:
+        raise ValueError("review failure class must be TRANSPORT or CONTENT")
+    next_part = next_review_part(run_root, attempt_id, review_key)
+    if next_part is None or next_part["part_id"] != part_id or not isinstance(reason, str) or not reason.strip():
+        raise ValueError("only the next unchecked part can be blocked with an explicit reason")
+    return _append_review_ledger_event(run_root, attempt_id, review_key, {"event_type": "REVIEW_PART_BLOCKED", "part_id": part_id, "reason": reason, "failure_class": failure_class})
+
+
+def open_review_part(run_root: Path, attempt_id: str, review_key: str, host: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind one real fresh invocation before the host sends its exact input."""
+    from tools.review_parts import review_digest
+    envelope = next_review_part(run_root, attempt_id, review_key)
+    if envelope is None:
+        raise ValueError("no review part awaits invocation")
+    part_id = envelope["part_id"]
+    project, root = _run_root(run_root)
+    state = derive_state(run_root)
+    tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
+    # One open request per declared part, sequentially.  Resume reads the original
+    # boundary/request; a replacement invocation exists only after the previous try
+    # was recorded as failed (fail_review_part), at most _MAX_REVIEW_PART_TRIES in total.
+    if tries and tries[-1]["failure"] is None:
+        raise ValueError("review part already requested; resume the existing invocation")
+    try_number = len(tries) + 1
+    if try_number > _MAX_REVIEW_PART_TRIES:
+        raise ValueError("review part has no invocation tries left")
+    used = set()
+    for row in tries:
+        prior = _read_attempt_receipt_with_state(project, root, state, attempt_id, _review_part_boundary_kind(review_key, part_id, row["try"]), "ARTIFACT_READ_BACK")["record"]
+        used.add(prior.get("reviewer_invocation_id"))
+    if host.get("reviewer_invocation_id") in used:
+        raise ValueError("a retried review part requires a fresh reviewer invocation id")
+    stage = _review_stage(review_key, part_id, try_number)
+    boundary = _publish_bound_attempt_receipt(run_root, attempt_id, _review_part_boundary_kind(review_key, part_id, try_number), {
+        "plan_digest": envelope["plan_digest"], "part_id": part_id, "input_digest": review_digest(envelope),
+        **dict(host),
+    })["record"]
+    snapshot = read_attempt_receipt(run_root, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+    append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id=stage,
+                 artifact_digest=review_digest(snapshot["automation"] or snapshot["document"]))
+    request = publish_model_request(run_root, attempt_id, stage, model_id=host["model_id"], invocation_id=host["reviewer_invocation_id"],
+                                    input_digests=[envelope["snapshot_digest"], envelope["plan_digest"], review_digest(envelope), boundary["digest"]])
+    return {"input": envelope, "boundary": boundary, "request": dict(request), "stage_instance_id": stage, "try": try_number}
+
+
+def fail_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: str, failure_class: str, reason: str) -> dict[str, Any]:
+    """Record that the open invocation of a part produced no valid assessment.
+
+    The failed try is closed in the journal with a failure record as its model
+    response.  While tries remain the part is offered again and must be opened
+    with a new invocation; after the last try the part is blocked with the
+    failure class, so a transport outage is never reported as a content defect.
+    """
+    from tools.review_parts import part_input, review_digest
+    if failure_class not in _REVIEW_FAILURE_CLASSES:
+        raise ValueError("review failure class must be TRANSPORT or CONTENT")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("review failure requires an explicit reason")
+    project, root = _run_root(run_root)
+    state = derive_state(run_root)
+    stage = _review_stage(review_key, part_id)
+    plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
+    part = next((item for item in [*plan["parts"], *plan["additions"]] if item["part_id"] == part_id), None)
+    if part is None or part["blocked_reason"]:
+        raise ValueError("undeclared or blocked review part")
+    tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
+    if not tries or tries[-1]["result"] is not None:
+        raise ValueError("review part has no open invocation to fail")
+    current = tries[-1]
+    failure = {"failure_class": failure_class, "reason": reason, "try": current["try"]}
+    if current["failure"] is None:
+        if part_id in plan["unavailable"]:
+            raise ValueError("review part has no open invocation to fail")
+        record = {"schema_version": "1.0.0", "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+                  "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), "invocation_failure": failure}
+        publish_model_stage_artifact(run_root, attempt_id, current["stage"], record)
+    elif current["failure"] != failure:
+        raise ValueError("review part has no open invocation to fail")
+    retry_allowed = current["try"] < _MAX_REVIEW_PART_TRIES
+    ledger = read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key)
+    if retry_allowed:
+        event = {"event_type": "REVIEW_PART_RETRY", "part_id": part_id, "failed_try": current["try"], "failure_class": failure_class, "reason": reason}
+    else:
+        event = {"event_type": "REVIEW_PART_BLOCKED", "part_id": part_id, "reason": reason, "failure_class": failure_class}
+    recorded = any({key: value for key, value in row.items() if key != "ordinal"} == event for row in ledger["events"])
+    if not recorded:
+        _append_review_ledger_event(run_root, attempt_id, review_key, event)
+    return {"part_id": part_id, "failed_try": current["try"], "failure_class": failure_class, "retry_allowed": retry_allowed, "tries_left": _MAX_REVIEW_PART_TRIES - current["try"]}
+
+
+def submit_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: str, assessment: Mapping[str, Any], *, transport_attempts: int = 1) -> dict[str, Any]:
+    """Bind unmodified substantive output to controller-owned envelope fields."""
+    from tools.review_parts import part_input, review_digest
+    if set(assessment) != {"coverage", "findings", "corrections", "required_checks"}:
+        raise ValueError("review assessment has unsupported fields")
+    project, root = _run_root(run_root)
+    state = derive_state(run_root)
+    plan, part = _review_part_definition(run_root, state, attempt_id, _review_stage(review_key, part_id))
+    tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
+    # The assessment belongs to the latest invocation try of this part.
+    stage = tries[-1]["stage"] if tries else _review_stage(review_key, part_id)
+    result = {"schema_version": "1.0.0", "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+              "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), **dict(assessment)}
+    return dict(publish_model_stage_artifact(run_root, attempt_id, stage, result, transport_attempts=transport_attempts))
+
+
+def finish_review(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:
+    """Publish one controller aggregate and seal the logical review ledger."""
+    from tools.review_parts import aggregate_review_parts, review_output, review_digest
+    if next_review_part(run_root, attempt_id, review_key) is not None:
+        raise ValueError("review still has available unchecked parts")
+    state = derive_state(run_root)
+    plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
+    results = _review_results(run_root, state, attempt_id, review_key, plan)
+    aggregate = aggregate_review_parts(plan, results)
+    snapshot = read_attempt_receipt(run_root, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"]
+    session = dict(read_reviewer_session_ledger(run_root, attempt_id, review_key=review_key))
+    output = review_output(snapshot, aggregate, session["session_id"])
+    receipt = _publish_bound_attempt_receipt(run_root, attempt_id, f"review-aggregate-{review_key}", {"plan_digest": plan["digest"], "aggregate": aggregate, "output": output})
+    if session["status"] == "WAITING":
+        if aggregate["complete"]:
+            report = output["artifacts"]["validation_report" if review_key == "canonical" else "autotest_review"]
+            session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "AUTHORITATIVE_VERDICT",
+                                      "verdict": "REJECTED" if report["verdict"] == "ТРЕБУЕТ ДОРАБОТКИ" else "ACCEPTED",
+                                      "report_digest": review_digest(report), "verdict_digest": review_digest({"verdict": report["verdict"], "effective": report.get("effective")})})
+            session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "REVIEW_SESSION_COMPLETED"})
+            session["status"] = "COMPLETED"
+        else:
+            session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": _review_abort_reason(plan, session)})
+            session["status"] = "ABORTED"
+        session["digest"] = review_digest({key: value for key, value in session.items() if key != "digest"})
+        publish_reviewer_session_ledger(run_root, attempt_id, session)
+    return {"output": output, "aggregate": aggregate, "receipt_digest": receipt["digest"], "session": session}
+
+
+def _review_abort_reason(plan: Mapping[str, Any], session: Mapping[str, Any]) -> str:
+    """Why an incomplete review stops: context limit, reviewer unreachable, or content needing rework."""
+    if any(part["blocked_reason"] for part in [*plan["parts"], *plan["additions"]]):
+        return "REVIEW_CONTEXT_LIMIT"
+    classes = set(_review_block_classes(session).values())
+    if classes == {"TRANSPORT"}:
+        return "REVIEW_TRANSPORT_FAILED"
+    return "REWORK"
+
+
+def read_review_aggregate(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:
+    return dict(read_attempt_receipt(run_root, attempt_id, f"review-aggregate-{review_key}", "ARTIFACT_READ_BACK")["record"])
 
 
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -3835,6 +4570,10 @@ def _validate_execution_event_branch(
     attempt_events = [event for event in events if event.get("attempt_id") == attempt_id]
     starts = [event for event in attempt_events if event.get("event_type") == "EXECUTION_STARTED"]
     unknowns = [event for event in attempt_events if event.get("event_type") == "EXECUTION_UNKNOWN"]
+    if verification == "NOT_RUNNABLE" and len(starts) == 1 and not unknowns:
+        # The started process proved the reviewed tests could not run; the
+        # execution receipt validator binds that proof to this one start.
+        return
     if verification in {"NOT_APPLICABLE", "NOT_RUNNABLE"}:
         if starts or unknowns:
             raise ValueError("pre-execution branch cannot follow EXECUTION_STARTED")
@@ -4468,15 +5207,18 @@ def _project_state_snapshot(
             raise ValueError("project Git state changed")
         return _sealed({"kind": "GIT_DIRECTORY", "path": ".git", "entries": []})
 
-    completed = subprocess.run(
-        [
-            "git", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
-            "status", "--porcelain=v1", "-z", "--untracked-files=all",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    # Git's own ownership check (safe.directory) is deliberately left in force: a repository
+    # owned by someone else is reported as unavailable instead of being trusted.
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(project), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=_GIT_STATUS_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("project Git state is unavailable: git could not be run") from error
     if completed.returncode != 0:
         raise ValueError("project Git state is unavailable")
     tokens = completed.stdout.split(b"\0")
@@ -5310,11 +6052,29 @@ def exit_code(result: Mapping[str, Any] | None, controller_error: bool = False) 
         return 3
     if result["attempt_state"] == "ACTIVE":
         return 2
+    evidence = result["evidence"]
+    broken = result["completion"] == "FATAL" or result.get("reason_code") == "FINALIZATION_INVALID" or not result["trace_valid"] or not result["operational_reliable"]
     if result["policy_profile"] == "cases-only-v1":
-        return 1
+        # The profile never accepts, so a valid terminal stays exit 1.  A fatal run, an invalid
+        # closure or unreliable evidence must still be distinguishable by CI: exit 2.
+        return 2 if broken else 1
     if result["accepted"]:
         return 0
-    evidence = result["evidence"]
-    if result["verification"] in {"UNKNOWN", "NOT_RUNNABLE"} or result["completion"] == "FATAL" or result.get("reason_code") == "FINALIZATION_INVALID" or not result["trace_valid"] or not result["operational_reliable"] or not evidence["finalization_completed"] or not evidence["finalization_read_back"]:
+    if result["verification"] in {"UNKNOWN", "NOT_RUNNABLE"} or broken or not evidence["finalization_completed"] or not evidence["finalization_read_back"]:
         return 2
     return 1
+
+
+def _install_run_locks() -> None:
+    """Every public operation on a run holds the run lock from its first read to its last write."""
+    import inspect
+
+    for name, value in list(globals().items()):
+        if name.startswith("_") or name == "run_lock" or not inspect.isfunction(value) or value.__module__ != __name__:
+            continue
+        parameters = list(inspect.signature(value).parameters)
+        if parameters and parameters[0] == "run_root":
+            globals()[name] = _run_writer(value)
+
+
+_install_run_locks()

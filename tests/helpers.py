@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -19,6 +20,11 @@ def build_phase_two_baseline(
 
     project = Path(project).resolve()
     module = project / identity["module"]
+    requirement_file = project / "docs" / "feature.md"
+    requirement_file.parent.mkdir(parents=True, exist_ok=True)
+    if not requirement_file.exists():
+        requirement_file.write_text("Пользователь видит карточку товара.\nПользователь может открыть список товаров.\n", encoding="utf-8")
+    requirement_binding = {"module_id": "fixture", "selected_target": None, "docs": [{"path": "docs/feature.md", "sha256": "sha256:" + hashlib.sha256(requirement_file.read_bytes()).hexdigest()}]}
     interpreter = MODULE_PYTHON
     policy_profile = identity.get("policy_profile", "local-pilot-v1")
     if skill_pack_root is not None:
@@ -72,12 +78,38 @@ def build_phase_two_baseline(
     if policy_profile == "local-pilot-v1":
         runtime_facts = {"interpreter_path": interpreter, "interpreter_identity": runtime_identity(module, interpreter), "adapter_id": "pytest:selected-symbols-v1", "build_profile": "default", "adapter_parameters": {}}
     return build_execution_baseline(
-        inventory, project_root=project, requirements={"requirement_id": "fixture", "digest": "sha256:" + "a" * 64},
+        inventory, project_root=project, requirements={"requirement_id": "fixture", "digest": "sha256:" + hashlib.sha256(json.dumps(requirement_binding, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()},
         skillsrc_file_id=by_path[".skillsrc"],
         skillsrc_authority=build_skillsrc_authority_receipt(skillsrc.read_bytes()),
         execution_file_ids=execution_ids, parent_build_file_ids=parent_ids,
         policy_profile=policy_profile, **runtime_facts,
     )
+
+
+def review_payload(project, document, *, package=None, automation=None):
+    content = (project / "docs/feature.md").read_bytes()
+    digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    return {"document": document, "automation": automation, "package_binding": package,
+            "sources": [{"path": "docs/feature.md", "sha256": digest, "content": content.decode("utf-8")}], "contexts": [],
+            "requirements_binding": {"module_id": "fixture", "selected_target": None, "docs": [{"path": "docs/feature.md", "sha256": digest}]}}
+
+
+def complete_review_parts(run_root, attempt_id, key="canonical", *, findings=(), corrections=()):
+    """Synthetic model assessments for protocol tests only, never qualification evidence."""
+    from tools.pilot_state import next_review_part, open_review_part, submit_review_part, finish_review
+    from tools.review_parts import review_digest
+    first = True
+    while (part := next_review_part(run_root, attempt_id, key)) is not None:
+        isolation = {"fresh_context": True, "distinct_invocations": True, "role_policy": "canonical-reviewer-v2" if key == "canonical" else "autotest-static-reviewer-v2"}
+        isolation["evidence_digest"] = review_digest(isolation)
+        open_review_part(run_root, attempt_id, key, {"reviewer_invocation_id": f"review-{key}-{part['part_id']}", "model_id": "model-reviewer" if key == "canonical" else "model-automation-reviewer",
+                                                  "host_isolation": isolation, "cli": "fixture", "cli_version": "1", "settings": "synthetic-test-assessment"})
+        submit_review_part(run_root, attempt_id, key, part["part_id"], {
+            "coverage": [{"scope_id": scope["scope_id"], "status": "CHECKED", "evidence": [item["artifact_digest"] + item["pointer"] for item in scope["inputs"]][:1], "assessment": "Synthetic protocol fixture assessment."} for scope in part["scopes"]],
+            "findings": list(findings) if first else [], "corrections": list(corrections) if first else [], "required_checks": [],
+        })
+        first = False
+    return finish_review(run_root, attempt_id, key)
 
 
 def phase_two_baseline(root: Path, project: Path, identity: dict) -> dict:
@@ -112,3 +144,14 @@ def projection_fixture(root: Path, target: Path) -> Path:
         path = target / relative_path
         path.write_text(contents, encoding="utf-8", newline="\n")
     return target
+
+
+def make_junction(link: Path, target: Path, *, run=subprocess.run) -> None:
+    """Create a Windows directory junction; console output is never decoded as UTF-8.
+
+    ``cmd.exe`` prints in the OEM code page (cp866 on a Russian system), so
+    ``text=True`` raised UnicodeDecodeError before the test could assert anything.
+    """
+    completed = run(["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)], check=False, capture_output=True)
+    output = (completed.stdout or b"") + (completed.stderr or b"")
+    assert completed.returncode == 0, output.decode("utf-8", errors="replace")

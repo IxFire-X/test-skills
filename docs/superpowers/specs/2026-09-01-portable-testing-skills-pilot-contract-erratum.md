@@ -40,3 +40,17 @@ boundary remains unchanged.
    Canonical reviewer requests bind the existing boundary's candidate/package digests
    and reviewer invocation; the preceding request, boundary and ledger must belong to
    the same attempt. These checks reuse the existing events and artifact readers.
+9. Bounded review supersedes the historical single full-context invocation and ban on
+   review by parts. There is one logical authoritative review per canonical branch
+   and per automation revision, with sequential fresh isolated invocations for every
+   declared part. Small and large inputs use the same 1/N protocol. Parts cover the
+   original sources, local material and cross-part relationships against one frozen
+   snapshot. Stage instances use `tc-reviewer:canonical:part-000001` and
+   `autotest-reviewer:r1:part-000001` (or the current revision/part ordinal), with
+   `canonical-reviewer-v2` and `autotest-static-reviewer-v2` role policies.
+   The controller assembles exactly one aggregate from validated saved part outputs;
+   this aggregate is not a model response. Incomplete, stale or untrusted coverage
+   cannot be accepted. Content findings do not stop later trustworthy parts. Parts
+   do not spend correction budgets: canonical r1 plus one mechanical r2 and automation
+   r1/r2 remain unchanged. Static acceptance does not establish runtime PASS or release
+   qualification; `implemented_unverified` and `ready_tuple=null` remain in force.

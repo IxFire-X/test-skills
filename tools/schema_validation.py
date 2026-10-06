@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import re
 from collections.abc import Iterable
 from functools import lru_cache
@@ -106,18 +108,56 @@ def _checked_schema_path(schema_path: Path, root: Path) -> Path:
     return candidate
 
 
+class _SchemaSnapshot(tuple):
+    """Schema directory bytes with a precomputed identity, so cache lookups do not rehash 300 KiB."""
+
+    identity: str = ""
+
+    def __hash__(self) -> int:
+        return hash(self.identity)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _SchemaSnapshot) and self.identity == other.identity
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+
+_SNAPSHOTS: dict[str, tuple[tuple[tuple[str, int, int, int], ...], _SchemaSnapshot]] = {}
+
+
 def _schema_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
+    """Read ``schemas/*.json`` once per process and again only when a schema file changes."""
     schemas = _schema_directory(root)
-    snapshot: list[tuple[str, bytes]] = []
-    for path in sorted(schemas.glob("*.json"), key=lambda item: item.name):
+    try:
+        signature = tuple(
+            (entry.name, details.st_size, details.st_mtime_ns, details.st_ino)
+            for entry, details in sorted(((entry, entry.stat()) for entry in os.scandir(schemas) if entry.name.endswith(".json")), key=lambda item: item[0].name)
+        )
+    except OSError as error:
+        raise StrictJsonError(f"JSON unreadable: {error}") from error
+    key = str(schemas)
+    cached = _SNAPSHOTS.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    rows: list[tuple[str, bytes]] = []
+    digest = hashlib.sha256()
+    for name, *_rest in signature:
         try:
-            snapshot.append((path.name, path.read_bytes()))
+            raw = (schemas / name).read_bytes()
         except OSError as error:
             raise StrictJsonError(f"JSON unreadable: {error}") from error
-    return tuple(snapshot)
+        rows.append((name, raw))
+        digest.update(name.encode("utf-8") + b"\0" + len(raw).to_bytes(8, "big") + raw)
+    snapshot = _SchemaSnapshot(rows)
+    snapshot.identity = digest.hexdigest()
+    if len(_SNAPSHOTS) >= 16:
+        _SNAPSHOTS.pop(next(iter(_SNAPSHOTS)))
+    _SNAPSHOTS[key] = (signature, snapshot)
+    return snapshot
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=256)
 def _compiled_validator(schema_name: str, snapshot: tuple[tuple[str, bytes], ...]) -> Draft202012Validator:
     registry = Registry()
     schema: dict[str, Any] | None = None
@@ -167,10 +207,21 @@ def _error_code(error: Any) -> str:
     return "SCHEMA_" + name.upper()
 
 
-@lru_cache(maxsize=64)
+_SCHEMA_ERROR_CACHE: dict[tuple[str, Any, str], tuple[tuple[str, str, str], ...]] = {}
+_SCHEMA_ERROR_CACHE_LIMIT = 20_000
+
+
 def _cached_schema_errors(schema_name: str, snapshot: tuple[tuple[str, bytes], ...], serialized: str) -> tuple[tuple[str, str, str], ...]:
-    validator = _compiled_validator(schema_name, snapshot)
-    return tuple((_error_path(error), _error_code(error), error.message) for error in validator.iter_errors(loads_json_strict(serialized)))
+    """Validation result per (schema, schema bytes, document bytes); keyed by digest, not by the document text."""
+    key = (schema_name, snapshot, hashlib.sha256(serialized.encode("utf-8")).hexdigest())
+    cached = _SCHEMA_ERROR_CACHE.get(key)
+    if cached is None:
+        validator = _compiled_validator(schema_name, snapshot)
+        cached = tuple((_error_path(error), _error_code(error), error.message) for error in validator.iter_errors(loads_json_strict(serialized)))
+        if len(_SCHEMA_ERROR_CACHE) >= _SCHEMA_ERROR_CACHE_LIMIT:
+            _SCHEMA_ERROR_CACHE.clear()
+        _SCHEMA_ERROR_CACHE[key] = cached
+    return cached
 
 
 def _semantic_error(path: str, code: str, message: str) -> dict[str, str]:

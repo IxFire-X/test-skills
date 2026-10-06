@@ -9,7 +9,11 @@ widens those inputs nor writes project/run state.
 
 Each source requirement has a stable `source_requirement_id`, physical `display_order`, supported `text`, exact source `digest`, and ordered `provenance`. Derive ordering and IDs only from authorized evidence. Source requirements are not canonical requirements: the controller assigns batch ownership and namespaces; the generator later emits `CREQ-*` conditions and explicit source-to-canonical mappings within its assigned namespace. Preserve safe observable facts (status, response field, event, state), but never a credential or raw secret.
 
-For reproducible IDs, normalize provenance references and text only for sorting: apply Unicode NFC; trim outer whitespace; convert CRLF/CR to LF; then collapse every remaining whitespace run to one ASCII space. For references also replace `\` with `/`. Keep each reference as `(normalized_reference, original_reference)` and sort by that pair. Sort requirements by their ordered normalized-reference tuple, original-reference tuple, normalized text, then original text, each in code-point order. Assign physical `display_order` from that order: the first ordered distinct requirement gets `SREQ-0001`, the second gets `SREQ-0002`, continuing zero-padded four digits. If a source has separate identifier and text references, keep that identifier/text provenance pair in its physical order.
+For reproducible IDs, follow the order `tools.build_context` produces. Order source files by their normalized project path: replace `\` with `/`, apply Unicode NFC, collapse whitespace runs to one ASCII space and trim, then compare in code-point order. Inside one file keep the requirements in document order; never re-sort them by text or by provenance reference. A duplicate requirement keeps the position of its first occurrence. Assign physical `display_order` from that order: the first distinct requirement gets `SREQ-0001`, the second gets `SREQ-0002`, continuing zero-padded four digits. A section appended to the end of a document therefore does not renumber the requirements that precede it in this order. The path normalization is used only for ordering, never to rewrite text.
+
+Each requirement's provenance starts with two marks: `<file> — <section title>` and `<file> — <sha256 of the file>`. The requirement text lives only in `text` and is bound by `digest`; do not repeat it inside provenance.
+
+In ordinary Markdown a heading without its own text, a glossary and a table of contents are not requirements and get no `SREQ` ID; do not turn them into requirements or report them as dropped content.
 
 Use `source_code_and_diff.sources` for safe source observations in the schema's inline-provenance form. A claim without sufficient evidence is a warning. Validate the envelope; downstream stages consume its 5.0.0 source requirements, not a prose reconstruction.
 
@@ -42,7 +46,10 @@ and review independently reconciles those conditions with the original request.
 
 For standard OpenSpec, the authorized `openspec/specs/<capability>/spec.md` documents
 are baseline; `openspec/changes/<selected-change>/specs/<capability>/spec.md` documents
-are one explicitly selected live delta. Compose the final state: RENAMED changes identity
+are one explicitly selected live delta. The `openspec/` directory may sit in any project
+directory (`**/openspec/`); each such directory is an independent specification root
+with its own capabilities and changes. `Requirement:`, delta-section and `Scenario:`
+headings are matched regardless of letter case and spacing, and a leading BOM is ignored. Compose the final state: RENAMED changes identity
 and keeps baseline behavior, REMOVED deletes it, MODIFIED replaces the complete block,
 ADDED introduces a block. A rename followed by MODIFIED uses the TO name. Reject an
 unmatched operation or ambiguous duplicate; do not silently match similar names or apply
@@ -64,6 +71,12 @@ same attempt/inventory. Publication and readback verify the bound OpenSpec files
 normalized identities. No additional source discovery or whole-project claim follows
 from those receipts: full-spec scope needs all agreed specifications authorized; change
 scope needs the selected delta and the justified related regression inputs.
+
+A secret-like line in an authorized document or specification reaches the model already
+masked as `[REDACTED:<rule>]`; the file stays an input and the controller adds a warning
+of the form `<path>:<line> — [REDACTED:<rule>]; secret-like line masked, not a requirement gap`.
+A `[REDACTED:…]` line is not a requirement gap: do not reconstruct the value, guess it,
+or raise a gap warning for it.
 
 Keep gaps in existing `warnings`, with four fields: source requirement/scenario and link;
 what is missing; which checks it blocks; the concrete question requiring resolution.

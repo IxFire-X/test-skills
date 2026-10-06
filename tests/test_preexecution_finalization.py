@@ -15,6 +15,7 @@ def _facts(run_id: str, attempt_id: str, *, reason: str, verdict: str | None, ab
         prior_stage_cause=reason,
         reviewer_session_complete=not abort,
         reviewer_pre_verdict_abort=abort,
+        reviewer_isolation_state="independence_unverified" if abort else "verified",
         authoritative_verdict=verdict,
         authoritative_verdict_count=0 if abort else 1,
     ) | {"policy_profile": "cases-only-v1"}
@@ -22,15 +23,21 @@ def _facts(run_id: str, attempt_id: str, *, reason: str, verdict: str | None, ab
 
 @pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
 def test_rejected_reviewer_branch_closes_without_effective_canonical(tmp_path: Path, profile: str) -> None:
-    from tests.test_reviewer_protocol import _bind_session, _completed, _session, _started, _verdict
+    from tests.test_reviewer_protocol import _new_run
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_requirement_traceability import canonical_fixture
+    from tests.helpers import complete_review_parts
     from tools import pilot_state
     from tools.finalize_attempt import finalize_attempt
     from tools.orchestrate_test_case_revision import validate_reviewer_session
 
-    session, binding, review = _session(
-        _started(), _verdict(), _completed(), review_verdict="ТРЕБУЕТ ДОРАБОТКИ",
-    )
-    run_root, attempt_id = _bind_session(tmp_path, session, binding, profile)
+    run_root, attempt_id = _new_run(tmp_path, profile)
+    _, binding, _, _ = _reviewer_protocol_inputs(canonical_fixture(), run_root, attempt_id, complete=False)
+    finished = complete_review_parts(run_root, attempt_id, findings=[{
+        "severity": "BLOCKING", "code": "SOURCE_OMISSION", "message": "Original condition omitted.",
+        "evidence": ["docs/feature.md"], "related_ids": ["TC-001"],
+    }])
+    session, review = finished["session"], finished["output"]
     validate_reviewer_session(session, binding, review, run_root=run_root, attempt_id=attempt_id)
     run_id = pilot_state.read_run(run_root)["manifest"]["run_id"]
 
@@ -52,18 +59,16 @@ def test_rejected_reviewer_branch_closes_without_effective_canonical(tmp_path: P
 
 @pytest.mark.parametrize("profile", ["cases-only-v1", "local-pilot-v1"])
 def test_pre_verdict_context_abort_closes_with_zero_verdict_and_not_applicable_execution(tmp_path: Path, profile: str) -> None:
-    from tests.test_reviewer_protocol import _bind_session, _session, _started
+    from tests.test_reviewer_protocol import _new_run
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_requirement_traceability import canonical_fixture
     from tools import pilot_state
     from tools.finalize_attempt import finalize_attempt
     from tools.orchestrate_test_case_revision import validate_reviewer_session
 
-    aborted_event = {
-        "ordinal": 2,
-        "event_type": "REVIEW_SESSION_ABORTED",
-        "reason_code": "REVIEW_CONTEXT_LIMIT",
-    }
-    session, binding, _review = _session(_started(), aborted_event, status="ABORTED")
-    run_root, attempt_id = _bind_session(tmp_path, session, binding, profile)
+    run_root, attempt_id = _new_run(tmp_path, profile)
+    _, binding, _, _ = _reviewer_protocol_inputs(canonical_fixture(), run_root, attempt_id, complete=False, byte_budget=1100)
+    session = pilot_state.finish_review(run_root, attempt_id)["session"]
     validate_reviewer_session(session, binding, run_root=run_root, attempt_id=attempt_id)
     run_id = pilot_state.read_run(run_root)["manifest"]["run_id"]
 

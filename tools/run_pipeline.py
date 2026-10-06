@@ -168,10 +168,10 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
             "next_expected_artifact": "canonical reviewer package and boundary",
             "evidence_path": str(root / "events" / f"{assembly['seq']:010d}.json"),
         }))
-    ledger_events = [row for row in events if row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") == "reviewer-ledger-v1"]
+    ledger_events = [row for row in events if row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") == "reviewer-ledger-v2-canonical"]
     if ledger_events:
         digest = ledger_events[-1]["artifact_digest"]
-        path = f"reviewer-session-ledgers/{attempt_id}/{digest[7:]}.json"
+        path = f"reviewer-session-ledgers/{attempt_id}/canonical/{digest[7:]}.json"
         try:
             ledger = pilot.read_reviewer_session_ledger(root, attempt_id, digest)
             lifecycle = pilot.reviewer_lifecycle_projection(ledger)
@@ -345,9 +345,12 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
     return selected
 
 
-def _scan_context_budget(inventory: Mapping[str, Any]) -> int:
+def _scan_context_budget(inventory: Mapping[str, Any], skillsrc_document: Mapping[str, Any] | None = None) -> int:
+    """Per-batch context budget: ``limits.context_batch_bytes`` in .skillsrc, else the default."""
     del inventory
-    return _SCAN_CONTEXT_BYTE_BUDGET
+    declared = skillsrc_document.get("limits") if isinstance(skillsrc_document, Mapping) else None
+    value = declared.get("context_batch_bytes") if isinstance(declared, Mapping) else None
+    return value if type(value) is int and value > 0 else _SCAN_CONTEXT_BYTE_BUDGET
 
 
 def _scan_execution_baseline(
@@ -400,11 +403,19 @@ def _scan_execution_baseline(
             executable = str(system_maven_path(test.get("executable")))
             runtime_facts.update(executable_path=executable, executable_identity=runtime_identity(module_root, executable, adapter_id=adapter_id))
         else:
-            interpreter = str(test["interpreter"]) if isinstance(test.get("interpreter"), str) else None
-            wrapper = str(test["wrapper"]) if isinstance(test.get("wrapper"), str) else None
+            # .skillsrc holds a logical runtime name (M33); the baseline binds the concrete
+            # host path, relative to the module or, for a wrapper, to its build root (B5).
+            from tools.execution_adapters import AdapterRequestError, resolve_module_runtime
+
+            try:
+                runtime_base, runtime_relative = resolve_module_runtime({**module, "module_root": str(module_root)})
+            except AdapterRequestError as error:
+                raise InventoryError("selected module runtime is unavailable") from error
+            interpreter = runtime_relative if isinstance(test.get("interpreter"), str) else None
+            wrapper = runtime_relative if isinstance(test.get("wrapper"), str) else None
             runtime_facts.update(interpreter_path=interpreter, wrapper_path=wrapper,
-                interpreter_identity=runtime_identity(module_root, interpreter) if interpreter is not None else None,
-                wrapper_identity=runtime_identity(module_root, wrapper) if wrapper is not None else None)
+                interpreter_identity=runtime_identity(runtime_base, interpreter) if interpreter is not None else None,
+                wrapper_identity=runtime_identity(runtime_base, wrapper) if wrapper is not None else None)
     requirement = {
         "module_id": module.get("id"),
         "selected_target": getattr(args, "target", None),
@@ -475,12 +486,12 @@ def cmd_scan(args: Any) -> int:
             frozen_inventory,
             project,
             selected_ids,
-            byte_budget=_scan_context_budget(frozen_inventory),
+            byte_budget=_scan_context_budget(frozen_inventory, skillsrc_document),
         )
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
-    except ContextSelectionError:
-        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", scope=scope))
+    except ContextSelectionError as error:
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", detail=str(error), scope=scope))
         return 2
     except (InventoryError, ValueError, OSError) as error:
         detail = str(error) if isinstance(error, InventoryError) else "scan input is unreadable" if isinstance(error, OSError) else "scan input or receipt is invalid"
@@ -500,6 +511,11 @@ def cmd_scan(args: Any) -> int:
         inventory_file_count=len(frozen_inventory["files"]),
         exclusion_count=len(exclusion_receipt["exclusions"]),
         context_batch_count=len(batches),
+        # Files skipped because they exceed the context budget: explicit, never silent.
+        context_gaps=[
+            {"project_path": gap["project_path"], "reason_code": gap["reason_code"], "size": gap["size"]}
+            for batch in batches for gap in batch["receipt"].get("gaps", [])
+        ],
     )
     _print(payload)
     return 0
@@ -593,8 +609,33 @@ def _validated_execution_coordinates(project: Path, run_id: str) -> dict[str, An
     return {"run_root": root, "manifest": manifest, "authorization": authorization, "attempt": attempt, "module_root": module_root}
 
 
-def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any) -> None:
-    """Reject any non-delta baseline drift before the execution-start gate."""
+def _restrict_inventory_to_baseline_inputs(current: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a fresh inventory onto the frozen baseline inputs and reseal it.
+
+    After a started execution only a changed or removed baseline input is drift.
+    Files the build or the tests created (coverage reports, ``.gradle``, logs,
+    IDE state) were never baseline inputs and are not compared.
+    """
+    frozen = {row.get("opaque_id") for row in baseline.get("inputs", []) if isinstance(row, Mapping)}
+    restricted = dict(current)
+    restricted["files"] = [
+        row for row in current.get("files", [])
+        if isinstance(row, Mapping) and row.get("opaque_id") in frozen
+    ]
+    body = {key: value for key, value in restricted.items() if key != "digest"}
+    restricted["digest"] = "sha256:" + hashlib.sha256(
+        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return restricted
+
+
+def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any, after_start: bool = False) -> None:
+    """Reject baseline drift around the one execution of an attempt.
+
+    Before the execution-start claim any difference outside the generated delta
+    is drift.  With ``after_start`` only the frozen baseline inputs are compared:
+    changed or removed is drift, a new file is not.
+    """
     from tools.project_inventory import (
         InventoryError,
         baseline_external_input_paths,
@@ -621,6 +662,8 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
         current["digest"] = "sha256:" + hashlib.sha256(
             json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+        if after_start:
+            current = _restrict_inventory_to_baseline_inputs(current, baseline)
         result = validate_execution_baseline(
             baseline,
             current,
@@ -629,7 +672,7 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
             build_profile=request.build_profile,
             adapter_parameters=dict(request.typed_parameters),
             runtime_identity_value=runtime_identity(
-                module_root, request.executable if request.adapter_id == "maven:selected-symbols-v1" else str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
+                Path(request.cwd), request.executable if request.adapter_id == "maven:selected-symbols-v1" else str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
                 adapter_id=baseline.get("adapter_id"),
             ),
         )
@@ -689,14 +732,22 @@ def _reconstruct_started_request(
             baseline["interpreter_path"] if adapter_id == PYTEST else baseline["executable_path"] if adapter_id == SYSTEM_MAVEN else baseline["wrapper_path"]
         )
         from tools.project_inventory import module_runtime_path, system_maven_path
-        executable = str(system_maven_path(str(runtime_path)) if adapter_id == SYSTEM_MAVEN else module_runtime_path(module_root, runtime_path.as_posix()))
+        from tools.execution_adapters import DEFAULT_TIMEOUT_SECONDS, AdapterRequestError, LaunchLayout, command_for, launch_layout
+        from tools.skillsrc_manifest import SkillsrcError, load_module_by_root
+        # Build root and timeout come from the authoritative .skillsrc (B5, P07); the
+        # start-event digest below proves the reconstruction is the request that ran.
+        try:
+            configured = load_module_by_root(Path(str(attempt["project"])), str(attempt["module"]))
+            layout = launch_layout({**configured, "module_root": str(module_root)})
+        except (SkillsrcError, AdapterRequestError):
+            layout = LaunchLayout(module_root, "", DEFAULT_TIMEOUT_SECONDS)
+        executable = str(system_maven_path(str(runtime_path)) if adapter_id == SYSTEM_MAVEN else module_runtime_path(layout.build_root, runtime_path.as_posix()))
         profile = str(baseline["build_profile"])
         typed = tuple(sorted((str(key), str(value)) for key, value in baseline["adapter_parameters"].items()))
-        from tools.execution_adapters import command_for
-        reports, argv = command_for(adapter_id, executable, profile, selectors)
+        reports, argv = command_for(adapter_id, executable, profile, selectors, module_path=layout.module_path)
         language = "python" if adapter_id == PYTEST else "java"
         request = ExecutionRequest(
-            adapter_id, executable, tuple(argv), str(module_root), tuple(selectors), 600,
+            adapter_id, executable, tuple(argv), str(layout.build_root), tuple(selectors), layout.timeout_seconds,
             reports, ("PROJECT_NATIVE_ENV",), profile, typed,
         )
         starts = [
@@ -863,6 +914,7 @@ def _execute(
 ) -> int:
     from tools.run_tests import (
         build_closed_execution_request,
+        build_closed_gate_request,
         run_tests_v5,
         validate_execution_eligibility,
     )
@@ -878,6 +930,9 @@ def _execute(
             raise HostStop("EXECUTION_COORDINATES", "selected module differs from the attempt module")
         module = coordinates["module"]
         request, _compatibility = build_closed_execution_request(execution_root, language, module, document, automation)
+        # Compile/collect gate for the same module and selectors; it runs after the
+        # execution-start claim and before the reviewed tests.
+        gate_request = build_closed_gate_request(request)
     except HostStop as error:
         return _reject_prestart_execution(
             coordinates, error.code, str(error), automation_artifact=automation, autotest_review=review,
@@ -937,7 +992,7 @@ def _execute(
 
     def post_execution_check() -> str | None:
         try:
-            _revalidate_execution_baseline(coordinates, request)
+            _revalidate_execution_baseline(coordinates, request, True)
         except HostStop as error:
             return error.code
         return None
@@ -951,6 +1006,7 @@ def _execute(
             attempt_id=str(coordinates["attempt"]["attempt_id"]),
             on_execution_start=on_execution_start,
             post_execution_check=post_execution_check,
+            gate_request=gate_request,
         )
     except HostStop as error:
         if not execution_claimed:
@@ -981,8 +1037,35 @@ def _execute(
         "status": "ok", "stage": "exec", "run_id": coordinates["manifest"]["run_id"],
         "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": result.get("verification"),
         "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
+        **_not_runnable_guidance(result, automation, coordinates.get("attempt")),
     })
     return int(closed["exit_code"])
+
+
+_AUTOMATION_REVISION_BUDGET = 2
+
+
+def _not_runnable_guidance(result: Mapping[str, Any], automation: Mapping[str, Any], attempt: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Tell the caller why a started run was NOT_RUNNABLE and whether r2 is still allowed.
+
+    A compile/collect failure of generated tests may be corrected by automation
+    revision r2 while the r1+r2 budget is not exhausted; a failed product check
+    (FAIL) is never regenerated.
+    """
+    reason = result.get("reason_code")
+    if result.get("verification") != "NOT_RUNNABLE" or reason not in {"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED"}:
+        return {}
+    guidance: dict[str, Any] = {"reason": reason}
+    if reason == "GENERATED_TEST_INVALID":
+        artifacts = automation.get("artifacts") if isinstance(automation, Mapping) else None
+        revision = artifacts.get("automation_revision") if isinstance(artifacts, Mapping) else None
+        allowed = type(revision) is int and 1 <= revision < _AUTOMATION_REVISION_BUDGET and (attempt or {}).get("retry_reason") != "GENERATED_TEST_INVALID"
+        guidance["automation_revision"] = revision
+        guidance["automation_revision_allowed"] = allowed
+        # The corrected revision is generated in a child attempt that declares this reason;
+        # pilot_state.create_attempt enforces the same r1+r2 budget.
+        guidance["regeneration"] = {"allowed": allowed, "retry_reason": "GENERATED_TEST_INVALID", "automation_revision": revision}
+    return guidance
 
 
 def cmd_exec(args: Any) -> int:
@@ -1059,7 +1142,7 @@ def cmd_exec(args: Any) -> int:
                 if finalization_receipt is None and resume_validation is None:
                     request, _language = _reconstruct_started_request(coordinates, document, automation)
                     try:
-                        _revalidate_execution_baseline(coordinates, request)
+                        _revalidate_execution_baseline(coordinates, request, True)
                     except HostStop as drift:
                         publish_resume_validation(
                             Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"]),
@@ -1250,8 +1333,11 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     language = execution_payload["target"]["language"]
     effective = read_effective_canonical(root, attempt_id)
     execution_inputs = read_execution_inputs(root, attempt_id)
+    from tools.execution_adapters import request_module_root
+
+    # Reviewed files and reports are module-relative even when the build starts above it.
     compatibility = validate_artifact_runner_compatibility(
-        Path(request.cwd).resolve(), language,
+        request_module_root(request).resolve(), language,
         effective["document"], execution_inputs["automation_artifact"],
     )
     if compatibility.status != "READY":
@@ -1296,7 +1382,7 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
 
     reports: list[dict[str, Any]] = []
     used_names: dict[str, int] = {}
-    cwd = Path(request.cwd).resolve()
+    cwd = request_module_root(request).resolve()
     for path in fresh_paths:
         raw = snapshots[path]
         after_fingerprint = fingerprint(after_inventory[path])

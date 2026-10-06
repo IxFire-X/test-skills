@@ -83,11 +83,13 @@ def reviewed_adapter_registry(document: Mapping[str, Any], automation: Mapping[s
         (row["file_id"], row["symbol_id"])
         for row in review["artifacts"]["autotest_review"]["reviewed_symbol_pairs"]
     }
+    # A blocker blocks its whole case, so ready steps of a blocked case are not automated either.
     operations = {
         (case["case_id"], step["step_id"]): step["operation"]
         for case in document["test_cases"]
+        if not any(row["automation_blockers"] for row in case["steps"])
         for step in case["steps"]
-        if not step["manual_only"] and not step["automation_blockers"] and step["operation"]["kind"] == "project_action"
+        if not step["manual_only"] and step["operation"]["kind"] == "project_action"
     }
     covered = {
         (row["case_id"], row["step_id"])
@@ -157,8 +159,10 @@ def _collect_uses(document: Mapping[str, Any]) -> tuple[list[_ProviderUse], list
     adapters: list[tuple[tuple[str, str], str]] = []
     capabilities = {capability["capability_id"]: capability for capability in document["operation_capabilities"]}
     for case_index, case in enumerate(document["test_cases"]):
+        if any(step["automation_blockers"] for step in case["steps"]):
+            continue  # a blocked case is not automated, so none of its steps needs providers
         for step_index, step in enumerate(case["steps"]):
-            if step["manual_only"] or step["automation_blockers"]:
+            if step["manual_only"]:
                 continue
             step_path = f"/test_cases/{case_index}/steps/{step_index}"
             operation = step["operation"]

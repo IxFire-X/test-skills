@@ -5,7 +5,7 @@ description: Use when a 5.0.0 source-requirement context batch must become one c
 
 # Canonical test-case generation
 
-Consume valid 5.0.0 context and emit JSON-only `artifacts.candidate_fragment`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume valid 5.0.0 context and emit one JSON-only bare candidate fragment. Read the [generation contract](references/case-generation-contract.md); `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source. The controller validates the stage output against `schemas/candidate-fragment.schema.json` directly; it does not accept the `tc-generator-output` envelope.
 
 The controller invokes this role once per deterministic batch with declared immutable
 inputs and persists/readback-checks the complete fragment before assembly. Do not create
@@ -17,7 +17,7 @@ run state, review your own output, publish projections, or write generated proje
 2. Create exactly one candidate fragment for the controller-owned batch namespace. Preserve distinct `SREQ-*` source IDs, assign only the controller-authorized canonical IDs, and emit explicit many-to-many source -> canonical -> case mappings. A case may cite only canonical requirements owned by that batch; `out_of_scope` is never a generator decision.
 3. For every step, write three human fields: `action`, `test_data`, and `expectations[].text`. Keep the structured operation, typed inputs, previous-step output references, outputs, and assertions as a separate exact automation model. The three human fields must be independently executable and cover the machine semantics without printing binding or assertion expressions.
 4. For a manual or blocked step, use its exact canonical manual/blocker branch and reason; do not turn a project-generation obstacle into invented behavior.
-5. Validate the fragment's canonical content through `tools.canonical_document`, wrap it in the 5.0.0 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The controller assembles all immutable fragments into the sole canonical document before reviewer or projection work.
+5. Validate the fragment's canonical content through `tools.canonical_document` and return the bare fragment itself, valid against `schemas/candidate-fragment.schema.json`. Do not wrap it in a `tc-generator-output` envelope or under `artifacts`. Its `batch_id` equals the batch of this stage (`tc-generator:<batch_id>`), its `digest` is the fragment's own digest over all other fields, and the embedded `context_receipt` keeps its own digest; take these service digests from the controller tools, never type them by hand. The controller assembles all immutable fragments into the sole canonical document before reviewer or projection work. It sorts `operation_capabilities` itself, merges an identical capability declared by several batches even when their provenance differs, and rejects a semantic difference as `BATCH_CAPABILITY_CONFLICT` naming both batches.
 
 Apply the mandatory [human scenario rules](references/case-generation-contract.md#human-scenario-rules) to every human field and its structured inputs/assertions. They are the single format authority for Russian wording, HTTP/JSON, placeholders, and requirement oracles.
 The shared canonical validator checks every step, including the last. Expected is a
@@ -39,7 +39,7 @@ applicable. These guide selection within the authorized scope, not mandatory ext
 
 ## Projection rule
 
-JSON is the sole machine source. The v4 standalone HTML preview takes human wording from `action`, `test_data`, and `expectations[].text`, and uses structured literal path/query inputs only to resolve the displayed URL in its three-column table `Шаг`, `Тестовые данные / запрос`, `Ожидаемый результат`. Machine outputs/assertions and binding expressions remain available to automation but never render in those cells. HTML preview and Zephyr CSV are human/export projections: they are never automation inputs and no second editable semantic copy exists.
+JSON is the sole machine source. The standalone HTML preview takes human wording from `action`, `test_data`, and `expectations[].text`, and uses structured literal path/query inputs only to resolve the displayed URL in its three-column table `Шаг`, `Тестовые данные / запрос`, `Ожидаемый результат`. Machine outputs/assertions and binding expressions remain available to automation but never render in those cells. A non-literal path/query value is shown as a readable placeholder such as `<ownerId из шага 1>` or `<переменная окружения X>`. HTML preview and Zephyr CSV are human/export projections: they are never automation inputs and no second editable semantic copy exists. The default CSV profile is `zephyr-scale-step-row-24-v5`, which carries only the human fields (the action with the resolved URL, `test_data` and the expectation text); v4 is produced only on an explicit `--csv-profile zephyr-scale-step-row-24-v4`.
 
 ## Stop conditions
 

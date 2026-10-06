@@ -23,6 +23,18 @@ from tools.automation_validation import (
 from tools.canonical_document import validate_canonical_document
 
 
+def _run_operation(function):
+    """Hold the run lock for the whole command (imported lazily to avoid an import cycle)."""
+    from functools import wraps
+
+    @wraps(function)
+    def operation(*args, **kwargs):
+        from tools.pilot_state import run_operation
+        return run_operation(function)(*args, **kwargs)
+    return operation
+
+
+
 class GeneratedDeltaError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
@@ -262,6 +274,7 @@ def _read_durable_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any
     return dict(durable)
 
 
+@_run_operation
 def materialize_delta(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,
@@ -550,9 +563,17 @@ def resolve_disposition_policy(
     materialization: str,
     *,
     retain_pass: bool,
+    keep_deselected: bool = False,
 ) -> tuple[str, str, Mapping[str, frozenset[tuple[str, str | None]]]]:
-    """Return the only permitted plan and its legal durable outcomes."""
+    """Return the only permitted plan and its legal durable outcomes.
+
+    ``keep_deselected`` is the NOT_RUNNABLE/TESTS_DESELECTED branch: the reviewed
+    tests are valid and were only skipped by the project's pytest configuration,
+    so an exact file stays in place with reason ``TESTS_DESELECTED``.
+    """
     if type(retain_pass) is not bool or verification != "PASS" and retain_pass:
+        raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "invalid disposition policy input")
+    if type(keep_deselected) is not bool or verification != "NOT_RUNNABLE" and keep_deselected:
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "invalid disposition policy input")
     if materialization == "NOT_MATERIALIZED":
         operation, requested = "NO_FILE", "NOT_MATERIALIZED"
@@ -561,6 +582,8 @@ def resolve_disposition_policy(
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "invalid materialization state")
     if verification == "PASS":
         operation, requested = ("RETAIN_IF_EXACT", "RETAINED") if retain_pass else ("CLEAN_IF_EXACT", "CLEANED")
+    elif keep_deselected:
+        operation, requested = "RETAIN_IF_EXACT", "RETAINED"
     else:
         try:
             operation, requested = {
@@ -572,7 +595,7 @@ def resolve_disposition_policy(
         except KeyError as error:
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "unknown verification") from error
     exact = {
-        "RETAIN_IF_EXACT": frozenset({("RETAINED", None), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")}),
+        "RETAIN_IF_EXACT": frozenset({("RETAINED", "TESTS_DESELECTED" if keep_deselected else None), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")}),
         "CLEAN_IF_EXACT": frozenset({("CLEANED", None), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT"), ("PRESERVED_CLEANUP_CONFLICT", "CLEANUP_CONFLICT")}),
         "PRESERVE_UNKNOWN": frozenset({("PRESERVED_EXECUTION_UNKNOWN", "EXECUTION_UNKNOWN"), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")}),
     }[operation]
@@ -580,6 +603,7 @@ def resolve_disposition_policy(
     return operation, requested, {"EXACT": exact, "MISSING": conflict, "DRIFT": conflict, "UNSAFE": conflict}
 
 
+@_run_operation
 def apply_dispositions(
     project: Path, delta: Mapping[str, Any], requested: Mapping[str, str], *,
     run_root: Path | None = None, attempt_id: str | None = None, verification: str | None = None,
@@ -620,6 +644,7 @@ def apply_dispositions(
             verification,
             str(row.get("materialization")),
             retain_pass=verification == "PASS" and requested[path] == "RETAINED",
+            keep_deselected=verification == "NOT_RUNNABLE" and requested[path] == "RETAINED",
         )
         if requested[path] != expected:
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "disposition is impossible for verification outcome")
@@ -639,10 +664,16 @@ def apply_dispositions(
                 "MATERIALIZATION_CONFLICT",
                 "execution-derived cleanup requires a read-back execution receipt",
             ) from error
+        deselected_rows = [
+            row for row in execution_payload.get("process_evidence", ())
+            if isinstance(row, Mapping) and row.get("kind") == "TESTS_DESELECTED"
+        ] if isinstance(execution_payload, Mapping) else []
         if (
             not isinstance(execution_payload, Mapping)
             or execution_payload.get("verdict") != verification
             or execution_record.get("generated_delta_digest") != generated_delta_digest
+            # Keeping a NOT_RUNNABLE file is legal only for a recorded deselection.
+            or any(row["requested_disposition"] == "RETAINED" for row in base_plan_rows) and not deselected_rows
         ):
             raise GeneratedDeltaError(
                 "MATERIALIZATION_CONFLICT",
@@ -759,7 +790,8 @@ def apply_dispositions(
                 final_rows.append(final_row | {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"})
             continue
         if plan_row["operation"] == "RETAIN_IF_EXACT":
-            final_rows.append(final_row | ({"disposition": "RETAINED"} if exact else {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"}))
+            retained = {"disposition": "RETAINED"} | ({"reason_code": "TESTS_DESELECTED"} if verification == "NOT_RUNNABLE" else {})
+            final_rows.append(final_row | (retained if exact else {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"}))
             continue
         if current is None:
             final_rows.append(final_row | {"disposition": "CLEANED"})

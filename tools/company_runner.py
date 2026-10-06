@@ -180,7 +180,7 @@ def validate_company_execution_receipt(
         or receipt.get("request_digest") != request.digest()
         or receipt.get("execution_report_digest") != execution_report_digest(run_result)
         or not isinstance(target, Mapping)
-        or target.get("runner") != runner_profile.split(":", 1)[0]
+        or target.get("runner") != _profile_runner(runner_profile)
         or target.get("command") != runner_profile
         or run_result.get("exit_code") != reconstructed_result.exit_code
         or not isinstance(stats, Mapping)
@@ -188,6 +188,13 @@ def validate_company_execution_receipt(
     ):
         raise CompanyRunnerError("company_receipt", "company receipt does not match run result")
     return receipt
+
+
+def _profile_runner(runner_profile: Any) -> str | None:
+    """Runner label of a closed adapter profile, exactly as the execution validator maps it."""
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
+
+    return {PYTEST: "pytest", MAVEN: "maven", SYSTEM_MAVEN: "maven", GRADLE: "gradle"}.get(runner_profile)
 
 
 def _receipt_safe_result(result: CompanyRunResult | None) -> bool:
@@ -353,9 +360,12 @@ def execute_company_details(
         raise CompanyRunnerError("review_not_accepted", str(error)[:400]) from error
     if not pairs:
         raise CompanyRunnerError("review_not_accepted", "accepted automation has no required symbol pairs")
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
+
+    # The same closed profile names and runner labels the execution validator accepts.
     allowed_profiles = {
-        "python": {"pytest:selected-symbols"},
-        "java": {"maven:selected-symbols", "gradle:selected-symbols"},
+        "python": {PYTEST},
+        "java": {MAVEN, SYSTEM_MAVEN, GRADLE},
     }
     if language not in allowed_profiles:
         raise CompanyRunnerError("invalid_result", "unsupported company runner language")
@@ -424,14 +434,21 @@ def execute_company_details(
                 raise CompanyRunnerError("invalid_result", errors[0])
         statuses = {(row["file_id"], row["symbol_id"]): row["status"] for row in evidence}
         stats = _stats(evidence, result.duration_sec)
-        if process_evidence or result.exit_code != 0 or any(value in {"FAILED", "ERROR"} for value in statuses.values()):
+        # Same mapping as ``validate_execution_evidence``: only complete exact
+        # evidence is PASS or FAIL; a process outcome, a skip or a non-zero exit
+        # with a clean report is UNKNOWN.
+        complete = (
+            not process_evidence and set(statuses) == set(pairs)
+            and not any(value == "SKIPPED" for value in statuses.values())
+        )
+        if complete and any(value in {"FAILED", "ERROR"} for value in statuses.values()):
             verdict = "FAIL"
-        elif len(statuses) != len(pairs) or any(value == "SKIPPED" for value in statuses.values()):
-            verdict = "NOT_RUNNABLE"
-        else:
+        elif complete and result.exit_code == 0:
             verdict = "PASS"
-        authoritative = not process_evidence and len(statuses) == len(pairs) and set(statuses) == set(pairs)
-        target = {"runner": runner_profile.split(":", 1)[0], "command": runner_profile}
+        else:
+            verdict = "UNKNOWN"
+        authoritative = complete
+        target = {"runner": _profile_runner(runner_profile), "command": runner_profile}
         diagnostics = validate_execution_evidence(
             verdict,
             run_id,

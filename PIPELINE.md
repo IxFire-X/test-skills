@@ -38,9 +38,10 @@ Version: `4.0`
 
 ## Reviewer session
 
-- one session; evidence pairs `0..bounded`; successful verdicts `1`
+- logical reviews `one_per_branch_or_revision`; fresh contexts `one_per_declared_part`; order `sequential`; successful verdicts `1`
+- coverage `original_source, local, cross_part`; aggregation `controller`; incomplete `never_accepted`
 - terminal pre-verdict abort verdicts `0`
-- forbidden: `per_batch_reviewers, hierarchical_reviewers, multiple_authoritative_reviewers`
+- forbidden: `shared_growing_context, hierarchical_reviewers, multiple_authoritative_aggregates`
 
 ## Physical lifecycle
 
@@ -89,6 +90,7 @@ Version: `4.0`
 
 - `controller_error_without_trustworthy_attempt_result => 2`
 - `waiting_for_input_or_model => 3`
+- `cases_only_fatal_invalid_closure_or_unreliable_evidence => 2`
 - `valid_terminal_cases_only_v1 => 1`
 - `accepted_terminal => 0`
 - `unknown_not_runnable_fatal_invalid_closure_or_unreliable_evidence => 2`

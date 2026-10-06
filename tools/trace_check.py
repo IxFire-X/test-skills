@@ -62,7 +62,7 @@ def _audit_source(trace: Any) -> dict[str, Any]:
 def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
     from tools.schema_validation import classify_version, schema_diagnostics
     from tools.build_trace_document import project_declared_order
-    from tools.run_tests import validate_process_evidence
+    from tools.run_tests import _not_runnable_process_kind, validate_process_evidence
     if classify_version(trace)["code"] == "V2_1_BREAKING_CHANGE":
         return [_diag("/schema_version", "V2_1_BREAKING_CHANGE", "V2.1 artifacts are incompatible with V3 trace.")]
     structural = schema_diagnostics(trace, TRACE_SCHEMA, ROOT)
@@ -132,6 +132,10 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         if row["file_id"] not in files or pair in symbols or locator in locators: rows.append(_diag(f"/symbols/{index}", "TRACE_SYMBOL_OWNERSHIP"))
         symbols.add(pair)
         locators.add(locator)
+    # A blocker blocks its whole case: such a case owns manual dispositions, never relations.
+    blocked_cases = {key[0] for key, step in steps.items() if step["blocker_ids"]}
+    automatable = any(not step["manual_only"] and key[0] not in blocked_cases for key, step in steps.items())
+    blocked_branch = trace["automation_status"] == "BLOCKED"
     required: set[tuple[str, str]] = set()
     relation_keys: set[tuple[Any, ...]] = set()
     for index, relation in enumerate(trace["implementation_relations"]):
@@ -139,7 +143,7 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         pair = (relation["file_id"], relation["symbol_id"])
         if relation["case_id"] not in cases or (relation["case_id"], relation["step_id"]) not in steps:
             rows.append(_diag(path, "TRACE_RELATION_STEP")); continue
-        if steps[(relation["case_id"], relation["step_id"])]["manual_only"] or steps[(relation["case_id"], relation["step_id"])]["blocker_ids"]:
+        if steps[(relation["case_id"], relation["step_id"])]["manual_only"] or relation["case_id"] in blocked_cases:
             rows.append(_diag(path, "TRACE_RELATION_NONREADY")); continue
         if relation["kind"] == "assertion" and (relation["case_id"], relation["step_id"], relation["expectation_id"], relation["assertion_id"]) not in assertions:
             rows.append(_diag(path, "TRACE_RELATION_ASSERTION")); continue
@@ -161,27 +165,31 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
     manual: set[tuple[str, str]] = set()
     for row in trace["manual_dispositions"]:
         key = (row["case_id"], row["step_id"])
-        if key in manual or key not in steps or not steps[key]["manual_only"]:
+        if key in manual or key not in steps or not (steps[key]["manual_only"] or key[0] in blocked_cases):
             rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_OWNERSHIP"))
         manual.add(key)
     manual_order = [(case_order.get(row["case_id"], 10**9), step_order.get((row["case_id"], row["step_id"]), 10**9)) for row in trace["manual_dispositions"]]
     if manual_order != sorted(manual_order): rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_ORDER"))
     for key, step in steps.items():
-        if step["manual_only"] and key not in manual: rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_COVERAGE"))
-        if not step["manual_only"] and not step["blocker_ids"]:
+        if blocked_branch:
+            continue  # the BLOCKED branch owns no dispositions or relations; TRACE_BLOCKED_BRANCH checks that
+        if (step["manual_only"] or key[0] in blocked_cases) and key not in manual: rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_COVERAGE"))
+        if not step["manual_only"] and key[0] not in blocked_cases:
             if not any(row["kind"] == "operation" and (row["case_id"], row["step_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_OPERATION_COVERAGE"))
     for key in assertions:
         step = steps.get((key[0], key[1]))
         if step is None:
             continue
-        if not step["manual_only"] and not step["blocker_ids"] and not any(row["kind"] == "assertion" and (row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_ASSERTION_COVERAGE"))
+        if not blocked_branch and not step["manual_only"] and key[0] not in blocked_cases and not any(row["kind"] == "assertion" and (row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_ASSERTION_COVERAGE"))
     for key in expectations:
         step = steps.get((key[0], key[1]))
-        if step is not None and not step["manual_only"] and not step["blocker_ids"] and not any(assertion[:3] == key for assertion in assertions):
+        if step is not None and not step["manual_only"] and key[0] not in blocked_cases and not any(assertion[:3] == key for assertion in assertions):
             rows.append(_diag("/assertions", "TRACE_ASSERTION_TOPOLOGY"))
-    if trace["automation_status"] == "BLOCKED":
-        if not any(step["blocker_ids"] for step in steps.values()) or not trace["automation_diagnostics"] or any((trace["files"], trace["symbols"], trace["implementation_relations"], trace["manual_dispositions"])): rows.append(_diag("/automation_status", "TRACE_BLOCKED_BRANCH"))
-    elif any(step["blocker_ids"] for step in steps.values()) or trace["automation_diagnostics"]:
+    if blocked_branch:
+        if not blocked_cases or automatable or not trace["automation_diagnostics"] or any((trace["files"], trace["symbols"], trace["implementation_relations"], trace["manual_dispositions"])): rows.append(_diag("/automation_status", "TRACE_BLOCKED_BRANCH"))
+    elif (blocked_cases and not automatable) or bool(blocked_cases) != bool(trace["automation_diagnostics"]):
+        # GENERATED with blockers is the partial branch: other cases are automated and the
+        # diagnostics explain the blocked ones.  Without blockers diagnostics stay forbidden.
         rows.append(_diag("/automation_status", "TRACE_GENERATED_BRANCH"))
     execution = trace["execution"]
     blocked_or_manual = trace["automation_status"] == "BLOCKED" or not required
@@ -210,6 +218,9 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         evidence_structural_error = any(row["code"] in {"TRACE_EVIDENCE_SOURCE", "TRACE_EVIDENCE_PAIR", "TRACE_DUPLICATE_EVIDENCE", "TRACE_SOURCE_CHANGED_EVIDENCE"} for row in rows)
         process_structural_error = any(row["code"].startswith("TRACE_PROCESS_") or row["code"] == "TRACE_STALE_PROCESS_EVIDENCE" for row in rows)
         derived = "FAIL" if evidence_structural_error or process_structural_error or process or any(status in {"FAILED", "ERROR"} for status in statuses.values()) else "NOT_RUNNABLE" if len(statuses) != len(required) or "SKIPPED" in statuses.values() else "PASS"
+        if not evidence_structural_error and not process_structural_error and _not_runnable_process_kind(execution["evidence"], process) is not None:
+            # A started run whose tests provably did not run (launch failure, compile/import gate, deselection).
+            derived = "NOT_RUNNABLE"
         if execution["verdict"] != "UNKNOWN" and execution["verdict"] != derived: rows.append(_diag("/execution/verdict", "TRACE_EXECUTION_VERDICT"))
         if execution["verdict"] == "UNKNOWN" and execution["evidence_authoritative"]:
             rows.append(_diag("/execution/evidence_authoritative", "TRACE_UNKNOWN_EVIDENCE"))

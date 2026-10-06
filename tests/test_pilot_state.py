@@ -10,7 +10,7 @@ from tools import pilot_state
 from tools import confined_output
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive
 from tools.pilot_state import append_event, create_run, derive_state
-from helpers import phase_two_baseline
+from helpers import make_junction, phase_two_baseline
 
 
 AUTHORIZATION = {"request_id": "request-1", "execution_requested": False}
@@ -57,6 +57,11 @@ def _snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
         for path in root.rglob("*")
         if path.is_file()
     }
+
+
+def _recover(root: Path) -> list[dict]:
+    """Writer-side journal read: only a writer (under the run lock) may repair pending markers."""
+    return pilot_state._events(root.parent.parent.resolve(), root, recover=True)
 
 
 def _module_digest(root: Path) -> str:
@@ -371,12 +376,12 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
     )
     append_event(
         root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id="tc-reviewer:canonical", artifact_digest=DIGEST_A,
+        stage_instance_id="tc-reviewer:canonical:part-000001", artifact_digest=DIGEST_A,
     )
     before = _snapshot(root)
-    with pytest.raises(ValueError, match="receipt|boundary"):
+    with pytest.raises(ValueError, match="review-plan|receipt|boundary"):
         pilot_state.publish_model_request(
-            root, attempt_id, "tc-reviewer:canonical",
+            root, attempt_id, "tc-reviewer:canonical:part-000001",
             model_id="model-reviewer", invocation_id="invoke-reviewer",
             input_digests=[DIGEST_A, DIGEST_B],
         )
@@ -437,14 +442,17 @@ def test_event_pair_failure_rolls_back_and_retry_reuses_next_sequence(tmp_path: 
     monkeypatch.undo()
     assert append_event(root, "MODULE_SELECTED", actor="controller", artifact_digest=_module_digest(root))["seq"] == 2
     previous = json.loads((root / "events" / "0000000002.json").read_text(encoding="utf-8"))
-    orphan = _sealed({"schema_version": "1.0.0", "seq": 3, "event_type": "ARTIFACT_PUBLISHED", "run_id": previous["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": previous["digest"], "artifact_digest": DIGEST_B})
+    orphan = _sealed({"schema_version": "2.0.0", "seq": 3, "event_type": "ARTIFACT_PUBLISHED", "run_id": previous["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": previous["digest"], "artifact_digest": DIGEST_B})
     orphan_path = root / "events" / "0000000003.json"
     orphan_data = pilot_state._canonical_bytes(orphan)
     orphan_path.write_bytes(orphan_data)
     marker_path = root / "pending-events" / "0000000003.json"
     marker_path.parent.mkdir(exist_ok=True)
     marker_path.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(orphan, orphan_data, (root / "events.jsonl").read_bytes())))
-    derive_state(root)
+    before_read = _snapshot(root)
+    assert derive_state(root)["events"][-1]["seq"] == 2
+    assert _snapshot(root) == before_read  # a reader never repairs a crashed writer's marker
+    _recover(root)
     assert not orphan_path.exists()
     assert not marker_path.exists()
 
@@ -471,7 +479,8 @@ def test_immutable_publish_is_temp_fsync_then_atomic_no_replace(tmp_path: Path, 
 
     monkeypatch.setattr(os, "fsync", observe)
     assert create_confined_bytes_exclusive(tmp_path, root, target, b"one\n") is True
-    assert observed == [False]
+    # The file is synced before it becomes visible; later syncs are POSIX directory syncs only.
+    assert observed[:1] == [False] and all(observed[1:])
     assert create_confined_bytes_exclusive(tmp_path, root, target, b"one\n") is False
     with pytest.raises(Exception):
         create_confined_bytes_exclusive(tmp_path, root, target, b"two\n")
@@ -485,9 +494,7 @@ def test_run_and_module_reparse_components_never_escape(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     if os.name == "nt":
-        subprocess = __import__("subprocess")
-        junction = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(unsafe_runs), str(outside)], check=False, capture_output=True, text=True)
-        assert junction.returncode == 0, junction.stdout + junction.stderr
+        make_junction(unsafe_runs, outside)
     else:
         unsafe_runs.symlink_to(outside, target_is_directory=True)
     try:
@@ -504,9 +511,7 @@ def test_run_and_module_reparse_components_never_escape(tmp_path: Path) -> None:
     (tmp_path / "real").mkdir()
     link = tmp_path / "link"
     if os.name == "nt":
-        subprocess = __import__("subprocess")
-        junction = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(tmp_path / "real")], check=False, capture_output=True, text=True)
-        assert junction.returncode == 0, junction.stdout + junction.stderr
+        make_junction(link, tmp_path / "real")
     else:
         link.symlink_to(tmp_path / "real", target_is_directory=True)
     try:
@@ -596,7 +601,7 @@ def test_replay_rejects_resealed_attempt_identity_and_two_nonterminal_attempts(t
     manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
     second = pilot_state._publish(tmp_path, root, root / "attempts" / f"{'b' * 32}.json", {"schema_version": "1.0.0", "run_id": manifest["run_id"], "attempt_id": "b" * 32, "project": str(tmp_path.resolve()), "module": ".", "policy_profile": "cases-only-v1", "baseline_digest": DIGEST_A, "parent_attempt_id": first["attempt_id"], "retry_reason": "retry-1"}, "attempt")
     prior = json.loads((root / "events" / "0000000003.json").read_text(encoding="utf-8"))
-    event = _sealed({"schema_version": "1.0.0", "seq": 4, "event_type": "ATTEMPT_CREATED", "run_id": manifest["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": prior["digest"], "attempt_id": second["attempt_id"], "artifact_digest": second["digest"]})
+    event = _sealed({"schema_version": "2.0.0", "seq": 4, "event_type": "ATTEMPT_CREATED", "run_id": manifest["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": prior["digest"], "attempt_id": second["attempt_id"], "artifact_digest": second["digest"]})
     data = pilot_state._canonical_bytes(event)
     (root / "events" / "0000000004.json").write_bytes(data)
     (root / "events.jsonl").write_bytes((root / "events.jsonl").read_bytes() + data)
@@ -672,12 +677,14 @@ def test_recovery_distinguishes_pending_publication_from_committed_truncation(tm
     before_root = Path(create_run(before_project, "cases-only-v1", AUTHORIZATION)["run_root"])
     prior = (before_root / "events.jsonl").read_bytes()
     first = json.loads((before_root / "events" / "0000000001.json").read_text(encoding="utf-8"))
-    future = _sealed({"schema_version": "1.0.0", "seq": 2, "event_type": "MODULE_SELECTED", "run_id": first["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": first["digest"], "artifact_digest": DIGEST_A})
+    future = _sealed({"schema_version": "2.0.0", "seq": 2, "event_type": "MODULE_SELECTED", "run_id": first["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": first["digest"], "artifact_digest": DIGEST_A})
     future_data = pilot_state._canonical_bytes(future)
     marker = before_root / "pending-events" / "0000000002.json"
     marker.parent.mkdir(exist_ok=True)
     marker.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(future, future_data, prior)))
     assert derive_state(before_root)["events"][-1]["seq"] == 1
+    assert marker.exists()
+    assert _recover(before_root)[-1]["seq"] == 1
     assert not marker.exists()
     after_project = tmp_path / "after-counterpart"
     after_project.mkdir()
@@ -688,6 +695,8 @@ def test_recovery_distinguishes_pending_publication_from_committed_truncation(tm
     after_marker = after_root / "pending-events" / "0000000002.json"
     after_marker.write_bytes(pilot_state._canonical_bytes(pilot_state._pending_event_value(after_event, after_data, (after_root / "events.jsonl").read_bytes().rsplit(after_data, 1)[0])))
     assert derive_state(after_root)["events"][-1]["seq"] == 2
+    assert after_marker.exists()
+    assert _recover(after_root)[-1]["seq"] == 2
     assert not after_marker.exists()
     mismatches = {
         "run_id": "0" * 32,
@@ -813,7 +822,7 @@ def _pending_marker(root: Path, event: dict, prior: bytes) -> tuple[Path, bytes]
 def _next_module_event(root: Path) -> tuple[dict, bytes]:
     first = json.loads((root / "events" / "0000000001.json").read_text(encoding="utf-8"))
     event = _sealed({
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "seq": 2,
         "event_type": "MODULE_SELECTED",
         "run_id": first["run_id"],
@@ -844,7 +853,7 @@ def test_round4_marker_recovery_keeps_marker_last_across_cleanup_faults(
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", fail_counterpart)
     before = _snapshot(root)
     with pytest.raises(ValueError, match="event journal"):
-        derive_state(root)
+        _recover(root)
     assert _snapshot(root) == before
     assert marker.read_bytes() == marker_data and counterpart.read_bytes() == data
 
@@ -857,11 +866,13 @@ def test_round4_marker_recovery_keeps_marker_last_across_cleanup_faults(
 
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", fail_marker)
     with pytest.raises(ValueError, match="event journal"):
-        derive_state(root)
+        _recover(root)
     assert not counterpart.exists()
     assert marker.read_bytes() == marker_data
     monkeypatch.setattr(pilot_state, "remove_confined_bytes_if_equal", original)
     assert derive_state(root)["events"][-1]["seq"] == 1
+    assert marker.exists()
+    assert _recover(root)[-1]["seq"] == 1
     assert not marker.exists()
 
 
@@ -1064,3 +1075,24 @@ def test_round5_temporary_replacement_is_preserved_and_fails_publication(
         create_confined_bytes_exclusive(tmp_path, root, target, b"owned\n")
     assert swapped["path"].read_bytes() == b"foreign\n"
     assert not target.exists()
+
+
+def test_junction_helper_survives_console_output_in_the_oem_code_page(tmp_path: Path) -> None:
+    """Review 2026-10-05 (M38): cmd.exe mklink answers in cp866 on a Russian Windows."""
+    from types import SimpleNamespace
+
+    calls: list[dict] = []
+
+    def russian_console(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(dict(kwargs))
+        text = "Соединение создано для " + argv[-2]
+        return SimpleNamespace(returncode=0, stdout=text.encode("cp866"), stderr=b"")
+
+    make_junction(tmp_path / "link", tmp_path / "target", run=russian_console)
+    assert calls and "text" not in calls[0] and "encoding" not in calls[0]
+
+    def failing(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=1, stdout="Отказано в доступе.".encode("cp866"), stderr=b"")
+
+    with pytest.raises(AssertionError):
+        make_junction(tmp_path / "link", tmp_path / "target", run=failing)

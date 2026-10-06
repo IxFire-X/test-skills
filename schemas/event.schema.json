@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "seq", "event_type", "run_id", "actor", "observed_at", "prev_digest", "artifact_digest", "digest"],
   "properties": {
-    "schema_version": {"const": "1.0.0"},
+    "schema_version": {"const": "2.0.0"},
     "seq": {"type": "integer", "minimum": 1},
     "event_type": {"enum": ["RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"]},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -13,7 +13,7 @@
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "batch_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
     "stage_instance_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "transport_attempts": {"type": "integer", "minimum": 1, "maximum": 2},
+    "transport_attempts": {"type": "integer", "minimum": 1, "maximum": 3},
     "artifact_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
     "prev_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},

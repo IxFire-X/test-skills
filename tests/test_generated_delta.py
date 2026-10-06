@@ -31,6 +31,8 @@ def _reviewer_protocol_inputs(
     *,
     bind_boundary: bool = True,
     bundle_root: Path | None = None,
+    complete: bool = True,
+    byte_budget: int = 1000000,
 ):
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import (
@@ -126,47 +128,18 @@ def _reviewer_protocol_inputs(
         document, bundle_root or run_root / "candidate-bundle",
         run_root=run_root, attempt_id=attempt_id,
     )
-    isolation = {"fresh_context": True, "distinct_invocations": True, "role_policy": "canonical-reviewer-v1"}
-    isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    start = {
-        "session_id": "phase5-effective", "generator_role": "generator", "reviewer_role": "canonical-reviewer",
-        "generator_invocation_id": generator_invocation_id, "reviewer_invocation_id": reviewer_invocation_id,
-        "host_isolation": isolation,
-        "context_budget_bytes": package["base_package_byte_count"],
-    }
-    boundary_digest = open_reviewer_session(run_root, attempt_id, package, start)["digest"] if bind_boundary else "sha256:" + "f" * 64
-    selected = {"document_id": document["document_id"], "revision": document["revision"], "document_sha256": document_sha256(document)}
-    report = {
-        "verdict": "ПРИНЯТО", "candidate": selected, "effective": selected,
-        "reviewed_case_ids": [case["case_id"] for case in document["test_cases"]], "findings": [], "corrections": [],
-    }
-    review = {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report}, "warnings": []}
-    session = {
-        "schema_version": "1.0.0", "session_id": "phase5-effective", "boundary_digest": boundary_digest,
-        "package_binding": package,
-        "context_budget_bytes": package["base_package_byte_count"],
-        "generator_role": "generator", "reviewer_role": "canonical-reviewer",
-        "generator_invocation_id": start["generator_invocation_id"], "reviewer_invocation_id": start["reviewer_invocation_id"], "host_isolation": isolation,
-        "events": [
-            {"ordinal": 1, "event_type": "REVIEW_SESSION_STARTED"},
-            {"ordinal": 2, "event_type": "AUTHORITATIVE_VERDICT", "verdict": "ACCEPTED", "report_digest": "sha256:" + hashlib.sha256(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest(), "verdict_digest": "sha256:" + hashlib.sha256(json.dumps({"verdict": report["verdict"], "effective": report["effective"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()},
-            {"ordinal": 3, "event_type": "REVIEW_SESSION_COMPLETED"},
-        ],
-        "status": "COMPLETED",
-    }
-    session["digest"] = "sha256:" + hashlib.sha256(json.dumps(session, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    append_event(
-        run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id="tc-reviewer:canonical",
-        artifact_digest=package["candidate_digest"],
-    )
-    publish_model_request(
-        run_root, attempt_id, "tc-reviewer:canonical",
-        model_id="model-reviewer", invocation_id=reviewer_invocation_id,
-        input_digests=[package["candidate_digest"], package["package_digest"]],
-    )
-    publish_model_stage_artifact(run_root, attempt_id, "tc-reviewer:canonical", review)
-    return session, package, review, candidate_receipt
+    from tests.helpers import review_payload, complete_review_parts
+    from tools.pilot_state import prepare_review
+    if not bind_boundary:
+        raise ValueError("review requires its durable boundary")
+    prepare_review(run_root, attempt_id, review_payload(Path(attempt["project"]), document, package=package),
+                   input_byte_budget=byte_budget, response_reserve_bytes=1000,
+                   instructions="Review original requirements, cases and cross-case consistency.", session_id="phase5-effective")
+    if not complete:
+        from tools.pilot_state import read_reviewer_session_ledger
+        return dict(read_reviewer_session_ledger(run_root, attempt_id)), package, None, candidate_receipt
+    completed = complete_review_parts(run_root, attempt_id)
+    return completed["session"], package, completed["output"], candidate_receipt
 
 
 def _published_reviewer_ledger(run_root: Path, attempt_id: str, document: dict, *, bind_boundary: bool = True) -> str:
@@ -210,33 +183,9 @@ def _inputs(
     boundary = evidence
     if effective and automation_lifecycle:
         _run_root, _attempt_id, boundary = durable_boundary(tmp_path, automation, "delta-review", evidence, run_root=run_root, attempt_id=attempt_id)
-    elif effective:
-        from tools.automation_validation import automation_sha256
-        from tools.pilot_state import open_automation_review_boundary
-
-        isolation = {
-            "fresh_context": True,
-            "distinct_invocations": True,
-        }
-        isolation["evidence_digest"] = _digest(
-            json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        )
-        boundary = open_automation_review_boundary(run_root, attempt_id, {
-            "automation_digest": automation_sha256(automation),
-            "automation_revision": automation["artifacts"]["automation_revision"],
-            "effective_canonical_digest": automation["artifacts"]["source"]["source_digest"],
-            "effective_bundle_receipt_digest": automation["artifacts"]["source"]["effective_bundle_receipt_digest"],
-            "reviewer_session_id": "delta-review",
-            "generator_invocation_id": evidence["generator_invocation_id"],
-            "reviewer_invocation_id": evidence["reviewer_invocation_id"],
-            "role_policy": "autotest-static-reviewer-v1",
-            "host_isolation": isolation,
-        })["record"]
-    review = review_artifact(document, automation, boundary, "ПРИНЯТО", session_id="delta-review")
-    if effective and automation_lifecycle:
-        _publish_automation_review_lifecycle(
-            run_root, attempt_id, automation, boundary, review,
-        )
+    review = review_artifact(document, automation, boundary, "ПРИНЯТО", session_id="delta-review",
+                            run_root=run_root if effective and automation_lifecycle else None,
+                            attempt_id=attempt_id if effective and automation_lifecycle else None)
     return baseline, automation, review, document, run_root, attempt_id
 
 
@@ -247,30 +196,9 @@ def _publish_automation_review_lifecycle(
     boundary: dict,
     review: dict,
 ) -> None:
-    from tools.automation_validation import automation_sha256
-    from tools.pilot_state import (
-        append_event, publish_model_request, publish_model_stage_artifact,
-        read_attempt_receipt,
-    )
-
-    revision = automation["artifacts"]["automation_revision"]
-    reviewer_stage = f"autotest-reviewer:r{revision}"
-    automation_digest = automation_sha256(automation)
-    append_event(
-        run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id=reviewer_stage, artifact_digest=automation_digest,
-    )
-    boundary_receipt = read_attempt_receipt(
-        run_root, attempt_id, f"automation-review-boundary-r{revision}",
-        "ARTIFACT_READ_BACK",
-    )
-    publish_model_request(
-        run_root, attempt_id, reviewer_stage,
-        model_id="model-automation-reviewer",
-        invocation_id=boundary["reviewer_invocation_id"],
-        input_digests=[automation_digest, boundary_receipt["digest"]],
-    )
-    publish_model_stage_artifact(run_root, attempt_id, reviewer_stage, review)
+    from tools.pilot_state import read_review_aggregate
+    aggregate = read_review_aggregate(run_root, attempt_id, f"r{automation['artifacts']['automation_revision']}")
+    assert aggregate["output"] == review and aggregate["aggregate"]["complete"]
 
 
 def _materialize(tmp_path: Path, inputs, **extra):
@@ -286,8 +214,8 @@ def test_automation_request_rejects_wrong_inputs_before_publication(tmp_path: Pa
     *_, run_root, attempt_id = _inputs(tmp_path, automation_lifecycle=False)
     before = (run_root / "events.jsonl").read_bytes()
     requests = sorted((run_root / "model-requests").rglob("*.json"))
-    for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
-        with pytest.raises(ValueError, match="input digests"):
+    for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1:part-000001"):
+        with pytest.raises(ValueError, match="inputs|input digests|review-plan"):
             publish_model_request(
                 run_root, attempt_id, stage, model_id="model-test",
                 invocation_id="wrong-inputs", input_digests=["sha256:" + "f" * 64],
@@ -337,7 +265,7 @@ def test_effective_selection_rejects_noncanonical_reviewer_ledger_bytes(tmp_path
 
     _baseline, _automation, _review, document, run_root, attempt_id = _inputs(tmp_path, effective=False)
     ledger_digest = _published_reviewer_ledger(run_root, attempt_id, document)
-    ledger_path = run_root / "reviewer-session-ledgers" / attempt_id / f"{ledger_digest.removeprefix('sha256:')}.json"
+    ledger_path = run_root / "reviewer-session-ledgers" / attempt_id / "canonical" / f"{ledger_digest.removeprefix('sha256:')}.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -430,7 +358,8 @@ def test_actual_phase4_selection_is_consumed_by_phase5_materialization(tmp_path:
     automation = automation_artifact(document, effective_bundle_receipt_digest=effective["effective_bundle_receipt_digest"])
     evidence = host_evidence("phase5-review")
     _root, _attempt, boundary = durable_boundary(tmp_path, automation, "phase5-review", evidence, run_root=run_root, attempt_id=attempt_id)
-    static_review = review_artifact(document, automation, boundary, "ПРИНЯТО", session_id="phase5-review")
+    # Bounded review: the verdict is the controller aggregate of the completed parts.
+    static_review = review_artifact(document, automation, boundary, "ПРИНЯТО", session_id="phase5-review", run_root=run_root, attempt_id=attempt_id)
     _publish_automation_review_lifecycle(
         run_root, attempt_id, automation, boundary, static_review,
     )
@@ -525,8 +454,11 @@ def test_execution_inputs_are_fixed_and_read_back_before_materialization(tmp_pat
 
     conflicting = json.loads(json.dumps(review))
     conflicting["warnings"] = ["different reviewed carrier"]
-    with pytest.raises(GeneratedDeltaError, match="execution inputs|materialization"):
+    # A carrier that differs from the durable review aggregate is refused before the
+    # frozen execution inputs can be touched.
+    with pytest.raises(GeneratedDeltaError, match="execution inputs|materialization|accepted reviewed automation chain is invalid"):
         _materialize(tmp_path, (inputs[0], automation, conflicting, inputs[3], run_root, attempt_id))
+    assert (run_root / "execution-inputs" / f"{attempt_id}.json").read_bytes() == before_bytes
 
 
 def test_materialization_rejects_missing_automation_model_lifecycle_before_side_effects(tmp_path: Path):
@@ -536,7 +468,8 @@ def test_materialization_rejects_missing_automation_model_lifecycle_before_side_
     inputs = _inputs(tmp_path, automation_lifecycle=False)
     _baseline, _automation, _review, _document, run_root, attempt_id = inputs
 
-    with pytest.raises(GeneratedDeltaError, match="execution inputs"):
+    # Without the durable per-part review the chain stops at its first missing link.
+    with pytest.raises(GeneratedDeltaError, match="execution inputs|static review boundary is not durable/read-back"):
         _materialize(tmp_path, inputs)
 
     assert not (tmp_path / "tests" / "test_products.py").exists()
@@ -1275,17 +1208,22 @@ def test_case_collision_and_escape_are_rejected_before_any_write(tmp_path: Path)
             {**relations[1], "file_id": "FILE-other", "symbol_id": "SYMBOL-other"}, relations[1],
         ]
 
-    inputs = _inputs(tmp_path, mutate=add_casefolding_collision)
+    refused = "accepted reviewed automation chain is invalid|static review boundary is not durable/read-back"
+    # The bounded review refuses to snapshot an invalid artifact, so it can never be reviewed...
+    with pytest.raises(ValueError, match="automation review snapshot is unbound"):
+        _inputs(tmp_path, mutate=add_casefolding_collision)
+    # ...and materialization refuses it as well when it arrives without that review.
+    inputs = _inputs(tmp_path, mutate=add_casefolding_collision, automation_lifecycle=False)
     _baseline, automation, _review, document, _run_root, _attempt_id = inputs
     assert {row["code"] for row in validate_automation_artifact(automation, document)} == {"AUTOMATION_DUPLICATE_PATH"}
-    with pytest.raises(GeneratedDeltaError, match="accepted reviewed automation chain is invalid") as collision:
+    with pytest.raises(GeneratedDeltaError, match=refused) as collision:
         _materialize(tmp_path, inputs)
     assert collision.value.code == "MATERIALIZATION_CONFLICT"
     assert not (tmp_path / "tests" / "test_products.py").exists()
-    inputs = _inputs(tmp_path, mutate=lambda automation: automation["artifacts"]["generated_files"][0].__setitem__("path", "tests/../escape.py"))
+    inputs = _inputs(tmp_path, mutate=lambda automation: automation["artifacts"]["generated_files"][0].__setitem__("path", "tests/../escape.py"), automation_lifecycle=False)
     _baseline, automation, _review, document, _run_root, _attempt_id = inputs
     assert {row["code"] for row in validate_automation_artifact(automation, document)} == {"AUTOMATION_PORTABLE_PATH"}
-    with pytest.raises(GeneratedDeltaError, match="accepted reviewed automation chain is invalid") as escape:
+    with pytest.raises(GeneratedDeltaError, match=refused) as escape:
         _materialize(tmp_path, inputs)
     assert escape.value.code == "MATERIALIZATION_CONFLICT"
     assert not (tmp_path / "escape.py").exists()

@@ -259,7 +259,7 @@ def test_late_process_stopped_cannot_retroactively_validate_child(tmp_path: Path
     events = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
     for event_type, attempt_id, digest in (("ATTEMPT_CREATED", child["attempt_id"], child["digest"]), ("PROCESS_STOPPED", parent["attempt_id"], DIGEST)):
         previous = events[-1]
-        event = state._sealed({"schema_version": "1.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": previous["digest"], "attempt_id": attempt_id, "artifact_digest": digest})
+        event = state._sealed({"schema_version": "2.0.0", "seq": len(events) + 1, "event_type": event_type, "run_id": manifest["run_id"], "actor": "controller", "observed_at": "2026-08-26T00:00:00.000000Z", "prev_digest": previous["digest"], "attempt_id": attempt_id, "artifact_digest": digest})
         data = state._canonical_bytes(event)
         (root / "events" / f"{event['seq']:010d}.json").write_bytes(data)
         journal.write_bytes(journal.read_bytes() + data)

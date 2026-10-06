@@ -136,25 +136,7 @@ def test_selected(plugin_value: str, conftest_value: str) -> None:
         run_root=run_root, attempt_id=attempt_id, document=document,
         generator=evidence["generator_invocation_id"], reviewer=evidence["reviewer_invocation_id"],
     )
-    static_review = review(document, artifact, boundary, "ПРИНЯТО", session_id="static-session")
-    from tools.automation_validation import automation_sha256
-    from tools.pilot_state import append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt
-
-    reviewer_stage = "autotest-reviewer:r1"
-    append_event(
-        run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id=reviewer_stage, artifact_digest=automation_sha256(artifact),
-    )
-    boundary_receipt = read_attempt_receipt(
-        run_root, attempt_id, "automation-review-boundary-r1", "ARTIFACT_READ_BACK",
-    )
-    publish_model_request(
-        run_root, attempt_id, reviewer_stage,
-        model_id="model-automation-reviewer",
-        invocation_id=evidence["reviewer_invocation_id"],
-        input_digests=[automation_sha256(artifact), boundary_receipt["digest"]],
-    )
-    publish_model_stage_artifact(run_root, attempt_id, reviewer_stage, static_review)
+    static_review = review(document, artifact, boundary, "ПРИНЯТО", session_id="static-session", run_root=run_root, attempt_id=attempt_id)
     from tools.generated_delta import materialize_delta
     from tools.pilot_state import read_attempt_receipt
 
@@ -272,9 +254,10 @@ def test_selected(value):
     assert not any(marker.encode() in path.read_bytes() for path in root.rglob("*") if path.is_file())
 
 
-def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifacts(
+def test_pytest_zero_collection_is_tests_deselected_and_keeps_the_generated_test(
     tmp_path: Path,
 ) -> None:
+    """Review decision 15: an explicit node ID that collects nothing is NOT_RUNNABLE, never FAIL."""
     from tests.test_durable_execution_trace import _publish_execution
     from tools.execution_adapters import request_digest
     from tools.finalize_attempt import finalize_durable_execution_attempt
@@ -309,10 +292,10 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
         row for row in report["execution"]["artifact_evidence"]
         if row["kind"] == "native_report"
     )
-    assert report["verdict"] == "FAIL", (run_root / retained_report["path"]).read_text(encoding="utf-8")
-    assert report["evidence_authoritative"] is True
+    assert report["verdict"] == "NOT_RUNNABLE", (run_root / retained_report["path"]).read_text(encoding="utf-8")
+    assert report["evidence_authoritative"] is False
     assert report["stats"]["total"] == 0
-    assert [row["kind"] for row in report["process_evidence"]] == ["NO_TESTS_COLLECTED"]
+    assert [row["kind"] for row in report["process_evidence"]] == ["TESTS_DESELECTED"]
     artifacts = report["execution"]["artifact_evidence"]
     assert {row["kind"] for row in artifacts} == {
         "native_report", "generated_test", "runner_output",
@@ -323,7 +306,7 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     assert retained_generated["source_path"] == "tests/test_generated.py"
     assert (run_root / retained_generated["path"]).read_bytes() == generated_bytes
     output = (run_root / next(row for row in artifacts if row["kind"] == "runner_output")["path"]).read_bytes()
-    assert 0 < len(output) <= 2000
+    assert 0 < len(output) <= 64 * 1024
     assert read_effective_canonical(run_root, attempt_id)["document"] == document
 
     _publish_execution(run_root, attempt_id, report)
@@ -333,10 +316,11 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     assert durable["execution"]["artifact_evidence"] == artifacts
     finalized = finalize_durable_execution_attempt(run_root, attempt_id)
 
-    assert finalized["exit_code"] == 1, json.dumps(finalized, indent=2)
-    assert finalized["result"]["verification"] == "FAIL"
-    assert finalized["result"]["reason_code"] == "NO_TESTS_COLLECTED"
-    assert not generated.exists()
+    assert finalized["exit_code"] == 2, json.dumps(finalized, indent=2)
+    assert finalized["result"]["verification"] == "NOT_RUNNABLE"
+    assert finalized["result"]["reason_code"] == "TESTS_DESELECTED"
+    # The test is valid and only deselected by project configuration: it is not cleaned like a FAIL.
+    assert generated.read_bytes() == generated_bytes
     assert (run_root / retained_generated["path"]).read_bytes() == generated_bytes
 
 
