@@ -2471,7 +2471,8 @@ def reviewer_lifecycle_projection(session: Mapping[str, Any]) -> Mapping[str, An
         "authoritative_verdict": verdicts[0]["verdict"] if verdicts else None,
         "authoritative_verdict_count": len(verdicts),
         "pre_verdict_abort": aborted,
-        "abort_reason": aborts[0].get("reason_code") if aborts else None,
+        # Ledgers sealed before 2026-10-06 named an incomplete review REWORK.
+        "abort_reason": ("REVIEW_INCOMPLETE" if aborts[0].get("reason_code") == "REWORK" else aborts[0].get("reason_code")) if aborts else None,
         "waiting": waiting,
     }
 
@@ -4305,13 +4306,17 @@ def finish_review(run_root: Path, attempt_id: str, review_key: str = "canonical"
 
 
 def _review_abort_reason(plan: Mapping[str, Any], session: Mapping[str, Any]) -> str:
-    """Why an incomplete review stops: context limit, reviewer unreachable, or content needing rework."""
+    """Why an incomplete review stops: context limit, reviewer unreachable, or evidence left unchecked.
+
+    A pre-verdict abort is never ``REWORK``: rework needs one authoritative REJECTED
+    verdict, and the terminal projection refuses any other combination.
+    """
     if any(part["blocked_reason"] for part in [*plan["parts"], *plan["additions"]]):
         return "REVIEW_CONTEXT_LIMIT"
     classes = set(_review_block_classes(session).values())
     if classes == {"TRANSPORT"}:
         return "REVIEW_TRANSPORT_FAILED"
-    return "REWORK"
+    return "REVIEW_INCOMPLETE"
 
 
 def read_review_aggregate(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:

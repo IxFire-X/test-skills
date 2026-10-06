@@ -736,7 +736,7 @@ def _terminal_facts(run_root: Path, attempt: Mapping[str, Any], *, document: Map
     steps = [step for case in (document or {}).get("test_cases", []) for step in case.get("steps", [])]
     manual = sum(step.get("manual_only") is True for step in steps)
     coverage = None if not accepted_review else "MANUAL_ONLY" if steps and manual == len(steps) else "MIXED" if manual else "FULL"
-    reason = None if accepted_review else "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason") or "REWORK"
+    reason = None if accepted_review else "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason") or "REVIEW_INCOMPLETE"
     return {
         "run_id": read_run(run_root)["manifest"]["run_id"], "attempt_id": attempt_id, "attempt_state": "TERMINAL",
         "completion": "COMPLETE" if accepted_review else "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": reason,

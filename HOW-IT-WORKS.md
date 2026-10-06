@@ -223,7 +223,8 @@ invocation — всего не
 более трёх вызовов на часть (stages `…:part-NNNNNN-try2`, `-try3`). Незавершённое
 ревью закрывается как `REVIEW_SESSION_ABORTED`: `REVIEW_CONTEXT_LIMIT`, если часть не
 поместилась в бюджет; `REVIEW_TRANSPORT_FAILED`, если все заблокированные части не
-удалось доставить reviewer; иначе `REWORK`.
+удалось доставить reviewer; иначе `REVIEW_INCOMPLETE` (остались непроверенные области).
+Прерванное ревью никогда не даёт `REWORK`: эта причина требует одного вердикта REJECTED.
 
 Host/controller доказывает isolation каждой части. Если доказательства нет, фиксируется
 `independence_unverified`, и effective canonical не может быть accepted.
@@ -260,8 +261,8 @@ Automation initial + максимум одна correction означает не 
 остаются append-only evidence. Драйвер записывает для статического ревью автотестов
 собственные причины завершения: `AUTOMATION_REVIEW_REJECTED` (ревью отклонило),
 `AUTOMATION_REVISION_BUDGET` (исправления нужны и после revision 2),
-`AUTOMATION_REVIEW_CONTEXT_LIMIT` и `AUTOMATION_REVIEW_TRANSPORT_FAILED` (ревью
-прервано). Файлы тестов в проект при этом не пишутся.
+`AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED` и
+`AUTOMATION_REVIEW_INCOMPLETE` (ревью прервано). Файлы тестов в проект при этом не пишутся.
 
 Canonical blocker блокирует только свой кейс. Для остальных кейсов автоматизация
 генерируется (`GENERATED`), каждый шаг заблокированного кейса получает строку в

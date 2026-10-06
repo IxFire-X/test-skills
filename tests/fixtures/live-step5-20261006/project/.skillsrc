@@ -1,0 +1,30 @@
+schema_version: 5.0.0
+version: '3.0'
+project:
+  name: step5-java-demo
+discovery:
+  on_missing: automatic
+  conflict_policy: ask_user
+modules:
+- id: root
+  root: .
+  stack:
+    language: java
+    build_tool: maven
+    framework: spring-boot
+  detected_from:
+  - pom.xml
+  paths:
+    source:
+    - src
+    - src/main/java
+    tests:
+    - src/test/java
+    resources:
+    - src/main/resources
+  test:
+    framework: junit5
+    adapter_id: maven-wrapper:selected-symbols-v1
+    wrapper: mvnw
+    build_profile: default
+    adapter_parameters: {}

@@ -20,7 +20,8 @@ invocation, at most three invocations per part. The controller records the failu
 `fail-part --failure-class TRANSPORT|CONTENT`; retried invocations use stage IDs ending
 in `-try2` and `-try3` and require a new `reviewer_invocation_id`. An incomplete review
 whose blocked parts are all `TRANSPORT` failures ends as `REVIEW_SESSION_ABORTED` with
-`REVIEW_TRANSPORT_FAILED`, not `REWORK`.
+`REVIEW_TRANSPORT_FAILED`, not `REWORK`. Any other incomplete review (unchecked scopes,
+content failures) ends with `REVIEW_INCOMPLETE`; `REWORK` always needs one REJECTED verdict.
 
 The model returns only the assessment fields `coverage`, `findings`, `corrections` and
 `required_checks` for the supplied scopes. Controller `submit-part` binds service fields

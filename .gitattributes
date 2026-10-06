@@ -1,2 +1,5 @@
 # Runtime receipts bind exact bytes; checkouts must match on Linux and Windows.
 * text=auto eol=lf
+
+# Real run fixtures bind exact bytes (CRLF requirements, byte ranges).
+tests/fixtures/live-step5-20261006/** -text

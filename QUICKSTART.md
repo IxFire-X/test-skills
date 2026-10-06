@@ -104,7 +104,8 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 | `FAIL` | Проверки завершились с неуспехом. Откройте причину и отчёт: нужно установить, проблема в приложении, тесте или сборке |
 | `UNKNOWN` | Надёжного результата исполнения нет. Сначала выясните причину и состояние предыдущего процесса |
 | `NOT_RUNNABLE` | Выполнение невозможно при текущих условиях; в отчёте должна быть причина. `GENERATED_TEST_INVALID` — созданный тест не компилируется или не импортируется: его можно один раз сгенерировать заново в новой попытке. `LAUNCH_FAILED` — тестовый процесс не запустился. `TESTS_DESELECTED` — настройки pytest проекта исключили выбранные тесты; файлы тестов при этом остаются |
-| `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`, `AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED` | Статическое ревью не приняло автотесты. Файлы тестов в проект не записаны, запуска не было |
+| `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`, `AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED`, `AUTOMATION_REVIEW_INCOMPLETE` | Статическое ревью не приняло автотесты. Файлы тестов в проект не записаны, запуска не было |
+| `REVIEW_INCOMPLETE` | Ревью кейсов прервано: часть областей осталась непроверенной. Кейсы не приняты, запуска не было |
 | `REVIEWER_ISOLATION_UNAVAILABLE` | У CLI нет отдельного свежего контекста для ревью. Запуск остановлен, кейсы остались непроверенными |
 | `WAITING_FOR_INPUT` | Нужен ваш ответ на конкретное уточнение |
 | `WAITING_FOR_MODEL` | Нужно продолжить работу через программу с моделью; это ещё не завершённый результат |

@@ -276,8 +276,8 @@ bytes, недостоверные inputs и слишком большой неп
 команду не выполняют после обычной checked части. У `block-part` есть
 `--failure-class TRANSPORT|CONTENT` (по умолчанию `CONTENT`). Если все заблокированные
 части имеют класс `TRANSPORT`, `finish-review` закрывает ревью как
-`REVIEW_SESSION_ABORTED` с `REVIEW_TRANSPORT_FAILED`, а не `REWORK`: это сбой доставки,
-а не замечание к содержимому. Неделимая oversized единица остаётся
+`REVIEW_SESSION_ABORTED` с `REVIEW_TRANSPORT_FAILED`: это сбой доставки, а не замечание
+к содержимому. Иначе незавершённое ревью закрывается с `REVIEW_INCOMPLETE`, но не `REWORK`. Неделимая oversized единица остаётся
 явным context gap. Cross scopes консервативно включают все пары единиц; независимость
 не угадывается. Предложения canonical corrections получают дополнительные bounded
 cross checks с exact proposals в reason до выбора r2. Дополнительные

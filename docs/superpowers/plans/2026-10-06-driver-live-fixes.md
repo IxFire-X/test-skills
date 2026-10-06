@@ -30,7 +30,7 @@ D1 → D2 → D3 → D6 → D5 → D4 → D7, затем мелочь и фин�
 
 ## Пункты
 
-- [ ] D1 Финализация отклонённого или незавершённого ревью падает (`d1834358`).
+- [x] D1 Финализация отклонённого или незавершённого ревью падает (`d1834358`) — **fixed**: точное место — `pilot_state._review_abort_reason` возвращал `REWORK` для ревью, прерванного до вердикта (UNCHECKED без заблокированных частей и CONTENT-сбои), а `_result_facts` разрешает `REWORK` только при одном вердикте REJECTED. `publish_terminal_result` бросал `FinalizationError` уже после записи closure, `main` превращал его в `DRIVER_FAILURE`. Теперь такая причина — `REVIEW_INCOMPLETE` (у автоматизации — `AUTOMATION_REVIEW_INCOMPLETE`); старые ledger'ы с `REWORK` в `REVIEW_SESSION_ABORTED` читаются как `REVIEW_INCOMPLETE`, поэтому повторный `next` на брошенном прогоне публикует terminal result. Тесты: `tests/test_live_fixes_d1.py` (проигрывание `d1834358`, восстановление прогона с closure без terminal result, REJECTED → `REWORK` на `2c10d733`); `test_review_fixes_review.py::test_b10_invalid_content_can_be_retried_and_three_failed_tries_block_the_part` закреплял `REWORK` для CONTENT-сбоя и обновлён.
 - [ ] D2 `required_checks` адресуются по кейсам и требованиям; поздний CHECKED закрывает ранний UNCHECKED; неполный конверт — переспросить, а не REWORK.
 - [ ] D3 Взрыв проверок после правки ревьюера (`3e852e76`: 1 правка → 66 частей).
 - [ ] D6 Служебный лог драйвера `.driver/driver-log.jsonl` (`9340016c`: 74 + 16 минут ожидания неотличимы от работы).

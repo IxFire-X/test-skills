@@ -89,7 +89,7 @@ def test_b10_invalid_content_can_be_retried_and_three_failed_tries_block_the_par
         submit_review_part(root, attempt, "canonical", part["part_id"], _assessment(part))
     finished = finish_review(root, attempt)
     assert finished["session"]["status"] == "ABORTED" and not finished["aggregate"]["complete"]
-    assert finished["session"]["events"][-1] == {"ordinal": len(finished["session"]["events"]), "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REWORK"}
+    assert finished["session"]["events"][-1] == {"ordinal": len(finished["session"]["events"]), "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_INCOMPLETE"}
 
 
 def test_b10_transport_block_is_not_recorded_as_rework(tmp_path: Path) -> None:

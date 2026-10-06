@@ -286,8 +286,8 @@ Candidate revision 1 немедленно публикуется как `UNREVIE
 evidence; событий `EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` нет. Правила:
 
 - итог собирает controller: одно ревью даёт ровно один authoritative verdict;
-- terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT` и
-  `REVIEW_TRANSPORT_FAILED`, содержит ноль;
+- terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT`,
+  `REVIEW_TRANSPORT_FAILED` и `REVIEW_INCOMPLETE`, содержит ноль;
 - часть без пригодной оценки можно открыть заново новым вызовом — не более трёх
   вызовов на часть; сбой вызова фиксирует `submit --failed TRANSPORT|CONTENT --reason`
   драйвера (при ручном ходе — команда `fail-part` с
@@ -347,7 +347,8 @@ verification    = NOT_APPLICABLE
 - `AUTOMATION_REVIEW_REJECTED` — ревью отклонило автотесты;
 - `AUTOMATION_REVISION_BUDGET` — исправления потребовались и после revision 2;
 - `AUTOMATION_REVIEW_CONTEXT_LIMIT` — часть ревью не поместилась в лимит;
-- `AUTOMATION_REVIEW_TRANSPORT_FAILED` — части ревью не удалось доставить reviewer.
+- `AUTOMATION_REVIEW_TRANSPORT_FAILED` — части ревью не удалось доставить reviewer;
+- `AUTOMATION_REVIEW_INCOMPLETE` — часть областей осталась непроверенной.
 
 Execution работает в доверенном обычном проекте: pytest plugins, conftest, Maven/Gradle
 plugins и lifecycle hooks могут выполнять код. Run-scoped authorization относится

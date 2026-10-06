@@ -140,7 +140,8 @@ root). Таймаут тестового процесса — `test.timeout_seco
 
 Если статическое ревью не приняло автотесты, попытка завершается с причиной
 `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`,
-`AUTOMATION_REVIEW_CONTEXT_LIMIT` или `AUTOMATION_REVIEW_TRANSPORT_FAILED`; файлы
+`AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED` или
+`AUTOMATION_REVIEW_INCOMPLETE`; файлы
 тестов в проект не записываются.
 
 Если процесс остановлен по таймауту и авторитетного результата нет, verification —

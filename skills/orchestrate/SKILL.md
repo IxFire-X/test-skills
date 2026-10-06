@@ -165,10 +165,11 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 - `UNKNOWN` — исход запуска не установлен; повтор без доказанной остановки процессов
   запрещён;
 - `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`,
-  `AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED` — статическое
-  ревью автотестов не приняло их; файлы в проект не записаны;
-- `REWORK`, `REVIEW_CONTEXT_LIMIT`, `REVIEW_TRANSPORT_FAILED` — ревью кейсов не
-  завершилось принятием.
+  `AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED`,
+  `AUTOMATION_REVIEW_INCOMPLETE` — статическое ревью автотестов не приняло их; файлы в
+  проект не записаны;
+- `REWORK`, `REVIEW_CONTEXT_LIMIT`, `REVIEW_TRANSPORT_FAILED`, `REVIEW_INCOMPLETE` — ревью
+  кейсов не завершилось принятием (`REVIEW_INCOMPLETE` — остались непроверенные области).
 
 Завершённая попытка неизменяема. Состояние релиза пакета — `implemented_unverified`:
 не выдавай результат одного запуска за подтверждённую готовность пакета.

@@ -282,7 +282,8 @@ def advance_automation(project: Path, run_root: Path, attempt: Mapping[str, Any]
                 reason = "AUTOMATION_REVISION_BUDGET"
             elif ledger["status"] == "ABORTED":
                 aborted = next((event.get("reason_code") for event in ledger["events"] if event["event_type"] == "REVIEW_SESSION_ABORTED"), None)
-                reason = {"REVIEW_CONTEXT_LIMIT": "AUTOMATION_REVIEW_CONTEXT_LIMIT", "REVIEW_TRANSPORT_FAILED": "AUTOMATION_REVIEW_TRANSPORT_FAILED"}.get(aborted, reason)
+                reason = {"REVIEW_CONTEXT_LIMIT": "AUTOMATION_REVIEW_CONTEXT_LIMIT", "REVIEW_TRANSPORT_FAILED": "AUTOMATION_REVIEW_TRANSPORT_FAILED",
+                          "REVIEW_INCOMPLETE": "AUTOMATION_REVIEW_INCOMPLETE"}.get(aborted, reason)
             _finalize_rejected_automation(project, run_root, attempt, effective, reason)
             return driver._done(run_root, driver._result_summary(run_root, driver._attempt(run_root)))
         execution = _execute(project, run_root, attempt, config, effective, automation, review, key)
