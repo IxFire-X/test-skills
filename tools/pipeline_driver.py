@@ -167,6 +167,35 @@ def _context_receipts(run_root: Path, attempt_id: str) -> list[dict[str, Any]]:
     return [dict(read_context_selection(run_root, attempt_id, digest)) for digest in dict.fromkeys(digests)]
 
 
+def _generation_context(project: Path, run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
+    """The one context receipt a generator fragment is bound to: every selected file.
+
+    ``scan`` may split a large project into several receipts.  A fragment binds
+    exactly one receipt, so the driver publishes one more receipt that carries
+    all of them; the generator then reads the same files as the other roles.
+    Files that scan reported as gaps stay gaps.
+    """
+    from tools.pilot_state import publish_context_selection
+    from tools.project_inventory import select_context_batches
+
+    attempt_id = str(attempt["attempt_id"])
+    receipts = _context_receipts(run_root, attempt_id)
+    if not receipts:
+        raise DriverError("DRIVER_STATE", "the run has no context receipt")
+    if len(receipts) == 1:
+        return receipts[0]
+    everything = {item["opaque_id"] for receipt in receipts for item in receipt["files"]}
+    for receipt in receipts:
+        if {item["opaque_id"] for item in receipt["files"]} == everything:
+            return receipt
+    _baseline, inventory = _baseline_and_inventory(run_root, attempt)
+    budget = sum(max(int(receipt.get("byte_count") or 0), 1) for receipt in receipts)
+    batches = select_context_batches(inventory, project, sorted(everything), byte_budget=budget, include_closed_manifests=False)
+    if len(batches) != 1 or batches[0]["receipt"].get("gaps"):
+        raise DriverError("DRIVER_STATE", "the combined generation context could not be selected as one receipt")
+    return dict(publish_context_selection(run_root, attempt_id, batches[0]["receipt"]))
+
+
 def _skill(stage: str) -> str:
     return str(ROOT / "skills" / stage / "SKILL.md")
 
@@ -184,6 +213,8 @@ def _llm_task(run_root: Path, attempt_id: str, label: str, *, stage: str, skill:
         "action": "llm", "task_id": task_id, "stage": stage, "skill_path": _skill(skill),
         "inputs": [str(path) for path in inputs], "output_path": str(directory / "outputs" / f"{task_id}.json"),
         "schema_path": str(schema_path), "instructions": instructions,
+        # Total size of the inputs, so the host can compare it with the model capacity before the call.
+        "input_bytes": sum(Path(path).stat().st_size for path in inputs if Path(path).is_file()),
         "run_id": run_root.name, "attempt_id": attempt_id,
         **dict(extra or {}),
     }
@@ -380,10 +411,7 @@ def _plan(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Map
     from tools.batch_assembly import plan_batches
 
     header = _header(project, run_root, config)
-    receipts = _context_receipts(run_root, str(attempt["attempt_id"]))
-    if not receipts:
-        raise DriverError("DRIVER_STATE", "the run has no context receipt")
-    context = receipts[0]
+    context = _generation_context(project, run_root, attempt)
     requirements = marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"]
     plan = plan_batches(requirements, {"header_digest": _sha(header), "context_receipt_digest": context["digest"]})
     return header, plan, context
@@ -413,9 +441,6 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
                         "expectation_id": f"EXP-{namespace}-", "assertion_id": f"ASSERT-{namespace}-", "blocker_id": f"BLOCK-{namespace}-"},
         "document_header": dict(header),
         "context_gaps": list(config.get("context_gaps", [])),
-        # Scan may split a large project into several context receipts; this fragment is bound to the first one.
-        "context_files_not_in_this_task": sorted(
-            item["project_path"] for receipt in _context_receipts(run_root, attempt_id)[1:] for item in receipt["files"]),
         "filled_by_driver": ["batch_id", "namespace", "plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "owned_source_requirement_ids",
                              "status", "schema_version", "digest", "display_order", "ordering of capabilities, arguments, results, blockers and categories"],
     }
@@ -430,9 +455,7 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
         instructions=("Первый файл — задание батча: какие исходные требования покрыть и какие префиксы идентификаторов использовать. "
                       "Верни только содержательную часть фрагмента: requirements, source_to_canonical_mappings, operation_capabilities, test_cases, diagnostics. "
                       "Служебные поля, дайджесты, display_order и порядок массивов заполнит драйвер."),
-        extra={"batch_id": batch["batch_id"], **({"warnings": [
-            "Контекст проекта разбит на несколько частей; в эту задачу вошла первая. Остальные файлы перечислены в задании в поле "
-            "context_files_not_in_this_task — не делай выводов об их содержимом."]} if brief["context_files_not_in_this_task"] else {})},
+        extra={"batch_id": batch["batch_id"]},
     )
 
 
@@ -778,6 +801,7 @@ def advance(project: Path, run_root: Path) -> dict[str, Any]:
             return terminal_step(project, run_root, attempt, config)
         return _done(run_root, _result_summary(run_root, attempt))
 
+    _generation_context(project, run_root, attempt)
     events = _events(run_root, attempt_id)
     if "MODEL_RESPONSE_RECEIVED" not in _stage_events(events, "context-marker:baseline"):
         return _context_marker_task(project, run_root, attempt, config)

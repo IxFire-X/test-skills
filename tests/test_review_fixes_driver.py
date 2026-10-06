@@ -398,7 +398,9 @@ def test_next_resumes_after_interruption_between_materialization_and_execution(t
     assert done["action"] == "done" and (done["result"]["verification"], done["result"]["accepted"]) == ("PASS", True)
 
 
-def test_generator_task_carries_only_the_context_receipt_it_is_bound_to(tmp_path: Path) -> None:
+def test_generator_reads_every_context_portion_through_one_combined_receipt(tmp_path: Path) -> None:
+    from tools.pilot_state import read_model_stage_artifact
+
     project = _project(tmp_path, local=False)
     skillsrc = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
     skillsrc["limits"] = {"context_batch_bytes": 1024}  # forces scan to split the context into several receipts
@@ -406,17 +408,31 @@ def test_generator_task_carries_only_the_context_receipt_it_is_bound_to(tmp_path
     for index in range(3):
         (project / "src" / f"feature_{index}.py").write_text(f"VALUE_{index} = '" + "x" * 700 + "'\n", encoding="utf-8")
     model = SavedModel("cases-only-v1")
-    task = _drive(project, _start(project, "cases-only-v1"), model, until=lambda task: task.get("stage", "").startswith("tc-generator:"))
-    run_root = _run_root(project, task)
-    receipts = driver._context_receipts(run_root, task["attempt_id"])
-    assert len(receipts) > 1
-    brief = _load(task["inputs"][0])
+    first = _start(project, "cases-only-v1")
+    run_root = _run_root(project, first)
+    receipts = driver._context_receipts(run_root, first["attempt_id"])
+    scanned = [receipt for receipt in receipts[:-1]]
+    assert len(scanned) > 1  # scan really split the project
+    everything = {item["project_path"] for receipt in scanned for item in receipt["files"]}
+    combined = receipts[-1]
+    assert {item["project_path"] for item in combined["files"]} == everything and not combined.get("gaps")
+
+    task = _drive(project, first, model, until=lambda task: task.get("stage", "").startswith("tc-generator:"))
     context_root = driver.work_dir(run_root) / "inputs" / "context"
     carried = {Path(path).relative_to(context_root).as_posix() for path in task["inputs"][2:]}
-    assert carried == {item["project_path"] for item in receipts[0]["files"]}
-    assert brief["context_files_not_in_this_task"] == sorted(item["project_path"] for receipt in receipts[1:] for item in receipt["files"])
-    assert brief["context_files_not_in_this_task"] and task["warnings"]
-    assert _drive(project, task, model)["result"]["completion"] == "COMPLETE"
+    assert carried == everything  # the generator sees the same files as the other roles
+    assert task["input_bytes"] >= sum(Path(path).stat().st_size for path in task["inputs"][2:])
+    assert "warnings" not in task and "context_files_not_in_this_task" not in _load(task["inputs"][0])
+
+    # Asking again publishes nothing new, and the fragment is bound to the combined receipt.
+    assert driver._generation_context(project, run_root, driver._attempt(run_root))["digest"] == combined["digest"]
+    assert len(driver._context_receipts(run_root, first["attempt_id"])) == len(receipts)
+    following = _answer_and_submit(project, task, model)
+    assert following.get("status") != "rejected", following.get("errors")
+    response = driver._stage_events(driver._events(run_root, task["attempt_id"]), task["stage"])["MODEL_RESPONSE_RECEIVED"]
+    fragment = read_model_stage_artifact(run_root, task["attempt_id"], task["stage"], response["artifact_digest"])["artifact"]
+    assert fragment["context_receipt_digest"] == combined["digest"]
+    assert _drive(project, following, model)["result"]["completion"] == "COMPLETE"
 
 
 def test_start_reports_scan_stop_as_done_error(tmp_path: Path) -> None:
@@ -427,3 +443,18 @@ def test_start_reports_scan_stop_as_done_error(tmp_path: Path) -> None:
     stopped = _start(project, "cases-only-v1")
     assert stopped["action"] == "done" and stopped["result"]["status"] == "error" and stopped["result"]["stage"] == "scan"
     assert driver._exit_code(stopped) == 2
+
+
+def test_child_attempt_keeps_the_combined_context_receipt(tmp_path: Path) -> None:
+    project = _project(tmp_path, local=True)
+    cfg = json.loads((project/".skillsrc").read_text()); cfg["limits"] = {"context_batch_bytes": 1024}
+    (project/".skillsrc").write_text(json.dumps(cfg)+"\n")
+    for i in range(3): (project/"src"/f"feature_{i}.py").write_text(f"VALUE_{i} = '"+"x"*700+"'\n")
+    model = SavedModel("local-pilot-v1", ["tc-to-autotest.broken-import.answer.json", "tc-to-autotest.passing.answer.json"])
+    done = _drive(project, _start(project, "local-pilot-v1"), model, answers={"regenerate-after-gate": "regenerate"})
+    assert done["result"]["verification"] == "PASS", done
+    run_root = project/".pilot-runs"/done["run_id"]
+    child = driver._attempt(run_root)
+    assert child["parent_attempt_id"]
+    parent_n = len(driver._context_receipts(run_root, child["parent_attempt_id"]))
+    assert len(driver._context_receipts(run_root, child["attempt_id"])) == parent_n, (parent_n, len(driver._context_receipts(run_root, child["attempt_id"])))
