@@ -34,3 +34,4 @@
 {"run":"E4c","part":"part-000002","model":"sonnet","tokens":139587,"tool_uses":18,"ms":91121}
 {"run":"E4c","part":"part-000006","model":"sonnet","tokens":127389,"tool_uses":14,"ms":92125}
 {"run":"E4c","part":"part-000005","model":"sonnet","tokens":134827,"tool_uses":20,"ms":94737}
+{"run":"E2c-p1-fable","part":"part-000001","model":"fable","tokens":140093,"tool_uses":24,"ms":177750}
