@@ -239,9 +239,11 @@
 
 ## Финальные прогоны
 
-Windows, Python 3.12.14, коммит `fd80bfb` (последний коммит кода и данных):
+Windows, Python 3.12.14, коммит `a94cbad` (переключение режима по умолчанию; после него менялись только отчёт и план):
 
-- весь набор `python -m pytest -q` — 835 passed, 5 skipped за 34 мин 16 с, код 0; лог `D:\AI-Projects\windows-full-20261007-review-scaling.log`;
-- CI-гейт `python -m tools.ci_gate --root .` — контрактная проверка passed, 835 passed, 5 skipped за 34 мин 2 с, код 0; лог `D:\AI-Projects\windows-ci-gate-20261007-review-scaling.log`.
+- весь набор `python -m pytest -q` — 838 passed, 5 skipped за 35 мин 8 с, код 0; лог `D:\AI-Projects\windows-full-20261007-review-scaling.log`;
+- CI-гейт `python -m tools.ci_gate --root .` — контрактная проверка passed, 838 passed, 5 skipped за 33 мин 57 с, код 0; лог `D:\AI-Projects\windows-ci-gate-20261007-review-scaling.log`.
+
+Прежние прогоны на `fd80bfb` (835 passed, 5 skipped) эти логи перезаписали.
 
 Р11 пройден.
