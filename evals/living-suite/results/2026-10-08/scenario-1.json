@@ -1,0 +1,78 @@
+{
+  "scenario": 1,
+  "outcome": "UPDATED",
+  "counts": {
+    "cases": {
+      "changed": 1,
+      "new": 1,
+      "retired": 1,
+      "unchanged": 10
+    },
+    "proposals": 0,
+    "quarantined": 0,
+    "questions": 0,
+    "released": 0,
+    "repaired": 0,
+    "requirements": {
+      "added": 1,
+      "changed": 2,
+      "removed": 2,
+      "renamed": 0
+    }
+  },
+  "reviews": {
+    "canonical": {
+      "eligible": true,
+      "input_bytes": 19480,
+      "parts": 1
+    },
+    "static": {
+      "eligible": true,
+      "input_bytes": 22541,
+      "parts": 1
+    }
+  },
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 13,
+    "by_status": {
+      "ACTIVE": 12,
+      "QUARANTINED": 0,
+      "RETIRED": 1
+    },
+    "quarantine": [],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "f57cbe7ccfa9498a869bb8c43b993d1b"
+      },
+      {
+        "action": "UPDATED",
+        "profile": "suite-update-v1",
+        "run_id": "c90ae65135764a94975ad9bf93cc886c"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [
+        "TC-B1-001"
+      ],
+      "methods": [],
+      "support": [],
+      "missing": []
+    }
+  },
+  "pr_description": {
+    "bytes": 3565,
+    "sections": [
+      "Итог",
+      "Требования (по ключам)",
+      "Кейсы",
+      "Тесты",
+      "Что сделать человеку"
+    ]
+  },
+  "patch_bytes": 202197,
+  "seconds_from_start": 652.1
+}

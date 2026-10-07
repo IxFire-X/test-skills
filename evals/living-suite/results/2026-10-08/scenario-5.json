@@ -1,0 +1,67 @@
+{
+  "scenario": 5,
+  "outcome": "UPDATED",
+  "counts": {
+    "cases": {
+      "changed": 0,
+      "new": 0,
+      "retired": 0,
+      "unchanged": 12
+    },
+    "proposals": 0,
+    "quarantined": 0,
+    "questions": 0,
+    "released": 0,
+    "repaired": 0,
+    "requirements": {
+      "added": 0,
+      "changed": 0,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "reviews": {},
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 12,
+    "by_status": {
+      "ACTIVE": 12,
+      "QUARANTINED": 0,
+      "RETIRED": 0
+    },
+    "quarantine": [],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "bb001eded89346669dd4e1e6cedd9a33"
+      },
+      {
+        "action": "UPDATED",
+        "profile": "suite-update-v1",
+        "run_id": "724c5c2cd1224804a6ca8e34f9ce4aec"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [],
+      "methods": [
+        "net.javaguides.springboot.controller.StudentControllerPipelineTest#tcB1001GetStudentReturnsFixedStudent"
+      ],
+      "support": [],
+      "missing": []
+    }
+  },
+  "pr_description": {
+    "bytes": 1368,
+    "sections": [
+      "Итог",
+      "Сила тестов упала",
+      "Что сделать человеку"
+    ]
+  },
+  "patch_bytes": 10486,
+  "seconds_from_start": 20.8,
+  "prepare_seconds": 38.8,
+  "update_seconds": 20.8
+}

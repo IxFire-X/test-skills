@@ -1,0 +1,66 @@
+{
+  "scenario": 4,
+  "outcome": "UPDATED",
+  "counts": {
+    "cases": {
+      "changed": 0,
+      "new": 0,
+      "retired": 0,
+      "unchanged": 12
+    },
+    "proposals": 0,
+    "quarantined": 0,
+    "questions": 1,
+    "released": 0,
+    "repaired": 0,
+    "requirements": {
+      "added": 0,
+      "changed": 0,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "reviews": {},
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 12,
+    "by_status": {
+      "ACTIVE": 12,
+      "QUARANTINED": 0,
+      "RETIRED": 0
+    },
+    "quarantine": [],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "69e35818aef342c38de173fc6017232b"
+      },
+      {
+        "action": "UPDATED",
+        "profile": "suite-update-v1",
+        "run_id": "adfc6571baf9433e8905bfc0eda7296b"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [],
+      "methods": [],
+      "support": [],
+      "missing": []
+    }
+  },
+  "pr_description": {
+    "bytes": 1543,
+    "sections": [
+      "Итог",
+      "Вопросы аналитикам",
+      "Что сделать человеку"
+    ]
+  },
+  "patch_bytes": 7032,
+  "seconds_from_start": 6.5,
+  "impact_questions": [],
+  "prepare_seconds": 22.9,
+  "update_seconds": 6.6
+}

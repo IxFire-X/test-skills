@@ -1,0 +1,56 @@
+{
+  "requirement": "O05",
+  "cases_total": 64,
+  "full": {
+    "parts": 11,
+    "input_bytes": 1856765,
+    "max_part_bytes": 175262
+  },
+  "with_id_pattern": {
+    "affected_cases": 1,
+    "case_ids": [
+      "TC-B1-019"
+    ],
+    "parts": 1,
+    "input_bytes": 65854,
+    "max_part_bytes": 65854,
+    "share_of_full_bytes": 0.0355
+  },
+  "builtin_split": {
+    "affected_cases": 28,
+    "case_ids": [
+      "TC-B1-001",
+      "TC-B1-002",
+      "TC-B1-003",
+      "TC-B1-004",
+      "TC-B1-005",
+      "TC-B1-006",
+      "TC-B1-007",
+      "TC-B1-008",
+      "TC-B1-009",
+      "TC-B1-010",
+      "TC-B1-011",
+      "TC-B1-012",
+      "TC-B1-013",
+      "TC-B1-014",
+      "TC-B1-015",
+      "TC-B1-016",
+      "TC-B1-017",
+      "TC-B1-018",
+      "TC-B1-019",
+      "TC-B1-020",
+      "TC-B1-021",
+      "TC-B1-022",
+      "TC-B1-023",
+      "TC-B1-024",
+      "TC-B1-025",
+      "TC-B1-026",
+      "TC-B1-027",
+      "TC-B1-028"
+    ],
+    "parts": 2,
+    "input_bytes": 238852,
+    "max_part_bytes": 131268,
+    "share_of_full_bytes": 0.1286
+  }
+}

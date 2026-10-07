@@ -608,3 +608,62 @@ python -m tools.pipeline_driver run --project "$project" --runner process --prof
 **Отчёт для аналитиков:** `next … --analyst-report` → `analyst-report.json`/`.md` рядом с
 проекциями, `analyst_questions` в сводке; комментарий для OpenSpec —
 `python -m tools.analyst_report export --project "$project" --run <run_id> --change <имя>`.
+
+## 13. Живой набор (волна 3)
+
+Всё включается явно; без флагов профили и результаты прежние. Поправки к контракту A4 и
+A5 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
+
+**Шаблон ID требований** (`.skillsrc` 5.2.0). Строка, начинающаяся с ID, открывает
+требование так же, как встроенные `REQ-…`/`AC-…`; без шаблона разбиение прежнее:
+
+```yaml
+requirements:
+  id_pattern: '[OPVX]\d\d\.'   # Petclinic: O01. … X02. — 29 требований вместо 7
+suite:
+  path: test-cases/            # каталог набора (по умолчанию test-cases/)
+```
+
+**Первый набор** — обычный `local-pilot-v1` с `--suite`: после терминального результата
+драйвер пишет в `test-cases/` канонический JSON, Markdown, HTML, CSV и
+`suite-manifest.json` (ключи и хеши требований, кейсы, методы и дайджесты их срезов,
+статусы, доли мутантов, снимок эндпоинтов). Сводка — версия 1.2.0 с полем `suite`.
+
+```powershell
+python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --suite
+```
+
+**Карантин вместо очистки** (`local-pilot-v1`, `--disposition-policy quarantine`): после
+`FAIL` прошедшие тесты остаются, упавшие методы получают одну строку
+`@org.junit.jupiter.api.Disabled("test-skills quarantine: …")` (pytest —
+`@pytest.mark.xfail(strict=True, reason=…)`); диспозиция файла — `QUARANTINED`. `FAIL`
+по-прежнему не принимается.
+
+**Без модели** — что изменилось и нужна ли модель вообще (для CI проекта):
+
+```powershell
+python -m tools.suite status  --project "$project"
+python -m tools.suite impact  --project "$project" --junit target/surefire-reports/TEST-My.xml --git-range origin/main..HEAD
+python -m tools.suite migrate --project "$project"     # набор прошлого формата → 1.0.0
+```
+
+`impact` — требования по ключам (добавлены, изменены, удалены, переименованы),
+затронутые кейсы, упавшие и сломанные тесты отчёта, новые эндпоинты без требования (вопрос
+аналитикам), `needs_model`.
+
+**Обновление набора** — профиль `suite-update-v1`:
+
+```powershell
+python -m tools.pipeline_driver next --project "$project" --profile suite-update-v1 --reviewer-isolation fresh [--mutation] [--junit report.xml]
+```
+
+Шаги: миграция → анализ влияния → обновление затронутых кейсов (задача
+`tc-generator:update`) → ревью только изменённых кейсов → автоматизация изменённых
+(`tc-to-autotest:update`, методы заменяются по срезам) → статическое ревью изменённых
+методов → прогон всего набора (карантинные — явно, упавшие — с повторами) → разбор
+падений: карантин с вопросом и черновиком баг-репорта, нестабильность, один ремонт
+(`tc-to-autotest:repair`, ожидания не меняются) → мутации (`--mutation`) → манифест → итог.
+Кейс или метод, который правил человек, не перезаписывается — изменение уходит
+предложением. Итог — изменения в рабочем дереве, `pr-description.md`, `suite.patch` и
+`suite-update-result.json` в каталоге драйвера; `accepted` у профиля нет, коммит и PR
+делает человек.

@@ -1,0 +1,74 @@
+{
+  "scenario": 3,
+  "outcome": "UPDATED",
+  "counts": {
+    "cases": {
+      "changed": 0,
+      "new": 0,
+      "retired": 0,
+      "unchanged": 12
+    },
+    "proposals": 0,
+    "quarantined": 1,
+    "questions": 1,
+    "released": 0,
+    "repaired": 0,
+    "requirements": {
+      "added": 0,
+      "changed": 0,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "reviews": {},
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 12,
+    "by_status": {
+      "ACTIVE": 11,
+      "QUARANTINED": 1,
+      "RETIRED": 0
+    },
+    "quarantine": [
+      {
+        "case_id": "TC-B1-010",
+        "question": "Кейс TC-B1-010 «Удаление студента по DELETE /students/3/delete возвращает подтверждающий текст» перестал проходить, хотя требование не менялось ([ASSERT-B1-010-01-1-2] expected: \"Student Successfully Deleted!\" but was: \"Student removed\"). Это дефект продукта или новое поведение, которое нужно описать в требовании?",
+        "reason": "BEHAVIOR_CHANGED_WITHOUT_SPEC",
+        "ref": "run efa52dc4 TC-B1-010",
+        "since_run": "efa52dc431cf4e5896357677dde0e557"
+      }
+    ],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "5f37ce3d3e994d5e966887ce455610a5"
+      },
+      {
+        "action": "UPDATED",
+        "profile": "suite-update-v1",
+        "run_id": "efa52dc431cf4e5896357677dde0e557"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [],
+      "methods": [],
+      "support": [],
+      "missing": []
+    }
+  },
+  "pr_description": {
+    "bytes": 3367,
+    "sections": [
+      "Итог",
+      "Карантин",
+      "Вопросы аналитикам",
+      "Что сделать человеку"
+    ]
+  },
+  "patch_bytes": 9242,
+  "seconds_from_start": 18.2,
+  "prepare_seconds": 24.2,
+  "update_seconds": 18.2
+}

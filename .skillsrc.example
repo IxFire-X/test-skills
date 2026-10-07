@@ -65,3 +65,10 @@ modules:
 #   models: {tc-reviewer: "claude-sonnet-5-5", autotest-reviewer: "claude-sonnet-5-5"}
 #   max_parallel: 4
 #   timeout_seconds: 1800
+# Необязательные разделы волны 3 (schema 5.2.0).
+# Шаблон явного ID требования: строка, начинающаяся с него, — отдельное требование.
+# requirements:
+#   id_pattern: '[OPVX]\d\d\.'
+# Каталог живого набора (local-pilot-v1 --suite, suite-update-v1).
+# suite:
+#   path: "test-cases/"

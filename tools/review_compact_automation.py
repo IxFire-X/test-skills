@@ -155,6 +155,9 @@ def _part_text(context: _Context, code: _Code, views: Mapping[str, str], *, part
         out += ["", "## Возможности (полностью)", *(context.capabilities[item["capability_id"]] for item in document["operation_capabilities"])]
     else:
         out += ["", "## Возможности (сигнатуры)", *(context.signatures[item["capability_id"]] for item in document["operation_capabilities"])]
+    if context.contexts:
+        # suite-update-v1 (wave 3): the product classes the changed methods refer to; the pilot passes none here.
+        out += ["", "## Файлы продукта, на которые ссылается код (только для проверки)", *context.contexts]
     if lint:
         out += ["", "## Подозрения (сверки кода и линтер; ответь lint_dispositions по каждому)"]
         out.extend(f"[{row['lint_id']}] {row['rule']} · {', '.join(row['related_ids'])}: {row['message']}" for row in lint)

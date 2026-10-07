@@ -1,0 +1,8 @@
+{"scenario": 1, "task": "tc-generator:update", "model": "sonnet", "tokens": 104327, "seconds": 92.2, "tries": 1, "accepted": true}
+{"scenario": 1, "task": "tc-reviewer:suite-canonical:part-000001", "model": "sonnet", "tokens": 71565, "seconds": 79.1, "tries": 1, "accepted": true, "findings": {"BLOCKING": 0, "WARNING": 1, "INFO": 4}}
+{"scenario": 1, "task": "tc-to-autotest:update", "model": "sonnet", "tokens": 91194, "seconds": 49.2, "tries": 1, "accepted": true}
+{"scenario": 1, "task": "autotest-reviewer:suite-static:part-000001", "model": "sonnet", "tokens": 70052, "seconds": 57.6, "tries": 1, "accepted": true, "findings": {"BLOCKING": 0, "WARNING": 0, "INFO": 1}}
+{"scenario": "2-first", "task": "tc-to-autotest:repair", "model": "sonnet", "tokens": 63426, "seconds": 32.3, "tries": 1, "accepted": true}
+{"scenario": "2-first", "task": "autotest-reviewer:suite-repair:part-000001", "model": "sonnet", "tokens": 75235, "seconds": 88.6, "tries": 1, "accepted": true, "findings": {"BLOCKING": 1, "WARNING": 0, "INFO": 1}, "note": "package defect: the review part had no product source, StudentDto unverifiable; fixed (product contexts in method reviews)"}
+{"scenario": 2, "task": "tc-to-autotest:repair", "model": "sonnet", "tokens": 63621, "seconds": 41.8, "tries": 1, "accepted": true}
+{"scenario": 2, "task": "autotest-reviewer:suite-repair:part-000001", "model": "sonnet", "tokens": 77863, "seconds": 175.4, "tries": 1, "accepted": true, "findings": {"BLOCKING": 0, "WARNING": 1, "INFO": 0}, "note": "with product contexts"}

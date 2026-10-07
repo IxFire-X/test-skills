@@ -106,6 +106,10 @@ def pr_description(facts: Mapping[str, Any]) -> str:
         lines += [f"- отремонтирован `{locator}` (ожидания не менялись)" for locator in tests["repaired"]]
         lines += [f"- удалён `{locator}`" for locator in tests["removed"]]
         lines.append("")
+    notes = [row for row in facts.get("review_notes") or [] if row.get("severity") in {"BLOCKING", "WARNING"}]
+    if notes and not facts.get("review_blocked"):
+        lines += ["## Замечания ревью (не блокируют)", ""]
+        lines += [f"- **{row['severity']}** {row.get('code', '')} `{', '.join(row.get('related_ids') or [])}`: {row.get('message', '')}" for row in notes] + [""]
     if facts["quarantine"]:
         lines += ["## Карантин", "", "| Тест | Кейс | Причина | Ссылка |", "| --- | --- | --- | --- |"]
         lines += [f"| `{row['locator']}` | {', '.join(row['case_ids'])} | {_REASONS.get(row['reason'], row['reason'])} | {row['ref']} |" for row in facts["quarantine"]]

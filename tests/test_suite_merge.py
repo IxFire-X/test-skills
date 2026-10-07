@@ -140,3 +140,16 @@ def test_splice_replaces_adds_and_removes_methods(step5: dict) -> None:
     assert "import java.util.List;" in text and text.rstrip().endswith("}")
     others = [row for row in symbols if f"{row['locator']['class_fqn']}#{row['locator']['method_name']}" not in {first, second}]
     slice_file({**generated, "content": text}, others)  # every other method is still found exactly once
+
+
+def test_reviews_get_the_product_classes_the_changed_code_refers_to(tmp_path: Path, step5: dict) -> None:
+    from tools.suite_update import product_contexts
+
+    project = _project(tmp_path, step5)
+    manifest = json.loads((project / "test-cases" / "suite-manifest.json").read_text(encoding="utf-8"))
+    code = '        net.javaguides.springboot.bean.Student request = new net.javaguides.springboot.bean.Student(5, "Ivan", "Petrov");'
+    paths = [row["path"] for row in product_contexts(project, manifest, step5["document"], code)]
+    assert paths[0] == "src/main/java/net/javaguides/springboot/bean/Student.java"  # the referenced class comes first
+    secret = project / "src" / "main" / "java" / "net" / "javaguides" / "springboot" / "bean" / "Student.java"
+    secret.write_text(secret.read_text(encoding="utf-8") + '\nclass Secret { String password = "hunter2hunter2hunter2"; }\n', encoding="utf-8")
+    assert "src/main/java/net/javaguides/springboot/bean/Student.java" not in [row["path"] for row in product_contexts(project, manifest, step5["document"], code)]

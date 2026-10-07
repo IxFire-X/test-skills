@@ -319,14 +319,64 @@ def _check_update(project: Path, run_root: Path, state: dict[str, Any], _label: 
 
 # ----------------------------------------------------------------------------------- 4./6. reviews
 
-def _review_snapshot(project: Path, run_root: Path, document: Mapping[str, Any], automation: Mapping[str, Any] | None) -> dict[str, Any]:
+def product_contexts(project: Path, manifest: Mapping[str, Any], document: Mapping[str, Any], code: str = "", *, budget: int = 120_000) -> list[dict[str, str]]:
+    """Product sources a reviewer needs: files the document's provenance names, and classes the changed code refers to.
+
+    A file with masked secret-like text stays out (as in the pilot's context selection); the order is the order of
+    first mention, within ``budget`` bytes.
+    """
+    import re
+
+    from tools.pipeline_driver_suite import _module, _skillsrc
+    from tools.project_inventory import redact_text
+
+    module = _module(_skillsrc(project), manifest["module_id"])
+    root = Path(project) / str(module.get("root") or ".")
+    tests = {str(item).strip("/") for item in ((module.get("paths") or {}).get("tests") or [])}
+    provenance = json.dumps([document.get("operation_capabilities") or [], [row.get("provenance") for row in document.get("requirements") or []]], ensure_ascii=False)
+    named: list[tuple[int, str, Path]] = []
+    seen: set[Path] = set()
+    for directory in ((module.get("paths") or {}).get("source") or ["src/main/java"]):
+        base = root / str(directory)
+        if not base.is_dir():
+            continue
+        for file in sorted(base.rglob("*")):
+            if file in seen or not file.is_file() or file.suffix not in {".java", ".py"}:
+                continue
+            relative = file.relative_to(Path(project)).as_posix()
+            if any(relative.startswith(prefix + "/") or f"/{prefix}/" in relative for prefix in tests):
+                continue
+            seen.add(file)
+            positions = [position for position in (provenance.find(relative), provenance.find(file.name)) if position >= 0]
+            match = re.search(rf"\b{re.escape(file.stem)}\b", code) if code else None
+            if match:
+                positions.append(match.start())
+            if positions:
+                named.append((min(positions) if not match else -1_000_000 + match.start(), relative, file))
+    contexts, used = [], 0
+    for _position, relative, file in sorted(named):
+        try:
+            content = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        _masked, redactions = redact_text(content)
+        size = len(content.encode("utf-8"))
+        if redactions or used + size > budget:
+            continue
+        used += size
+        contexts.append({"path": relative, "sha256": sha256_bytes(content.encode("utf-8")), "content": content})
+    return contexts
+
+
+def _review_snapshot(project: Path, run_root: Path, document: Mapping[str, Any], automation: Mapping[str, Any] | None, *, code: str = "") -> dict[str, Any]:
     from tools.run_pipeline import _docs_entries
 
     config = driver._config(run_root)
     _suite_dir, manifest, _document = _suite(project, run_root)
     entries = _docs_entries(project, config["docs"] or [row["path"] for row in manifest["documents"]])
     return {"document": copy.deepcopy(dict(document)), "automation": None if automation is None else copy.deepcopy(dict(automation)), "package_binding": None,
-            "sources": [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in entries], "contexts": [],
+            "sources": [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in entries],
+            "contexts": product_contexts(project, manifest, document, code),
             "requirements_binding": {"module_id": manifest["module_id"], "selected_target": None, "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in entries]}}
 
 
@@ -431,8 +481,11 @@ def _review_task(run_root: Path, key: str, plan: Mapping[str, Any], part: Mappin
     source.write_text(envelope["text"], encoding="utf-8", newline="\n")
     kind = "tc-reviewer" if key == "canonical" else "autotest-reviewer"
     stage = f"{kind}:suite-{key}:{part['part_id']}"
+    scope = (" Это ревью только изменённых кейсов живого набора: остальные кейсы набора уже прошли ревью и не менялись, их отсутствие в части "
+             "не пробел покрытия." if key == "canonical" else " Это ревью только изменённых или отремонтированных методов живого набора: "
+             "остальные методы файла уже прошли ревью и не менялись.")
     return _task(run_root, f"review-{key}.{part['part_id']}", stage=stage, skill=kind, inputs=[source], schema=driver._review_schema(_REVIEW_MODE),
-                 instructions=driver.review_task_instructions(compact=True, fresh=driver._config(run_root).get("reviewer_isolation") == "fresh"),
+                 instructions=driver.review_task_instructions(compact=True, fresh=driver._config(run_root).get("reviewer_isolation") == "fresh") + scope,
                  extra={"review_key": key, "part_id": part["part_id"], "review_mode": _REVIEW_MODE})
 
 
@@ -692,7 +745,14 @@ def _static_snapshot(project: Path, run_root: Path, state: Mapping[str, Any], ke
                                 "generated_files": [{"file_id": target["file_id"], "path": target["path"], "language": target["language"],
                                                      "framework": "pytest" if target["language"] == "python" else "junit5", "content": facts["content"],
                                                      "content_digest": sha256_bytes(facts["content"].encode("utf-8"))}]}}
-    return _review_snapshot(project, run_root, subset_document(document, changed), automation)
+    from tools.suite_manifest import slices_of
+
+    try:
+        slices = slices_of(target["path"], target["file_id"], facts["content"], [{"symbol_id": row["symbol_id"], "locator": row["locator"]} for row in symbols])
+        code = "\n".join("\n".join(slices.lines[member.start - 1:member.end]) for member in slices.symbols.values())
+    except ValueError:
+        code = facts["content"]
+    return _review_snapshot(project, run_root, subset_document(document, changed), automation, code=code)
 
 
 def _static_review(project: Path, run_root: Path, state: dict[str, Any], max_tasks: int) -> dict[str, Any] | None:
@@ -1062,6 +1122,7 @@ def summary_facts(project: Path, run_root: Path, state: Mapping[str, Any]) -> di
         "quarantine": facts.get("quarantine") or [], "released": facts.get("released") or [], "questions": sorted(set(facts.get("questions") or [])),
         "proposals": facts.get("proposals") or [], "strength": strength, "strength_drops": facts.get("strength_drops") or [],
         "review_blocked": _blocked(state), "review_findings": facts.get("review_findings") or [],
+        "review_notes": [row for review in (facts.get("reviews") or {}).values() for row in review.get("findings") or []],
         "stop": facts.get("stop"),
     }
 
