@@ -269,6 +269,30 @@ def _contains_literal(code: str, value: Any) -> bool:
     return False
 
 
+_HTTP_METHODS = ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
+
+
+def _contains_http_method(code: str, method: str) -> bool:
+    """The request method as a literal, an enum constant, or a builder call that takes a URL/path literal.
+
+    ``exchange("PUT", …)``, ``HttpMethod.PUT``, ``MockMvcRequestBuilders.put("/x")``,
+    ``client.put("/x")``.  A builder call needs a literal starting with ``/`` or ``http``,
+    so ``map.get("key")`` is not a GET.
+    """
+    if _contains_literal(code, method):
+        return True
+    upper = method.upper()
+    if upper not in _HTTP_METHODS:
+        return False
+    if re.search(rf"\b(?:HttpMethod|RequestMethod)\.{upper}\b", code):
+        return True
+    return re.search(rf"\b{upper.lower()}\s*\(\s*f?[\"'](?:/|https?:)", code) is not None
+
+
+# ``body.put("key", value)`` puts a body field; a request builder ``put("/path")`` does not.
+_BODY_PUT = re.compile(r'(?<!RequestBuilders)\.put\(\s*"([^"/][^"]*)"')
+
+
 def _statement(lines: list[str], index: int) -> str:
     """The whole statement around ``lines[index]``: back to the end of the previous one, on to its own ``;``.
 
@@ -330,7 +354,8 @@ def lint_automation(document: Mapping[str, Any], automation: Mapping[str, Any], 
                 requested = [("метод", operation.get("method")), ("путь", operation.get("path"))]
             requested += [(name, value) for name, value in literals.items() if name in {"method", "path"} and isinstance(value, str)]
             for label, value in requested:
-                if value and not _contains_literal(method, value):
+                found = _contains_http_method(method, value) if label in {"метод", "method"} else _contains_literal(method, value)
+                if value and not found:
                     rows.append({"rule": "request-differs", "case_ids": [case["case_id"]], "related_ids": [step["step_id"], relation["symbol_id"]],
                                  "message": f"{step['step_id']}: {label} запроса {value!r} не найден в методе {member.name}."})
             body = next((value for name, value in literals.items() if name in {"jsonBody", "body", ""} and isinstance(value, dict)), None)
@@ -339,7 +364,7 @@ def lint_automation(document: Mapping[str, Any], automation: Mapping[str, Any], 
                     if not isinstance(value, (dict, list)) and (f'"{key}"' in method or f"'{key}'" in method) is False and not _contains_literal(reach, value):
                         rows.append({"rule": "request-differs", "case_ids": [case["case_id"]], "related_ids": [step["step_id"], relation["symbol_id"]],
                                      "message": f"{step['step_id']}: поле тела {key}={value!r} не найдено в методе {member.name}."})
-                for key in re.findall(r'\.put\("([^"]+)"', method):
+                for key in _BODY_PUT.findall(method):
                     if key not in body:
                         rows.append({"rule": "request-differs", "case_ids": [case["case_id"]], "related_ids": [step["step_id"], relation["symbol_id"]],
                                      "message": f"{step['step_id']}: метод {member.name} кладёт в тело поле {key!r}, которого нет во входе шага."})

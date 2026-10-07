@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 
 from tests.live_step5 import review_state
-from tests.review_scaling_helpers import clean_compact_answer, eval_data, part_text
+from tests.review_scaling_helpers import FIXTURES, clean_compact_answer, eval_data, part_text
 from tests.test_review_fixes_driver import SavedModel, _drive, _project, _start
 from tools import review_compact
 from tools.review_modes import build_offline_plan
@@ -93,6 +93,41 @@ def test_code_checks_flag_literal_path_and_extra_body_field() -> None:
     found = {(row["rule"], row["case_ids"][0]) for row in plan["lint"]}
     assert found == {("assert-literal-differs", "TC-B1-006"), ("request-differs", "TC-B1-009"), ("request-differs", "TC-B1-008")}
     assert plan["parts"][0]["lint_ids"] == [row["lint_id"] for row in plan["lint"]]
+
+
+def test_request_builders_are_requests_and_their_drift_is_still_flagged() -> None:
+    """E5: a class that calls MockMvc builders (``get("/student")``) instead of one ``exchange`` helper."""
+    import gzip
+
+    from tools.code_slices import slice_file
+    from tools.review_lint import _contains_http_method, lint_automation
+
+    artifacts = json.loads(gzip.decompress((FIXTURES / "automation-mockmvc-builders.json.gz").read_bytes()).decode("utf-8"))
+    document = _automation_snapshot()["document"]
+
+    def lint(edit=lambda java: java):
+        generated = copy.deepcopy(artifacts)
+        file = generated["generated_files"][0]
+        file["content"] = edit(file["content"])
+        slices = {file["file_id"]: slice_file(file, [row for row in generated["generated_symbols"] if row["file_id"] == file["file_id"]])}
+        return lint_automation(document, {"artifacts": generated}, slices)
+
+    rows = lint()
+    assert not [row for row in rows if row["rule"] == "request-differs"]
+    assert len([row for row in rows if row["rule"] == "assert-id-missing"]) == 31  # the class really drops every ASSERT ID
+
+    def drift(java: str) -> str:
+        assert java.count('MockMvcRequestBuilders.get("/student")') == 1 and java.count('put("/students/10/update")') == 1
+        return java.replace('MockMvcRequestBuilders.get("/student")', 'MockMvcRequestBuilders.post("/student")').replace(
+            'put("/students/10/update")', 'put("/students/11/update")')
+
+    found = {(row["related_ids"][0], row["message"].split(": ", 1)[1].split(" запроса")[0]) for row in lint(drift) if row["rule"] == "request-differs"}
+    assert found == {("STEP-B1-001-01", "method"), ("STEP-B1-009-01", "path")}
+
+    assert _contains_http_method('exchange("PUT", "/students/10/update", null, body);', "PUT")
+    assert _contains_http_method("request(HttpMethod.DELETE, uri)", "DELETE")
+    assert _contains_http_method('response = client.post(f"/students/{student_id}")', "POST")
+    assert not _contains_http_method('Object name = map.get("firstName");', "GET")
 
 
 def test_an_unsliceable_file_goes_whole_or_blocks_the_part() -> None:
