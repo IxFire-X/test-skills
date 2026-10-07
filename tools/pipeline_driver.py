@@ -272,7 +272,8 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
         raise DriverError("DRIVER_INPUT", "starting a run requires --profile cases-only-v1 or local-pilot-v1")
     if not docs:
         raise DriverError("DRIVER_INPUT", "starting a run requires at least one --docs requirement document")
-    arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"))
+    arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
+                                mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")))
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -321,6 +322,9 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
+        # Opt-in options (contract amendments 2026-10-07) are saved only when set.
+        **({"mutation": True} if options.get("mutation") else {}),
+        **({"require_driver_isolation": True} if options.get("require_driver_isolation") else {}),
     }
 
 
@@ -1181,7 +1185,7 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
     paths = {name: str(path) for name, path in (
         ("candidate_bundle", _bundle_dir(run_root, attempt)),
         ("run_root", run_root), ("driver_dir", directory)) if path.exists()}
-    return {
+    summary = {
         "schema_version": "1.0.0", "status": "terminal", "run_id": run_root.name, "attempt_id": attempt_id, "policy_profile": attempt["policy_profile"],
         "completion": terminal.get("completion"), "verification": terminal.get("verification"), "coverage": terminal.get("coverage"),
         "accepted": terminal.get("accepted"), "reason_code": terminal.get("reason_code"), "exit_code": exit_code(terminal),
@@ -1189,6 +1193,23 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
     }
+    _strength_summary(run_root, attempt, summary)
+    return summary
+
+
+def _strength_summary(run_root: Path, attempt: Mapping[str, Any], summary: dict[str, Any]) -> None:
+    """Opt-in mutation stage: the ``test_strength`` view and the report beside the attempt's projections (summary 1.1.0)."""
+    from tools.pilot_state import read_mutation_receipt_if_present
+
+    receipt = read_mutation_receipt_if_present(run_root, str(attempt["attempt_id"]))
+    if receipt is None:
+        return
+    from tools.mutation import summary as strength
+    from tools.strength_report import write_strength_report
+
+    summary["schema_version"] = "1.1.0"
+    summary["test_strength"] = strength(receipt)
+    summary["paths"].update(write_strength_report(_bundle_dir(run_root, attempt), receipt))
 
 
 def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
@@ -1418,6 +1439,10 @@ def _parser() -> argparse.ArgumentParser:
                                  help="Review format of this run: compact-v1 (default: projection, whole cases per part) or pairs (legacy scopes and pair checks).")
             command.add_argument("--max-tasks", type=int, default=1,
                                  help="Return up to K independent review part tasks at once (compact-v1); each still needs its own fresh call.")
+            command.add_argument("--mutation", action="store_true",
+                                 help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
+            command.add_argument("--require-driver-isolation", action="store_true",
+                                 help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
         if name == "submit":
             command.add_argument("--task-id", required=True)
             command.add_argument("--output", type=Path, help="Answer file; defaults to the task's output_path.")
@@ -1526,7 +1551,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode")},
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
+                "mutation", "require_driver_isolation")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock

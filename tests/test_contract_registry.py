@@ -15,7 +15,7 @@ SCHEMA_ROWS = [
     ("model-request.schema.json", 1, "IMPLEMENTED", "2.0.0"),
     ("attempt.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("run-authorization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("terminal-result.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("finalization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
-    ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.0.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),
+    ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.1.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),
     ("inventory-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("exclusion-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-selection-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("execution-baseline.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-marker-output.schema.json", 3, "IMPLEMENTED", "5.0.0"), ("tc-generator-output.schema.json", 3, "IMPLEMENTED", "5.0.0"),
@@ -29,7 +29,7 @@ SCHEMA_ROWS = [
     ("run-tests-output.schema.json", 6, "IMPLEMENTED", "5.0.0"), ("resume-validation-receipt.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("trace-document.schema.json", 7, "IMPLEMENTED", "5.0.0"),
     ("trace-audit-output.schema.json", 7, "IMPLEMENTED", "5.0.0"), ("pre-finalization-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
     ("derived-terminal-trace.schema.json", 7, "IMPLEMENTED", "1.0.0"),
-    ("driver-summary.schema.json", 7, "IMPLEMENTED", "1.0.0"),
+    ("driver-summary.schema.json", 7, "IMPLEMENTED", "1.1.0"),
     ("compatibility-evidence.schema.json", 8, "IMPLEMENTED", "2.0.0"), ("retained-native-rerun-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("scenario-observation-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-eval-run.schema.json", 8, "IMPLEMENTED", "1.0.0"),
     ("release-eval-receipt.schema.json", 8, "IMPLEMENTED", "1.0.0"), ("release-manifest.schema.json", 8, "IMPLEMENTED", "1.0.0"),
 ]

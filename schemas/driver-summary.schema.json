@@ -7,7 +7,7 @@
   "required": ["schema_version", "status", "run_id", "attempt_id", "policy_profile", "completion", "verification", "coverage", "accepted", "reason_code", "exit_code",
                "review_independence", "warnings", "effective_document_digest", "paths"],
   "properties": {
-    "schema_version": {"const": "1.0.0"},
+    "schema_version": {"enum": ["1.0.0", "1.1.0"]},
     "status": {"const": "terminal"},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -39,8 +39,30 @@
     "paths": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {"candidate_bundle": {"type": "string"}, "run_root": {"type": "string"}, "driver_dir": {"type": "string"}}
+      "properties": {"candidate_bundle": {"type": "string"}, "run_root": {"type": "string"}, "driver_dir": {"type": "string"},
+                     "test_strength_json": {"type": "string"}, "test_strength_markdown": {"type": "string"},
+                     "analyst_report_json": {"type": "string"}, "analyst_report_markdown": {"type": "string"}}
     },
-    "exec": {"type": "object"}
-  }
+    "exec": {"type": "object"},
+    "test_strength": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason_code", "killed", "survived", "no_coverage", "timed_out", "memory_error", "score", "survivor_groups", "duration_seconds"],
+      "properties": {
+        "status": {"enum": ["MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"]},
+        "reason_code": {"type": ["string", "null"]},
+        "killed": {"type": "integer", "minimum": 0}, "survived": {"type": "integer", "minimum": 0}, "no_coverage": {"type": "integer", "minimum": 0},
+        "timed_out": {"type": "integer", "minimum": 0}, "memory_error": {"type": "integer", "minimum": 0},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "survivor_groups": {"type": "integer", "minimum": 0},
+        "duration_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "isolation_evidence": {"enum": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE", null]},
+    "strength_triage": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"schema_version": {"const": "1.0.0"}}, "required": ["schema_version"]},
+     "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}]}}}
+  ]
 }

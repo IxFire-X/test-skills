@@ -57,6 +57,8 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 - mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
 - model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
 - runner evidence `command_digest, cli_name_version, model, started_finished, exit_code, session_id, stdout_digest, tokens, user_settings_loaded` → axis `isolation_evidence`; `--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`
+- optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
+- optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
 - optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
 
@@ -133,7 +135,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `run-authorization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `terminal-result.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `finalization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `skillsrc.schema.json` | `2` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
+| `skillsrc.schema.json` | `2` | `IMPLEMENTED` | `5.1.0` | `True` | `-` |
 | `skillsrc-init-output.schema.json` | `2` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `inventory-receipt.schema.json` | `2` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `exclusion-receipt.schema.json` | `2` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
@@ -164,7 +166,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.1.0` | `True` | `-` |
 | `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

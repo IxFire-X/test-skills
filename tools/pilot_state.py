@@ -35,7 +35,9 @@ on_confined_write(_forget_validated_evidence)
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation"}
+# Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
+_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -541,6 +543,11 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
     requested = authorization["execution_requested"]
     if (policy_profile == "cases-only-v1" and requested) or (policy_profile == "local-pilot-v1" and not requested):
         raise ValueError("authorization policy mismatch")
+    # An opt-in consent is recorded only as an explicit true; mutations need a local execution.
+    if any(key in authorization and authorization[key] is not True for key in _AUTH_OPT_IN_KEYS):
+        raise ValueError("unsafe authorization")
+    if "mutation_requested" in authorization and policy_profile != "local-pilot-v1":
+        raise ValueError("authorization policy mismatch")
     return dict(authorization)
 
 
@@ -968,6 +975,7 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
         receipt_data = {"schema_version": "1.0.0", "run_id": run_id, "request_id": safe_auth["request_id"], "policy_profile": policy_profile, "execution_requested": safe_auth["execution_requested"]}
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
+        receipt_data.update({key: True for key in _AUTH_OPT_IN_KEYS if key in safe_auth})
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest = _publish(root_project, root, root / "run-manifest.json", {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
@@ -2544,7 +2552,7 @@ def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
         if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid review receipt attempt")
         return root / "review-state" / attempt_id / f"{kind}.json"
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "mutation-receipt": "mutation-receipts"}
     if kind not in directories or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
         raise ValueError("invalid factual receipt")
     suffix = "" if not kind.startswith("automation-review-boundary-r") else f".{kind[-2:]}"
@@ -2880,6 +2888,17 @@ def _validate_factual_receipt(
         if not identity_matches:
             raise ValueError("foreign review receipt")
         _validate_review_receipt(project, root, state, attempt, kind, receipt, common)
+    elif kind == "mutation-receipt":
+        # Opt-in MUTATION stage (contract amendments 2026-10-07): bound to the attempt's execution receipt,
+        # published before the retain/cleanup decision.
+        from tools.schema_validation import schema_diagnostics
+        if not identity_matches or schema_diagnostics(dict(receipt), _SCHEMA_ROOT / "mutation-receipt.schema.json", _PACK_ROOT):
+            raise ValueError("invalid mutation receipt")
+        execution = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "execution-receipt", "ARTIFACT_READ_BACK")["record"]
+        if receipt["execution_receipt_digest"] != execution["digest"] or receipt["verification"] != execution["payload"]["verdict"]:
+            raise ValueError("mutation receipt is not bound to the execution receipt")
+        if receipt["status"] == "MEASURED" and (receipt["totals"] is None or receipt["report"] is None or receipt["project_inventory"]["unchanged"] is not True):
+            raise ValueError("invalid mutation receipt")
     elif kind == "reviewer-session-boundary":
         plan = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "review-plan-canonical", "ARTIFACT_READ_BACK")["record"]["plan"]
         snapshot = _read_attempt_receipt_with_state(project, root, state, str(attempt["attempt_id"]), "review-snapshot-canonical", "ARTIFACT_READ_BACK")["record"]["payload"]
@@ -3504,6 +3523,18 @@ def _bind_published_attempt_receipt(
         raise ValueError("invalid fixed receipt event order")
     readback = read_attempt_receipt(root, attempt_id, kind, "ARTIFACT_READ_BACK")
     return {**readback, "created": published["created"], "installed_identity": published["installed_identity"]}
+
+
+def publish_mutation_receipt(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Publish and read back the one mutation receipt of an attempt (opt-in MUTATION stage)."""
+    return _publish_bound_attempt_receipt(run_root, attempt_id, "mutation-receipt", facts)
+
+
+def read_mutation_receipt_if_present(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
+    _project, root = _run_root(run_root)
+    if not _receipt_target(root, attempt_id, "mutation-receipt").exists():
+        return None
+    return dict(read_attempt_receipt(run_root, attempt_id, "mutation-receipt", "ARTIFACT_READ_BACK")["record"])
 
 
 def publish_execution_trace_pair(
@@ -4571,6 +4602,12 @@ _RESULT_EVIDENCE_KEYS = {
 _RESULT_BASE_KEYS = {"run_id", "attempt_id", "attempt_state", "completion", "verification", "coverage", "reason_code"}
 # Optional evidence (results written before D8 have neither): who reviewed, and whether a self-review was accepted.
 _RESULT_INDEPENDENCE_KEYS = {"review_independence", "self_review_accepted"}
+# Opt-in evidence (contract amendments 2026-10-07): the mutation axis, and the isolation evidence level
+# together with the run decision to require driver-run review processes; additive keys, absent without the options.
+_RESULT_STRENGTH_KEYS = {"test_strength"}
+_RESULT_ISOLATION_KEYS = {"isolation_evidence", "driver_isolation_required"}
+_TEST_STRENGTH_VALUES = {"MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"}
+_ISOLATION_EVIDENCE_VALUES = {"DRIVER_PROCESS", "HOST_DECLARED", "NONE"}
 
 
 def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool = True) -> tuple[dict[str, Any], bool]:
@@ -4598,6 +4635,13 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
             facts["review_independence"] not in {"ISOLATED", "SELF"} or type(facts["self_review_accepted"]) is not bool
             or facts["review_independence"] == "ISOLATED" and facts["self_review_accepted"])):
         raise ValueError("invalid review independence facts")
+    strength = set(facts) & _RESULT_STRENGTH_KEYS
+    if strength and facts["test_strength"] not in _TEST_STRENGTH_VALUES:
+        raise ValueError("invalid test strength facts")
+    isolation = set(facts) & _RESULT_ISOLATION_KEYS
+    if isolation not in (set(), _RESULT_ISOLATION_KEYS) or (isolation and (
+            facts["isolation_evidence"] not in _ISOLATION_EVIDENCE_VALUES or type(facts["driver_isolation_required"]) is not bool)):
+        raise ValueError("invalid isolation evidence facts")
     facts = dict(facts)
     # A self-review is not independent: unless the run accepted it explicitly, it is a
     # reason not to accept, even when everything else holds.
@@ -4606,6 +4650,13 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
         facts["reason_code"] = "REVIEW_NOT_INDEPENDENT"
     if facts.get("reason_code") == "REVIEW_NOT_INDEPENDENT" and not self_unaccepted:
         raise ValueError("REVIEW_NOT_INDEPENDENT requires an unaccepted self-review")
+    # With --require-driver-isolation only driver-run review processes are proof of isolation.
+    isolation_unverified = bool(isolation) and facts["driver_isolation_required"] and facts["isolation_evidence"] != "DRIVER_PROCESS"
+    if isolation_unverified and facts.get("reason_code") is None and facts.get("finalization_valid") is True:
+        facts["reason_code"] = "REVIEW_ISOLATION_UNVERIFIED"
+    if facts.get("reason_code") == "REVIEW_ISOLATION_UNVERIFIED" and not isolation_unverified:
+        raise ValueError("REVIEW_ISOLATION_UNVERIFIED requires required driver isolation without driver evidence")
+    present = present | strength | isolation
     if set(facts) - present != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
         raise ValueError("invalid result facts")
     if facts["completion"] not in {"COMPLETE", "PARTIAL", "FATAL"} or facts["verification"] not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", None} or facts["coverage"] not in {"FULL", "MIXED", "MANUAL_ONLY", None} or facts["reason_code"] is not None and not _safe_label(facts["reason_code"]) or not _safe_label(facts["prior_stage_cause"]):
@@ -4723,6 +4774,7 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
 
 def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool) -> Mapping[str, Any]:
     facts, accepted = _result_facts(facts, policy_profile, external_cause_available=external_cause_available)
+    opted = set(facts) & (_RESULT_STRENGTH_KEYS | _RESULT_ISOLATION_KEYS)
     result = {"schema_version": "1.0.0", "run_id": facts["run_id"], "attempt_id": facts["attempt_id"], "policy_profile": policy_profile, "attempt_state": facts["attempt_state"], "completion": facts["completion"], "verification": facts["verification"], "coverage": facts["coverage"]}
     if facts["attempt_state"] == "TERMINAL":
         result["accepted"] = accepted
@@ -4733,9 +4785,12 @@ def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_
         result["trace_valid"] = facts["trace_valid"]
         result["finalization_valid"] = facts["finalization_valid"]
         result["operational_reliable"] = facts["operational_reliable"]
-        result["evidence"] = {key: facts[key] for key in _RESULT_EVIDENCE_KEYS | (_RESULT_INDEPENDENCE_KEYS & set(facts))}
+        result["evidence"] = {key: facts[key] for key in _RESULT_EVIDENCE_KEYS | ((_RESULT_INDEPENDENCE_KEYS | opted) & set(facts))}
         if "review_independence" in facts:
             result["review_independence"] = facts["review_independence"]
+        for key in ("test_strength", "isolation_evidence"):
+            if key in facts:
+                result[key] = facts[key]
     return _sealed(result)
 
 

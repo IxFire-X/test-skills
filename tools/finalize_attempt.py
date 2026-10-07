@@ -1016,6 +1016,15 @@ def finalize_durable_execution_attempt(
         unknown_digest = str(execution_record["digest"]) if verification == "UNKNOWN" else None
         existing_plan = None
         plan_path = Path(run_root) / "disposition-plans" / f"{attempt_id}.json"
+        # Opt-in MUTATION stage (contract amendments 2026-10-07): after the execution trace and
+        # before the retain/cleanup decision, while the generated files are still in the project.
+        # Once the decision is durable the stage only reads its receipt back.
+        if plan_path.exists():
+            strength = pilot_state.read_mutation_receipt_if_present(run_root, attempt_id)
+        else:
+            from tools.mutation import mutation_stage
+
+            strength = mutation_stage(run_root, attempt_id)
         if plan_path.exists():
             try:
                 existing_plan = pilot_state.read_attempt_receipt(
@@ -1116,6 +1125,7 @@ def finalize_durable_execution_attempt(
         "prior_stage_cause": prior_stage_cause,
         "policy_profile": attempt["policy_profile"],
         **pilot_state.review_independence(run_root, attempt_id),
+        **({"test_strength": strength["status"]} if strength is not None else {}),
     }
     branch = {
         "run_id": attempt["run_id"], "attempt_id": attempt_id,

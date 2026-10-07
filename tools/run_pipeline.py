@@ -272,11 +272,16 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
     from tools.init_skillsrc import ensure_skillsrc
     from tools.pilot_state import create_run
 
-    run = create_run(
-        project,
-        getattr(args, "profile", "local-pilot-v1"),
-        {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": getattr(args, "profile", "local-pilot-v1") == "local-pilot-v1"},
-    )
+    profile = getattr(args, "profile", "local-pilot-v1")
+    authorization: dict[str, Any] = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
+    # Opt-in run-scoped consents (contract amendments 2026-10-07); absent flags keep the 1.0.0 receipt.
+    if getattr(args, "mutation", False):
+        if profile != "local-pilot-v1":
+            raise HostStop("MUTATION_PROFILE", "--mutation needs the local-pilot-v1 profile (mutations run the generated tests)")
+        authorization["mutation_requested"] = True
+    if getattr(args, "require_driver_isolation", False):
+        authorization["require_driver_isolation"] = True
+    run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
         receipt = {"status": "unchanged"}
@@ -1676,6 +1681,10 @@ def build_parser() -> JsonArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     scan_parser = sub.add_parser("scan", parents=[shared])
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
+    scan_parser.add_argument("--mutation", action="store_true",
+                             help="Consent to the opt-in MUTATION stage for this run (needs mutation.enabled in .skillsrc; may resolve pinned PIT jars).")
+    scan_parser.add_argument("--require-driver-isolation", action="store_true",
+                             help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
     status_parser = sub.add_parser("status", parents=[shared])
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])

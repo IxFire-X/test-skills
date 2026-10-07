@@ -24,11 +24,11 @@ SKILL_PATHS = {
 }
 SCHEMA_ROWS = [
     ("pipeline.schema.json",1,"IMPLEMENTED","4.0"),("pilot-common.schema.json",1,"IMPLEMENTED","1.0.0"),("run-manifest.schema.json",1,"IMPLEMENTED","1.0.0"),("event.schema.json",1,"IMPLEMENTED","2.0.0"),("model-request.schema.json",1,"IMPLEMENTED","2.0.0"),("attempt.schema.json",1,"IMPLEMENTED","1.0.0"),("run-authorization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),("terminal-result.schema.json",1,"IMPLEMENTED","1.0.0"),("finalization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),
-    ("skillsrc.schema.json",2,"IMPLEMENTED","5.0.0"),("skillsrc-init-output.schema.json",2,"IMPLEMENTED","5.0.0"),("inventory-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("exclusion-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("context-selection-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("execution-baseline.schema.json",2,"IMPLEMENTED","1.0.0"),
+    ("skillsrc.schema.json",2,"IMPLEMENTED","5.1.0"),("skillsrc-init-output.schema.json",2,"IMPLEMENTED","5.0.0"),("inventory-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("exclusion-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("context-selection-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("execution-baseline.schema.json",2,"IMPLEMENTED","1.0.0"),
     ("context-marker-output.schema.json",3,"IMPLEMENTED","5.0.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
     ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","6.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","2.0.0"),("review-plan.schema.json",4,"IMPLEMENTED","1.0.0"),("review-part-output.schema.json",4,"IMPLEMENTED","1.0.0"),("review-plan-compact.schema.json",4,"IMPLEMENTED","2.0.0"),("review-part-output-compact.schema.json",4,"IMPLEMENTED","2.0.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","6.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
-    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.0.0"),
+    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.1.0"),
     ("compatibility-evidence.schema.json",8,"IMPLEMENTED","2.0.0"),("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-run.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
 ]
 ARTIFACT_ROWS = [
@@ -136,6 +136,9 @@ EXPECTED_MUTATION_TOOLING = {
              "report": "xml_full_mutation_matrix"},
     "python": "not_implemented",
 }
+# New schemas and artifacts of the opt-in features: registered next to the frozen registries.
+OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0")]
+OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED")]
 EXPECTED_MODEL_RUNNER = {
     "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",
     "skillsrc_fields": ["preset", "models", "max_parallel", "timeout_seconds"], "invocation": "fresh_process_temp_cwd_stdin_no_write_tools", "wait_action": "wait",
@@ -186,39 +189,60 @@ def _known_object_boundaries_are_closed(value: Any) -> bool:
     return True
 
 
+def _accepted_versions(schema: Mapping[str, Any]) -> list[str]:
+    """Versions a schema accepts: one ``const``, or a minor-compatible ``enum`` ending with the target.
+
+    A minor version (2026-10-07 amendments) keeps every earlier minor of the same major
+    valid, so existing artifacts and project files stay readable.
+    """
+    declared = schema.get("properties", {}).get("schema_version", {})
+    if "const" in declared:
+        return [declared["const"]]
+    values = declared.get("enum")
+    if not isinstance(values, list) or not values or not all(isinstance(value, str) and value.count(".") == 2 for value in values):
+        return []
+    parsed = [tuple(int(part) for part in value.split(".")) for value in values]
+    if parsed != sorted(set(parsed)) or len({version[0] for version in parsed}) != 1:
+        return []
+    return list(values)
+
+
 def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
     rows = contract.get("schema_registry", [])
     _error_if_not_equal(errors, "schema_registry exact truth", rows, _expected_schema_rows())
     if len({row.get("id") for row in rows if isinstance(row, Mapping)}) != len(rows):
         errors.append("duplicate schema_registry")
     for row in rows:
-        if not isinstance(row, Mapping):
-            continue
-        name = row.get("id")
-        status = row.get("implementation_status")
-        path = root / "schemas" / str(name)
-        if status in {"IMPLEMENTED", "MIGRATION_PENDING"}:
-            if not path.is_file():
-                errors.append(f"{status.lower()} schema missing: {name}")
-                continue
-            schema = _load_json(path)
-            if schema.get("$id") != f"schemas/{name}":
-                errors.append(f"schema id mismatch: {name}")
-        if status == "IMPLEMENTED":
-            schema = _load_json(path)
-            if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-                errors.append(f"implemented schema draft mismatch: {name}")
-            if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and schema.get("properties", {}).get("schema_version", {}).get("const") != row.get("target_version"):
-                errors.append(f"implemented schema version mismatch: {name}")
-            if not _known_object_boundaries_are_closed(schema):
-                errors.append(f"implemented schema closure mismatch: {name}")
-        elif status == "MIGRATION_PENDING":
-            # Schema-version equality is not semantic readiness.  A legacy
-            # schema may retain its current version while its frozen-pilot
-            # migration is still explicitly pending in the registry.
-            _load_json(path)
-        elif status == "NOT_IMPLEMENTED" and path.exists():
-            errors.append(f"future placeholder schema forbidden: {name}")
+        if isinstance(row, Mapping):
+            _validate_schema_file(root, row, errors)
+
+
+def _validate_schema_file(root: Path, row: Mapping[str, Any], errors: list[str]) -> None:
+    name = row.get("id")
+    status = row.get("implementation_status")
+    path = root / "schemas" / str(name)
+    if status in {"IMPLEMENTED", "MIGRATION_PENDING"}:
+        if not path.is_file():
+            errors.append(f"{status.lower()} schema missing: {name}")
+            return
+        schema = _load_json(path)
+        if schema.get("$id") != f"schemas/{name}":
+            errors.append(f"schema id mismatch: {name}")
+    if status == "IMPLEMENTED":
+        schema = _load_json(path)
+        if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+            errors.append(f"implemented schema draft mismatch: {name}")
+        if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and _accepted_versions(schema)[-1:] != [row.get("target_version")]:
+            errors.append(f"implemented schema version mismatch: {name}")
+        if not _known_object_boundaries_are_closed(schema):
+            errors.append(f"implemented schema closure mismatch: {name}")
+    elif status == "MIGRATION_PENDING":
+        # Schema-version equality is not semantic readiness.  A legacy
+        # schema may retain its current version while its frozen-pilot
+        # migration is still explicitly pending in the registry.
+        _load_json(path)
+    elif status == "NOT_IMPLEMENTED" and path.exists():
+        errors.append(f"future placeholder schema forbidden: {name}")
 
 
 def _validate_registry_shape(contract: Mapping[str, Any], errors: list[str]) -> None:
@@ -303,6 +327,17 @@ def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[s
     _error_if_not_equal(errors, "optional result axes", contract.get("optional_result_axes"), EXPECTED_OPTIONAL_AXES)
     if set(contract.get("optional_result_axes") or {}) & set(contract.get("result_axes") or {}):
         errors.append("optional result axis shadows a frozen axis")
+    _error_if_not_equal(errors, "optional schema registry", contract.get("optional_schema_registry"),
+                        [{"id": name, "phase": phase, "implementation_status": status, "target_version": version, "semantic_ready": True}
+                         for name, phase, status, version in OPTIONAL_SCHEMA_ROWS])
+    _error_if_not_equal(errors, "optional artifact registry", contract.get("optional_artifact_registry"),
+                        [{"id": name, "phase": phase, "implementation_status": status, "semantic_ready": True} for name, phase, status in OPTIONAL_ARTIFACT_ROWS])
+    frozen = {row.get("id") for row in contract.get("schema_registry") or [] if isinstance(row, Mapping)}
+    for row in contract.get("optional_schema_registry") or []:
+        if not isinstance(row, Mapping) or row.get("id") in frozen:
+            errors.append("optional schema shadows a frozen schema")
+            continue
+        _validate_schema_file(root, row, errors)
     _error_if_not_equal(errors, "mutation tooling", contract.get("mutation_tooling"), EXPECTED_MUTATION_TOOLING)
     _error_if_not_equal(errors, "model runner", contract.get("model_runner"), EXPECTED_MODEL_RUNNER)
 

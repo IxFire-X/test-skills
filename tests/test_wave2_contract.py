@@ -51,7 +51,8 @@ def test_projections_render_the_amendments(pack_root: Path) -> None:
         assert "`--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`" in text
     # A contract without the amendments renders exactly as before (no empty section).
     frozen = {key: value for key, value in _contract(pack_root).items()
-              if key not in {"contract_amendments", "optional_lifecycle_stages", "optional_result_axes", "mutation_tooling", "model_runner"}}
+              if key not in {"contract_amendments", "optional_lifecycle_stages", "optional_result_axes", "mutation_tooling", "model_runner",
+                            "optional_schema_registry", "optional_artifact_registry"}}
     assert all("amendments" not in text for text in _rendered_files(frozen).values())
 
 

@@ -71,6 +71,10 @@ def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
                      f"custom template `{runner['custom_template']}`; `.skillsrc` fields `{', '.join(runner['skillsrc_fields'])}`; invocation `{runner['invocation']}`; "
                      f"wait action `{runner['wait_action']}`; tries per part `{runner['tries_per_part']}`; standalone `{runner['standalone_command']}`")
         lines.append(f"- runner evidence `{', '.join(runner['evidence'])}` → axis `{runner['evidence_axis']}`; `{runner['require_flag']}` rejects lower levels with `{runner['require_reason_code']}`")
+    for row in contract.get("optional_schema_registry") or []:
+        lines.append(f"- optional schema `{row['id']}` (phase {row['phase']}, `{row['implementation_status']}`, `{row['target_version']}`)")
+    for row in contract.get("optional_artifact_registry") or []:
+        lines.append(f"- optional artifact `{row['id']}` (phase {row['phase']}, `{row['implementation_status']}`)")
     for name, axis in (contract.get("optional_result_axes") or {}).items():
         lines.append(f"- optional axis `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
     return lines

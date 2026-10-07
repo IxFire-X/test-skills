@@ -20,6 +20,8 @@
     "operational_reliable": {"type": "boolean"},
     "evidence": {"$ref": "#/$defs/evidence"},
     "review_independence": {"enum": ["ISOLATED", "SELF"]},
+    "test_strength": {"enum": ["MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"]},
+    "isolation_evidence": {"enum": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE"]},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
   },
   "$defs": {
@@ -51,9 +53,13 @@
         "mixed_manual_traceable": {"type": "boolean"},
         "operational_reliable": {"type": "boolean"},
         "review_independence": {"enum": ["ISOLATED", "SELF"]},
-        "self_review_accepted": {"type": "boolean"}
+        "self_review_accepted": {"type": "boolean"},
+        "test_strength": {"enum": ["MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"]},
+        "isolation_evidence": {"enum": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE"]},
+        "driver_isolation_required": {"type": "boolean"}
       },
-      "dependentRequired": {"review_independence": ["self_review_accepted"], "self_review_accepted": ["review_independence"]}
+      "dependentRequired": {"review_independence": ["self_review_accepted"], "self_review_accepted": ["review_independence"],
+                            "isolation_evidence": ["driver_isolation_required"], "driver_isolation_required": ["isolation_evidence"]}
     }
   },
   "allOf": [
