@@ -137,3 +137,20 @@ def test_a_reviewer_question_goes_through_submit_into_the_report(tmp_path: Path)
     assert any(result["schema_version"] == "2.1.0" for result in results)
     report = json.loads(Path(task["result"]["paths"]["analyst_report_json"]).read_text(encoding="utf-8"))
     assert [row["question"] for row in report["items"] if any(source["kind"] == "tc-reviewer" for source in row["sources"])] == ["В каком порядке выдавать товары?"]
+
+
+def test_near_duplicates_of_one_requirement_join_and_keep_their_wording() -> None:
+    """Live step5 run (2026-10-07): the triage asked the same logging question once per printed field."""
+    triage = [{"group_id": f"MUT-000{n}", "decision": "SPEC_GAP", "requirement_id": "SREQ-0008", "refs": [f"MUT-000{n}:L5{8 + n}"], "rationale": "…",
+               "question": f"SREQ-0008 говорит «логирует поля», но не задаёт канал (консоль или логгер), формат и обязательность. Входит ли вывод {field} в консоль в проверяемое поведение?"}
+              for n, field in ((1, "id"), (2, "firstName"), (3, "lastName"))]
+    other = [{"group_id": "MUT-0009", "decision": "SPEC_GAP", "requirement_id": "SREQ-0008", "refs": ["MUT-0009:L70"], "rationale": "…",
+              "question": "Нужно ли обрезать имя длиннее 40 символов?"}]
+    report = analyst_report.build_report(analyst_report.triage_items(triage + other), run_id="r" * 32, attempt_id="a" * 32)
+    assert len(report["items"]) == 2
+    logging = next(row for row in report["items"] if "логирует" in row["question"])
+    assert [source["ref"] for source in logging["sources"]] == ["MUT-0001", "MUT-0002", "MUT-0003"] and len(logging["also_asked"]) == 2
+    # Cases are keyed by their requirements, so an automation reviewer's question meets the others.
+    parts = [{"review_key": "r1", "part_id": "part-000001", "result": {"findings": [_finding("Какой канал журнала ожидается?", ["TC-B1-013"])]}}]
+    keyed = analyst_report.build_report(analyst_report.review_items(parts), run_id="r" * 32, attempt_id="a" * 32, sources_of={"TC-B1-013": ["SREQ-0008"]})
+    assert keyed["items"][0]["requirement_ids"] == ["SREQ-0008"]

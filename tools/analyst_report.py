@@ -34,10 +34,20 @@ _FIELDS = {
 _SOURCE_ORDER = {"context-marker": 0, "tc-reviewer": 1, "autotest-reviewer": 2, "mutation-triage": 3}
 
 
+SIMILAR = 0.7
+
+
 def normalize(text: str) -> str:
     value = unicodedata.normalize("NFC", text or "").casefold()
     value = re.sub(r"\s+", " ", value).strip()
     return value.rstrip(" ?.!;:")
+
+
+def similarity(left: str, right: str) -> float:
+    """Jaccard similarity of the words (3+ letters) of two normalized questions."""
+    words = [set(re.findall(r"[\w-]{3,}", value)) for value in (left, right)]
+    union = words[0] | words[1]
+    return 1.0 if not union else len(words[0] & words[1]) / len(union)
 
 
 def parse_warning(line: str) -> dict[str, Any] | None:
@@ -119,12 +129,25 @@ def build_report(items: Sequence[Mapping[str, Any]], *, run_id: str, attempt_id:
         source = {name: value for name, value in item["source"].items() if value is not None}
         if source not in row["sources"]:
             row["sources"].append(source)
-    rows = []
+    # Near-duplicates of one requirement (the same question about another field, say) join the first of
+    # them in sorted order when their words mostly coincide; the joined wording stays in ``also_asked``.
+    clusters: list[tuple[tuple, dict[str, Any]]] = []
     for key in sorted(joined):
         row = joined[key]
+        home = next((cluster for cluster in clusters if cluster[0][0] == key[0] and similarity(cluster[0][1], key[1]) >= SIMILAR), None)
+        if home is None:
+            clusters.append((key, {**row, "also_asked": []}))
+            continue
+        target = home[1]
+        target["missing"] = target["missing"] or row["missing"]
+        target["blocks"] = target["blocks"] or row["blocks"]
+        target["also_asked"].append(row["question"])
+        target["sources"].extend(source for source in row["sources"] if source not in target["sources"])
+    rows = []
+    for key, row in clusters:
         row["sources"].sort(key=lambda source: (_SOURCE_ORDER.get(source["kind"], 9), source["ref"]))
         row["item_id"] = "AQ-" + hashlib.sha256(json.dumps([list(key[0]), key[1]], ensure_ascii=False).encode("utf-8")).hexdigest()[:10].upper()
-        rows.append({name: row[name] for name in ("item_id", "requirement_ids", "question", "missing", "blocks", "sources")})
+        rows.append({name: row[name] for name in ("item_id", "requirement_ids", "question", "also_asked", "missing", "blocks", "sources")})
     return {"schema_version": "1.0.0", "run_id": run_id, "attempt_id": attempt_id, "items": rows,
             "counts": {kind: sum(any(source["kind"] == kind for source in row["sources"]) for row in rows) for kind in _SOURCE_ORDER}}
 
@@ -139,6 +162,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(f"## {row['item_id']}: {', '.join(row['requirement_ids'])}")
         lines.append("")
         lines.append(f"**Вопрос.** {row['question']}")
+        for variant in row.get("also_asked") or []:
+            lines.append(f"**Тот же вопрос иначе.** {variant}")
         if row["missing"]:
             lines.append(f"**Чего не хватает.** {row['missing']}")
         if row["blocks"]:

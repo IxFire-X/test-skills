@@ -42,7 +42,7 @@ def report_for(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _sources_of(run_root: Path, attempt_id: str) -> dict[str, list[str]]:
-    """CREQ → SREQ of the attempt's effective (else candidate) document."""
+    """CREQ and case → SREQ of the attempt's effective (else candidate) document."""
     from tools.pilot_state import read_effective_canonical_if_present
 
     effective = read_effective_canonical_if_present(run_root, attempt_id)
@@ -54,6 +54,9 @@ def _sources_of(run_root: Path, attempt_id: str) -> dict[str, list[str]]:
     for row in document.get("source_to_canonical_mappings", []):
         for creq in row.get("canonical_requirement_ids", []):
             table.setdefault(creq, []).append(row["source_requirement_id"])
+    # A finding that names only cases (an automation reviewer often does) is keyed by their requirements.
+    for case in document.get("test_cases", []):
+        table[case["case_id"]] = sorted({source for creq in case.get("requirement_ids", []) for source in table.get(creq, [creq])})
     return table
 
 
