@@ -76,8 +76,56 @@ The linear lifecycle gains one optional stage:
 
 ## Wave 3
 
-(Added at the start of wave 3: §17 item 2 — quarantine disposition policy; §25 — the package may change only
-tests it owns whose digest matches the suite manifest.)
+### A4. §17 item 2 — disposition policy `quarantine`
+
+§17 item 2 still holds by default: after `FAIL` or `NOT_RUNNABLE` every byte-identical pipeline-owned
+materialized file receives `CLEANED`. As an option the run MAY use the disposition policy `quarantine`:
+
+- `local-pilot-v1` — only with `next … --disposition-policy quarantine` (recorded as
+  `disposition_policy: quarantine` in the run-scoped authorization); the default stays `cleanup`;
+- `suite-update-v1` — the profile's default.
+
+Rules:
+
+1. The policy applies only after an authoritative `FAIL` with per-method outcomes. `NOT_RUNNABLE`,
+   `EXECUTION_UNKNOWN`, partial materialization and every other branch keep the frozen rules.
+2. A file whose selected methods all passed receives `RETAINED`.
+3. A file with failed methods receives `QUARANTINED`: the package rewrites only that file, only when its
+   bytes equal the materialized digest, and changes only the failed methods — a JUnit 5 method gets
+   `@org.junit.jupiter.api.Disabled` and a pytest function gets `@pytest.mark.xfail(strict=True)`, each with
+   the reason and the reference of the run and method. The new bytes have their own digest in the
+   disposition receipt; nothing else in the file changes.
+4. A file whose bytes changed after materialization is preserved with the frozen conflict outcome.
+5. Verification, coverage, acceptance and the result tuple do not change: a `FAIL` run is never accepted,
+   with or without quarantine.
+6. A quarantined method is run explicitly on the next suite run (JUnit 5:
+   `junit.jupiter.conditions.deactivate`; pytest: `--runxfail`), so a fixed defect is seen.
+
+### A5. §25 — the package may change only tests it owns, recorded in the suite manifest
+
+§25 still forbids changing existing tests and auto-repair after a runtime failure, except as follows.
+
+1. A **suite** is the project directory `.skillsrc` `suite.path` (default `test-cases/`): the canonical
+   document, its human projections and the suite manifest (`suite-manifest.schema.json`). It is written only
+   under run-scoped authorization (`local-pilot-v1 --suite`, or the `suite-update-v1` profile).
+2. The manifest records, per test case, the requirement keys and text digests, the test method and the digest
+   of its source slice, the status (`ACTIVE`, `QUARANTINED`, `RETIRED`), the quarantine reason and
+   reference, the last green run and the kill ratio of mutants; per test file, the digest of its SUPPORT code.
+3. The package MAY change a test method only when the method is listed in the manifest and its slice digest
+   matches the manifest (and the SUPPORT digest, when SUPPORT changes). Permitted changes: **update** (the
+   case changed because its requirement changed), **repair** and **quarantine**. Everything else is a human
+   edit: it is never overwritten or quarantined; the proposed change goes to the pull request description.
+4. **Repair** exists only in `suite-update-v1`: one try per failing method, only when the test does not
+   compile or its own code fails while the case and its requirements are unchanged; it goes through the static
+   review; expectations and assertion literals must stay the same, and the method's kill ratio must not drop.
+5. The profile `suite-update-v1` updates an existing suite: migration, impact analysis, update and repair,
+   review of the changed cases, automation of the changed cases, static review of the changed slices, a run
+   of the whole suite, failure triage and quarantine, mutations, manifest, summary. Its result is a
+   **proposal**: changes in the working tree, `pr-description.md` and a patch in the run directory. It is not a
+   pilot attempt, has no `accepted` and no pilot result tuple, and never commits, pushes or opens a pull
+   request.
+6. Product code, project dependencies, build configuration, secrets and files outside the suite and the
+   manifest's test files are never changed.
 
 ## What remains in force
 

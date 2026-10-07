@@ -123,6 +123,8 @@ EXPECTED_EXIT_PRIORITY = [{"when": "controller_error_without_trustworthy_attempt
 EXPECTED_AMENDMENTS = [
     {"id": "pilot-contract-amendments-2026-10-07", "document": "docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md",
      "status": "ACCEPTED", "opt_in": True, "wave": 2, "sections": ["1.2", "1.5", "17"]},
+    {"id": "pilot-contract-amendments-2026-10-07-wave-3", "document": "docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md",
+     "status": "ACCEPTED", "opt_in": True, "wave": 3, "sections": ["17.2", "25"]},
 ]
 EXPECTED_OPTIONAL_LIFECYCLE = [
     {"stage": "MUTATION", "after": "EXECUTION_TRACE", "before": "RETAIN_OR_CLEANUP_DECISION",
@@ -158,6 +160,12 @@ EXPECTED_MODEL_RUNNER = {
     "evidence_axis": "isolation_evidence", "require_flag": "--require-driver-isolation", "require_reason_code": "REVIEW_ISOLATION_UNVERIFIED",
     "standalone_command": "run --runner process",
 }
+
+# Wave 3: quarantine disposition policy (§17 item 2), owned suite tests and the suite-update-v1 proposal profile (§25).
+EXPECTED_DISPOSITION_POLICIES = {'setting': '--disposition-policy', 'values': ['cleanup', 'quarantine'], 'defaults': {'local-pilot-v1': 'cleanup', 'suite-update-v1': 'quarantine'}, 'authorization_key': 'disposition_policy', 'quarantine': {'applies_to': 'authoritative_fail_with_method_outcomes', 'all_methods_passed': 'RETAINED', 'failed_methods': 'QUARANTINED', 'rewrite': 'exact_owned_bytes_failed_methods_only', 'marks': {'junit5': 'org.junit.jupiter.api.Disabled', 'pytest': 'pytest.mark.xfail(strict=True)'}, 'explicit_run': {'junit5': 'junit.jupiter.conditions.deactivate', 'pytest': '--runxfail'}, 'never_changes': ['verification', 'coverage', 'accepted', 'result_tuple']}}
+EXPECTED_OPTIONAL_PROFILES = [{'id': 'suite-update-v1', 'version': 'v1', 'kind': 'suite_proposal', 'steps': ['MIGRATION', 'IMPACT', 'UPDATE_AND_REPAIR', 'REVIEW', 'AUTOMATION', 'STATIC_REVIEW', 'SUITE_RUN', 'FAILURE_TRIAGE', 'MUTATION', 'MANIFEST', 'SUMMARY'], 'disposition_policy': 'quarantine', 'repair': 'one_try_static_review_expectations_unchanged', 'writes': ['suite_directory', 'manifest_owned_tests'], 'outputs': ['pr_description', 'suite_patch', 'suite_update_result'], 'accepted': 'not_applicable', 'commits': False}]
+EXPECTED_SUITE_CONTRACT = {'path_setting': 'suite.path', 'default_path': 'test-cases/', 'manifest_schema': 'suite-manifest.schema.json', 'format_version': '1.0.0', 'migrations': ['0->1.0.0'], 'statuses': ['ACTIVE', 'QUARANTINED', 'RETIRED'], 'created_by': 'local-pilot-v1 --suite', 'authorization_key': 'suite_requested', 'owned_change_proof': 'manifest_slice_digest', 'human_edit': 'never_overwritten_proposal_in_pr'}
+EXPECTED_REQUIREMENT_IDENTITY = {'openspec': 'capability_and_requirement_name_with_renames', 'markdown': 'explicit_id_else_path_and_heading_chain', 'builtin_ids': ['REQ', 'AC', 'US', 'FR', 'BR', 'TR', 'ТР', 'ПС'], 'id_pattern_setting': 'requirements.id_pattern', 'text_digest': 'sha256_nfc_collapsed_whitespace', 'sreq_format': 'unchanged', 'stored_in': 'suite_manifest'}
 
 
 def _error_if_not_equal(errors: list[str], label: str, actual: Any, expected: Any) -> None:
@@ -365,6 +373,17 @@ def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[s
             errors.append(f"optional stage answer schema missing: {row.get('answer_schema')}")
     _error_if_not_equal(errors, "mutation tooling", contract.get("mutation_tooling"), EXPECTED_MUTATION_TOOLING)
     _error_if_not_equal(errors, "model runner", contract.get("model_runner"), EXPECTED_MODEL_RUNNER)
+    _error_if_not_equal(errors, "disposition policies", contract.get("optional_disposition_policies"), EXPECTED_DISPOSITION_POLICIES)
+    _error_if_not_equal(errors, "optional policy profiles", contract.get("optional_policy_profiles"), EXPECTED_OPTIONAL_PROFILES)
+    frozen_profiles = {row.get("id") for row in contract.get("policy_profiles") or [] if isinstance(row, Mapping)}
+    for row in contract.get("optional_policy_profiles") or []:
+        if not isinstance(row, Mapping) or row.get("id") in frozen_profiles or row.get("commits") is not False:
+            errors.append("optional policy profile shadows a frozen profile or commits")
+    defaults = (contract.get("optional_disposition_policies") or {}).get("defaults") or {}
+    if any(defaults.get(profile) not in {None, "cleanup"} for profile in frozen_profiles):
+        errors.append("disposition policies change a frozen profile's default")
+    _error_if_not_equal(errors, "suite contract", contract.get("suite_contract"), EXPECTED_SUITE_CONTRACT)
+    _error_if_not_equal(errors, "requirement identity", contract.get("requirement_identity"), EXPECTED_REQUIREMENT_IDENTITY)
 
 
 def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_drift: bool = False) -> dict[str, Any]:

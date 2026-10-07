@@ -91,6 +91,37 @@ def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
         lines.append(f"- optional artifact `{row['id']}` (phase {row['phase']}, `{row['implementation_status']}`)")
     for name, axis in (contract.get("optional_result_axes") or {}).items():
         lines.append(f"- optional axis `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
+    if any(row.get("wave") == 3 for row in contract.get("contract_amendments") or []):
+        lines.extend(_wave3_lines(contract))
+    return lines
+
+
+def _wave3_lines(contract: Mapping[str, Any]) -> list[str]:
+    """Machine form of the wave-3 amendment: rendered only together with it."""
+    lines: list[str] = []
+    policies = contract.get("optional_disposition_policies")
+    if policies:
+        quarantine = policies["quarantine"]
+        defaults = ", ".join(f"{profile} `{value}`" for profile, value in policies["defaults"].items())
+        lines.append(f"- disposition policy `{policies['setting']}`: `{', '.join(policies['values'])}`; defaults: {defaults}; authorization key `{policies['authorization_key']}`")
+        lines.append(f"- disposition policy `quarantine`: applies to `{quarantine['applies_to']}`; all methods passed → `{quarantine['all_methods_passed']}`, "
+                     f"failed methods → `{quarantine['failed_methods']}`; rewrite `{quarantine['rewrite']}`; marks "
+                     + ", ".join(f"{name} `{mark}`" for name, mark in quarantine["marks"].items())
+                     + "; explicit run " + ", ".join(f"{name} `{flag}`" for name, flag in quarantine["explicit_run"].items())
+                     + f"; never changes `{', '.join(quarantine['never_changes'])}`")
+    for row in contract.get("optional_policy_profiles") or []:
+        lines.append(f"- optional profile `{row['id']}` ({row['kind']}): steps `{' -> '.join(row['steps'])}`; disposition policy `{row['disposition_policy']}`; "
+                     f"repair `{row['repair']}`; writes `{', '.join(row['writes'])}`; outputs `{', '.join(row['outputs'])}`; accepted `{row['accepted']}`; "
+                     f"commits `{str(row['commits']).lower()}`")
+    suite = contract.get("suite_contract")
+    if suite:
+        lines.append(f"- suite `{suite['path_setting']}` (default `{suite['default_path']}`): manifest `{suite['manifest_schema']}` {suite['format_version']}, "
+                     f"migrations `{', '.join(suite['migrations'])}`, statuses `{', '.join(suite['statuses'])}`, created by `{suite['created_by']}` "
+                     f"(`{suite['authorization_key']}`); owned change proof `{suite['owned_change_proof']}`; human edit `{suite['human_edit']}`")
+    identity = contract.get("requirement_identity")
+    if identity:
+        lines.append(f"- requirement identity: OpenSpec `{identity['openspec']}`, Markdown `{identity['markdown']}` (built-in IDs `{', '.join(identity['builtin_ids'])}`, "
+                     f"`{identity['id_pattern_setting']}`); text digest `{identity['text_digest']}`; SREQ format `{identity['sreq_format']}`; stored in `{identity['stored_in']}`")
     return lines
 
 

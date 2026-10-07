@@ -25,7 +25,7 @@ def test_amended_contract_passes_and_keeps_frozen_sections(pack_root: Path) -> N
     assert lifecycle.index(stage["before"]) == lifecycle.index(stage["after"]) + 1 == lifecycle.index("RETAIN_OR_CLEANUP_DECISION")
     assert set(contract["optional_result_axes"]) == {"test_strength", "isolation_evidence"}
     assert not set(contract["optional_result_axes"]) & set(contract["result_axes"])
-    [amendment] = contract["contract_amendments"]
+    [amendment] = [row for row in contract["contract_amendments"] if row["wave"] == 2]
     assert (pack_root / amendment["document"]).is_file() and amendment["opt_in"] is True
 
 

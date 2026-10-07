@@ -71,6 +71,7 @@ Version: `4.0`
 ## Opt-in amendments
 
 - `pilot-contract-amendments-2026-10-07` (wave 2, `ACCEPTED`, opt-in `true`): §1.2, §1.5, §17 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+- `pilot-contract-amendments-2026-10-07-wave-3` (wave 3, `ACCEPTED`, opt-in `true`): §17.2, §25 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
 - optional stage `MUTATION` between `EXECUTION_TRACE` and `RETAIN_OR_CLEANUP_DECISION`; requires `skillsrc_mutation_enabled, run_authorization_mutation_requested, authoritative_pass_or_fail`; mutates `passing_generated_methods_only`; writes `run_directory_only`; proves `project_inventory_unchanged`; receipt `mutation_receipt`; axis `test_strength`; never changes `verification, accepted, dispositions, earlier_evidence`
 - mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
 - model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
@@ -84,6 +85,11 @@ Version: `4.0`
 - optional artifact `runner_process_evidence` (phase 4, `IMPLEMENTED`)
 - optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
+- disposition policy `--disposition-policy`: `cleanup, quarantine`; defaults: local-pilot-v1 `cleanup`, suite-update-v1 `quarantine`; authorization key `disposition_policy`
+- disposition policy `quarantine`: applies to `authoritative_fail_with_method_outcomes`; all methods passed → `RETAINED`, failed methods → `QUARANTINED`; rewrite `exact_owned_bytes_failed_methods_only`; marks junit5 `org.junit.jupiter.api.Disabled`, pytest `pytest.mark.xfail(strict=True)`; explicit run junit5 `junit.jupiter.conditions.deactivate`, pytest `--runxfail`; never changes `verification, coverage, accepted, result_tuple`
+- optional profile `suite-update-v1` (suite_proposal): steps `MIGRATION -> IMPACT -> UPDATE_AND_REPAIR -> REVIEW -> AUTOMATION -> STATIC_REVIEW -> SUITE_RUN -> FAILURE_TRIAGE -> MUTATION -> MANIFEST -> SUMMARY`; disposition policy `quarantine`; repair `one_try_static_review_expectations_unchanged`; writes `suite_directory, manifest_owned_tests`; outputs `pr_description, suite_patch, suite_update_result`; accepted `not_applicable`; commits `false`
+- suite `suite.path` (default `test-cases/`): manifest `suite-manifest.schema.json` 1.0.0, migrations `0->1.0.0`, statuses `ACTIVE, QUARANTINED, RETIRED`, created by `local-pilot-v1 --suite` (`suite_requested`); owned change proof `manifest_slice_digest`; human edit `never_overwritten_proposal_in_pr`
+- requirement identity: OpenSpec `capability_and_requirement_name_with_renames`, Markdown `explicit_id_else_path_and_heading_chain` (built-in IDs `REQ, AC, US, FR, BR, TR, ТР, ПС`, `requirements.id_pattern`); text digest `sha256_nfc_collapsed_whitespace`; SREQ format `unchanged`; stored in `suite_manifest`
 
 ## Normative result tuples
 
