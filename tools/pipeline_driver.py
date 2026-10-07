@@ -325,6 +325,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         # Opt-in options (contract amendments 2026-10-07) are saved only when set.
         **({"mutation": True} if options.get("mutation") else {}),
         **({"require_driver_isolation": True} if options.get("require_driver_isolation") else {}),
+        **({"analyst_report": True} if options.get("analyst_report") else {}),
     }
 
 
@@ -458,7 +459,10 @@ def _context_marker_task(project: Path, run_root: Path, attempt: Mapping[str, An
                       + ("Это доработка после отклонённого ревью: черновик — ответ прошлой попытки; если код и требования не менялись, сохрани его без изменений. "
                          if rework is not None else "")
                       + "Дополни `artifacts.source_code_and_diff.sources` наблюдениями по коду и `warnings` пробелами требований "
-                      "(каждая строка в виде «источник — наблюдение») и сохрани весь объект в output_path."),
+                      "(каждая строка в виде «источник — наблюдение») и сохрани весь объект в output_path."
+                      + (" Каждый пробел требований запиши ещё и в `requirement_gaps` (requirement — SREQ-…; location — файл и раздел; missing — чего не хватает; "
+                         "blocks — какие проверки это блокирует; question — вопрос аналитику до 300 символов) и поставь schema_version 5.1.0."
+                         if config.get("analyst_report") else "")),
         extra={"draft_path": str(draft_path), **({"rework": True} if rework is not None else {})},
     )
 
@@ -1013,12 +1017,16 @@ _LEGACY_INSTRUCTIONS = (
     "вызови submit с --failed TRANSPORT или --failed CONTENT и --reason.")
 
 
-def review_task_instructions(*, compact: bool, fresh: bool) -> str:
+_ANALYST_QUESTION = (" Если проблема в требовании, а не в кейсе или коде (требование молчит или противоречит себе), добавь в находку "
+                     "analyst_question — вопрос аналитику до 300 символов.")
+
+
+def review_task_instructions(*, compact: bool, fresh: bool, analyst: bool = False) -> str:
     """The instructions of a review part task (also used by the review-scaling eval)."""
     isolation = ("Выполни эту задачу в свежем изолированном контексте: субагентом или новым процессом CLI без истории генерации. " if fresh else
                  "Хост не даёт отдельного контекста: проверь часть только по её конверту, не опираясь на то, как кейсы генерировались. "
                  "Результат будет помечен review_independence: SELF. ")
-    return isolation + (_COMPACT_INSTRUCTIONS if compact else _LEGACY_INSTRUCTIONS)
+    return isolation + (_COMPACT_INSTRUCTIONS + (_ANALYST_QUESTION if analyst else "") if compact else _LEGACY_INSTRUCTIONS)
 
 
 def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -1038,7 +1046,7 @@ def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mappi
     return _llm_task(
         run_root, attempt_id, label, stage=opened["stage_instance_id"], skill="tc-reviewer" if review_key == "canonical" else "autotest-reviewer",
         inputs=[input_path], schema=_review_schema("compact-v1" if compact else "pairs"),
-        instructions=review_task_instructions(compact=compact, fresh=fresh),
+        instructions=review_task_instructions(compact=compact, fresh=fresh, analyst=bool(config.get("analyst_report"))),
         extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": fresh,
                **({"review_mode": "compact-v1"} if compact else {}),
                **({"warnings": warnings} if not fresh else {})},
@@ -1193,23 +1201,14 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
     }
-    _strength_summary(run_root, attempt, summary)
+    if attempt["policy_profile"] == "local-pilot-v1":
+        from tools.pipeline_driver_strength import strength_summary
+
+        strength_summary(run_root, attempt, summary)  # opt-in mutations: summary 1.1.0 with test_strength
+    from tools.pipeline_driver_analyst import analyst_summary
+
+    analyst_summary(run_root, attempt, summary)  # opt-in --analyst-report
     return summary
-
-
-def _strength_summary(run_root: Path, attempt: Mapping[str, Any], summary: dict[str, Any]) -> None:
-    """Opt-in mutation stage: the ``test_strength`` view and the report beside the attempt's projections (summary 1.1.0)."""
-    from tools.pilot_state import read_mutation_receipt_if_present
-
-    receipt = read_mutation_receipt_if_present(run_root, str(attempt["attempt_id"]))
-    if receipt is None:
-        return
-    from tools.mutation import summary as strength
-    from tools.strength_report import write_strength_report
-
-    summary["schema_version"] = "1.1.0"
-    summary["test_strength"] = strength(receipt)
-    summary["paths"].update(write_strength_report(_bundle_dir(run_root, attempt), receipt))
 
 
 def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
@@ -1354,6 +1353,24 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
 
             start_regeneration(project, run_root, config)
         return advance(project, run_root)
+    if str(task.get("stage", "")).startswith("mutation-triage:"):
+        # Post-terminal survivor triage (opt-in mutations): checked against its task and kept beside the attempt.
+        from tools.pipeline_driver_strength import submit_triage
+
+        if failed is not None:
+            raise DriverError("DRIVER_INPUT", "--failed applies to review tasks only")
+        try:
+            try:
+                value = _read_json(Path(output or task["output_path"]))
+            except Exception as error:  # strict JSON loader raises its own error types
+                raise DriverError("TASK_OUTPUT_INVALID", f"task output is not strict UTF-8 JSON: {error}") from error
+            submit_triage(project, run_root, attempt, task, value)
+        except DriverError as error:
+            if error.code != "TASK_OUTPUT_INVALID":
+                raise
+            return {**task, "status": "rejected", "errors": error.diagnostics or [{"path": "", "code": error.code, "message": str(error)}], "message": str(error)}
+        _log(_log_path(run_root.parents[1], run_root.name), {"event": "triage_accepted", "task_id": task_id, "group_ids": task.get("group_ids")})
+        return advance(project, run_root)
     if attempt["state"] == "TERMINAL":
         return advance(project, run_root)
 
@@ -1443,6 +1460,8 @@ def _parser() -> argparse.ArgumentParser:
                                  help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
             command.add_argument("--require-driver-isolation", action="store_true",
                                  help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
+            command.add_argument("--analyst-report", action="store_true",
+                                 help="Ask roles for structured requirement gaps and analyst questions; write analyst-report.json/.md beside the projections.")
         if name == "submit":
             command.add_argument("--task-id", required=True)
             command.add_argument("--output", type=Path, help="Answer file; defaults to the task's output_path.")
@@ -1552,7 +1571,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                 "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                "mutation", "require_driver_isolation")},
+                "mutation", "require_driver_isolation", "analyst_report")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock

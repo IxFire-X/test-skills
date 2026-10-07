@@ -31,6 +31,14 @@ def source_chunk_bytes(input_byte_budget: int, response_reserve_bytes: int) -> i
 ANSWER_FIELDS = {PAIRS: ("coverage", "findings", "corrections", "required_checks"),
                  COMPACT: ("coverage", "findings", "corrections", "lint_dispositions", "required_checks")}
 OUTPUT_VERSION = {PAIRS: "1.0.0", COMPACT: "2.0.0"}
+
+
+def output_version(mode: str, assessment: Mapping[str, Any]) -> str:
+    """The bound answer version: compact 2.1.0 only when a finding asks the analyst (``analyst_question``)."""
+    findings = assessment.get("findings") if isinstance(assessment, Mapping) else None
+    if mode == COMPACT and isinstance(findings, list) and any(isinstance(row, Mapping) and "analyst_question" in row for row in findings):
+        return "2.1.0"
+    return OUTPUT_VERSION[mode]
 ANSWER_SCHEMA = {PAIRS: "review-part-output.schema.json", COMPACT: "review-part-output-compact.schema.json"}
 
 

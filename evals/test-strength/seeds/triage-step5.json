@@ -1,0 +1,40 @@
+{
+  "description": "W2-Р6: внесённые случаи на копии step5 для четырёх решений разбора выживших мутантов. Каждый случай — правка кода продукта или ослабленный тест; ожидаемое решение задаётся по классу, методу и фрагменту строки, у которой выживает мутант.",
+  "test_edits": [
+    {
+      "id": "weak-tc-b1-001",
+      "why": "TC-B1-001 проверяет только статус: тело ответа GET /student (требование 3.1, AC-1) больше не проверяется.",
+      "find": "        assertThat(response.getContentType()).as(\"ASSERT-B1-001-01-1-2\").isEqualTo(APPLICATION_JSON);\n        assertThat(jsonObject(response)).as(\"ASSERT-B1-001-01-1-3\").isEqualTo(student(1, \"Ramseh\", \"Mishra\"));\n        assertThat(text(response)).as(\"ASSERT-B1-001-01-1-4\")\n                .isEqualTo(\"{\\\"id\\\":1,\\\"firstName\\\":\\\"Ramseh\\\",\\\"lastName\\\":\\\"Mishra\\\"}\");\n",
+      "replace": ""
+    }
+  ],
+  "product_edits": [
+    {
+      "id": "name-length-cut",
+      "path": "src/main/java/net/javaguides/springboot/controller/StudentController.java",
+      "why": "Код обрезает имя длиннее 40 символов; требования (3.5) длину имени не задают.",
+      "find": "        System.out.println(student.getId());\n        System.out.println(student.getFirstName());\n        System.out.println(student.getLastName());\n        return student;\n    }\n\n    // Spring Boot REST API that handles  HTTP PUT Request",
+      "replace": "        System.out.println(student.getId());\n        System.out.println(student.getFirstName());\n        System.out.println(student.getLastName());\n        if (student.getFirstName() != null && student.getFirstName().length() > 40) {\n            student.setFirstName(student.getFirstName().substring(0, 40));\n        }\n        return student;\n    }\n\n    // Spring Boot REST API that handles  HTTP PUT Request"
+    },
+    {
+      "id": "greeting-same-branches",
+      "path": "src/main/java/net/javaguides/springboot/controller/HelloWorldController.java",
+      "why": "Обе ветви возвращают одну и ту же строку: инверсия условия ничего не меняет.",
+      "find": "        return \"Hello World!\";",
+      "replace": "        String greeting = \"Hello World!\";\n        if (greeting.length() > 5) {\n            return greeting;\n        }\n        return \"Hello World!\";"
+    },
+    {
+      "id": "request-counter-filter",
+      "path": "src/main/java/net/javaguides/springboot/controller/RequestCounterFilter.java",
+      "why": "Служебный фильтр считает запросы и раз в 1000 запросов пишет в журнал; к требованиям StudentController и HelloWorldController он не относится.",
+      "create": "package net.javaguides.springboot.controller;\n\nimport jakarta.servlet.FilterChain;\nimport jakarta.servlet.ServletException;\nimport jakarta.servlet.http.HttpServletRequest;\nimport jakarta.servlet.http.HttpServletResponse;\nimport java.io.IOException;\nimport java.util.concurrent.atomic.AtomicLong;\nimport org.springframework.stereotype.Component;\nimport org.springframework.web.filter.OncePerRequestFilter;\n\n/** Operations: counts requests and reports every thousandth one to the server log. */\n@Component\npublic class RequestCounterFilter extends OncePerRequestFilter {\n\n    private final AtomicLong requests = new AtomicLong();\n\n    @Override\n    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)\n            throws ServletException, IOException {\n        long count = requests.incrementAndGet();\n        if (count % 1000 == 0) {\n            System.err.println(\"requests served: \" + count);\n        }\n        chain.doFilter(request, response);\n    }\n}\n"
+    }
+  ],
+  "expected": [
+    {"seed": "weak-tc-b1-001", "class": "net.javaguides.springboot.controller.StudentController", "method": "getStudent", "decisions": ["TEST_GAP"], "case_id": "TC-B1-001"},
+    {"seed": "name-length-cut", "class": "net.javaguides.springboot.controller.StudentController", "method": "createStudent", "line_contains": "length() > 40", "decisions": ["SPEC_GAP"]},
+    {"seed": "greeting-same-branches", "class": "net.javaguides.springboot.controller.HelloWorldController", "method": "helloWorld", "line_contains": "greeting.length() > 5", "decisions": ["EQUIVALENT"]},
+    {"seed": "request-counter-filter", "class": "net.javaguides.springboot.controller.RequestCounterFilter", "method": "doFilterInternal", "decisions": ["OUT_OF_SCOPE"]}
+  ],
+  "unseeded": "Выжившие на System.out.println в StudentController существуют и без правок (требование 3.5 говорит «логирует поля»): их решения записываются, но не оцениваются."
+}

@@ -27,6 +27,6 @@
       {"file": "pitest-junit5-plugin-1.2.3.jar", "sha256": "d3e2fcc8db5fd52c0c4ac2fe0d937e64da3df39b657093a1581b5fd463f9be64"},
       {"file": "stringtemplate-3.2.1.jar", "sha256": "f66ce72e965e5301cb0f020e54d2ba6ad76feb91b3cbfc30dbbf00c06a6df6d7"}
     ],
-    "launcher_family": ["junit-platform-launcher", "junit-platform-engine", "junit-platform-commons", "opentest4j", "apiguardian-api"]
+    "launcher_family": ["junit-platform-launcher", "junit-platform-engine", "junit-platform-commons", "opentest4j", "apiguardian-api", "jspecify"]
   }
 }

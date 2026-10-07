@@ -1,0 +1,170 @@
+{
+  "model": "fable",
+  "correct": 4,
+  "seeds": 4,
+  "scored": [
+    {
+      "seed": "weak-tc-b1-001",
+      "expected": [
+        "TEST_GAP"
+      ],
+      "groups": [
+        "MUT-0008"
+      ],
+      "decisions": [
+        "TEST_GAP"
+      ],
+      "correct": true,
+      "answers": [
+        {
+          "group_id": "MUT-0008",
+          "decision": "TEST_GAP",
+          "refs": [
+            "MUT-0008:L21",
+            "CREQ-B1-001",
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "ASSERT-B1-001-01-1-3",
+            "T:L0093"
+          ],
+          "rationale": "Мутант возвращает null вместо студента, и GET /student отдаёт пустое тело без JSON. CREQ-B1-001 требует Content-Type application/json и тело ровно {\"id\":1,\"firstName\":\"Ramseh\",\"lastName\":\"Mishra\"}; кейс TC-B1-001 содержит эти проверки (ASSERT-B1-001-01-1-2…4), но сгенерированный тест реализует только статус 200 (T:L0093), поэтому мутант выжил. Нужно дореализовать проверки заголовка и тела в тесте.",
+          "proposal": {
+            "case_id": "TC-B1-001",
+            "step_id": "STEP-B1-001-01",
+            "text": "В шаге STEP-B1-001-01 дополнить тест проверками из EXP-B1-001-01-1: Content-Type равен application/json (ASSERT-B1-001-01-1-2), JSON-объект тела равен {\"id\":1,\"firstName\":\"Ramseh\",\"lastName\":\"Mishra\"} (ASSERT-B1-001-01-1-3) и текст тела в точности равен этой строке (ASSERT-B1-001-01-1-4). Пустой ответ при return null должен проваливать тест."
+          }
+        }
+      ]
+    },
+    {
+      "seed": "name-length-cut",
+      "expected": [
+        "SPEC_GAP"
+      ],
+      "groups": [
+        "MUT-0006"
+      ],
+      "decisions": [
+        "SPEC_GAP"
+      ],
+      "correct": true,
+      "answers": [
+        {
+          "group_id": "MUT-0006",
+          "decision": "SPEC_GAP",
+          "refs": [
+            "MUT-0006:L62",
+            "MUT-0006:L63",
+            "CREQ-B1-006",
+            "SREQ-0008",
+            "SREQ-0016",
+            "TC-B1-007"
+          ],
+          "rationale": "Мутанты 2 и 3 отключают обрезку firstName длиннее 40 символов (L62–63); разница наблюдаема только при длинном имени, а все кейсы (TC-B1-007/008/012) шлют короткие имена, поэтому мутанты выжили. CREQ-B1-006, SREQ-0008 и AC-5 (SREQ-0016) говорят об «эхо запроса» и ничего не говорят о лимите длины: код расходится с буквальным эхо, но выводить ожидание из кода нельзя — нужен ответ аналитика. Мутант 1 (> → >=) эквивалентен: при длине ровно 40 substring(0, 40) возвращает ту же строку.",
+          "question": "POST /students/create: код обрезает firstName длиннее 40 символов до 40, а требование обещает эхо тела без оговорок. Обрезка — ожидаемое поведение (тогда зафиксировать лимит 40 и ответ 201 с усечённым именем) или дефект, и эхо должно быть точным при любой длине имени?",
+          "requirement_id": "CREQ-B1-006"
+        }
+      ]
+    },
+    {
+      "seed": "greeting-same-branches",
+      "expected": [
+        "EQUIVALENT"
+      ],
+      "groups": [
+        "MUT-0001"
+      ],
+      "decisions": [
+        "EQUIVALENT"
+      ],
+      "correct": true,
+      "answers": [
+        {
+          "group_id": "MUT-0001",
+          "decision": "EQUIVALENT",
+          "refs": [
+            "MUT-0001:L16",
+            "MUT-0001:L17",
+            "MUT-0001:L19",
+            "CREQ-B1-010",
+            "ASSERT-B1-011-01-1-2",
+            "T:L0193"
+          ],
+          "rationale": "Строка «Hello World!» имеет длину 12, поэтому условие > 5 истинно всегда; при сдвиге границы (>= 5) и при замене условия на false метод возвращает ту же строку «Hello World!» — через ветку L17 либо L19. Наблюдаемое поведение (200 и текст по CREQ-B1-010) не меняется, тест TC-B1-011 уже проверяет точный текст (T:L0193). Оба мутанта эквивалентны."
+        }
+      ]
+    },
+    {
+      "seed": "request-counter-filter",
+      "expected": [
+        "OUT_OF_SCOPE"
+      ],
+      "groups": [
+        "MUT-0002"
+      ],
+      "decisions": [
+        "OUT_OF_SCOPE"
+      ],
+      "correct": true,
+      "answers": [
+        {
+          "group_id": "MUT-0002",
+          "decision": "OUT_OF_SCOPE",
+          "refs": [
+            "MUT-0002:L22",
+            "MUT-0002:L23",
+            "MUT-0002:L25",
+            "SREQ-0001",
+            "SREQ-0002",
+            "CREQ-B1-013"
+          ],
+          "rationale": "RequestCounterFilter — сервлетный фильтр вне фичи: источники требований (SREQ-0001) — StudentController, Student, HelloWorldController и pom.xml, ни одно требование не описывает подсчёт запросов. К тому же мутированное условие управляет только печатью в System.err каждые 1000 запросов (L23), а chain.doFilter (L25) выполняется в любом случае, так что HTTP-ответы эндпоинтов, наблюдаемые через MockMvc (CREQ-B1-013), не меняются."
+        }
+      ]
+    }
+  ],
+  "unseeded": [
+    {
+      "group_id": "MUT-0003",
+      "method": "createStudent",
+      "line": 59,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый вызов System.out.println(student.getId()) лишь печатает поле в stdout; статус 201 и тело-эхо (CREQ-B1-006, SREQ-0008) формируются независимо от него и уже проверяются TC-B1-007. Упоминание «логирует поля» в SREQ-0008 описательное, в CREQ-B1-006 и AC-5 логирование не входит, а через MockMvc (CREQ-B1-013) stdout не наблюдается. Это отладочная печать — поведение не меняется."
+    },
+    {
+      "group_id": "MUT-0004",
+      "method": "createStudent",
+      "line": 60,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый вызов System.out.println(student.getFirstName()) — отладочная печать в stdout; статус 201 и тело-эхо (CREQ-B1-006, SREQ-0008) от неё не зависят и уже проверяются TC-B1-007 (T:L0151). «Логирует поля» в SREQ-0008 — описание кода, в CREQ-B1-006 и AC-5 этого нет; через MockMvc (CREQ-B1-013) stdout не наблюдается. Поведение не меняется."
+    },
+    {
+      "group_id": "MUT-0005",
+      "method": "createStudent",
+      "line": 61,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый вызов System.out.println(student.getLastName()) — отладочная печать в stdout; ответ формируется в return student (L65), статус 201 и эхо (в т.ч. lastName = null по CREQ-B1-007) от печати не зависят и уже проверяются TC-B1-008 (T:L0164). println(null) печатает «null» без исключения, поэтому и исходный код, и мутант ведут себя одинаково для HTTP-клиента. Поведение не меняется."
+    },
+    {
+      "group_id": "MUT-0007",
+      "method": "deleteStudent",
+      "line": 81,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый System.out.println(id) — отладочная печать в stdout; ответ 200 и текст «Student Successfully Deleted!» (L82, CREQ-B1-009) от неё не зависят и уже проверяются TC-B1-010 (T:L0184). «Логирует id» в SREQ-0010 — описание кода, в AC-7 этого нет; через MockMvc stdout не наблюдается. Поведение не меняется."
+    },
+    {
+      "group_id": "MUT-0009",
+      "method": "updateStudent",
+      "line": 72,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый System.out.println(student.getFirstName()) — отладочная печать в stdout; ответ 200 и эхо тела (L74, CREQ-B1-008) от неё не зависят и уже проверяются TC-B1-009 (T:L0175). «Логирует имя/фамилию» в SREQ-0009 — описание кода, в AC-6 этого нет; через MockMvc stdout не наблюдается. Поведение не меняется."
+    },
+    {
+      "group_id": "MUT-0010",
+      "method": "updateStudent",
+      "line": 73,
+      "decision": "EQUIVALENT",
+      "rationale": "Удалённый System.out.println(student.getLastName()) — отладочная печать в stdout; ответ 200 и эхо тела (L74, CREQ-B1-008) от неё не зависят и уже проверяются TC-B1-009 (T:L0175). «Логирует имя/фамилию» в SREQ-0009 — описание кода, в AC-6 этого нет; через MockMvc stdout не наблюдается. Поведение не меняется."
+    }
+  ]
+}

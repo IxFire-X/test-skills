@@ -4452,21 +4452,21 @@ def fail_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: 
 
 def review_part_diagnostics(run_root: Path, attempt_id: str, review_key: str, part_id: str, assessment: Mapping[str, Any]) -> list[dict[str, str]]:
     """Why an assessment would be rejected (empty when it would be accepted); nothing is written."""
-    from tools.review_modes import ANSWER_FIELDS, OUTPUT_VERSION, part_input, plan_mode, validate_part
+    from tools.review_modes import ANSWER_FIELDS, output_version, part_input, plan_mode, validate_part
     from tools.review_parts import review_digest
     state = derive_state(run_root)
     plan, part = _review_part_definition(run_root, state, attempt_id, _review_stage(review_key, part_id))
     mode = plan_mode(plan)
     if set(assessment) != set(ANSWER_FIELDS[mode]):
         return [{"code": "REVIEW_ASSESSMENT_FIELDS", "path": "", "message": "the answer has exactly: " + ", ".join(ANSWER_FIELDS[mode])}]
-    result = {"schema_version": OUTPUT_VERSION[mode], "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+    result = {"schema_version": output_version(mode, assessment), "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
               "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), **dict(assessment)}
     return validate_part(plan, part, result, _review_snapshot_payload(run_root, attempt_id, review_key))
 
 
 def submit_review_part(run_root: Path, attempt_id: str, review_key: str, part_id: str, assessment: Mapping[str, Any], *, transport_attempts: int = 1) -> dict[str, Any]:
     """Bind unmodified substantive output to controller-owned envelope fields."""
-    from tools.review_modes import ANSWER_FIELDS, OUTPUT_VERSION, part_input, plan_mode
+    from tools.review_modes import ANSWER_FIELDS, output_version, part_input, plan_mode
     from tools.review_parts import review_digest
     project, root = _run_root(run_root)
     state = derive_state(run_root)
@@ -4477,7 +4477,7 @@ def submit_review_part(run_root: Path, attempt_id: str, review_key: str, part_id
     tries = _review_part_tries(project, root, state, attempt_id, review_key, part_id)
     # The assessment belongs to the latest invocation try of this part.
     stage = tries[-1]["stage"] if tries else _review_stage(review_key, part_id)
-    result = {"schema_version": OUTPUT_VERSION[mode], "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
+    result = {"schema_version": output_version(mode, assessment), "plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],
               "part_id": part_id, "input_digest": review_digest(part_input(plan, part)), **dict(assessment)}
     return dict(publish_model_stage_artifact(run_root, attempt_id, stage, result, transport_attempts=transport_attempts))
 
@@ -4528,6 +4528,17 @@ def _review_abort_reason(plan: Mapping[str, Any], session: Mapping[str, Any]) ->
 
 def read_review_aggregate(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any]:
     return dict(read_attempt_receipt(run_root, attempt_id, f"review-aggregate-{review_key}", "ARTIFACT_READ_BACK")["record"])
+
+
+def review_part_results(run_root: Path, attempt_id: str, review_key: str = "canonical") -> list[dict[str, Any]]:
+    """Every journalled part result of one review (failed invocation tries excluded); empty without a plan."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    try:
+        plan = _review_plan_with_state(root, state, attempt_id, review_key)
+    except (KeyError, TypeError, ValueError):
+        return []
+    return [dict(result) for result in _review_results(root, state, attempt_id, review_key, plan)]
 
 
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:

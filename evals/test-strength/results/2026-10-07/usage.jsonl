@@ -1,0 +1,2 @@
+{"role":"mutation-triage","model":"sonnet","tokens":86764,"tool_uses":6,"duration_ms":78798,"checks":1}
+{"role":"mutation-triage","model":"fable","tokens":90905,"tool_uses":6,"duration_ms":179648,"checks":1}

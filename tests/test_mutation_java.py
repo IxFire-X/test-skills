@@ -35,6 +35,8 @@ def _replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit=None) -> Repla
     def answer(task):
         if task.get("review_mode") == "compact-v1":
             return clean_compact_answer(part_text(task))
+        if task["stage"].startswith("mutation-triage:"):
+            return _triage_answer(task)
         if edit is not None and task["stage"].startswith("tc-to-autotest:"):
             value = next(value for label, value in replay.recorded.items() if label.startswith("tc-to-autotest."))
             value = {**value, "generated_files": [{**row, "content": edit(row["content"])} for row in value["generated_files"]]}
@@ -47,6 +49,16 @@ def _replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit=None) -> Repla
     skillsrc = replay.project / ".skillsrc"
     skillsrc.write_text(skillsrc.read_text(encoding="utf-8") + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
     return replay
+
+
+def _triage_answer(task: dict) -> dict:
+    """Every group EQUIVALENT, citing its mutated line (the line marked with '>')."""
+    text = Path(task["inputs"][0]).read_text(encoding="utf-8")
+    rows = []
+    for group_id in task["group_ids"]:
+        line = next(line for line in text.splitlines() if line.startswith(f"[{group_id}:L") and "] >" in line)
+        rows.append({"group_id": group_id, "decision": "EQUIVALENT", "refs": [line[1:line.index("]")]], "rationale": "Наблюдаемое поведение не меняется."})
+    return {"groups": rows}
 
 
 def _receipt(replay: Replay, done: dict) -> dict:
@@ -73,6 +85,11 @@ def test_pass_run_measures_strength_without_changing_acceptance(tmp_path: Path, 
     assert (terminal["test_strength"], terminal["accepted"]) == ("MEASURED", True)
     assert Path(result["paths"]["test_strength_markdown"]).read_text(encoding="utf-8").startswith("# Сила тестов")
     assert (replay.project / GENERATED).is_file()  # PASS keeps the generated file (RETAINED)
+    # Survivor triage ran after the terminal result, one decision per pending group.
+    triage = result["strength_triage"]
+    assert triage["triaged"] == triage["groups"] == strength["survivor_groups"] and triage["pending"] == 0
+    assert triage["decisions"]["EQUIVALENT"] == triage["groups"]
+    assert replay.tasks("mutation-triage:")
 
 
 def test_a_failing_method_is_excluded_and_the_file_is_still_cleaned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

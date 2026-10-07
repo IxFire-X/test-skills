@@ -52,7 +52,7 @@ def test_projections_render_the_amendments(pack_root: Path) -> None:
     # A contract without the amendments renders exactly as before (no empty section).
     frozen = {key: value for key, value in _contract(pack_root).items()
               if key not in {"contract_amendments", "optional_lifecycle_stages", "optional_result_axes", "mutation_tooling", "model_runner",
-                            "optional_schema_registry", "optional_artifact_registry"}}
+                            "optional_schema_registry", "optional_artifact_registry", "optional_skills", "optional_stage_registry"}}
     assert all("amendments" not in text for text in _rendered_files(frozen).values())
 
 

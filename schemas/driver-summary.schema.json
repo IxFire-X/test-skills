@@ -59,10 +59,11 @@
       }
     },
     "isolation_evidence": {"enum": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE", null]},
-    "strength_triage": {"type": "object"}
+    "strength_triage": {"type": "object"},
+    "analyst_questions": {"type": "integer", "minimum": 0}
   },
   "allOf": [
     {"if": {"properties": {"schema_version": {"const": "1.0.0"}}, "required": ["schema_version"]},
-     "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}]}}}
+     "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}, {"required": ["analyst_questions"]}]}}}
   ]
 }

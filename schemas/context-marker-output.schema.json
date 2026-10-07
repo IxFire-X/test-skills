@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schemas/context-marker-output.schema.json",
-  "title": "Portable 5.0.0 context-marker artifact envelope",
+  "title": "Portable 5.x context-marker artifact envelope (5.1.0 adds requirement_gaps)",
   "type": "object",
   "required": ["schema_version", "stage", "artifacts", "warnings"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "5.0.0"},
+    "schema_version": {"enum": ["5.0.0", "5.1.0"]},
     "stage": {"const": "context-marker"},
     "artifacts": {
       "type": "object",
@@ -23,7 +23,21 @@
         }
       }
     },
-    "warnings": {"type": "array", "items": {"$ref": "#/$defs/inline_provenance_string"}}
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/inline_provenance_string"}},
+    "requirement_gaps": {
+      "type": "array",
+      "description": "Structured requirement gaps for the analyst report (optional; warnings stay readable).",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["requirement", "location", "missing", "blocks", "question"],
+        "properties": {
+          "requirement": {"type": "string", "minLength": 1, "maxLength": 120},
+          "location": {"type": "string", "minLength": 1, "maxLength": 300},
+          "missing": {"type": "string", "minLength": 1, "maxLength": 600},
+          "blocks": {"type": "string", "minLength": 1, "maxLength": 300},
+          "question": {"type": "string", "minLength": 1, "maxLength": 300}
+        }
+      }
+    }
   },
   "$defs": {
     "inline_provenance_string": {"type": "string", "pattern": "^.+ — .+$"}

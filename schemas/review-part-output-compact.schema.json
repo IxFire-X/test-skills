@@ -10,7 +10,7 @@
     {"required": ["invocation_failure"], "not": {"anyOf": [{"required": ["coverage"]}, {"required": ["findings"]}, {"required": ["corrections"]}, {"required": ["lint_dispositions"]}, {"required": ["required_checks"]}]}}
   ],
   "properties": {
-    "schema_version": {"const": "2.0.0"},
+    "schema_version": {"enum": ["2.0.0", "2.1.0"]},
     "invocation_failure": {
       "type": "object",
       "additionalProperties": false,
@@ -46,7 +46,8 @@
           "severity": {"enum": ["BLOCKING", "WARNING", "INFO"]},
           "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
           "related_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
-          "message": {"type": "string", "minLength": 1, "maxLength": 600}
+          "message": {"type": "string", "minLength": 1, "maxLength": 600},
+          "analyst_question": {"type": "string", "minLength": 1, "maxLength": 300, "description": "2.1.0: the problem is in the requirement, not in the case; a question for the analyst."}
         }
       }
     },

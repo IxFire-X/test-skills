@@ -25,8 +25,8 @@ SKILL_PATHS = {
 SCHEMA_ROWS = [
     ("pipeline.schema.json",1,"IMPLEMENTED","4.0"),("pilot-common.schema.json",1,"IMPLEMENTED","1.0.0"),("run-manifest.schema.json",1,"IMPLEMENTED","1.0.0"),("event.schema.json",1,"IMPLEMENTED","2.0.0"),("model-request.schema.json",1,"IMPLEMENTED","2.0.0"),("attempt.schema.json",1,"IMPLEMENTED","1.0.0"),("run-authorization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),("terminal-result.schema.json",1,"IMPLEMENTED","1.0.0"),("finalization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),
     ("skillsrc.schema.json",2,"IMPLEMENTED","5.1.0"),("skillsrc-init-output.schema.json",2,"IMPLEMENTED","5.0.0"),("inventory-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("exclusion-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("context-selection-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("execution-baseline.schema.json",2,"IMPLEMENTED","1.0.0"),
-    ("context-marker-output.schema.json",3,"IMPLEMENTED","5.0.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
-    ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","6.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","2.0.0"),("review-plan.schema.json",4,"IMPLEMENTED","1.0.0"),("review-part-output.schema.json",4,"IMPLEMENTED","1.0.0"),("review-plan-compact.schema.json",4,"IMPLEMENTED","2.0.0"),("review-part-output-compact.schema.json",4,"IMPLEMENTED","2.0.0"),
+    ("context-marker-output.schema.json",3,"IMPLEMENTED","5.1.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
+    ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","6.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","2.0.0"),("review-plan.schema.json",4,"IMPLEMENTED","1.0.0"),("review-part-output.schema.json",4,"IMPLEMENTED","1.0.0"),("review-plan-compact.schema.json",4,"IMPLEMENTED","2.0.0"),("review-part-output-compact.schema.json",4,"IMPLEMENTED","2.1.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","6.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
     ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.1.0"),
     ("compatibility-evidence.schema.json",8,"IMPLEMENTED","2.0.0"),("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-run.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
@@ -138,7 +138,13 @@ EXPECTED_MUTATION_TOOLING = {
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
 OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0")]
-OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED")]
+OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED")]
+OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
+OPTIONAL_STAGE_ROWS = [
+    {"stage": "mutation-triage", "role": "strength-analyst", "role_policy": "mutation-triage-v1", "cardinality": "post_terminal_per_task",
+     "profiles": ["local-pilot-v1"], "answer_schema": "mutation-triage-output.schema.json", "decisions": ["TEST_GAP", "SPEC_GAP", "EQUIVALENT", "OUT_OF_SCOPE"],
+     "changes": "nothing_in_the_attempt"},
+]
 EXPECTED_MODEL_RUNNER = {
     "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",
     "skillsrc_fields": ["preset", "models", "max_parallel", "timeout_seconds"], "invocation": "fresh_process_temp_cwd_stdin_no_write_tools", "wait_action": "wait",
@@ -338,6 +344,14 @@ def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[s
             errors.append("optional schema shadows a frozen schema")
             continue
         _validate_schema_file(root, row, errors)
+    _error_if_not_equal(errors, "optional skills", contract.get("optional_skills"), OPTIONAL_SKILLS)
+    for name, path in (contract.get("optional_skills") or {}).items():
+        if name in (contract.get("skill_files") or {}) or not (root / str(path)).is_file():
+            errors.append(f"optional skill missing or shadowing a core skill: {name}")
+    _error_if_not_equal(errors, "optional stage registry", contract.get("optional_stage_registry"), OPTIONAL_STAGE_ROWS)
+    for row in contract.get("optional_stage_registry") or []:
+        if isinstance(row, Mapping) and not (root / "schemas" / str(row.get("answer_schema"))).is_file():
+            errors.append(f"optional stage answer schema missing: {row.get('answer_schema')}")
     _error_if_not_equal(errors, "mutation tooling", contract.get("mutation_tooling"), EXPECTED_MUTATION_TOOLING)
     _error_if_not_equal(errors, "model runner", contract.get("model_runner"), EXPECTED_MODEL_RUNNER)
 

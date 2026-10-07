@@ -75,8 +75,12 @@ Version: `4.0`
 - mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
 - model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
 - runner evidence `command_digest, cli_name_version, model, started_finished, exit_code, session_id, stdout_digest, tokens, user_settings_loaded` → axis `isolation_evidence`; `--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`
+- optional skill `mutation-triage` — `skills/mutation-triage/SKILL.md`
+- optional stage `mutation-triage`: role `strength-analyst`, policy `mutation-triage-v1`, cardinality `post_terminal_per_task`, profiles `local-pilot-v1`, answer `mutation-triage-output.schema.json`, decisions `TEST_GAP, SPEC_GAP, EQUIVALENT, OUT_OF_SCOPE`, changes `nothing_in_the_attempt`
 - optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
 - optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
+- optional artifact `mutation_triage` (phase 6, `IMPLEMENTED`)
+- optional artifact `analyst_report` (phase 7, `IMPLEMENTED`)
 - optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
 

@@ -296,8 +296,6 @@ def finish_execution(project: Path, run_root: Path, config: Mapping[str, Any], e
     if attempt["state"] != "TERMINAL":
         return driver._done(run_root, {"status": "stopped", "stop_reason": output.get("reason") or "EXECUTION_NOT_FINALIZED", "run_id": run_root.name,
                                        "attempt_id": attempt["attempt_id"], "exit_code": execution.get("exit_code", 2), "exec": output})
-    summary = driver._result_summary(run_root, attempt)
-    summary["exec"] = {key: output.get(key) for key in ("verdict", "accepted", "reason", "automation_revision", "regeneration") if key in output}
     regeneration = output.get("regeneration")
     if isinstance(regeneration, Mapping) and regeneration.get("allowed") is True and config.get("answers", {}).get(_regeneration_task_id(attempt)) is None:
         return driver._ask_task(
@@ -305,6 +303,14 @@ def finish_execution(project: Path, run_root: Path, config: Mapping[str, Any], e
             "Сгенерированные тесты не прошли компиляцию или сбор и убраны из проекта. Создать дочернюю попытку и сгенерировать исправленную ревизию "
             "(кейсы и ревью в ней проходят заново)? Это разрешено один раз.",
             [{"value": "regenerate", "label": "Да, создать дочернюю попытку"}, {"value": "stop", "label": "Нет, завершить с текущим результатом"}])
+    # Opt-in mutations: survivor triage tasks come before `done` (they change nothing in the attempt).
+    from tools.pipeline_driver_strength import triage_step
+
+    task = triage_step(project, run_root, attempt, config)
+    if task is not None:
+        return task
+    summary = driver._result_summary(run_root, attempt)
+    summary["exec"] = {key: output.get(key) for key in ("verdict", "accepted", "reason", "automation_revision", "regeneration") if key in output}
     return driver._done(run_root, summary)
 
 

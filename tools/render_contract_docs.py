@@ -71,6 +71,11 @@ def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
                      f"custom template `{runner['custom_template']}`; `.skillsrc` fields `{', '.join(runner['skillsrc_fields'])}`; invocation `{runner['invocation']}`; "
                      f"wait action `{runner['wait_action']}`; tries per part `{runner['tries_per_part']}`; standalone `{runner['standalone_command']}`")
         lines.append(f"- runner evidence `{', '.join(runner['evidence'])}` → axis `{runner['evidence_axis']}`; `{runner['require_flag']}` rejects lower levels with `{runner['require_reason_code']}`")
+    for name, path in (contract.get("optional_skills") or {}).items():
+        lines.append(f"- optional skill `{name}` — `{path}`")
+    for row in contract.get("optional_stage_registry") or []:
+        lines.append(f"- optional stage `{row['stage']}`: role `{row['role']}`, policy `{row['role_policy']}`, cardinality `{row['cardinality']}`, "
+                     f"profiles `{', '.join(row['profiles'])}`, answer `{row['answer_schema']}`, decisions `{', '.join(row['decisions'])}`, changes `{row['changes']}`")
     for row in contract.get("optional_schema_registry") or []:
         lines.append(f"- optional schema `{row['id']}` (phase {row['phase']}, `{row['implementation_status']}`, `{row['target_version']}`)")
     for row in contract.get("optional_artifact_registry") or []:
