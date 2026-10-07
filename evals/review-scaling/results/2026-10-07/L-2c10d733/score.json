@@ -1,0 +1,59 @@
+{
+  "set": "L-2c10d733",
+  "mode": "compact-v1",
+  "clean": true,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55043,
+  "answer_bytes": [
+    7646
+  ],
+  "answer_bytes_total": 7646,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 0,
+  "seeds": 0,
+  "rows": [],
+  "severity_counts": {
+    "INFO": 3,
+    "WARNING": 1,
+    "BLOCKING": 0
+  },
+  "unseeded_blocking_warning": [
+    {
+      "severity": "WARNING",
+      "code": "COMPONENT_MISMATCH",
+      "message": "TC-B1-011 management.components[0] = «StudentController», но маршрут GET /hello-world реализован в HelloWorldController (SRC-1:L05, L12; источники CAP-B1-mockmvc_exchange). Метаданные кейса указывают неверный компонент; требуется механическая замена на «HelloWorldController» (см. corrections).",
+      "evidence": [
+        "TC-B1-011",
+        "CREQ-B1-010",
+        "SREQ-0002"
+      ],
+      "related_ids": [
+        "TC-B1-011",
+        "CREQ-B1-010",
+        "SREQ-0002"
+      ]
+    }
+  ],
+  "corrections": [
+    {
+      "path": "/test_cases/10/management/components/0",
+      "related_ids": [
+        "TC-B1-011"
+      ],
+      "after": "HelloWorldController"
+    }
+  ],
+  "lint_dispositions": [],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324460.8060892,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}
