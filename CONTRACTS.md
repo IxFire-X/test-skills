@@ -150,7 +150,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `run-authorization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `terminal-result.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `finalization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `skillsrc.schema.json` | `2` | `IMPLEMENTED` | `5.1.0` | `True` | `-` |
+| `skillsrc.schema.json` | `2` | `IMPLEMENTED` | `5.2.0` | `True` | `-` |
 | `skillsrc-init-output.schema.json` | `2` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `inventory-receipt.schema.json` | `2` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `exclusion-receipt.schema.json` | `2` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

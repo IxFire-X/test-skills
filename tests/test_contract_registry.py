@@ -15,7 +15,7 @@ SCHEMA_ROWS = [
     ("model-request.schema.json", 1, "IMPLEMENTED", "2.0.0"),
     ("attempt.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("run-authorization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("terminal-result.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("finalization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
-    ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.1.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),
+    ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.2.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),
     ("inventory-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("exclusion-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-selection-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("execution-baseline.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-marker-output.schema.json", 3, "IMPLEMENTED", "5.1.0"), ("tc-generator-output.schema.json", 3, "IMPLEMENTED", "5.0.0"),

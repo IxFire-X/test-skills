@@ -20,6 +20,41 @@ _DOCS_MAX_TOTAL = DEFAULT_CONTEXT_LIMITS["docs_total_bytes"]
 
 REQ_ID_RE = re.compile(r"\b(?:REQ|AC|US|FR|BR|TR|ТР|ПС)[-_]\d+\b", re.I)
 HEADING_RE = re.compile(r"^(?:#{1,6}\s+[^\n]+|(?:[-*]\s+)?(?:REQ|AC|US|FR|BR|TR|ТР|ПС)[-_]\d+\b[^\n]*)", re.M | re.I)
+_BUILTIN_ID = r"(?:REQ|AC|US|FR|BR|TR|ТР|ПС)[-_]\d+\b"
+
+
+def compile_id_pattern(pattern: str | None) -> re.Pattern[str] | None:
+    """The project's explicit requirement ID (``.skillsrc`` ``requirements.id_pattern``), or None.
+
+    The pattern marks an ID at the start of a line, exactly like the built-in ``REQ-``/``AC-`` IDs;
+    a pattern that does not compile or matches the empty string is rejected.
+    """
+    if pattern is None:
+        return None
+    if not isinstance(pattern, str) or not pattern or len(pattern) > 200:
+        raise ValueError("requirements.id_pattern must be a non-empty string of at most 200 characters")
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
+        raise ValueError(f"requirements.id_pattern does not compile: {error}") from error
+    if compiled.fullmatch("") is not None or compiled.match("") is not None:
+        raise ValueError("requirements.id_pattern must not match the empty string")
+    return compiled
+
+
+def _heading_regex(id_re: re.Pattern[str] | None) -> re.Pattern[str]:
+    if id_re is None:
+        return HEADING_RE
+    return re.compile(r"^(?:#{1,6}\s+[^\n]+|(?:[-*]\s+)?(?:" + _BUILTIN_ID + r"|(?-i:" + id_re.pattern + r"))[^\n]*)", re.M | re.I)
+
+
+def explicit_requirement_id(title: str, id_re: re.Pattern[str] | None = None) -> str | None:
+    """The explicit ID a section title starts with (bullet and bold marks ignored), without trailing punctuation."""
+    head = re.sub(r"^(?:[-*+]\s+)?(?:\*\*)?", "", title or "")
+    match = re.match(_BUILTIN_ID, head, re.I) or (id_re.match(head) if id_re is not None else None)
+    if match is None or not match.group(0).strip():
+        return None
+    return match.group(0).strip().rstrip(".:)").strip() or None
 API_PATH_RE = re.compile(r"""['"](/api/[^'"]+)['"]""")
 FLASK_ROUTE_RE = re.compile(
     r"""@(?:app|router|bp|api)\.(?:get|post|put|patch|delete|route)\(\s*['"]([^'"]+)['"]""",
@@ -45,9 +80,9 @@ _TITLE_NUMBERING = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s+)")
 _TOC_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s*\[[^\]]+\]\(#[^)]*\)\s*$")
 
 
-def _section_kind(section: str, title: str) -> str:
+def _section_kind(section: str, title: str, id_re: re.Pattern[str] | None = None) -> str:
     """Classify one delimited section; only requirement/flow rows need a test case."""
-    if REQ_ID_RE.match(title):
+    if REQ_ID_RE.match(title) or (id_re is not None and id_re.match(title)):
         return "requirement"
     lines = section.splitlines()
     if not lines[0].lstrip().startswith("#"):
@@ -62,24 +97,40 @@ def _section_kind(section: str, title: str) -> str:
     return "flow"
 
 
-def extract_inventory(analytics: str) -> list[dict[str, Any]]:
+def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None = None) -> list[dict[str, Any]]:
     """Partition authorized requirement prose without dropping unlabelled content.
 
     Every section is returned in document order. ``kind`` is ``requirement`` or
     ``flow`` for text a test case must cover, ``structure`` for a heading without
     its own text and ``reference`` for a glossary or table of contents. Deeper
-    semantic classification belongs to context-marker/reviewer.
+    semantic classification belongs to context-marker/reviewer.  ``chain`` is the
+    titles of the enclosing Markdown headings and the section's own title; with
+    ``id_pattern`` a line starting with the project's ID opens a section like a
+    built-in ``REQ-`` ID does.
     """
     text = analytics or ""
     if not text.strip():
         return []
+    id_re = id_pattern if isinstance(id_pattern, re.Pattern) else compile_id_pattern(id_pattern)
     found: list[dict[str, Any]] = []
-    boundaries = sorted({0, len(text), *(match.start() for match in HEADING_RE.finditer(text))})
+    stack: list[tuple[int, str]] = []
+    boundaries = sorted({0, len(text), *(match.start() for match in _heading_regex(id_re).finditer(text))})
     for start, stop in zip(boundaries, boundaries[1:]):
         section = text[start:stop].strip()
         if section:
-            title = _norm(section.splitlines()[0].lstrip("# "))
-            found.append({"kind": _section_kind(section, title), "title": title, "text": section})
+            first = section.splitlines()[0]
+            title = _norm(first.lstrip("# "))
+            heading = re.match(r"^(#{1,6})\s", first)
+            if heading:
+                level = len(heading.group(1))
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                chain = [name for _level, name in stack] + [title]
+                stack.append((level, title))
+            else:
+                chain = [name for _level, name in stack] + [title]
+            found.append({"kind": _section_kind(section, title, id_re), "title": title, "text": section, "chain": chain,
+                          "explicit_id": explicit_requirement_id(title, id_re)})
     return found
 
 
@@ -329,11 +380,16 @@ def build_context(
     source_snapshot: list[dict[str, str]] | None = None,
     max_file_bytes: int | None = None,
     max_total_bytes: int | None = None,
+    id_pattern: str | None = None,
 ) -> dict[str, Any]:
     """Build the envelope. Document size limits come from the explicit arguments,
-    then ``limits`` in the project's ``.skillsrc``, then the 256 KiB / 1 MiB defaults."""
+    then ``limits`` in the project's ``.skillsrc``, then the 256 KiB / 1 MiB defaults.
+    The explicit requirement ID comes from ``id_pattern``, else ``requirements.id_pattern``
+    of the project's ``.skillsrc``; without one the split is the built-in one."""
     project = project.resolve()
     limits = _project_limits(project)
+    if id_pattern is None:
+        id_pattern = _project_id_pattern(project)
     file_limit = max_file_bytes if max_file_bytes is not None else limits["docs_file_bytes"]
     total_limit = max_total_bytes if max_total_bytes is not None else limits["docs_total_bytes"]
     if type(file_limit) is not int or type(total_limit) is not int or file_limit <= 0 or total_limit <= 0:
@@ -368,51 +424,8 @@ def build_context(
             )
     else:
         doc_entries = docs_snapshot
-    # Rows are appended in document order; that order is the identity order (M29).
-    normalized_rows: list[tuple[str, str, str, str]] = []
-    openspec_entries: list[dict[str, str]] = []
-    openspec_provenance: dict[tuple[str, str, str, str], list[str]] = {}
-    for entry in doc_entries:
-        rel = entry.get("path")
-        digest = entry.get("sha256")
-        text = entry.get("content")
-        if not isinstance(rel, str) or not isinstance(digest, str) or not isinstance(text, str):
-            raise ValueError("docs snapshot row is invalid")
-        data = text.encode("utf-8")
-        if digest != "sha256:" + hashlib.sha256(data).hexdigest():
-            raise ValueError(f"docs snapshot digest does not match content: {rel}")
-        if len(data) > file_limit:
-            raise RequirementConflict("NEED_DOCS_LIMIT", f"NEED_DOCS_LIMIT: docs file exceeds {file_limit} bytes: {rel}")
-        total_docs += len(data)
-        if total_docs > total_limit:
-            raise RequirementConflict("NEED_DOCS_LIMIT", f"NEED_DOCS_LIMIT: docs snapshot exceeds {total_limit} bytes")
-        if is_openspec_document(rel):
-            openspec_entries.append(entry)
-            continue
-        text, redactions = redact_text(text)
-        warnings.extend(_redaction_warnings(rel.replace("\\", "/"), redactions))
-        rows = extract_inventory(text)
-        for row in rows:
-            if row["kind"] not in _REQUIREMENT_KINDS:
-                # A bare grouping heading, glossary or table of contents is not a
-                # requirement that a test case has to cover (decision 19).
-                continue
-            snippet = str(row.get("text") or row["title"])
-            normalized_rows.append((_compare_key(rel.replace("\\", "/")), digest, snippet, _norm(row["title"])))
-
-    openspec_rows, openspec_warnings = _openspec_rows(openspec_entries)
-    warnings.extend(openspec_warnings)
-    for row in openspec_rows:
-        key = (_compare_key(row["path"]), row["digest"], row["text"], row["name"])
-        normalized_rows.append(key)
-        openspec_provenance[key] = _openspec_marks(row) + row["rename_provenance"]
-
-    # Snapshot order is not provenance, document order is. Dedupe keeping the first
-    # occurrence, then order files by normalized path and keep each file's rows in
-    # document order (the sort is stable). A resumed/controller-provided snapshot
-    # therefore has the same identity as an equivalent CLI snapshot, and a section
-    # appended to a document never renumbers the requirements before it.
-    deduped_rows = sorted(dict.fromkeys(normalized_rows), key=lambda row: (row[0], row[1]))
+    deduped_rows, openspec_provenance, scan_warnings, _identity = scan_documents(doc_entries, file_limit, total_limit, id_pattern)
+    warnings.extend(scan_warnings)
     for index, (rel, digest, snippet, title) in enumerate(deduped_rows, start=1):
         req_id = _source_requirement_id(index)
         # The mark names the file and section.  The requirement text itself lives in ``text``
@@ -466,6 +479,82 @@ def build_context(
     envelope["status"] = status
     return envelope
 
+
+def scan_documents(doc_entries: list[dict[str, str]], file_limit: int, total_limit: int, id_pattern: str | None = None):
+    """Requirement rows of authorized documents in identity order (path, then document order).
+
+    Returns ``(rows, openspec_provenance, warnings, identity)``: ``rows`` are
+    ``(path, file digest, text, title)`` tuples that become ``SREQ-NNNN`` in this order,
+    ``identity`` maps a row to its heading chain, explicit ID or OpenSpec origin.
+    """
+    id_re = compile_id_pattern(id_pattern)
+    warnings: list[str] = []
+    total_docs = 0
+    identity: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    # Rows are appended in document order; that order is the identity order (M29).
+    normalized_rows: list[tuple[str, str, str, str]] = []
+    openspec_entries: list[dict[str, str]] = []
+    openspec_provenance: dict[tuple[str, str, str, str], list[str]] = {}
+    for entry in doc_entries:
+        rel = entry.get("path")
+        digest = entry.get("sha256")
+        text = entry.get("content")
+        if not isinstance(rel, str) or not isinstance(digest, str) or not isinstance(text, str):
+            raise ValueError("docs snapshot row is invalid")
+        data = text.encode("utf-8")
+        if digest != "sha256:" + hashlib.sha256(data).hexdigest():
+            raise ValueError(f"docs snapshot digest does not match content: {rel}")
+        if len(data) > file_limit:
+            raise RequirementConflict("NEED_DOCS_LIMIT", f"NEED_DOCS_LIMIT: docs file exceeds {file_limit} bytes: {rel}")
+        total_docs += len(data)
+        if total_docs > total_limit:
+            raise RequirementConflict("NEED_DOCS_LIMIT", f"NEED_DOCS_LIMIT: docs snapshot exceeds {total_limit} bytes")
+        if is_openspec_document(rel):
+            openspec_entries.append(entry)
+            continue
+        text, redactions = redact_text(text)
+        warnings.extend(_redaction_warnings(rel.replace("\\", "/"), redactions))
+        rows = extract_inventory(text, id_re)
+        for row in rows:
+            if row["kind"] not in _REQUIREMENT_KINDS:
+                # A bare grouping heading, glossary or table of contents is not a
+                # requirement that a test case has to cover (decision 19).
+                continue
+            snippet = str(row.get("text") or row["title"])
+            key = (_compare_key(rel.replace("\\", "/")), digest, snippet, _norm(row["title"]))
+            normalized_rows.append(key)
+            identity.setdefault(key, {"kind": "markdown", "chain": row["chain"], "explicit_id": row["explicit_id"]})
+
+    openspec_rows, openspec_warnings = _openspec_rows(openspec_entries)
+    warnings.extend(openspec_warnings)
+    for row in openspec_rows:
+        key = (_compare_key(row["path"]), row["digest"], row["text"], row["name"])
+        normalized_rows.append(key)
+        openspec_provenance[key] = _openspec_marks(row) + row["rename_provenance"]
+        identity.setdefault(key, {"kind": "openspec", "path": row["path"], "capability": row["capability"], "name": row["name"],
+                                  "rename_provenance": list(row["rename_provenance"])})
+
+    # Snapshot order is not provenance, document order is. Dedupe keeping the first
+    # occurrence, then order files by normalized path and keep each file's rows in
+    # document order (the sort is stable). A resumed/controller-provided snapshot
+    # therefore has the same identity as an equivalent CLI snapshot, and a section
+    # appended to a document never renumbers the requirements before it.
+    deduped_rows = sorted(dict.fromkeys(normalized_rows), key=lambda row: (row[0], row[1]))
+    return deduped_rows, openspec_provenance, warnings, identity
+
+
+def _project_id_pattern(project: Path) -> str | None:
+    """``requirements.id_pattern`` of the project's ``.skillsrc``; None when absent or unreadable."""
+    manifest = project / ".skillsrc"
+    try:
+        if not manifest.is_file():
+            return None
+        from tools.skillsrc_manifest import load_skillsrc
+
+        value = (load_skillsrc(manifest).get("requirements") or {}).get("id_pattern")
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, str) else None
 
 def _project_limits(project: Path) -> dict[str, int]:
     """Read optional document limits from the project's ``.skillsrc``; defaults otherwise."""
