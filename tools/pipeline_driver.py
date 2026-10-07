@@ -1415,7 +1415,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--accept-self-review", action="store_true",
                                  help="Accept a review done without isolation (review_independence: SELF stays in the result).")
             command.add_argument("--review-mode", choices=("pairs", "compact-v1"),
-                                 help="Review format of this run: pairs (default, legacy scopes) or compact-v1 (projection, whole cases per part).")
+                                 help="Review format of this run: compact-v1 (default: projection, whole cases per part) or pairs (legacy scopes and pair checks).")
             command.add_argument("--max-tasks", type=int, default=1,
                                  help="Return up to K independent review part tasks at once (compact-v1); each still needs its own fresh call.")
         if name == "submit":

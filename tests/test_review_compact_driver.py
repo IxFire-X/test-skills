@@ -32,11 +32,21 @@ def _run_root(replay: Replay, task: dict) -> Path:
     return replay.project / ".pilot-runs" / str(task["run_id"])
 
 
-def test_default_review_mode_stays_pairs(tmp_path: Path) -> None:
+def test_default_review_mode_is_compact_and_pairs_stays_available(tmp_path: Path) -> None:
     from tools.pilot_state import read_review_plan
 
-    replay = Replay("2c10d733", tmp_path)
-    code, task = replay.drive(until=lambda item: str(item.get("stage", "")).startswith("tc-reviewer:"))
+    def until(item):
+        return str(item.get("stage", "")).startswith("tc-reviewer:")
+
+    default = Replay("2c10d733", tmp_path / "default")
+    default.review_mode = None
+    code, task = default.drive(default.start()[1], until=until)
+    config = json.loads((default.project / ".pilot-runs" / f"{task['run_id']}.driver" / "config.json").read_text(encoding="utf-8"))
+    assert config["review_mode"] == "compact-v1" and task["review_mode"] == "compact-v1"
+    assert read_review_plan(_run_root(default, task), task["attempt_id"])["mode"] == "compact-v1"
+
+    replay = Replay("2c10d733", tmp_path / "pairs")  # pins --review-mode pairs, the mode of the recorded answers
+    code, task = replay.drive(until=until)
     config = json.loads((replay.project / ".pilot-runs" / f"{task['run_id']}.driver" / "config.json").read_text(encoding="utf-8"))
     assert config["review_mode"] == "pairs"
     plan = read_review_plan(_run_root(replay, task), task["attempt_id"])

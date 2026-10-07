@@ -86,6 +86,7 @@ class Replay:
         self.project = copy_project(tmp_path / "project")
         self.review = review
         self.override = override  # answers a task itself when it returns anything but None
+        self.review_mode: str | None = "pairs"  # the mode of the recorded answers; None = driver default
         self.used: set[str] = set()
         self.log: list[dict[str, Any]] = []
 
@@ -152,13 +153,18 @@ class Replay:
         return self.start_with()
 
     def start_with(self, *extra: str) -> tuple[int, dict[str, Any]]:
-        """Start like the recorded run; ``extra`` flags come last and override (e.g. ``--reviewer-isolation none``)."""
+        """Start like the recorded run; ``extra`` flags come last and override (e.g. ``--reviewer-isolation none``).
+
+        The recorded runs reviewed in ``pairs``, so that mode is pinned unless ``review_mode``
+        is set to another mode, or to ``None`` for the driver default.
+        """
         config = self.config
+        mode = () if self.review_mode is None else ("--review-mode", self.review_mode)
         return self.call(
             "next", "--project", str(self.project), "--profile", self.profile, "--docs", DOCS,
             "--subject", config["subject"], "--model-id", config["model_id"], "--reviewer-isolation", "fresh",
             "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"],
-            "--document-id", f"TCDOC-step5-java-demo-{self.run[:8]}", *extra,
+            "--document-id", f"TCDOC-step5-java-demo-{self.run[:8]}", *mode, *extra,
         )
 
     def run_root(self, payload: Mapping[str, Any]) -> Path:

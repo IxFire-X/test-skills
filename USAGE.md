@@ -150,7 +150,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
 контекста модели в байтах, по умолчанию 500000), `--accept-self-review`,
-`--review-mode pairs|compact-v1` (формат ревью, по умолчанию `pairs`), `--max-tasks K`
+`--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
 (сколько независимых частей ревью `compact-v1` выдать сразу). `run_id` берётся
 из первого ответа.
 

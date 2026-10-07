@@ -98,8 +98,9 @@ def _run_root(project: Path, task: dict[str, Any]) -> Path:
 
 
 def _start(project: Path, profile: str, **options: Any) -> dict[str, Any]:
+    # The saved answers are in the pairs format; a test that wants compact-v1 passes review_mode.
     return driver.start_run(project, {"profile": profile, "docs": ["docs/feature.md"], "subject": "Каталог товаров", "reviewer_isolation": "fresh",
-                                      "model_id": "model-test", **options})
+                                      "model_id": "model-test", "review_mode": "pairs", **options})
 
 
 def _answer_and_submit(project: Path, task: dict[str, Any], model: SavedModel) -> dict[str, Any]:
@@ -137,7 +138,7 @@ def test_driver_cli_drives_cases_only_run_to_done(tmp_path: Path, capsys: pytest
         return code, json.loads(capsys.readouterr().out)
 
     code, task = call("next", "--project", str(project), "--profile", "cases-only-v1", "--docs", "docs/feature.md", "--subject", "Каталог товаров",
-                      "--reviewer-isolation", "fresh", "--model-id", "model-test")
+                      "--reviewer-isolation", "fresh", "--model-id", "model-test", "--review-mode", "pairs")
     run_id = task["run_id"]
     for _ in range(20):
         if task["action"] == "done":

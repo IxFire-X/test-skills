@@ -63,7 +63,7 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 `--model-id`, `--host-cli`, `--host-cli-version`, `--host-settings`,
 `--reviewer-isolation fresh|none`, `--review-input-bytes`, `--review-reserve-bytes`,
 `--review-context-bytes` (окно контекста, по умолчанию 500000), `--accept-self-review`,
-`--review-mode pairs|compact-v1` (формат ревью; по умолчанию `pairs`).
+`--review-mode pairs|compact-v1` (формат ревью; по умолчанию `compact-v1`).
 Укажи фактические модель и CLI: они записываются в журнал как сведения о вызовах.
 
 Каждый вызов печатает один JSON-объект. Дальше повторяй:

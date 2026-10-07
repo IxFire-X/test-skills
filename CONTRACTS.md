@@ -44,7 +44,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 ## Review modes
 
-- review mode `--review-mode`: `pairs, compact-v1`; default `pairs`
+- review mode `--review-mode`: `pairs, compact-v1`; default `compact-v1`
 - `compact-v1` model input: `review_projection_text` (`review-projection-v1`, `canonical_document_digest_in_snapshot`); never model inputs: `html, markdown, csv`
 - `compact-v1` plan `review-plan-compact.schema.json`, answer `review-part-output-compact.schema.json`; packing `whole_cases_content_defined_blocks_block_pairs`; `every_case_pair_in_one_part`; areas `source, case_home_part, cross_per_part`
 - `compact-v1` order `independent_parts_batchable` (`--max-tasks`); answer checks `refs_are_part_anchors, case_area_cites_own_anchor, every_lint_suspicion_answered, info_findings_at_most_5, related_ids_known`
