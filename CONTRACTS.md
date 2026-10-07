@@ -50,6 +50,10 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 - `compact-v1` order `independent_parts_batchable` (`--max-tasks`); answer checks `refs_are_part_anchors, case_area_cites_own_anchor, every_lint_suspicion_answered, info_findings_at_most_5, related_ids_known`
 - `compact-v1` corrections `closed_field_dictionary_one_pointer_before_checked`; carry key `area_fingerprint, role_policy, skill_digest, instructions_digest, model_id, mode`
 
+## Acceptance reason codes
+
+- `no_unresolved_blocker` failed (`local-pilot-v1`): reason `UNRESOLVED_AUTOMATION_BLOCKER` on `blocker_count_positive`, when `verification_pass_without_earlier_reason`, precedence `after_review_reasons`; legacy results `reason_absent_stays_valid`
+
 ## Contract amendments (opt-in)
 
 - `pilot-contract-amendments-2026-10-07` (wave 2, `ACCEPTED`, opt-in `true`): §1.2, §1.5, §17 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`

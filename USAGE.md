@@ -502,6 +502,15 @@ terminal result тоже даёт `2`. Если scan при создании run
 Результат без изоляции ревью (`review_independence: SELF`) без `--accept-self-review`
 не принимается: в `local-pilot-v1` это код `1`.
 
+`COMPLETE + PASS + accepted=false` с `reason_code: UNRESOLVED_AUTOMATION_BLOCKER`
+(`local-pilot-v1`): тесты прошли, но в принятом canonical остались блокеры
+автоматизации (`automation_blockers`, `evidence.blocker_count > 0`) — эти кейсы не
+автоматизированы, предикат `no_unresolved_blocker` не выполнен; код завершения `1`.
+Код ставится, только если более ранней причины нет (`REVIEW_NOT_INDEPENDENT` и
+`REVIEW_ISOLATION_UNVERIFIED` важнее); при `FAIL` и `NOT_RUNNABLE` причину объясняет
+`verification`, и кода нет. Terminal result, записанный до появления кода, остаётся
+валидным: блокеры видны только в `evidence.blocker_count`, `reason_code` отсутствует.
+
 ## 11. Проверка и release identity
 
 ```powershell

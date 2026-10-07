@@ -220,6 +220,13 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   (`SELF`); принять такой результат можно только флагом `--accept-self-review`;
 - `REVIEW_ISOLATION_UNVERIFIED` — run требовал `--require-driver-isolation`, а хотя бы
   одна часть ревью шла не процессом драйвера (`HOST_DECLARED`) или без изоляции (`NONE`);
+- `UNRESOLVED_AUTOMATION_BLOCKER` (`local-pilot-v1`, `verification=PASS`) — тесты прошли,
+  но в принятых кейсах остались блокеры автоматизации (`automation_blockers`, например
+  `UNRESOLVED_ASSERTION`): эти кейсы не автоматизированы, поэтому результат не принят
+  (код `1`). Назови пользователю заблокированные кейсы и причины блокеров из
+  опубликованного набора кейсов; снять блокер можно только уточнением требований и новым
+  run. Результаты, записанные до появления кода, читаются как прежде: `accepted=false`
+  без `reason_code`;
 - `FAIL` — упала продуктовая проверка: тест не перегенерируется и не правится;
 - `NOT_RUNNABLE` с `LAUNCH_FAILED` — тестовый процесс не запустился; с
   `TESTS_DESELECTED` — настройки проекта отфильтровали выбранные тесты. Тест не

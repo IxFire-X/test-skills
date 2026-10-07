@@ -110,6 +110,11 @@ EXPECTED_REVIEWER_SESSION = {'logical_review_count': 'one_per_branch_or_revision
 EXPECTED_PHYSICAL_LIFECYCLE = ["MATERIALIZATION", "EXECUTION", "EXECUTION_TRACE", "RETAIN_OR_CLEANUP_DECISION", "DISPOSITION_RECEIPTS", "PRE_FINALIZATION_TRACE", "FINALIZATION_VERIFICATION", "FINALIZATION_RECEIPT_READ_BACK", "TERMINAL_RESULT", "DERIVED_TERMINAL_TRACE", "TERMINAL_EVENT"]
 EXPECTED_RESULT_TUPLES = {"complete_fail": {"attempt_state": "TERMINAL", "completion": "COMPLETE", "verification": "FAIL", "accepted": False}, "execution_unknown": {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "UNKNOWN", "reason_code": "EXECUTION_UNKNOWN", "accepted": False}, "pre_execution_rework": {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "reason_code": "REWORK", "accepted": False}, "early_fatal": {"attempt_state": "TERMINAL", "completion": "FATAL", "coverage": None, "accepted": False}, "review_context_limit": {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "reason_code": "REVIEW_CONTEXT_LIMIT", "accepted": False}, "invalid_finalization": {"attempt_state": "TERMINAL", "accepted": False, "reason_code": "FINALIZATION_INVALID", "verification": "PRESERVED", "coverage": "PRESERVED"}}
 EXPECTED_ACCEPTANCE = {"cases-only-v1": ["coverage_full_mixed_or_manual_only", "verification_not_applicable", "canonical_schema_semantic_provenance_valid", "successful_full_document_authoritative_review", "exactly_one_authoritative_verdict", "reviewer_isolation_verified", "no_unresolved_blocker", "branch_valid_trace", "finalization_valid", "materialization_not_applicable", "execution_not_applicable", "draft_artifact_only_not_accepted"], "local-pilot-v1": ["accepted_canonical", "accepted_automation", "complete_generated_delta_materialization", "authoritative_exact_target_pass", "valid_trace", "every_required_generated_file_retained", "finalization_valid", "reviewer_isolation_verified", "review_isolated_or_self_review_accepted", "no_unresolved_blocker", "mixed_manual_coverage_traceable"]}
+# A reason the result projection derives when an acceptance predicate fails and no earlier cause is set.
+EXPECTED_ACCEPTANCE_REASON_CODES = [
+    {"predicate": "no_unresolved_blocker", "profiles": ["local-pilot-v1"], "reason_code": "UNRESOLVED_AUTOMATION_BLOCKER", "evidence": "blocker_count_positive",
+     "when": "verification_pass_without_earlier_reason", "precedence": "after_review_reasons", "legacy_results": "reason_absent_stays_valid"},
+]
 EXPECTED_EXIT_PRIORITY = [{"when": "controller_error_without_trustworthy_attempt_result", "code": 2}, {"when": "waiting_for_input_or_model", "code": 3}, {"when": "cases_only_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "valid_terminal_cases_only_v1", "code": 1}, {"when": "accepted_terminal", "code": 0}, {"when": "unknown_not_runnable_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "other_trustworthy_terminal_unaccepted", "code": 1}]
 
 
@@ -318,6 +323,11 @@ def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str
         errors.append("result axes mismatch")
     _error_if_not_equal(errors, "result tuples", contract.get("result_tuples"), EXPECTED_RESULT_TUPLES)
     _error_if_not_equal(errors, "acceptance predicates", contract.get("acceptance_predicates"), EXPECTED_ACCEPTANCE)
+    _error_if_not_equal(errors, "acceptance reason codes", contract.get("acceptance_reason_codes"), EXPECTED_ACCEPTANCE_REASON_CODES)
+    predicates = contract.get("acceptance_predicates") if isinstance(contract.get("acceptance_predicates"), Mapping) else {}
+    for row in contract.get("acceptance_reason_codes") or []:
+        if not isinstance(row, Mapping) or any(row.get("predicate") not in (predicates.get(profile) or []) for profile in row.get("profiles") or []):
+            errors.append("acceptance reason code names a predicate its profile does not have")
     _error_if_not_equal(errors, "exit priority", contract.get("exit_priority"), EXPECTED_EXIT_PRIORITY)
     _validate_amendments(contract, root, errors)
 

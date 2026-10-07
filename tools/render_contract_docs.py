@@ -51,6 +51,15 @@ def _mode_lines(modes: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _acceptance_reason_lines(contract: Mapping[str, Any]) -> list[str]:
+    """Reasons derived from a failed acceptance predicate (empty for a contract without them)."""
+    return [
+        f"- `{row['predicate']}` failed (`{', '.join(row['profiles'])}`): reason `{row['reason_code']}` on `{row['evidence']}`, "
+        f"when `{row['when']}`, precedence `{row['precedence']}`; legacy results `{row['legacy_results']}`"
+        for row in contract.get("acceptance_reason_codes") or []
+    ]
+
+
 def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
     """Opt-in amendments (empty for a contract without them)."""
     lines: list[str] = []
@@ -96,6 +105,9 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts.extend(["", "## Canonical rework", "", *_rework_lines(contract["reviewer_session_contract"]["rework"])])
     contracts.extend(["", "## Review without isolation", "", *_self_review_lines(contract["reviewer_session_contract"]["self_review"])])
     contracts.extend(["", "## Review modes", "", *_mode_lines(contract["reviewer_session_contract"]["modes"])])
+    reasons = _acceptance_reason_lines(contract)
+    if reasons:
+        contracts.extend(["", "## Acceptance reason codes", "", *reasons])
     amendments = _amendment_lines(contract)
     if amendments:
         contracts.extend(["", "## Contract amendments (opt-in)", "", *amendments])
@@ -123,6 +135,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     for profile in POLICY_ORDER:
         predicates = contract["acceptance_predicates"][profile]
         pipeline.append(f"- `{profile}`: `{', '.join(predicates)}`")
+    pipeline.extend(_acceptance_reason_lines(contract))
     pipeline.extend(["", "## Exit priority", ""])
     pipeline.extend(f"- `{rule['when']} => {rule['code']}`" for rule in contract["exit_priority"])
     release = contract["release_qualification"]

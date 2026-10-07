@@ -4718,7 +4718,8 @@ _TEST_STRENGTH_VALUES = {"MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"}
 _ISOLATION_EVIDENCE_VALUES = {"DRIVER_PROCESS", "HOST_DECLARED", "NONE"}
 
 
-def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool = True) -> tuple[dict[str, Any], bool]:
+def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool = True,
+                  legacy_blocker_reason: bool = False) -> tuple[dict[str, Any], bool]:
     if policy_profile not in _PROFILES or not isinstance(facts, Mapping):
         raise ValueError("invalid result facts")
     waiting = {"run_id", "attempt_id", "attempt_state"}
@@ -4764,6 +4765,18 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
         facts["reason_code"] = "REVIEW_ISOLATION_UNVERIFIED"
     if facts.get("reason_code") == "REVIEW_ISOLATION_UNVERIFIED" and not isolation_unverified:
         raise ValueError("REVIEW_ISOLATION_UNVERIFIED requires required driver isolation without driver evidence")
+    # An automation blocker left in the canonical fails no_unresolved_blocker: it is the reason a
+    # local-pilot PASS is not accepted unless an earlier cause explains it.  FAIL and NOT_RUNNABLE are
+    # explained by verification (the frozen complete_fail tuple has no reason), the cases-only draft
+    # is never accepted.  Results written before the code existed carry none (legacy_blocker_reason).
+    blocker_unresolved = (
+        policy_profile == "local-pilot-v1" and facts.get("verification") == "PASS"
+        and type(facts.get("blocker_count")) is int and facts["blocker_count"] > 0
+    )
+    if blocker_unresolved and not legacy_blocker_reason and facts.get("reason_code") is None and facts.get("finalization_valid") is True:
+        facts["reason_code"] = "UNRESOLVED_AUTOMATION_BLOCKER"
+    if facts.get("reason_code") == "UNRESOLVED_AUTOMATION_BLOCKER" and not blocker_unresolved:
+        raise ValueError("UNRESOLVED_AUTOMATION_BLOCKER requires a local-pilot pass with an automation blocker")
     present = present | strength | isolation
     if set(facts) - present != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
         raise ValueError("invalid result facts")
@@ -4880,8 +4893,10 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
     return dict(facts), accepted
 
 
-def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool) -> Mapping[str, Any]:
-    facts, accepted = _result_facts(facts, policy_profile, external_cause_available=external_cause_available)
+def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_cause_available: bool,
+                     legacy_blocker_reason: bool = False) -> Mapping[str, Any]:
+    facts, accepted = _result_facts(facts, policy_profile, external_cause_available=external_cause_available,
+                                    legacy_blocker_reason=legacy_blocker_reason)
     opted = set(facts) & (_RESULT_STRENGTH_KEYS | _RESULT_ISOLATION_KEYS)
     result = {"schema_version": "1.0.0", "run_id": facts["run_id"], "attempt_id": facts["attempt_id"], "policy_profile": policy_profile, "attempt_state": facts["attempt_state"], "completion": facts["completion"], "verification": facts["verification"], "coverage": facts["coverage"]}
     if facts["attempt_state"] == "TERMINAL":
@@ -4914,7 +4929,9 @@ def _validate_result_record(result: Mapping[str, Any]) -> bool:
             return result.get("completion") is None and result.get("verification") is None and result.get("coverage") is None and "accepted" not in result and "reason_code" not in result
         evidence = result["evidence"]
         facts = {"run_id": result["run_id"], "attempt_id": result["attempt_id"], "attempt_state": result["attempt_state"], "completion": result["completion"], "verification": result["verification"], "coverage": result["coverage"], "reason_code": result.get("reason_code"), "prior_stage_cause": "EXTERNAL", **evidence}
-        return dict(_terminal_result(facts, result["policy_profile"], external_cause_available=False)) == dict(result)
+        # A result without a reason may predate UNRESOLVED_AUTOMATION_BLOCKER: it stays readable (never accepted).
+        return dict(_terminal_result(facts, result["policy_profile"], external_cause_available=False,
+                                     legacy_blocker_reason="reason_code" not in result)) == dict(result)
     except (KeyError, TypeError, ValueError):
         return False
 

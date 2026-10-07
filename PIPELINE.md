@@ -114,6 +114,7 @@ Version: `4.0`
 
 - `cases-only-v1`: `coverage_full_mixed_or_manual_only, verification_not_applicable, canonical_schema_semantic_provenance_valid, successful_full_document_authoritative_review, exactly_one_authoritative_verdict, reviewer_isolation_verified, no_unresolved_blocker, branch_valid_trace, finalization_valid, materialization_not_applicable, execution_not_applicable, draft_artifact_only_not_accepted`
 - `local-pilot-v1`: `accepted_canonical, accepted_automation, complete_generated_delta_materialization, authoritative_exact_target_pass, valid_trace, every_required_generated_file_retained, finalization_valid, reviewer_isolation_verified, review_isolated_or_self_review_accepted, no_unresolved_blocker, mixed_manual_coverage_traceable`
+- `no_unresolved_blocker` failed (`local-pilot-v1`): reason `UNRESOLVED_AUTOMATION_BLOCKER` on `blocker_count_positive`, when `verification_pass_without_earlier_reason`, precedence `after_review_reasons`; legacy results `reason_absent_stays_valid`
 
 ## Exit priority
 
