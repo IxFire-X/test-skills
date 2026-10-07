@@ -113,6 +113,38 @@ EXPECTED_ACCEPTANCE = {"cases-only-v1": ["coverage_full_mixed_or_manual_only", "
 EXPECTED_EXIT_PRIORITY = [{"when": "controller_error_without_trustworthy_attempt_result", "code": 2}, {"when": "waiting_for_input_or_model", "code": 3}, {"when": "cases_only_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "valid_terminal_cases_only_v1", "code": 1}, {"when": "accepted_terminal", "code": 0}, {"when": "unknown_not_runnable_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "other_trustworthy_terminal_unaccepted", "code": 1}]
 
 
+# Opt-in amendments of 2026-10-07 (docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md).
+# Without the option a run follows the frozen sections above unchanged.
+EXPECTED_AMENDMENTS = [
+    {"id": "pilot-contract-amendments-2026-10-07", "document": "docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md",
+     "status": "ACCEPTED", "opt_in": True, "wave": 2, "sections": ["1.2", "1.5", "17"]},
+]
+EXPECTED_OPTIONAL_LIFECYCLE = [
+    {"stage": "MUTATION", "after": "EXECUTION_TRACE", "before": "RETAIN_OR_CLEANUP_DECISION",
+     "requires": ["skillsrc_mutation_enabled", "run_authorization_mutation_requested", "authoritative_pass_or_fail"],
+     "mutates": "passing_generated_methods_only", "writes": "run_directory_only", "proves": "project_inventory_unchanged",
+     "receipt": "mutation_receipt", "axis": "test_strength", "never_changes": ["verification", "accepted", "dispositions", "earlier_evidence"]},
+]
+EXPECTED_OPTIONAL_AXES = {
+    "test_strength": {"values": ["MEASURED", "NOT_RUNNABLE", "NOT_APPLICABLE"], "nullable": True},
+    "isolation_evidence": {"values": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE"], "nullable": True},
+}
+EXPECTED_MUTATION_TOOLING = {
+    "java": {"tool": "org.pitest:pitest-command-line", "version": "1.30.0", "plugin": "org.pitest:pitest-junit5-plugin", "plugin_version": "1.2.3",
+             "pins": "tools/mutation_tools.json", "resolution": "project_build_tool_local_repository", "launcher": "junit_platform_launcher_of_project_version",
+             "consent": ["skillsrc_mutation_enabled", "run_authorization_mutation_requested"], "digest_mismatch": "NOT_RUNNABLE", "mutators": "DEFAULTS",
+             "report": "xml_full_mutation_matrix"},
+    "python": "not_implemented",
+}
+EXPECTED_MODEL_RUNNER = {
+    "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",
+    "skillsrc_fields": ["preset", "models", "max_parallel", "timeout_seconds"], "invocation": "fresh_process_temp_cwd_stdin_no_write_tools", "wait_action": "wait",
+    "tries_per_part": 3, "evidence": ["command_digest", "cli_name_version", "model", "started_finished", "exit_code", "session_id", "stdout_digest", "tokens", "user_settings_loaded"],
+    "evidence_axis": "isolation_evidence", "require_flag": "--require-driver-isolation", "require_reason_code": "REVIEW_ISOLATION_UNVERIFIED",
+    "standalone_command": "run --runner process",
+}
+
+
 def _error_if_not_equal(errors: list[str], label: str, actual: Any, expected: Any) -> None:
     if actual != expected:
         errors.append(f"{label} exact ordered registry mismatch")
@@ -256,6 +288,23 @@ def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str
     _error_if_not_equal(errors, "result tuples", contract.get("result_tuples"), EXPECTED_RESULT_TUPLES)
     _error_if_not_equal(errors, "acceptance predicates", contract.get("acceptance_predicates"), EXPECTED_ACCEPTANCE)
     _error_if_not_equal(errors, "exit priority", contract.get("exit_priority"), EXPECTED_EXIT_PRIORITY)
+    _validate_amendments(contract, root, errors)
+
+
+def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
+    """Opt-in amendments: exact truth, existing documents, and an optional stage placed inside the frozen lifecycle."""
+    _error_if_not_equal(errors, "contract amendments", contract.get("contract_amendments"), EXPECTED_AMENDMENTS)
+    _error_if_not_equal(errors, "optional lifecycle stages", contract.get("optional_lifecycle_stages"), EXPECTED_OPTIONAL_LIFECYCLE)
+    lifecycle = list(contract.get("physical_lifecycle") or [])
+    for row in contract.get("optional_lifecycle_stages") or []:
+        if not isinstance(row, Mapping) or row.get("after") not in lifecycle or row.get("before") not in lifecycle \
+                or lifecycle.index(row["before"]) != lifecycle.index(row["after"]) + 1 or row.get("stage") in lifecycle:
+            errors.append("optional lifecycle stage is not between two adjacent frozen stages")
+    _error_if_not_equal(errors, "optional result axes", contract.get("optional_result_axes"), EXPECTED_OPTIONAL_AXES)
+    if set(contract.get("optional_result_axes") or {}) & set(contract.get("result_axes") or {}):
+        errors.append("optional result axis shadows a frozen axis")
+    _error_if_not_equal(errors, "mutation tooling", contract.get("mutation_tooling"), EXPECTED_MUTATION_TOOLING)
+    _error_if_not_equal(errors, "model runner", contract.get("model_runner"), EXPECTED_MODEL_RUNNER)
 
 
 def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_drift: bool = False) -> dict[str, Any]:
@@ -269,6 +318,10 @@ def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_dr
     _validate_registry_shape(contract, errors)
     _validate_bindings(contract, root, errors)
     if check_drift:
+        # The amendment documents live in docs/, outside the runtime pack: checked with the projections.
+        for row in contract.get("contract_amendments") or []:
+            if isinstance(row, Mapping) and not (root / str(row.get("document"))).is_file():
+                errors.append(f"amendment document missing: {row.get('document')}")
         from tools.render_contract_docs import _rendered_files
         for relative_path, expected in _rendered_files(contract).items():
             path = root / relative_path

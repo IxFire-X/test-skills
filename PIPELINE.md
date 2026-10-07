@@ -68,6 +68,16 @@ Version: `4.0`
 - `reason_code`: preterminal `absent`; terminal `written_once`
 - `accepted`: preterminal `absent`; terminal `boolean`
 
+## Opt-in amendments
+
+- `pilot-contract-amendments-2026-10-07` (wave 2, `ACCEPTED`, opt-in `true`): §1.2, §1.5, §17 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+- optional stage `MUTATION` between `EXECUTION_TRACE` and `RETAIN_OR_CLEANUP_DECISION`; requires `skillsrc_mutation_enabled, run_authorization_mutation_requested, authoritative_pass_or_fail`; mutates `passing_generated_methods_only`; writes `run_directory_only`; proves `project_inventory_unchanged`; receipt `mutation_receipt`; axis `test_strength`; never changes `verification, accepted, dispositions, earlier_evidence`
+- mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
+- model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
+- runner evidence `command_digest, cli_name_version, model, started_finished, exit_code, session_id, stdout_digest, tokens, user_settings_loaded` → axis `isolation_evidence`; `--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`
+- optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
+- optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
+
 ## Normative result tuples
 
 - `complete_fail`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "COMPLETE", "verification": "FAIL"}`

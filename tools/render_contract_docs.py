@@ -51,6 +51,31 @@ def _mode_lines(modes: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
+    """Opt-in amendments (empty for a contract without them)."""
+    lines: list[str] = []
+    for row in contract.get("contract_amendments") or []:
+        lines.append(f"- `{row['id']}` (wave {row['wave']}, `{row['status']}`, opt-in `{str(row['opt_in']).lower()}`): §{', §'.join(row['sections'])} — `{row['document']}`")
+    for stage in contract.get("optional_lifecycle_stages") or []:
+        lines.append(f"- optional stage `{stage['stage']}` between `{stage['after']}` and `{stage['before']}`; requires `{', '.join(stage['requires'])}`; "
+                     f"mutates `{stage['mutates']}`; writes `{stage['writes']}`; proves `{stage['proves']}`; receipt `{stage['receipt']}`; axis `{stage['axis']}`; "
+                     f"never changes `{', '.join(stage['never_changes'])}`")
+    java = (contract.get("mutation_tooling") or {}).get("java")
+    if java:
+        lines.append(f"- mutation tool (Java): `{java['tool']}:{java['version']}` + `{java['plugin']}:{java['plugin_version']}`, pins `{java['pins']}`, "
+                     f"resolution `{java['resolution']}`, launcher `{java['launcher']}`, consent `{', '.join(java['consent'])}`, digest mismatch `{java['digest_mismatch']}`, "
+                     f"mutators `{java['mutators']}`, report `{java['report']}`; Python: `{contract['mutation_tooling']['python']}`")
+    runner = contract.get("model_runner")
+    if runner:
+        lines.append(f"- model runner `{runner['setting']}`: `{', '.join(runner['values'])}`; default `{runner['default']}`; presets `{', '.join(runner['presets'])}`; "
+                     f"custom template `{runner['custom_template']}`; `.skillsrc` fields `{', '.join(runner['skillsrc_fields'])}`; invocation `{runner['invocation']}`; "
+                     f"wait action `{runner['wait_action']}`; tries per part `{runner['tries_per_part']}`; standalone `{runner['standalone_command']}`")
+        lines.append(f"- runner evidence `{', '.join(runner['evidence'])}` → axis `{runner['evidence_axis']}`; `{runner['require_flag']}` rejects lower levels with `{runner['require_reason_code']}`")
+    for name, axis in (contract.get("optional_result_axes") or {}).items():
+        lines.append(f"- optional axis `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
+    return lines
+
+
 def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts = ["# Contract Reference", "", MARKER, "", "## Core Skills", ""]
     contracts.extend(f"- `{name}` — `{contract['skill_files'][name]}`" for name in contract["core_skills"])
@@ -62,6 +87,9 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
     contracts.extend(["", "## Canonical rework", "", *_rework_lines(contract["reviewer_session_contract"]["rework"])])
     contracts.extend(["", "## Review without isolation", "", *_self_review_lines(contract["reviewer_session_contract"]["self_review"])])
     contracts.extend(["", "## Review modes", "", *_mode_lines(contract["reviewer_session_contract"]["modes"])])
+    amendments = _amendment_lines(contract)
+    if amendments:
+        contracts.extend(["", "## Contract amendments (opt-in)", "", *amendments])
     contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
     pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
     pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
@@ -75,6 +103,9 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
             pipeline.append(f"- `{name}`: preterminal `{axis['preterminal']}`; terminal `{axis['terminal']}`")
         else:
             pipeline.append(f"- `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
+    amendments = _amendment_lines(contract)
+    if amendments:
+        pipeline.extend(["", "## Opt-in amendments", "", *amendments])
     pipeline.extend(["", "## Normative result tuples", ""])
     pipeline.extend(f"- `{name}`: `{json.dumps(contract['result_tuples'][name], ensure_ascii=False, sort_keys=True)}`" for name in ("complete_fail", "execution_unknown", "pre_execution_rework", "early_fatal", "review_context_limit", "invalid_finalization"))
     policies = {row["id"]: row for row in contract["policy_profiles"]}
