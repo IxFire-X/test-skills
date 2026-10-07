@@ -42,3 +42,5 @@
 {"run":"E4c-v2","part":"part-000005","model":"sonnet","tokens":146383,"tool_uses":15,"ms":69377}
 {"run":"E4c-v2","part":"part-000006","model":"sonnet","tokens":141734,"tool_uses":13,"ms":99340}
 {"run":"E3c-v2","part":"part-000001","model":"sonnet","tokens":82675,"tool_uses":7,"ms":47826}
+{"run":"E2c-p1-sonnet-r2","part":"part-000001","model":"claude-sonnet-5-5","tokens":108161,"tool_uses":16,"ms":81317}
+{"run":"E2c-p1-sonnet-r3","part":"part-000001","model":"claude-sonnet-5-5","tokens":117281,"tool_uses":16,"ms":119628}

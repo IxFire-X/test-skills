@@ -70,6 +70,7 @@ class _Code:
         self.diagnostics = list(generated.get("diagnostics") or [])
         referenced = {relation["file_id"] for relation in generated["implementation_relations"]}
         self.support_only = [file_id for file_id in self.files if file_id not in referenced]
+        self._support: dict[str, str] = {}
 
     def lines(self, file_id: str) -> list[str]:
         return self.slices[file_id].lines if file_id in self.slices else _whole_lines(self.files[file_id])
@@ -80,6 +81,11 @@ class _Code:
         return [(1, len(self.lines(file_id)))]
 
     def support_text(self, file_id: str) -> str:
+        if file_id not in self._support:
+            self._support[file_id] = self._support_text(file_id)
+        return self._support[file_id]
+
+    def _support_text(self, file_id: str) -> str:
         from tools.code_slices import shared_state_text
 
         file = self.files[file_id]
@@ -215,18 +221,29 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
                 "case_ranges": case_ranges, "requested_check": None, "input_byte_count": size,
                 "blocked_reason": "REVIEW_CONTEXT_LIMIT" if size + reserve > input_byte_budget else None}
 
-    # Greedy in document order: a case joins the current part while the part still fits.
-    # A closed part homes its SUPPORT areas, so later trial parts are sized without them.
+    # First fit decreasing: the largest cases first, each into the first part where it fits.
+    # A file's SUPPORT is answered in the first part that holds one of its cases, so a
+    # trial part is sized without the SUPPORT of files already in an earlier part (adding a
+    # case to part g never changes parts before g; parts after g can only lose SUPPORT).
+    # Inside a part the cases keep document order.
+    position = {case_id: number for number, case_id in enumerate(order)}
+
+    def trial(groups: list[list[str]], index: int, case_ids: Sequence[str]) -> bool:
+        homes.clear()
+        homes.update(file_id for group in groups[:index] for file_id in files_for(group))
+        # The trial title is at least as long as the real one («5 из 6»), so a fitting trial fits for real.
+        return make(f"part-{index + 1:06d}", "999999 из 999999", sorted(case_ids, key=position.__getitem__))["blocked_reason"] is None
+
+    homes.update(code.files)
+    alone = {case_id: make("part-000000", "x", [case_id])["input_byte_count"] for case_id in order}
     groups: list[list[str]] = []
-    current: list[str] = []
-    for case_id in order:
-        if current and make("part-000000", "x", [*current, case_id])["blocked_reason"] is not None:
-            groups.append(current)
-            homes.update(files_for(current))
-            current = []
-        current.append(case_id)
-    if current:
-        groups.append(current)
+    for case_id in sorted(order, key=lambda item: (-alone[item], position[item])):
+        index = next((number for number, group in enumerate(groups) if trial(groups, number, [*group, case_id])), None)
+        if index is None:
+            groups.append([case_id])
+        else:
+            groups[index].append(case_id)
+    groups = [sorted(group, key=position.__getitem__) for group in groups]
     homes.clear()
     parts = []
     for index, group in enumerate(groups, start=1):

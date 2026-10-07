@@ -1,0 +1,542 @@
+{
+  "set": "E2",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 11,
+  "missing_answers": [
+    "part-000002",
+    "part-000003",
+    "part-000004",
+    "part-000005",
+    "part-000006",
+    "part-000007",
+    "part-000008",
+    "part-000009",
+    "part-000010",
+    "part-000011"
+  ],
+  "input_bytes": 1842103,
+  "answer_bytes": [
+    3340
+  ],
+  "answer_bytes_total": 3340,
+  "complete": false,
+  "diagnostics": [
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000002",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000003",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000004",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000005",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000006",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000007",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000008",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000009",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000010",
+      "message": "one answer per part"
+    },
+    {
+      "code": "REVIEW_PART_MISSING_OR_DUPLICATE",
+      "path": "part-000011",
+      "message": "one answer per part"
+    }
+  ],
+  "unchecked": [
+    {
+      "scope_id": "local-TC-B1-001",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-002",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-003",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-004",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-005",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-006",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-007",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-008",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-009",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-010",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-011",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-012",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-013",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-014",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-015",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-016",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-017",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-018",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-019",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-b9644ed0ee78b091",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-cbb500ea13f82f5e",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-64eb8a436a34fa0b",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-059",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-060",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-061",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-062",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-063",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-064",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-ffdc1a7e1fe8efc4",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-020",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-021",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-022",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-024",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-025",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-026",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-027",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-028",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-029",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-030",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-031",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-032",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-033",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-034",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-035",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-9ec94931a2c3f66f",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-f0a350242c3e97b5",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-4a6a5da562bd9428",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-036",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-037",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-038",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-039",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-040",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-041",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-042",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-043",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-044",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-045",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-046",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-047",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-756516743632dee2",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-9825bc63726b9e65",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-048",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-049",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-050",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-051",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-052",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-053",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-054",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-055",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-056",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-057",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "local-TC-B1-058",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-337e83f7d26b5c23",
+      "reason": "REVIEW_PART_MISSING_OR_DUPLICATE"
+    },
+    {
+      "scope_id": "cross-df6f5b44d962ac614a8964b0d26a737fcb4d806e9bbd5c622942e62d6d62a9a2",
+      "reason": "Вне этой части: проверить, что TC-B1-033 фактически вводит имя питомца из 31 A и ожидает name/size, а TC-B1-017 с телефоном 12345678901 ожидает отклонение telephone без создания владельца, а не успех."
+    }
+  ],
+  "found": 3,
+  "seeds": 12,
+  "rows": [
+    {
+      "id": "L1",
+      "class": "literal-vs-input-or-text",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "L2",
+      "class": "literal-vs-input-or-text",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "SR1",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "TITLE_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "CREQ-B1-026"
+          ],
+          "message": "Заголовок TC-B1-017 «Сохранение владельца с телефоном 12345678901» противоречит CREQ-B1-026 и SRC-1:L18 (O04): значение из 11 цифр должно отклоняться с ошибкой telephone без создания записи. Нужно проверить, не ослаблено ли ожидание в самом кейсе."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "SR2",
+      "class": "contradicts-source",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "X1",
+      "class": "same-call-different-expectations",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "X2",
+      "class": "same-call-different-expectations",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "C1",
+      "class": "count-of-shared-resource",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "C2",
+      "class": "count-of-shared-resource",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "R1",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-036",
+            "SREQ-0010"
+          ],
+          "message": "Исходник SRC-1:L24 (O07): несуществующий префикс NoSuchLifecycle должен вернуть форму поиска с ошибкой lastName/notFound. CREQ-B1-036 есть, но ни один кейс индекса на него не ссылается (нет кейса с действием и assertion для этого исхода; номер TC-B1-023 в нумерации пропущен). Условие не покрыто."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "F1",
+      "class": "foreign-requirement-link",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-045",
+            "SREQ-0014"
+          ],
+          "message": "Исходник SRC-1:L33 (P02): имя питомца из 31 символа A отклоняется с name/size, питомец не создаётся. CREQ-B1-045 не связано ни с одним кейсом индекса: граничное отклонение имени питомца длиной 31 не покрыто."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CASE_LINKED_TO_WRONG_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-033",
+            "CREQ-B1-047",
+            "CREQ-B1-045"
+          ],
+          "message": "Кейс TC-B1-033 «Отклонение питомца при имени из 31 символа» в индексе связан с CREQ-B1-047 (вчерашняя дата рождения допускается, SRC-1:L35), а не с CREQ-B1-045 (31 символ, name/size). Связь с нерелевантным требованием не даёт покрытия; CREQ-B1-047 уже покрыто TC-B1-035."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "M1",
+      "class": "wrong-component",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "P1",
+      "class": "result-not-in-capability",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 1,
+    "BLOCKING": 3
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-E309C083E2",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-036 (NoSuchLifecycle, lastName/notFound) отсутствует в индексе кейсов; исход из O07 не покрыт."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-1CFBF57880",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-045 (имя питомца 31 символ, name/size) не связано с кейсом; TC-B1-033 ошибочно ссылается на CREQ-B1-047."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791379358.7829788,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [],
+    "part-000003": [],
+    "part-000004": [],
+    "part-000005": [],
+    "part-000006": [],
+    "part-000007": [],
+    "part-000008": [],
+    "part-000009": [],
+    "part-000010": [],
+    "part-000011": []
+  }
+}
