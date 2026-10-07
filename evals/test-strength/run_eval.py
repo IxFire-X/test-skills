@@ -173,7 +173,8 @@ def cmd_triage_check(args: argparse.Namespace) -> int:
     answer = json.loads(Path(args.answer).read_text(encoding="utf-8"))
     rows = validate({"group_ids": task["group_ids"], "text": Path(task["input_path"]).read_text(encoding="utf-8")}, answer, receipt, document)
     log = Path(args.dir) / "checks.jsonl"
-    with log.open("a", encoding="utf-8") as handle:
+    with log.open("a", encoding="utf-8", newline="
+") as handle:
         handle.write(json.dumps({"label": args.label, "answer": str(args.answer), "accepted": not rows, "errors": rows}, ensure_ascii=False) + "\n")
     print(json.dumps({"accepted": not rows, "errors": rows}, ensure_ascii=False, indent=2))
     return 0 if not rows else 1
