@@ -155,9 +155,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     _gz(out / "plan.json.gz", plan)
     _gz(out / "snapshot.json.gz", snapshot)
     # The seeds stay outside the reviewer's directory: a reviewer never sees them.
-    _seeds_path(out).write_text(json.dumps(seeds, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _seeds_path(out).write_text(json.dumps(seeds, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     schema = out / "answer.schema.json"
-    schema.write_text(json.dumps(pipeline_driver._review_schema(args.mode), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    schema.write_text(json.dumps(pipeline_driver._review_schema(args.mode), ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     skill = ROOT / "skills" / ("tc-reviewer" if key == "canonical" else "autotest-reviewer") / "SKILL.md"
     tasks = []
     for part in plan["parts"]:
@@ -167,7 +167,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
             source.write_text(envelope["text"], encoding="utf-8", newline="\n")
         else:
             source = out / f"{part['part_id']}.input.json"
-            source.write_text(json.dumps(envelope, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            source.write_text(json.dumps(envelope, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         task = {"part_id": part["part_id"], "input": str(source), "output": str(out / f"{part['part_id']}.answer.json"), "schema": str(schema),
                 "skill": str(skill), "instructions": pipeline_driver.review_task_instructions(compact=compact, fresh=True),
                 "input_bytes": source.stat().st_size, "blocked_reason": part["blocked_reason"]}
@@ -175,7 +175,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     meta = {"set": args.set, "mode": args.mode, "clean": args.clean, "review_key": key, "budget": args.budget,
             "parts": len(plan["parts"]), "blocked": sum(1 for part in plan["parts"] if part["blocked_reason"]),
             "input_bytes": sum(part["input_byte_count"] for part in plan["parts"]), "tasks": tasks}
-    (out / "tasks.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out / "tasks.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({key: value for key, value in meta.items() if key != "tasks"}, ensure_ascii=False))
     return 0
 
@@ -270,7 +270,7 @@ def cmd_score(args: argparse.Namespace) -> int:
               "severity_counts": {name: sum(1 for item in findings if item["severity"] == name) for name in SEVERITY},
               "unseeded_blocking_warning": unseeded, "corrections": [{"path": item["path"], "related_ids": item["related_ids"], "after": item["after"]} for item in corrections],
               "lint_dispositions": result.get("lint_dispositions", []), "tries": tries}
-    (directory / "score.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (directory / "score.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({key: report[key] for key in ("set", "mode", "clean", "parts", "found", "seeds", "complete", "severity_counts", "answer_bytes_total")}, ensure_ascii=False))
     for row in rows:
         print(("FOUND " if row["found"] else "MISSED") + f" {row['id']} {row['class']}")
