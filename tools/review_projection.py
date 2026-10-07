@@ -179,9 +179,13 @@ def case_text(case: Mapping[str, Any]) -> str:
     return "\n".join(out)
 
 
-def _step(step: Mapping[str, Any]) -> list[str]:
+def _step(step: Mapping[str, Any], *, dense: bool = False) -> list[str]:
     out = _text("  ", f"[{step.get('step_id')}] action", step.get("action"))
-    out.extend(_text("    ", "data", step.get("test_data")))
+    if not dense:
+        out.extend(_text("    ", "data", step.get("test_data")))
+    elif not step.get("inputs"):
+        # With inputs, the human Test Data restates them; the code implements the inputs.
+        out.extend(_text("    ", "data", _compact_data(step.get("test_data"))))
     out.append(f"    call: {_operation(step.get('operation'))}")
     for item in step.get("inputs") or []:
         line = f"    [{item.get('input_id')}] {_target(item.get('target') or {})} = {_source(item.get('source') or {})}"
@@ -198,7 +202,9 @@ def _step(step: Mapping[str, Any]) -> list[str]:
         rest = _rest(blocker, ("blocker_id", "code", "field_path", "reason", "provenance"))
         if rest:
             out.append(f"      extra:{rest}")
-    for output in step.get("outputs") or []:
+    if dense and step.get("outputs"):
+        out.append(f"    out: {', '.join(_output_token(output) for output in step['outputs'])}")
+    for output in [] if dense else step.get("outputs") or []:
         line = f"    out {output.get('output_id')} ← {_observed(output.get('source') or {})}"
         line += _type(output.get("semantic_type")) + _types(output.get("type_provenance"))
         line += _rest(output, ("output_id", "source", "semantic_type", "type_provenance", "display_order"))
@@ -220,6 +226,65 @@ def _step(step: Mapping[str, Any]) -> list[str]:
     if rest:
         out.append(f"    extra:{rest}")
     return out
+
+
+def _compact_data(value: Any) -> Any:
+    """Test data that is a JSON document, on one line: whitespace between tokens dropped, tokens byte for byte."""
+    if not isinstance(value, str) or not value.lstrip().startswith(("{", "[")):
+        return value
+    try:
+        json.loads(value)
+    except ValueError:
+        return value
+    out, in_string, escaped = [], False, False
+    for char in value:
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            out.append(char)
+            in_string = True
+        elif char not in " \t\r\n":
+            out.append(char)
+    return "".join(out)
+
+
+def _output_token(output: Mapping[str, Any]) -> str:
+    source = output.get("source") or {}
+    if source.get("kind") == "project_result" and source.get("name") == output.get("output_id") and set(source) == {"kind", "name"}:
+        text = str(output.get("output_id"))
+    else:
+        text = f"{output.get('output_id')}←{_observed(source)}"
+    text += _type(output.get("semantic_type")) + _types(output.get("type_provenance"))
+    return text + _rest(output, ("output_id", "source", "semantic_type", "type_provenance", "display_order"))
+
+
+def automation_case_text(case: Mapping[str, Any]) -> str:
+    """The case as the automation reviewer needs it: same anchors as ``case_text``, denser lines.
+
+    Everything generated code must implement stays exact (operations, inputs, outputs,
+    expectations, assertions, blockers).  Test data that is JSON goes on one line,
+    outputs of a step share one line (``name:type`` when it is the project result of the
+    same name), and management, priority and categories — case-review fields — are left out.
+    """
+    out = [f"[{case.get('case_id')}] {_clean(case.get('title'))}".split("\n")[0]]
+    out.extend(f"  | {line}" for line in _clean(case.get("title")).split("\n")[1:])
+    out.append(f"  requirements: {', '.join(case.get('requirement_ids') or [])}")
+    out.extend(_text("  ", "objective", case.get("objective")))
+    for item in case.get("preconditions") or []:
+        out.extend(_text("  ", "pre", item))
+    extra = _rest(case, ("case_id", "title", "priority", "categories", "requirement_ids", "objective", "preconditions",
+                         "management", "steps", "display_order"))
+    if extra:
+        out.append(f"  extra:{extra}")
+    for step in case.get("steps") or []:
+        out.extend(_step(step, dense=True))
+    return "\n".join(out)
 
 
 def _params(rows: Sequence[Mapping[str, Any]] | None, *, optional: bool) -> str:

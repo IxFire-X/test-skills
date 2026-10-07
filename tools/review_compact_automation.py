@@ -1,7 +1,8 @@
 """``compact-v1`` automation review: case slices, one SUPPORT area per file, no pair areas.
 
-Each case is reviewed once, in one part, from its canonical projection and the exact
-slice of its test method (original line numbers).  The rest of the file — header,
+Each case is reviewed once, in one part, from its automation view
+(``review_projection.automation_case_text``: every anchor and binding of the canonical
+projection, denser) and the exact slice of its test method (original line numbers).  The rest of the file — header,
 fields, setup, fixtures, helpers, nested types — is the file's SUPPORT code, sent in
 every part that holds one of its cases, with a shared-state table built by code; its
 own area is answered in the first such part.  Every part has a ``cross`` area over
@@ -18,7 +19,7 @@ from typing import Any, Mapping, Sequence
 
 from tools.review_compact import MODE, PLAN_VERSION, _Context, validate_compact_plan
 from tools.review_parts import review_digest
-from tools.review_projection import build_projection
+from tools.review_projection import automation_case_text, build_projection
 
 
 def _slices(automation: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
@@ -121,7 +122,7 @@ class _Code:
         return "\n".join(out)
 
 
-def _part_text(context: _Context, code: _Code, *, part_id: str, title: str, areas: Sequence[Mapping[str, Any]], case_ids: Sequence[str],
+def _part_text(context: _Context, code: _Code, views: Mapping[str, str], *, part_id: str, title: str, areas: Sequence[Mapping[str, Any]], case_ids: Sequence[str],
                files: Sequence[str], lint: Sequence[Mapping[str, Any]], full_capabilities: bool) -> str:
     spec = context.specification
     document = context.document
@@ -157,7 +158,7 @@ def _part_text(context: _Context, code: _Code, *, part_id: str, title: str, area
     if case_ids:
         out += ["", "## Кейсы и их методы"]
         for case_id in case_ids:
-            out += [context.cases[case_id], code.case_code(case_id), ""]
+            out += [views[case_id], code.case_code(case_id), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -174,6 +175,7 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
     code = _Code(automation, document)
     lint = [*lint_automation(document, automation, code.slices), *(row for row in lint_document(document) if row["case_ids"])]
     context = _Context(spec, payload, lint)
+    views = {case["case_id"]: automation_case_text(case) for case in document["test_cases"]}
     reserve = int(spec["response_reserve_bytes"])
     order = context.case_order
 
@@ -191,7 +193,7 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
                 areas.append({"area_id": "local-file-" + file_id, "kind": "support", "targets": [file_id],
                               "fingerprint": review_digest(code.support_text(file_id))})
         areas.extend({"area_id": "local-" + case_id, "kind": "local", "targets": [case_id],
-                      "fingerprint": review_digest({"case": context.cases[case_id], "code": code.case_code(case_id)})} for case_id in case_ids)
+                      "fingerprint": review_digest({"case": views[case_id], "code": code.case_code(case_id)})} for case_id in case_ids)
         if case_ids:
             areas.append({"area_id": "cross-" + review_digest(list(case_ids))[7:23], "kind": "cross", "targets": list(case_ids),
                           "fingerprint": review_digest([context.case_fingerprint(case_id) for case_id in case_ids])})
@@ -202,7 +204,7 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
         areas = areas_for(case_ids)
         rows = context.lint_for(case_ids, source=False)
         full = any(area["kind"] == "support" for area in areas)
-        text = _part_text(context, code, part_id=part_id, title=title, areas=areas, case_ids=case_ids, files=files, lint=rows, full_capabilities=full)
+        text = _part_text(context, code, views, part_id=part_id, title=title, areas=areas, case_ids=case_ids, files=files, lint=rows, full_capabilities=full)
         size = len(text.encode("utf-8"))
         ranges = [[start, end, file_id] for file_id in files for start, end in code.support_ranges(file_id)]
         case_ranges = {case_id: code.case_ranges(case_id) for case_id in case_ids}
@@ -214,15 +216,18 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
                 "blocked_reason": "REVIEW_CONTEXT_LIMIT" if size + reserve > input_byte_budget else None}
 
     # Greedy in document order: a case joins the current part while the part still fits.
+    # A closed part homes its SUPPORT areas, so later trial parts are sized without them.
     groups: list[list[str]] = []
     current: list[str] = []
     for case_id in order:
         if current and make("part-000000", "x", [*current, case_id])["blocked_reason"] is not None:
             groups.append(current)
+            homes.update(files_for(current))
             current = []
         current.append(case_id)
     if current:
         groups.append(current)
+    homes.clear()
     parts = []
     for index, group in enumerate(groups, start=1):
         part = make(f"part-{index:06d}", f"{index} из {len(groups)}", group)

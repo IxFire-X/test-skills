@@ -45,7 +45,8 @@ relation-array digest, runner compatibility) are verified by the controller, not
 part: a part without them is complete, so do not report
 `REVIEW_PART_GLOBAL_BINDINGS_NOT_IN_ENVELOPE` or mark scopes unchecked for that reason.
 
-In `compact-v1` a part carries exact method slices (original line numbers), the SUPPORT code of
+In `compact-v1` a part carries the automation view of its cases (every anchor and binding of the
+canonical projection; human Test Data only for steps without inputs), exact method slices (original line numbers), the SUPPORT code of
 their file once, a shared-state table and code-check suspicions; there are no pair scopes, and the
 SUPPORT and cross areas cover test interactions. Missing slices never shorten the evidence: a file
 that cannot be sliced is sent whole or its part is blocked.

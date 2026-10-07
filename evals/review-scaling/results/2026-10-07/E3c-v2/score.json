@@ -1,0 +1,187 @@
+{
+  "set": "E3",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 49005,
+  "answer_bytes": [
+    6599
+  ],
+  "answer_bytes_total": 6599,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "A1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERT_EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "ASSERT-B1-006-01-1-1",
+            "SYMBOL-B1-006"
+          ],
+          "message": "L146 asserts status 404, but Expected and CREQ-B1-005 require 400 Bad Request for a missing id parameter. The assertion checks the wrong oracle and contradicts the case."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A2",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_BINDING_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "SYMBOL-B1-009"
+          ],
+          "message": "L179 sends PUT /students/42/update; the case input is /students/10/update with body id 42. With equal path and body ids the check that the path id is not substituted (CREQ-B1-008) is lost."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A3",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_BINDING_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "SYMBOL-B1-008"
+          ],
+          "message": "The body of TC-B1-008 puts lastName=null explicitly (L166); the case input {firstName:Olga,id:6} has no lastName. Explicit null is not the partial body without the field required by CREQ-B1-007, so the scenario is not exercised."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A4",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "HELPER_EXPECTED_DATA_DRIFT",
+          "related_ids": [
+            "FILE-B1-student-controller-pipeline-test",
+            "TC-B1-002",
+            "TC-B1-012",
+            "ASSERT-B1-002-01-1-3",
+            "ASSERT-B1-002-01-1-4",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2"
+          ],
+          "message": "fourStudents() (L80-85) returns only 3 students; (4, Sanjay, Mishra) is missing. Assertions hasSize(4) (L109), isEqualTo(fourStudents()) (L110, L214, L219) contradict the canonical four-element list and CREQ-B1-002; they fail or check the wrong data."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A5",
+      "class": "shared-static-state",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Static pathId (L35) is read to build paths in TC-B1-003 (L116) and TC-B1-004 (L126), and TC-B1-003 sets it to 0 (L117). TC-B1-004 passes only if TC-B1-003 ran first; a repeated or reordered run requests /students/5 instead of /students/0. Canonical paths are literals; use them."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A6",
+      "class": "weakened-check",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERT_WEAKENED",
+          "related_ids": [
+            "TC-B1-011",
+            "ASSERT-B1-011-01-1-2",
+            "SYMBOL-B1-011"
+          ],
+          "message": "L200 only checks text(response) isNotNull(); Expected requires text equals 'Hello World!' (CREQ-B1-010). Any non-null body would pass, so the assertion does not observe the expected value."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 0,
+    "BLOCKING": 6
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-542CFAB338",
+      "decision": "confirmed",
+      "reason": "Path is built from mutable static pathId, not the literal /students/5; value depends on run order/repeat."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EE64C7CCAC",
+      "decision": "confirmed",
+      "reason": "Path from pathId is 0 only after TC-B1-003 ran; otherwise /students/5 is requested instead of /students/0."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-BF1FB0A36A",
+      "decision": "confirmed",
+      "reason": "L146 asserts 404, expected 400."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-FC54E69D5E",
+      "decision": "confirmed",
+      "reason": "Body adds lastName=null that the step input does not contain."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-688AA3DA9D",
+      "decision": "confirmed",
+      "reason": "Request goes to /students/42/update, the case requires /students/10/update."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-F795BD7551",
+      "decision": "confirmed",
+      "reason": "L200 uses isNotNull() instead of equality with 'Hello World!'."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791357665.4460056,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

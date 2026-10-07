@@ -86,7 +86,10 @@ format examples are in the review contract. A summary does not replace original 
 ## compact-v1 parts
 
 When the task says `review_mode: compact-v1`, the only input is the part text (`.input.md`).
-It holds the cases of the part (the canonical projection with ID anchors), the exact slice
+It holds the cases of the part in the automation view of the canonical projection (the same
+ID anchors; a step's outputs on one `out:` line, `name:type` for the project result of the
+same name; a step's Test Data only when the step has no inputs, since the code implements
+the `[INPUT-…]` bindings; no management, priority or categories), the exact slice
 of each case's test method with original line numbers (`L0123| …`), the file's SUPPORT code
 (header, fields, setup, fixtures, helpers and nested types, also with line numbers) and a
 shared-state table built by code. Code checks run before you: a changed ASSERT ID, a

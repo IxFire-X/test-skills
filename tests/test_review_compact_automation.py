@@ -2,6 +2,8 @@
 
 * step5 ``9340016c`` automation review is one part (instead of 6), with the exact method
   slice of every case, the SUPPORT code once and a shared-state table;
+* the automation case view keeps every anchor and binding; Petclinic ``b7733d39`` fits
+  six parts (Р14), the full capabilities only in the SUPPORT home part;
 * code checks before the model flag a changed literal, a changed path and an extra body
   field as suspicions, and nothing on the clean class;
 * a file that cannot be sliced goes whole into the part, or blocks it when it does not fit;
@@ -10,15 +12,17 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 from pathlib import Path
 
 from tests.live_step5 import review_state
-from tests.review_scaling_helpers import clean_compact_answer, part_text
+from tests.review_scaling_helpers import clean_compact_answer, eval_data, part_text
 from tests.test_review_fixes_driver import SavedModel, _drive, _project, _start
 from tools import review_compact
 from tools.review_modes import build_offline_plan
 from tools.review_parts import review_digest
+from tools.review_projection import _compact_data, anchors, automation_case_text, case_text
 
 
 def _automation_snapshot() -> dict:
@@ -43,6 +47,40 @@ def test_step5_automation_review_is_one_part_with_exact_slices() -> None:
     assert plan["lint"] == []
     ranges = part["case_ranges"]["TC-B1-002"]
     assert [88 + 12, 110] in [row[:2] for row in ranges] and [78, 84] in [row[:2] for row in ranges]  # method and fourStudents()
+
+
+def test_the_automation_case_view_keeps_every_anchor_and_every_binding() -> None:
+    documents = [_automation_snapshot()["document"], eval_data.petclinic_b7733d39_canonical(), eval_data.petclinic_document()]
+    for document in documents:
+        for case in document["test_cases"]:
+            dense = automation_case_text(case)
+            assert anchors(dense) == anchors(case_text(case))
+            for step in case["steps"]:
+                for output in step.get("outputs") or []:
+                    assert re.search(rf"\b{re.escape(output['output_id'])}\b", dense)
+                if not step.get("inputs"):
+                    assert _compact_data(step["test_data"]).split("\n")[0] in dense
+    full = sum(len(case_text(case)) for case in documents[1]["test_cases"])
+    assert sum(len(automation_case_text(case)) for case in documents[1]["test_cases"]) < 0.7 * full
+
+
+def test_compact_test_data_drops_only_whitespace_between_json_tokens() -> None:
+    text = '{\n  "a": "x  y\\" z",\n  "b": [1.50, 1e5, -0],\n  "c": "<D из шага 1>"\n}'
+    assert _compact_data(text) == '{"a":"x  y\\" z","b":[1.50,1e5,-0],"c":"<D из шага 1>"}'
+    assert json.loads(_compact_data(text)) == json.loads(text)
+    for other in ("D — дата сервера", "[не JSON", "", None, {"kind": "x"}):
+        assert _compact_data(other) == other
+
+
+def test_petclinic_automation_review_fits_six_parts() -> None:
+    plan = build_offline_plan(eval_data.petclinic_automation_snapshot(), mode="compact-v1", review_key="r1")
+    parts = plan["parts"]
+    assert len(parts) <= 6 and not any(part["blocked_reason"] for part in parts)
+    assert sorted(case for part in parts for case in part["case_ids"]) == sorted(case["case_id"] for case in
+                                                                                 eval_data.petclinic_b7733d39_canonical()["test_cases"])
+    # Only the part that homes the SUPPORT code carries the full capabilities.
+    assert [("## Возможности (полностью)" in part["text"]) for part in parts] == [True] + [False] * (len(parts) - 1)
+    assert [any(area["kind"] == "support" for area in part["areas"]) for part in parts] == [True] + [False] * (len(parts) - 1)
 
 
 def test_code_checks_flag_literal_path_and_extra_body_field() -> None:

@@ -1,0 +1,300 @@
+{
+  "set": "E4",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 6,
+  "missing_answers": [],
+  "input_bytes": 1021957,
+  "answer_bytes": [
+    5072,
+    4699,
+    6046,
+    5317,
+    5027,
+    3900
+  ],
+  "answer_bytes_total": 30061,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "cross-eb2566aa29d55328a092e980e05fba23cd29251b990f93f9460678fafe6a1135",
+      "reason": "Check lastSnapshot (L60) usage: static field written by case029 and read by case030 creates test-order dependence; verify it is not relied on across methods/contexts."
+    },
+    {
+      "scope_id": "cross-6ea69132cb2cbc15d7d4052edceb6ff37c916706c8e895457d587298b561a0ac",
+      "reason": "Verify that case030 does not depend on case029 through static lastSnapshot (L60) and is independent of execution order, as CREQ-B1-S30 requires."
+    },
+    {
+      "scope_id": "cross-974db3bbda5b243758ad09fbcf5560f2231c50e19396801502dfb69b98f7e22d",
+      "reason": "calendar() даёт tomorrow=D+2 (L107); проверить кейсы других частей, использующие STEP-01.tomorrow (D+1) как дату визита или границу: их значения и ожидания могут быть искажены."
+    },
+    {
+      "scope_id": "cross-9f14756c46037c091620ca871b77dace4a8d8fe1ed7389d7438c1603e5b62053",
+      "reason": "Static field lastSnapshot (L60) is written by case029 and read by case030 per shared-state table; check order dependence and that the read value is produced in the same test, not left from another test."
+    },
+    {
+      "scope_id": "cross-975ea019384724df0308d4c1515da710238baa76effee601eb5969066a4e54b3",
+      "reason": "SUPPORT-таблица: static lastSnapshot (L60) пишет case029, читает case030; зависимость от порядка запуска методов вне этой части, нужна проверка независимости (требование S30)."
+    }
+  ],
+  "found": 4,
+  "seeds": 4,
+  "rows": [
+    {
+      "id": "P1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-001",
+            "ASSERT-B1-001-05-03",
+            "STEP-B1-001-05",
+            "SYMBOL-TC-B1-001"
+          ],
+          "message": "L636 asserts r5.address equals \"10 Test Str\", but the case (EXP-B1-001-05, INPUT-B1-001-04-06) requires \"10 Test Street\". The truncated literal makes the check fail on correct behavior (or hide a defect); expected value must be restored to the canonical one."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P2",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "STEP-B1-001-01",
+            "ASSERT-B1-001-01-03",
+            "FILE-owner-lifecycle-b7733d39"
+          ],
+          "message": "calendar() at L106-L107 returns tomorrow=d.plusDays(2) (equal to dayAfter) instead of D+1 required by CAP-B1-calendar and STEP-01 (D-1, D+1, D+2, D+3). Only a date-format regex is asserted here, so the drift is invisible, but any case later using tomorrow as a visit/birth date gets a wrong D+2 input."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar",
+            "TC-B1-011",
+            "TC-B1-012",
+            "TC-B1-013",
+            "ASSERT-B1-011-01-03"
+          ],
+          "message": "L107 in calendar(): result 'tomorrow' is d.plusDays(2), so tomorrow equals dayAfter (D+2). Canonical STEP-*-01 requires D+1 (cap out tomorrow, 'D-1, D+1, D+2, D+3'). Shared helper used by every case (step 01); regex-only asserts (01-03/04) do not catch it; later cases using tomorrow get wrong dates. Fix: d.plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar",
+            "STEP-B1-024-01",
+            "ASSERT-B1-024-01-03"
+          ],
+          "message": "calendar() (L106-107) вычисляет tomorrow как d.plusDays(2), совпадая с dayAfter; по CAP-B1-calendar/CREQ-B1-S3 и EXP-xxx-01 tomorrow = D+1. Проверки STEP-01 только по regex yyyy-MM-dd и дрейф не ловят, поэтому он скрыт. В кейсах этой части tomorrow не используется, но общий хелпер выдаёт неверное значение для всех кейсов файла (в т.ч. визитов с D+1). Требуется d.plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_LITERAL_DRIFT_TOMORROW",
+          "related_ids": [
+            "TC-B1-037",
+            "STEP-B1-037-03",
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39"
+          ],
+          "message": "calendar() L106-107 builds tomorrow with d.plusDays(2) (equal to dayAfter), but EXP-B1-035..046-01 and CREQ-B1-P03-tomorrow require D+1. case037 passes r1.tomorrow as birthDate (L2530), so it submits D+2 and the D+1 boundary is untested: an off-by-one validator accepting D+1 would pass. Step-01 regex asserts cannot detect it. Fix: plusDays(1). Affects every case/part that uses tomorrow."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar",
+            "TC-B1-049",
+            "TC-B1-050",
+            "TC-B1-048",
+            "TC-B1-054",
+            "TC-B1-055",
+            "ASSERT-B1-049-03-04",
+            "ASSERT-B1-049-03-05"
+          ],
+          "message": "Общий хелпер calendar() (L106-107) кладёт в tomorrow d.plusDays(2), а должно быть plusDays(1) (D+1): tomorrow совпадает с dayAfter. Кейс 049 ожидает visitDate/minVisitDate = D+1, приложение отдаёт D+1, ассерты сравнивают с D+2 и падают. В 050 визит сохраняется и читается с D+2, а не D+1; в 048, 054, 055 вход дрейфует от D+1. Нужна доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39",
+            "STEP-B1-059-01",
+            "TC-B1-059",
+            "TC-B1-060",
+            "TC-B1-061",
+            "TC-B1-062",
+            "ASSERT-B1-061-06-01",
+            "ASSERT-B1-061-08-04",
+            "ASSERT-B1-061-08-05",
+            "ASSERT-B1-062-11-01"
+          ],
+          "message": "L106-107: calendar() кладёт в tomorrow d.plusDays(2) (как dayAfter), а канон требует D+1 (EXP-061-06/08, EXP-062-11). Даты визитов и ожидания в 059-062 дрейфуют; regex-проверки 01-03 дрейф не ловят. Исправить на d.plusDays(1)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P3",
+      "class": "shared-static-state",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "SHARED_STATIC_STATE",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "TC-B1-029",
+            "TC-B1-030"
+          ],
+          "message": "static field lastSnapshot (L60) is written by case029 and read by case030 per the shared-state table: order-dependent unless carried only within one method. Not exercised by this part's cases; confirm in the part with 029/030."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "STATIC_SHARED_SNAPSHOT_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-030",
+            "TC-B1-029",
+            "INPUT-B1-030-04-01",
+            "ASSERT-B1-030-04-01",
+            "FILE-owner-lifecycle-b7733d39"
+          ],
+          "message": "case030 STEP-04 (L2153-2154) использует статическое поле lastSnapshot (L60), записанное case029 (L2073), а не STEP-B1-030-02.snapshot (r2 своего кейса). Контекст/H2 уникальны на метод (DirtiesContext), снимок case029 содержит Rex у Boris и другие ID: при порядке 029->030 сверка ложно падает, при запуске 030 отдельно before=null даёт NPE. Нарушены независимость от порядка (CREQ-B1-S30) и привязка INPUT-B1-030-04-01; проверка отсутствия побочных эффектов не работает. Нужно r2.get(\"snapshot\") и удалить static-поле."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P4",
+      "class": "stub-instead-of-application",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "STEP_NOT_EXECUTED_STUBBED_RESULT",
+          "related_ids": [
+            "TC-B1-040",
+            "STEP-B1-040-03",
+            "ASSERT-B1-040-03-01",
+            "ASSERT-B1-040-03-02",
+            "SYMBOL-TC-B1-040"
+          ],
+          "message": "case040 L2674: r3 is a hand-built map (view=pets/createOrUpdatePetForm, errorFields=[type], exceptionType=\"\") instead of request(...). The POST /owners/{ownerId}/pets/new with type=dragon never reaches MockMvc, so ASSERT-03-01/02 and the exceptionType check are tautological and the snapshot check L2680 only compares two reads with no action between. Requires rework: call request() with method, path, today, ownerId, name=Rex, birthDate=2020-01-02, type=dragon."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 1,
+    "WARNING": 1,
+    "BLOCKING": 10
+  },
+  "unseeded_blocking_warning": [
+    {
+      "severity": "BLOCKING",
+      "code": "VISIT_ORDER_CHECK_VACUOUS",
+      "message": "Из-за tomorrow==dayAfter (оба D+2) оба новых визита имеют одну дату, сравнение истории по возрастанию даты (STEP-061-07/11, sqlGraph L212) не различает порядок и не доказывает V07-order; шаг 08 сверяет D+2, а канон ждёт D+1.",
+      "evidence": [
+        "TC-B1-061",
+        "CREQ-B1-V07-order",
+        "STEP-B1-061-03",
+        "STEP-B1-061-05",
+        "ASSERT-B1-061-07-03"
+      ],
+      "related_ids": [
+        "TC-B1-061",
+        "CREQ-B1-V07-order",
+        "STEP-B1-061-03",
+        "STEP-B1-061-05",
+        "ASSERT-B1-061-07-03"
+      ]
+    }
+  ],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-B333CE572A",
+      "decision": "confirmed",
+      "reason": "L636 asserts \"10 Test Str\" instead of \"10 Test Street\" required by EXP-B1-001-05; real literal drift."
+    },
+    {
+      "part_id": "part-000004",
+      "lint_id": "LINT-DE7E9A0B3B",
+      "decision": "confirmed",
+      "reason": "case040 L2674 builds r3 as literal map; no POST is performed, real defect (stubbed request)."
+    },
+    {
+      "part_id": "part-000004",
+      "lint_id": "LINT-8D05A12977",
+      "decision": "confirmed",
+      "reason": "Path /owners/{ownerId}/pets/new absent from case040: request() is never called, result is hardcoded L2674."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791357682.4555633,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [
+      {
+        "at": 1791357706.6837,
+        "accepted": false,
+        "codes": [
+          "REVIEW_FINDING_UNKNOWN_ID"
+        ]
+      },
+      {
+        "at": 1791357712.3632278,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000003": [
+      {
+        "at": 1791357715.596032,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000004": [
+      {
+        "at": 1791357693.6417716,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000005": [
+      {
+        "at": 1791357687.166407,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000006": [
+      {
+        "at": 1791357712.9246817,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}
