@@ -1,0 +1,190 @@
+{
+  "set": "E1",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55992,
+  "answer_bytes": [
+    6885
+  ],
+  "answer_bytes_total": 6885,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "S1",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_DIFFERS_FROM_EXPECTATION",
+          "related_ids": [
+            "TC-B1-005",
+            "CREQ-B1-004"
+          ],
+          "message": "ASSERT-B1-005-01-1-2 проверяет id 8, тогда как запрос id=7 (INPUT-B1-005-01-3), текст EXP-B1-005-01-1 и CREQ-B1-004/AC-4 требуют id 7. Кейс упадёт на корректной реализации."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S2",
+      "class": "contradicts-source-and-other-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-004",
+            "CREQ-B1-003"
+          ],
+          "message": "EXP-B1-004-01-1 и ASSERT-B1-004-01-1-2 ждут firstName \"Ramesh\" для GET /students/0, но CREQ-B1-003 (SRC-1:L51) задаёт для GET /students/{id} firstName \"Ramsesh\" (как в TC-B1-003). Литерал в ожидании и проверке неверен."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S3",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-010",
+            "CREQ-B1-009"
+          ],
+          "message": "EXP-B1-010-01-1 и ASSERT-B1-010-01-1-2 ждут текст \"Student Deleted!\", а CREQ-B1-009 (SRC-1:L76, AC-7) требует \"Student Successfully Deleted!\"."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S4",
+      "class": "shared-state-list",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "STATE_CONTRADICTS_STATELESS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-012",
+            "CREQ-B1-012",
+            "CREQ-B1-002"
+          ],
+          "message": "STEP-B1-012-02 и -03 ждут 5 студентов (с id 9) в GET /students после POST /students/create, но CREQ-B1-012 (SRC-1:L95) и CREQ-B1-002 требуют: POST не меняет GET /students, всегда 4 студента. Кейс должен проверять неизменность списка из 4 студентов, а не появление нового."
+        },
+        {
+          "severity": "WARNING",
+          "code": "CROSS_CASE_CONFLICT",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012"
+          ],
+          "message": "Один и тот же вызов GET /students ожидается с 4 элементами в TC-B1-002 и с 5 в TC-B1-012; по CREQ-B1-012 верен TC-B1-002, TC-B1-012 нужно привести в соответствие (см. STATE_CONTRADICTS_STATELESS_REQUIREMENT)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S5",
+      "class": "wrong-component",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "COMPONENT_MISMATCH",
+          "related_ids": [
+            "TC-B1-007"
+          ],
+          "message": "management.components[0] кейса TC-B1-007 равно \"HelloWorldController\", тогда как POST /students/create обслуживает StudentController (SRC-1:L60); у остальных кейсов StudentController."
+        }
+      ],
+      "corrections": [
+        {
+          "path": "/test_cases/6/management/components/0",
+          "after": "StudentController"
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-010"
+          ],
+          "message": "CREQ-B1-010 (GET /hello-world → 200 и \"Hello World!\", SRC-1:L78-L80, AC-8) не покрыт ни одним кейсом; в нумерации кейсов пропущен TC-B1-011, вероятно потерян кейс для этого требования."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 2,
+    "BLOCKING": 5
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [
+    {
+      "path": "/test_cases/6/management/components/0",
+      "related_ids": [
+        "TC-B1-007"
+      ],
+      "after": "StudentController"
+    }
+  ],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-810195B8A1",
+      "decision": "confirmed",
+      "reason": "ASSERT-B1-005-01-1-2 содержит id 8, а запрос и ожидание — id 7."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-C621671AD4",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-010 (GET /hello-world) действительно не покрыт кейсом."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EAA185637A",
+      "decision": "confirmed",
+      "reason": "TC-B1-012 ожидает 5 студентов вопреки CREQ-B1-012; расхождение — дефект TC-B1-012."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-B6937281D1",
+      "decision": "confirmed",
+      "reason": "По CREQ-B1-003 верно Ramsesh; TC-B1-004 с Ramesh ошибочен."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-1909D9DE81",
+      "decision": "confirmed",
+      "reason": "Ожидание 5 в TC-B1-012 противоречит CREQ-B1-012: состояние не хранится, список всегда из 4."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791367407.390036,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}
