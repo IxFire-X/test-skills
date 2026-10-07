@@ -150,8 +150,8 @@ def cmd_triage_plan(args: argparse.Namespace) -> int:
             "tasks": [{"task_id": item["task_id"], "label": item["triage_label"], "group_ids": item["group_ids"], "input_path": item["inputs"][0],
                        "skill_path": item["skill_path"], "schema_path": item["schema_path"], "instructions": item["instructions"]} for item in tasks],
             "summary": {"killed": receipt["totals"]["killed"], "survived": receipt["totals"]["survived"], "groups": len(receipt["survivor_groups"])}}
-    (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    (out / "receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (out / "receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     return 0
 
@@ -173,8 +173,7 @@ def cmd_triage_check(args: argparse.Namespace) -> int:
     answer = json.loads(Path(args.answer).read_text(encoding="utf-8"))
     rows = validate({"group_ids": task["group_ids"], "text": Path(task["input_path"]).read_text(encoding="utf-8")}, answer, receipt, document)
     log = Path(args.dir) / "checks.jsonl"
-    with log.open("a", encoding="utf-8", newline="
-") as handle:
+    with log.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps({"label": args.label, "answer": str(args.answer), "accepted": not rows, "errors": rows}, ensure_ascii=False) + "\n")
     print(json.dumps({"accepted": not rows, "errors": rows}, ensure_ascii=False, indent=2))
     return 0 if not rows else 1
@@ -213,7 +212,7 @@ def cmd_triage_score(args: argparse.Namespace) -> int:
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.json:
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.json).write_text(text + "\n", encoding="utf-8")
+        Path(args.json).write_text(text + "\n", encoding="utf-8", newline="\n")
     print(text)
     return 0
 
