@@ -1,9 +1,31 @@
 name: Portable implementation gate
 
+# Runs for pull requests and for pushes to main only: a push to a feature branch
+# with an open pull request used to start the whole matrix twice.
+# Human-readable documents that no check reads do not start a run. CONTRACTS.md,
+# PIPELINE.md and skills/ are verified by ci_gate, so they are not ignored.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'QUICKSTART.md'
+      - 'USAGE.md'
+      - 'HOW-IT-WORKS.md'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'QUICKSTART.md'
+      - 'USAGE.md'
+      - 'HOW-IT-WORKS.md'
   workflow_dispatch:
+
+# A newer push to the same branch or pull request cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
