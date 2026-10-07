@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/suite-manifest.schema.json",
+  "title": "Living suite manifest (wave 3)",
+  "description": "suite-manifest.json in the suite directory (.skillsrc suite.path): requirement keys and digests, test cases, their test methods and slice digests, status and quarantine, strength, code surface snapshot. Digests show human edits: the package changes only what still matches.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "package_version", "suite_id", "module_id", "source_run", "last_run", "id_pattern", "documents", "requirements", "cases", "files", "code_surface", "suite_files", "history"],
+  "properties": {
+    "format_version": {"const": "1.0.0"},
+    "package_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "suite_id": {"type": "string", "pattern": "^SUITE-[A-Za-z0-9._-]{1,120}$"},
+    "module_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source_run": {"$ref": "#/$defs/run"},
+    "last_run": {"$ref": "#/$defs/run"},
+    "id_pattern": {"type": ["string", "null"], "maxLength": 200},
+    "documents": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/digest"}}}},
+    "requirements": {"type": "array", "items": {"$ref": "#/$defs/requirement"}},
+    "cases": {"type": "array", "items": {"$ref": "#/$defs/case"}},
+    "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "code_surface": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/surface"}]},
+    "suite_files": {"type": "object", "additionalProperties": false, "required": ["canonical", "markdown", "html", "csv"], "properties": {
+      "canonical": {"$ref": "#/$defs/suite_file"}, "markdown": {"$ref": "#/$defs/suite_file"}, "html": {"$ref": "#/$defs/suite_file"}, "csv": {"$ref": "#/$defs/suite_file"}}},
+    "history": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["run_id", "profile", "action"], "properties": {
+      "run_id": {"$ref": "#/$defs/run_id"}, "profile": {"enum": ["local-pilot-v1", "suite-update-v1", "migration"]}, "action": {"enum": ["CREATED", "UPDATED", "MIGRATED"]},
+      "from_format": {"type": "string", "maxLength": 32}}}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "run_id": {"type": "string", "pattern": "^(?:[0-9a-f]{32}|legacy-[A-Za-z0-9._-]{1,64})$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\\\:*?\"<>|]+$", "not": {"pattern": "(?:^|/)\\.\\.(?:/|$)|^/"}},
+    "run": {"type": "object", "additionalProperties": false, "required": ["run_id", "attempt_id", "profile", "verification", "accepted"], "properties": {
+      "run_id": {"$ref": "#/$defs/run_id"}, "attempt_id": {"type": ["string", "null"], "pattern": "^[0-9a-f]{32}$"},
+      "profile": {"enum": ["local-pilot-v1", "suite-update-v1", "migration"]},
+      "verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", null]}, "accepted": {"type": ["boolean", "null"]}}},
+    "requirement": {"type": "object", "additionalProperties": false, "required": ["key", "source_requirement_id", "path", "title", "explicit_id", "text_digest"], "properties": {
+      "key": {"type": "string", "minLength": 3, "maxLength": 1024}, "source_requirement_id": {"type": "string", "pattern": "^SREQ-[0-9]{4,}$"}, "path": {"$ref": "#/$defs/path"},
+      "title": {"type": "string", "maxLength": 4096}, "explicit_id": {"type": ["string", "null"], "maxLength": 128}, "text_digest": {"$ref": "#/$defs/digest"}}},
+    "method": {"type": "object", "additionalProperties": false, "required": ["file", "symbol_id", "locator", "slice_digest"], "properties": {
+      "file": {"$ref": "#/$defs/path"}, "symbol_id": {"type": "string", "minLength": 1, "maxLength": 128}, "locator": {"type": "string", "minLength": 3, "maxLength": 512},
+      "slice_digest": {"$ref": "#/$defs/digest"}}},
+    "quarantine": {"type": "object", "additionalProperties": false, "required": ["reason", "ref", "since_run"], "properties": {
+      "reason": {"enum": ["ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT"]}, "ref": {"type": "string", "minLength": 1, "maxLength": 512},
+      "since_run": {"$ref": "#/$defs/run_id"}, "question": {"type": "string", "maxLength": 2000}}},
+    "strength": {"type": "object", "additionalProperties": false, "required": ["covered", "killed", "run_id"], "properties": {
+      "covered": {"type": "integer", "minimum": 0}, "killed": {"type": "integer", "minimum": 0}, "run_id": {"$ref": "#/$defs/run_id"}}},
+    "case": {"type": "object", "additionalProperties": false, "required": ["case_id", "title", "requirement_ids", "requirement_keys", "requirement_text_digests", "case_digest", "automation", "methods", "zephyr_key", "status", "quarantine", "last_green_run", "strength"], "properties": {
+      "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9-]+$"}, "title": {"type": "string", "maxLength": 4096},
+      "requirement_ids": {"type": "array", "items": {"type": "string", "minLength": 1}}, "requirement_keys": {"type": "array", "items": {"type": "string", "minLength": 3}},
+      "requirement_text_digests": {"type": "object", "additionalProperties": {"$ref": "#/$defs/digest"}},
+      "case_digest": {"$ref": "#/$defs/digest"}, "automation": {"enum": ["AUTOMATED", "MANUAL"]},
+      "methods": {"type": "array", "items": {"$ref": "#/$defs/method"}}, "zephyr_key": {"type": ["string", "null"], "maxLength": 64},
+      "status": {"enum": ["ACTIVE", "QUARANTINED", "RETIRED"]}, "quarantine": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/quarantine"}]},
+      "last_green_run": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/run_id"}]}, "strength": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/strength"}]}}},
+    "file": {"type": "object", "additionalProperties": false, "required": ["path", "file_id", "language", "file_digest", "support_digest"], "properties": {
+      "path": {"$ref": "#/$defs/path"}, "file_id": {"type": "string", "minLength": 1, "maxLength": 128}, "language": {"enum": ["java", "python"]},
+      "file_digest": {"$ref": "#/$defs/digest"}, "support_digest": {"$ref": "#/$defs/digest"}}},
+    "surface": {"type": "object", "additionalProperties": false, "required": ["endpoints", "digest"], "properties": {
+      "digest": {"$ref": "#/$defs/digest"},
+      "endpoints": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["method", "path", "signature", "parameters", "handler", "source"], "properties": {
+        "method": {"enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY"]}, "path": {"type": "string", "minLength": 1, "maxLength": 512}, "signature": {"type": "string", "minLength": 3, "maxLength": 600},
+        "parameters": {"type": "array", "items": {"type": "string", "minLength": 1}}, "handler": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1}}}}}},
+    "suite_file": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/digest"}}}
+  }
+}

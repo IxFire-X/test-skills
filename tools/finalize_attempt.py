@@ -37,6 +37,7 @@ _VERIFICATIONS = {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"}
 _DISPOSITIONS = {
     "RETAINED", "CLEANED", "NOT_MATERIALIZED", "PRESERVED_EXECUTION_UNKNOWN",
     "PRESERVED_CONTENT_CONFLICT", "PRESERVED_CLEANUP_CONFLICT",
+    "QUARANTINED",  # opt-in quarantine policy after FAIL (contract amendment A4)
 }
 
 
@@ -118,9 +119,20 @@ def decide_dispositions(
     if verification != "UNKNOWN" and execution_unknown_evidence_digest is not None:
         raise FinalizationError("execution-unknown evidence is only valid for UNKNOWN")
     requested: dict[str, str] = {}
+    modes = None
+    if verification == "FAIL":
+        from tools.generated_delta import _quarantine_inputs
+        from tools.pilot_state import read_attempt_receipt
+
+        try:
+            execution = read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
+        except (KeyError, OSError, TypeError, ValueError):
+            execution = None
+        modes, _symbols = _quarantine_inputs(run_root, attempt_id, verification, execution)
     for row in rows:
         path = str(row["path"])
         materialization = str(row.get("materialization"))
+        mode = None if modes is None or materialization != "MATERIALIZED" else ("QUARANTINE" if modes.get(str(row.get("file_id"))) else "RETAIN")
         if verification == "UNKNOWN" and materialization == "MATERIALIZED":
             state = states.get(path)
             if state not in {"UNCHANGED_OWNED", "CONTENT_DRIFT", "OWNERSHIP_CONFLICT"}:
@@ -133,6 +145,7 @@ def decide_dispositions(
                 materialization,
                 retain_pass=verification == "PASS" and pre_trace_valid,
                 keep_deselected=verification == "NOT_RUNNABLE" and tests_deselected,
+                quarantine=mode,
             )
         except GeneratedDeltaError as error:
             raise FinalizationError(str(error)) from error

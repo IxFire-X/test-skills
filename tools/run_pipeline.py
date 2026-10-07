@@ -281,6 +281,14 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         authorization["mutation_requested"] = True
     if getattr(args, "require_driver_isolation", False):
         authorization["require_driver_isolation"] = True
+    if getattr(args, "disposition_policy", None) == "quarantine":
+        if profile != "local-pilot-v1":
+            raise HostStop("DISPOSITION_POLICY_PROFILE", "--disposition-policy quarantine needs the local-pilot-v1 profile")
+        authorization["disposition_policy"] = "quarantine"
+    if getattr(args, "suite", False):
+        if profile != "local-pilot-v1":
+            raise HostStop("SUITE_PROFILE", "--suite needs the local-pilot-v1 profile (the suite records retained tests)")
+        authorization["suite_requested"] = True
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -1683,6 +1691,10 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     scan_parser.add_argument("--mutation", action="store_true",
                              help="Consent to the opt-in MUTATION stage for this run (needs mutation.enabled in .skillsrc; may resolve pinned PIT jars).")
+    scan_parser.add_argument("--disposition-policy", choices=("cleanup", "quarantine"), default="cleanup",
+                             help="quarantine: after FAIL keep passing generated tests and mark failed methods disabled (contract amendment A4).")
+    scan_parser.add_argument("--suite", action="store_true",
+                             help="Consent to write the living suite with its manifest after the terminal result (local-pilot-v1).")
     scan_parser.add_argument("--require-driver-isolation", action="store_true",
                              help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
     status_parser = sub.add_parser("status", parents=[shared])

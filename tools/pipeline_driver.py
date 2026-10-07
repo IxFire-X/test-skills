@@ -273,7 +273,8 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     if not docs:
         raise DriverError("DRIVER_INPUT", "starting a run requires at least one --docs requirement document")
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
-                                mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")))
+                                mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
+                                suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"))
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -326,6 +327,8 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"mutation": True} if options.get("mutation") else {}),
         **({"require_driver_isolation": True} if options.get("require_driver_isolation") else {}),
         **({"analyst_report": True} if options.get("analyst_report") else {}),
+        **({"suite": True} if options.get("suite") else {}),
+        **({"disposition_policy": "quarantine"} if options.get("disposition_policy") == "quarantine" else {}),
         **_runner_options(options),
     }
 
@@ -1236,6 +1239,10 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
     from tools.pipeline_driver_analyst import analyst_summary
 
     analyst_summary(run_root, attempt, summary)  # opt-in --analyst-report
+    if attempt["policy_profile"] == "local-pilot-v1":
+        from tools.pipeline_driver_suite import suite_summary
+
+        suite_summary(run_root, attempt, summary)  # opt-in --suite: the living suite (summary 1.2.0)
     return summary
 
 
@@ -1493,6 +1500,10 @@ def _parser() -> argparse.ArgumentParser:
                                  help="Return up to K independent review part tasks at once (compact-v1); each still needs its own fresh call.")
             command.add_argument("--mutation", action="store_true",
                                  help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
+            command.add_argument("--disposition-policy", choices=("cleanup", "quarantine"),
+                                 help="quarantine: after FAIL keep passing generated tests and mark the failed methods disabled (local-pilot-v1; default cleanup).")
+            command.add_argument("--suite", action="store_true",
+                                 help="Write the living suite (.skillsrc suite.path, default test-cases/) with its manifest after the terminal result (local-pilot-v1).")
             command.add_argument("--require-driver-isolation", action="store_true",
                                  help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
             command.add_argument("--review-runner", choices=("host", "process"),
@@ -1585,7 +1596,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                   "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                  "mutation", "require_driver_isolation", "analyst_report", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
+                  "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
 
 
 def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any], started: float) -> int:
@@ -1640,7 +1651,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                 "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                "mutation", "require_driver_isolation", "analyst_report", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
+                "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock

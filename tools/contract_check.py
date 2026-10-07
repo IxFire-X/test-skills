@@ -28,7 +28,7 @@ SCHEMA_ROWS = [
     ("context-marker-output.schema.json",3,"IMPLEMENTED","5.1.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
     ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","6.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","2.0.0"),("review-plan.schema.json",4,"IMPLEMENTED","1.0.0"),("review-part-output.schema.json",4,"IMPLEMENTED","1.0.0"),("review-plan-compact.schema.json",4,"IMPLEMENTED","2.0.0"),("review-part-output-compact.schema.json",4,"IMPLEMENTED","2.1.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","6.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
-    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.1.0"),
+    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.2.0"),
     ("compatibility-evidence.schema.json",8,"IMPLEMENTED","2.0.0"),("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-run.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
 ]
 ARTIFACT_ROWS = [
@@ -144,9 +144,9 @@ EXPECTED_MUTATION_TOOLING = {
     "python": "not_implemented",
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
-OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0")]
+OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0")]
 OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED"),
-                          ("runner_process_evidence", 4, "IMPLEMENTED")]
+                          ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED")]
 OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
 OPTIONAL_STAGE_ROWS = [
     {"stage": "mutation-triage", "role": "strength-analyst", "role_policy": "mutation-triage-v1", "cardinality": "post_terminal_per_task",
@@ -215,7 +215,9 @@ def _accepted_versions(schema: Mapping[str, Any]) -> list[str]:
     A minor version (2026-10-07 amendments) keeps every earlier minor of the same major
     valid, so existing artifacts and project files stay readable.
     """
-    declared = schema.get("properties", {}).get("schema_version", {})
+    properties = schema.get("properties", {})
+    # The suite manifest names its version ``format_version`` (the suite's format, wave 3).
+    declared = properties.get("schema_version") or properties.get("format_version") or {}
     if "const" in declared:
         return [declared["const"]]
     values = declared.get("enum")

@@ -79,10 +79,12 @@ Version: `4.0`
 - optional skill `mutation-triage` — `skills/mutation-triage/SKILL.md`
 - optional stage `mutation-triage`: role `strength-analyst`, policy `mutation-triage-v1`, cardinality `post_terminal_per_task`, profiles `local-pilot-v1`, answer `mutation-triage-output.schema.json`, decisions `TEST_GAP, SPEC_GAP, EQUIVALENT, OUT_OF_SCOPE`, changes `nothing_in_the_attempt`
 - optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
+- optional schema `suite-manifest.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
 - optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
 - optional artifact `mutation_triage` (phase 6, `IMPLEMENTED`)
 - optional artifact `analyst_report` (phase 7, `IMPLEMENTED`)
 - optional artifact `runner_process_evidence` (phase 4, `IMPLEMENTED`)
+- optional artifact `suite_manifest` (phase 7, `IMPLEMENTED`)
 - optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
 - disposition policy `--disposition-policy`: `cleanup, quarantine`; defaults: local-pilot-v1 `cleanup`, suite-update-v1 `quarantine`; authorization key `disposition_policy`

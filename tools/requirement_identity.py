@@ -140,3 +140,41 @@ def rename_pairs(before: Iterable[Mapping[str, Any]], after: Iterable[Mapping[st
         if len(rows) == 1 and len(new.get(marker, [])) == 1:
             pairs.add((rows[0]["key"], new[marker][0]["key"]))
     return sorted(pairs)
+
+
+def identities_from_record(source_requirements: Sequence[Mapping[str, Any]], id_pattern: str | None = None) -> list[dict[str, Any]]:
+    """Keys from the run's own record when its documents changed since (suite migration).
+
+    Without the document the heading chain is unknown, so a Markdown key uses the section title
+    (``md:<path>#<title>``) unless the title starts with an explicit ID; an OpenSpec row keeps its
+    capability and name from the provenance.  A later scan pairs such a key with the full one by
+    the text digest (``rename_pairs``), so nothing looks removed.
+    """
+    from tools.build_context import explicit_requirement_id
+
+    id_re = compile_id_pattern(id_pattern)
+    rows: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for item in source_requirements:
+        provenance = [str(mark) for mark in item.get("provenance") or []]
+        path, _sep, title = (provenance[0] if provenance else " — ").partition(" — ")
+        spec = next((mark for mark in provenance if " — capability=" in mark and "; ### Requirement: " in mark and "; #### Scenario:" not in mark), None)
+        if spec is not None:
+            capability = spec.split(" — capability=", 1)[1].split(";", 1)[0]
+            name = spec.split("; ### Requirement: ", 1)[1]
+            match = _OPENSPEC_PATH.fullmatch(path.split(":", 1)[0])
+            root = (match.group(1) or "") if match else ""
+            key = f"openspec:{root + '/' if root else ''}{capability}#{name}"
+            explicit = None
+            body = requirement_body(str(item.get("text") or ""))
+        else:
+            explicit = explicit_requirement_id(title, id_re)
+            key = f"md:{path}#{explicit or title}"
+            body = requirement_body(str(item.get("text") or ""), explicit)
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1:
+            key = f"{key}~{seen[key]}"
+        rows.append({"source_requirement_id": item["source_requirement_id"], "key": key, "path": path.split(":", 1)[0], "title": title,
+                     "explicit_id": explicit, "text": str(item.get("text") or ""), "text_digest": text_digest(body),
+                     "file_digest": str(item.get("digest") or ""), "renamed_from": []})
+    return rows

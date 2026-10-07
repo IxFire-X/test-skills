@@ -35,9 +35,9 @@ on_confined_write(_forget_validated_evidence)
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
-_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation")
+_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -546,7 +546,9 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
     # An opt-in consent is recorded only as an explicit true; mutations need a local execution.
     if any(key in authorization and authorization[key] is not True for key in _AUTH_OPT_IN_KEYS):
         raise ValueError("unsafe authorization")
-    if "mutation_requested" in authorization and policy_profile != "local-pilot-v1":
+    if "disposition_policy" in authorization and authorization["disposition_policy"] != "quarantine":
+        raise ValueError("unsafe authorization")
+    if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization) and policy_profile != "local-pilot-v1":
         raise ValueError("authorization policy mismatch")
     return dict(authorization)
 
@@ -976,6 +978,8 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
         receipt_data.update({key: True for key in _AUTH_OPT_IN_KEYS if key in safe_auth})
+        if "disposition_policy" in safe_auth:
+            receipt_data["disposition_policy"] = safe_auth["disposition_policy"]
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest = _publish(root_project, root, root / "run-manifest.json", {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
@@ -3307,7 +3311,49 @@ def _validate_factual_receipt(
             if (verification == "UNKNOWN") != isinstance(evidence, str) or (isinstance(evidence, str) and not _DIGEST.fullmatch(evidence)):
                 raise ValueError(f"invalid {kind} receipt")
             rows = payload["files"]
-            from tools.generated_delta import GeneratedDeltaError, resolve_disposition_policy
+            from tools.generated_delta import GeneratedDeltaError, quarantine_modes, quarantined_bytes, resolve_disposition_policy
+
+            # The opt-in quarantine policy (contract amendment A4) is re-derived from the run's
+            # authorization and the execution receipt's failed methods, never taken from the receipt.
+            modes = None
+            quarantine_symbols: list[Any] = []
+            contents: dict[str, bytes] = {}
+            if verification == "FAIL" and _run_boundary(project, root)[1].get("disposition_policy") == "quarantine":
+                try:
+                    _manifest, authorization_receipt = _run_boundary(project, root)
+                    execution_payload = _read_attempt_receipt_with_state(
+                        project, root, state, str(attempt["attempt_id"]), "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
+                    modes = quarantine_modes(authorization_receipt, "FAIL", execution_payload)
+                    if modes is not None:
+                        automation = _read_attempt_receipt_with_state(
+                            project, root, state, str(attempt["attempt_id"]), "execution-inputs", "ARTIFACT_READ_BACK")["record"]["automation_artifact"]
+                        artifacts = automation.get("artifacts") or {}
+                        quarantine_symbols = list(artifacts.get("generated_symbols") or [])
+                        contents = {str(item["file_id"]): str(item["content"]).encode("utf-8") for item in artifacts.get("generated_files") or []}
+                except (KeyError, TypeError, ValueError) as error:
+                    raise ValueError(f"invalid {kind} receipt") from error
+
+            def mode_of(row: Mapping[str, Any]) -> str | None:
+                if modes is None or row.get("materialization") != "MATERIALIZED":
+                    return None
+                return "QUARANTINE" if modes.get(str(row.get("file_id"))) else "RETAIN"
+
+            def quarantine_fields_valid(row: Mapping[str, Any], operation: str) -> bool:
+                if operation != "QUARANTINE_IF_EXACT":
+                    return "quarantine_symbols" not in row and "quarantined_content_digest" not in row
+                failed = modes[str(row.get("file_id"))]
+                if row.get("quarantine_symbols") != sorted(failed):
+                    return False
+                if row.get("pre_effect_state") != "EXACT":
+                    return "quarantined_content_digest" not in row
+                content = contents.get(str(row.get("file_id")))
+                if content is None or "sha256:" + hashlib.sha256(content).hexdigest() != row.get("content_digest"):
+                    return False
+                try:
+                    expected = "sha256:" + hashlib.sha256(quarantined_bytes(content, str(row.get("path")), failed, quarantine_symbols, root.name)).hexdigest()
+                except (GeneratedDeltaError, ValueError):
+                    return False
+                return row.get("quarantined_content_digest") == expected
 
             if kind == "disposition-plan":
                 if payload.get("stage") != "disposition-plan" or len(rows) != len(expected_rows):
@@ -3321,6 +3367,7 @@ def _validate_factual_receipt(
                             str(expected.get("materialization")),
                             retain_pass=verification == "PASS" and actual.get("requested_disposition") == "RETAINED",
                             keep_deselected=verification == "NOT_RUNNABLE" and actual.get("requested_disposition") == "RETAINED",
+                            quarantine=mode_of(expected),
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-plan receipt") from error
@@ -3328,6 +3375,7 @@ def _validate_factual_receipt(
                     if (
                         any(actual.get(key) != relation.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
                         or actual.get("pre_effect_state") not in ({"NOT_APPLICABLE"} if operation == "NO_FILE" else {"EXACT", "MISSING", "DRIFT", "UNSAFE"})
+                        or not quarantine_fields_valid(actual, operation)
                     ):
                         raise ValueError("invalid disposition-plan receipt")
             else:
@@ -3356,6 +3404,7 @@ def _validate_factual_receipt(
                             str(verification), str(plan_row.get("materialization")),
                             retain_pass=verification == "PASS" and plan_row.get("requested_disposition") == "RETAINED",
                             keep_deselected=verification == "NOT_RUNNABLE" and plan_row.get("requested_disposition") == "RETAINED",
+                            quarantine=mode_of(plan_row),
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-receipt receipt") from error

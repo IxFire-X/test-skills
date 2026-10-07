@@ -7,7 +7,7 @@
   "required": ["schema_version", "status", "run_id", "attempt_id", "policy_profile", "completion", "verification", "coverage", "accepted", "reason_code", "exit_code",
                "review_independence", "warnings", "effective_document_digest", "paths"],
   "properties": {
-    "schema_version": {"enum": ["1.0.0", "1.1.0"]},
+    "schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0"]},
     "status": {"const": "terminal"},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -41,7 +41,8 @@
       "additionalProperties": false,
       "properties": {"candidate_bundle": {"type": "string"}, "run_root": {"type": "string"}, "driver_dir": {"type": "string"},
                      "test_strength_json": {"type": "string"}, "test_strength_markdown": {"type": "string"},
-                     "analyst_report_json": {"type": "string"}, "analyst_report_markdown": {"type": "string"}}
+                     "analyst_report_json": {"type": "string"}, "analyst_report_markdown": {"type": "string"},
+                     "suite_dir": {"type": "string"}, "suite_manifest": {"type": "string"}}
     },
     "exec": {"type": "object"},
     "test_strength": {
@@ -60,10 +61,24 @@
     },
     "isolation_evidence": {"enum": ["DRIVER_PROCESS", "HOST_DECLARED", "NONE", null]},
     "strength_triage": {"type": "object"},
-    "analyst_questions": {"type": "integer", "minimum": 0}
+    "analyst_questions": {"type": "integer", "minimum": 0},
+    "suite": {
+      "description": "Opt-in --suite (wave 3): whether the living suite was written after the terminal result.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason_code", "message", "cases", "files"],
+      "properties": {
+        "status": {"enum": ["WRITTEN", "NOT_WRITTEN"]},
+        "reason_code": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "message": {"type": ["string", "null"]},
+        "cases": {"type": "integer", "minimum": 0}, "files": {"type": "integer", "minimum": 0}
+      }
+    }
   },
   "allOf": [
     {"if": {"properties": {"schema_version": {"const": "1.0.0"}}, "required": ["schema_version"]},
-     "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}, {"required": ["analyst_questions"]}]}}}
+     "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}, {"required": ["analyst_questions"]}, {"required": ["suite"]}]}}},
+    {"if": {"properties": {"schema_version": {"const": "1.1.0"}}, "required": ["schema_version"]},
+     "then": {"not": {"required": ["suite"]}}}
   ]
 }
