@@ -1,0 +1,95 @@
+{
+  "risk": "W2-Р12",
+  "date": "2026-10-07",
+  "how": "Both modes are fresh Sonnet subagents of this session (user decision: no external CLI). process: the subagent gets exactly the stdin the runner would send (tools.model_runner.compose_input with the production SKILL, task instructions and answer schema), reads it, writes the JSON answer, no checks; the answer is then checked by the production validator (run_eval.py check), as the runner would. subagent: wave-1 mode, the subagent reads SKILL/input/schema from tasks.json and may run the check up to 3 times.",
+  "caveat": "A real `claude -p --tools \"\"` process has its own system prompt and user settings and no tool definitions; here both modes carry the same subagent harness, so the comparison is between the two input shapes, not the CLI cost.",
+  "wave1_subagent_reference": {
+    "E1": {
+      "tokens": 81000,
+      "minutes": 0.8
+    },
+    "E3": {
+      "tokens": 83000,
+      "minutes": 0.8
+    }
+  },
+  "rows": [
+    {
+      "envelope": "E1",
+      "mode": "process",
+      "model": "sonnet",
+      "tokens": 84370,
+      "tool_uses": 4,
+      "seconds": 68.5,
+      "checks": 0,
+      "note": "Read returned lines 1-815 of 992 in one call; the agent read the rest with a second Read",
+      "accepted_first_try": true,
+      "seeds_found": 6,
+      "seeds": 6,
+      "severity_counts": {
+        "INFO": 0,
+        "WARNING": 1,
+        "BLOCKING": 5
+      },
+      "answer_sha256": "d2ad8e6591c4864eb31d9a6c7e669b08298279c9eaa331e0f3e4e0ec35be8dae",
+      "stdin_bytes": 69001,
+      "stdin_sha256": "44024ab96465dc9ae6a2ee9797d459f563e7e558c6b129c0c2981e838154a219"
+    },
+    {
+      "envelope": "E3",
+      "mode": "process",
+      "model": "sonnet",
+      "tokens": 83897,
+      "tool_uses": 3,
+      "seconds": 73.4,
+      "checks": 0,
+      "accepted_first_try": true,
+      "seeds_found": 6,
+      "seeds": 6,
+      "severity_counts": {
+        "INFO": 0,
+        "WARNING": 0,
+        "BLOCKING": 6
+      },
+      "answer_sha256": "dc83a729e624334ef1464c8b03a9d7dda943acd44eafec31ee94074d8ad5f7de",
+      "stdin_bytes": 64151,
+      "stdin_sha256": "bfcec53cfb58f9efd4754dcc8e43b1662e5c8b25e28bc778929edfb86139bf51"
+    },
+    {
+      "envelope": "E1",
+      "mode": "subagent",
+      "model": "sonnet",
+      "tokens": 85698,
+      "tool_uses": 7,
+      "seconds": 75.6,
+      "checks": 1,
+      "accepted_first_try": true,
+      "seeds_found": 6,
+      "seeds": 6,
+      "severity_counts": {
+        "INFO": 0,
+        "WARNING": 1,
+        "BLOCKING": 5
+      },
+      "answer_sha256": "55ab6df5af2de7316c9026b9dba6ae1fcbabd1ae5f30e57ae1ed2dbab4d47029"
+    },
+    {
+      "envelope": "E3",
+      "mode": "subagent",
+      "model": "sonnet",
+      "tokens": 83096,
+      "tool_uses": 7,
+      "seconds": 69.2,
+      "checks": 1,
+      "accepted_first_try": true,
+      "seeds_found": 6,
+      "seeds": 6,
+      "severity_counts": {
+        "INFO": 0,
+        "WARNING": 0,
+        "BLOCKING": 6
+      },
+      "answer_sha256": "403cde3d02f92cedb0e0270af190f28b1e19611d2e6a310a9800087d202db53b"
+    }
+  ]
+}
