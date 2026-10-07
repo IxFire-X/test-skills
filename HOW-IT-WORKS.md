@@ -413,6 +413,10 @@ MATERIALIZATION
 -> TERMINAL_EVENT
 ```
 
+С опцией мутаций (поправки к контракту 2026-10-07, A3) между `EXECUTION_TRACE` и
+`RETAIN_OR_CLEANUP_DECISION` стоит необязательный этап `MUTATION` (раздел 11). Без опции
+порядок прежний.
+
 Pre-finalization trace заканчивается execution/dispositions и не ссылается на ещё не
 существующий finalization receipt. После verification публикуется derived terminal
 trace со ссылкой на receipt/result — цикла нет.
@@ -473,3 +477,68 @@ Policy `adaptive-1-3-5-v1` требует:
 Protocol violation всегда блокирует readiness. Company runner, production rollback и
 Zephyr tenant round-trip не нужны для core pilot и остаются `N/A` без отдельного
 evidence.
+
+## 11. Опции волны 2: сила тестов, изоляция процессом, вопросы аналитикам
+
+Поправки к контракту: `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
+Каждая возможность включается только опцией; без неё артефакты и результаты прежние.
+
+### Этап `MUTATION`
+
+- **Когда.** `.skillsrc` `mutation.enabled: true` **и** согласие run (`next --mutation` →
+  `mutation_requested` в разрешении прогона), `local-pilot-v1`, Java, verification `PASS`
+  или `FAIL` из авторитетного отчёта. Файлы тестов ещё в проекте даже после `FAIL`.
+- **Инструмент.** PIT 1.30.0 из командной строки и `pitest-junit5-plugin` 1.2.3. Maven
+  проекта разрешает их замыкание по временному POM в каталоге прогона в свой локальный
+  репозиторий; SHA-256 каждого из 15 jar сверяется с `tools/mutation_tools.json`, лишний
+  или подменённый jar → `NOT_RUNNABLE`. `junit-platform-launcher` берётся той же версии,
+  что JUnit Platform проекта (5.x или 6.x, у 6.x ещё `jspecify`).
+- **Что мутируется.** `--targetTests` — только сгенерированные классы; упавшие методы
+  исключены (`--skipFailingTests`, `--includedTestMethods`); `--targetClasses` — пакеты
+  файлов продукта из provenance возможностей (или `mutation.target_classes`). Classpath
+  проекта — `dependency:build-classpath` (Gradle — init script из каталога прогона) в
+  файл (`--classPathFile`); отчёт XML с полной матрицей — в каталог прогона.
+- **Проверки.** Дайджест всего дерева проекта (кроме `.pilot-runs` и `.git`) до и после
+  этапа; изменение → `MUTATION_PROJECT_CHANGED`. Любая остановка — статус квитанции с
+  причиной, а не сбой финализации.
+- **Результат.** Квитанция `mutation-receipt` (счётчики без дробей), отдельная ось
+  `test_strength` (`MEASURED`, `NOT_RUNNABLE`, `NOT_APPLICABLE`) в терминальном результате
+  и в сводке драйвера, отчёт `test-strength.json`/`.md` рядом с проекциями попытки.
+  Доля — убитые / (убитые + выжившие) среди покрытых мутантов; `NO_COVERAGE`,
+  `TIMED_OUT`, `MEMORY_ERROR` считаются отдельно. По кейсу и требованию — через полную
+  матрицу: метод → символ (`generated_symbols`) → кейс (`implementation_relations`) →
+  CREQ → SREQ. `verification` и `accepted` этап не меняет.
+
+### Разбор выживших (`mutation-triage`)
+
+Выжившие группируются по методу и строке продукта; первые `mutation.triage_limit`
+(30) групп после терминального результата уходят модели задачами `mutation-triage`
+(SKILL `skills/mutation-triage`). Вход — строка мутанта с соседями, кейсы, требования с
+текстом, срезы методов теста; ответ — одно решение на группу (`TEST_GAP`, `SPEC_GAP`,
+`EQUIVALENT`, `OUT_OF_SCOPE`) со ссылками на якоря задачи, которые проверяет драйвер.
+Разбор ничего не меняет в попытке: `TEST_GAP` копятся как предложения усиления
+(`strength/<attempt>/proposals.json`), `SPEC_GAP` уходят в отчёт для аналитиков.
+
+### Части ревью процессами драйвера (A2)
+
+`next … --review-runner process`: драйвер сам запускает каждую часть ревью отдельным
+процессом CLI (пресеты `claude -p --output-format json --tools ""` и
+`codex exec --sandbox read-only --ephemeral --json`), во временном каталоге вне проекта,
+с полным входом в stdin, и сразу возвращает `wait`. Следующий `next` собирает готовые
+ответы: та же проверка, что у `submit`, до трёх процессов на часть, пауза при лимите
+частоты, всё — в `driver-log.jsonl`. На каждую часть публикуется квитанция процесса
+(дайджест команды, CLI, модель, время, код выхода, сессия, дайджест stdout, токены,
+`user_settings_loaded`). Уровень доказательства `isolation_evidence`:
+`DRIVER_PROCESS` — только у частей, ответ которых пришёл из процесса драйвера с
+отдельной сессией; ответ хоста — не выше `HOST_DECLARED`; самопроверка — `NONE`.
+С `--require-driver-isolation` результат ниже `DRIVER_PROCESS` не принимается
+(`REVIEW_ISOLATION_UNVERIFIED`). `run --runner process` отдаёт раннеру все задачи модели.
+
+### Отчёт для аналитиков
+
+С `next --analyst-report`: context-marker пишет структурные `requirement_gaps`, ревьюеры —
+`analyst_question` у находок, когда проблема в требовании; вместе со `SPEC_GAP` разбора
+они собираются детерминированно в `analyst-report.json`/`.md` (дубли склеиваются по SREQ
+и нормализованному вопросу, у каждого пункта — источники). `python -m tools.analyst_report
+export --project … --run …` печатает комментарий для change OpenSpec; в `openspec/` пакет
+сам не пишет.

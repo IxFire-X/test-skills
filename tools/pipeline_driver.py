@@ -326,7 +326,26 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"mutation": True} if options.get("mutation") else {}),
         **({"require_driver_isolation": True} if options.get("require_driver_isolation") else {}),
         **({"analyst_report": True} if options.get("analyst_report") else {}),
+        **_runner_options(options),
     }
+
+
+def _runner_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    """``--review-runner process``: the driver runs review parts itself (a template only from the launch flag)."""
+    if options.get("review_runner") != "process":
+        if options.get("review_runner_command") or options.get("review_runner_preset") or options.get("review_runner_cli"):
+            raise DriverError("DRIVER_INPUT", "--review-runner-preset/-command/-cli need --review-runner process")
+        return {}
+    command = options.get("review_runner_command")
+    if command is not None:
+        try:
+            command = json.loads(command) if isinstance(command, str) else command
+        except json.JSONDecodeError as error:
+            raise DriverError("DRIVER_INPUT", "--review-runner-command is a JSON array of strings") from error
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
+            raise DriverError("DRIVER_INPUT", "--review-runner-command is a JSON array of strings")
+    return {"reviewer_isolation": "fresh", "review_runner": {"mode": "process", "preset": options.get("review_runner_preset"), "command": command,
+                                                             "cli": options.get("review_runner_cli")}}
 
 
 def _review_mode(value: Any) -> str:
@@ -981,6 +1000,11 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     """
     from tools.pilot_state import available_review_parts
 
+    from tools import pipeline_driver_runner as runner
+
+    if runner.enabled(config):
+        # Opt-in process runner: the driver runs the parts itself and answers with `wait`.
+        return runner.review_step(project, run_root, attempt, dict(config), review_key)
     attempt_id = str(attempt["attempt_id"])
     limit = max(1, int(config.get("_max_tasks") or 1))
     tasks = [{**task, "warnings": _self_review_warnings(run_root, attempt_id, review_key)} if task.get("warnings") is not None else task
@@ -1029,11 +1053,12 @@ def review_task_instructions(*, compact: bool, fresh: bool, analyst: bool = Fals
     return isolation + (_COMPACT_INSTRUCTIONS + (_ANALYST_QUESTION if analyst else "") if compact else _LEGACY_INSTRUCTIONS)
 
 
-def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
+def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], review_key: str, envelope: Mapping[str, Any], *,
+                       host: Mapping[str, Any] | None = None, extra_task: Mapping[str, Any] | None = None) -> dict[str, Any]:
     from tools.pilot_state import open_review_part
 
     attempt_id = str(attempt["attempt_id"])
-    opened = open_review_part(run_root, attempt_id, review_key, _host_evidence(config, review_key), part_id=envelope["part_id"])
+    opened = open_review_part(run_root, attempt_id, review_key, dict(host) if host is not None else _host_evidence(config, review_key), part_id=envelope["part_id"])
     label = f"review.{review_key}.{opened['stage_instance_id'].rsplit(':', 1)[1]}"
     compact = opened["input"].get("mode") == "compact-v1"
     if compact:
@@ -1049,7 +1074,8 @@ def _issue_review_task(run_root: Path, attempt: Mapping[str, Any], config: Mappi
         instructions=review_task_instructions(compact=compact, fresh=fresh, analyst=bool(config.get("analyst_report"))),
         extra={"review_key": review_key, "part_id": opened["input"]["part_id"], "try": opened.get("try", 1), "requires_fresh_context": fresh,
                **({"review_mode": "compact-v1"} if compact else {}),
-               **({"warnings": warnings} if not fresh else {})},
+               **({"warnings": warnings} if not fresh else {}),
+               **dict(extra_task or {})},
     )
 
 
@@ -1145,7 +1171,7 @@ def _package(run_root: Path, attempt_id: str, assembled: Mapping[str, Any]) -> d
 
 def _terminal_facts(run_root: Path, attempt: Mapping[str, Any], *, document: Mapping[str, Any] | None) -> dict[str, Any]:
     """Result facts of a branch that never executes project code, derived from the durable ledger."""
-    from tools.pilot_state import read_run, review_independence, terminal_reviewer_evidence
+    from tools.pilot_state import isolation_evidence, read_run, review_independence, terminal_reviewer_evidence
 
     attempt_id = str(attempt["attempt_id"])
     reviewer = terminal_reviewer_evidence(run_root, attempt_id)
@@ -1170,6 +1196,7 @@ def _terminal_facts(run_root: Path, attempt: Mapping[str, Any], *, document: Map
         "prior_stage_cause": "CANONICAL_COMPLETE" if accepted_review else reason,
         "policy_profile": attempt["policy_profile"],
         **review_independence(run_root, attempt_id),
+        **isolation_evidence(run_root, attempt_id),
     }
 
 
@@ -1198,6 +1225,7 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         "completion": terminal.get("completion"), "verification": terminal.get("verification"), "coverage": terminal.get("coverage"),
         "accepted": terminal.get("accepted"), "reason_code": terminal.get("reason_code"), "exit_code": exit_code(terminal),
         "review_independence": terminal.get("review_independence"),
+        **({"isolation_evidence": terminal["isolation_evidence"], "schema_version": "1.1.0"} if "isolation_evidence" in terminal else {}),
         "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
     }
@@ -1374,6 +1402,8 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
     if attempt["state"] == "TERMINAL":
         return advance(project, run_root)
 
+    if task.get("runner") == "process":
+        raise DriverError("DRIVER_INPUT", "this review part is run by the driver's process runner; call next to collect it")
     task["transport_attempts"] = transport_attempts
     stage_events = _stage_events(_events(run_root, str(attempt["attempt_id"])), task["stage"])
     if "MODEL_RESPONSE_RECEIVED" in stage_events:
@@ -1430,11 +1460,16 @@ def status(project: Path, run_root: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deterministic pipeline driver: next / submit / status.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("next", "submit", "status"):
+    for name in ("next", "submit", "status", "run"):
         command = commands.add_parser(name)
         command.add_argument("--project", required=True, help="Absolute path of the target project.")
-        command.add_argument("--run", required=name != "next", help="Run id printed by the first `next`.")
-        if name == "next":
+        if name != "run":
+            command.add_argument("--run", required=name != "next", help="Run id printed by the first `next`.")
+        if name == "run":
+            command.add_argument("--runner", choices=("process",), required=True, help="Every model task goes to a driver-launched CLI process.")
+            command.add_argument("--answer", action="append", default=[], help="label=value answer of an ask_user question (repeatable).")
+            command.add_argument("--answers", type=Path, help="JSON file {label: value} with answers to ask_user questions.")
+        if name in {"next", "run"}:
             command.add_argument("--profile", choices=PROFILES, help="Required to start a run.")
             command.add_argument("--docs", action="append", default=None, help="Requirement document inside the project; repeatable.")
             command.add_argument("--module", help="Exact module ID when the project has several.")
@@ -1460,6 +1495,11 @@ def _parser() -> argparse.ArgumentParser:
                                  help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
             command.add_argument("--require-driver-isolation", action="store_true",
                                  help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
+            command.add_argument("--review-runner", choices=("host", "process"),
+                                 help="process: the driver runs every review part in its own CLI process (claude/codex preset) and answers `wait`.")
+            command.add_argument("--review-runner-preset", choices=("claude", "codex"), help="Runner preset (default: .skillsrc review_runner.preset, else claude).")
+            command.add_argument("--review-runner-command", help="Custom command template as a JSON array ({model}, {schema_path}, {schema_json}, {last_message}); launch flag only.")
+            command.add_argument("--review-runner-cli", help="Path of the preset's CLI executable when it is not on PATH.")
             command.add_argument("--analyst-report", action="store_true",
                                  help="Ask roles for structured requirement gaps and analyst questions; write analyst-report.json/.md beside the projections.")
         if name == "submit":
@@ -1476,7 +1516,7 @@ def _exit_code(payload: Mapping[str, Any]) -> int:
     if payload.get("action") == "done":
         result = payload.get("result", {})
         return int(result.get("exit_code", 0 if result.get("status") == "terminal" else 2))
-    if payload.get("action") in {"llm", "ask_user", "batch"}:
+    if payload.get("action") in {"llm", "ask_user", "batch", "wait"}:
         return 3  # waiting for a model or a person, same meaning as the pipeline's exit 3
     return 0
 
@@ -1543,13 +1583,40 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
                         "since_first_issue_seconds": round(max(time.time() - first, 0.0), 3)})
 
 
+_START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
+                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
+                  "mutation", "require_driver_isolation", "analyst_report", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
+
+
+def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any], started: float) -> int:
+    """``run --runner process``: the whole run without an orchestrating session."""
+    from tools.pipeline_driver_run import run as run_without_orchestrator
+
+    answers: dict[str, str] = {}
+    if args.answers:
+        answers.update({str(key): str(value) for key, value in json.loads(Path(args.answers).read_text(encoding="utf-8")).items()})
+    for item in args.answer:
+        label, _, value = str(item).partition("=")
+        answers[label] = value
+    options = {key: getattr(args, key, None) for key in _START_OPTIONS}
+    try:
+        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)))
+    except DriverError as error:
+        payload = {"action": "error", "code": error.code, "message": str(error)}
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 2
+    _log_command(project, payload.get("run_id"), entry, payload, started)
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return _exit_code(payload)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     started = time.monotonic()
     project = Path(args.project).resolve()
-    entry: dict[str, Any] = {"event": "command", "command": args.command, "run_id": args.run}
+    entry: dict[str, Any] = {"event": "command", "command": args.command, "run_id": getattr(args, "run", None)}
     if args.command == "submit":
         first = _first_issue(_log_rows(_log_path(project, args.run)), args.task_id)
         entry.update({"task_id": args.task_id, "failed": args.failed, "reason": args.reason, "transport_attempts": args.transport_attempts,
@@ -1566,12 +1633,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 2
 
+    if args.command == "run":
+        return _run_command(args, project, entry, started)
     try:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                 "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                "mutation", "require_driver_isolation", "analyst_report")},
+                "mutation", "require_driver_isolation", "analyst_report", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock

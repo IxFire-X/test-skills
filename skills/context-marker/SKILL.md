@@ -47,6 +47,11 @@ requirement/scenario and source, what is missing, which checks it blocks, and th
 question to resolve. A missing scenario is a visible gap. Missing/extra identities or a
 source mismatch prevent accepting the normalized set; reconcile the source rather than
 inventing behavior. Mechanical identity checks do not prove semantic body completeness.
+When the task instructions ask for it (runs with `--analyst-report`), also write each gap
+once into the optional `requirement_gaps` array (`requirement` — the source requirement ID,
+`location` — file and section, `missing`, `blocks`, `question` up to 300 characters) and
+set `schema_version` to `5.1.0`; keep the warning line as well. The controller joins both
+into the analyst report and never counts one gap twice.
 
 Before returning, reconcile every behavior and acceptance criterion in the original
 authorized request with the normalized source set. Preserve each condition, role, boundary,

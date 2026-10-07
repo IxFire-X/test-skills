@@ -50,3 +50,18 @@ modules:
     feature_sources:
       requirements: ["docs/requirements"]
     detected_from: ["frontend/package.json"]
+
+# Необязательные разделы волны 2 (schema 5.1.0; файлы 5.0.0 без них остаются валидными).
+# Этап мутаций: работает только вместе с флагом run --mutation (Java, local-pilot-v1).
+# mutation:
+#   enabled: true
+#   threads: 2
+#   timeout_seconds: 1800
+#   triage_limit: 30
+# Ревью процессами драйвера (--review-runner process): только пресет, модели, параллельность, таймаут.
+# Команду процесса файл проекта задать не может.
+# review_runner:
+#   preset: "claude"
+#   models: {tc-reviewer: "claude-sonnet-5-5", autotest-reviewer: "claude-sonnet-5-5"}
+#   max_parallel: 4
+#   timeout_seconds: 1800

@@ -66,6 +66,22 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 `--review-mode pairs|compact-v1` (формат ревью; по умолчанию `compact-v1`).
 Укажи фактические модель и CLI: они записываются в журнал как сведения о вызовах.
 
+Опции волны 2 (каждая включается только явно, без неё поведение прежнее):
+
+- `--mutation` — согласие на этап мутаций в этом run (`local-pilot-v1`; нужен ещё
+  `mutation.enabled: true` в `.skillsrc`). Драйвер сам разрешает закреплённые jar PIT
+  Maven проекта в его локальный репозиторий и мутирует код через прошедшие
+  сгенерированные тесты. Передавай флаг только по явной просьбе пользователя.
+- `--review-runner process` — части ревью драйвер запускает сам, отдельными процессами
+  CLI (пресет `claude` или `codex` из `.skillsrc` `review_runner`); `--review-runner-cli`
+  — путь CLI, если его нет в PATH. Свой шаблон команды — только флагом
+  `--review-runner-command`, никогда из файла проекта.
+- `--require-driver-isolation` — принять результат только при `isolation_evidence:
+  DRIVER_PROCESS` (части ревью шли процессами драйвера); иначе
+  `REVIEW_ISOLATION_UNVERIFIED`.
+- `--analyst-report` — роли дополнительно отдают структурные пробелы требований и
+  вопросы аналитику; драйвер собирает `analyst-report.json`/`.md` рядом с проекциями.
+
 Каждый вызов печатает один JSON-объект. Дальше повторяй:
 
 1. Прочитай `action`.
@@ -77,6 +93,10 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 4. `done` — остановись и сообщи результат (раздел 4).
 5. `error` — прочитай `code` и `message`; не обходи ошибку ручными вызовами.
 6. `batch` — несколько независимых частей ревью `compact-v1` сразу (см. ниже).
+7. `wait` — части ревью выполняет сам драйвер (`--review-runner process`). Ничего не
+   запускай: подожди `poll_seconds` секунд и снова вызови `next --project ... --run ...`.
+   Команда не ждёт модель и возвращается сразу; если сессия оборвалась, процессы
+   продолжают работу, а следующий `next` соберёт их результаты.
 
 Пачки. При `--review-mode compact-v1` части ревью независимы. `next ... --max-tasks K`
 возвращает до K задач: `{"action": "batch", "tasks": [...]}`. Запусти по одному свежему
@@ -139,6 +159,12 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   оборвался) или `--failed CONTENT --reason "..."` (ответ непригоден). Драйвер выдаст
   ту же часть новой задачей — до трёх вызовов на часть. Содержательное замечание
   ревьюера не останавливает остальные части.
+- `mutation-triage:triage-NN` — разбор выживших мутантов после терминального результата
+  (только при `--mutation`). Единственный вход — текст задачи с якорями `[MUT-…]`,
+  `[MUT-…:L…]`, кейсами, требованиями и срезами тестов. Выполни свежим вызовом по
+  `skills/mutation-triage/SKILL.md`: по группе одно решение — `TEST_GAP`, `SPEC_GAP`,
+  `EQUIVALENT` или `OUT_OF_SCOPE` — со ссылками на якоря задачи. Ожидание из кода не
+  выводи: если требование молчит, это вопрос аналитику. Разбор ничего не меняет в попытке.
 - `tc-to-autotest:rN` — второй вход — принятый набор кейсов, единственный источник
   смысла. Верни файлы тестов, символы, связи и ручные шаги. При `rN = r2` во входах
   есть предыдущая ревизия и ревью с исправлениями: примени их полностью. Поле
@@ -180,7 +206,11 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 - `status=terminal`: `completion`, `verification`, `coverage`, `accepted`,
   `reason_code`, `review_independence`, `exit_code`, `warnings` и пути `paths`
   (опубликованный набор кейсов, каталог run). `review_independence: SELF` называй
-  прямо: ревью делала та же сессия, что генерировала;
+  прямо: ревью делала та же сессия, что генерировала. При опциях волны 2 там же:
+  `test_strength` (доля убитых мутантов, выжившие группы; отчёт `test-strength.md`),
+  `strength_triage` (решения разбора), `isolation_evidence` и `analyst_questions`
+  (отчёт `analyst-report.md`). `test_strength` — отдельная ось: на `verification` и
+  `accepted` она не влияет;
 - `status=stopped` или `error`: `stop_reason`/`reason` и что нужно для продолжения.
 
 Что означает результат:
@@ -188,6 +218,8 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 - `verification=PASS` и `accepted=true` — тесты прошли; файлы оставлены в проекте;
 - `REVIEW_NOT_INDEPENDENT` — всё остальное могло пройти, но ревью было без изоляции
   (`SELF`); принять такой результат можно только флагом `--accept-self-review`;
+- `REVIEW_ISOLATION_UNVERIFIED` — run требовал `--require-driver-isolation`, а хотя бы
+  одна часть ревью шла не процессом драйвера (`HOST_DECLARED`) или без изоляции (`NONE`);
 - `FAIL` — упала продуктовая проверка: тест не перегенерируется и не правится;
 - `NOT_RUNNABLE` с `LAUNCH_FAILED` — тестовый процесс не запустился; с
   `TESTS_DESELECTED` — настройки проекта отфильтровали выбранные тесты. Тест не
@@ -216,7 +248,16 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 ответь `none`, и результат будет помечен `SELF`. Не обходи остановку ручной
 публикацией артефактов.
 
-## 6. Диагностика
+## 6. Запуск без оркестратора
+
+`python -m tools.pipeline_driver run --project "$project" --runner process --profile ... --docs ...`
+проходит весь run без сессии-оркестратора: каждую задачу модели (разметку, генераторы,
+ревью, автоматизацию, разбор мутантов) драйвер отдаёт процессу CLI и сам отправляет
+ответ. Ответы на `ask_user` — флагами `--answer <метка>=<значение>` или файлом
+`--answers answers.json`; вопрос без ответа останавливает run с кодом 3. Это основа
+запуска из CI; в сессии-оркестраторе эту команду не вызывай.
+
+## 7. Диагностика
 
 Прежние команды остаются для разбора сбоев и для run, начатого вручную:
 `tools.run_pipeline` (`scan`, `status`, `exec`, `rerun-retained`),

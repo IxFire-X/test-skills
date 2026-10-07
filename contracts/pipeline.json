@@ -75,7 +75,8 @@
   "optional_artifact_registry": [
     {"id":"mutation_receipt","phase":6,"implementation_status":"IMPLEMENTED","semantic_ready":true},
     {"id":"mutation_triage","phase":6,"implementation_status":"IMPLEMENTED","semantic_ready":true},
-    {"id":"analyst_report","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true}
+    {"id":"analyst_report","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true},
+    {"id":"runner_process_evidence","phase":4,"implementation_status":"IMPLEMENTED","semantic_ready":true}
   ],
   "model_runner": {"setting":"--review-runner","values":["host","process"],"default":"host","presets":["claude","codex"],"custom_template":"launch_flag_only","skillsrc_fields":["preset","models","max_parallel","timeout_seconds"],"invocation":"fresh_process_temp_cwd_stdin_no_write_tools","wait_action":"wait","tries_per_part":3,"evidence":["command_digest","cli_name_version","model","started_finished","exit_code","session_id","stdout_digest","tokens","user_settings_loaded"],"evidence_axis":"isolation_evidence","require_flag":"--require-driver-isolation","require_reason_code":"REVIEW_ISOLATION_UNVERIFIED","standalone_command":"run --runner process"}
 }

@@ -111,7 +111,8 @@ corrects no case), `lint_dispositions` and `required_checks`. A coverage row has
 `status`, `refs` (1–3: an anchor of the part or a code line `L123`; a case area cites its
 own case or a line of its method or helpers) and `note` (at most 200 characters). Findings
 have `severity`, `code`, `related_ids` (case, assertion, file or symbol IDs) and `message`
-(at most 600 characters); at most 5 INFO. Answer every suspicion in `lint_dispositions`
+(at most 600 characters); at most 5 INFO; `analyst_question` (at most 300 characters) only when the
+task asks for it and the requirement itself is silent or contradictory. Answer every suspicion in `lint_dispositions`
 (`confirmed` or `rejected` with a reason) and write the finding yourself when it is real.
 
 ## Stop conditions

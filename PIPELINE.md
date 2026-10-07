@@ -81,6 +81,7 @@ Version: `4.0`
 - optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
 - optional artifact `mutation_triage` (phase 6, `IMPLEMENTED`)
 - optional artifact `analyst_report` (phase 7, `IMPLEMENTED`)
+- optional artifact `runner_process_evidence` (phase 4, `IMPLEMENTED`)
 - optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
 - optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
 

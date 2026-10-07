@@ -1,0 +1,81 @@
+"""``run --runner process`` (wave 2, W2.8): a whole run without an orchestrating session (fake CLI)."""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from tests.live_step5 import DOCS, LIVE
+from tools import pipeline_driver as driver
+from tools.pilot_state import derive_state, read_terminal_result
+
+FAKE = Path(__file__).resolve().parent / "fixtures" / "fake_cli.py"
+GENERATED = "src/test/java/net/javaguides/springboot/controller/StudentControllerPipelineTest.java"
+
+
+def _project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    shutil.copytree(LIVE / "project", project)
+    (project / GENERATED).unlink()
+    return project
+
+
+def _run(project: Path, *extra: str, script: str = "ok") -> tuple[int, dict]:
+    argv = ["run", "--project", str(project), "--runner", "process", "--docs", DOCS, "--subject", "StudentController", "--model-id", "fake-model-1",
+            "--review-runner-command", json.dumps([sys.executable, str(FAKE), "--script", script, "--state", str(project.parent / "fake-state")]), *extra]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = driver.main(argv)
+    return code, json.loads(buffer.getvalue())
+
+
+def test_a_cases_only_run_needs_no_orchestrator(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "cases-only-v1")
+    result = payload["result"]
+    assert payload["action"] == "done" and (result["completion"], result["verification"], result["review_independence"]) == ("COMPLETE", "NOT_APPLICABLE", "ISOLATED")
+    assert code == 1  # cases-only is always a draft (erratum 1)
+    run_root = project / ".pilot-runs" / payload["run_id"]
+    log = [json.loads(line) for line in (run_root.with_name(payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    collected = {row["task_id"].split(".", 1)[1] for row in log if row.get("event") == "runner_collected"}
+    assert {"context-marker"} <= collected and any(label.startswith("tc-generator.") for label in collected)
+    assert any(row.get("event") == "runner_collected" and ".review." in row["task_id"] for row in log)  # review parts too
+    stages = [event.get("stage_instance_id") for event in derive_state(run_root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    assert len(stages) == len(set(stages))
+
+
+def test_an_unanswered_question_stops_with_exit_3(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / ".skillsrc").unlink()  # discovery asks; with an answer file the run would continue
+    code, payload = _run(project, "--profile", "cases-only-v1")
+    if payload.get("action") == "ask_user":
+        assert code == 3 and payload["stopped"] == "ASK_USER_UNANSWERED"
+    else:  # discovery needed no question for this project: the run simply completes
+        assert payload["action"] == "done"
+
+
+def test_an_answer_that_never_fits_fails_as_transport_with_its_reason(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "cases-only-v1", script="prose")
+    assert code == 2 and payload["code"] == "RUNNER_TASK_FAILED" and "RUNNER_ANSWER_NOT_JSON" in payload["message"]
+
+
+JAVA_HOME = os.environ.get("TEST_SKILLS_JAVA_HOME")
+
+
+@pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven")
+def test_a_local_pilot_run_passes_without_an_orchestrator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JAVA_HOME", str(JAVA_HOME))
+    monkeypatch.setenv("PATH", str(Path(JAVA_HOME) / "bin") + os.pathsep + os.environ.get("PATH", ""))
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "local-pilot-v1", "--require-driver-isolation")
+    result = payload["result"]
+    assert (code, result["verification"], result["accepted"], result["isolation_evidence"]) == (0, "PASS", True, "DRIVER_PROCESS"), result
+    terminal = read_terminal_result(project / ".pilot-runs" / payload["run_id"], result["attempt_id"])
+    assert terminal["isolation_evidence"] == "DRIVER_PROCESS" and (project / GENERATED).is_file()

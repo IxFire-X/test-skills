@@ -545,6 +545,16 @@ def _durable_branch(
     # Facts may omit an isolated review (callers before D8), never a self-review.
     if (claimed and claimed != independence) or (not claimed and independence.get("review_independence") == "SELF"):
         raise FinalizationError("terminal review independence does not bind the part boundaries")
+    # Opt-in evidence (contract amendments 2026-10-07) is derived from durable receipts, never claimed.
+    try:
+        isolation = pilot_state.isolation_evidence(run_root, attempt_id)
+        strength = pilot_state.read_mutation_receipt_if_present(run_root, attempt_id)
+    except (KeyError, TypeError, ValueError) as error:
+        raise FinalizationError("opt-in review or mutation evidence is unreadable") from error
+    if {key: facts[key] for key in ("isolation_evidence", "driver_isolation_required") if key in facts} != isolation:
+        raise FinalizationError("terminal isolation evidence does not bind the part boundaries")
+    if facts.get("test_strength") != (None if strength is None else strength["status"]):
+        raise FinalizationError("terminal test strength does not bind the mutation receipt")
     verdict = reviewer["authoritative_verdict"]
     if effective is not None:
         if verdict != "ACCEPTED" or effective.get("reviewer_session_digest") != reviewer["digest"]:
@@ -1125,6 +1135,7 @@ def finalize_durable_execution_attempt(
         "prior_stage_cause": prior_stage_cause,
         "policy_profile": attempt["policy_profile"],
         **pilot_state.review_independence(run_root, attempt_id),
+        **pilot_state.isolation_evidence(run_root, attempt_id),
         **({"test_strength": strength["status"]} if strength is not None else {}),
     }
     branch = {

@@ -2042,8 +2042,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
         ):
             raise ValueError("invalid generator fragment artifact")
     elif stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")):
-        # compact-v1 answers carry schema 2.0.0; the frozen plan decides which one a part accepts.
-        schema_name = "review-part-output-compact.schema.json" if value.get("schema_version") == "2.0.0" else "review-part-output.schema.json"
+        # compact-v1 answers carry schema 2.x (2.1.0 with an analyst question); the frozen plan decides which one a part accepts.
+        schema_name = "review-part-output-compact.schema.json" if value.get("schema_version") in {"2.0.0", "2.1.0"} else "review-part-output.schema.json"
         if _review_part_token(stage_instance_id.rsplit(":", 1)[1])[0] != value.get("part_id"):
             raise ValueError("invalid review part identity")
     elif stage_instance_id.startswith("tc-to-autotest:"):
@@ -2548,7 +2548,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    if re.fullmatch(r"review-(?:snapshot|plan|aggregate)-(?:canonical|r[12])|review-part-boundary-(?:canonical|r[12])-part-[0-9]{6}(?:-try[23])?", kind):
+    if re.fullmatch(r"review-(?:snapshot|plan|aggregate)-(?:canonical|r[12])|review-part-(?:boundary|process)-(?:canonical|r[12])-part-[0-9]{6}(?:-try[23])?", kind):
         if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid review receipt attempt")
         return root / "review-state" / attempt_id / f"{kind}.json"
@@ -2884,7 +2884,7 @@ def _validate_factual_receipt(
         }, attempt["policy_profile"])
         if dict(receipt) != dict(expected):
             raise ValueError("invalid structured result")
-    elif kind.startswith(("review-snapshot-", "review-plan-", "review-part-boundary-", "review-aggregate-")):
+    elif kind.startswith(("review-snapshot-", "review-plan-", "review-part-boundary-", "review-part-process-", "review-aggregate-")):
         if not identity_matches:
             raise ValueError("foreign review receipt")
         _validate_review_receipt(project, root, state, attempt, kind, receipt, common)
@@ -3974,7 +3974,7 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         key, part_token = kind.removeprefix("review-part-boundary-").split("-part-", 1)
         part_id, try_number = _review_part_token("part-" + part_token)
         stage = _review_stage(key, part_id, try_number)
-        plan, part = _review_part_definition(root, state, attempt_id, stage)
+        plan, part = _review_part_definition(root, state, attempt_id, stage, allow_unavailable=True)
         isolation = receipt.get("host_isolation")
         expected_keys = common | {"plan_digest", "part_id", "input_digest", "reviewer_invocation_id", "model_id", "host_isolation", "cli", "cli_version", "settings"}
         from tools.review_modes import part_input as mode_part_input
@@ -3992,6 +3992,9 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
                 request = _read_artifact(project, root, _model_request_target(root, attempt_id, event["artifact_digest"]), "model request")
                 if request.get("invocation_id") == receipt["reviewer_invocation_id"]:
                     raise ValueError("review invocation reuses another context")
+        return
+    if kind.startswith("review-part-process-"):
+        _validate_review_process_receipt(project, root, state, attempt_id, kind, receipt, common)
         return
     if kind.startswith("review-aggregate-"):
         key = kind.removeprefix("review-aggregate-")
@@ -4023,20 +4026,112 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
     raise ValueError("unsupported review receipt")
 
 
+_RUNNER_KEYS = {"preset", "command_digest", "cli"}
+
+
 def _review_isolation_shape(isolation: Mapping[str, Any]) -> bool:
     """Host evidence of one review part: a fresh isolated call, or a self-review that says so.
 
     ``fresh_context``/``distinct_invocations`` are both true (a subagent or a new CLI
     process) or both false (the generating session reviews itself).  Only a
     self-review carries ``self_review_accepted``: the run decision to accept it.
+    A part the driver runs itself (opt-in process runner) also declares
+    ``isolation_evidence: DRIVER_PROCESS`` and the ``runner`` that starts it; the
+    level is proved only by the part's process receipt (``isolation_evidence``).
     """
     base = {"fresh_context", "distinct_invocations", "role_policy", "evidence_digest"}
     fresh, distinct = isolation.get("fresh_context"), isolation.get("distinct_invocations")
     if type(fresh) is not bool or fresh is not distinct:
         return False
     if fresh:
-        return set(isolation) == base
+        if set(isolation) == base:
+            return True
+        runner = isolation.get("runner")
+        return (set(isolation) == base | {"isolation_evidence", "runner"} and isolation.get("isolation_evidence") == "DRIVER_PROCESS"
+                and isinstance(runner, dict) and set(runner) == _RUNNER_KEYS and all(isinstance(runner[key], str) and runner[key] for key in _RUNNER_KEYS))
     return set(isolation) == base | {"self_review_accepted"} and type(isolation.get("self_review_accepted")) is bool
+
+
+_PROCESS_KEYS = {"boundary_digest", "answer_digest", "command_digest", "cli", "cli_version", "model", "model_source", "started_at", "finished_at",
+                 "exit_code", "session_id", "stdout_sha256", "stdout_bytes", "tokens", "user_settings_loaded"}
+
+
+def _validate_review_process_receipt(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, kind: str,
+                                     receipt: Mapping[str, Any], common: set[str]) -> None:
+    """Evidence of the driver-run process that produced one part answer (opt-in process runner)."""
+    key, part_token = kind.removeprefix("review-part-process-").split("-part-", 1)
+    part_id, try_number = _review_part_token("part-" + part_token)
+    boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, _review_part_boundary_kind(key, part_id, try_number), "ARTIFACT_READ_BACK")["record"]
+    isolation = boundary["host_isolation"]
+    if (set(receipt) != common | _PROCESS_KEYS or receipt["boundary_digest"] != boundary["digest"]
+            or isolation.get("isolation_evidence") != "DRIVER_PROCESS" or receipt["command_digest"] != isolation["runner"]["command_digest"]
+            or not _DIGEST.fullmatch(str(receipt["answer_digest"])) or not _DIGEST.fullmatch(str(receipt["stdout_sha256"]))
+            or receipt["model_source"] not in {"cli_output", "configured"} or type(receipt["user_settings_loaded"]) is not bool
+            or not isinstance(receipt["session_id"], str) or not receipt["session_id"]
+            or not isinstance(receipt["tokens"], dict) or not all(isinstance(value, int) and value >= 0 for value in receipt["tokens"].values())):
+        raise ValueError("invalid review process receipt")
+
+
+def publish_review_process_receipt(run_root: Path, attempt_id: str, review_key: str, part_id: str, try_number: int, facts: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Publish the process evidence of one driver-run part try, before its answer is submitted."""
+    kind = f"review-part-process-{review_key}-{part_id}" + ("" if try_number == 1 else f"-try{try_number}")
+    return _publish_bound_attempt_receipt(run_root, attempt_id, kind, facts)
+
+
+_EVIDENCE_ORDER = ("NONE", "HOST_DECLARED", "DRIVER_PROCESS")
+
+
+def isolation_evidence(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """``isolation_evidence`` (+ ``driver_isolation_required``) for runs that opted in; empty otherwise.
+
+    A part counts as ``DRIVER_PROCESS`` only when its answered try was declared driver-run,
+    a process receipt binds that boundary and the exact submitted answer, and its CLI
+    session differs from every other part's.  A host answer is at most ``HOST_DECLARED``;
+    a self-review is ``NONE``.  The attempt gets the lowest level of its parts (a rework
+    attempt also counts its parent's parts).
+    """
+    from tools.review_parts import review_digest
+    project, root = _run_root(run_root)
+    authorization = read_run(run_root)["authorization"]
+    required = authorization.get("require_driver_isolation") is True
+    state = derive_state(root)
+    attempts = {item["attempt_id"]: item for item in state["attempts"]}
+    lineage = [attempt_id]
+    if attempts.get(attempt_id, {}).get("retry_reason") == REWORK_RETRY_REASON:
+        lineage.append(str(attempts[attempt_id]["parent_attempt_id"]))
+    levels, sessions, opted = [], [], required
+    for owner in lineage:
+        directory = root / "review-state" / owner
+        for path in sorted(directory.glob("review-part-boundary-*.json")) if directory.is_dir() else []:
+            key, part_token = path.stem.removeprefix("review-part-boundary-").split("-part-", 1)
+            part_id, try_number = _review_part_token("part-" + part_token)
+            tries = _review_part_tries(project, root, state, owner, key, part_id)
+            answered = next((row for row in tries if row["try"] == try_number and row["result"] is not None), None)
+            if answered is None:
+                continue  # a failed or unanswered try proves nothing
+            isolation = _read_attempt_receipt_with_state(project, root, state, owner, path.stem, "ARTIFACT_READ_BACK")["record"]["host_isolation"]
+            if isolation["fresh_context"] is False:
+                levels.append("NONE")
+                continue
+            if isolation.get("isolation_evidence") != "DRIVER_PROCESS":
+                levels.append("HOST_DECLARED")
+                continue
+            opted = True
+            process = _receipt_target(root, owner, path.stem.replace("review-part-boundary-", "review-part-process-", 1))
+            if not process.exists():
+                levels.append("HOST_DECLARED")
+                continue
+            record = _read_attempt_receipt_with_state(project, root, state, owner, process.stem, "ARTIFACT_READ_BACK")["record"]
+            answer = {key_: value for key_, value in answered["result"].items() if key_ not in {"schema_version", "plan_digest", "snapshot_digest", "part_id", "input_digest"}}
+            if record["answer_digest"] != review_digest(answer) or record["session_id"] in sessions:
+                levels.append("HOST_DECLARED")
+                continue
+            sessions.append(record["session_id"])
+            levels.append("DRIVER_PROCESS")
+    if not opted:
+        return {}
+    level = min(levels, key=_EVIDENCE_ORDER.index) if levels else "NONE"
+    return {"isolation_evidence": level, "driver_isolation_required": required}
 
 
 def review_independence(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -4141,13 +4236,15 @@ def _review_block_classes(ledger: Mapping[str, Any]) -> dict[str, str]:
     return {event["part_id"]: event.get("failure_class", "CONTENT") for event in ledger["events"] if event["event_type"] == "REVIEW_PART_BLOCKED"}
 
 
-def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str) -> tuple[dict, dict]:
+def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: str, stage: str, *, allow_unavailable: bool = False) -> tuple[dict, dict]:
+    """The declared part of a stage.  ``allow_unavailable`` reads a part the ledger later blocked
+    (after its last failed try): its boundaries were valid when they were published."""
     from tools.review_modes import validate_plan
     plan = _review_plan_with_state(root, state, attempt_id, _review_key(stage))
     if validate_plan(plan):
         raise ValueError("invalid durable review plan")
     part = next((part for part in [*plan["parts"], *plan["additions"]] if part["part_id"] == _review_part_token(stage.rsplit(":", 1)[1])[0]), None)
-    if part is None or part["blocked_reason"] or part["part_id"] in plan["unavailable"]:
+    if part is None or part["blocked_reason"] or (part["part_id"] in plan["unavailable"] and not allow_unavailable):
         raise ValueError("undeclared or blocked review part")
     return plan, part
 

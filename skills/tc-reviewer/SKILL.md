@@ -74,6 +74,9 @@ Answer with exactly `coverage`, `findings`, `corrections`, `lint_dispositions` a
   `SRC-n:Lk`) and `note` (at most 200 characters). Areas listed as carried are not answered.
 - `findings`: `severity`, `code` (`UPPER_SNAKE`), `related_ids` (canonical IDs) and `message`
   (at most 600 characters, the violated rule and the exact location). At most 5 INFO.
+  When the task instructions ask for analyst questions and the problem is in the requirement
+  (it is silent or contradicts itself), not in the case, add `analyst_question` (at most 300
+  characters) and name the requirement in `related_ids`.
 - `corrections`: mechanical text fixes only — `target_id`, `field` from the dictionary
   (case: `title`, `objective`, `preconditions[N]`, `management.folder|status|owner|estimated_time`,
   `management.components[N]`, `management.labels[N]`; step: `action`, `test_data`,

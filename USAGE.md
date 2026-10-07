@@ -542,3 +542,60 @@ registry/digest, pipeline contract, profiles, adapters и release-eval suite. О
 
 Company runner, production rollback и реальный Zephyr tenant round-trip для core pilot
 остаются `N/A`.
+
+## 12. Опции волны 2
+
+Все три опции независимы и по умолчанию выключены.
+
+**Мутации** (`local-pilot-v1`, Java/Maven или Gradle):
+
+```yaml
+# .skillsrc
+mutation:
+  enabled: true          # без этого и без --mutation ничего не скачивается и не запускается
+  threads: 2             # потоки PIT (1–16)
+  timeout_seconds: 1800  # общий таймаут этапа
+  timeout_const_ms: 4000
+  mutators: DEFAULTS
+  triage_limit: 30       # сколько групп выживших отдать на разбор
+  # target_classes: ["com.example.orders.*"]  # сузить, если этап долгий
+```
+
+```powershell
+python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --mutation
+```
+
+После терминального результата драйвер выдаёт задачи `mutation-triage:triage-NN`
+(их можно получать пачкой через `--max-tasks`). Итог — `test_strength` и
+`strength_triage` в сводке, `test-strength.md` рядом с проекциями.
+
+**Ревью процессами драйвера:**
+
+```yaml
+# .skillsrc — только пресет, модели по ролям, параллельность и таймаут
+review_runner:
+  preset: claude            # или codex
+  models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
+  max_parallel: 4
+  timeout_seconds: 1800
+```
+
+```powershell
+python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md `
+  --review-runner process --review-runner-cli "C:\path\to\claude.exe" --require-driver-isolation
+```
+
+На `{"action": "wait"}` подождите `poll_seconds` и снова вызовите `next`. CLI должен быть
+залогинен (подписка или ключ самого CLI); пакет учётных данных не видит. Свой шаблон
+команды — только флагом `--review-runner-command '["…", "{model}"]'`.
+
+**Без оркестратора:**
+
+```powershell
+python -m tools.pipeline_driver run --project "$project" --runner process --profile local-pilot-v1 `
+  --docs docs/feature.md --answer reviewer-isolation=fresh
+```
+
+**Отчёт для аналитиков:** `next … --analyst-report` → `analyst-report.json`/`.md` рядом с
+проекциями, `analyst_questions` в сводке; комментарий для OpenSpec —
+`python -m tools.analyst_report export --project "$project" --run <run_id> --change <имя>`.

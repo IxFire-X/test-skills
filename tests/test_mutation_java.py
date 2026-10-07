@@ -47,7 +47,9 @@ def _replay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit=None) -> Repla
     replay.review_mode = None  # the driver default (compact-v1)
     (replay.project / GENERATED).unlink()  # the fixture keeps the class retained by the live run
     skillsrc = replay.project / ".skillsrc"
-    skillsrc.write_text(skillsrc.read_text(encoding="utf-8") + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+    # A 5.1.0 manifest with the optional section (the live-run .skillsrc has the same shape).
+    text = skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.1.0", 1)
+    skillsrc.write_text(text + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
     return replay
 
 

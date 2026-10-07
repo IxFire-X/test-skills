@@ -106,3 +106,34 @@ def test_the_driver_writes_the_report_only_with_the_option(tmp_path: Path, optio
     from tools.pipeline_driver_analyst import attempt_report
 
     assert attempt_report(project, done["run_id"]) == report  # rebuilt from durable sources: same report
+
+
+def test_a_reviewer_question_goes_through_submit_into_the_report(tmp_path: Path) -> None:
+    from tests.review_scaling_helpers import clean_compact_answer, part_text
+    from tests.test_review_fixes_driver import SavedModel, _answer_and_submit, _project, _run_root, _start
+    from tools import pipeline_driver as driver
+    from tools.pilot_state import review_part_results
+
+    project = _project(tmp_path, local=False)
+    task = _start(project, "cases-only-v1", review_mode="compact-v1", analyst_report=True)
+    asked = False
+    for _ in range(40):
+        if task["action"] == "done":
+            break
+        if task.get("review_mode") == "compact-v1":
+            assert "analyst_question" in task["instructions"]
+            answer = clean_compact_answer(part_text(task))
+            if not asked:
+                answer["findings"] = [{"severity": "WARNING", "code": "REQUIREMENT_SILENT", "related_ids": [next(ref for ref in part_text(task).split("[") if ref.startswith("SREQ-")).split("]")[0]],
+                                       "message": "Требование не задаёт порядок сортировки.", "analyst_question": "В каком порядке выдавать товары?"}]
+                asked = True
+            Path(task["output_path"]).write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
+            task = driver.submit(project, _run_root(project, task), task["task_id"])
+            assert task.get("status") != "rejected", task.get("errors")
+        else:
+            task = _answer_and_submit(project, task, SavedModel("cases-only-v1"))
+    run_root = project / ".pilot-runs" / task["run_id"]
+    results = review_part_results(run_root, task["result"]["attempt_id"])
+    assert any(result["schema_version"] == "2.1.0" for result in results)
+    report = json.loads(Path(task["result"]["paths"]["analyst_report_json"]).read_text(encoding="utf-8"))
+    assert [row["question"] for row in report["items"] if any(source["kind"] == "tc-reviewer" for source in row["sources"])] == ["В каком порядке выдавать товары?"]
