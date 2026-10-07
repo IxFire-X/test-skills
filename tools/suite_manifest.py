@@ -29,7 +29,7 @@ MANIFEST = "suite-manifest.json"
 SUITE_FILES = {"canonical": "test-cases.json", "markdown": "test-cases.md", "html": "test-cases.html", "csv": "test-cases.zephyr-scale.csv"}
 _ROOT = Path(__file__).resolve().parents[1]
 _SCHEMA = _ROOT / "schemas" / "suite-manifest.schema.json"
-QUARANTINE_REASONS = ("ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT")
+QUARANTINE_REASONS = ("ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED")
 
 
 class SuiteError(ValueError):

@@ -45,6 +45,11 @@ def classify(runs: Sequence[str], *, compile_error: bool = False, requirement_ch
     return {"outcome": outcome, "reason": reason, "proposal_only": bool(edited_by_person and outcome in {"REPAIR", "UPDATE", "QUARANTINE", "FIXED"})}
 
 
+def _one_line(text: str | None, limit: int = 500) -> str:
+    """A failure message on one line (AssertJ puts \"expected … but was …\" on the lines after the description)."""
+    return " ".join(str(text or "").split())[:limit]
+
+
 def _expected_text(step: Mapping[str, Any]) -> list[str]:
     return [str(item.get("text") or "").strip() for item in step.get("expectations") or [] if str(item.get("text") or "").strip()]
 
@@ -65,11 +70,11 @@ def bug_report(case: Mapping[str, Any], *, locator: str, failure: str | None, ru
         expected += _expected_text(step)
     expected_lines = [f"- {text.splitlines()[0]}" for text in expected] or ["- (см. кейс)"]
     lines += ["", "**Ожидается**", *expected_lines, "", "**Фактически**",
-              f"- {(failure or 'тест упал на проверке').strip().splitlines()[0][:500]}", ""]
+              f"- {_one_line(failure) or 'тест упал на проверке'}", ""]
     return "\n".join(lines)
 
 
 def analyst_question(case: Mapping[str, Any], *, failure: str | None) -> str:
-    observed = (failure or "проверка не прошла").strip().splitlines()[0][:300]
+    observed = _one_line(failure, 300) or "проверка не прошла"
     return (f"Кейс {case.get('case_id')} «{case.get('title')}» перестал проходить, хотя требование не менялось ({observed}). "
             f"Это дефект продукта или новое поведение, которое нужно описать в требовании?")

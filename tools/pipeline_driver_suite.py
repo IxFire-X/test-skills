@@ -62,8 +62,8 @@ def _case_state(run_id: str, report: Mapping[str, Any], automation: Mapping[str,
 def _strength(run_root: Path, attempt_id: str, run_id: str) -> dict[str, dict[str, Any]]:
     from tools.pilot_state import read_mutation_receipt_if_present
 
-    receipt = read_mutation_receipt_if_present(run_root, attempt_id)
-    payload = (receipt or {}).get("payload") or {}
+    receipt = read_mutation_receipt_if_present(run_root, attempt_id) or {}
+    payload = receipt.get("payload") if isinstance(receipt.get("payload"), dict) else receipt
     if payload.get("status") != "MEASURED":
         return {}
     return {row["case_id"]: {"covered": int(row["covered"]), "killed": int(row["killed"]), "run_id": run_id} for row in payload.get("cases") or []}

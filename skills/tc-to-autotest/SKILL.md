@@ -43,6 +43,25 @@ checks and required clarification. Do not invent it or replace the case with a u
 
 Markdown/CSV and their human prose are never automation inputs.
 
+## Update and repair modes (`suite-update-v1`)
+
+A task with `mode: update` automates the updated and new cases of a living suite. The
+brief names the target file (its current text), and for every case its canonical case and,
+for an updated case, its current method (`locator`, `method_name`, `source`). Return
+`methods` — one complete method per case of the task: the same `method_name` for an
+updated case, a new unique name for a new case — plus `helpers` (new helper methods) and
+`imports` (missing import lines) when needed. Every check keeps its `ASSERT-…` label and
+the case's expected value; the controller rejects a method that drops one. The controller
+keeps every other method and the file's shared code, splices the methods in by their
+slices, reviews them statically and writes the file only if no person edited the methods.
+
+A task with `mode: repair` follows a suite run where the test does not compile or its own
+code fails while the case and its requirements did not change. The brief carries the case,
+the current method, the error output and the target file. Return `methods` with the same
+`method_name` and corrected code. A repair fixes the test's code, never the expected
+behaviour: the controller rejects a method that loses any literal or `ASSERT-…` label of
+the old one. There is one repair try; a method that still fails goes to quarantine.
+
 ## Stop conditions
 
 Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or work outside the authorized scope. Also stop when discovery, preflight, runtime setup, or a required project change is unresolved.

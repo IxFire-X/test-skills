@@ -75,14 +75,16 @@
   ],
   "optional_schema_registry": [
     {"id":"mutation-receipt.schema.json","phase":6,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true},
-    {"id":"suite-manifest.schema.json","phase":7,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true}
+    {"id":"suite-manifest.schema.json","phase":7,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true},
+    {"id":"suite-update-result.schema.json","phase":7,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true}
   ],
   "optional_artifact_registry": [
     {"id":"mutation_receipt","phase":6,"implementation_status":"IMPLEMENTED","semantic_ready":true},
     {"id":"mutation_triage","phase":6,"implementation_status":"IMPLEMENTED","semantic_ready":true},
     {"id":"analyst_report","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true},
     {"id":"runner_process_evidence","phase":4,"implementation_status":"IMPLEMENTED","semantic_ready":true},
-    {"id":"suite_manifest","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true}
+    {"id":"suite_manifest","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true},
+    {"id":"suite_update_result","phase":7,"implementation_status":"IMPLEMENTED","semantic_ready":true}
   ],
   "model_runner": {"setting":"--review-runner","values":["host","process"],"default":"host","presets":["claude","codex"],"custom_template":"launch_flag_only","skillsrc_fields":["preset","models","max_parallel","timeout_seconds"],"invocation":"fresh_process_temp_cwd_stdin_no_write_tools","wait_action":"wait","tries_per_part":3,"evidence":["command_digest","cli_name_version","model","started_finished","exit_code","session_id","stdout_digest","tokens","user_settings_loaded"],"evidence_axis":"isolation_evidence","require_flag":"--require-driver-isolation","require_reason_code":"REVIEW_ISOLATION_UNVERIFIED","standalone_command":"run --runner process"},
   "optional_disposition_policies": {"setting":"--disposition-policy","values":["cleanup","quarantine"],"defaults":{"local-pilot-v1":"cleanup","suite-update-v1":"quarantine"},"authorization_key":"disposition_policy","quarantine":{"applies_to":"authoritative_fail_with_method_outcomes","all_methods_passed":"RETAINED","failed_methods":"QUARANTINED","rewrite":"exact_owned_bytes_failed_methods_only","marks":{"junit5":"org.junit.jupiter.api.Disabled","pytest":"pytest.mark.xfail(strict=True)"},"explicit_run":{"junit5":"junit.jupiter.conditions.deactivate","pytest":"--runxfail"},"never_changes":["verification","coverage","accepted","result_tuple"]}},

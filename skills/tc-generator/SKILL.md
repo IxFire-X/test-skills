@@ -48,6 +48,30 @@ brief's `id_prefixes`. Do not return unchanged cases, requirements, mappings or
 capabilities: the controller keeps them from r1 and builds canonical r2 with
 `parent_sha256` of r1. There is one rework per run.
 
+## Update mode
+
+A task with `mode: update` comes from the `suite-update-v1` profile: the living suite's
+requirements changed. The first input is the brief — `changed_requirements` (key, old and
+new text, old and new `SREQ-*` numbers, linked canonical requirements and cases),
+`added_requirements`, `removed_requirements`, `affected_cases` in full, the involved
+`canonical_requirements`, `test_gap_proposals` and `id_prefixes`; the second is the whole
+current suite document; the third is the new requirement scan with its new `SREQ-*`
+numbers. Return only what changes:
+
+- `test_cases` — every affected case that must change, in full, with the same `case_id`
+  (keep the IDs of steps, inputs, expectations and assertions that still apply), and
+  every new case with IDs from `id_prefixes`;
+- `requirements` — canonical requirements whose text changes, and new ones (IDs from
+  `id_prefixes.requirement_id`);
+- `source_to_canonical_mappings` — one row for every added source requirement (by its
+  new number) and for a changed one whose mapping changes;
+- `retire` — cases of removed behaviour, with a reason.
+
+Never return a case listed in `edited_by_people` or a case that is not affected: people
+edited it, or it is unrelated to the change. Apply the same human scenario rules and
+oracle discipline as a fresh fragment. The controller keeps everything else, renumbers
+source requirements by key, and validates the merged next revision like a fresh document.
+
 ## Projection rule
 
 JSON is the sole machine source. The standalone HTML preview takes human wording from `action`, `test_data`, and `expectations[].text`, and uses structured literal path/query inputs only to resolve the displayed URL in its three-column table `Шаг`, `Тестовые данные / запрос`, `Ожидаемый результат`. Machine outputs/assertions and binding expressions remain available to automation but never render in those cells. A non-literal path/query value is shown as a readable placeholder such as `<ownerId из шага 1>` or `<переменная окружения X>`. HTML preview and Zephyr CSV are human/export projections: they are never automation inputs and no second editable semantic copy exists. The default CSV profile is `zephyr-scale-step-row-24-v5`, which carries only the human fields (the action with the resolved URL, `test_data` and the expectation text); v4 is produced only on an explicit `--csv-profile zephyr-scale-step-row-24-v4`.

@@ -46,6 +46,7 @@ from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("cases-only-v1", "local-pilot-v1")
+SUITE_PROFILE = "suite-update-v1"  # optional profile (contract amendment A5): tools.suite_update
 _DEFAULT_REVIEW_INPUT_BYTES = 200_000
 _DEFAULT_REVIEW_RESERVE_BYTES = 20_000
 # One model context window in UTF-8 bytes (about 200k tokens of Russian text and JSON).
@@ -268,6 +269,10 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
 
     profile = options.get("profile")
     docs = list(options.get("docs") or [])
+    if profile == SUITE_PROFILE:
+        from tools import suite_update
+
+        return suite_update.start(project, options, max_tasks=max_tasks)
     if profile not in PROFILES:
         raise DriverError("DRIVER_INPUT", "starting a run requires --profile cases-only-v1 or local-pilot-v1")
     if not docs:
@@ -1267,6 +1272,10 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, A
 
     ``max_tasks`` > 1 lets a compact review return a batch of independent part tasks.
     """
+    from tools import suite_update
+
+    if suite_update.is_suite_run(run_root):
+        return suite_update.advance(project, run_root, max_tasks=max_tasks)
     from tools.pilot_state import finish_review, prepare_review, read_effective_canonical_if_present
 
     project = Path(project).resolve()
@@ -1356,6 +1365,10 @@ def _select(project: Path, run_root: Path, attempt: Mapping[str, Any], assembled
 def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None = None, answer: str | None = None,
            failed: str | None = None, reason: str | None = None, transport_attempts: int = 1) -> dict[str, Any]:
     project = Path(project).resolve()
+    from tools import suite_update
+
+    if suite_update.is_suite_run(run_root):
+        return suite_update.submit(project, run_root, task_id, output=output, failed=failed, reason=reason)
     path = _task_path(run_root, task_id)
     if not path.is_file():
         raise DriverError("DRIVER_INPUT", "unknown task id")
@@ -1448,6 +1461,10 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
 
 
 def status(project: Path, run_root: Path) -> dict[str, Any]:
+    from tools import suite_update
+
+    if suite_update.is_suite_run(run_root):
+        return suite_update.status(project, run_root)
     from tools.pilot_state import derive_state
 
     state = derive_state(run_root)
@@ -1477,7 +1494,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--answer", action="append", default=[], help="label=value answer of an ask_user question (repeatable).")
             command.add_argument("--answers", type=Path, help="JSON file {label: value} with answers to ask_user questions.")
         if name in {"next", "run"}:
-            command.add_argument("--profile", choices=PROFILES, help="Required to start a run.")
+            command.add_argument("--profile", choices=(*PROFILES, SUITE_PROFILE), help="Required to start a run (suite-update-v1 updates the living suite).")
+            command.add_argument("--junit", action="append", default=[], help="suite-update-v1: JUnit XML report(s) of the project's own CI run for the impact analysis.")
             command.add_argument("--docs", action="append", default=None, help="Requirement document inside the project; repeatable.")
             command.add_argument("--module", help="Exact module ID when the project has several.")
             command.add_argument("--target")
@@ -1596,7 +1614,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                   "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                  "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
+                  "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
 
 
 def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any], started: float) -> int:
@@ -1651,7 +1669,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                 "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
+                "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock

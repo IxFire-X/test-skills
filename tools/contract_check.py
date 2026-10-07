@@ -144,9 +144,9 @@ EXPECTED_MUTATION_TOOLING = {
     "python": "not_implemented",
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
-OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0")]
+OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0")]
 OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED"),
-                          ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED")]
+                          ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED"), ("suite_update_result", 7, "IMPLEMENTED")]
 OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
 OPTIONAL_STAGE_ROWS = [
     {"stage": "mutation-triage", "role": "strength-analyst", "role_policy": "mutation-triage-v1", "cardinality": "post_terminal_per_task",
