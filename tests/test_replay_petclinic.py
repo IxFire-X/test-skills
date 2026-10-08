@@ -11,13 +11,18 @@ import replay_petclinic as rp
 from tools import review_compact as rc
 
 
+def _plan(key: str):
+    """The plan run d's answers of review ``key`` were given for, built by the current code."""
+    return rp.plan(key, run_lint=key != "canonical")
+
+
 def _additions(key: str, results):
-    plan = rp.plan(key)
+    plan = _plan(key)
     return plan, rc.additional_parts(plan, rp.payload(key), results)
 
 
 def _bound(key: str, **options):
-    plan = rp.plan(key)
+    plan = _plan(key)
     return [rp.bind(plan, answer) for answer in rp.answers(key, **options)]
 
 
@@ -31,7 +36,7 @@ def test_the_base_case_review_parts_are_those_run_d_answered() -> None:
 
 def test_every_recorded_answer_is_valid_for_the_current_plan() -> None:
     for key, part_2 in (("canonical", "d"), ("canonical", "b"), ("r1", "d")):
-        plan = rp.plan(key)
+        plan = _plan(key)
         payload = rp.payload(key)
         parts = {part["part_id"]: part for part in plan["parts"]}
         for result in _bound(key, part_2=part_2):
@@ -122,10 +127,10 @@ def test_the_automation_review_follows_the_check_policy() -> None:
     """Run d, autotest review part 4 asked to check CREQ-B1-T-ISOLATION (all 81 cases; the reviewer needed schema.sql):
     the automation plan had no check policy — one 559 KB part, REVIEW_CONTEXT_LIMIT.  The automation review follows the
     case review's policy, and its check parts carry the code of their cases."""
-    plan = rp.plan("r1")
+    plan = _plan("r1")
     payload = rp.payload("r1")
     results = _bound("r1")
-    assert plan.get("check_policy") == rc.CHECK_POLICY and rc.check_limit(plan) == 2
+    assert len(plan["parts"]) == 10 and plan.get("check_policy") == rc.CHECK_POLICY and rc.check_limit(plan) == 2
     additions = rc.additional_parts(plan, payload, results)
     assert 0 < len(additions) <= rc.check_limit(plan)
     assert all(part["blocked_reason"] is None and len(part["case_ids"]) < 81 for part in additions)
@@ -161,3 +166,23 @@ def test_a_check_part_with_source_requirements_lists_only_its_own_requirements()
     assert len(additions) <= min(rc.check_limit(plan), 9)
     assert all(part["blocked_reason"] is None for part in additions)
 
+
+def test_an_assert_id_inside_a_string_literal_counts_as_present() -> None:
+    """Run d: the code labels checks as .as(x.label("ASSERT-B1-0042 response_status")); the linter looked for exactly
+    "ASSERT-B1-0042" and raised 1285 false suspicions over ten parts, which the reviewers dismissed by script."""
+    from tools.review_lint import names_id
+
+    assert names_id('.as(label("ASSERT-B1-0042 response_status"))', "ASSERT-B1-0042")
+    assert names_id("x.as('ASSERT-B1-0042')", "ASSERT-B1-0042")
+    assert names_id('assertThat(a).as("поле ASSERT-B1-0042: имя").isEqualTo(b)', "ASSERT-B1-0042")
+    assert not names_id('.as("ASSERT-B1-0010 поле")', "ASSERT-B1-001")
+    assert not names_id('.as("ASSERT-B1-00420")', "ASSERT-B1-0042")
+    assert not names_id("// ASSERT-B1-0042 in a comment", "ASSERT-B1-0042")
+    current = rp.plan("r1")
+    # Without the false suspicions the same cases and code fit eight parts instead of ten.
+    assert len(current["parts"]) == 8 and all(part["blocked_reason"] is None for part in current["parts"])
+    lint = current["lint"]
+    missing = [row for row in lint if row["rule"] == "assert-id-missing"]
+    code = rp.payload("r1")["automation"]["artifacts"]["generated_files"][0]["content"]
+    assert len(missing) < 10, len(missing)
+    assert all(not names_id(code, row["related_ids"][0]) for row in missing)

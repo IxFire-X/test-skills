@@ -307,6 +307,14 @@ def _statement(lines: list[str], index: int) -> str:
     return "\n".join(lines[start:end + 1])
 
 
+def names_id(code: str, identifier: str) -> bool:
+    """``identifier`` as a whole word inside a string literal of ``code``: ``"ASSERT-B1-0042"``, but also
+    ``.as(x.label("ASSERT-B1-0042 response_status"))`` (live Petclinic run d: an exact-literal search raised 1285 false
+    suspicions over ten parts); ``ASSERT-B1-001`` never matches ``ASSERT-B1-0010``."""
+    word = rf"(?<![\w-]){re.escape(identifier)}(?![\w-])"
+    return re.search(rf"\"[^\"\n]*{word}[^\"\n]*\"|'[^'\n]*{word}[^'\n]*'", code) is not None
+
+
 def lint_automation(document: Mapping[str, Any], automation: Mapping[str, Any], slices: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Code checks before the model: ASSERT IDs, simple literals, request method/path/body.
 
@@ -332,13 +340,13 @@ def lint_automation(document: Mapping[str, Any], automation: Mapping[str, Any], 
             for expectation in step["expectations"]:
                 for assertion in expectation["assertions"]:
                     identifier = assertion["assertion_id"]
-                    if f'"{identifier}"' not in reach and f"'{identifier}'" not in reach:
+                    if not names_id(reach, identifier):
                         rows.append({"rule": "assert-id-missing", "case_ids": [case["case_id"]], "related_ids": [identifier, relation["symbol_id"]],
                                      "message": f"{identifier} не найден в коде метода {member.name} и его хелперов."})
                         continue
                     expected = assertion.get("expected") or {}
                     if assertion["operator"] == "equals" and expected.get("kind") == "literal" and not isinstance(expected.get("value"), (dict, list)):
-                        index = next((number for number, line in enumerate(method_lines) if identifier in line), None)
+                        index = next((number for number, line in enumerate(method_lines) if names_id(line, identifier)), None)
                         statement = None if index is None else _statement(method_lines, index)
                         if statement is not None:
                             # A named constant of the file stands for its literal.

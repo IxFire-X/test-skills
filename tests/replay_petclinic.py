@@ -12,6 +12,7 @@ copy (``docs/superpowers/plans/2026-10-08-live-fixes.md``, R1).
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import functools
 import gzip
@@ -38,19 +39,29 @@ def snapshot(key: str) -> dict[str, Any]:
     return load(f"{key}-snapshot.json.gz")
 
 
+def _run_d_names_id(code: str, identifier: str) -> bool:
+    """The ASSERT ID search of run d's package (``10ae352``): the exact quoted ID only."""
+    return f'"{identifier}"' in code or f"'{identifier}'" in code
+
+
 @functools.lru_cache(maxsize=None)
-def _plan(key: str) -> str:
+def _plan(key: str, run_lint: bool) -> str:
+    from unittest import mock
+
     from tools.review_compact import build_compact_plan
 
     recorded = _load(f"{key}-snapshot.json.gz")
     specification = {name: value for name, value in recorded["specification"].items() if name != "projection_digest"}
-    plan = build_compact_plan(specification, recorded["payload"], input_byte_budget=recorded["input_byte_budget"])
+    with mock.patch("tools.review_lint.names_id", _run_d_names_id) if run_lint else contextlib.nullcontext():
+        plan = build_compact_plan(specification, recorded["payload"], input_byte_budget=recorded["input_byte_budget"])
     return json.dumps(plan, ensure_ascii=False)
 
 
-def plan(key: str) -> dict[str, Any]:
-    """The plan the current code builds from the recorded snapshot (without additions)."""
-    return {**json.loads(_plan(key)), "additions": [], "unavailable": {}}
+def plan(key: str, *, run_lint: bool = False) -> dict[str, Any]:
+    """The plan the current code builds from the recorded snapshot (without additions).  ``run_lint`` keeps the
+    automation linter of run d, so the plan has the parts run d's answers were given for (the current linter raises
+    fewer suspicions, and an automation plan packs its parts by size)."""
+    return {**json.loads(_plan(key, run_lint)), "additions": [], "unavailable": {}}
 
 
 def payload(key: str) -> dict[str, Any]:
