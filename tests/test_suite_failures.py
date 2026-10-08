@@ -138,6 +138,54 @@ def test_gradle_compile_errors_name_their_lines() -> None:
     assert suite_run.compile_lines_of(output) == [("/p/src/test/java/a/ApiTest.java", 42)]
 
 
+_PRODUCT_TRACE = """jakarta.servlet.ServletException: Request processing failed: java.lang.IllegalStateException: storage unavailable
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1022)
+	at org.springframework.test.web.servlet.MockMvc.perform(MockMvc.java:201)
+	at net.javaguides.springboot.controller.StudentControllerPipelineTest.exchange(StudentControllerPipelineTest.java:40)
+Caused by: java.lang.IllegalStateException: storage unavailable
+	at net.javaguides.springboot.controller.StudentController.deleteStudent(StudentController.java:79)
+"""
+_TEST_TRACE = """java.lang.NullPointerException: Cannot invoke "String.length()" because "body" is null
+	at net.javaguides.springboot.controller.StudentControllerPipelineTest.text(StudentControllerPipelineTest.java:61)
+	at net.javaguides.springboot.controller.StudentControllerPipelineTest.tcB1001(StudentControllerPipelineTest.java:90)
+"""
+
+
+@pytest.mark.parametrize("trace,origin,outcome", [
+    (_PRODUCT_TRACE, "PRODUCT", ("QUARANTINE", "BEHAVIOR_CHANGED_WITHOUT_SPEC")),
+    (_TEST_TRACE, "TEST", ("REPAIR", "TEST_CODE_ERROR")),
+])
+def test_an_exception_from_the_product_is_a_behaviour_failure_not_a_repair(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch,
+                                                                         trace: str, origin: str, outcome: tuple) -> None:
+    """Review 2.1 item 11: JUnit <error> is REPAIR only when the test's own code broke."""
+    from xml.sax.saxutils import escape
+
+    project = tmp_path / "project"
+    import shutil
+
+    shutil.copytree(step5["project"], project, ignore=shutil.ignore_patterns(".pilot-runs"))
+    manifest = _manifest(step5)
+    _write(project, step5, manifest)
+    locators = [case["methods"][0]["locator"] for case in manifest["cases"]]
+    owner, name = locators[0].rsplit("#", 1)
+
+    def fake(argv, **_kwargs):
+        directory = project / "target" / "surefire-reports"
+        directory.mkdir(parents=True, exist_ok=True)
+        cases = [f'<testcase classname="{owner}" name="{locator.rsplit("#", 1)[1]}"/>' for locator in locators[1:]]
+        message = escape(trace.splitlines()[0], {'"': "&quot;"})
+        cases.append(f'<testcase classname="{owner}" name="{name}"><error message="{message}" type="x">{escape(trace)}</error></testcase>')
+        (directory / f"TEST-{owner}.xml").write_text(f'<testsuite name="{owner}">{"".join(cases)}</testsuite>', encoding="utf-8")
+        return SimpleNamespace(returncode=1, stdout="Tests run: 12, Errors: 1", stderr="")
+
+    monkeypatch.setattr(suite_run, "RUNNER", fake)
+    result = suite_run.run_suite(project, manifest, _module(project), repeats=1)
+    row = next(item for item in result["methods"] if item["locator"] == locators[0])
+    assert row["runs"] == ["broken", "broken"] and row["error_origin"] == origin
+    decision = classify(row["runs"], product_error=row["error_origin"] == "PRODUCT")
+    assert (decision["outcome"], decision["reason"]) == outcome
+
+
 def test_quarantined_methods_run_explicitly(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmp_path / "project"
     import shutil

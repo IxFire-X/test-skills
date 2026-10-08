@@ -97,7 +97,7 @@ def junit_outcomes(paths: Iterable[Path]) -> list[dict[str, str]]:
                 status = "passed"
             message = None if problem is None else problem.get("message") or next(iter((problem.text or "").strip().splitlines()), None)
             rows.append({"classname": case.get("classname") or "", "name": (case.get("name") or "").split("(", 1)[0].split("[", 1)[0], "status": status,
-                         "message": message})
+                         "message": message, "trace": None if problem is None else (problem.text or "")[:20000]})
     return rows
 
 

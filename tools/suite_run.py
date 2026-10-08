@@ -30,6 +30,35 @@ def compile_lines_of(output: str) -> list[tuple[str, int]]:
     return sorted(found)
 
 
+_FRAME = re.compile(r"^\s*at ([\w$.]+)\.[\w$<>]+\(", re.M)
+
+
+def product_classes(module_root: Path, sources: Sequence[str]) -> set[str]:
+    """Fully qualified names of the product's Java classes (``a/b/C.java`` under a source root is ``a.b.C``)."""
+    names = set()
+    for source in sources:
+        root = Path(module_root) / source
+        if root.is_dir():
+            names |= {".".join(path.relative_to(root).with_suffix("").parts) for path in root.rglob("*.java")}
+    return names
+
+
+def error_origin(trace: str | None, message: str | None, product: set[str]) -> str:
+    """``PRODUCT`` when the error came out of the product's code, else ``TEST`` (review 2.1 item 11).
+
+    A frame of a product class anywhere in the trace (the ``Caused by`` chain included) or MockMvc's
+    ``Request processing failed`` (the handler threw) is the product's; anything else broke in the
+    test's own code and is a repair.
+    """
+    text = f"{message or ''}\n{trace or ''}"
+    if "Request processing failed" in text:
+        return "PRODUCT"
+    for match in _FRAME.finditer(text):
+        if match.group(1).split("$", 1)[0] in product:
+            return "PRODUCT"
+    return "TEST"
+
+
 def selector_of(method: Mapping[str, Any], module_root: str) -> str:
     """Java ``class#method``; pytest ``module-relative path::function`` or ``::Class::method``."""
     locator = method["locator"]
@@ -143,7 +172,7 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
             if only is not None and method["locator"] not in only:
                 continue
             row = methods.setdefault(method["locator"], {"locator": method["locator"], "file": method["file"], "case_ids": [], "runs": [], "failure": None,
-                                                         "compile_error": False, "quarantined": case["status"] == "QUARANTINED"})
+                                                         "compile_error": False, "quarantined": case["status"] == "QUARANTINED", "error_origin": None})
             row["case_ids"].append(case["case_id"])
     if not methods:
         return {"methods": [], "commands": [], "execution": None, "build_broken": []}
@@ -151,6 +180,7 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
     explicit = any(row["quarantined"] for row in methods.values())
     commands = []
     execution = None
+    product: set[str] | None = None
     build_broken: list[str] = []
     pending = sorted(by_selector)
     for attempt in range(1 + max(0, int(repeats))):
@@ -170,6 +200,11 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
             methods[locator]["runs"].append(row["status"])
             if row["status"] in {"failed", "broken"} and methods[locator]["failure"] is None:
                 methods[locator]["failure"] = row.get("message") or None
+            if row["status"] == "broken" and methods[locator]["error_origin"] != "PRODUCT":
+                if product is None:
+                    module_root_path = (Path(project) / module_root).resolve()
+                    product = product_classes(module_root_path, list(((module.get("paths") or {}).get("source")) or ["src/main/java"]))
+                methods[locator]["error_origin"] = error_origin(row.get("trace"), row.get("message"), product)
         if outcome["compile_error"]:
             build_broken = _blame(project, manifest, methods, outcome)
             break

@@ -2,8 +2,9 @@
 
 Per test method, from the outcomes of the run and its repeats:
 
-* does not compile, or its own code broke (``broken``: an error other than an assertion) while
-  the case's requirements did not change — ``REPAIR`` (one try, ``suite-update-v1`` only);
+* does not compile, or its own code broke (``broken``: an error other than an assertion, raised in
+  the test's code, not the product's) while the case's requirements did not change — ``REPAIR``
+  (one try, ``suite-update-v1`` only); an exception out of the product is a behaviour failure;
 * failed on an assertion and a linked requirement changed — ``UPDATE``;
 * failed on an assertion with neither the requirement nor the test changed — the behaviour
   changed without a specification: ``QUARANTINE`` with reason ``BEHAVIOR_CHANGED_WITHOUT_SPEC``,
@@ -23,8 +24,12 @@ STATUSES = ("passed", "failed", "broken", "skipped")
 
 
 def classify(runs: Sequence[str], *, compile_error: bool = False, requirement_changed: bool = False, edited_by_person: bool = False,
-             quarantined: bool = False) -> dict[str, Any]:
-    """``{"outcome", "reason", "proposal_only"}`` for one method; ``runs`` are its statuses, first run first."""
+             quarantined: bool = False, product_error: bool = False) -> dict[str, Any]:
+    """``{"outcome", "reason", "proposal_only"}`` for one method; ``runs`` are its statuses, first run first.
+
+    ``product_error``: the errors came out of the product's code (``suite_run.error_origin``) — a
+    behaviour failure like a failed assertion, never a repair of the test.
+    """
     if any(status not in STATUSES for status in runs):
         raise ValueError(f"unknown test status in {list(runs)}")
     ran = [status for status in runs if status != "skipped"]
@@ -38,7 +43,7 @@ def classify(runs: Sequence[str], *, compile_error: bool = False, requirement_ch
         outcome, reason = "QUARANTINE", "FLAKY"
     elif requirement_changed:
         outcome, reason = "UPDATE", "REQUIREMENT_CHANGED"
-    elif all(status == "broken" for status in ran):
+    elif all(status == "broken" for status in ran) and not product_error:
         outcome, reason = "REPAIR", "TEST_CODE_ERROR"
     else:
         outcome, reason = "QUARANTINE", "BEHAVIOR_CHANGED_WITHOUT_SPEC"

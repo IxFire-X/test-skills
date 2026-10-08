@@ -871,7 +871,7 @@ def _triage(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
         if case_id in rewritten:
             requirement_changed = False  # the update already followed the new requirement; a failure now is the product's
         decision = classify(row["runs"], compile_error=row["compile_error"], requirement_changed=requirement_changed, edited_by_person=row["locator"] in edited,
-                            quarantined=row["quarantined"])
+                            quarantined=row["quarantined"], product_error=row.get("error_origin") == "PRODUCT")
         if decision["outcome"] == "REPAIR" and state["facts"].get("repair_ran"):
             decision = {"outcome": "QUARANTINE", "reason": "REPAIR_FAILED", "proposal_only": decision["proposal_only"]}
         if decision["outcome"] == "UPDATE" and not decision["proposal_only"]:

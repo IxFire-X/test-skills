@@ -348,3 +348,20 @@ def test_a_repair_that_lowers_the_kill_ratio_is_not_accepted(tmp_path: Path, mon
     assert case["status"] == "QUARANTINED" and case["quarantine"]["reason"] == "REPAIR_FAILED"
     description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
     assert "## Сила тестов упала" in description and "ремонт не принят" in description
+
+
+@needs_java
+def test_a_product_exception_is_quarantined_with_a_question_not_repaired(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 11: the handler throws, MockMvc rethrows (JUnit <error>): a behaviour failure, not a test to repair."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _replace_in(project / CONTROLLER, f'return  "{OLD}";', 'throw new IllegalStateException("storage unavailable");')
+    tasks: list = []
+    result = _drive(replay, seen=tasks)["result"]
+    assert not [task for task in tasks if task["stage"] == "tc-to-autotest:repair"]
+    assert result["counts"]["quarantined"] == 1 and result["counts"]["questions"] == 1 and result["counts"]["repaired"] == 0, result
+    [case] = [row for row in read_suite(project, "test-cases/")["cases"] if row["status"] == "QUARANTINED"]
+    assert case["case_id"] == "TC-B1-010" and case["quarantine"]["reason"] == "BEHAVIOR_CHANGED_WITHOUT_SPEC"
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "Черновик баг-репорта" in description and "storage unavailable" in description
