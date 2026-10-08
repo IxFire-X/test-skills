@@ -136,3 +136,28 @@ def test_the_automation_review_follows_the_check_policy() -> None:
     aggregate = rc.aggregate(plan, payload, results)
     assert [row["requirement_ids"] for row in aggregate.get("too_broad", [])] == [["CREQ-B1-T-ISOLATION"]]
 
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    end = text.find("\n## ", start + len(heading))
+    return text[start:end if end >= 0 else len(text)]
+
+
+def test_a_check_part_with_source_requirements_lists_only_its_own_requirements() -> None:
+    """Run d: a check part carrying SREQ listed every CREQ of the document (nine case-review check parts instead of a few)."""
+    import re
+
+    plan, additions = _additions("canonical", _bound("canonical"))
+    document = rp.payload("canonical")["document"]
+    mapped = {row["source_requirement_id"]: set(row["canonical_requirement_ids"]) for row in document["source_to_canonical_mappings"]}
+    linked = {case["case_id"]: set(case["requirement_ids"]) for case in document["test_cases"]}
+    named = [part for part in additions if "## SREQ" in part["text"]]
+    assert named
+    for part in named:
+        sreq = set(re.findall(r"^\[(SREQ-\d{4})\]", _section(part["text"], "## SREQ"), re.M))
+        listed = set(re.findall(r"^\[(CREQ-[^\]]+)\]", _section(part["text"], "## Требования CREQ"), re.M))
+        expected = {item for case_id in part["case_ids"] for item in linked[case_id]} | {item for source in sreq for item in mapped[source]}
+        assert sreq and listed == expected, (part["part_id"], sorted(listed - expected)[:5])
+    assert len(additions) <= min(rc.check_limit(plan), 9)
+    assert all(part["blocked_reason"] is None for part in additions)
+

@@ -318,7 +318,7 @@ _SOURCE_GROUPS = (("docs", "## Исходные требования (досло
 
 def _part_text(context: _Context, *, part_id: str, title: str, areas: Sequence[Mapping[str, Any]], carried_ids: Sequence[str],
                case_ids: Sequence[str], source_items: Sequence[Mapping[str, Any]] | None, lint: Sequence[Mapping[str, Any]],
-               notes: Sequence[str] = ()) -> str:
+               notes: Sequence[str] = (), check: bool = False) -> str:
     source = bool(source_items)
     spec = context.specification
     document = context.document
@@ -335,8 +335,19 @@ def _part_text(context: _Context, *, part_id: str, title: str, areas: Sequence[M
         out.append(f"Перенесены из прошлого ревью без изменений (не отвечать): {', '.join(carried_ids)}.")
     out.extend(notes)
     out += ["", "## Индекс всех кейсов документа", context.index]
-    requirement_ids = [item["requirement_id"] for item in document["requirements"]] if source else context.requirement_ids_for(case_ids)
-    out += ["", "## Требования CREQ" + ("" if source else " кейсов этой части"), *(context.requirements[item] for item in requirement_ids)]
+    if check:
+        # A check part's own requirements: its cases' and those its SREQ map to (live Petclinic run d: a check part
+        # carrying SREQ listed every CREQ of the document and took a part's budget).
+        named = {item["anchor"] for item in source_items or [] if item["group"] == "sreq"}
+        mapped = {creq for row in document["source_to_canonical_mappings"] if row["source_requirement_id"] in named for creq in row["canonical_requirement_ids"]}
+        linked = set(context.requirement_ids_for(case_ids)) | mapped
+        requirement_ids = [item["requirement_id"] for item in document["requirements"] if item["requirement_id"] in linked]
+        heading = "## Требования CREQ кейсов и SREQ этой части"
+    elif source:
+        requirement_ids, heading = [item["requirement_id"] for item in document["requirements"]], "## Требования CREQ"
+    else:
+        requirement_ids, heading = context.requirement_ids_for(case_ids), "## Требования CREQ кейсов этой части"
+    out += ["", heading, *(context.requirements[item] for item in requirement_ids)]
     full = {item["anchor"] for item in source_items or [] if item["group"] == "capabilities"}
     if len(full) < len(document["operation_capabilities"]):
         out += ["", "## Возможности (сигнатуры)", *(context.signatures[item["capability_id"]] for item in document["operation_capabilities"]
@@ -359,7 +370,7 @@ def _part(context: _Context, budget: int, reserve: int, *, part_id: str, title: 
           source_lint: bool = True) -> dict[str, Any]:
     lint = context.lint_for(case_ids, source=bool(source_items) and source_lint) if with_lint else []
     text = _part_text(context, part_id=part_id, title=title, areas=areas, carried_ids=carried_ids, case_ids=case_ids,
-                      source_items=source_items, lint=lint, notes=notes)
+                      source_items=source_items, lint=lint, notes=notes, check=requested_check is not None)
     size = len(text.encode("utf-8"))
     return {"part_id": part_id, "case_ids": list(case_ids), "blocks": [list(block) for block in (blocks or [case_ids])],
             "source": bool(source_items), "areas": copy.deepcopy(areas), "carried_area_ids": list(carried_ids),
