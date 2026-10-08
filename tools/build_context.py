@@ -115,12 +115,17 @@ def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None =
     found: list[dict[str, Any]] = []
     stack: list[tuple[int, str]] = []
     boundaries = sorted({0, len(text), *(match.start() for match in _heading_regex(id_re).finditer(text))})
+    fences = _fenced_ranges(text)
     for start, stop in zip(boundaries, boundaries[1:]):
         section = text[start:stop].strip()
         if section:
             first = section.splitlines()[0]
             title = _norm(first.lstrip("# "))
             heading = re.match(r"^(#{1,6})\s", first)
+            # A ``#`` line inside a fenced code block still opens a section (the frozen SREQ split), but it is no
+            # heading of the document: it leaves the heading chain alone (independent review 2.3).
+            if heading and any(low < start < high for low, high in fences):
+                heading = None
             if heading:
                 level = len(heading.group(1))
                 while stack and stack[-1][0] >= level:
@@ -132,6 +137,24 @@ def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None =
             found.append({"kind": _section_kind(section, title, id_re), "title": title, "text": section, "chain": chain,
                           "explicit_id": explicit_requirement_id(title, id_re)})
     return found
+
+
+def _fenced_ranges(text: str) -> list[tuple[int, int]]:
+    """Character ranges of fenced code blocks (``` or ~~~), from the opening to the closing fence."""
+    ranges, opened, marker = [], None, ""
+    position = 0
+    for line in text.splitlines(keepends=True):
+        fence = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence:
+            if opened is None:
+                opened, marker = position, fence.group(1)[0] * 3
+            elif fence.group(1).startswith(marker):
+                ranges.append((opened, position + len(line)))
+                opened = None
+        position += len(line)
+    if opened is not None:
+        ranges.append((opened, len(text)))
+    return ranges
 
 
 _REQUIREMENT_KINDS = frozenset({"requirement", "flow"})

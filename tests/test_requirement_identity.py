@@ -127,3 +127,18 @@ def test_project_id_pattern_cuts_petclinic_into_29_requirements(tmp_path: Path) 
 def test_unusable_id_patterns_are_rejected(pattern: str) -> None:
     with pytest.raises(ValueError):
         identify([entry("docs/a.md", "## A\nтекст\n")], id_pattern=pattern)
+
+
+
+def test_a_hash_line_inside_a_code_block_is_no_heading_of_the_chain() -> None:
+    """Independent review 2.3: `# comment` in a fenced block must not reset the heading chain of the sections after it."""
+    import hashlib
+
+    from tools.requirement_identity import identify
+
+    text = ("# API\n\n## Users\n\n### Create\nPOST /users creates a user.\n\n```bash\n# create a user\ncurl -X POST /users\n```\n\n"
+            "### Delete\nDELETE /users/{id} deletes the user.\n")
+    entry = {"path": "docs/api.md", "sha256": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(), "content": text}
+    keys = [row["key"] for row in identify([entry])]
+    assert "md:docs/api.md#API > Users > Delete" in keys, keys
+    assert "md:docs/api.md#API > Users > Create" in keys
