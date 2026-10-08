@@ -504,3 +504,45 @@ def test_a_driver_call_checks_the_review_plan_and_snapshot_once(tmp_path: Path, 
     assert len(parts) >= 4
     assert worst["review-snapshot-canonical"] <= 1 and worst["review-plan-canonical"] <= 1, worst
     assert worst["plan outside aggregates"] <= 2, worst  # the stored plan, then with its additions
+
+
+def test_a_sealed_aggregate_is_checked_against_the_ledger_status_in_a_long_process(tmp_path: Path, monkeypatch) -> None:
+    """Independent review of F3: an aggregate read while its ledger was WAITING must not stay proven for the process —
+    a later ABORTED ledger with a complete aggregate is caught on the next read (a process runner lives long)."""
+    import pytest
+
+    from tools import pilot_state
+    from tools.review_modes import aggregate as mode_aggregate
+    from tools.review_parts import review_digest, review_output
+
+    class Stop(Exception):
+        pass
+
+    def stop(*_args, **_kwargs):
+        raise Stop
+
+    replay = Replay("2c10d733", tmp_path)
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else None
+    monkeypatch.setattr(pilot_state, "finish_review", stop)
+    # The driver turns the exception into an error payload: every part is answered, the review is not sealed.
+    _code, stopped = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-to-autotest"))
+    assert stopped.get("action") == "error", stopped
+    monkeypatch.undo()
+    root = next((replay.project / ".pilot-runs").glob("*.driver")).with_suffix("")
+    state = pilot_state.derive_state(root)
+    attempt_id = state["attempts"][-1]["attempt_id"]
+    plan = pilot_state._review_plan_with_state(root, state, attempt_id, "canonical")
+    results = pilot_state._review_results(root, state, attempt_id, "canonical", plan)
+    snapshot = pilot_state._review_snapshot_payload(root, attempt_id, "canonical")
+    aggregate = mode_aggregate(plan, results, snapshot)
+    session = dict(pilot_state.read_reviewer_session_ledger(root, attempt_id, review_key="canonical"))
+    assert aggregate["complete"] and session["status"] == "WAITING"
+    pilot_state._publish_bound_attempt_receipt(root, attempt_id, "review-aggregate-canonical", {
+        "plan_digest": plan["digest"], "aggregate": aggregate, "output": review_output(snapshot, aggregate, session["session_id"])})
+    pilot_state.read_review_aggregate(root, attempt_id)  # valid while the ledger waits
+    session["events"].append({"ordinal": len(session["events"]) + 1, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_INCOMPLETE"})
+    session["status"] = "ABORTED"
+    session["digest"] = review_digest({key: value for key, value in session.items() if key != "digest"})
+    pilot_state.publish_reviewer_session_ledger(root, attempt_id, session)
+    with pytest.raises(ValueError, match="terminal verdict differs"):
+        pilot_state.read_review_aggregate(root, attempt_id)
