@@ -43,8 +43,18 @@ def normalize(text: str) -> str:
     return value.rstrip(" ?.!;:")
 
 
+_NEGATION = re.compile(r"(?<![\w-])(?:не|нет|ни|без|нельзя|not|no|never|none|without|cannot|can't|don't|doesn't|isn't|shouldn't|mustn't)(?![\w-])")
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
 def similarity(left: str, right: str) -> float:
-    """Jaccard similarity of the words (3+ letters) of two normalized questions."""
+    """Jaccard similarity of the words (3+ letters) of two normalized questions.
+
+    Questions that differ in a negation or in a number are different questions whatever their words
+    ("возвращать" / "не возвращать", "длиннее 40" / "длиннее 20") — review 2.1 item 14.
+    """
+    if sorted(_NEGATION.findall(left)) != sorted(_NEGATION.findall(right)) or sorted(_NUMBER.findall(left)) != sorted(_NUMBER.findall(right)):
+        return 0.0
     words = [set(re.findall(r"[\w-]{3,}", value)) for value in (left, right)]
     union = words[0] | words[1]
     return 1.0 if not union else len(words[0] & words[1]) / len(union)

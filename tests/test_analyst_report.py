@@ -154,3 +154,16 @@ def test_near_duplicates_of_one_requirement_join_and_keep_their_wording() -> Non
     parts = [{"review_key": "r1", "part_id": "part-000001", "result": {"findings": [_finding("Какой канал журнала ожидается?", ["TC-B1-013"])]}}]
     keyed = analyst_report.build_report(analyst_report.review_items(parts), run_id="r" * 32, attempt_id="a" * 32, sources_of={"TC-B1-013": ["SREQ-0008"]})
     assert keyed["items"][0]["requirement_ids"] == ["SREQ-0008"]
+
+
+@pytest.mark.parametrize("left,right", [
+    ("Нужно ли возвращать ошибку при пустом имени?", "Нужно ли не возвращать ошибку при пустом имени?"),
+    ("Должно ли имя быть длиннее 40 символов?", "Должно ли имя быть длиннее 20 символов?"),
+    ("Should the API return 404 for a missing owner?", "Should the API not return 404 for a missing owner?"),
+])
+def test_negations_and_numbers_keep_questions_apart(left: str, right: str) -> None:
+    """Review 2.1 item 14: opposite or differently bounded questions are different questions."""
+    from tools.analyst_report import SIMILAR, normalize, similarity
+
+    assert similarity(normalize(left), normalize(right)) < SIMILAR
+    assert similarity(normalize(left), normalize(left + " ")) == 1.0
