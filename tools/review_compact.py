@@ -293,7 +293,12 @@ class _Context:
 
 def _area_line(area: Mapping[str, Any]) -> str:
     if area["kind"] == "source":
-        return f"- {area['area_id']} — исходник: каждое условие исходных требований ↔ SREQ ↔ CREQ, требования без кейсов, возможности и их источники."
+        if any(str(target).startswith(("SRC-", "SREQ")) for target in area["targets"]):
+            return f"- {area['area_id']} — исходник: каждое условие исходных требований ↔ SREQ ↔ CREQ, требования без кейсов, возможности и их источники."
+        # A continuation part holds only capabilities and project files (live Petclinic run, 2026-10-08: asked for
+        # "every source condition" here, the reviewer found no source text and asked to re-check every SREQ).
+        return (f"- {area['area_id']} — исходник (продолжение): возможности этой части и файлы проекта из их источников — сигнатуры, "
+                "входы и выходы против источников, CREQ и кейсов. Текст требований (SRC, SREQ) сверяет другая часть исходника, здесь его нет.")
     if area["kind"] == "local":
         return f"- {area['area_id']} — кейс {area['targets'][0]}: шаги, данные, вызовы и входы, ожидания и проверки против CREQ/SREQ и возможностей."
     if area.get("question"):
@@ -755,8 +760,15 @@ def check_part(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mappi
     notes = [f"Вопрос проверки: {check['reason']}"]
     for correction in check.get("corrections") or []:
         notes.append(f"Предложенная правка {correction['target_id']}.{correction['field']}: «{correction['before']}» → «{correction['after']}» ({correction['why']})")
+    # A check naming requirements sees their source requirements (live Petclinic run 2026-10-08: without them two
+    # check parts came back UNCHECKED — "the original requirements are not in this part").
+    named = set(check.get("source_requirement_ids") or [])
+    items = [item for item in context.source_items() if item["group"] == "sreq" and item["anchor"] in named]
+    if items:
+        items.append(next(item for item in context.source_items() if item["group"] == "mapping"))
     return _part(context, plan["input_byte_budget"], plan["snapshot"]["response_reserve_bytes"], part_id=f"part-{index:06d}", title="проверка",
-                 areas=[area], carried_ids=(), case_ids=check["case_ids"], requested_check=digest, notes=notes, with_lint=False)
+                 areas=[area], carried_ids=(), case_ids=check["case_ids"], source_items=items or None, requested_check=digest, notes=notes,
+                 with_lint=False)
 
 
 def _valid_results(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -815,11 +827,19 @@ def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
     order = [case["case_id"] for case in document["test_cases"]]
     merged: dict[tuple[str, ...], dict[str, Any]] = {}
 
-    def add(case_ids, reason: str, corrections=(), source: str | None = None) -> None:
+    mapped = {item["source_requirement_id"]: set(item["canonical_requirement_ids"]) for item in document["source_to_canonical_mappings"]}
+
+    def source_requirements(requirement_ids) -> list[str]:
+        """The source requirements a check names directly or through the canonical requirements it names."""
+        wanted = set(requirement_ids or [])
+        return [sreq for sreq, creqs in mapped.items() if sreq in wanted or creqs & wanted]
+
+    def add(case_ids, reason: str, corrections=(), source: str | None = None, sreq=()) -> None:
         cases = tuple(case_id for case_id in order if case_id in set(case_ids))
         if not cases:
             return
-        row = merged.setdefault(cases, {"reasons": [], "corrections": [], "sources": []})
+        row = merged.setdefault(cases, {"reasons": [], "corrections": [], "sources": [], "sreq": []})
+        row["sreq"].extend(item for item in sreq if item not in row["sreq"])
         if reason not in row["reasons"]:
             row["reasons"].append(reason)
         row["corrections"].extend(dict(item) for item in corrections if dict(item) not in row["corrections"])
@@ -830,7 +850,7 @@ def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
         for check in result["required_checks"]:
             resolved = resolve_check(document, check)
             if resolved is not None:
-                add(resolved["case_ids"], resolved["reason"], source=review_digest(resolved))
+                add(resolved["case_ids"], resolved["reason"], source=review_digest(resolved), sreq=source_requirements(check.get("requirement_ids")))
     if payload.get("automation") is None:
         index = id_index(document)
         requirements = {item["requirement_id"] for item in document.get("requirements") or []}
@@ -838,13 +858,14 @@ def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
             for item in result["corrections"]:
                 if is_service_correction(item) or _correction_level(result, item) == "INFO":
                     continue  # journalled with the answer, never re-checked
+                sreq = source_requirements([item["target_id"]])
                 if item["target_id"] in requirements:
                     cases = [case["case_id"] for case in document["test_cases"] if item["target_id"] in (case.get("requirement_ids") or [])]
                 else:
                     _pointer, case_id = correction_pointer(document, item["target_id"], item["field"], index)
                     cases = [case_id] if case_id else []
                 add(cases, "Проверь, что предложенная правка " + item["target_id"] + "." + item["field"]
-                    + " сохраняет смысл и не создаёт противоречий с другими кейсами.", [item])
+                    + " сохраняет смысл и не создаёт противоречий с другими кейсами.", [item], sreq=sreq)
     return _packed_checks(plan, payload, [(list(cases), row) for cases, row in merged.items()])
 
 
@@ -869,6 +890,10 @@ def _packed_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], rows: Se
         sources = [source for _cases, row in items for source in row["sources"]]
         if sources:
             check["sources"] = sources
+        named = {sreq for _cases, row in items for sreq in row.get("sreq", [])}
+        if named:
+            check["source_requirement_ids"] = [item["source_requirement_id"] for item in payload["document"]["source_requirements"]
+                                               if item["source_requirement_id"] in named]
         return check
 
     def fits(items) -> bool:

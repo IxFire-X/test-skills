@@ -409,3 +409,35 @@ def test_a_check_larger_than_a_part_is_split_into_parts_that_fit(tmp_path: Path)
     assert all(review_compact.check_part(small, payload, check, 99)["blocked_reason"] is None for check in checks)
     assert set().union(*(set(check["case_ids"]) for check in checks)) == set(cases)
     assert sum(every in check["sources"] for check in checks) >= 2 and sum(one in check["sources"] for check in checks) == 1
+
+
+def test_a_source_continuation_area_names_what_its_part_holds() -> None:
+    """Live Petclinic run (2026-10-08, restart): part 2 held only capabilities and project files, yet its source area
+    asked for "every condition of the source requirements"; the reviewer found no source text, left the area UNCHECKED
+    and asked to check every SREQ — 81 cases."""
+    from tools.review_compact import _area_line
+
+    first = _area_line({"area_id": "source-000001", "kind": "source", "targets": ["SRC-1", "SREQ-0001", "SREQ→CREQ"]})
+    rest = _area_line({"area_id": "source-000002", "kind": "source", "targets": ["CAP-PETCLINIC-X", "CTX-1"]})
+    assert "каждое условие исходных требований" in first
+    assert "каждое условие исходных требований" not in rest and "возможности" in rest and "SRC" in rest
+
+
+def test_a_check_naming_requirements_carries_their_source_requirements(tmp_path: Path) -> None:
+    """Live Petclinic run (2026-10-08, restart): check parts asked to compare cases with source requirements held no
+    SREQ text; two of them came back UNCHECKED and the review stayed incomplete."""
+    from tools import review_compact
+
+    plan, payload, results = _finished_review(tmp_path)
+    document = payload["document"]
+    mapping = document["source_to_canonical_mappings"][0]
+    sreq, creq = mapping["source_requirement_id"], mapping["canonical_requirement_ids"][0]
+    base = {part["part_id"] for part in plan["parts"]}
+    first = dict(next(row for row in results if row["part_id"] in base))
+    first["required_checks"] = [{"requirement_ids": [sreq], "reason": "Сверить кейсы с исходным требованием."},
+                                {"requirement_ids": [creq], "reason": "Сверить кейсы требования с исходником."}]
+    others = [row for row in results if row["part_id"] != first["part_id"]]
+    checks = review_compact.required_checks(plan, payload, [*others, first])
+    assert checks and all(sreq in check.get("source_requirement_ids", []) for check in checks), checks
+    text = review_compact.check_part(plan, payload, checks[0], len(plan["parts"]) + 1)["text"]
+    assert "## SREQ" in text and f"[{sreq}]" in text, text[:2000]
