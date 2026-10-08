@@ -147,6 +147,33 @@ def test_a_survivor_triage_proposal_reaches_the_update_brief(suite_project, tmp_
 
 
 @needs_java
+def test_a_suite_run_that_ran_nothing_stops_instead_of_passing(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 3: no JDK — the build runs no test; the update stops with a reason, never UPDATED/NO_CHANGES and exit 0."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    missing = tmp_path / "no-jdk"
+    monkeypatch.setenv("JAVA_HOME", str(missing))
+    monkeypatch.setenv("PATH", os.pathsep.join(item for item in os.environ.get("PATH", "").split(os.pathsep) if not (Path(item) / ("java.exe" if os.name == "nt" else "java")).is_file()))
+    before = read_suite(project, "test-cases/")
+    result = _drive(replay)["result"]
+    assert (result["outcome"], result["reason_code"], result["exit_code"]) == ("STOPPED", "SUITE_NOT_RUN", 1), result
+    assert "exit" in result["message"]
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "## Остановка" in description and "не выполн" in description
+    assert "| 12 / 12 / 0 |" not in description.replace(" / 0 / 0 |", " |")
+    assert read_suite(project, "test-cases/")["last_run"] == before["last_run"]  # the manifest does not record a run that did not happen
+
+
+def test_not_run_methods_are_never_a_pass() -> None:
+    from tools.suite_update import _verdict
+
+    assert _verdict({"a": {"outcome": "PASS"}, "b": {"outcome": "NOT_RUN"}}) == "UNKNOWN"
+    assert _verdict({"a": {"outcome": "NOT_RUN"}}) == "UNKNOWN"
+    assert _verdict({"a": {"outcome": "PASS"}, "b": {"outcome": "FIXED"}}) == "PASS"
+    assert _verdict({"a": {"outcome": "QUARANTINE"}, "b": {"outcome": "NOT_RUN"}}) == "FAIL"
+
+
+@needs_java
 def test_a_behaviour_change_without_a_requirement_goes_to_quarantine(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replay = _copy(suite_project, tmp_path)
     project = replay.project

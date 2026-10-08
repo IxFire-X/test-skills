@@ -73,9 +73,17 @@ def pr_description(facts: Mapping[str, Any]) -> str:
              f"| Тесты: обновлено / новых / отремонтировано / удалено | {len(tests['updated'])} / {len(tests['new'])} / {len(tests['repaired'])} / {len(tests['removed'])} |",
              f"| Прогон набора: методов / прошло / упало / карантин / снят карантин | {tests['run']['methods']} / {tests['run']['passed']} / {tests['run']['failed']} / "
              f"{len(facts['quarantine'])} / {len(facts['released'])} |", ""]
+    if tests["run"].get("not_run"):
+        lines.insert(-1, f"| Прогон набора: не выполнено методов (не считаются прошедшими) | {tests['run']['not_run']} |")
     strength = facts.get("strength")
     if strength:
         lines.insert(-1, f"| Доля убитых мутантов: было → стало | {strength['before']} → {strength['after']} |")
+    stop = facts.get("stop")
+    if stop:
+        lines += [f"## Остановка: `{stop['reason']}`", "",
+                  "Прогон остановлен до конца: изменения ниже не проверены прогоном набора, манифест набора не обновлён."
+                  + (" Тесты набора не выполнялись — цифры прогона в таблице выше не являются результатом." if stop["reason"] in {"SUITE_NOT_RUN", "SUITE_RUN_NONZERO_EXIT"} else ""),
+                  "", f"Причина: {' '.join(str(stop.get('message') or '').split())[:1200]}", ""]
     if facts.get("migration") and facts["migration"].get("status") == "MIGRATED":
         lines += ["## Миграция набора", "", f"Формат {facts['migration']['from_format']} → {facts['migration']['to_format']}: "
                   + "; ".join(facts["migration"].get("steps") or []) + ".", ""]

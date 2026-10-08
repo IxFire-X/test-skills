@@ -827,7 +827,7 @@ def _effective_manifest(project: Path, run_root: Path, state: Mapping[str, Any])
 
 
 def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
-    from tools.suite_run import run_suite
+    from tools.suite_run import not_run_reason, run_suite
 
     if state["facts"].get("stop"):
         _goto(run_root, state, "SUMMARY")
@@ -835,7 +835,13 @@ def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) 
     manifest = _effective_manifest(project, run_root, state)
     result = run_suite(project, manifest, _module(project, manifest), repeats=int(driver._config(run_root)["repeats"]))
     _write(_work(run_root) / "suite-run.json", result)
-    _goto(run_root, state, "TRIAGE", suite_run={"methods": len(result["methods"]), "commands": len(result["commands"])})
+    state["facts"]["suite_run"] = {"methods": len(result["methods"]), "commands": len(result["commands"])}
+    stopped = not_run_reason(result)
+    if stopped:
+        # Review 2.1 item 3: a run that executed nothing is no verification — stop, never a green update.
+        _stop(run_root, state, *stopped)
+        return None
+    _goto(run_root, state, "TRIAGE")
     return None
 
 
@@ -934,7 +940,7 @@ def _repair_review(project: Path, run_root: Path, state: dict[str, Any], max_tas
 
 
 def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
-    from tools.suite_run import run_suite
+    from tools.suite_run import not_run_reason, run_suite
 
     facts = state["facts"]["repair_automation"]
     _suite_dir, manifest, _document = _suite(project, run_root)
@@ -946,6 +952,10 @@ def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int)
     result = run_suite(project, effective, _module(project, effective), repeats=int(driver._config(run_root)["repeats"]))
     _write(_work(run_root) / "repair-run.json", result)
     state["facts"]["repair_ran"] = True
+    stopped = not_run_reason(result)
+    if stopped:
+        _stop(run_root, state, *stopped)
+        return None
     state["facts"]["repaired"] = sorted(row["locator"] for row in result["methods"] if row["locator"] in locators and row["runs"]
                                         and all(status == "passed" for status in row["runs"]))
     # The triage of the repaired methods replaces their first decisions; the others keep theirs.
@@ -1083,9 +1093,13 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
 
 
 def _verdict(decisions: Mapping[str, Any]) -> str | None:
+    """PASS only when every method ran and passed; a method that did not run is no evidence (UNKNOWN)."""
     if not decisions:
         return None
-    return "PASS" if all(row["outcome"] in {"PASS", "FIXED", "NOT_RUN"} for row in decisions.values()) else "FAIL"
+    outcomes = {row["outcome"] for row in decisions.values()}
+    if outcomes <= {"PASS", "FIXED"}:
+        return "PASS"
+    return "UNKNOWN" if outcomes <= {"PASS", "FIXED", "NOT_RUN"} else "FAIL"
 
 
 def summary_facts(project: Path, run_root: Path, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1121,7 +1135,8 @@ def summary_facts(project: Path, run_root: Path, state: Mapping[str, Any]) -> di
                   "new": sorted(row["locator"] for row in methods.values() if row["kind"] == "new") if applied else [],
                   "repaired": sorted(facts.get("repaired") or []), "removed": sorted(automation.get("removed") or []) if applied else [],
                   "run": {"methods": len(decisions), "passed": sum(row["outcome"] in {"PASS", "FIXED"} for row in decisions.values()),
-                          "failed": sum(row["outcome"] not in {"PASS", "FIXED", "NOT_RUN"} for row in decisions.values())}},
+                          "failed": sum(row["outcome"] not in {"PASS", "FIXED", "NOT_RUN"} for row in decisions.values()),
+                          "not_run": sum(row["outcome"] == "NOT_RUN" for row in decisions.values())}},
         "quarantine": facts.get("quarantine") or [], "released": facts.get("released") or [], "questions": sorted(set(facts.get("questions") or [])),
         "proposals": facts.get("proposals") or [], "strength": strength, "strength_drops": facts.get("strength_drops") or [],
         "review_blocked": _blocked(state), "review_findings": facts.get("review_findings") or [],

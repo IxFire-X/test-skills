@@ -139,7 +139,8 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
         if not pending:
             break
         outcome = run_once(project, module, pending, explicit=explicit, timeout=timeout)
-        commands.append({"argv": outcome["argv"], "returncode": outcome["returncode"], "selectors": len(pending)})
+        commands.append({"argv": outcome["argv"], "returncode": outcome["returncode"], "selectors": len(pending), "reported": len(outcome["rows"]),
+                         "output_tail": outcome["output_tail"][-1500:]})
         execution = execution or outcome["execution"]
         seen = set()
         for row in outcome["rows"]:
@@ -163,3 +164,26 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
                     row["runs"] = ["skipped"]
         pending = [selector for selector in pending if methods[by_selector[selector]]["runs"][-1] in {"failed", "broken"}]
     return {"methods": [methods[locator] for locator in sorted(methods)], "commands": commands, "execution": execution}
+
+
+def not_run_reason(result: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Why a suite run is no evidence at all, or None.
+
+    Nothing executed (no JDK, unresolved dependencies, a wrong module: no report and no compile
+    error) — ``SUITE_NOT_RUN``; the build failed although every reported method passed —
+    ``SUITE_RUN_NONZERO_EXIT``.  Either way the run proves nothing and must not read as green.
+    """
+    methods = result.get("methods") or []
+    commands = result.get("commands") or []
+    if not methods or not commands:
+        return None
+    codes = ", ".join(str(row["returncode"]) for row in commands)
+    tail = " ".join(str(commands[0].get("output_tail") or "").split())[-600:]
+    if any(row["compile_error"] for row in methods):
+        return None
+    if not any(status != "skipped" for row in methods for status in row["runs"]):
+        return "SUITE_NOT_RUN", f"the suite run executed no test (exit {codes}): {tail or 'no output'}"
+    failed = any(status in {"failed", "broken"} for row in methods for status in row["runs"])
+    if not failed and any(row["returncode"] != 0 for row in commands):
+        return "SUITE_RUN_NONZERO_EXIT", f"the build exited with {codes} although every reported test passed: {tail or 'no output'}"
+    return None
