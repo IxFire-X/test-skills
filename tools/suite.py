@@ -58,7 +58,9 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--git-range", help="Changed files between two revisions (BASE..HEAD) narrow the code under tests.")
         if name == "migrate":
             command.add_argument("--run", help="Run that produced a format-0 bundle (default: found under .pilot-runs).")
-            command.add_argument("--dry-run", action="store_true")
+            command.add_argument("--write", action="store_true",
+                                 help="Write the migrated suite (a person's consent, recorded in .pilot-runs/suite-migrations/); without it the command only previews.")
+            command.add_argument("--dry-run", action="store_true", help="Preview only (the default).")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -67,9 +69,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             payload = status(project)
         elif args.command == "migrate":
-            from tools.suite_migrate import migrate
+            from tools.suite_migrate import migrate, record_migration
 
-            payload = {"status": "ok", "migration": migrate(project, run_id=args.run, write=not args.dry_run)}
+            # A5.1: the suite is written only under an authorization — suite-update-v1 (its MIGRATION step) or a
+            # person's explicit `--write`, recorded beside the runs; without it the command previews.
+            write = bool(args.write) and not args.dry_run
+            migration = migrate(project, run_id=args.run, write=write)
+            payload = {"status": "ok", "migration": migration, "written": write and migration.get("status") == "MIGRATED"}
+            if payload["written"]:
+                payload["receipt"] = str(record_migration(project, migration, authorization="suite migrate --write"))
         else:
             from tools.suite_impact import impact
 

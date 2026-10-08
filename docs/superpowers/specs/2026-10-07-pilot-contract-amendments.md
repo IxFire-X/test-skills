@@ -130,7 +130,10 @@ Rules:
 
 1. A **suite** is the project directory `.skillsrc` `suite.path` (default `test-cases/`): the canonical
    document, its human projections and the suite manifest (`suite-manifest.schema.json`). It is written only
-   under run-scoped authorization (`local-pilot-v1 --suite`, or the `suite-update-v1` profile).
+   under run-scoped authorization (`local-pilot-v1 --suite`, or the `suite-update-v1` profile). *Clarified
+   2026-10-08 (independent review, 2.3):* the migration of a format-0 suite is written by `suite-update-v1`
+   (its first step) or by a person's explicit `python -m tools.suite migrate --write`; both leave a migration
+   receipt in `.pilot-runs/suite-migrations/`, and the command without `--write` only previews.
 2. The manifest records, per test case, the requirement keys and text digests, the test method and the digest
    of its source slice, the status (`ACTIVE`, `QUARANTINED`, `RETIRED`), the quarantine reason and
    reference, the last green run and the kill ratio of mutants; per test file, the digest of its SUPPORT code.

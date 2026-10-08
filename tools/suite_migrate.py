@@ -69,6 +69,23 @@ def _source_run(project: Path, document: Mapping[str, Any], run_id: str | None) 
     return found[-1][2], found[-1][3]
 
 
+def record_migration(project: Path, migration: Mapping[str, Any], *, authorization: str) -> Path:
+    """The receipt of a written migration (who authorized it, from which run, which manifest) beside the runs."""
+    import time
+
+    from tools.suite_manifest import sha256_bytes
+
+    directory = Path(project) / ".pilot-runs" / "suite-migrations"
+    directory.mkdir(parents=True, exist_ok=True)
+    manifest = Path(project) / str(migration.get("manifest") or "")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = directory / f"{stamp}-{str(migration.get('run_id') or 'run')[:8]}.json"
+    receipt = {"schema_version": "1.0.0", "authorization": authorization, "migration": dict(migration),
+               "manifest_sha256": sha256_bytes(manifest.read_bytes()) if manifest.is_file() else None}
+    path.write_bytes(canonical_bytes(receipt))
+    return path
+
+
 def migrate(project: Path, *, run_id: str | None = None, write: bool = True) -> dict[str, Any]:
     """Bring the project's suite to ``FORMAT_VERSION``; returns the migration summary."""
     from tools.pipeline_driver_suite import _skillsrc, attempt_suite

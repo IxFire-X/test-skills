@@ -148,6 +148,10 @@ def _migration(project: Path, run_root: Path, state: dict[str, Any], _max: int) 
     except SuiteError as error:
         _stop(run_root, state, error.code, str(error))
         return None
+    if summary.get("status") == "MIGRATED":
+        from tools.suite_migrate import record_migration
+
+        record_migration(project, summary, authorization=f"suite-update-v1 run {run_root.name}")
     _goto(run_root, state, "IMPACT", migration=summary)
     return None
 

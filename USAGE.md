@@ -158,7 +158,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `review_runner.preset`, иначе `claude`), `--review-runner-command '<JSON-массив>'` (свой шаблон, только флагом
 запуска) и `--review-runner-cli <путь>` — разделы 11–13. `run --runner process [--run <run_id>]` проводит прогон
 без оркестратора (`--run` продолжает прерванный). Миграцию набора без записи показывает
-`python -m tools.suite migrate --project "$project" --dry-run`. `run_id` берётся
+`python -m tools.suite migrate --project "$project"` (запись — только с `--write`). `run_id` берётся
 из первого ответа.
 
 Каждый вызов печатает один JSON-объект:
@@ -655,7 +655,8 @@ python -m tools.pipeline_driver next --project "$project" --profile local-pilot-
 ```powershell
 python -m tools.suite status  --project "$project"
 python -m tools.suite impact  --project "$project" --junit target/surefire-reports/TEST-My.xml --git-range origin/main..HEAD
-python -m tools.suite migrate --project "$project"     # набор прошлого формата → 1.0.0
+python -m tools.suite migrate --project "$project"           # набор прошлого формата → 1.0.0: предпросмотр
+python -m tools.suite migrate --project "$project" --write   # запись (согласие человека, квитанция в .pilot-runs/suite-migrations/)
 ```
 
 `impact` — требования по ключам (добавлены, изменены, удалены, переименованы),
