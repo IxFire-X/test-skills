@@ -13,6 +13,25 @@ Gradle или Python/pytest environment. Пайплайн ничего не ус
 `--project`; так модуль `tools` целевого проекта не подменит инструменты пакета.
 Сами автотесты запускаются из выбранного module root.
 
+Копия внутри дерева проекта попадает под проверки его сборки: Petclinic проверяет
+`nohttp` на фазе `validate` и находил `http://` в фикстурах `tests/` пакета и в
+`docs/*.pptx` (живой прогон 2026-10-08). Поэтому ставьте копию без них —
+sparse checkout — или вне дерева проекта (тогда `--project` указывает на проект, а
+пакет запускается из своего каталога):
+
+```bash
+git clone --no-checkout <url пакета> .tools/test-skills
+cd .tools/test-skills
+printf '%s\n' '/*' '!/tests/' '!/docs/*.pptx' | MSYS_NO_PATHCONV=1 git sparse-checkout set --no-cone --stdin
+git checkout <коммит>
+```
+
+В Git Bash на Windows шаблоны передаются только через `--stdin` и с
+`MSYS_NO_PATHCONV=1`: аргумент `/tests/` в командной строке MSYS превращает в путь
+Windows, и шаблон молча перестаёт исключать каталог. Проверка: `git sparse-checkout list`
+показывает три шаблона как есть, а каталога `tests/` в копии нет (`git ls-files` его
+по-прежнему перечисляет — файлы лишь не выложены в рабочее дерево).
+
 Нормативная точка входа — явный запрос model-enabled CLI выполнить
 `skills/orchestrate/SKILL.md`. Python controller не выбирает модель, не хранит model
 credentials и не предоставляет standalone `pipeline run`. Ход запуска ведёт драйвер
