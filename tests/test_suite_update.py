@@ -174,6 +174,31 @@ def test_not_run_methods_are_never_a_pass() -> None:
 
 
 @needs_java
+@pytest.mark.parametrize("where", ["support", "product"])
+def test_a_build_broken_outside_the_methods_stops_without_repair_or_quarantine(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    """Review 2.1 item 4: an import of the test file or the product's code does not compile — a person's job, not a repair."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    if where == "support":
+        text = (project / GENERATED).read_text(encoding="utf-8")
+        first = next(line for line in text.splitlines() if line.startswith("import "))
+        _replace_in(project / GENERATED, first, first + "\nimport net.javaguides.springboot.NoSuchType;")
+    else:
+        _replace_in(project / CONTROLLER, "public class StudentController {", "public class StudentController {\n    int broken = ;")
+    test_bytes = (project / GENERATED).read_bytes()
+    before = read_suite(project, "test-cases/")
+    tasks: list = []
+    result = _drive(replay, seen=tasks)["result"]
+    assert (result["outcome"], result["reason_code"], result["exit_code"]) == ("STOPPED", "SUITE_BUILD_BROKEN", 1), result
+    assert not [task for task in tasks if task["stage"] == "tc-to-autotest:repair"]
+    assert (project / GENERATED).read_bytes() == test_bytes and "test-skills quarantine" not in test_bytes.decode("utf-8")
+    assert read_suite(project, "test-cases/") == before
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "## Остановка: `SUITE_BUILD_BROKEN`" in description and "## Карантин" not in description
+
+
+@needs_java
 def test_a_behaviour_change_without_a_requirement_goes_to_quarantine(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replay = _copy(suite_project, tmp_path)
     project = replay.project

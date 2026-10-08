@@ -87,18 +87,55 @@ def test_a_stable_failure_is_not_flaky_and_a_changing_one_is(tmp_path: Path, ste
     assert by[locators[0]]["failure"] == "expected 200 but was 500"
 
 
-def test_a_compile_error_sends_the_file_to_repair(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+def _compile_failure(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch, where) -> tuple[dict, dict, Path]:
     project = tmp_path / "project"
     import shutil
 
     shutil.copytree(step5["project"], project, ignore=shutil.ignore_patterns(".pilot-runs"))
     manifest = _manifest(step5)
     _write(project, step5, manifest)
-    output = f"[ERROR] COMPILATION ERROR :\n[ERROR] {project.as_posix()}/{GENERATED}:[42,17] cannot find symbol\n"
+    path, line = where(project, manifest)
+    output = f"[ERROR] COMPILATION ERROR :\n[ERROR] {project.as_posix()}/{path}:[{line},17] cannot find symbol\n"
     monkeypatch.setattr(suite_run, "RUNNER", lambda argv, **_kwargs: SimpleNamespace(returncode=1, stdout=output, stderr=""))
-    result = suite_run.run_suite(project, manifest, _module(project))
-    assert all(row["compile_error"] for row in result["methods"]) and len(result["commands"]) == 1
-    assert {classify(row["runs"], compile_error=True)["outcome"] for row in result["methods"]} == {"REPAIR"}
+    return suite_run.run_suite(project, manifest, _module(project)), manifest, project
+
+
+def _line_of(project: Path, text: str) -> int:
+    return next(number for number, line in enumerate((project / GENERATED).read_text(encoding="utf-8").splitlines(), start=1) if text in line)
+
+
+def test_a_compile_error_inside_a_method_sends_only_that_method_to_repair(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    def inside(project, manifest):
+        name = manifest["cases"][0]["methods"][0]["locator"].rsplit("#", 1)[1]
+        return GENERATED, _line_of(project, f" {name}(") + 2
+
+    result, manifest, _project = _compile_failure(tmp_path, step5, monkeypatch, inside)
+    broken = [row["locator"] for row in result["methods"] if row["compile_error"]]
+    assert broken == [manifest["cases"][0]["methods"][0]["locator"]] and len(result["commands"]) == 1
+    assert result["build_broken"] == [] and suite_run.not_run_reason(result) is None
+    assert {classify(row["runs"], compile_error=row["compile_error"])["outcome"] for row in result["methods"]} == {"REPAIR", "NOT_RUN"}
+
+
+@pytest.mark.parametrize("where", ["import", "product", "no_line"])
+def test_a_compile_error_outside_every_method_stops_the_run_for_a_person(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    """Review 2.1 item 4: an error in imports, SUPPORT or the product is no method's to repair or quarantine."""
+    def locate(project, _manifest):
+        if where == "import":
+            return GENERATED, _line_of(project, "import ")
+        if where == "product":
+            return "src/main/java/net/javaguides/springboot/controller/StudentController.java", 12
+        return GENERATED, "x"
+
+    result, _manifest, _project = _compile_failure(tmp_path, step5, monkeypatch, locate)
+    assert not any(row["compile_error"] for row in result["methods"])
+    assert result["build_broken"]
+    reason, message = suite_run.not_run_reason(result)
+    assert reason == "SUITE_BUILD_BROKEN" and "outside" in message
+
+
+def test_gradle_compile_errors_name_their_lines() -> None:
+    output = "> Task :compileTestJava FAILED\nC:\\p\\src\\test\\java\\a\\ApiTest.java:42: error: cannot find symbol\n"
+    assert suite_run.compile_lines_of(output) == [("/p/src/test/java/a/ApiTest.java", 42)]
 
 
 def test_quarantined_methods_run_explicitly(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
