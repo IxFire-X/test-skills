@@ -578,9 +578,17 @@ def measure(inputs: StageInputs) -> dict[str, Any]:
         facts["status"] = "MEASURED"
     except MutationStop as stop:
         facts.update({"status": stop.status, "reason_code": stop.code, "message": str(stop)[:600]})
-    after = project_snapshot(inputs.project)
+    except Exception as error:  # noqa: BLE001 — review 2.1 item 9: every stop of the stage is a status with a reason
+        facts.update({"status": "NOT_RUNNABLE", "reason_code": "MUTATION_STAGE_ERROR", "message": f"{type(error).__name__}: {error}"[:600],
+                      "report": None, "totals": None, "cases": [], "requirements": [], "source_requirements": [], "survivor_groups": []})
+    try:
+        after = project_snapshot(inputs.project)
+    except OSError as error:
+        after = None
+        facts.update({"status": "NOT_RUNNABLE", "reason_code": "MUTATION_STAGE_ERROR", "message": f"the project inventory after the stage failed: {error}"[:600],
+                      "report": None, "totals": None, "cases": [], "requirements": [], "source_requirements": [], "survivor_groups": []})
     facts["project_inventory"].update({"after": after, "unchanged": after == before})
-    if after != before:
+    if after is not None and after != before:
         facts.update({"status": "NOT_RUNNABLE", "reason_code": "MUTATION_PROJECT_CHANGED",
                       "message": "the project inventory changed during the mutation stage", "totals": None, "cases": [], "requirements": [],
                       "source_requirements": [], "survivor_groups": []})
@@ -652,8 +660,12 @@ def mutation_stage(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
         facts = measure(StageInputs(project=project, workdir=workdir, report=report, automation=inputs["automation_artifact"],
                                     document=effective["document"], settings=settings, run=_RUNNER))
         if facts["status"] == "MEASURED":
-            data = (workdir / "report" / "mutations.xml").read_bytes()
-            stored = pilot_state.publish_run_artifact_bytes(run_root, attempt_id, f"mutation/mutations-{facts['report']['sha256'][7:19]}.xml", data)
-            facts["report"]["path"] = stored["path"]
+            try:
+                data = (workdir / "report" / "mutations.xml").read_bytes()
+                stored = pilot_state.publish_run_artifact_bytes(run_root, attempt_id, f"mutation/mutations-{facts['report']['sha256'][7:19]}.xml", data)
+                facts["report"]["path"] = stored["path"]
+            except (OSError, ValueError) as error:
+                facts.update({"status": "NOT_RUNNABLE", "reason_code": "MUTATION_STAGE_ERROR", "message": f"the PIT report could not be kept: {error}"[:600],
+                              "report": None, "totals": None, "cases": [], "requirements": [], "source_requirements": [], "survivor_groups": []})
     facts["execution_receipt_digest"] = execution["digest"]
     return dict(pilot_state.publish_mutation_receipt(run_root, attempt_id, facts)["record"])

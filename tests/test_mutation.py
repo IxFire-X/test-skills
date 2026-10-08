@@ -247,6 +247,37 @@ def test_a_tampered_jar_stops_before_pit(tmp_path: Path) -> None:
     assert not any("--reportDir" in call for call in fake.calls) and facts["totals"] is None
 
 
+def test_any_error_of_the_stage_is_a_status_with_a_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 9: an OSError (a JVM still holding the report directory on Windows) is NOT_RUNNABLE, not an exception."""
+    automation, document = _step5()
+    pins_path, jars = _fake_pins(tmp_path)
+    fake = FakeBuild(tmp_path, mutation.load_pins(pins_path), jars, xml=_xml("step5-9340016c-mutations.xml.gz"))
+    inputs = _inputs(tmp_path, automation, document, _report(tmp_path, automation), fake, pins_path)
+    (inputs.workdir / "report").mkdir(parents=True)  # left over by an earlier try
+
+    def locked(path, *args, **kwargs):
+        raise PermissionError(13, "The process cannot access the file because it is being used by another process", str(path))
+
+    monkeypatch.setattr(mutation.shutil, "rmtree", locked)
+    facts = mutation.measure(inputs)
+    assert (facts["status"], facts["reason_code"]) == ("NOT_RUNNABLE", "MUTATION_STAGE_ERROR")
+    assert "PermissionError" in facts["message"] and facts["project_inventory"]["unchanged"] is True
+
+
+def test_a_report_the_stage_cannot_read_is_not_runnable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    automation, document = _step5()
+    pins_path, jars = _fake_pins(tmp_path)
+    fake = FakeBuild(tmp_path, mutation.load_pins(pins_path), jars, xml=_xml("step5-9340016c-mutations.xml.gz"))
+
+    def broken(_data):
+        raise KeyError("mutatedClass")
+
+    monkeypatch.setattr(mutation, "parse_report", broken)
+    facts = mutation.measure(_inputs(tmp_path, automation, document, _report(tmp_path, automation), fake, pins_path))
+    assert (facts["status"], facts["reason_code"]) == ("NOT_RUNNABLE", "MUTATION_STAGE_ERROR") and "KeyError" in facts["message"]
+    assert facts["totals"] is None and facts["survivor_groups"] == []
+
+
 def test_a_project_change_during_the_stage_voids_the_measurement(tmp_path: Path) -> None:
     automation, document = _step5()
     pins_path, jars = _fake_pins(tmp_path)

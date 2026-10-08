@@ -21,14 +21,14 @@
 
 #### 1.1. Подтверждённые дефекты (ревью, раздел 2.1)
 
-- [ ] R1 `TEST_GAP`: одно место записи и чтения предложений разбора; сквозной тест разбор → бриф `update`.
-- [ ] R2 Карантин: авторитетный `FAIL` без исходов по методам → прежняя очистка (§17 п. 2).
-- [ ] R3 Прогон набора без выполненных тестов (`NOT_RUN`, ненулевой код) → остановка с причиной, не `UPDATED`/`NO_CHANGES`.
-- [ ] R4 Ошибка компиляции вне методов → остановка с передачей человеку, без ремонта и карантина.
-- [ ] R5 Заголовок Markdown с контрактом без ID: изменение заголовка — `changed`, не `relinked`.
-- [ ] R6 `--suite` после `FAIL` с карантином: кейсы `QUARANTINED` с причиной и ссылкой; файл сверяется с квитанцией.
-- [ ] R7 Лимиты частоты и подписки: пауза без траты попытки, нарастающее ожидание с пределом.
-- [ ] R8 `DRIVER_PROCESS`: связь квитанции с процессом или честное сужение A1.6; тест подделки `result.json`.
+- [x] R1 `TEST_GAP`: одно место — `pipeline_driver_strength.proposals_path` (пишет разбор, читает `suite_update`); сквозной тест `test_suite_update.py::test_a_survivor_triage_proposal_reaches_the_update_brief` — `eea109d`.
+- [x] R2 `quarantine_modes` без упавших методов — None (очистка §17 п. 2); `test_quarantine_disposition.py::test_a_fail_without_failed_methods_falls_back_to_cleanup` — `191088f`.
+- [x] R3 `suite_run.not_run_reason`: `SUITE_NOT_RUN`/`SUITE_RUN_NONZERO_EXIT` — остановка, exit 1, раздел «Остановка» в описании PR, `NOT_RUN` не PASS; сквозной тест без JDK `test_a_suite_run_that_ran_nothing_stops_instead_of_passing` — `57223bc`.
+- [x] R4 ошибка вне методов — `SUITE_BUILD_BROKEN`, без ремонта и карантина; внутри метода — только этот метод; строки javac/Gradle; `test_suite_failures.py`, сквозной `test_a_build_broken_outside_the_methods_stops_without_repair_or_quarantine` — `fb490aa`.
+- [x] R5 `suite_impact.own_heading_changed`: правка своего заголовка раздела без ID — `changed`, переименование родителя — `relinked`; `test_suite_impact.py` (rename_student переписан) — `767537f`.
+- [x] R6 `--suite` после FAIL: кейсы `QUARANTINED` (причина, ссылка = текст `@Disabled`, вопрос), `quarantine.md` с черновиками баг-репортов; манифест — по байтам из квитанций диспозиций; `test_quarantine_disposition.py` — `9f5ac8d`, `162ad65`.
+- [x] R7 лимит частоты/подписки — пауза без траты попытки (60 с ×2 до 30 мин, ≤ 8 пауз), регулярка подписки Claude Code; фальшивый CLI `sublimit`; `test_model_runner.py`, `test_driver_run.py` — `448f803`.
+- [x] R8 выбор: привязка `result.json` к запуску (одноразовый токен только в окружении оболочки, в каталоге — дайджест; плюс дайджест stdout) и честное сужение A1.6; тест подделки `test_forged_part_results_never_reach_driver_process` — `a5839dc`.
 - [ ] R9 `measure`: любая ошибка этапа — `NOT_RUNNABLE` с причиной, финализация доходит до терминала.
 - [ ] R10 Проверка ремонта сравнивает утверждения целиком; падение доли мутантов по кейсу блокирует ремонт.
 - [ ] R11 JUnit `<error>` из кода продукта — падение поведения (вопрос, черновик баг-репорта).

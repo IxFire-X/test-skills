@@ -145,3 +145,20 @@ def test_a_tampered_tool_is_not_runnable_and_verification_stays(tmp_path: Path, 
     receipt = _receipt(replay, done)
     assert receipt["report"] is None and receipt["project_inventory"]["unchanged"] is True
     assert not (Path(str(replay.run_root(done)) + ".driver") / "mutation" / result["attempt_id"][:8] / "report").exists()
+
+
+def test_a_stage_error_still_reaches_a_terminal_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 9: an error inside the stage is recorded in the receipt and finalization reaches the terminal."""
+    from tools import mutation
+
+    def broken(_data):
+        raise KeyError("mutatedClass")
+
+    monkeypatch.setattr(mutation, "parse_report", broken)
+    replay = _replay(tmp_path, monkeypatch)
+    code, done = replay.drive(replay.start_with("--mutation")[1])
+    result = done["result"]
+    assert (result["verification"], result["accepted"], code) == ("PASS", True, 0), result
+    assert result["test_strength"]["status"] == "NOT_RUNNABLE" and result["test_strength"]["reason_code"] == "MUTATION_STAGE_ERROR"
+    receipt = _receipt(replay, done)
+    assert receipt["status"] == "NOT_RUNNABLE" and "KeyError" in receipt["message"]
