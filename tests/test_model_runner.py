@@ -86,7 +86,6 @@ def test_host_submit_of_a_runner_part_is_refused(tmp_path: Path) -> None:
     ("garbage,ok", "RUNNER_OUTPUT_NOT_JSON"),
     ("prose,ok", "RUNNER_ANSWER_NOT_JSON"),
     ("nonzero,ok", "RUNNER_EXIT_3"),
-    ("ratelimit,ok", "RUNNER_CLI_ERROR"),
 ])
 def test_a_failed_try_is_retried_with_a_new_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, reason: str) -> None:
     monkeypatch.setattr(model_runner, "RATE_LIMIT_PAUSE", 1)
@@ -96,10 +95,45 @@ def test_a_failed_try_is_retried_with_a_new_process(tmp_path: Path, monkeypatch:
     log = [json.loads(line) for line in (project / ".pilot-runs" / (done["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
     failures = [row for row in log if row.get("event") == "runner_failed"]
     assert failures and all(row["reason"].startswith(reason) for row in failures) and all(row["retry_allowed"] for row in failures)
-    if script.startswith("ratelimit"):
-        assert all(row["rate_limited"] for row in failures) and any(wait.get("paused_until") for wait in waits)
     tries = [event["stage_instance_id"] for event in _events(project, done) if event["event_type"] == "MODEL_REQUESTED" and "-try2" in str(event.get("stage_instance_id"))]
     assert tries  # the second try is a new invocation
+
+
+@pytest.mark.parametrize("limits", ["sublimit,ratelimit,sublimit-text,sublimit,ok"])
+def test_rate_and_subscription_limits_pause_without_spending_a_try(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limits: str) -> None:
+    """Review 2.1 item 7: four limit answers in a row (more than the three tries of a part) only pause, longer each time."""
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_PAUSE", 1)
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_MAX_PAUSE", 2)
+    project, task = _start_runner(tmp_path, limits)
+    done, waits = _until_done(project, task, SavedModel("cases-only-v1"), limit=300)
+    assert done["result"]["completion"] == "COMPLETE", done["result"]
+    log = [json.loads(line) for line in (project / ".pilot-runs" / (done["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert not [row for row in log if row.get("event") == "runner_failed"]
+    limited = [row for row in log if row.get("event") == "runner_rate_limited"]
+    first = [row["pause_seconds"] for row in limited if row["wait"] <= 4][:4]
+    assert first == [1, 2, 2, 2] and any(wait.get("paused_until") for wait in waits)
+    assert not [event for event in _events(project, done) if event["event_type"] == "MODEL_REQUESTED" and "-try2" in str(event.get("stage_instance_id"))]
+
+
+def test_a_limit_that_outlasts_the_waits_spends_a_try(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_PAUSE", 1)
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_MAX_WAITS", 1)
+    project, task = _start_runner(tmp_path, "ratelimit,ratelimit,ok")
+    done, _waits = _until_done(project, task, SavedModel("cases-only-v1"), limit=300)
+    assert done["result"]["completion"] == "COMPLETE"
+    log = [json.loads(line) for line in (project / ".pilot-runs" / (done["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    failed = [row for row in log if row.get("event") == "runner_failed"]
+    assert failed and all(row["reason"].startswith("RUNNER_RATE_LIMITED") and row["retry_allowed"] for row in failed)
+
+
+@pytest.mark.parametrize("message,limited", [
+    ("API Error: 429 rate_limit_error", True), ("You've hit your limit · resets 5pm (Europe/Moscow)", True),
+    ("Claude AI usage limit reached|1760000000", True), ("You have reached your weekly limit", True), ("Out of usage credits", True),
+    ("5-hour limit reached ∙ resets 3am", True), ("Overloaded", True),
+    ("prompt is too long: 230000 tokens > 200000 maximum", False), ("Invalid API key", False),
+])
+def test_limit_messages_are_recognized(message: str, limited: bool) -> None:
+    assert model_runner.is_rate_limited(message) is limited
 
 
 def test_three_failures_block_the_part_as_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

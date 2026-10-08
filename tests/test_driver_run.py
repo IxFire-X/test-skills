@@ -66,6 +66,19 @@ def test_an_answer_that_never_fits_fails_as_transport_with_its_reason(tmp_path: 
     assert code == 2 and payload["code"] == "RUNNER_TASK_FAILED" and "RUNNER_ANSWER_NOT_JSON" in payload["message"]
 
 
+def test_subscription_limits_pause_the_run_without_spending_its_tries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 7: more limit answers than tries in a row — the run pauses and finishes."""
+    from tools import model_runner
+
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_PAUSE", 1)
+    monkeypatch.setattr(model_runner, "RATE_LIMIT_MAX_PAUSE", 1)
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "cases-only-v1", script="sublimit,sublimit-text,sublimit,sublimit,ok")
+    assert payload["action"] == "done" and payload["result"]["completion"] == "COMPLETE", payload
+    log = [json.loads(line) for line in (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(row.get("event") == "runner_rate_limited" for row in log) and not any(row.get("event") == "runner_failed" for row in log)
+
+
 JAVA_HOME = os.environ.get("TEST_SKILLS_JAVA_HOME")
 
 

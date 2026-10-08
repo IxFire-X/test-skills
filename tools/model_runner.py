@@ -55,8 +55,26 @@ PRESETS: dict[str, dict[str, Any]] = {
 }
 DEFAULT_TIMEOUT = 1800
 DEFAULT_PARALLEL = 4
-RATE_LIMIT_PAUSE = 60
-_RATE_LIMIT = re.compile(r"rate.?limit|\b429\b|overloaded|too many requests|usage limit", re.I)
+RATE_LIMIT_PAUSE = 60       # the first pause after a rate or usage limit, seconds
+RATE_LIMIT_MAX_PAUSE = 1800  # the pause doubles up to this
+RATE_LIMIT_MAX_WAITS = 8     # pauses per task before a limit counts as a failed try (about 2 hours in all)
+# API limits (429, overload) and the messages of a Claude Code subscription ("You've hit your limit",
+# "Claude AI usage limit reached", weekly / 5-hour limits, "out of usage credits") — review 2.1 item 7.
+_RATE_LIMIT = re.compile(
+    r"rate.?limit|\b429\b|overloaded|too many requests|usage limit|hit your (?:[\w-]+ )*limit|(?:weekly|daily|monthly|session|[0-9]+-hour) limit"
+    r"|out of (?:usage )?credits|limit reached|quota exceeded|resource.?exhausted", re.I)
+
+
+def is_rate_limited(message: str) -> bool:
+    """Whether a CLI error is a rate or usage limit (a pause, not a failed try)."""
+    return bool(_RATE_LIMIT.search(message or ""))
+
+
+def rate_limit_pause(wait: int) -> int:
+    """The pause before the ``wait``-th relaunch after a limit: doubling from ``RATE_LIMIT_PAUSE`` up to ``RATE_LIMIT_MAX_PAUSE``."""
+    return int(min(RATE_LIMIT_PAUSE * 2 ** max(0, wait - 1), RATE_LIMIT_MAX_PAUSE))
+
+
 _SECRET = re.compile(r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|api[_-]?key=\S+|token=\S+|bearer\s+\S+)")
 
 
@@ -339,7 +357,7 @@ def read_outcome(directory: Path, *, preset: str, configured_model: str | None) 
                 evidence.update(model=models[0] if len(models) == 1 else ",".join(models), model_source="cli_output")
             if payload.get("is_error"):
                 message = str(payload.get("result") or payload.get("api_error_status") or "error")
-                outcome.rate_limited = bool(_RATE_LIMIT.search(message) or payload.get("api_error_status") == 429)
+                outcome.rate_limited = is_rate_limited(message) or payload.get("api_error_status") == 429
                 outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_CLI_ERROR: {message[:300]}"
                 return outcome
             if payload.get("stop_reason") == "max_tokens":
@@ -361,7 +379,7 @@ def read_outcome(directory: Path, *, preset: str, configured_model: str | None) 
                     text = event["item"].get("text")
                 elif event.get("type") in {"error", "turn.failed"}:
                     message = json.dumps(event, ensure_ascii=False)[:300]
-                    outcome.rate_limited = bool(_RATE_LIMIT.search(message))
+                    outcome.rate_limited = is_rate_limited(message)
                     outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_CLI_ERROR: {message}"
                     return outcome
             last = directory / "last-message.txt"
@@ -369,14 +387,14 @@ def read_outcome(directory: Path, *, preset: str, configured_model: str | None) 
                 text = last.read_text(encoding="utf-8", errors="replace")
             evidence["model_source"] = "configured"  # codex --json events do not name the model
     except (ValueError, json.JSONDecodeError):
-        outcome.rate_limited = bool(_RATE_LIMIT.search(stdout + stderr))
+        outcome.rate_limited = is_rate_limited(stdout + stderr)
         if result["exit_code"] != 0:
             outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_EXIT_{result['exit_code']}: {(stderr or stdout)[-300:].strip()}"
         else:
             outcome.failure, outcome.reason = "TRANSPORT", "RUNNER_OUTPUT_NOT_JSON: the CLI output is not its JSON format" + (" (rate limit)" if outcome.rate_limited else "")
         return outcome
     if result["exit_code"] != 0:
-        outcome.rate_limited = bool(_RATE_LIMIT.search(stdout + stderr))
+        outcome.rate_limited = is_rate_limited(stdout + stderr)
         outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_EXIT_{result['exit_code']}: {(stderr or stdout)[-300:].strip()}"
         return outcome
     if not text:

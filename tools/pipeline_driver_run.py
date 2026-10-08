@@ -41,7 +41,9 @@ def _run_one(project: Path, run_root: Path, task: Mapping[str, Any], config: Map
     feedback = ""
     last: dict[str, Any] = {}
     reason = None
-    for number in range(1, TRIES + 1):
+    number = 0
+    while number < TRIES:
+        number += 1
         attempt_task = {**task, "task_id": f"{task['task_id']}-run{number}", "instructions": str(task["instructions"]) + feedback}
         runner.launch_task(run_root, attempt_task, cfg, model)
         directory = runner.runner_directory(run_root, attempt_task["task_id"])
@@ -54,10 +56,16 @@ def _run_one(project: Path, run_root: Path, task: Mapping[str, Any], config: Map
         outcome = model_runner.read_outcome(directory, preset=cfg.preset, configured_model=model)
         if outcome.failure is not None:
             reason = outcome.reason
-            driver._log(driver._log_path(run_root.parents[1], run_root.name), {"event": "runner_failed", "task_id": task["task_id"], "try": number,
-                                                                                "failure_class": outcome.failure, "reason": outcome.reason})
             if outcome.rate_limited:
-                time.sleep(model_runner.RATE_LIMIT_PAUSE)
+                # A rate or usage limit is a pause, not a failed try (review 2.1 item 7); the waits are bounded.
+                pause = runner.rate_limit_wait(run_root, attempt_task["task_id"], directory, outcome.reason)
+                if pause is not None:
+                    time.sleep(pause)
+                    number -= 1
+                    continue
+                reason = f"RUNNER_RATE_LIMITED: still limited after {model_runner.RATE_LIMIT_MAX_WAITS} pauses; {outcome.reason}"
+            driver._log(driver._log_path(run_root.parents[1], run_root.name), {"event": "runner_failed", "task_id": task["task_id"], "try": number,
+                                                                                "failure_class": outcome.failure, "reason": reason})
             feedback = f"\n\nПредыдущая попытка не дала ответа ({outcome.reason}). Верни только JSON-объект по схеме."
             continue
         Path(task["output_path"]).write_text(json.dumps(outcome.answer, ensure_ascii=False), encoding="utf-8", newline="\n")

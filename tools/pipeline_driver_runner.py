@@ -82,8 +82,37 @@ def _paused_until(run_root: Path) -> float:
     return float(json.loads(path.read_text(encoding="utf-8")).get("paused_until", 0)) if path.is_file() else 0.0
 
 
+def _runner_state(run_root: Path) -> dict[str, Any]:
+    path = _state_path(run_root)
+    return dict(json.loads(path.read_text(encoding="utf-8"))) if path.is_file() else {}
+
+
 def _pause(run_root: Path, seconds: int) -> None:
-    driver._write_json(_state_path(run_root), {"paused_until": time.time() + seconds})
+    state = _runner_state(run_root)
+    state["paused_until"] = max(float(state.get("paused_until", 0)), time.time() + seconds)
+    driver._write_json(_state_path(run_root), state)
+
+
+def rate_limit_wait(run_root: Path, task_id: str, directory: Path, reason: str | None) -> int | None:
+    """A rate or usage limit: pause (doubling) and set the task up for a relaunch without spending a try.
+
+    The finished process directory is kept aside (``<task>.rate-limited-<n>``) so the same task can be
+    launched again.  Returns the pause in seconds, or None when the task already waited
+    ``RATE_LIMIT_MAX_WAITS`` times — then the limit counts as a failed try.
+    """
+    state = _runner_state(run_root)
+    waits = dict(state.get("rate_waits") or {})
+    wait = int(waits.get(task_id, 0)) + 1
+    if wait > model_runner.RATE_LIMIT_MAX_WAITS:
+        return None
+    seconds = model_runner.rate_limit_pause(wait)
+    waits[task_id] = wait
+    state["rate_waits"] = waits
+    state["paused_until"] = max(float(state.get("paused_until", 0)), time.time() + seconds)
+    driver._write_json(_state_path(run_root), state)
+    directory.rename(directory.with_name(f"{directory.name}.rate-limited-{wait}"))
+    _log(run_root, {"event": "runner_rate_limited", "task_id": task_id, "wait": wait, "pause_seconds": seconds, "reason": (reason or "")[:300]})
+    return seconds
 
 
 def host_evidence(config: Mapping[str, Any], review_key: str, runner: model_runner.RunnerConfig, schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -150,7 +179,9 @@ def _collect(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
             failure, reason = "CONTENT", f"RUNNER_ANSWER_REJECTED: {error}"[:600]
     if failure is not None:
         if outcome.rate_limited:
-            _pause(run_root, model_runner.RATE_LIMIT_PAUSE)
+            if rate_limit_wait(run_root, str(task["task_id"]), runner_directory(run_root, task["task_id"]), reason) is not None:
+                return  # relaunched after the pause; no try spent (review 2.1 item 7)
+            reason = f"RUNNER_RATE_LIMITED: still limited after {model_runner.RATE_LIMIT_MAX_WAITS} pauses; {reason or ''}"[:600]
         result = fail_review_part(run_root, attempt_id, key, part_id, failure, reason or failure)
         _log(run_root, {"event": "runner_failed", "task_id": task["task_id"], "failure_class": failure, "reason": reason, "rate_limited": outcome.rate_limited,
                         "retry_allowed": result["retry_allowed"]})
@@ -196,7 +227,10 @@ def review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], confi
                                              extra_task={"runner": "process"})
             launch_task(run_root, task, runner, role_model(config, _role(review_key)))
             running.append(task["task_id"])
-    if running or available:
+    # A part set aside by a rate or usage limit is open but not launched: it waits for the pause to end.
+    waiting = [task["task_id"] for task in driver._open_review_tasks(run_root, attempt_id, review_key)
+               if not (runner_directory(run_root, task["task_id"]) / "spec.json").is_file()]
+    if running or available or waiting:
         until = _paused_until(run_root)
         return {"action": "wait", "run_id": run_root.name, "attempt_id": attempt_id, "review_key": review_key, "running": sorted(running),
                 "poll_seconds": POLL_SECONDS if running else max(1, int(until - time.time()) + 1), "paused_until": until if until > time.time() else None,

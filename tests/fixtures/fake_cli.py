@@ -5,7 +5,7 @@
 Reads the whole role input from stdin.  ``--script`` lists the behaviour of successive
 calls with the same input (the last one repeats): ``ok`` answers, ``garbage`` prints
 non-JSON, ``prose`` returns a result without a JSON object, ``nonzero`` exits 3,
-``ratelimit`` reports an API 429, ``timeout`` sleeps for an hour, ``nosession`` answers
+``ratelimit`` reports an API 429, ``sublimit``/``sublimit-text`` a subscription limit (JSON / plain text), ``timeout`` sleeps for an hour, ``nosession`` answers
 without a session id, and ``fixed-session`` answers with the same session id every time.
 
 Answers: a compact review part gets a clean answer (every area checked, every lint
@@ -85,6 +85,12 @@ def main() -> int:
         return 3
     if mode == "ratelimit":
         print(json.dumps({"type": "result", "is_error": True, "api_error_status": 429, "result": "API Error: 429 rate_limit_error", "session_id": session}))
+        return 1
+    if mode == "sublimit":  # a Claude Code subscription limit: no HTTP status in the result
+        print(json.dumps({"type": "result", "is_error": True, "result": "You've hit your limit · resets 5pm (Europe/Moscow)", "session_id": session}))
+        return 1
+    if mode == "sublimit-text":  # the same as plain text on stderr
+        print("Claude AI usage limit reached|1760000000", file=sys.stderr)
         return 1
     result = "Вот мой ответ без JSON." if mode == "prose" else json.dumps(answer(prompt), ensure_ascii=False)
     payload = {"type": "result", "subtype": "success", "is_error": False, "result": result, "stop_reason": "end_turn",
