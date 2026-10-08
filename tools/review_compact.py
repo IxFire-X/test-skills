@@ -849,16 +849,10 @@ def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
 
 
 def _packed_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], rows: Sequence[tuple[list[str], Mapping[str, Any]]]) -> list[dict[str, Any]]:
-    """Checks whose cases overlap become one; the rest are packed in order while a part still fits its byte budget
-    (live Petclinic run 2026-10-08: 21 merged checks of one or a few cases each would each have cost a part).
+    """Checks packed in case order while a part still fits its byte budget (live Petclinic run 2026-10-08: 21 merged
+    checks of one or a few cases each would each have cost a part); a check too large for one part is split into parts
+    that fit (a request for every source requirement named all 81 cases: one 577 KB part, blocked, the run PARTIAL).
     ``sources`` names the digests of the answers' own checks a packed check answers."""
-    groups: list[dict[str, Any]] = []
-    for cases, row in rows:
-        group = {"case_ids": set(cases), "items": [(cases, row)]}
-        for other in [item for item in groups if item["case_ids"] & group["case_ids"]]:
-            groups.remove(other)
-            group = {"case_ids": other["case_ids"] | group["case_ids"], "items": [*other["items"], *group["items"]]}
-        groups.append(group)
     order = [case["case_id"] for case in payload["document"]["test_cases"]]
 
     def question(items) -> str:
@@ -882,13 +876,31 @@ def _packed_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], rows: Se
         found = anchors(part["text"])
         return len(question(items)) <= 4000 and part["blocked_reason"] is None and len(found) == len(set(found))
 
+    def pieces(cases: list[str], row: Mapping[str, Any]) -> list[tuple[list[str], Mapping[str, Any]]]:
+        if fits([(cases, row)]):
+            return [(cases, row)]
+        out: list[tuple[list[str], Mapping[str, Any]]] = []
+
+        def piece(chunk: list[str]) -> tuple[list[str], Mapping[str, Any]]:
+            note = f" (часть {len(out) + 1} проверки: остальные её кейсы — в других частях)"
+            return chunk, {**row, "reasons": [reason + note for reason in row["reasons"]]}
+
+        chunk: list[str] = []
+        for case_id in cases:
+            if chunk and not fits([piece([*chunk, case_id])]):
+                out.append(piece(chunk))
+                chunk = []
+            chunk.append(case_id)
+        out.append(piece(chunk))  # a single case that does not fit stays blocked: REVIEW_CONTEXT_LIMIT
+        return out
+
+    items = [item for cases, row in sorted(rows, key=lambda row: order.index(row[0][0])) for item in pieces(list(cases), row)]
     packed: list[list] = []
-    for group in groups:
-        items = sorted(group["items"], key=lambda item: order.index(item[0][0]))
-        if packed and fits([*packed[-1], *items]):
-            packed[-1].extend(items)
+    for item in items:
+        if packed and fits([*packed[-1], item]):
+            packed[-1].append(item)
         else:
-            packed.append(list(items))
+            packed.append([item])
     return [build(items) for items in packed]
 
 
@@ -952,8 +964,11 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
     checks = required_checks(plan, payload, results)
     requested = {review_digest(check): check for check in checks}
     # A packed check (CHECK_POLICY) answers the answers' own checks it names in ``sources``.
-    alias = {source: digest for digest, check in requested.items() for source in check.get("sources", [])}
-    open_rows = [(part_id, row, [alias.get(digest, digest) for digest in own]) for part_id, row, own in open_rows]
+    alias: dict[str, list[str]] = {}
+    for digest, check in requested.items():
+        for source in check.get("sources", []):
+            alias.setdefault(source, []).append(digest)  # a split check is answered by all of its parts
+    open_rows = [(part_id, row, [item for digest in own for item in alias.get(digest, [digest])]) for part_id, row, own in open_rows]
     for index, part in enumerate(parts, start=1):
         if part["requested_check"] is not None:
             check = requested.get(part["requested_check"])

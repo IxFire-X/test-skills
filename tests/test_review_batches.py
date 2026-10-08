@@ -389,3 +389,23 @@ def test_small_checks_are_packed_into_one_part_that_closes_the_unchecked_area(tm
     aggregate = read_review_aggregate(root, first["attempt_id"])["aggregate"]
     assert left_open and aggregate["complete"] and aggregate["unchecked"] == [], aggregate["unchecked"]
     assert task.get("action") == "done" and (task["result"]["completion"], task["result"]["coverage"]) == ("COMPLETE", "FULL"), task.get("result")
+
+
+def test_a_check_larger_than_a_part_is_split_into_parts_that_fit(tmp_path: Path) -> None:
+    """Live Petclinic run (2026-10-08, restart): a request to check every source requirement named all 81 cases;
+    packed with the overlapping checks it became one 577 KB part over the 200 KB budget — blocked, the run PARTIAL."""
+    from tools import review_compact
+
+    plan, payload, _results = _finished_review(tmp_path)
+    cases = [case["case_id"] for case in payload["document"]["test_cases"]]
+    whole = review_compact.check_part(plan, payload, {"case_ids": cases, "reason": "Сверить все кейсы."}, 99)
+    small = dict(plan, input_byte_budget=whole["input_byte_count"] + plan["snapshot"]["response_reserve_bytes"] - 1)
+    every, one = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    checks = review_compact._packed_checks(small, payload, [
+        (cases, {"reasons": ["Сверить все кейсы."], "corrections": [], "sources": [every]}),
+        ([cases[0]], {"reasons": ["Сверить первый кейс."], "corrections": [], "sources": [one]}),
+    ])
+    assert len(checks) >= 2, checks
+    assert all(review_compact.check_part(small, payload, check, 99)["blocked_reason"] is None for check in checks)
+    assert set().union(*(set(check["case_ids"]) for check in checks)) == set(cases)
+    assert sum(every in check["sources"] for check in checks) >= 2 and sum(one in check["sources"] for check in checks) == 1
