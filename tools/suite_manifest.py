@@ -235,9 +235,21 @@ def write_suite(project: Path, suite_dir: str, payloads: Mapping[str, bytes], *,
     written = []
     for name, target, data in plan:
         if data is not None:
-            temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-            temporary.write_bytes(data)
-            os.replace(temporary, target)
+            expected = (replace or {}).get(name)
+            if not target.exists() or expected is None:
+                # A new file: created exclusively, so a file that appeared since the plan is never overwritten.
+                try:
+                    with open(target, "xb") as handle:
+                        handle.write(data)
+                except FileExistsError as error:
+                    if sha256_bytes(target.read_bytes()) != sha256_bytes(data):
+                        raise SuiteError("SUITE_FILE_CONFLICT", f"{suite_dir}{names[name]} appeared with other content while the suite was written") from error
+            else:
+                if sha256_bytes(target.read_bytes()) != expected:
+                    raise SuiteError("SUITE_FILE_CONFLICT", f"{suite_dir}{names[name]} changed while the suite was written")
+                temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+                temporary.write_bytes(data)
+                os.replace(temporary, target)
         written.append({"name": name, "path": target.relative_to(project).as_posix(), "sha256": sha256_bytes(target.read_bytes())})
     return written
 

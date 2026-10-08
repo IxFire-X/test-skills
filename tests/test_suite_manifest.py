@@ -172,3 +172,27 @@ def test_without_the_flag_nothing_is_written(tmp_path: Path, monkeypatch: pytest
     _code, done = replay.drive(replay.start()[1])
     assert "suite" not in done["result"] and done["result"]["schema_version"] == "1.0.0"
     assert not (replay.project / "test-cases").exists()
+
+
+
+def test_a_suite_file_that_appears_while_writing_is_never_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent review 2.3: a new suite file is created exclusively (O_EXCL), not after an exists() check."""
+    import pathlib
+
+    from tools.suite_manifest import SuiteError, write_suite
+
+    project = tmp_path / "project"
+    project.mkdir()
+    original = pathlib.Path.mkdir
+
+    def racing(self, *args, **kwargs):  # a person (or another run) creates the file between the plan and the write
+        result = original(self, *args, **kwargs)
+        if self.name == "test-cases":
+            (self / "suite-manifest.json").write_bytes(b"{\"theirs\": true}")
+        return result
+
+    monkeypatch.setattr(pathlib.Path, "mkdir", racing)
+    with pytest.raises(SuiteError) as error:
+        write_suite(project, "test-cases/", {"manifest": b"{\"ours\": true}"})
+    assert error.value.code == "SUITE_FILE_CONFLICT"
+    assert (project / "test-cases" / "suite-manifest.json").read_bytes() == b"{\"theirs\": true}"
