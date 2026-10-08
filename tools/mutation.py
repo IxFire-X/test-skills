@@ -101,13 +101,17 @@ def project_snapshot(project: Path) -> str:
         if relative == Path("."):
             directories[:] = [name for name in directories if name not in _EXCLUDED_TOP]
         directories.sort()
+        for name in directories:  # a new (even empty) directory or a link to one is a change too (independent review 2.3)
+            path = Path(current) / name
+            rows.append([(relative / name).as_posix() + "/", "link:" + os.readlink(path) if path.is_symlink() else "dir", None])
         for name in sorted(files):
             path = Path(current) / name
             try:
-                rows.append([(relative / name).as_posix(), path.stat().st_size, _sha256_file(path)])
+                link = "link:" + os.readlink(path) if path.is_symlink() else None
+                rows.append([(relative / name).as_posix(), link or path.stat().st_size, None if link else _sha256_file(path)])
             except OSError:
                 rows.append([(relative / name).as_posix(), None, None])
-    return _canonical_digest(sorted(rows))
+    return _canonical_digest(sorted(rows, key=lambda row: (row[0], str(row[1]), str(row[2]))))
 
 
 @dataclass(frozen=True)

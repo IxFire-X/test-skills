@@ -159,6 +159,22 @@ def rename_pairs(before: Iterable[Mapping[str, Any]], after: Iterable[Mapping[st
     for marker, rows in gone.items():
         if len(rows) == 1 and len(new.get(marker, [])) == 1:
             pairs.add((rows[0]["key"], new[marker][0]["key"]))
+    # A moved or renamed document (independent review 2.3): the same heading chain or ID and the same text under
+    # another path is the same requirement — only when that pair is unique on both sides.
+    paired_old = {old for old, _new in pairs}
+    paired_new = {new for _old, new in pairs}
+
+    def by_anchor(rows: list[Mapping[str, Any]], paired: set[str]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
+        grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+        for row in rows:
+            if row["key"] not in paired and row["key"].startswith("md:"):
+                grouped.setdefault((row["key"].split("#", 1)[-1], row["text_digest"]), []).append(row)
+        return grouped
+
+    moved_from, moved_to = by_anchor(removed, paired_old), by_anchor(added, paired_new)
+    for marker, rows in moved_from.items():
+        if len(rows) == 1 and len(moved_to.get(marker, [])) == 1 and key_path(rows[0]["key"]) != key_path(moved_to[marker][0]["key"]):
+            pairs.add((rows[0]["key"], moved_to[marker][0]["key"]))
     return sorted(pairs)
 
 

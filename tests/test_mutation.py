@@ -357,6 +357,18 @@ def test_a_project_change_during_the_stage_voids_the_measurement(tmp_path: Path)
     assert (facts["status"], facts["reason_code"], facts["project_inventory"]["unchanged"]) == ("NOT_RUNNABLE", "MUTATION_PROJECT_CHANGED", False)
 
 
+def test_the_project_inventory_sees_new_directories_and_links(tmp_path: Path) -> None:
+    """Independent review 2.3: the inventory proving the project unchanged covers directories (and symbolic links), not only files."""
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "src" / "A.java").write_text("class A {}", encoding="utf-8")
+    before = mutation.project_snapshot(project)
+    (project / "src" / "generated").mkdir()
+    assert mutation.project_snapshot(project) != before
+    (project / "src" / "generated").rmdir()
+    assert mutation.project_snapshot(project) == before
+
+
 @pytest.mark.parametrize("change,code", [
     (lambda report: report.update(verdict="UNKNOWN"), "MUTATION_VERIFICATION_NOT_AUTHORITATIVE"),
     (lambda report: report.update(evidence_authoritative=False), "MUTATION_VERIFICATION_NOT_AUTHORITATIVE"),

@@ -463,3 +463,20 @@ def test_crlf_test_files_keep_their_line_endings(suite_project, tmp_path: Path, 
     data = (project / GENERATED).read_bytes()
     assert (NEW.encode() in data) if change == "update" else (b"test-skills quarantine" in data)
     assert _only_crlf(data)
+
+
+
+@needs_java
+def test_a_changed_id_pattern_stops_instead_of_retiring_the_suite(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent review 2.3: keys made with another id_pattern are not 'removed requirements'; the update stops with a reason."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    skillsrc = project / ".skillsrc"
+    skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.2.0", 1)
+                        + "requirements:\n  id_pattern: '3\\.\\d\\.'\n", encoding="utf-8")
+    before = read_suite(project, "test-cases/")
+    tests_before = (project / GENERATED).read_bytes()
+    result = _drive(replay)["result"]
+    assert (result["outcome"], result["reason_code"]) == ("STOPPED", "SUITE_ID_PATTERN_CHANGED"), result
+    assert read_suite(project, "test-cases/") == before and (project / GENERATED).read_bytes() == tests_before

@@ -122,6 +122,18 @@ def test_the_suite_paths_use_the_document_limits_of_the_skillsrc(tmp_path: Path,
     assert [key.rsplit(" > ", 1)[-1] for key in result["requirements"]["added"]] == ["Приложение"]
 
 
+def test_a_moved_requirement_document_relinks_its_cases(tmp_path: Path, step5: dict) -> None:
+    """Independent review 2.3: a renamed or moved document keeps its requirements (renamed keys), no case retires."""
+    project = _project(tmp_path, step5)
+    moved = Path(DOCS).parent / "renamed" / Path(DOCS).name
+    (project / moved).parent.mkdir(parents=True)
+    (project / DOCS).rename(project / moved)
+    result = impact(project, docs=[moved.as_posix()])
+    assert result["requirements"]["added"] == [] and result["requirements"]["removed"] == [] and result["requirements"]["changed"] == []
+    assert result["requirements"]["renamed"] and result["cases"]["to_retire"] == [] and result["cases"]["to_update"] == []
+    assert all(row["to"].startswith("md:" + moved.as_posix() + "#") for row in result["requirements"]["renamed"])
+
+
 def test_cases_retire_only_when_all_their_requirements_are_gone() -> None:
     manifest = {"cases": [{"case_id": "TC-1", "status": "ACTIVE", "requirement_keys": ["a", "b"]}, {"case_id": "TC-2", "status": "ACTIVE", "requirement_keys": ["b"]},
                           {"case_id": "TC-3", "status": "ACTIVE", "requirement_keys": ["c"]}, {"case_id": "TC-4", "status": "RETIRED", "requirement_keys": ["b"]}]}

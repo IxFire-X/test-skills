@@ -166,6 +166,12 @@ def _impact(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
         _stop(run_root, state, error.code, str(error))
         return None
     _write(_work(run_root) / "impact.json", result)
+    if result.get("id_pattern_changed"):
+        # Keys made with another requirements.id_pattern do not compare: every requirement would look removed and
+        # every case would retire (independent review 2.3).  A person restores the pattern or re-keys the suite.
+        _stop(run_root, state, "SUITE_ID_PATTERN_CHANGED", "requirements.id_pattern of .skillsrc differs from the pattern the suite was keyed with; "
+              "restore it, or create the suite again (local-pilot-v1 --suite) with the new pattern")
+        return None
     needs_update = bool(result["requirements"]["added"] or result["requirements"]["changed"] or result["requirements"]["removed"])
     # New endpoints without a requirement are questions for the analysts; test cases do not change for them.
     questions = [row["question"] for row in result.get("analyst_questions") or []]
