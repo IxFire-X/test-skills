@@ -28,7 +28,7 @@ _STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _PY_ROUTE = re.compile(r"^\s*@(\w+)\.(route|get|post|put|delete|patch|api_route)\s*\((.*)$")
 _PY_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(([^)]*)")
 _PY_PREFIX = re.compile(r"^\s*(\w+)\s*=\s*(?:\w+\.)?(?:APIRouter|Blueprint)\s*\((.*)\)", re.M)
-_PATH_IN_TEXT = re.compile(r"(?:\b(GET|POST|PUT|DELETE|PATCH)\s+)?(/[A-Za-z0-9_\-{}<>:.]+(?:/[A-Za-z0-9_\-{}<>:.]*)*)")
+_PATH_IN_TEXT = re.compile(r"(?:\b(GET|POST|PUT|DELETE|PATCH)\s+[`'\"]?)?(/[A-Za-z0-9_\-{}<>:.]+(?:/[A-Za-z0-9_\-{}<>:.]*)*)")
 
 
 def _annotation_args(text: str, start: int) -> tuple[str, int]:
@@ -55,12 +55,104 @@ def _annotation_args(text: str, start: int) -> tuple[str, int]:
     return text[index + 1:], len(text)
 
 
-def _paths_of(arguments: str) -> list[str]:
-    """``value``/``path`` strings of a mapping annotation, else its leading positional strings, else ``[""]``."""
-    named = re.search(r'\b(?:value|path)\s*=\s*(\{[^}]*\}|"(?:[^"\\]|\\.)*")', arguments)
-    if named is None:
-        named = re.match(r'\s*(\{[^}]*\}|"(?:[^"\\]|\\.)*")', arguments)
-    return _STRING.findall(named.group(1)) if named else [""]
+_CONSTANT = re.compile(r"\b(?:static\s+final|final\s+static)\s+String\s+([A-Za-z_]\w*)\s*=\s*([^;]+);")
+_UNRESOLVED = "~"  # a path segment ``~expression~``: a mapping the surface could not resolve, kept apart (review 2.1 item 16)
+
+
+def _split_top(text: str, separator: str) -> list[str]:
+    """``text`` split at ``separator`` outside string literals, parentheses and braces."""
+    parts, depth, current, index = [], 0, [], 0
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            end = index + 1
+            while end < len(text) and text[end] != '"':
+                end += 2 if text[end] == "\\" else 1
+            current.append(text[index:end + 1])
+            index = end + 1
+            continue
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+        if char == separator and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    parts.append("".join(current))
+    return parts
+
+
+def _evaluate(expression: str, constants: Mapping[str, str]) -> str | None:
+    """A string expression of literals and constants joined by ``+``, or None when a part is unknown."""
+    out = []
+    for part in _split_top(expression.strip(), "+"):
+        part = part.strip().strip("()").strip()
+        literal = re.fullmatch(r'"((?:[^"\\]|\\.)*)"', part)
+        if literal:
+            out.append(literal.group(1))
+        elif part in constants:
+            out.append(constants[part])
+        else:
+            return None
+    return "".join(out)
+
+
+def java_constants(sources: Iterable[tuple[str, str]]) -> dict[str, str]:
+    """``static final String`` constants of the product sources as ``NAME`` and ``Owner.NAME`` (resolved transitively)."""
+    raw: dict[str, str] = {}
+    for path, text in sources:
+        owner = _JAVA_CLASS.search(text)
+        name = owner.group(1) if owner else Path(path).stem
+        for match in _CONSTANT.finditer(mask_java_comments(text)):
+            raw.setdefault(match.group(1), match.group(2))
+            raw[f"{name}.{match.group(1)}"] = match.group(2)
+    resolved: dict[str, str] = {}
+    for _round in range(6):
+        changed = False
+        for key, expression in raw.items():
+            if key in resolved:
+                continue
+            value = _evaluate(expression, resolved)
+            if value is not None:
+                resolved[key] = value
+                changed = True
+        if not changed:
+            break
+    return resolved
+
+
+def _paths_of(arguments: str, constants: Mapping[str, str] | None = None) -> list[str]:
+    """``value``/``path`` of a mapping annotation, else its leading positional argument, else ``[""]``.
+
+    A path built from constants (``Paths.API + "/{id}"``) is resolved with ``constants``; one that
+    cannot be resolved becomes a ``~expression~`` segment — never silently the bare prefix.
+    """
+    arguments = arguments.strip()
+    if not arguments:
+        return [""]
+    expression = None
+    for part in _split_top(arguments, ","):
+        key = re.match(r"\s*(value|path)\s*=\s*(.*)$", part, re.S)
+        if key:
+            expression = key.group(2)
+            break
+    if expression is None:
+        first = _split_top(arguments, ",")[0]
+        if re.match(r"\s*[A-Za-z_]\w*\s*=", first):
+            return [""]  # only named attributes such as method = RequestMethod.GET
+        expression = first
+    expression = expression.strip()
+    elements = _split_top(expression[1:-1], ",") if expression.startswith("{") and expression.endswith("}") else [expression]
+    out = []
+    for element in elements:
+        if not element.strip():
+            continue
+        value = _evaluate(element, constants or {})
+        out.append(value if value is not None else f"{_UNRESOLVED}{' '.join(element.split())}{_UNRESOLVED}")
+    return out or [""]
 
 
 def _java_methods(arguments: str, kind: str) -> list[str]:
@@ -125,9 +217,10 @@ def _java_parameters(signature: str) -> list[str]:
     return names
 
 
-def java_endpoints(path: str, source: str) -> list[dict[str, Any]]:
+def java_endpoints(path: str, source: str, constants: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
     endpoints: list[dict[str, Any]] = []
     source = mask_java_comments(source)
+    constants = {**java_constants([(path, source)]), **(constants or {})}
     if "Mapping" not in source or not re.search(r"@(?:Rest)?Controller\b", source):
         return []
     class_match = _JAVA_CLASS.search(source)
@@ -136,7 +229,7 @@ def java_endpoints(path: str, source: str) -> list[dict[str, Any]]:
     class_mapping = list(re.finditer(r"@RequestMapping\b", head))
     if class_mapping:
         arguments, _end = _annotation_args(head, class_mapping[-1].end())
-        prefix = (_paths_of(arguments) or [""])[0]
+        prefix = (_paths_of(arguments, constants) or [""])[0]
     owner = class_match.group(1) if class_match else Path(path).stem
     body_start = class_match.end() if class_match else 0
     for match in _MAPPING.finditer(source, body_start):
@@ -153,9 +246,12 @@ def java_endpoints(path: str, source: str) -> list[dict[str, Any]]:
         handler = method_match.group(1) if method_match else "?"
         line = source.count("\n", 0, match.start()) + 1
         for http in _java_methods(arguments, match.group(1)):
-            for value in _paths_of(arguments):
-                endpoints.append({"method": http, "path": _join(prefix, value), "parameters": _java_parameters(signature),
-                                  "handler": f"{owner}#{handler}", "source": f"{path}:{line}"})
+            for value in _paths_of(arguments, constants):
+                row = {"method": http, "path": _join(prefix, value), "parameters": _java_parameters(signature),
+                       "handler": f"{owner}#{handler}", "source": f"{path}:{line}"}
+                if _UNRESOLVED in row["path"]:
+                    row["unresolved"] = True
+                endpoints.append(row)
     return endpoints
 
 
@@ -213,6 +309,7 @@ def surface(module_root: Path, source_dirs: Sequence[str] = ("src/main/java", "s
     module_root = Path(module_root)
     seen: set[Path] = set()
     endpoints: list[dict[str, Any]] = []
+    texts: list[tuple[str, str]] = []
     for directory in source_dirs:
         base = (module_root / directory).resolve()
         if not base.is_dir():
@@ -230,38 +327,75 @@ def surface(module_root: Path, source_dirs: Sequence[str] = ("src/main/java", "s
                 text = file.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            endpoints.extend(java_endpoints(relative, text) if file.suffix == ".java" else python_endpoints(relative, text))
+            texts.append((relative, text))
+    constants = java_constants([(relative, text) for relative, text in texts if relative.endswith(".java")])
+    for relative, text in texts:
+        endpoints.extend(java_endpoints(relative, text, constants) if relative.endswith(".java") else python_endpoints(relative, text))
     rows = sorted({(row["method"], row["path"], tuple(row["parameters"]), row["handler"], row["source"]) for row in endpoints})
-    endpoints = [{"method": method, "path": path, "signature": signature(method, path), "parameters": list(parameters), "handler": handler, "source": source}
+    endpoints = [{"method": method, "path": path, "signature": signature(method, path), "parameters": list(parameters), "handler": handler, "source": source,
+                  **({"unresolved": True} if _UNRESOLVED in path else {})}
                  for method, path, parameters, handler, source in rows]
     identities = sorted({(row["signature"], tuple(sorted(row["parameters"]))) for row in endpoints})
     return {"endpoints": endpoints, "digest": "sha256:" + hashlib.sha256(json.dumps(identities, ensure_ascii=False).encode("utf-8")).hexdigest()}
 
 
-def requirement_paths(texts: Iterable[str]) -> set[str]:
-    """Signatures and bare paths named in requirement text (``GET /students/{id}`` or just ``/students/{id}``)."""
-    found: set[str] = set()
+def requirement_mentions(texts: Iterable[str]) -> tuple[set[str], set[str]]:
+    """``(signatures, bare paths)`` named in requirement text: ``GET /students/{id}`` names one method on the path;
+    ``/students/{id}`` without a method next to it names the path for every method."""
+    signatures: set[str] = set()
+    bare: set[str] = set()
     for text in texts:
         for method, path in _PATH_IN_TEXT.findall(text or ""):
             if len(path) < 2 or path.startswith("//"):
                 continue
-            path = path.rstrip(".,;:)")
+            path = path.rstrip(".,;:)`")
             if method:
-                found.add(signature(method, path))
-            found.add(signature("ANY", path).split(" ", 1)[1])
-    return found
+                signatures.add(signature(method, path))
+            else:
+                bare.add(signature("ANY", path).split(" ", 1)[1])
+    return signatures, bare
+
+
+def requirement_paths(texts: Iterable[str]) -> set[str]:
+    """Signatures and bare paths named in requirement text (``GET /students/{id}`` or just ``/students/{id}``)."""
+    signatures, bare = requirement_mentions(list(texts))
+    return signatures | bare | {item.split(" ", 1)[1] for item in signatures}
 
 
 def new_endpoints(current: Mapping[str, Any], snapshot: Mapping[str, Any] | None, requirement_texts: Iterable[str]) -> list[dict[str, Any]]:
-    """Endpoints of ``current`` missing from ``snapshot`` (by signature) that no requirement names."""
+    """Endpoints of ``current`` missing from ``snapshot`` (by method and path) that no requirement names.
+
+    A requirement that names ``GET /students/{id}`` does not cover ``DELETE /students/{id}`` (review 2.1
+    item 16); a path named without a method covers every method on it.
+    """
     known = {row["signature"] for row in (snapshot or {}).get("endpoints", [])}
-    named = requirement_paths(requirement_texts)
+    named, named_bare = requirement_mentions(list(requirement_texts))
     rows = []
     for row in current.get("endpoints", []):
         bare = row["signature"].split(" ", 1)[1]
-        if row["signature"] in known or row["signature"] in named or bare in named:
+        if row["signature"] in known or row["signature"] in named or bare in named_bare:
+            continue
+        if row["method"] == "ANY" and any(item.split(" ", 1)[1] == bare for item in named):
             continue
         if any(row["signature"] == other["signature"] for other in rows):
             continue
         rows.append(dict(row))
+    return rows
+
+
+def changed_parameters(current: Mapping[str, Any], snapshot: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Endpoints of the snapshot whose query, body or form parameters grew (path variables are part of the path)."""
+    def fields(row: Mapping[str, Any]) -> set[str]:
+        return {item for item in row.get("parameters") or [] if not str(item).startswith("path:")}
+
+    before: dict[str, set[str]] = {}
+    for row in (snapshot or {}).get("endpoints", []):
+        before.setdefault(row["signature"], set()).update(fields(row))
+    rows = []
+    for row in current.get("endpoints", []):
+        if row["signature"] not in before:
+            continue
+        added = sorted(fields(row) - before[row["signature"]])
+        if added and not any(other["signature"] == row["signature"] for other in rows):
+            rows.append({**dict(row), "added_parameters": added})
     return rows

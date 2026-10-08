@@ -159,6 +159,66 @@ def test_a_new_endpoint_is_a_question_and_changes_no_case(tmp_path: Path, step5:
     assert payload["cases"]["to_update"] == [] and payload["needs_model"] is False
 
 
+_CONTROLLER = """package demo;
+
+@RestController
+@RequestMapping(Paths.STUDENTS)
+public class StudentApi {
+    @GetMapping("/{id}")
+    public Student one(@PathVariable int id) { return null; }
+
+    @GetMapping
+    public List<Student> all(@RequestParam(name = "page") int page) { return null; }
+}
+"""
+_PATHS = """package demo;
+
+public final class Paths {
+    public static final String API = "/api";
+    public static final String STUDENTS = API + "/students";
+    private Paths() {}
+}
+"""
+
+
+def _surface_of(tmp_path: Path, controller: str, paths: str | None = _PATHS) -> dict:
+    root = tmp_path / "module"
+    (root / "src" / "main" / "java" / "demo").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "main" / "java" / "demo" / "StudentApi.java").write_text(controller, encoding="utf-8")
+    if paths is not None:
+        (root / "src" / "main" / "java" / "demo" / "Paths.java").write_text(paths, encoding="utf-8")
+    elif (root / "src" / "main" / "java" / "demo" / "Paths.java").exists():
+        (root / "src" / "main" / "java" / "demo" / "Paths.java").unlink()
+    return surface(root, ["src/main/java"])
+
+
+def test_paths_from_constants_are_resolved_or_kept_apart(tmp_path: Path) -> None:
+    """Review 2.1 item 16: a path built from constants is resolved; one that cannot be is never collapsed into the prefix."""
+    resolved = _surface_of(tmp_path, _CONTROLLER)
+    assert sorted(row["signature"] for row in resolved["endpoints"]) == ["GET /api/students", "GET /api/students/{}"]
+    unresolved = _surface_of(tmp_path, _CONTROLLER.replace('@GetMapping("/{id}")', "@GetMapping(External.ONE)"))
+    signatures = sorted(row["signature"] for row in unresolved["endpoints"])
+    assert len(signatures) == 2 and signatures[0] == "GET /api/students" and "external.one" in signatures[1]
+    assert [row for row in unresolved["endpoints"] if row.get("unresolved")]
+
+
+def test_a_new_method_on_a_named_path_and_a_new_parameter_are_questions(tmp_path: Path) -> None:
+    """Review 2.1 item 16: the requirement names GET /api/students/{id}; DELETE on the same path is new behaviour."""
+    from tools.code_surface import changed_parameters
+
+    before = _surface_of(tmp_path, _CONTROLLER)
+    texts = ["Метод GET `/api/students/{id}` возвращает студента; GET `/api/students` — список с параметром page."]
+    added = _CONTROLLER.replace("    @GetMapping\n", '    @DeleteMapping("/{id}")\n    public void remove(@PathVariable int id) { }\n\n    @GetMapping\n')
+    after = _surface_of(tmp_path, added)
+    assert [row["signature"] for row in new_endpoints(after, before, texts)] == ["DELETE /api/students/{}"]
+    widened = _surface_of(tmp_path, _CONTROLLER.replace('@RequestParam(name = "page") int page', '@RequestParam(name = "page") int page, @RequestParam(name = "size") int size'))
+    assert new_endpoints(widened, before, texts) == []
+    [row] = changed_parameters(widened, before)
+    assert row["signature"] == "GET /api/students" and row["added_parameters"] == ["query:size"]
+    renamed = _surface_of(tmp_path, _CONTROLLER.replace("int id)", "int studentId)").replace("{id}", "{studentId}"))
+    assert changed_parameters(renamed, before) == [] and new_endpoints(renamed, before, texts) == []  # a renamed path variable is noise
+
+
 # ------------------------------------------------------------------- W3-Р8: noise of the code surface
 
 def _variations(source: str, *, handler: str, path_variable: str | None) -> dict[str, str]:

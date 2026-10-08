@@ -143,7 +143,7 @@ def changed_files(project: Path, git_range: str) -> list[str]:
 
 
 def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[str] = (), git_range: str | None = None) -> dict[str, Any]:
-    from tools.code_surface import new_endpoints, surface
+    from tools.code_surface import changed_parameters, new_endpoints, surface
     from tools.pipeline_driver_suite import _module, _skillsrc
     from tools.requirement_identity import identify_project
     from tools.run_pipeline import _docs_entries
@@ -173,6 +173,11 @@ def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[
     questions = [{"requirement_ids": ["(code)"], "question": f"В коде есть {row['method']} {row['path']} ({row['handler']}), но ни одно требование его не описывает. "
                   f"Это новое поведение, которое нужно описать, или служебный эндпоинт вне тестов?",
                   "source": {"kind": "code-surface", "ref": row["signature"], "location": row["source"]}} for row in endpoints]
+    widened = changed_parameters(now, manifest["code_surface"])
+    questions += [{"requirement_ids": ["(code)"], "question": f"У {row['method']} {row['path']} ({row['handler']}) появились параметры "
+                   f"{', '.join(row['added_parameters'])}. Требования их описывают или это новое поведение, которое нужно описать?",
+                   "source": {"kind": "code-surface", "ref": row["signature"] + " " + ",".join(row["added_parameters"]), "location": row["source"]}}
+                  for row in widened]
     changed = changed_files(project, git_range) if git_range else None
     module_root = str(module.get("root") or ".").strip("./")
     product = [f"{module_root + '/' if module_root else ''}{path.strip('/')}/" for path in sources]
@@ -184,7 +189,7 @@ def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[
     return {
         "suite_dir": suite_dir, "suite_id": manifest["suite_id"], "id_pattern_changed": id_pattern != manifest["id_pattern"],
         "requirements": requirements, "cases": {**cases, "requirements_without_cases": requirements["added"]},
-        "tests": tests, "new_endpoints": endpoints, "analyst_questions": questions,
+        "tests": tests, "new_endpoints": endpoints, "new_parameters": widened, "analyst_questions": questions,
         "code_surface_digest": {"manifest": (manifest["code_surface"] or {}).get("digest"), "current": now["digest"]},
         "changed_files": changed, "code_under_test_changed": code_changed, "edited": edited, "needs_model": needs_model,
     }
