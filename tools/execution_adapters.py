@@ -20,6 +20,9 @@ PYTEST = "pytest:selected-symbols-v1"
 MAVEN = "maven-wrapper:selected-symbols-v1"
 SYSTEM_MAVEN = "maven:selected-symbols-v1"
 GRADLE = "gradle-wrapper:selected-symbols-v1"
+# A selected run checks the selected tests: the package's init script disables the whole suite's coverage gate
+# (JaCoCo coverage verification wired to `test`), which no subset can satisfy.  Nothing in the build changes.
+GRADLE_SELECTED_INIT = Path(__file__).resolve().parent / "gradle" / "selected-symbols.init.gradle"
 ADAPTER_IDS = frozenset({PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE})
 SAFE_ENVIRONMENT_LABELS = frozenset({"PROJECT_NATIVE_ENV"})
 _UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r")
@@ -336,7 +339,7 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
         return (_REPORT_DIRECTORIES[GRADLE],), (
             executable, _gradle_task(module_path, "cleanTest"), _gradle_task(module_path, "test"),
             *(part for selector in gradle_selectors for part in ("--tests", selector)),
-            *_gradle_profile(profile), "--no-daemon",
+            *_gradle_profile(profile), "--no-daemon", "--init-script", str(GRADLE_SELECTED_INIT),
         )
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
@@ -394,7 +397,10 @@ def command_for_request(request: ExecutionRequest) -> tuple[tuple[str, ...], tup
     legacy = _legacy_command_for(request.adapter_id, request.executable, request.build_profile, request.selectors)
     if legacy is not None and request.argv == legacy[1]:
         return legacy
-    return command_for(request.adapter_id, request.executable, request.build_profile, request.selectors, module_path=request_module_path(request))
+    current = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors, module_path=request_module_path(request))
+    if request.adapter_id == GRADLE and current[1][-2:] == ("--init-script", str(GRADLE_SELECTED_INIT)) and request.argv == current[1][:-2]:
+        return current[0], current[1][:-2]  # recorded before the coverage-gate init script (2026-10-08)
+    return current
 
 
 def request_scope_is_closed(request: ExecutionRequest, project: Path, module: Path) -> bool:

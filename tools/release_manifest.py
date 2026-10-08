@@ -15,7 +15,7 @@ PACKAGE_VERSION = "0.5.0-pilot"
 COMPATIBILITY_VERSION = "portable-cli-v1"
 EXECUTION_PROFILE_VERSION = "v1"
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools", "evals")
-RUNTIME_SUFFIXES = {".json", ".md", ".py"}
+RUNTIME_SUFFIXES = {".json", ".md", ".py", ".gradle"}
 
 
 def _canonical(value: Any) -> bytes:

@@ -181,6 +181,11 @@ frozen registry or schema, and a reader of the frozen contract must know it.
    `pipeline.schema.json` gained the amendment sections and, on 2026-10-08, the `default_on` field.
 4. **The default of `local-pilot-v1` after `FAIL`** is the quarantine policy (A4) since 2026-10-08 — see the
    introduction and `contract_amendments[wave 3].default_on`.
+5. **The closed command of `gradle-wrapper:selected-symbols-v1`** ends with `--init-script
+   tools/gradle/selected-symbols.init.gradle` (package file, in the release manifest) since 2026-10-08: the
+   script disables JaCoCo coverage verification tasks for the selected run, because a coverage gate of the
+   whole suite wired to `test` fails for any subset (found preparing the RealWorld live run). Receipts recorded
+   with the earlier argv keep verifying (`command_for_request`). No build file changes.
 
 ## What remains in force
 

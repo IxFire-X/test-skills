@@ -94,7 +94,7 @@ def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tm
     )
 
     assert request.selectors == ("pkg.SampleTest#works",)
-    assert request.argv[-3:] == ("--tests", "pkg.SampleTest.works", "--no-daemon")
+    assert request.argv[-5:-2] == ("--tests", "pkg.SampleTest.works", "--no-daemon")
     assert "--rerun-tasks" not in request.argv
     from tools.run_tests import _request_report_path
     assert _request_report_path(request) == tmp_path.resolve() / "build/test-results/test"
@@ -209,3 +209,19 @@ def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path
     source = {"source_digest": "sha256:" + "a" * 64}
     row = _process_row("OS_ERROR", ProcessOutcome(127, "", "", "OS_ERROR"), "RUN-system", source, request.adapter_id, 1.0)
     assert validate_process_evidence([row], "RUN-system", source, 127, 1.0, {"runner": "maven", "command": request.adapter_id}) == []
+
+
+
+def test_a_gradle_selected_run_disables_the_suites_coverage_gate(tmp_path: Path):
+    """Live-run preparation (RealWorld): a JaCoCo coverage verification wired to `test` fails for any subset of the
+    suite, so the selected run would read UNKNOWN; the package's init script disables those tasks for the run only."""
+    from tools.execution_adapters import GRADLE, GRADLE_SELECTED_INIT, ExecutionRequest, build_request, command_for_request
+
+    request = build_request(GRADLE, _module(tmp_path, GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
+    assert request.argv[-2:] == ("--init-script", str(GRADLE_SELECTED_INIT))
+    script = GRADLE_SELECTED_INIT.read_text(encoding="utf-8")
+    assert "JacocoCoverageVerification" in script and "enabled = false" in script
+    assert command_for_request(request)[1] == request.argv
+    # A receipt recorded before the init script keeps verifying against the shape it was launched with.
+    earlier = ExecutionRequest(**{**request.__dict__, "argv": request.argv[:-2]})
+    assert command_for_request(earlier)[1] == earlier.argv

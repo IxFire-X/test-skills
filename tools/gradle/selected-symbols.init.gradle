@@ -1,0 +1,6 @@
+// test-skills selected-symbols run (gradle-wrapper:selected-symbols-v1): the run checks the selected tests only.
+// A coverage gate of the whole suite (JaCoCo coverage verification wired to `test`) cannot hold for a subset,
+// so its tasks are disabled for this build. No build file changes; nothing else is touched.
+allprojects {
+    tasks.withType(org.gradle.testing.jacoco.tasks.JacocoCoverageVerification).configureEach { enabled = false }
+}

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.execution_adapters import GRADLE, MAVEN, PYTEST, SYSTEM_MAVEN
+from tools.execution_adapters import GRADLE, GRADLE_SELECTED_INIT, MAVEN, PYTEST, SYSTEM_MAVEN
 
 
 POM = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>{name}</artifactId><version>1</version>{body}</project>"
@@ -131,7 +131,7 @@ def test_gradle_single_project_reruns_only_the_test_task(tmp_path: Path) -> None
     request = build_request(GRADLE, _module(tmp_path, GRADLE, "gradlew"), [{"selector": "pkg.ATest#a"}, {"selector": "pkg.BTest#b"}])
 
     assert request.argv == (
-        str(wrapper.resolve()), ":cleanTest", ":test", "--tests", "pkg.ATest.a", "--tests", "pkg.BTest.b", "--no-daemon",
+        str(wrapper.resolve()), ":cleanTest", ":test", "--tests", "pkg.ATest.a", "--tests", "pkg.BTest.b", "--no-daemon", "--init-script", str(GRADLE_SELECTED_INIT),
     )
     assert "--rerun-tasks" not in request.argv
 
@@ -147,7 +147,7 @@ def test_gradle_subproject_runs_its_own_task_from_the_settings_root(tmp_path: Pa
 
     assert request.cwd == str(project.resolve())
     assert request.argv == (
-        str(wrapper), ":services:api:cleanTest", ":services:api:test", "--tests", "pkg.ATest.a", "-Pprofile=ci", "--no-daemon",
+        str(wrapper), ":services:api:cleanTest", ":services:api:test", "--tests", "pkg.ATest.a", "-Pprofile=ci", "--no-daemon", "--init-script", str(GRADLE_SELECTED_INIT),
     )
     assert _request_report_path(request) == module.resolve() / "build/test-results/test"
 
