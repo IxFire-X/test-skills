@@ -69,6 +69,28 @@ class _PublicationUnknown(ValueError):
 _GIT_STATUS_TIMEOUT_SECONDS = 120
 _MAX_TRANSPORT_ATTEMPTS = 3
 _VERIFIED_REVIEW_PLANS: set[tuple[str, str]] = set()
+
+
+# Review snapshots, plans and sealed aggregates are immutable and content-addressed, and what their validation checks
+# against — the frozen baseline, the published candidate, the automation answer, the recorded part answers — is
+# append-only journal fact.  So one process
+# validates each exact receipt once (keyed by its bytes), and a plan with its additions once per plan receipt and
+# set of additions (live Petclinic runs 2026-10-08: every review part re-validated both through its boundary;
+# next and submit took 1.5–6 minutes).  The bytes are still read back and the event binding checked on every read.
+_VALIDATED_REVIEW_RECEIPTS: set[tuple[str, str, str, str]] = set()
+_VALID_REVIEW_PLANS: set[tuple[str, str]] = set()  # (plan receipt digest, digest of additions and unavailable parts)
+# One journal state reads the same immutable review receipt many times (a part's request, boundary and answer each
+# need the plan and the snapshot: 7–9 MB in Petclinic, deep-copied on every read).  Within one derived state the
+# validated read is shared, read-only, while the file keeps its settled size, mtime and inode.
+_SHARED_REVIEW_READS: dict[tuple[str, str, str, str], tuple[Mapping[str, Any], tuple[int, int, int], Any]] = {}
+
+
+def reset_process_caches() -> None:
+    """Forget every per-process proof (tests: each driver call is a new process)."""
+    _VERIFIED_REVIEW_PLANS.clear()
+    _VALIDATED_REVIEW_RECEIPTS.clear()
+    _VALID_REVIEW_PLANS.clear()
+    _SHARED_REVIEW_READS.clear()
 _MAX_REVIEW_PART_TRIES = 3
 _REVIEW_FAILURE_CLASSES = ("TRANSPORT", "CONTENT")
 _RUN_LOCK_NAME = ".lock"
@@ -3476,13 +3498,27 @@ def _read_attempt_receipt_with_state(
     memo = _REVIEW_READBACKS.get()
     key = (str(root), id(state), attempt_id, kind, event_type)
     cacheable = kind.startswith(("review-", "automation-review-boundary-")) or kind in {"reviewer-session-boundary", "effective-canonical"}
+    shared_key = (str(root), attempt_id, kind, event_type)
+    shared = kind.startswith(("review-snapshot-", "review-plan-", "review-aggregate-"))
+    if shared:
+        hit = _SHARED_REVIEW_READS.get(shared_key)
+        if hit is not None and hit[0] is state and _stat_signature(_receipt_target(root, attempt_id, kind)) == hit[1]:
+            if token is not None:
+                _REVIEW_READBACKS.reset(token)
+            return hit[2]
     try:
         if cacheable and key in memo and memo[key][0] is state:
             result = memo[key][1]
             if read_confined_bytes(project, root, _receipt_target(root, attempt_id, kind)) != result["bytes"]:
                 raise ValueError("factual receipt read-back mismatch")
             return copy.deepcopy(result)
+        observed_ns = time.time_ns()
         result = _read_attempt_receipt_uncached(project, root, state, attempt_id, kind, event_type)
+        signature = _stat_signature(_receipt_target(root, attempt_id, kind)) if shared else None
+        if signature is not None and _signature_is_settled(signature, observed_ns):
+            if len(_SHARED_REVIEW_READS) >= 64:
+                _SHARED_REVIEW_READS.clear()
+            _SHARED_REVIEW_READS[shared_key] = (state, signature, result)
         if cacheable:
             memo[key] = (state, copy.deepcopy(result))
         return result
@@ -3504,11 +3540,18 @@ def _read_attempt_receipt_uncached(
         raise ValueError("unknown factual receipt attempt")
     target = _receipt_target(root, attempt_id, kind)
     receipt = _read_artifact(project, root, target, kind)
-    _validate_factual_receipt(project, root, attempt, kind, receipt, state)
+    data = _canonical_bytes(receipt)
+    immutable = kind.startswith(("review-snapshot-", "review-plan-", "review-aggregate-"))
+    proof = (str(root), attempt_id, kind, hashlib.sha256(data).hexdigest())
+    if not immutable or proof not in _VALIDATED_REVIEW_RECEIPTS:
+        _validate_factual_receipt(project, root, attempt, kind, receipt, state)
+        if immutable:
+            if len(_VALIDATED_REVIEW_RECEIPTS) >= 256:
+                _VALIDATED_REVIEW_RECEIPTS.clear()
+            _VALIDATED_REVIEW_RECEIPTS.add(proof)
     event = next((item for item in state["events"] if item["event_type"] == event_type and item.get("attempt_id") == attempt_id and item.get("artifact_digest") == receipt["digest"]), None)
     if event is None:
         raise ValueError("unbound factual receipt")
-    data = _canonical_bytes(receipt)
     if read_confined_bytes(project, root, target) != data:
         raise ValueError("factual receipt read-back mismatch")
     return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": data, "digest": receipt["digest"], "record": receipt}
@@ -4272,12 +4315,30 @@ def read_review_plan(run_root: Path, attempt_id: str, review_key: str = "canonic
 
 
 def _review_plan_with_state(root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str) -> dict[str, Any]:
+    return _review_plan_and_proof(root, state, attempt_id, review_key)[0]
+
+
+def _review_plan_and_proof(root: Path, state: Mapping[str, Any], attempt_id: str, review_key: str) -> tuple[dict[str, Any], tuple[str, str]]:
+    """The plan with its ledger additions, and what its validity depends on: the plan receipt's digest and the
+    digest of its additions and unavailable parts (other ledger events change nothing in the plan).  One derived
+    state reads them once: the plan's top level and its additions are copied for the caller, the parts are shared."""
+    from tools.review_parts import review_digest
     project, root = _run_root(root)
-    plan = dict(_read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-plan-{review_key}", "ARTIFACT_READ_BACK")["record"]["plan"])
+    memo_key = (str(root), attempt_id, review_key, "plan-with-ledger")
+    hit = _SHARED_REVIEW_READS.get(memo_key)
+    if hit is not None and hit[0] is state:
+        plan, proof = hit[2]
+        return {**plan, "additions": list(plan["additions"]), "unavailable": dict(plan["unavailable"])}, proof
+    receipt = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"review-plan-{review_key}", "ARTIFACT_READ_BACK")["record"]
+    plan = dict(receipt["plan"])
     ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, review_key=review_key)
     plan["additions"] = [event["part"] for event in ledger["events"] if event["event_type"] == "REVIEW_CHECK_ADDED"]
     plan["unavailable"] = {event["part_id"]: event["reason"] for event in ledger["events"] if event["event_type"] == "REVIEW_PART_BLOCKED"}
-    return plan
+    proof = (str(receipt["digest"]), review_digest({"additions": plan["additions"], "unavailable": plan["unavailable"]}))
+    if len(_SHARED_REVIEW_READS) >= 64:
+        _SHARED_REVIEW_READS.clear()
+    _SHARED_REVIEW_READS[memo_key] = (state, (0, 0, 0), (plan, proof))
+    return {**plan, "additions": list(plan["additions"]), "unavailable": dict(plan["unavailable"])}, proof
 
 
 def _review_block_classes(ledger: Mapping[str, Any]) -> dict[str, str]:
@@ -4289,9 +4350,13 @@ def _review_part_definition(root: Path, state: Mapping[str, Any], attempt_id: st
     """The declared part of a stage.  ``allow_unavailable`` reads a part the ledger later blocked
     (after its last failed try): its boundaries were valid when they were published."""
     from tools.review_modes import validate_plan
-    plan = _review_plan_with_state(root, state, attempt_id, _review_key(stage))
-    if validate_plan(plan):
-        raise ValueError("invalid durable review plan")
+    plan, proof = _review_plan_and_proof(root, state, attempt_id, _review_key(stage))
+    if proof not in _VALID_REVIEW_PLANS:
+        if validate_plan(plan):
+            raise ValueError("invalid durable review plan")
+        if len(_VALID_REVIEW_PLANS) >= 256:
+            _VALID_REVIEW_PLANS.clear()
+        _VALID_REVIEW_PLANS.add(proof)
     part = next((part for part in [*plan["parts"], *plan["additions"]] if part["part_id"] == _review_part_token(stage.rsplit(":", 1)[1])[0]), None)
     if part is None or part["blocked_reason"] or (part["part_id"] in plan["unavailable"] and not allow_unavailable):
         raise ValueError("undeclared or blocked review part")

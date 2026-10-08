@@ -445,3 +445,62 @@ def test_a_check_naming_requirements_carries_their_source_requirements(tmp_path:
     assert checks and all(sreq in check.get("source_requirement_ids", []) for check in checks), checks
     text = review_compact.check_part(plan, payload, checks[0], len(plan["parts"]) + 1)["text"]
     assert "## SREQ" in text and f"[{sreq}]" in text, text[:2000]
+
+
+def test_a_driver_call_checks_the_review_plan_and_snapshot_once(tmp_path: Path, monkeypatch) -> None:
+    """Live Petclinic runs (2026-10-08): next and submit took 1.5–6 minutes — every review part re-validated the
+    whole plan and the review snapshot (the canonical document, the automation) through its boundary receipt.  Within
+    one driver call (one process) each is checked once per content; the count does not grow with the parts."""
+    from collections import Counter
+
+    from tools import pilot_state, review_compact
+
+    counts: Counter = Counter()
+    validate_plan = review_compact.validate_compact_plan
+    validate_receipt = pilot_state._validate_review_receipt
+    aggregate = review_compact.aggregate
+
+    def counted_aggregate(*args, **kwargs):
+        counts["aggregate"] += 1  # an aggregate checks its plan itself, once per computation
+        return aggregate(*args, **kwargs)
+
+    def counted_plan(plan):
+        counts["plan"] += 1
+        return validate_plan(plan)
+
+    def counted_receipt(project, root, state, attempt, kind, receipt, common):
+        counts[kind.rsplit("-", 1)[0] if kind.startswith("review-part-") else kind] += 1
+        return validate_receipt(project, root, state, attempt, kind, receipt, common)
+
+    monkeypatch.setattr(review_compact, "validate_compact_plan", counted_plan)
+    monkeypatch.setattr(review_compact, "aggregate", counted_aggregate)
+    monkeypatch.setattr(pilot_state, "_validate_review_receipt", counted_receipt)
+    replay = Replay("2c10d733", tmp_path)
+    code, task = replay.drive(replay.start_with(*SMALL)[1], until=lambda item: str(item.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = task["run_id"]
+    worst: Counter = Counter()
+    parts: set[str] = set()
+
+    def call(*argv):
+        pilot_state.reset_process_caches()  # every driver call is a new process
+        counts.clear()
+        result = replay.call(*argv, "--project", str(replay.project), "--run", run_id)
+        counts["plan outside aggregates"] = counts["plan"] - counts["aggregate"]
+        for name, value in counts.items():
+            worst[name] = max(worst[name], value)
+        return result
+
+    for _ in range(40):
+        tasks = task["tasks"] if task.get("action") == "batch" else [task] if task.get("action") == "llm" else []
+        if not tasks or not all(str(item.get("stage", "")).startswith("tc-reviewer:") for item in tasks):
+            break
+        for item in tasks:
+            parts.add(item["part_id"])
+            Path(item["output_path"]).write_text(json.dumps(clean_compact_answer(part_text(item)), ensure_ascii=False), encoding="utf-8")
+            code, submitted = call("submit", "--task-id", item["task_id"])
+            assert submitted.get("action") != "error" and submitted.get("status") != "rejected", submitted
+        code, task = call("next", "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    assert len(parts) >= 4
+    assert worst["review-snapshot-canonical"] <= 1 and worst["review-plan-canonical"] <= 1, worst
+    assert worst["plan outside aggregates"] <= 2, worst  # the stored plan, then with its additions
