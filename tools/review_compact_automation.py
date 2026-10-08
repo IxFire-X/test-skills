@@ -17,7 +17,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping, Sequence
 
-from tools.review_compact import MODE, PLAN_VERSION, _Context, validate_compact_plan
+from tools.review_compact import CHECK_POLICY, MODE, PLAN_VERSION, _Context, validate_compact_plan
 from tools.review_parts import review_digest
 from tools.review_projection import automation_case_text, build_projection
 
@@ -145,6 +145,8 @@ def _part_text(context: _Context, code: _Code, views: Mapping[str, str], *, part
                        "граница приложения, общее состояние.")
         elif area["kind"] == "local":
             out.append(f"- {area['area_id']} — кейс {area['targets'][0]}: метод и вызываемые хелперы против шагов, входов, ожиданий и проверок кейса.")
+        elif area.get("question"):
+            out.append(f"- {area['area_id']} — проверка по коду кейсов этой части: {area['question']}")
         else:
             out.append(f"- {area['area_id']} — взаимодействия тестов этой части через общий код и состояние: порядок, побочные эффекты, "
                        "общие хелперы, изоляция данных.")
@@ -253,8 +255,10 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
         part = make(f"part-{index:06d}", f"{index} из {len(groups)}", group)
         homes.update(area["targets"][0] for area in part["areas"] if area["kind"] == "support")
         parts.append(part)
+    # The case review's addition policy (live Petclinic run d: without it a check of a requirement linked to all 81
+    # cases became one 559 KB part).
     plan = {"schema_version": PLAN_VERSION, "mode": MODE, "snapshot": spec, "input_byte_budget": input_byte_budget,
-            "lint": lint, "parts": parts, "digest": "sha256:" + "0" * 64}
+            "lint": lint, "parts": parts, "check_policy": CHECK_POLICY, "digest": "sha256:" + "0" * 64}
     if code.failures:
         plan["slice_failures"] = code.failures
     plan["digest"] = review_digest({key: value for key, value in plan.items() if key != "digest"})
@@ -262,3 +266,36 @@ def build_automation_plan(specification: Mapping[str, Any], payload: Mapping[str
     if rows:
         raise ValueError(f"invalid compact automation plan: {rows}")
     return plan
+
+
+_CODE: dict[str, tuple[_Code, dict[str, str]]] = {}
+
+
+def check_part(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mapping[str, Any], index: int) -> dict[str, Any]:
+    """One bounded check part of a ``CHECK_POLICY`` automation plan: the question, the named cases with their methods and
+    helpers, and the SUPPORT code of their files (a case-review check part would show the reviewer no code)."""
+    from tools.review_compact import _context_for
+
+    document = payload["document"]
+    if plan["digest"] not in _CODE:
+        _CODE.clear()
+        _CODE[plan["digest"]] = (_Code(payload["automation"], document), {case["case_id"]: automation_case_text(case) for case in document["test_cases"]})
+    code, views = _CODE[plan["digest"]]
+    context = _context_for(plan, payload)
+    case_ids = list(check["case_ids"])
+    digest = review_digest(check)
+    area = {"area_id": "cross-" + digest[7:], "kind": "cross", "targets": case_ids, "question": check["reason"],
+            "fingerprint": review_digest({"cases": [views[case_id] for case_id in case_ids], "code": [code.case_code(case_id) for case_id in case_ids],
+                                          "reason": check["reason"]})}
+    wanted = {file_id for case_id in case_ids for file_id in code.case_files.get(case_id, [])}
+    files = [file_id for file_id in code.files if file_id in wanted or file_id in code.support_only]
+    text = _part_text(context, code, views, part_id=f"part-{index:06d}", title="проверка", areas=[area], case_ids=case_ids, files=files, lint=[],
+                      full_capabilities=False)
+    size = len(text.encode("utf-8"))
+    ranges = [[start, end, file_id] for file_id in files for start, end in code.support_ranges(file_id)]
+    case_ranges = {case_id: code.case_ranges(case_id) for case_id in case_ids}
+    for case_id in case_ids:
+        ranges.extend(row for row in case_ranges[case_id] if row not in ranges)
+    return {"part_id": f"part-{index:06d}", "case_ids": case_ids, "blocks": [case_ids], "source": False, "areas": [area], "carried_area_ids": [],
+            "lint_ids": [], "text": text, "code_ranges": ranges, "case_ranges": case_ranges, "requested_check": digest, "input_byte_count": size,
+            "blocked_reason": "REVIEW_CONTEXT_LIMIT" if size + int(plan["snapshot"]["response_reserve_bytes"]) > plan["input_byte_budget"] else None}

@@ -789,6 +789,10 @@ def _context_for(plan: Mapping[str, Any], payload: Mapping[str, Any]) -> _Contex
 
 def check_part(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mapping[str, Any], index: int) -> dict[str, Any]:
     """One bounded check part: the named cases with the shared context and the question."""
+    if payload.get("automation") is not None and plan.get("check_policy") == CHECK_POLICY:
+        from tools.review_compact_automation import check_part as automation_check_part
+
+        return automation_check_part(plan, payload, check, index)
     context = _context_for(plan, payload)
     digest = review_digest(check)
     area = {"area_id": "cross-" + digest[7:], "kind": "cross", "targets": list(check["case_ids"]), "question": check["reason"],

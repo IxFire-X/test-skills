@@ -117,3 +117,22 @@ def test_an_unchecked_area_closes_as_too_broad_only_when_all_its_checks_are() ->
     assert "source-000002" not in {row["scope_id"] for row in aggregate["unchecked"]}
     assert {"part_id": "part-000002", "scope_id": "source-000002", "resolved_by": [], "reason": rc.TOO_BROAD_REASON} in aggregate["resolved_unchecked"]
 
+
+def test_the_automation_review_follows_the_check_policy() -> None:
+    """Run d, autotest review part 4 asked to check CREQ-B1-T-ISOLATION (all 81 cases; the reviewer needed schema.sql):
+    the automation plan had no check policy — one 559 KB part, REVIEW_CONTEXT_LIMIT.  The automation review follows the
+    case review's policy, and its check parts carry the code of their cases."""
+    plan = rp.plan("r1")
+    payload = rp.payload("r1")
+    results = _bound("r1")
+    assert plan.get("check_policy") == rc.CHECK_POLICY and rc.check_limit(plan) == 2
+    additions = rc.additional_parts(plan, payload, results)
+    assert 0 < len(additions) <= rc.check_limit(plan)
+    assert all(part["blocked_reason"] is None and len(part["case_ids"]) < 81 for part in additions)
+    for part in additions:
+        for case_id in part["case_ids"]:
+            assert f"[{case_id}]" in part["text"]
+        assert "## Кейсы и их методы" in part["text"] and part["code_ranges"]
+    aggregate = rc.aggregate(plan, payload, results)
+    assert [row["requirement_ids"] for row in aggregate.get("too_broad", [])] == [["CREQ-B1-T-ISOLATION"]]
+
