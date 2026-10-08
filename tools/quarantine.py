@@ -70,23 +70,46 @@ def quarantine(path: str, content: str, methods: Iterable[tuple[Mapping[str, obj
         inserts.append((member.start - 1, indent + text))
     for index, line in sorted(inserts, reverse=True):
         lines.insert(index, line)
-    if language == "python" and inserts and not any(re.match(r"^\s*(?:import pytest\b|from pytest\b)", line) for line in lines):
+    if language == "python" and inserts and not any(_imports_pytest(line) for line in lines):
         lines.insert(_python_import_line(lines), "import pytest")
     return _join(lines, newline, trailing)
 
 
+def _imports_pytest(line: str) -> bool:
+    """A top-level ``import pytest`` that binds the name ``pytest`` (not ``from pytest import …``, not ``as pt``)."""
+    match = re.match(r"^import\s+(.+?)\s*(?:#.*)?$", line)
+    return bool(match) and any(re.fullmatch(r"pytest", item.strip()) for item in match.group(1).split(","))
+
+
 def _python_import_line(lines: Sequence[str]) -> int:
-    """After the module docstring and ``from __future__`` imports."""
+    """The line after the module's leading comments, docstring and ``from __future__`` imports (review 2.1 item 17)."""
     index = 0
-    if lines and re.match(r'^\s*[rRuU]?("""|\'\'\')', lines[0]):
-        quote = re.match(r'^\s*[rRuU]?("""|\'\'\')', lines[0]).group(1)
-        if lines[0].count(quote) >= 2:
-            index = 1
-        else:
-            index = next((number + 1 for number in range(1, len(lines)) if quote in lines[number]), 1)
-    while index < len(lines) and re.match(r"^\s*from __future__ import", lines[index]):
+    while index < len(lines) and (not lines[index].strip() or lines[index].lstrip().startswith("#")):
         index += 1
-    return index
+    opening = re.match(r'^\s*[rRuUbB]{0,2}("""|\'\'\'|"|\')', lines[index]) if index < len(lines) else None
+    if opening:
+        quote = opening.group(1)
+        rest = lines[index][opening.end():]
+        if len(quote) == 1 or quote in rest:
+            index += 1
+        else:
+            index = next((number + 1 for number in range(index + 1, len(lines)) if quote in lines[number]), index + 1)
+    after = index
+    cursor = index
+    while cursor < len(lines):
+        line = lines[cursor].strip()
+        if not line or line.startswith("#"):
+            cursor += 1
+            continue
+        if re.match(r"from\s+__future__\s+import\b", line):
+            if "(" in line and ")" not in line:
+                while cursor < len(lines) and ")" not in lines[cursor]:
+                    cursor += 1
+            cursor += 1
+            after = cursor
+            continue
+        break
+    return after
 
 
 def release(path: str, content: str, locators: Sequence[Mapping[str, object]]) -> str:

@@ -146,3 +146,42 @@ def test_the_driver_summary_with_a_quarantined_suite_matches_its_schema(tmp_path
     root = Path(__file__).resolve().parents[1]
     assert done["result"]["suite"]["quarantined"] == 1
     assert schema_diagnostics(done["result"], root / "schemas" / "driver-summary.schema.json", root) == []
+
+
+
+def test_pytest_quarantine_end_to_end_on_a_synthetic_project(tmp_path: Path) -> None:
+    """Review 2.1 item 17: the default quarantine on a pytest project — the module still imports, the failed test is
+    an expected failure in the ordinary run and fails again when run with --runxfail."""
+    import json as _json
+    import subprocess as _subprocess
+    import sys as _sys
+
+    from tests.helpers import MODULE_PYTHON
+    from tests.test_review_fixes_driver import SavedModel, _drive, _project, _start
+
+    project = _project(tmp_path, local=True)
+    (project / "src" / "sample.py").write_text('def combine(left: str, right: str) -> str:\n    return f"{left}-{right}"\n', encoding="utf-8")
+    model = SavedModel("local-pilot-v1")
+    original = model.answer
+
+    def answer(task):
+        value = original(task)
+        if task["stage"].startswith("tc-to-autotest:"):
+            row = value["generated_files"][0]
+            row["content"] = ("# generated\nfrom __future__ import annotations\n\nfrom pytest import mark\n\nfrom sample import combine\n\n\n@mark.native\n"
+                              + row["content"].split("@pytest.mark.native\n", 1)[1])
+        return value
+
+    model.answer = answer
+    done = _drive(project, _start(project, "local-pilot-v1"), model)
+    result = done["result"]
+    assert (result["verification"], result["accepted"]) == ("FAIL", False), result
+    final = read_attempt_receipt(project / ".pilot-runs" / done["run_id"], result["attempt_id"], "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
+    assert [row["disposition"] for row in final["files"]] == ["QUARANTINED"]
+    text = (project / "tests" / "test_generated.py").read_text(encoding="utf-8")
+    assert "@pytest.mark.xfail(strict=True" in text and "import pytest" in text
+    python = MODULE_PYTHON if Path(MODULE_PYTHON).is_file() else _sys.executable
+    ordinary = _subprocess.run([python, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_generated.py"], cwd=project, capture_output=True, text=True)
+    assert ordinary.returncode == 0 and "xfailed" in ordinary.stdout, ordinary.stdout + ordinary.stderr
+    explicit = _subprocess.run([python, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--runxfail", "tests/test_generated.py"], cwd=project, capture_output=True, text=True)
+    assert explicit.returncode == 1 and "failed" in explicit.stdout, explicit.stdout
