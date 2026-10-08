@@ -85,6 +85,19 @@ def _answer_path(run_root: Path, attempt: Mapping[str, Any], label: str) -> Path
     return strength_dir(run_root, attempt) / "answers" / f"{label}.json"
 
 
+def _failed_path(run_root: Path, attempt: Mapping[str, Any], label: str) -> Path:
+    return strength_dir(run_root, attempt) / "failed" / f"{label}.json"
+
+
+def fail_triage(run_root: Path, attempt: Mapping[str, Any], task: Mapping[str, Any], failure: str, reason: str | None) -> None:
+    """Close a triage task without an answer (its groups stay pending); the attempt's result does not change."""
+    label = str(task.get("triage_label") or "")
+    if not label or _answer_path(run_root, attempt, label).is_file():
+        return
+    driver._write_json(_failed_path(run_root, attempt, label), {"label": label, "group_ids": list(task.get("group_ids") or []),
+                                                                "failure_class": failure, "reason": (reason or "")[:600]})
+
+
 def answers(run_root: Path, attempt: Mapping[str, Any]) -> list[dict[str, Any]]:
     directory = strength_dir(run_root, attempt) / "answers"
     return [dict(driver._read_json(path)) for path in sorted(directory.glob("triage-*.json"))] if directory.is_dir() else []
@@ -98,7 +111,7 @@ def triage_step(project: Path, run_root: Path, attempt: Mapping[str, Any], confi
     if receipt is None or not pending_groups(receipt):
         return None
     plan = _plan(project, run_root, attempt, receipt)
-    open_rows = [row for row in plan if not _answer_path(run_root, attempt, row["label"]).is_file()]
+    open_rows = [row for row in plan if not _answer_path(run_root, attempt, row["label"]).is_file() and not _failed_path(run_root, attempt, row["label"]).is_file()]
     if not open_rows:
         return None
     attempt_id = str(attempt["attempt_id"])

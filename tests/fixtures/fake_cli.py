@@ -4,7 +4,8 @@
 
 Reads the whole role input from stdin.  ``--script`` lists the behaviour of successive
 calls with the same input (the last one repeats): ``ok`` answers, ``garbage`` prints
-non-JSON, ``prose`` returns a result without a JSON object, ``nonzero`` exits 3,
+non-JSON, ``prose`` returns a result without a JSON object (``triage-prose``: only for survivor
+triage tasks), ``nonzero`` exits 3,
 ``ratelimit`` reports an API 429, ``sublimit``/``sublimit-text`` a subscription limit (JSON / plain text), ``timeout`` sleeps for an hour, ``nosession`` answers
 without a session id, and ``fixed-session`` answers with the same session id every time.
 
@@ -92,7 +93,9 @@ def main() -> int:
     if mode == "sublimit-text":  # the same as plain text on stderr
         print("Claude AI usage limit reached|1760000000", file=sys.stderr)
         return 1
-    result = "Вот мой ответ без JSON." if mode == "prose" else json.dumps(answer(prompt), ensure_ascii=False)
+    triage = "# Разбор выживших мутантов" in prompt
+    prose = mode == "prose" or (mode == "triage-prose" and triage)
+    result = "Вот мой ответ без JSON." if prose else json.dumps(answer(prompt), ensure_ascii=False)
     payload = {"type": "result", "subtype": "success", "is_error": False, "result": result, "stop_reason": "end_turn",
                "usage": {"input_tokens": len(prompt) // 4, "output_tokens": len(result) // 4, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
                "modelUsage": {"fake-model-1": {}}}

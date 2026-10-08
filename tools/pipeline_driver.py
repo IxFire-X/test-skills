@@ -1403,10 +1403,14 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
         return advance(project, run_root)
     if str(task.get("stage", "")).startswith("mutation-triage:"):
         # Post-terminal survivor triage (opt-in mutations): checked against its task and kept beside the attempt.
-        from tools.pipeline_driver_strength import submit_triage
+        from tools.pipeline_driver_strength import fail_triage, submit_triage
 
         if failed is not None:
-            raise DriverError("DRIVER_INPUT", "--failed applies to review tasks only")
+            # A triage task that gets no accepted answer leaves its groups pending; the terminal result stands.
+            fail_triage(run_root, attempt, task, failed, reason)
+            _log(_log_path(run_root.parents[1], run_root.name), {"event": "triage_failed", "task_id": task_id, "group_ids": task.get("group_ids"),
+                                                                 "failure_class": failed, "reason": (reason or "")[:600]})
+            return advance(project, run_root)
         try:
             try:
                 value = _read_json(Path(output or task["output_path"]))
@@ -1491,6 +1495,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--run", required=name != "next", help="Run id printed by the first `next`.")
         if name == "run":
             command.add_argument("--runner", choices=("process",), required=True, help="Every model task goes to a driver-launched CLI process.")
+            command.add_argument("--run", help="Run id of an interrupted `run` to continue (processes already launched are collected).")
             command.add_argument("--answer", action="append", default=[], help="label=value answer of an ask_user question (repeatable).")
             command.add_argument("--answers", type=Path, help="JSON file {label: value} with answers to ask_user questions.")
         if name in {"next", "run"}:
@@ -1630,7 +1635,7 @@ def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any],
         answers[label] = value
     options = {key: getattr(args, key, None) for key in _START_OPTIONS}
     try:
-        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)))
+        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run)
     except DriverError as error:
         payload = {"action": "error", "code": error.code, "message": str(error)}
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))

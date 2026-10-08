@@ -92,3 +92,41 @@ def test_a_local_pilot_run_passes_without_an_orchestrator(tmp_path: Path, monkey
     assert (code, result["verification"], result["accepted"], result["isolation_evidence"]) == (0, "PASS", True, "DRIVER_PROCESS"), result
     terminal = read_terminal_result(project / ".pilot-runs" / payload["run_id"], result["attempt_id"])
     assert terminal["isolation_evidence"] == "DRIVER_PROCESS" and (project / GENERATED).is_file()
+
+
+def test_an_interrupted_run_continues_with_its_run_id(tmp_path: Path) -> None:
+    """Review 2.1 item 12: `run --run <id>` resumes; the processes already launched are collected, not restarted."""
+    from tools.pipeline_driver import DriverError
+    from tools.pipeline_driver_run import run
+
+    project = _project(tmp_path)
+    command = json.dumps([sys.executable, str(FAKE), "--script", "ok", "--state", str(project.parent / "fake-state")])
+    options = {"profile": "cases-only-v1", "docs": [DOCS], "subject": "StudentController", "model_id": "fake-model-1", "review_runner_command": command}
+    with pytest.raises(DriverError) as stopped:
+        run(project, options, answers={}, limit_seconds=0.5)
+    assert stopped.value.code == "RUNNER_TIMEOUT"
+    [run_id] = [path.name for path in (project / ".pilot-runs").iterdir() if path.is_dir() and len(path.name) == 32]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = driver.main(["run", "--project", str(project), "--runner", "process", "--run", run_id])
+    payload = json.loads(buffer.getvalue())
+    assert payload["action"] == "done" and payload["run_id"] == run_id and payload["result"]["completion"] == "COMPLETE", payload
+    assert code == 1  # cases-only is always a draft
+
+
+@pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven and PIT")
+def test_a_post_terminal_task_that_never_fits_does_not_undo_the_terminal_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 12: survivor triage rejected three times — the accepted attempt stays done (exit 0); the groups stay pending."""
+    monkeypatch.setenv("JAVA_HOME", str(JAVA_HOME))
+    monkeypatch.setenv("PATH", str(Path(JAVA_HOME) / "bin") + os.pathsep + os.environ.get("PATH", ""))
+    project = _project(tmp_path)
+    skillsrc = project / ".skillsrc"
+    skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.1.0", 1)
+                        + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+    code, payload = _run(project, "--profile", "local-pilot-v1", "--mutation", script="triage-prose")
+    assert payload["action"] == "done", payload
+    result = payload["result"]
+    assert (code, result["verification"], result["accepted"]) == (0, "PASS", True), result
+    assert result["strength_triage"]["triaged"] == 0 and result["strength_triage"]["pending"] == result["strength_triage"]["groups"] > 0
+    log = (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8")
+    assert '"event": "triage_failed"' in log

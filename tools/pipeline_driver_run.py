@@ -45,8 +45,11 @@ def _run_one(project: Path, run_root: Path, task: Mapping[str, Any], config: Map
     while number < TRIES:
         number += 1
         attempt_task = {**task, "task_id": f"{task['task_id']}-run{number}", "instructions": str(task["instructions"]) + feedback}
-        runner.launch_task(run_root, attempt_task, cfg, model)
         directory = runner.runner_directory(run_root, attempt_task["task_id"])
+        if (directory / "spec.json").is_file() and model_runner.state(directory) in {"running", "done"}:
+            pass  # launched before an interruption (`run --run`): collect that process, do not start another
+        else:
+            runner.launch_task(run_root, attempt_task, cfg, model)
         while model_runner.state(directory) == "running":
             time.sleep(1)
         if model_runner.state(directory) == "lost":
@@ -80,11 +83,20 @@ def _run_one(project: Path, run_root: Path, task: Mapping[str, Any], config: Map
     raise DriverError("RUNNER_TASK_FAILED", f"{task['task_id']}: no accepted answer after {TRIES} processes; last: {reason}")
 
 
-def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str], max_tasks: int = 4, limit_seconds: float = 6 * 3600) -> dict[str, Any]:
-    """Drive one run to ``done`` (or to an unanswered question) with the process runner for every model task."""
+def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str], max_tasks: int = 4, limit_seconds: float = 6 * 3600,
+        run_id: str | None = None) -> dict[str, Any]:
+    """Drive one run to ``done`` (or to an unanswered question) with the process runner for every model task.
+
+    ``run_id`` continues an interrupted run (review 2.1 item 12): the driver state says what is next,
+    and processes launched before the interruption are collected rather than started again.
+    """
     project = Path(project).resolve()
-    options = {**dict(options), "review_runner": "process"}
-    payload = driver.start_run(project, options, max_tasks=max_tasks)
+    if run_id:
+        run_root = driver._run_root(project, str(run_id))
+        payload = _locked(project, run_root, lambda: driver.advance(project, run_root, max_tasks=max_tasks))
+    else:
+        options = {**dict(options), "review_runner": "process"}
+        payload = driver.start_run(project, options, max_tasks=max_tasks)
     deadline = time.monotonic() + limit_seconds
     while time.monotonic() < deadline:
         action = payload.get("action")
@@ -105,7 +117,14 @@ def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str]
         cfg = runner.runner_config(project, run_root, config)
         tasks = payload["tasks"] if action == "batch" else [payload]
         for task in tasks:
-            payload = _locked(project, run_root, lambda task=task: _run_one(project, run_root, task, driver._config(run_root), cfg))
+            try:
+                payload = _locked(project, run_root, lambda task=task: _run_one(project, run_root, task, driver._config(run_root), cfg))
+            except DriverError as error:
+                if error.code != "RUNNER_TASK_FAILED" or not task.get("post_terminal"):
+                    raise
+                # A post-terminal task (survivor triage) never undoes the terminal result: it is closed as failed.
+                payload = _locked(project, run_root, lambda task=task, error=error: driver.submit(project, run_root, str(task["task_id"]),
+                                                                                                 failed="TRANSPORT", reason=str(error)))
         if action == "batch":
             payload = _locked(project, run_root, lambda: driver.advance(project, run_root, max_tasks=max_tasks))
     raise DriverError("RUNNER_TIMEOUT", "the run did not finish within the time limit")
