@@ -186,6 +186,35 @@ def test_an_exception_from_the_product_is_a_behaviour_failure_not_a_repair(tmp_p
     assert (decision["outcome"], decision["reason"]) == outcome
 
 
+def test_a_parameterized_method_with_one_failing_invocation_is_not_flaky(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent review 2.3: the invocations of one parameterized method in one run are one outcome (the worst), not repeats."""
+    project = tmp_path / "project"
+    import shutil
+
+    shutil.copytree(step5["project"], project, ignore=shutil.ignore_patterns(".pilot-runs"))
+    manifest = _manifest(step5)
+    _write(project, step5, manifest)
+    locators = [case["methods"][0]["locator"] for case in manifest["cases"]]
+    owner, name = locators[0].rsplit("#", 1)
+
+    def fake(argv, **_kwargs):
+        directory = project / "target" / "surefire-reports"
+        directory.mkdir(parents=True, exist_ok=True)
+        cases = [f'<testcase classname="{owner}" name="{locator.rsplit("#", 1)[1]}"/>' for locator in locators[1:]]
+        cases += [f'<testcase classname="{owner}" name="{name}(String)[1]"/>',
+                  f'<testcase classname="{owner}" name="{name}(String)[2]"><failure message="expected 200 but was 500"/></testcase>',
+                  f'<testcase classname="{owner}" name="{name}(String)[3]"/>']
+        (directory / f"TEST-{owner}.xml").write_text(f'<testsuite name="{owner}">{"".join(cases)}</testsuite>', encoding="utf-8")
+        return SimpleNamespace(returncode=1, stdout="Tests run: 14, Failures: 1", stderr="")
+
+    monkeypatch.setattr(suite_run, "RUNNER", fake)
+    result = suite_run.run_suite(project, manifest, _module(project), repeats=2)
+    row = next(item for item in result["methods"] if item["locator"] == locators[0])
+    assert row["runs"] == ["failed", "failed", "failed"]
+    assert classify(row["runs"])["reason"] == "BEHAVIOR_CHANGED_WITHOUT_SPEC"
+    assert all(item["runs"] == ["passed"] for item in result["methods"] if item["locator"] != locators[0])
+
+
 def test_quarantined_methods_run_explicitly(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmp_path / "project"
     import shutil

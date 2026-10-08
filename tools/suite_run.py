@@ -191,13 +191,19 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
                          "output_tail": outcome["output_tail"][-1500:]})
         execution = execution or outcome["execution"]
         seen = set()
+        # The invocations of a parameterized method (``m(String)[1]``, ``test_x[a]``) are one outcome per run:
+        # the worst of them — never a sequence of repeats that would read as FLAKY (independent review 2.3).
+        severity = {"skipped": 0, "passed": 1, "failed": 2, "broken": 3}
+        this_run: dict[str, str] = {}
+        asked = set(pending)
         for row in outcome["rows"]:
             selector = _row_selector(row, adapter_id)
             locator = by_selector.get(selector)
-            if locator is None:
+            if locator is None or selector not in asked:
                 continue
             seen.add(selector)
-            methods[locator]["runs"].append(row["status"])
+            if locator not in this_run or severity[row["status"]] > severity[this_run[locator]]:
+                this_run[locator] = row["status"]
             if row["status"] in {"failed", "broken"} and methods[locator]["failure"] is None:
                 methods[locator]["failure"] = row.get("message") or None
             if row["status"] == "broken" and methods[locator]["error_origin"] != "PRODUCT":
@@ -205,6 +211,8 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
                     module_root_path = (Path(project) / module_root).resolve()
                     product = product_classes(module_root_path, list(((module.get("paths") or {}).get("source")) or ["src/main/java"]))
                 methods[locator]["error_origin"] = error_origin(row.get("trace"), row.get("message"), product)
+        for locator, status in this_run.items():
+            methods[locator]["runs"].append(status)
         if outcome["compile_error"]:
             build_broken = _blame(project, manifest, methods, outcome)
             break
