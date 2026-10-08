@@ -134,3 +134,15 @@ def test_a_person_edit_before_the_suite_is_written_stays_a_person_edit(tmp_path:
     migrate(replay.project)
     manifest = read_suite(replay.project, "test-cases/")
     assert len(verify(replay.project, manifest)["methods"]) == 1  # the person's method, never the package's own
+
+
+@needs_java
+def test_the_driver_summary_with_a_quarantined_suite_matches_its_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.schema_validation import schema_diagnostics
+
+    replay = _local(tmp_path, monkeypatch)
+    _change_product(replay.project)
+    _code, done = replay.drive(replay.start_with("--suite")[1])
+    root = Path(__file__).resolve().parents[1]
+    assert done["result"]["suite"]["quarantined"] == 1
+    assert schema_diagnostics(done["result"], root / "schemas" / "driver-summary.schema.json", root) == []

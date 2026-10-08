@@ -42,7 +42,8 @@
       "properties": {"candidate_bundle": {"type": "string"}, "run_root": {"type": "string"}, "driver_dir": {"type": "string"},
                      "test_strength_json": {"type": "string"}, "test_strength_markdown": {"type": "string"},
                      "analyst_report_json": {"type": "string"}, "analyst_report_markdown": {"type": "string"},
-                     "suite_dir": {"type": "string"}, "suite_manifest": {"type": "string"}}
+                     "suite_dir": {"type": "string"}, "suite_manifest": {"type": "string"},
+                     "quarantine_markdown": {"type": "string"}}
     },
     "exec": {"type": "object"},
     "test_strength": {
@@ -71,7 +72,8 @@
         "status": {"enum": ["WRITTEN", "NOT_WRITTEN"]},
         "reason_code": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
         "message": {"type": ["string", "null"]},
-        "cases": {"type": "integer", "minimum": 0}, "files": {"type": "integer", "minimum": 0}
+        "cases": {"type": "integer", "minimum": 0}, "files": {"type": "integer", "minimum": 0},
+        "quarantined": {"type": "integer", "minimum": 1}
       }
     }
   },
