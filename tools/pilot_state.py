@@ -4545,13 +4545,26 @@ def open_review_part(run_root: Path, attempt_id: str, review_key: str, host: Map
     if host.get("reviewer_invocation_id") in used:
         raise ValueError("a retried review part requires a fresh reviewer invocation id")
     stage = _review_stage(review_key, part_id, try_number)
-    boundary = _publish_bound_attempt_receipt(run_root, attempt_id, _review_part_boundary_kind(review_key, part_id, try_number), {
-        "plan_digest": envelope["plan_digest"], "part_id": part_id, "input_digest": review_digest(envelope),
-        **dict(host),
-    })["record"]
+    kind = _review_part_boundary_kind(review_key, part_id, try_number)
+    # An opening interrupted after its boundary (and maybe its REVIEW_REQUESTED) but before the model request is
+    # resumed with that boundary — its invocation id is already bound — never rewritten (live Petclinic run, 2026-10-08).
+    boundary = None
+    if _receipt_target(root, attempt_id, kind).exists():
+        existing = _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")["record"]
+        if existing.get("plan_digest") == envelope["plan_digest"] and existing.get("input_digest") == review_digest(envelope):
+            boundary = existing
+            host = {key: existing[key] for key in host if key in existing}
+    if boundary is None:
+        boundary = _publish_bound_attempt_receipt(run_root, attempt_id, kind, {
+            "plan_digest": envelope["plan_digest"], "part_id": part_id, "input_digest": review_digest(envelope),
+            **dict(host),
+        })["record"]
     snapshot = read_attempt_receipt(run_root, attempt_id, f"review-snapshot-{review_key}", "ARTIFACT_READ_BACK")["record"]["payload"]
-    append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id=stage,
-                 artifact_digest=review_digest(snapshot["automation"] or snapshot["document"]))
+    requested = any(event.get("event_type") == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage
+                    for event in derive_state(run_root)["events"] if event.get("attempt_id") == attempt_id)
+    if not requested:
+        append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id=stage,
+                     artifact_digest=review_digest(snapshot["automation"] or snapshot["document"]))
     request = publish_model_request(run_root, attempt_id, stage, model_id=host["model_id"], invocation_id=host["reviewer_invocation_id"],
                                     input_digests=[envelope["snapshot_digest"], envelope["plan_digest"], review_digest(envelope), boundary["digest"]])
     return {"input": envelope, "boundary": boundary, "request": dict(request), "stage_instance_id": stage, "try": try_number}

@@ -146,3 +146,36 @@ def test_required_check_parts_are_issued_one_at_a_time_in_a_batch_run(tmp_path: 
     extra = {part_id for batch in seen_batches for part_id in batch} - base  # parts added for the required checks
     assert extra, "the required checks became extra parts"
     assert all(len(batch) == 1 for batch in seen_batches if extra & set(batch)), seen_batches
+
+
+
+def test_a_part_whose_opening_was_interrupted_is_resumed_not_rewritten(tmp_path: Path, monkeypatch) -> None:
+    """Live Petclinic run (2026-10-08): a failed opening left the part's boundary and REVIEW_REQUESTED without a model
+    request; every later `next` failed ("review-part-boundary-… already exists with different content")."""
+    from tools import pilot_state
+
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    original = pilot_state.publish_model_request
+    calls = {"n": 0}
+
+    def interrupted(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("interrupted after the boundary and the review request")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pilot_state, "publish_model_request", interrupted)
+    code, failed = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "2")
+    assert failed.get("action") == "error", failed
+    monkeypatch.setattr(pilot_state, "publish_model_request", original)
+    code, batch = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "2")
+    assert batch.get("action") == "batch", batch
+    for task in batch["tasks"]:
+        Path(task["output_path"]).write_text(json.dumps(clean_compact_answer(part_text(task)), ensure_ascii=False), encoding="utf-8")
+        code, submitted = replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", task["task_id"])
+        assert submitted.get("action") != "error" and submitted.get("status") != "rejected", submitted
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else None
+    code, done = replay.drive(replay.next(run_id)[1])
+    assert done["action"] == "done", done
