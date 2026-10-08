@@ -61,7 +61,7 @@ def _answer(task: dict) -> dict:
     raise KeyError(stage)
 
 
-def _drive(replay, *extra: str, limit: int = 60) -> dict:
+def _drive(replay, *extra: str, limit: int = 60, seen: list | None = None) -> dict:
     config = replay.config
     code, task = replay.call("next", "--project", str(replay.project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
                              "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"], *extra)
@@ -70,6 +70,8 @@ def _drive(replay, *extra: str, limit: int = 60) -> dict:
             return task
         tasks = task["tasks"] if task.get("action") == "batch" else [task]
         for item in tasks:
+            if seen is not None:
+                seen.append(item)
             Path(item["output_path"]).write_text(json.dumps(_answer(item), ensure_ascii=False), encoding="utf-8")
             code, task = replay.submit(item)
             assert task.get("status") != "rejected", task.get("errors")
@@ -120,6 +122,28 @@ def test_an_updated_requirement_rebuilds_only_its_cases_and_keeps_a_people_edit(
     from tools.suite_impact import impact
 
     assert impact(project)["requirements"] == {"added": [], "changed": [], "removed": [], "renamed": []}
+
+
+@needs_java
+def test_a_survivor_triage_proposal_reaches_the_update_brief(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 1: TEST_GAP proposals are written where the survivor triage keeps them and read from there by update."""
+    from tools.pipeline_driver_strength import proposals_path
+
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    source = read_suite(project, "test-cases/")["source_run"]
+    path = proposals_path(project / ".pilot-runs" / source["run_id"], source["attempt_id"])
+    proposal = {"group_id": "MUT-0001", "case_id": "TC-B1-010", "text": "Проверить, что студент действительно удалён", "refs": ["MUT-0001:L52"]}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mutation_receipt_digest": "sha256:" + "0" * 64, "proposals": [proposal]}, ensure_ascii=False), encoding="utf-8")
+    _replace_in(project / DOCS, OLD, NEW)
+    _replace_in(project / CONTROLLER, OLD, NEW)
+    tasks: list = []
+    assert _drive(replay, seen=tasks)["result"]["outcome"] == "UPDATED"
+    [update] = [task for task in tasks if task["stage"] == "tc-generator:update"]
+    brief = json.loads(Path(update["inputs"][0]).read_text(encoding="utf-8"))
+    assert brief["test_gap_proposals"] == [proposal]
 
 
 @needs_java

@@ -286,10 +286,13 @@ def _update(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
 
 
 def _test_gap_proposals(project: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """TEST_GAP proposals of the survivor triage of the run that last measured the suite (wave 2)."""
+    """TEST_GAP proposals of the survivor triage of the attempts that measured the suite (wave 2)."""
+    from tools.pipeline_driver_strength import proposals_path
+
     rows = []
-    for run_id in {manifest["source_run"]["run_id"], manifest["last_run"]["run_id"]}:
-        path = Path(project) / ".pilot-runs" / f"{run_id}.driver" / "strength" / "proposals.json"
+    runs = {(row["run_id"], row["attempt_id"]) for row in (manifest["source_run"], manifest["last_run"]) if row.get("attempt_id")}
+    for run_id, attempt_id in sorted(runs):
+        path = proposals_path(Path(project) / ".pilot-runs" / run_id, attempt_id)
         if path.is_file():
             try:
                 rows += [dict(row) for row in json.loads(path.read_text(encoding="utf-8")).get("proposals", [])]

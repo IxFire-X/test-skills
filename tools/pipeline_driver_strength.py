@@ -24,6 +24,11 @@ def strength_dir(run_root: Path, attempt: Mapping[str, Any]) -> Path:
     return driver.work_dir(run_root) / "strength" / str(attempt["attempt_id"])[:8]
 
 
+def proposals_path(run_root: Path, attempt_id: str) -> Path:
+    """The one place of the attempt's ``TEST_GAP`` proposals: written here, read by ``suite-update-v1``."""
+    return strength_dir(run_root, {"attempt_id": attempt_id}) / "proposals.json"
+
+
 def _receipt(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     from tools.pilot_state import read_mutation_receipt_if_present
 
@@ -147,8 +152,7 @@ def strength_summary(run_root: Path, attempt: Mapping[str, Any], summary: dict[s
     summary["paths"].update(write_strength_report(driver._bundle_dir(run_root, attempt), receipt, rows))
     pending = pending_groups(receipt)
     if pending or receipt.get("survivor_groups"):
-        directory = strength_dir(run_root, attempt)
         if rows:
-            driver._write_text(directory / "proposals.json", dumps({"mutation_receipt_digest": receipt["digest"], "proposals": proposals(rows)}))
+            driver._write_text(proposals_path(run_root, str(attempt["attempt_id"])), dumps({"mutation_receipt_digest": receipt["digest"], "proposals": proposals(rows)}))
         summary["strength_triage"] = {"groups": len(receipt.get("survivor_groups", [])), "triaged": len(rows), "pending": len(pending) - len(rows),
                                       "over_limit": len(receipt.get("survivor_groups", [])) - len(pending), "decisions": counts(rows)}
