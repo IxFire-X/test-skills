@@ -240,3 +240,21 @@ def test_creation_and_replacement_receipts_require_readback_and_proposal(pack_ro
         validator.validate(created)
     with pytest.raises(ValidationError):
         validator.validate(updated)
+
+
+def test_the_example_skillsrc_is_valid_with_its_optional_sections_enabled(tmp_path: Path) -> None:
+    """Independent review 2.2: the example names the schema version its sections need (5.2.0)."""
+    import re
+
+    from tools.skillsrc_manifest import load_skillsrc
+
+    root = Path(__file__).resolve().parents[1]
+    text = (root / ".skillsrc.example").read_text(encoding="utf-8")
+    assert re.search(r'^schema_version: "5\.2\.0"', text, re.M)
+    (tmp_path / ".skillsrc").write_text(text, encoding="utf-8")
+    assert load_skillsrc(tmp_path / ".skillsrc")["schema_version"] == "5.2.0"
+    enabled = re.sub(r"^# ((?:mutation|review_runner|requirements|suite):.*)$", r"\1", text, flags=re.M)
+    enabled = re.sub(r"^#(  .*)$", r"\1", enabled, flags=re.M)
+    (tmp_path / ".skillsrc").write_text(enabled, encoding="utf-8")
+    loaded = load_skillsrc(tmp_path / ".skillsrc")
+    assert {"mutation", "review_runner", "requirements", "suite"} <= set(loaded)

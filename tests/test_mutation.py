@@ -149,6 +149,34 @@ def test_launcher_family_jars_are_recorded_and_bound_to_the_project_platform(tmp
     assert stop.value.code == "MUTATION_TOOL_UNPINNED" and "1.9.0" in str(stop.value)
 
 
+@pytest.mark.parametrize("module", ["", "services/api"])
+def test_the_gradle_path_builds_its_argv_from_the_recorded_request(tmp_path: Path, module: str) -> None:
+    """Independent review 2.2: the Gradle argv (init script from the run directory, the module's task, the profile) is tested."""
+    from tools.execution_adapters import command_for
+
+    executable = str(tmp_path / ("gradlew.bat" if mutation.os.name == "nt" else "gradlew"))
+    _reports, argv = command_for("gradle-wrapper:selected-symbols-v1", executable, "ci", ["demo.ApiTest#works"], module_path=module)
+    build = mutation.BuildTool.from_execution({"adapter_id": "gradle-wrapper:selected-symbols-v1", "argv": list(argv), "cwd": str(tmp_path),
+                                               "executable_path": executable, "build_profile": "ci"})
+    assert build.module_path == module and build.module_root == (tmp_path.joinpath(*module.split("/")) if module else tmp_path)
+    calls = []
+
+    def run(argv, cwd, environment=None, *, timeout):
+        calls.append((list(argv), cwd))
+        output = next(item.split("=", 1)[1] for item in argv if item.startswith("-DtestSkills.classpathFile="))
+        Path(output).write_text(str(tmp_path / "classes"), encoding="utf-8")
+        return SimpleNamespace(exit_code=0, stdout="", stderr="", kind="EXIT")
+
+    workdir = tmp_path / "run" / "mutation"
+    workdir.mkdir(parents=True)
+    assert mutation.project_classpath(build, mutation.load_pins(), workdir, run=run, timeout=60) == [str(tmp_path / "classes")]
+    [(argv, cwd)] = calls
+    task = ":" + ":".join([*(module.split("/") if module else ()), "testSkillsMutationClasspath"])
+    assert argv[:4] == [executable, "--init-script", str(workdir / "mutation-classpath.gradle"), task]
+    assert "-Pprofile=ci" in argv and "--no-daemon" in argv and Path(cwd) == tmp_path
+    assert (workdir / "mutation-classpath.gradle").read_text(encoding="utf-8").startswith("// test-skills mutation stage")
+
+
 def test_the_shipped_pins_cover_the_whole_closure() -> None:
     pins = mutation.load_pins()
     names = {row["file"] for row in pins["java"]["jars"]}

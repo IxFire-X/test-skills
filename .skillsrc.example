@@ -1,6 +1,6 @@
 # Обычно этот файл создаёт tools/init_skillsrc.py.
 # Редактируйте подтверждённые значения; при конфликте следующий запуск покажет diff.
-schema_version: "5.0.0"
+schema_version: "5.2.0"   # 5.1.0 — mutation, review_runner; 5.2.0 — requirements, suite (ниже)
 version: "3.0"
 
 project:

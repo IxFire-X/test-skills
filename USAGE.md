@@ -144,14 +144,21 @@ python -m tools.pipeline_driver next --project "$project" --run "$runId"
 python -m tools.pipeline_driver status --project "$project" --run "$runId"
 ```
 
-Первый `next` требует `--profile cases-only-v1|local-pilot-v1` и хотя бы один `--docs`
-(путь внутри проекта, флаг можно повторять). Необязательные флаги: `--subject`,
+Первый `next` требует `--profile cases-only-v1|local-pilot-v1|suite-update-v1` и для первых двух хотя бы
+один `--docs` (путь внутри проекта, флаг можно повторять; `suite-update-v1` берёт документы набора, если
+`--docs` не задан — раздел 13). Необязательные флаги: `--subject`,
 `--module <ID>`, `--target`, `--document-id`, `--model-id`, `--host-cli`,
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
 контекста модели в байтах, по умолчанию 500000), `--accept-self-review`,
 `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
-(сколько независимых частей ревью `compact-v1` выдать сразу). `run_id` берётся
+(сколько независимых частей ревью `compact-v1` выдать сразу). Опции волн 2–3 — `--mutation`,
+`--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
+`--review-runner host|process` с `--review-runner-preset claude|codex` (по умолчанию — `.skillsrc`
+`review_runner.preset`, иначе `claude`), `--review-runner-command '<JSON-массив>'` (свой шаблон, только флагом
+запуска) и `--review-runner-cli <путь>` — разделы 11–13. `run --runner process [--run <run_id>]` проводит прогон
+без оркестратора (`--run` продолжает прерванный). Миграцию набора без записи показывает
+`python -m tools.suite migrate --project "$project" --dry-run`. `run_id` берётся
 из первого ответа.
 
 Каждый вызов печатает один JSON-объект:

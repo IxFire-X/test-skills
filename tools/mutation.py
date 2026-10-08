@@ -132,6 +132,8 @@ class BuildTool:
         module_path = ""
         if adapter in MAVEN_ADAPTERS and "-pl" in argv:
             module_path = argv[argv.index("-pl") + 1]
+        elif adapter == GRADLE_ADAPTER and len(argv) > 1 and argv[1].startswith(":") and argv[1].endswith(":cleanTest"):
+            module_path = argv[1][1:-len(":cleanTest")].strip(":").replace(":", "/")  # ``:a:b:cleanTest`` of a nested module
         cwd = Path(str(execution["cwd"]))
         profile = str(execution.get("build_profile") or UNDECLARED_PROFILE)
         profile_args = () if profile == UNDECLARED_PROFILE else ((f"-P{profile}",) if adapter in MAVEN_ADAPTERS else (f"-Pprofile={profile}",))
