@@ -61,9 +61,9 @@
 
 #### 1.4. Гейт исправлений
 
-- [ ] G1 Весь набор тестов и `contract_check --full` зелёные.
-- [ ] G2 Финальные прогоны на Windows: `windows-full-20261008-review-fixes.log`, `windows-ci-gate-20261008-review-fixes.log`.
-- [ ] G3 Отчёт `docs/review/2026-10-08-review-fixes-report.md`.
+- [x] G1 Весь набор тестов (1070 passed, 5 skipped) и `contract_check --full` зелёные на `963febc`.
+- [x] G2 Финальные прогоны на Windows (оба — 1070 passed, 5 skipped, код 0): `windows-full-20261008-review-fixes.log` (59:44), `windows-ci-gate-20261008-review-fixes.log` (1:00:13).
+- [x] G3 Отчёт `docs/review/2026-10-08-review-fixes-report.md`.
 
 ### 2. Живые прогоны внутри Claude Code
 
