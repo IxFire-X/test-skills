@@ -120,6 +120,7 @@
     "digest": {
       "$ref": "#/$defs/digest"
     },
+    "check_policy": {"const": "merged-after-base-v1", "description": "Additional check parts: added once after every base part answered, one per target, at most a quarter of the base parts (2026-10-08)."},
     "slice_failures": {
       "type": "array",
       "minItems": 1,

@@ -4320,8 +4320,9 @@ def _validate_review_request(project: Path, root: Path, state: Mapping[str, Any]
     candidate_digest = review_digest(snapshot["automation"] or snapshot["document"])
     if reviews[0]["artifact_digest"] != candidate_digest:
         raise ValueError("review request candidate differs")
-    if parallel_parts(plan) and part["requested_check"] is None:
-        # compact-v1 base parts are independent: a batch may run them in any order.
+    if parallel_parts(plan) and (part["requested_check"] is None or plan.get("check_policy") == "merged-after-base-v1"):
+        # compact-v1 base parts are independent: a batch may run them in any order; so are the additional parts of a
+        # plan that adds them only after every base part answered (review_compact.CHECK_POLICY).
         return
     for previous in [*plan["parts"], *plan["additions"]]:
         if previous["part_id"] == part["part_id"]:
@@ -4478,6 +4479,8 @@ def sequential_review_part_ids(run_root: Path, attempt_id: str, review_key: str 
     """Parts that must run after every earlier part: the extra parts of reviewers' required checks."""
     state = derive_state(run_root)
     plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
+    if plan.get("check_policy") == "merged-after-base-v1":
+        return set()  # added only after every base part: independent, batched like the base parts
     return {part["part_id"] for part in [*plan["parts"], *plan.get("additions", [])] if part.get("requested_check") is not None}
 
 

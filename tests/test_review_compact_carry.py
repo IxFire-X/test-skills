@@ -169,6 +169,8 @@ def test_a_behavioral_correction_is_rechecked_in_the_parts_holding_the_case(tmp_
         answer = clean_compact_answer(text)
         if "проверка)" not in text.split("\n", 1)[0]:
             answer["corrections"] = [{"target_id": "TC-B1-005", "field": "objective", "before": None, "after": None, "why": "Уточнить цель."}]
+            # A correction no WARNING/BLOCKING finding names is a rewording: journalled, not re-checked (2026-10-08).
+            answer["findings"] = [{"severity": "WARNING", "code": "OBJECTIVE_IMPRECISE", "related_ids": ["TC-B1-005"], "message": "Цель неточна."}]
             snapshot_case = next(line for line in text.splitlines() if line.startswith("  objective: ") and "[TC-B1-005]" in text)
             del snapshot_case
         return answer

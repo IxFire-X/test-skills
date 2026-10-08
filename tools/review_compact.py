@@ -30,6 +30,19 @@ from tools.review_projection import (anchors, build_projection, canonical_ids, c
 ROOT = Path(__file__).resolve().parents[1]
 MODE = "compact-v1"
 PLAN_VERSION = "2.0.0"
+# Additional check parts of a plan with this policy (live Petclinic run 2026-10-08: 38 base parts registered 58 more):
+# added once, after every base part answered, from the base parts' answers only; one part per checked target
+# (duplicate required checks merged); a correction is re-checked only on the cases it touches (a requirement
+# correction — on the cases linked to that requirement), and a rewording the answer ranks INFO (or no finding
+# names) is only journalled; additions are independent (a batch); at most a quarter of the base parts — the
+# rest stays unchecked with REVIEW_CHECK_LIMIT, so the review is incomplete instead of silently expensive.
+CHECK_POLICY = "merged-after-base-v1"
+CHECK_LIMIT_REASON = "REVIEW_CHECK_LIMIT"
+
+
+def check_limit(plan: Mapping[str, Any]) -> int:
+    """How many additional parts a ``CHECK_POLICY`` plan may add: a quarter of its base parts, at least one."""
+    return max(1, len(plan["parts"]) // 4)
 OUTPUT_VERSION = "2.0.0"
 MAX_REFS = 3
 NOTE_CHARS = 200
@@ -478,7 +491,7 @@ def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, A
         # Nothing changed at all: the whole review is sent again rather than carried blind.
         return build_compact_plan(specification, payload, input_byte_budget=input_byte_budget, carry=None)
     plan = {"schema_version": PLAN_VERSION, "mode": MODE, "snapshot": spec, "input_byte_budget": input_byte_budget,
-            "lint": context.lint, "parts": parts, "digest": "sha256:" + "0" * 64}
+            "lint": context.lint, "parts": parts, "check_policy": CHECK_POLICY, "digest": "sha256:" + "0" * 64}
     if carried_rows:
         plan["carried"] = carried_rows
     plan["digest"] = review_digest({key: value for key, value in plan.items() if key != "digest"})
@@ -754,6 +767,8 @@ def _valid_results(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
 
 def required_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Normalized checks the answers asked for, plus correction re-checks once every base part answered."""
+    if plan.get("check_policy") == CHECK_POLICY:
+        return _merged_checks(plan, payload, results)
     document = payload["document"]
     valid = _valid_results(plan, payload, results)
     checks = [resolve_check(document, check) for result in valid for check in result["required_checks"]]
@@ -782,11 +797,109 @@ def required_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results
     return unique
 
 
+def _correction_level(result: Mapping[str, Any], item: Mapping[str, Any]) -> str:
+    """The highest severity among the answer's findings that name the corrected target (``INFO`` when none does)."""
+    order = ("INFO", "WARNING", "BLOCKING")
+    levels = [finding["severity"] for finding in result["findings"] if item["target_id"] in finding["related_ids"]]
+    return max(levels, key=order.index) if levels else "INFO"
+
+
+def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The checks of a ``CHECK_POLICY`` plan: none until every base part answered, then one per checked target."""
+    document = payload["document"]
+    completed = {result["part_id"] for result in results}
+    if not all(part["part_id"] in completed or part["blocked_reason"] or part["part_id"] in plan.get("unavailable", {}) for part in plan["parts"]):
+        return []
+    base = {part["part_id"] for part in plan["parts"]}
+    valid = sorted((result for result in _valid_results(plan, payload, results) if result["part_id"] in base), key=lambda result: result["part_id"])
+    order = [case["case_id"] for case in document["test_cases"]]
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+
+    def add(case_ids, reason: str, corrections=(), source: str | None = None) -> None:
+        cases = tuple(case_id for case_id in order if case_id in set(case_ids))
+        if not cases:
+            return
+        row = merged.setdefault(cases, {"reasons": [], "corrections": [], "sources": []})
+        if reason not in row["reasons"]:
+            row["reasons"].append(reason)
+        row["corrections"].extend(dict(item) for item in corrections if dict(item) not in row["corrections"])
+        if source is not None and source not in row["sources"]:
+            row["sources"].append(source)
+
+    for result in valid:
+        for check in result["required_checks"]:
+            resolved = resolve_check(document, check)
+            if resolved is not None:
+                add(resolved["case_ids"], resolved["reason"], source=review_digest(resolved))
+    if payload.get("automation") is None:
+        index = id_index(document)
+        requirements = {item["requirement_id"] for item in document.get("requirements") or []}
+        for result in valid:
+            for item in result["corrections"]:
+                if is_service_correction(item) or _correction_level(result, item) == "INFO":
+                    continue  # journalled with the answer, never re-checked
+                if item["target_id"] in requirements:
+                    cases = [case["case_id"] for case in document["test_cases"] if item["target_id"] in (case.get("requirement_ids") or [])]
+                else:
+                    _pointer, case_id = correction_pointer(document, item["target_id"], item["field"], index)
+                    cases = [case_id] if case_id else []
+                add(cases, "Проверь, что предложенная правка " + item["target_id"] + "." + item["field"]
+                    + " сохраняет смысл и не создаёт противоречий с другими кейсами.", [item])
+    return _packed_checks(plan, payload, [(list(cases), row) for cases, row in merged.items()])
+
+
+def _packed_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], rows: Sequence[tuple[list[str], Mapping[str, Any]]]) -> list[dict[str, Any]]:
+    """Checks whose cases overlap become one; the rest are packed in order while a part still fits its byte budget
+    (live Petclinic run 2026-10-08: 21 merged checks of one or a few cases each would each have cost a part).
+    ``sources`` names the digests of the answers' own checks a packed check answers."""
+    groups: list[dict[str, Any]] = []
+    for cases, row in rows:
+        group = {"case_ids": set(cases), "items": [(cases, row)]}
+        for other in [item for item in groups if item["case_ids"] & group["case_ids"]]:
+            groups.remove(other)
+            group = {"case_ids": other["case_ids"] | group["case_ids"], "items": [*other["items"], *group["items"]]}
+        groups.append(group)
+    order = [case["case_id"] for case in payload["document"]["test_cases"]]
+
+    def question(items) -> str:
+        # Case IDs without brackets: a bracketed ID is an anchor, defined once per part text.
+        return "\n".join(" | ".join(row["reasons"]) if len(items) == 1 else "Кейсы " + ", ".join(cases) + ": " + " | ".join(row["reasons"])
+                         for cases, row in items)
+
+    def build(items) -> dict[str, Any]:
+        wanted = {case_id for cases, _row in items for case_id in cases}
+        check = {"case_ids": [case_id for case_id in order if case_id in wanted], "reason": question(items)[:4000]}
+        corrections = [item for _cases, row in items for item in row["corrections"]]
+        if corrections:
+            check["corrections"] = corrections
+        sources = [source for _cases, row in items for source in row["sources"]]
+        if sources:
+            check["sources"] = sources
+        return check
+
+    def fits(items) -> bool:
+        part = check_part(plan, payload, build(items), len(plan["parts"]) + 1)
+        found = anchors(part["text"])
+        return len(question(items)) <= 4000 and part["blocked_reason"] is None and len(found) == len(set(found))
+
+    packed: list[list] = []
+    for group in groups:
+        items = sorted(group["items"], key=lambda item: order.index(item[0][0]))
+        if packed and fits([*packed[-1], *items]):
+            packed[-1].extend(items)
+        else:
+            packed.append(list(items))
+    return [build(items) for items in packed]
+
+
 def additional_parts(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     parts = [*plan["parts"], *plan.get("additions", [])]
     known = {part["requested_check"] for part in parts}
     additions = []
-    for check in required_checks(plan, payload, results):
+    checks = required_checks(plan, payload, results)
+    if plan.get("check_policy") == CHECK_POLICY:
+        checks = checks[:check_limit(plan)]  # the rest stays unchecked: REVIEW_CHECK_LIMIT in the aggregate
+    for check in checks:
         digest = review_digest(check)
         if digest in known:
             continue
@@ -838,6 +951,9 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
         dispositions.extend({"part_id": part["part_id"], **row} for row in result["lint_dispositions"])
     checks = required_checks(plan, payload, results)
     requested = {review_digest(check): check for check in checks}
+    # A packed check (CHECK_POLICY) answers the answers' own checks it names in ``sources``.
+    alias = {source: digest for digest, check in requested.items() for source in check.get("sources", [])}
+    open_rows = [(part_id, row, [alias.get(digest, digest) for digest in own]) for part_id, row, own in open_rows]
     for index, part in enumerate(parts, start=1):
         if part["requested_check"] is not None:
             check = requested.get(part["requested_check"])
@@ -859,9 +975,12 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
             resolved.append({"part_id": row[0], "scope_id": row[1]["scope_id"], "resolved_by": sorted({closing[digest] for digest in row[2]})})
     unchecked = [row[1] for row in open_rows]
     closed = {part["requested_check"] for part in parts if all(area["area_id"] in checked for area in answer_areas(part))}
+    limited = set(list(requested)[check_limit(plan):]) if plan.get("check_policy") == CHECK_POLICY else set()
     for digest, check in requested.items():
         if digest not in closed:
-            unchecked.append({"scope_id": "cross-" + digest[7:], "reason": check["reason"]})
+            reason = (f"{CHECK_LIMIT_REASON}: more than {check_limit(plan)} additional checks; not checked ({', '.join(check['case_ids'])}): {check['reason']}"
+                      if digest in limited else check["reason"])
+            unchecked.append({"scope_id": "cross-" + digest[7:], "reason": reason[:4000]})
     complete = not diagnostics and not unchecked
     blocked = bool(diagnostics or unchecked or any(item["severity"] == "BLOCKING" for item in findings))
     result = {"plan_digest": plan["digest"], "snapshot_digest": plan["snapshot"]["snapshot_digest"],

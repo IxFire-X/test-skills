@@ -179,3 +179,213 @@ def test_a_part_whose_opening_was_interrupted_is_resumed_not_rewritten(tmp_path:
     replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else None
     code, done = replay.drive(replay.next(run_id)[1])
     assert done["action"] == "done", done
+
+
+def test_required_checks_become_one_part_per_case_set_after_the_base_parts(tmp_path: Path) -> None:
+    """Live Petclinic run (2026-10-08): 38 base parts registered 58 extra parts — duplicates of one check in other words,
+    whole-part re-checks of a text correction, checks asked by check parts.  A new plan merges them."""
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    from tools.pilot_state import read_review_plan
+
+    target = next(case_id for part in read_review_plan(replay.project / ".pilot-runs" / run_id, first["attempt_id"])["parts"] for case_id in part["case_ids"])
+    issued: list[str] = []
+
+    def answer(task):
+        value = clean_compact_answer(part_text(task))
+        value["required_checks"] = [{"case_ids": [target], "reason": f"Сверить ожидание (часть {task['part_id']})."}]
+        return value
+
+    task = first
+    for _ in range(80):
+        if task.get("action") != "llm" and task.get("action") != "batch":
+            break
+        tasks = task["tasks"] if task.get("action") == "batch" else [task]
+        if not all(str(item.get("stage", "")).startswith("tc-reviewer:") for item in tasks):
+            break
+        for item in tasks:
+            issued.append(item["part_id"])
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            code, submitted = replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", item["task_id"])
+            assert submitted.get("action") != "error" and submitted.get("status") != "rejected", submitted
+        code, task = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    plan = read_review_plan(replay.project / ".pilot-runs" / run_id, first["attempt_id"])
+    base = [part["part_id"] for part in plan["parts"]]
+    extra = sorted(set(issued) - set(base))
+    assert len(base) >= 4 and len(extra) == 1, (base, extra)  # one merged check; its own required check adds nothing
+    assert issued.index(extra[0]) > max(issued.index(part_id) for part_id in base)  # added after every base part
+
+
+def _finished_review(tmp_path: Path):
+    """A compact case review of 2c10d733 answered clean to the end: the run root, attempt, plan, payload and results."""
+    from tools.pilot_state import _review_plan_with_state, _review_results, _review_snapshot_payload, derive_state
+
+    replay = Replay("2c10d733", tmp_path)
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else None
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-to-autotest"))
+    root = replay.project / ".pilot-runs" / first["run_id"]
+    state = derive_state(root)
+    attempt_id = state["attempts"][-1]["attempt_id"]
+    plan = _review_plan_with_state(root, state, attempt_id, "canonical")
+    return plan, _review_snapshot_payload(root, attempt_id, "canonical"), _review_results(root, state, attempt_id, "canonical", plan)
+
+
+def test_a_correction_is_rechecked_by_its_level_and_only_on_its_cases(tmp_path: Path) -> None:
+    """Review scale fix (2026-10-08): a rewording the answer ranks INFO is only journalled; a WARNING correction is
+    re-checked on its own case, not on the whole part; checks naming the same cases are one check."""
+    from tools import review_compact
+
+    plan, payload, results = _finished_review(tmp_path)
+    assert plan.get("check_policy") == review_compact.CHECK_POLICY
+    document = payload["document"]
+    part = next(part for part in plan["parts"] if len(part["case_ids"]) >= 3)
+    result = dict(next(row for row in results if row["part_id"] == part["part_id"]))
+    cases = {case["case_id"]: case for case in document["test_cases"]}
+    first, second, third = part["case_ids"][:3]
+    step_one, step_two = cases[first]["steps"][0], cases[second]["steps"][0]
+    result["corrections"] = [
+        {"target_id": step_one["step_id"], "field": "action", "before": step_one["action"], "after": step_one["action"] + " (уточнено)", "why": "Смысл шага."},
+        {"target_id": step_two["step_id"], "field": "action", "before": step_two["action"], "after": step_two["action"] + ".", "why": "Пунктуация."},
+    ]
+    result["findings"] = [{"severity": "WARNING", "code": "ACTION_MEANING", "related_ids": [step_one["step_id"]], "message": "Действие неточно."},
+                          {"severity": "INFO", "code": "TEXT_GRAMMAR", "related_ids": [step_two["step_id"]], "message": "Пунктуация."}]
+    result["required_checks"] = [{"case_ids": [third], "reason": "Сверить ожидание."}, {"case_ids": [third], "reason": "Сверить данные шага."}]
+    others = [row for row in results if row["part_id"] != part["part_id"]]
+    assert review_compact.validate_answer(plan, part, result, document) == []
+    checks = review_compact.required_checks(plan, payload, [*others, result])
+    # One packed check: the WARNING correction on its own case and the two checks of the third case merged.
+    assert len(checks) == 1 and set(checks[0]["case_ids"]) == {first, third}, checks
+    assert "Сверить ожидание." in checks[0]["reason"] and "Сверить данные шага." in checks[0]["reason"]
+    assert [item["target_id"] for item in checks[0]["corrections"]] == [step_one["step_id"]]
+    assert len(checks[0]["sources"]) == 2
+    # Nothing is added while a base part is still unanswered.
+    assert review_compact.required_checks(plan, payload, others) == []
+
+
+def _unpacked(monkeypatch) -> None:
+    """Every merged check its own part: the limit and the batch are tested apart from the packing."""
+    from tools import review_compact
+
+    original = review_compact._packed_checks
+    monkeypatch.setattr(review_compact, "_packed_checks", lambda plan, payload, rows: [check for row in rows for check in original(plan, payload, [row])])
+
+
+def test_additional_parts_are_batched_and_limited(tmp_path: Path, monkeypatch) -> None:
+    """Review scale fix (2026-10-08): additional parts are independent (a batch) and at most a quarter of the base parts;
+    the checks beyond the limit stay unchecked with REVIEW_CHECK_LIMIT and the review is incomplete."""
+    from tools import review_compact
+    from tools.pilot_state import read_review_aggregate, read_review_plan
+
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    root = replay.project / ".pilot-runs" / run_id
+    plan = read_review_plan(root, first["attempt_id"])
+    targets = list(dict.fromkeys(case_id for part in plan["parts"] for case_id in part["case_ids"]))[:3]
+    limit = review_compact.check_limit(plan)
+    assert len(targets) == 3 and limit < 3  # the small plan allows fewer additions than asked
+    _unpacked(monkeypatch)
+
+    def answer(task):
+        value = clean_compact_answer(part_text(task))
+        value["required_checks"] = [{"case_ids": [case_id], "reason": f"Сверить {case_id}."} for case_id in targets]
+        return value
+
+    task, batches = first, []
+    for _ in range(40):
+        tasks = task["tasks"] if task.get("action") == "batch" else [task] if task.get("action") == "llm" else []
+        if not tasks or not all(str(item.get("stage", "")).startswith("tc-reviewer:") for item in tasks):
+            break
+        batches.append([item["part_id"] for item in tasks])
+        for item in tasks:
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", item["task_id"])
+        code, task = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    base = {part["part_id"] for part in plan["parts"]}
+    extra = sorted({part_id for batch in batches for part_id in batch} - base)
+    assert len(extra) == limit
+    aggregate = read_review_aggregate(root, first["attempt_id"])["aggregate"]
+    limited = [row for row in aggregate["unchecked"] if row["reason"].startswith(review_compact.CHECK_LIMIT_REASON)]
+    assert len(limited) == 3 - limit and not aggregate["complete"]
+    assert task.get("action") == "done" and task["result"]["reason_code"] == "REVIEW_INCOMPLETE", task.get("result")
+
+
+def test_additional_parts_go_out_in_one_batch(tmp_path: Path, monkeypatch) -> None:
+    from tools import review_compact
+    from tools.pilot_state import read_review_plan
+
+    monkeypatch.setattr(review_compact, "check_limit", lambda plan: 3)
+    _unpacked(monkeypatch)
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    plan = read_review_plan(replay.project / ".pilot-runs" / run_id, first["attempt_id"])
+    targets = list(dict.fromkeys(case_id for part in plan["parts"] for case_id in part["case_ids"]))[:3]
+    base = {part["part_id"] for part in plan["parts"]}
+
+    def answer(task):
+        value = clean_compact_answer(part_text(task))
+        if task["part_id"] in base:
+            value["required_checks"] = [{"case_ids": [case_id], "reason": f"Сверить {case_id}."} for case_id in targets]
+        return value
+
+    task, batches = first, []
+    for _ in range(40):
+        tasks = task["tasks"] if task.get("action") == "batch" else [task] if task.get("action") == "llm" else []
+        if not tasks or not all(str(item.get("stage", "")).startswith("tc-reviewer:") for item in tasks):
+            break
+        batches.append([item["part_id"] for item in tasks])
+        for item in tasks:
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", item["task_id"])
+        code, task = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    extra_batches = [batch for batch in batches if set(batch) - base]
+    assert any(len(set(batch) - base) == 3 for batch in extra_batches), batches  # the three additions in one batch
+
+
+def test_small_checks_are_packed_into_one_part_that_closes_the_unchecked_area(tmp_path: Path) -> None:
+    """Review scale fix (2026-10-08): on the live Petclinic answers the merged checks were still 21 parts of one or a few
+    cases; they are packed while a part fits its budget (2 parts there), and an area a base part left UNCHECKED for its
+    own check is closed by the packed part that answers that check."""
+    from tools import review_compact
+    from tools.pilot_state import read_review_aggregate, read_review_plan
+
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    root = replay.project / ".pilot-runs" / run_id
+    plan = read_review_plan(root, first["attempt_id"])
+    base = {part["part_id"] for part in plan["parts"]}
+    targets = list(dict.fromkeys(case_id for part in plan["parts"] for case_id in part["case_ids"]))[:3]
+    left_open = []
+
+    def answer(task):
+        value = clean_compact_answer(part_text(task))
+        if task["part_id"] in base:
+            value["required_checks"] = [{"case_ids": [case_id], "reason": f"Сверить {case_id}."} for case_id in targets]
+            if not left_open:
+                value["coverage"][0]["status"] = "UNCHECKED"
+                value["coverage"][0]["note"] = "Нужна сверка с соседними кейсами."
+                left_open.append(value["coverage"][0]["area_id"])
+        return value
+
+    task, batches = first, []
+    for _ in range(40):
+        tasks = task["tasks"] if task.get("action") == "batch" else [task] if task.get("action") == "llm" else []
+        if not tasks or not all(str(item.get("stage", "")).startswith("tc-reviewer:") for item in tasks):
+            break
+        batches.append([item["part_id"] for item in tasks])
+        for item in tasks:
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", item["task_id"])
+        code, task = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    extra = {part_id for batch in batches for part_id in batch} - base
+    assert len(extra) == 1, batches
+    aggregate = read_review_aggregate(root, first["attempt_id"])["aggregate"]
+    assert left_open and aggregate["complete"] and aggregate["unchecked"] == [], aggregate["unchecked"]
+    assert task.get("action") == "done" and (task["result"]["completion"], task["result"]["coverage"]) == ("COMPLETE", "FULL"), task.get("result")
