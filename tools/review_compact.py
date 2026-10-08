@@ -40,7 +40,8 @@ CHECK_POLICY = "merged-after-base-v1"
 CHECK_LIMIT_REASON = "REVIEW_CHECK_LIMIT"
 # A required check of a CHECK_POLICY plan whose requirements link more cases than one check part holds (live Petclinic
 # runs b and d: "every SREQ", CREQ-B1-T-ISOLATION — 81 cases) checks only the cases it names; naming none, it gets no
-# part: the aggregate keeps it as a WARNING finding and a question for the analyst, outside the addition limit.
+# part: the aggregate keeps it as a WARNING finding and a question for the analyst, outside the addition limit and
+# outside the unchecked list; an area its reviewer left UNCHECKED stays unchecked unless an ordinary check closes it.
 TOO_BROAD_REASON = "REVIEW_CHECK_TOO_BROAD"
 
 
@@ -682,11 +683,16 @@ def narrow_check(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Map
     named = [case_id for case_id in check.get("case_ids") or []]
     if resolved is None or not check.get("requirement_ids") or set(resolved["case_ids"]) == set(named):
         return resolved, []
-    key = (plan["digest"], tuple(resolved["case_ids"]))
+    # Sized like the part it would become: the reason and the source requirements the merged check carries.
+    wanted = set(check["requirement_ids"])
+    sources = [row["source_requirement_id"] for row in document["source_to_canonical_mappings"]
+               if row["source_requirement_id"] in wanted or set(row["canonical_requirement_ids"]) & wanted]
+    trial = {"case_ids": resolved["case_ids"], "reason": resolved["reason"], **({"source_requirement_ids": sources} if sources else {})}
+    key = (plan["digest"], review_digest(trial))
     if key not in _FITS:
         if len(_FITS) >= 4096:
             _FITS.clear()
-        _FITS[key] = check_part(plan, payload, {"case_ids": resolved["case_ids"], "reason": resolved["reason"]}, len(plan["parts"]) + 1)["blocked_reason"] is None
+        _FITS[key] = check_part(plan, payload, trial, len(plan["parts"]) + 1)["blocked_reason"] is None
     if _FITS[key]:
         return resolved, []
     dropped = list(check["requirement_ids"])
@@ -1036,25 +1042,20 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
             continue
         result = candidates[0]
         bindings.append({"part_id": part["part_id"], "result_digest": review_digest(result)})
-        own_checks, own_broad = [], False
+        own_checks = []
         for check in result["required_checks"]:
             narrowed, dropped = _own_check(plan, payload, check)
             if dropped and part["part_id"] in base_ids:
                 too_broad.append({"part_id": part["part_id"], "requirement_ids": dropped, "case_ids": [] if narrowed is None else narrowed["case_ids"],
                                   "question": check["reason"]})
-            if narrowed is None:
-                # An additional part's own checks are never added: none of its areas can wait for one.
-                own_broad = own_broad or (bool(dropped) and part["part_id"] in base_ids)
-            else:
+            if narrowed is not None:
                 own_checks.append(review_digest(narrowed))
         for row in result["coverage"]:
             if row["status"] == "CHECKED":
                 checked.append(row["area_id"])
-            elif not own_checks and own_broad:
-                # Every check this area waits for is too broad: closed with that reason, the review stays complete.
-                checked.append(row["area_id"])
-                resolved.append({"part_id": part["part_id"], "scope_id": row["area_id"], "resolved_by": [], "reason": TOO_BROAD_REASON})
             else:
+                # An area the reviewer left UNCHECKED stays open unless an ordinary check closes it: a too broad check
+                # never does (independent review: naming a broad requirement would otherwise skip a whole part).
                 open_rows.append((part["part_id"], {"scope_id": row["area_id"], "reason": row["note"] or "UNCHECKED"}, own_checks))
         for finding in result["findings"]:
             findings.append({"severity": finding["severity"], "code": finding["code"], "message": finding["message"],

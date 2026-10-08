@@ -71,9 +71,8 @@ _MAX_TRANSPORT_ATTEMPTS = 3
 _VERIFIED_REVIEW_PLANS: set[tuple[str, str]] = set()
 
 
-# Review snapshots, plans and sealed aggregates are immutable and content-addressed, and what their validation checks
-# against — the frozen baseline, the published candidate, the automation answer, the recorded part answers — is
-# append-only journal fact.  So one process
+# Review snapshots and plans are immutable and content-addressed, and what their validation checks against — the
+# frozen baseline, the published candidate, the automation answer — is append-only journal fact.  So one process
 # validates each exact receipt once (keyed by its bytes), and a plan with its additions once per plan receipt and
 # set of additions (live Petclinic runs 2026-10-08: every review part re-validated both through its boundary;
 # next and submit took 1.5–6 minutes).  The bytes are still read back and the event binding checked on every read.
@@ -3541,7 +3540,8 @@ def _read_attempt_receipt_uncached(
     target = _receipt_target(root, attempt_id, kind)
     receipt = _read_artifact(project, root, target, kind)
     data = _canonical_bytes(receipt)
-    immutable = kind.startswith(("review-snapshot-", "review-plan-", "review-aggregate-"))
+    # Not the aggregate: its validity also depends on the reviewer ledger's later status (independent review).
+    immutable = kind.startswith(("review-snapshot-", "review-plan-"))
     proof = (str(root), attempt_id, kind, hashlib.sha256(data).hexdigest())
     if not immutable or proof not in _VALIDATED_REVIEW_RECEIPTS:
         _validate_factual_receipt(project, root, attempt, kind, receipt, state)

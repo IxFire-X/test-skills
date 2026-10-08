@@ -107,20 +107,39 @@ def test_a_broad_requirement_with_named_cases_checks_only_those_cases() -> None:
     assert all("часть 1 проверки" not in check["reason"] for check in checks)
 
 
-def test_an_unchecked_area_closes_as_too_broad_only_when_all_its_checks_are() -> None:
+def test_a_too_broad_check_never_closes_an_unchecked_area() -> None:
+    """Independent review of F1: a part that left areas UNCHECKED and named only a broad requirement would have been
+    closed whole.  The area stays unchecked (the review incomplete); the broad check itself is never unchecked."""
     plan = rp.plan("canonical")
     payload = rp.payload("canonical")
     results = _bound("canonical", part_2="b")
-    # Run b's part 2 left its source area UNCHECKED with a too broad check and an ordinary one: it waits for the latter.
+    # Run b's part 2: its source area UNCHECKED, a too broad check and an ordinary one — it waits for the latter.
     aggregate = rc.aggregate(plan, payload, results)
     assert "source-000002" in {row["scope_id"] for row in aggregate["unchecked"]}
-    # Without the ordinary check the area is closed by the too broad one, with that reason.
     alone = copy.deepcopy(results)
     part = next(result for result in alone if result["part_id"] == "part-000002")
     part["required_checks"] = [check for check in part["required_checks"] if len(check.get("requirement_ids") or []) == 29]
     aggregate = rc.aggregate(plan, payload, alone)
-    assert "source-000002" not in {row["scope_id"] for row in aggregate["unchecked"]}
-    assert {"part_id": "part-000002", "scope_id": "source-000002", "resolved_by": [], "reason": rc.TOO_BROAD_REASON} in aggregate["resolved_unchecked"]
+    assert "source-000002" in {row["scope_id"] for row in aggregate["unchecked"]} and not aggregate["complete"]
+    assert not aggregate.get("resolved_unchecked") and aggregate["too_broad"]
+
+
+def test_a_too_broad_check_of_a_checked_part_leaves_the_review_complete() -> None:
+    """Run d, autotest review part 4: every area CHECKED and a request to check CREQ-B1-T-ISOLATION — the review is
+    complete, with a WARNING and a question for the analyst (no PARTIAL)."""
+    plan = _plan("r1")
+    payload = rp.payload("r1")
+    results = _bound("r1")
+    part = next(result for result in results if result["part_id"] == "part-000004")
+    part["required_checks"] = [check for check in part["required_checks"] if check.get("requirement_ids") == ["CREQ-B1-T-ISOLATION"]]
+    assert part["required_checks"] and rc.additional_parts(plan, payload, results) == []
+    aggregate = rc.aggregate(plan, payload, results)
+    assert aggregate["complete"] and aggregate["unchecked"] == [] and aggregate["diagnostics"] == []
+    assert [row["requirement_ids"] for row in aggregate["too_broad"]] == [["CREQ-B1-T-ISOLATION"]]
+    assert any(item["code"] == rc.TOO_BROAD_REASON and item["severity"] == "WARNING" for item in aggregate["findings"])
+    from tools.analyst_report import too_broad_items
+
+    assert [item["question"] for item in too_broad_items("r1", aggregate)] == [part["required_checks"][0]["reason"]]
 
 
 def test_the_automation_review_follows_the_check_policy() -> None:
