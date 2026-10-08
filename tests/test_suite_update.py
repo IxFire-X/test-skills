@@ -61,7 +61,7 @@ def _answer(task: dict) -> dict:
     raise KeyError(stage)
 
 
-def _drive(replay, *extra: str, limit: int = 60, seen: list | None = None) -> dict:
+def _drive(replay, *extra: str, limit: int = 60, seen: list | None = None, answer=None) -> dict:
     config = replay.config
     code, task = replay.call("next", "--project", str(replay.project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
                              "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"], *extra)
@@ -72,7 +72,7 @@ def _drive(replay, *extra: str, limit: int = 60, seen: list | None = None) -> di
         for item in tasks:
             if seen is not None:
                 seen.append(item)
-            Path(item["output_path"]).write_text(json.dumps(_answer(item), ensure_ascii=False), encoding="utf-8")
+            Path(item["output_path"]).write_text(json.dumps((answer or _answer)(item), ensure_ascii=False), encoding="utf-8")
             code, task = replay.submit(item)
             assert task.get("status") != "rejected", task.get("errors")
     raise AssertionError("suite-update did not finish")
@@ -301,3 +301,50 @@ def test_a_weakened_check_stays_green_and_the_strength_drop_reaches_the_pr(tmp_p
     assert "## Сила тестов упала" in description and "TC-B1-001" in description.split("## Сила тестов упала", 1)[1]
     assert (replay.project / GENERATED).read_text(encoding="utf-8") == weakened  # a person's edit is not undone by the package
     assert (replay.project / ".pilot-runs" / "suite-strength").is_dir()  # PIT history outside the suite
+
+
+@needs_java
+def test_a_repair_that_lowers_the_kill_ratio_is_not_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 10 (A5.4): with --mutation a repair whose case kills fewer mutants than before is blocked."""
+    from tests.test_mutation_java import _triage_answer
+    from tools.suite_manifest import canonical_bytes, method_digests, parse_locator
+
+    replay = _local(tmp_path, monkeypatch)
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else \
+        _triage_answer(task) if task["stage"].startswith("mutation-triage:") else None
+    skillsrc = replay.project / ".skillsrc"
+    text = skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.2.0", 1)
+    skillsrc.write_text(text + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+    _code, _done = replay.drive(replay.start_with("--suite", "--mutation")[1])
+    project = replay.project
+    manifest = read_suite(project, "test-cases/")
+    before = next(row for row in manifest["cases"] if row["case_id"] == "TC-B1-010")["strength"]
+    assert before and before["killed"] > 0
+    # An older package version left the method broken; the manifest records it as the package's own.
+    _replace_in(project / GENERATED, 'assertThat(text(response)).as("ASSERT-B1-010-01-1-2")', 'assertThat(textOfResponse(response)).as("ASSERT-B1-010-01-1-2")')
+    content = (project / GENERATED).read_text(encoding="utf-8")
+    methods = [method for case in manifest["cases"] for method in case["methods"]]
+    symbols = [{"symbol_id": method["symbol_id"], "locator": parse_locator(method["locator"], "java")} for method in methods]
+    digests, support = method_digests(GENERATED, manifest["files"][0]["file_id"], content, symbols)
+    for case in manifest["cases"]:
+        for method in case["methods"]:
+            method["slice_digest"] = digests[method["symbol_id"]]
+    manifest["files"][0]["file_digest"] = "sha256:" + __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
+    manifest["files"][0]["support_digest"] = support
+    (project / "test-cases" / "suite-manifest.json").write_bytes(canonical_bytes(manifest))
+
+    def weakening(task):
+        if task["stage"] == "tc-to-autotest:repair":
+            brief = json.loads(Path(task["inputs"][0]).read_text(encoding="utf-8"))
+            # The check after the label is unchanged, but the actual value is now a constant: the mutants survive.
+            return {"methods": [{"case_id": row["case_id"], "method_name": row["method"]["method_name"],
+                                 "source": row["method"]["source"].replace("textOfResponse(response)", f'"{OLD}"')} for row in brief["cases"]]}
+        return _answer(task)
+
+    result = _drive(replay, "--mutation", answer=weakening)["result"]
+    assert result["counts"]["repaired"] == 0, result
+    after = read_suite(project, "test-cases/")
+    case = next(row for row in after["cases"] if row["case_id"] == "TC-B1-010")
+    assert case["status"] == "QUARANTINED" and case["quarantine"]["reason"] == "REPAIR_FAILED"
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "## Сила тестов упала" in description and "ремонт не принят" in description

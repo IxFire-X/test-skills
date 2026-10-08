@@ -1005,9 +1005,42 @@ def _mutation(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         before, after = case.get("strength"), per_case.get(case["case_id"])
         if before and after and before["covered"] and after["covered"] and after["killed"] * before["covered"] < before["killed"] * after["covered"]:
             drops.append({"case_id": case["case_id"], "before": f"{before['killed']}/{before['covered']}", "after": f"{after['killed']}/{after['covered']}"})
+    _block_weaker_repairs(project, run_root, state, drops)
     _goto(run_root, state, "MANIFEST", strength={"status": facts["status"], "reason": facts.get("reason_code"), "message": facts.get("message"), "cases": per_case, "totals": facts.get("totals")},
           strength_drops=drops)
     return None
+
+
+def _block_weaker_repairs(project: Path, run_root: Path, state: dict[str, Any], drops: Sequence[Mapping[str, Any]]) -> None:
+    """A5.4: a repair never lowers its case's kill ratio — a repaired method whose case now kills fewer mutants
+    is not accepted: it goes to quarantine (``REPAIR_FAILED``) and is no longer counted as repaired."""
+    from tools.quarantine import quarantine as mark
+
+    repaired = set(state["facts"].get("repaired") or [])
+    if not repaired or not drops:
+        return
+    dropped = {row["case_id"]: row for row in drops}
+    decisions = state["facts"].get("decisions") or {}
+    blocked = sorted(locator for locator in repaired if decisions.get(locator, {}).get("case_ids", [None])[0] in dropped)
+    if not blocked:
+        return
+    _suite_dir, manifest, _document = _suite(project, run_root)
+    language = {row["path"]: row["language"] for row in manifest["files"]}
+    quarantined = list(state["facts"].get("quarantine") or [])
+    by_file: dict[str, list] = {}
+    for locator in blocked:
+        row = decisions[locator]
+        case_id = row["case_ids"][0]
+        ref = f"run {run_root.name[:8]} {case_id}"
+        by_file.setdefault(row["file"], []).append((parse_locator(locator, language[row["file"]]), "REPAIR_FAILED", ref))
+        quarantined.append({"locator": locator, "case_ids": row["case_ids"], "reason": "REPAIR_FAILED", "ref": ref})
+        state["facts"].setdefault("proposals", []).append(
+            f"`{locator}`: ремонт не принят — доля убитых мутантов кейса `{case_id}` упала {dropped[case_id]['before']} → {dropped[case_id]['after']}; тест в карантине")
+    for path, marks in by_file.items():
+        target = Path(project) / path
+        target.write_bytes(mark(path, target.read_text(encoding="utf-8"), marks).encode("utf-8"))
+    state["facts"]["quarantine"] = quarantined
+    state["facts"]["repaired"] = sorted(repaired - set(blocked))
 
 
 def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
@@ -1034,7 +1067,7 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         green = locators and all(decisions.get(locator, {}).get("outcome") in {"PASS", "FIXED"} for locator in locators)
         previous = old.get(case["case_id"], {})
         if marked:
-            entry = {"reason": marked[0]["reason"] if marked[0]["reason"] in {"ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED"} else "ASSERTION_FAILED",
+            entry = {"reason": marked[0]["reason"] if marked[0]["reason"] in {"ASSERTION_FAILED", "TEST_ERROR", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED"} else "ASSERTION_FAILED",
                      "ref": marked[0]["ref"], "since_run": run_root.name}
             if marked[0].get("question"):
                 entry["question"] = marked[0]["question"][:2000]

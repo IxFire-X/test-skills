@@ -284,9 +284,63 @@ def literal_diagnostics(case: Mapping[str, Any], method_source: str, support_sou
     return rows
 
 
+_LABEL = re.compile(r'"(ASSERT-[A-Za-z0-9_.-]+)"')
+_PY_COMPARISON = re.compile(r"\s(==|!=|<=|>=|<|>|not in|in|is not|is)\s")
+
+
+def _statement_at(source: str, index: int) -> tuple[int, int]:
+    """Start and end (exclusive) of the statement around ``index``: Java to ``;``, Python to the end of the line."""
+    start = max(source.rfind(";", 0, index), source.rfind("{", 0, index), source.rfind("}", 0, index), source.rfind("\n\n", 0, index)) + 1
+    end = source.find(";", index)
+    return start, (len(source) if end < 0 else end + 1)
+
+
+def _normalized(text: str) -> str:
+    """Whitespace-free code with the spacing inside string literals kept."""
+    out, last = [], 0
+    for match in _STRING.finditer(text):
+        out.append(re.sub(r"\s+", "", text[last:match.start()]))
+        out.append(match.group(0))
+        last = match.end()
+    out.append(re.sub(r"\s+", "", text[last:]))
+    return "".join(out)
+
+
+def expectation_parts(source: str) -> dict[str, str]:
+    """``{assertion label: what the check expects}`` of a method.
+
+    Java (AssertJ): the matcher chain after ``.as("ASSERT-…")`` up to the end of the statement —
+    the matcher, its arguments and every further matcher.  Python: the right side of the
+    comparison of the ``assert`` that carries the label (the whole condition without one).  The
+    actual side (how the value is obtained) is what a repair may change.
+    """
+    parts: dict[str, str] = {}
+    for match in _LABEL.finditer(source):
+        label = match.group(1)
+        line_start = source.rfind("\n", 0, match.start()) + 1
+        line = source[line_start:source.find("\n", match.start()) if source.find("\n", match.start()) >= 0 else len(source)]
+        if line.lstrip().startswith("assert ") and "assertThat" not in line:
+            condition = line.lstrip()[len("assert "):].rsplit(",", 1)[0]
+            comparison = _PY_COMPARISON.search(condition)
+            parts[label] = _normalized(condition[comparison.start():] if comparison else condition)
+            continue
+        _start, end = _statement_at(source, match.start())
+        close = source.find(")", match.end())
+        parts[label] = _normalized(source[close + 1:end] if 0 <= close < end else source[match.end():end])
+    return parts
+
+
 def repair_diagnostics(case: Mapping[str, Any], old_source: str, new_source: str, support_source: str = "") -> list[dict[str, str]]:
-    """A repair keeps the case's checks and every string literal of the old method's assertions."""
+    """A repair keeps the case's checks whole: every labelled check expects exactly what it expected before
+    (matcher, arguments, further matchers — review 2.1 item 10) and no string literal of the old checks is lost."""
     rows = literal_diagnostics(case, new_source, support_source)
+    before, after = expectation_parts(old_source), expectation_parts(new_source)
+    for label, expected in sorted(before.items()):
+        if label in after and after[label] != expected:
+            rows.append(_diag(label, "REPAIR_EXPECTATION_CHANGED", f"The repair changed what {label} expects ({expected[:120]} → {after[label][:120]}); "
+                              "a repair may change how the value is obtained, never the expectation."))
+        elif label not in after:
+            rows.append(_diag(label, "REPAIR_EXPECTATION_CHANGED", f"The repaired method lost the check {label}."))
     old = set(_STRING.findall("\n".join(line for line in old_source.splitlines() if "isEqualTo" in line or "assert" in line.lower())))
     new = set(_STRING.findall(new_source))
     for literal in sorted(old - new):

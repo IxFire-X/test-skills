@@ -153,3 +153,40 @@ def test_reviews_get_the_product_classes_the_changed_code_refers_to(tmp_path: Pa
     secret = project / "src" / "main" / "java" / "net" / "javaguides" / "springboot" / "bean" / "Student.java"
     secret.write_text(secret.read_text(encoding="utf-8") + '\nclass Secret { String password = "hunter2hunter2hunter2"; }\n', encoding="utf-8")
     assert "src/main/java/net/javaguides/springboot/bean/Student.java" not in [row["path"] for row in product_contexts(project, manifest, step5["document"], code)]
+
+
+_CASE = {"case_id": "TC-1", "steps": [{"expectations": [{"assertions": [{"assertion_id": "ASSERT-1", "expected": {"kind": "literal", "value": 4}},
+                                                                      {"assertion_id": "ASSERT-2", "expected": {"kind": "reference", "value": "x"}}]}]}]}
+_OLD = """    @Test
+    void listsStudents() {
+        var students = api.list();
+        assertThat(students).as("ASSERT-1").hasSize(4);
+        assertThat(students.get(0))
+                .as("ASSERT-2")
+                .isEqualTo(student(1, "Ramesh"));
+    }
+"""
+
+
+@pytest.mark.parametrize("new,changed", [
+    (_OLD.replace("hasSize(4)", "hasSize(3)"), True),
+    (_OLD.replace('.isEqualTo(student(1, "Ramesh"))', ".isNotNull()"), True),
+    (_OLD.replace("hasSize(4)", "hasSizeGreaterThan(0)"), True),
+    (_OLD.replace("api.list()", "api.listAll()"), False),  # the actual side may change: that is the repair
+    (_OLD.replace('                .as("ASSERT-2")\n                .isEqualTo(student(1, "Ramesh"));', '                .as("ASSERT-2").isEqualTo(student(1,  "Ramesh"));'), False),
+])
+def test_a_repair_keeps_every_check_whole(new: str, changed: bool) -> None:
+    """Review 2.1 item 10: the matcher and its arguments after the assertion label are the expectation; they never change."""
+    from tools.suite_merge import repair_diagnostics
+
+    rows = repair_diagnostics(_CASE, _OLD, new)
+    assert any(row["code"] == "REPAIR_EXPECTATION_CHANGED" for row in rows) is changed, rows
+
+
+def test_a_python_repair_keeps_the_expected_side() -> None:
+    from tools.suite_merge import repair_diagnostics
+
+    old = '    response = client.get("/students")\n    assert len(response.json()) == 4, "ASSERT-1"\n'
+    case = {"case_id": "TC-1", "steps": [{"expectations": [{"assertions": [{"assertion_id": "ASSERT-1", "expected": {"kind": "literal", "value": 4}}]}]}]}
+    assert not [row for row in repair_diagnostics(case, old, old.replace("client.get", "api_client.get")) if row["code"] == "REPAIR_EXPECTATION_CHANGED"]
+    assert [row for row in repair_diagnostics(case, old, old.replace("== 4", ">= 1")) if row["code"] == "REPAIR_EXPECTATION_CHANGED"]
