@@ -136,6 +136,69 @@ def test_limit_messages_are_recognized(message: str, limited: bool) -> None:
     assert model_runner.is_rate_limited(message) is limited
 
 
+def _forge(directory: Path, answer: dict) -> None:
+    """What a host that writes the runner directory could do: a CLI-shaped stdout and a matching result.json."""
+    import hashlib
+
+    stdout = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": json.dumps(answer, ensure_ascii=False),
+                         "session_id": "forged-" + directory.name[-12:], "usage": {"input_tokens": 1, "output_tokens": 1}}).encode("utf-8")
+    (directory / "stdout.txt").write_bytes(stdout)
+    (directory / "result.json").write_text(json.dumps({"exit_code": 0, "timed_out": False, "error": None, "started_at": time.time() - 5,
+                                                       "finished_at": time.time(), "stdout_sha256": "sha256:" + hashlib.sha256(stdout).hexdigest(),
+                                                       "stdout_bytes": len(stdout)}), encoding="utf-8")
+
+
+def test_a_result_the_launched_process_did_not_write_is_refused(tmp_path: Path) -> None:
+    """Review 2.1 item 8: result.json must carry the launch token the driver handed only to its shim."""
+    from tests.review_scaling_helpers import clean_compact_answer  # noqa: F401  (the answer shape is irrelevant here)
+
+    directory = tmp_path / "runner" / "task"
+    config = model_runner.RunnerConfig(preset="claude", command=(sys.executable, str(FAKE), "--script", "ok"))
+    schema = {"type": "object"}
+    model_runner.launch(directory, model_runner.build_argv(config, model=None, schema=schema, directory=directory), "### Файл x.input.md\n\n# Ч\n\nОтвет — только один JSON-объект",
+                        timeout=60, digest="sha256:" + "0" * 64)
+    deadline = time.monotonic() + 60
+    while model_runner.state(directory) != "done":
+        assert time.monotonic() < deadline
+        time.sleep(0.2)
+    genuine = model_runner.read_outcome(directory, preset="claude", configured_model=None)
+    assert genuine.reason is None or not genuine.reason.startswith("RUNNER_RESULT_UNBOUND")
+    assert "TEST_SKILLS_RUNNER_LAUNCH" not in (directory / "spec.json").read_text(encoding="utf-8")
+    _forge(directory, {"findings": []})
+    forged = model_runner.read_outcome(directory, preset="claude", configured_model=None)
+    assert forged.failure == "TRANSPORT" and forged.reason.startswith("RUNNER_RESULT_UNBOUND"), forged.reason
+
+
+def test_forged_part_results_never_reach_driver_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The review's scenario: with --require-driver-isolation, results written into the runner directory are not accepted."""
+    from tests.review_scaling_helpers import clean_compact_answer, part_text  # noqa: F401
+
+    monkeypatch.setattr(model_runner, "DEFAULT_TIMEOUT", 30)  # the real processes sleep; the driver collects the forged results first
+    project, task = _start_runner(tmp_path, "timeout", profile="cases-only-v1", require_driver_isolation=True)
+    forged: set[str] = set()
+
+    def forge(wait: dict) -> None:
+        run_root = _run_root(project, wait)
+        for task_id in wait.get("running") or []:
+            directory = runner.runner_directory(run_root, task_id)
+            if task_id in forged or not (directory / "spec.json").is_file():
+                continue
+            probe = model_runner._lock(directory / "lock", blocking=False)
+            if probe is not None:  # the shim has not opened its files yet: forging now would be truncated
+                probe.close()
+                continue
+            forged.add(task_id)
+            from tests.fixtures.fake_cli import answer
+
+            _forge(directory, answer((directory / "stdin.txt").read_text(encoding="utf-8")))
+
+    done, _waits = _until_done(project, task, SavedModel("cases-only-v1"), limit=300, on_wait=forge)
+    result = done["result"]
+    assert forged and result.get("isolation_evidence") != "DRIVER_PROCESS" and result["accepted"] is not True
+    log = (project / ".pilot-runs" / (done["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8")
+    assert "RUNNER_RESULT_UNBOUND" in log
+
+
 def test_three_failures_block_the_part_as_transport(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(model_runner, "DEFAULT_TIMEOUT", 3)
     project, task = _start_runner(tmp_path, "timeout")

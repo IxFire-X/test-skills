@@ -33,13 +33,23 @@ Rules:
    writes nothing.
 4. The answer passes the same checks as `submit`. Transport failures and malformed output are retried
    (at most 3 tries per part, as in the review-part retry rule), rate limits pause; every step goes to
-   `driver-log.jsonl`.
+   `driver-log.jsonl`. *Clarified 2026-10-08 (independent review, item 7):* a rate or usage limit (HTTP 429,
+   overload, a subscription limit message) is a pause, not a try: the pause doubles from 60 s up to 30 min,
+   at most 8 pauses per task; only a limit that outlasts them counts as a failed try (`RUNNER_RATE_LIMITED`).
 5. Evidence per review part: command digest without secrets, CLI name and version, model as reported by the
    CLI (or as configured, marked so), start and end time, exit code, CLI session or thread ID (distinct per
    part), stdout digest, tokens, and whether user-level CLI settings were loaded.
 6. Isolation evidence level `isolation_evidence` ∈ {`DRIVER_PROCESS`, `HOST_DECLARED`, `NONE`} sits next to
-   `review_independence`. `DRIVER_PROCESS` is derived only from durable evidence of a process the driver
+   `review_independence`. `DRIVER_PROCESS` is derived only from the record of a process the driver
    launched and whose output the driver read; an answer submitted by the host is at most `HOST_DECLARED`.
+   *Clarified 2026-10-08 (independent review, item 8):* the record is bound to the launch — the shim alone
+   receives a one-time launch token (its environment, never the runner directory, which keeps only the
+   token's digest), and `result.json` must carry that token and the digest of the stdout it captured; an
+   unbound result is a failed try (`RUNNER_RESULT_UNBOUND`). This catches a mistaken or careless host that
+   writes into the runner directory. It is **not** proof against a host acting as the machine's own user,
+   which can rewrite both the launch record and the result: against such a host `DRIVER_PROCESS` is worth
+   no more than `HOST_DECLARED`. The level states how the answer was obtained, not that the host could not
+   have interfered.
 7. Acceptance does not change by default. With `--require-driver-isolation` any level below
    `DRIVER_PROCESS` gives `accepted = false` with reason `REVIEW_ISOLATION_UNVERIFIED`.
 

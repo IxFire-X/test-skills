@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -183,6 +184,11 @@ def launch(directory: Path, argv: Sequence[str], stdin_text: str, *, timeout: in
     (directory / "spec.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8", newline="\n")
     env = dict(os.environ if environment is None else environment)
     env["PYTHONPATH"] = str(ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    # The launch token reaches only the shim (its environment); the runner directory keeps its digest.
+    # result.json must carry the token: a file a host wrote into the directory cannot (review 2.1 item 8).
+    token = secrets.token_hex(32)
+    env[LAUNCH_ENV] = token
+    _write_atomic(directory / "launch.json", {"launch_digest": _token_digest(token), "launched_at": spec["launched_at"]})
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": str(directory), "env": env, "close_fds": True}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -190,6 +196,34 @@ def launch(directory: Path, argv: Sequence[str], stdin_text: str, *, timeout: in
         kwargs["start_new_session"] = True
     process = subprocess.Popen([sys.executable, "-m", "tools.model_runner", "shim", str(directory)], **kwargs)
     return {"pid": process.pid, "directory": str(directory)}
+
+
+LAUNCH_ENV = "TEST_SKILLS_RUNNER_LAUNCH"
+
+
+def _token_digest(token: str) -> str:
+    return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def bound_to_launch(directory: Path, result: Mapping[str, Any]) -> str | None:
+    """Why ``result.json`` is not the record of the process the driver launched, or None.
+
+    The shim alone knows the launch token (its environment); the result carries it and the
+    digest of the stdout it captured.  This binds the result to the launch against a mistaken
+    or careless host; a host that deliberately rewrites both ``launch.json`` and the result
+    can still forge it — DRIVER_PROCESS is not proof against the machine's own user (A1.6).
+    """
+    try:
+        launch = json.loads((Path(directory) / "launch.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "no launch record"
+    token = result.get("launch_token")
+    if not isinstance(token, str) or _token_digest(token) != launch.get("launch_digest"):
+        return "the result does not carry the token of this launch"
+    data = (Path(directory) / "stdout.txt").read_bytes() if (Path(directory) / "stdout.txt").is_file() else b""
+    if "sha256:" + hashlib.sha256(data).hexdigest() != result.get("stdout_sha256") or len(data) != result.get("stdout_bytes"):
+        return "stdout.txt is not the output the process captured"
+    return None
 
 
 def _lock(path: Path, *, blocking: bool) -> Any:
@@ -224,6 +258,7 @@ def shim(directory: Path) -> int:
     if held is None:
         return 2  # another shim owns this invocation
     spec = json.loads((directory / "spec.json").read_text(encoding="utf-8"))
+    token = os.environ.pop(LAUNCH_ENV, None)  # never passed on to the CLI
     workdir = Path(tempfile.mkdtemp(prefix="test-skills-model-"))  # outside the project: no project CLAUDE.md
     started = time.time()
     timed_out = False
@@ -246,7 +281,8 @@ def shim(directory: Path) -> int:
     shutil.rmtree(workdir, ignore_errors=True)
     data = (directory / "stdout.txt").read_bytes()
     _write_atomic(directory / "result.json", {"exit_code": exit_code, "timed_out": timed_out, "error": error, "started_at": started, "finished_at": time.time(),
-                                              "stdout_sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "stdout_bytes": len(data)})
+                                              "stdout_sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "stdout_bytes": len(data),
+                                              "launch_token": token})
     held.close()
     return 0
 
@@ -338,6 +374,10 @@ def read_outcome(directory: Path, *, preset: str, configured_model: str | None) 
         "user_settings_loaded": bool(PRESETS[preset]["user_settings_loaded"]),
     }
     outcome = Outcome(evidence=evidence)
+    unbound = bound_to_launch(directory, result)
+    if unbound:
+        outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_RESULT_UNBOUND: {unbound}"
+        return outcome
     if result.get("error"):
         outcome.failure, outcome.reason = "TRANSPORT", f"RUNNER_LAUNCH_FAILED: {result['error']}"
         return outcome
