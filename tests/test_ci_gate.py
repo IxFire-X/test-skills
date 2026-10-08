@@ -60,3 +60,16 @@ def test_ci_gate_reports_a_missing_required_tool_as_not_runnable(tmp_path: Path,
 
     assert ci_gate.main(["--root", str(tmp_path)]) == 2
     assert "NOT_RUNNABLE: missing tools/contract_check.py" in capsys.readouterr().err
+
+
+
+def test_the_workflow_gives_the_java_tests_a_jdk(pack_root: Path) -> None:
+    """Independent review 2.2: without TEST_SKILLS_JAVA_HOME the Maven/PIT tests are skipped in GitHub Actions."""
+    import re
+
+    workflow = (pack_root / ".github" / "workflows" / "portable.yml").read_text(encoding="utf-8")
+    setup = re.search(r"uses: actions/setup-java@([0-9a-f]{40}) # v[0-9.]+\n\s+with:\n\s+distribution: temurin\n\s+java-version: '17'", workflow)
+    assert setup, "setup-java must be pinned by a commit SHA"
+    gate = workflow.index("python -m tools.ci_gate --root .")
+    assert workflow.index("actions/setup-java@") < gate
+    assert "TEST_SKILLS_JAVA_HOME: ${{ env.JAVA_HOME }}" in workflow[gate:gate + 200]
