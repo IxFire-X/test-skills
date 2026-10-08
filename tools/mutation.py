@@ -583,9 +583,20 @@ def measure(inputs: StageInputs) -> dict[str, Any]:
         mutants = parse_report(data)
         facts["report"] = {"sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "bytes": len(data), "mutations": len(mutants)}
         facts.update(attribute(mutants, inputs.automation, inputs.document, triage_limit=int(inputs.settings["triage_limit"])))
+        # A measurement is a count over the generated methods: none at all is no measurement (independent review 2.3).
+        if not mutants:
+            raise MutationStop("NOT_APPLICABLE", "MUTATION_NO_MUTANTS", f"PIT found nothing to mutate in {', '.join(classes) or 'the target classes'}")
+        if not any(row["covered"] for row in facts["cases"]):
+            totals = facts["totals"]
+            raise MutationStop("NOT_RUNNABLE", "MUTATION_NOT_ATTRIBUTED",
+                               f"{len(mutants)} mutants ({totals.get('killed', 0)} killed, {totals.get('survived', 0)} survived, {totals.get('no_coverage', 0)} "
+                               "without coverage), none covered by a generated test method: the tests do not reach the target classes, or PIT named them "
+                               "differently")
         facts["status"] = "MEASURED"
     except MutationStop as stop:
         facts.update({"status": stop.status, "reason_code": stop.code, "message": str(stop)[:600]})
+        if stop.code in {"MUTATION_NO_MUTANTS", "MUTATION_NOT_ATTRIBUTED"}:
+            facts.update({"cases": [], "requirements": [], "source_requirements": [], "survivor_groups": []})
     except Exception as error:  # noqa: BLE001 — review 2.1 item 9: every stop of the stage is a status with a reason
         facts.update({"status": "NOT_RUNNABLE", "reason_code": "MUTATION_STAGE_ERROR", "message": f"{type(error).__name__}: {error}"[:600],
                       "report": None, "totals": None, "cases": [], "requirements": [], "source_requirements": [], "survivor_groups": []})

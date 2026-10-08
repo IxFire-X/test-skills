@@ -329,6 +329,26 @@ def test_a_report_the_stage_cannot_read_is_not_runnable(tmp_path: Path, monkeypa
     assert facts["totals"] is None and facts["survivor_groups"] == []
 
 
+@pytest.mark.parametrize("kind", ["no_mutants", "not_attributed"])
+def test_a_measurement_that_attributes_nothing_is_not_measured(tmp_path: Path, kind: str) -> None:
+    """Independent review 2.3: zero mutants, or mutants none of which a generated method covers, is no strength measurement."""
+    import copy
+
+    automation, document = _step5()
+    pins_path, jars = _fake_pins(tmp_path)
+    xml = b'<?xml version="1.0" encoding="UTF-8"?>\n<mutations/>\n' if kind == "no_mutants" else _xml("step5-9340016c-mutations.xml.gz")
+    report_automation = automation
+    if kind == "not_attributed":  # the report names test methods the generated symbols do not (another class)
+        automation = copy.deepcopy(automation)
+        for row in automation["artifacts"]["generated_symbols"]:
+            row["locator"]["class_fqn"] = row["locator"]["class_fqn"] + "Renamed"
+    fake = FakeBuild(tmp_path, mutation.load_pins(pins_path), jars, xml=xml)
+    facts = mutation.measure(_inputs(tmp_path, automation, document, _report(tmp_path, report_automation if kind == "no_mutants" else automation), fake, pins_path))
+    expected = ("NOT_APPLICABLE", "MUTATION_NO_MUTANTS") if kind == "no_mutants" else ("NOT_RUNNABLE", "MUTATION_NOT_ATTRIBUTED")
+    assert (facts["status"], facts["reason_code"]) == expected, facts["message"]
+    assert facts["cases"] == [] and facts["survivor_groups"] == []
+
+
 def test_a_project_change_during_the_stage_voids_the_measurement(tmp_path: Path) -> None:
     automation, document = _step5()
     pins_path, jars = _fake_pins(tmp_path)
