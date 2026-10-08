@@ -52,12 +52,10 @@ def test_a_cases_only_run_needs_no_orchestrator(tmp_path: Path) -> None:
 
 def test_an_unanswered_question_stops_with_exit_3(tmp_path: Path) -> None:
     project = _project(tmp_path)
-    (project / ".skillsrc").unlink()  # discovery asks; with an answer file the run would continue
+    (project / ".skillsrc").unlink()  # discovery asks which test framework the module uses
     code, payload = _run(project, "--profile", "cases-only-v1")
-    if payload.get("action") == "ask_user":
-        assert code == 3 and payload["stopped"] == "ASK_USER_UNANSWERED"
-    else:  # discovery needed no question for this project: the run simply completes
-        assert payload["action"] == "done"
+    assert payload["action"] == "ask_user" and code == 3 and payload["stopped"] == "ASK_USER_UNANSWERED", payload
+    assert ".ask.skillsrc." in payload["task_id"] and payload["options"]
 
 
 def test_an_answer_that_never_fits_fails_as_transport_with_its_reason(tmp_path: Path) -> None:

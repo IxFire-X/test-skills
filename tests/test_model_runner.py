@@ -51,13 +51,15 @@ def _events(project: Path, done: dict) -> list[dict]:
 
 
 def test_next_returns_wait_at_once_and_collects_every_part_once(tmp_path: Path) -> None:
-    project, task = _start_runner(tmp_path)
+    project, task = _start_runner(tmp_path, "slow")
     model = SavedModel("cases-only-v1")
+    elapsed = 0.0
     while task["action"] == "llm":
-        task = _answer_and_submit(project, task, model)
-    started = time.monotonic()
+        started = time.monotonic()
+        task = _answer_and_submit(project, task, model)  # the call that opens the review launches its parts
+        elapsed = time.monotonic() - started
     assert task["action"] == "wait" and task["running"], task  # the review parts run in the background
-    assert time.monotonic() - started < 5
+    assert elapsed < 5  # each part answers only after 8 s: the call did not wait for them
     assert driver._exit_code(task) == 3
     done, _waits = _until_done(project, task, model)
     result = done["result"]
@@ -269,14 +271,13 @@ def test_driver_process_evidence_and_the_require_flag(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("script", ["nosession", "fixed-session"])
 def test_unprovable_sessions_are_not_driver_process(tmp_path: Path, script: str) -> None:
-    project, task = _start_runner(tmp_path, script, require_driver_isolation=True)
+    """One CLI session behind several parts (or none at all) proves no isolation: the parts are split on purpose."""
+    project, task = _start_runner(tmp_path, script, require_driver_isolation=True, review_input_bytes=24000)
     done, _waits = _until_done(project, task, SavedModel("cases-only-v1"))
     terminal = read_terminal_result(project / ".pilot-runs" / done["run_id"], done["result"]["attempt_id"])
-    parts = len(list((project / ".pilot-runs" / done["run_id"] / "review-state" / done["result"]["attempt_id"]).glob("review-part-boundary-*.json")))
-    if script == "nosession" or parts > 1:
-        assert terminal["isolation_evidence"] == "HOST_DECLARED" and terminal["reason_code"] == "REVIEW_ISOLATION_UNVERIFIED"
-    else:  # one part with a fixed session is still a distinct session
-        assert terminal["isolation_evidence"] == "DRIVER_PROCESS"
+    parts = {path.stem.split("-try", 1)[0] for path in (project / ".pilot-runs" / done["run_id"] / "review-state" / done["result"]["attempt_id"]).glob("review-part-boundary-*.json")}
+    assert len(parts) > 1, parts  # the branch "one session for several parts" really runs
+    assert terminal["isolation_evidence"] == "HOST_DECLARED" and terminal["reason_code"] == "REVIEW_ISOLATION_UNVERIFIED"
 
 
 def test_presets_forbid_writes_and_project_files_cannot_set_a_command(tmp_path: Path) -> None:

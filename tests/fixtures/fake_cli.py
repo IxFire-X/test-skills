@@ -6,7 +6,7 @@ Reads the whole role input from stdin.  ``--script`` lists the behaviour of succ
 calls with the same input (the last one repeats): ``ok`` answers, ``garbage`` prints
 non-JSON, ``prose`` returns a result without a JSON object (``triage-prose``: only for survivor
 triage tasks), ``nonzero`` exits 3,
-``ratelimit`` reports an API 429, ``sublimit``/``sublimit-text`` a subscription limit (JSON / plain text), ``timeout`` sleeps for an hour, ``nosession`` answers
+``ratelimit`` reports an API 429, ``sublimit``/``sublimit-text`` a subscription limit (JSON / plain text), ``timeout`` sleeps for an hour, ``slow`` answers after 8 s, ``nosession`` answers
 without a session id, and ``fixed-session`` answers with the same session id every time.
 
 Answers: a compact review part gets a clean answer (every area checked, every lint
@@ -78,6 +78,8 @@ def main() -> int:
     session = "fixed-session" if mode == "fixed-session" else str(uuid.uuid4())
     if mode == "timeout":
         time.sleep(3600)
+    if mode == "slow":  # answers, but only after 8 s: a driver that waited for it would be seen
+        time.sleep(8)
     if mode == "garbage":
         print("<<< not json >>>")
         return 0

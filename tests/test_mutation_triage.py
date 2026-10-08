@@ -87,9 +87,16 @@ def test_answers_that_do_not_look_or_point_outside_are_rejected() -> None:
     blind = copy.deepcopy(answer)
     blind["groups"][0]["refs"] = [receipt["survivor_groups"][0]["case_ids"][0]]  # an anchor, but not the group's own line
     assert codes(blind) == {"TRIAGE_REF_FOREIGN"}
+    assert len(task["group_ids"]) > 1  # the task really has a group to leave out
     missing = copy.deepcopy(answer)
-    missing["groups"] = missing["groups"][1:] or []
-    assert ("TRIAGE_GROUPS" in codes(missing)) or not missing["groups"]
+    missing["groups"] = missing["groups"][1:]
+    assert "TRIAGE_GROUPS" in codes(missing)
+    reordered = copy.deepcopy(answer)
+    reordered["groups"] = reordered["groups"][::-1]
+    assert "TRIAGE_GROUPS" in codes(reordered)
+    none = copy.deepcopy(answer)
+    none["groups"] = []
+    assert codes(none)
     foreign = _answer(task, receipt, "TEST_GAP")
     foreign["groups"][0]["proposal"]["case_id"] = "TC-B1-002"
     assert "TRIAGE_CASE_FOREIGN" in codes(foreign)
