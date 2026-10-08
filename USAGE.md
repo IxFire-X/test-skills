@@ -156,7 +156,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
 `--review-runner host|process` с `--review-runner-preset claude|codex` (по умолчанию — `.skillsrc`
 `review_runner.preset`, иначе `claude`), `--review-runner-command '<JSON-массив>'` (свой шаблон, только флагом
-запуска) и `--review-runner-cli <путь>` — разделы 11–13. `run --runner process [--run <run_id>]` проводит прогон
+запуска; хранится в `.pilot-runs/<run>.driver/config.json` для возобновления — секретов в шаблон не класть) и `--review-runner-cli <путь>` — разделы 11–13. `run --runner process [--run <run_id>]` проводит прогон
 без оркестратора (`--run` продолжает прерванный). Миграцию набора без записи показывает
 `python -m tools.suite migrate --project "$project"` (запись — только с `--write`). `run_id` берётся
 из первого ответа.
