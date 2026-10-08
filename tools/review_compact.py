@@ -719,6 +719,11 @@ def validate_answer(plan: Mapping[str, Any], part: Mapping[str, Any], result: Ma
         rows.append(_row("REVIEW_PART_COVERAGE", "/coverage", "coverage needs one row per assigned area, in order: "
                          + ", ".join(area["area_id"] for area in areas)))
     defined, lines, ranges = _part_refs(part)
+    if automation is not None:
+        # The methods of the part's cases and their files are named in its text without brackets (live Petclinic run d:
+        # a reviewer citing its method's SYMBOL ID was rejected with REVIEW_REF_UNKNOWN).
+        defined = defined | {row[field] for row in automation["artifacts"]["implementation_relations"] if row["case_id"] in set(part["case_ids"])
+                             for field in ("symbol_id", "file_id")}
     own = _own_anchors(part, document, automation)
     by_id = {area["area_id"]: area for area in areas}
     for index, row in enumerate(result["coverage"]):
@@ -775,6 +780,10 @@ def _own_anchors(part: Mapping[str, Any], document: Mapping[str, Any], automatio
     from tools.review_projection import case_anchor_ids
 
     own = {case["case_id"]: set(case_anchor_ids(case)) for case in document["test_cases"] if case["case_id"] in set(part["case_ids"])}
+    if automation is not None:
+        for row in automation["artifacts"]["implementation_relations"]:
+            if row["case_id"] in own:
+                own[row["case_id"]].add(row["symbol_id"])  # the case's own method
     return own
 
 

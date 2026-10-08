@@ -186,3 +186,24 @@ def test_an_assert_id_inside_a_string_literal_counts_as_present() -> None:
     code = rp.payload("r1")["automation"]["artifacts"]["generated_files"][0]["content"]
     assert len(missing) < 10, len(missing)
     assert all(not names_id(code, row["related_ids"][0]) for row in missing)
+
+
+def test_a_symbol_id_of_a_case_of_the_part_is_a_valid_ref() -> None:
+    """Run d, autotest review part 5: the reviewer cited the method's SYMBOL ID, shown in the part text without
+    brackets; the answer was rejected with REVIEW_REF_UNKNOWN.  The IDs of the part's own symbols and files are refs,
+    a symbol of a case outside the part is not."""
+    plan = _plan("r1")
+    payload = rp.payload("r1")
+    relations = payload["automation"]["artifacts"]["implementation_relations"]
+    result = next(row for row in _bound("r1") if row["part_id"] == "part-000005")
+    part = next(item for item in plan["parts"] if item["part_id"] == "part-000005")
+    index, row = next((index, row) for index, row in enumerate(result["coverage"]) if row["area_id"].startswith("local-TC-"))
+    case_id = row["area_id"][len("local-"):]
+    own = next(item for item in relations if item["case_id"] == case_id)
+    foreign = next(item for item in relations if item["case_id"] not in part["case_ids"])
+    assert own["symbol_id"] in part["text"] and f"[{own['symbol_id']}]" not in part["text"]
+    for refs, codes in (([own["symbol_id"]], []), ([own["file_id"], own["symbol_id"]], []), ([foreign["symbol_id"]], ["REVIEW_REF_UNKNOWN"])):
+        answer = copy.deepcopy(result)
+        answer["coverage"][index]["refs"] = refs
+        found = [item["code"] for item in rc.validate_answer(plan, part, answer, payload["document"], payload["automation"])]
+        assert found == codes, (refs, found)
