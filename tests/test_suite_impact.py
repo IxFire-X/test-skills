@@ -55,8 +55,10 @@ def test_requirement_changes_are_found_by_key(tmp_path: Path, step5: dict) -> No
     assert clean["needs_model"] is False and clean["new_endpoints"] == [] and clean["edited"]["methods"] == []
     _edit(project, EDITS)
     result = impact(project)["requirements"]
-    # The deleted-student text is in AC-7 and in section 3.7: both requirements changed.
-    assert sorted(key.split("#", 1)[1].rsplit(" > ", 1)[-1] for key in result["changed"]) == ["3.7. DELETE `/students/{id}/delete`", "AC-7"]
+    # The deleted-student text is in AC-7 and in section 3.7: both requirements changed.  The heading of 3.1
+    # carries its contract (method and path) and has no explicit ID: editing it is a change too (review 2.1 item 5).
+    assert sorted(key.split("#", 1)[1].rsplit(" > ", 1)[-1] for key in result["changed"]) == [
+        "3.1. GET `/student` (один студент)", "3.7. DELETE `/students/{id}/delete`", "AC-7"]
     assert [key.split("#", 1)[1] for key in result["added"]] == ["Аналитика: StudentController (независимый прогон run2) > 3. Перечень эндпоинтов и контракты API > 3.0. GET `/students/count`"]
     assert [key.split("#", 1)[1].rsplit(" > ", 1)[1] for key in result["removed"]] == ["3.8. GET `/hello-world`"]
     assert [(row["from"].rsplit(" > ", 1)[1], row["to"].rsplit(" > ", 1)[1]) for row in result["renamed"]] == [("3.1. GET `/student`", "3.1. GET `/student` (один студент)")]
@@ -78,6 +80,26 @@ def test_affected_cases_cover_every_case_of_a_changed_key(tmp_path: Path, step5:
         affected = set(result["cases"]["to_update"]) | set(result["cases"]["to_retire"])
         assert expected <= affected, (combination, expected - affected)
         assert not (affected - expected), combination  # exactly the linked cases
+
+
+def test_a_heading_edit_updates_its_cases_and_a_parent_rename_only_relinks(tmp_path: Path, step5: dict) -> None:
+    """Review 2.1 item 5: a Markdown section without an ID is keyed by its heading, and the heading names the endpoint."""
+    project = _project(tmp_path, step5)
+    manifest = json.loads((project / "test-cases" / "suite-manifest.json").read_text(encoding="utf-8"))
+    linked = {case["case_id"] for case in manifest["cases"] if any(key.endswith("> 3.1. GET `/student`") for key in case["requirement_keys"])}
+    assert linked
+    _edit(project, ["rename_student"])
+    heading = impact(project)
+    assert set(heading["cases"]["to_update"]) >= linked and not linked & set(heading["cases"]["relinked"])
+    assert heading["needs_model"] is True
+    # Renaming only the parent section changes every child key but no requirement's own heading or text.
+    (project / DOCS).write_bytes((step5["project"] / DOCS).read_bytes())
+    raw = (project / DOCS).read_bytes().decode("utf-8")
+    parent = next(line for line in raw.splitlines() if line.startswith("## 3."))
+    (project / DOCS).write_bytes(raw.replace(parent, parent + " (v2)", 1).encode("utf-8"))
+    moved = impact(project)
+    assert moved["requirements"]["changed"] == [] and moved["requirements"]["renamed"]
+    assert moved["cases"]["to_update"] == [] and set(moved["cases"]["relinked"]) >= linked
 
 
 def test_cases_retire_only_when_all_their_requirements_are_gone() -> None:

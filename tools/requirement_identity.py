@@ -11,7 +11,9 @@ section is inserted before it:
 
 ``text_digest`` is the SHA-256 of the requirement text without its heading line or leading
 ID, NFC-normalized with collapsed whitespace: renaming a heading keeps it, editing the text
-changes it.  Rows come from the same scan as ``build_context`` (``scan_documents``), so the
+changes it.  The impact analysis still treats an edited own heading of a section without an
+ID as a change (``suite_impact.own_heading_changed``): there the heading names the endpoint.
+Rows come from the same scan as ``build_context`` (``scan_documents``), so the
 ``source_requirement_id`` of a row is the SREQ the context envelope gives the same text.
 The keys are stored in the suite manifest, not in the closed context or canonical schemas.
 """

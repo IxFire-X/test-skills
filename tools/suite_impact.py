@@ -3,8 +3,9 @@
 Input: the current requirement scan, the suite manifest, optionally JUnit XML reports of the
 project's ordinary CI and a git range.  Output:
 
-* requirements by key — ``added``, ``changed`` (text digest), ``removed``, ``renamed`` (same text
-  under a new heading or ID, or an OpenSpec ``RENAMED`` pair);
+* requirements by key — ``added``, ``changed`` (text digest; for a Markdown section without an ID
+  also its own heading, which carries the method and path), ``removed``, ``renamed`` (same text
+  under a new parent heading or ID, or an OpenSpec ``RENAMED`` pair);
 * affected cases — ``to_update`` (a linked requirement changed or one of several was removed),
   ``to_retire`` (every linked requirement removed), ``relinked`` (only renamed), plus
   ``requirements_without_cases`` for added requirements;
@@ -25,6 +26,18 @@ from typing import Any, Iterable, Mapping, Sequence
 from tools.suite_manifest import FORMAT_VERSION, SuiteError, read_suite, suite_directory, validate, verify
 
 
+def own_heading_changed(old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
+    """A Markdown section without an explicit ID whose own heading changed (review 2.1 item 5).
+
+    Such a section is keyed by its heading chain, and its heading carries the contract
+    (``### 3.1. GET `/student```: method, path, number), so editing the heading is editing the
+    requirement, not renaming it.  A renamed parent section changes the key, not the own heading:
+    that stays a rename (relinked cases).
+    """
+    return (str(new["key"]).startswith("md:") and not new.get("explicit_id") and not old.get("explicit_id")
+            and " ".join(str(old.get("title") or "").split()) != " ".join(str(new.get("title") or "").split()))
+
+
 def compare_requirements(old: Sequence[Mapping[str, Any]], new: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     from tools.requirement_identity import rename_pairs
 
@@ -34,7 +47,8 @@ def compare_requirements(old: Sequence[Mapping[str, Any]], new: Sequence[Mapping
     renamed_old = {pair[0] for pair in renamed}
     renamed_new = {pair[1] for pair in renamed}
     changed = sorted(key for key in old_by.keys() & new_by.keys() if old_by[key]["text_digest"] != new_by[key]["text_digest"])
-    changed += sorted(new_key for old_key, new_key in renamed if old_by[old_key]["text_digest"] != new_by[new_key]["text_digest"])
+    changed += sorted(new_key for old_key, new_key in renamed if old_by[old_key]["text_digest"] != new_by[new_key]["text_digest"]
+                      or own_heading_changed(old_by[old_key], new_by[new_key]))
     return {
         "added": sorted(key for key in new_by.keys() - old_by.keys() if key not in renamed_new),
         "changed": sorted(set(changed)),
