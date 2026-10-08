@@ -35,6 +35,38 @@ def test_wave3_sections_are_opt_in_next_to_the_frozen_registries(pack_root: Path
     assert contract["requirement_identity"]["sreq_format"] == "unchanged"
 
 
+def test_the_quarantine_default_is_declared_by_its_amendment(pack_root: Path) -> None:
+    """Independent review 2.2: A4 is no longer opt-in for local-pilot-v1; the contract says so and the checker holds it."""
+    contract = _contract(pack_root)
+    wave3 = next(row for row in contract["contract_amendments"] if row["wave"] == 3)
+    assert wave3["opt_in"] is False and wave3["default_on"] == [{"amendment": "A4", "profile": "local-pilot-v1", "setting": "--disposition-policy",
+                                                                 "value": "quarantine", "opt_out": "cleanup", "since": "2026-10-08"}]
+    for change in (lambda c: c["optional_disposition_policies"]["defaults"].__setitem__("local-pilot-v1", "cleanup"),
+                   lambda c: next(row for row in c["contract_amendments"] if row["wave"] == 3).__setitem__("opt_in", True)):
+        changed = copy.deepcopy(contract)
+        change(changed)
+        errors = validate_pipeline_contract(changed, pack_root)["errors"]
+        assert errors, "the checker accepted a contradicting default"
+    for text in _rendered_files(contract).values():
+        assert "on by default: A4 in `local-pilot-v1`" in text
+
+
+def test_the_mutation_pins_file_is_checked_against_the_contract(pack_root: Path, tmp_path: Path) -> None:
+    """Independent review 2.2: the exact check also covers tools/mutation_tools.json and the triage answer schema."""
+    import shutil
+
+    contract = _contract(pack_root)
+    assert any(row["id"] == "mutation-triage-output.schema.json" for row in contract["optional_schema_registry"])
+    root = tmp_path / "pack"
+    shutil.copytree(pack_root / "schemas", root / "schemas")
+    shutil.copytree(pack_root / "tools", root / "tools", ignore=shutil.ignore_patterns("__pycache__"))
+    pins = json.loads((root / "tools" / "mutation_tools.json").read_text(encoding="utf-8"))
+    pins["java"]["pit_version"] = "1.31.0"
+    (root / "tools" / "mutation_tools.json").write_text(json.dumps(pins), encoding="utf-8")
+    errors = validate_pipeline_contract(contract, root)["errors"]
+    assert any("mutation pins" in error for error in errors), errors
+
+
 @pytest.mark.parametrize("change,expected", [
     (lambda c: c["contract_amendments"][1].__setitem__("sections", ["17.2"]), "contract amendments"),
     (lambda c: c["optional_policy_profiles"][0].__setitem__("id", "local-pilot-v1"), "optional policy profile"),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -118,13 +119,16 @@ EXPECTED_ACCEPTANCE_REASON_CODES = [
 EXPECTED_EXIT_PRIORITY = [{"when": "controller_error_without_trustworthy_attempt_result", "code": 2}, {"when": "waiting_for_input_or_model", "code": 3}, {"when": "cases_only_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "valid_terminal_cases_only_v1", "code": 1}, {"when": "accepted_terminal", "code": 0}, {"when": "unknown_not_runnable_fatal_invalid_closure_or_unreliable_evidence", "code": 2}, {"when": "other_trustworthy_terminal_unaccepted", "code": 1}]
 
 
-# Opt-in amendments of 2026-10-07 (docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md).
-# Without the option a run follows the frozen sections above unchanged.
+# Amendments of 2026-10-07 (docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md).  Every amendment
+# is an option except what ``default_on`` names: since the wave-3 gate (2026-10-08) A4 (quarantine) is the
+# default of local-pilot-v1, with ``--disposition-policy cleanup`` keeping the frozen §17 item 2.
 EXPECTED_AMENDMENTS = [
     {"id": "pilot-contract-amendments-2026-10-07", "document": "docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md",
      "status": "ACCEPTED", "opt_in": True, "wave": 2, "sections": ["1.2", "1.5", "17"]},
     {"id": "pilot-contract-amendments-2026-10-07-wave-3", "document": "docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md",
-     "status": "ACCEPTED", "opt_in": True, "wave": 3, "sections": ["17.2", "25"]},
+     "status": "ACCEPTED", "opt_in": False, "wave": 3, "sections": ["17.2", "25"],
+     "default_on": [{"amendment": "A4", "profile": "local-pilot-v1", "setting": "--disposition-policy", "value": "quarantine", "opt_out": "cleanup",
+                     "since": "2026-10-08"}]},
 ]
 EXPECTED_OPTIONAL_LIFECYCLE = [
     {"stage": "MUTATION", "after": "EXECUTION_TRACE", "before": "RETAIN_OR_CLEANUP_DECISION",
@@ -144,7 +148,10 @@ EXPECTED_MUTATION_TOOLING = {
     "python": "not_implemented",
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
-OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0")]
+OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("mutation-triage-output.schema.json", 6, "IMPLEMENTED", "1.0.0"),
+                        ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0")]
+# Role answers without a version field: their version is the role policy (``mutation-triage-v1``).
+VERSIONLESS_ANSWER_SCHEMAS = {"mutation-triage-output.schema.json"}
 OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED"),
                           ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED"), ("suite_update_result", 7, "IMPLEMENTED")]
 OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
@@ -254,7 +261,7 @@ def _validate_schema_file(root: Path, row: Mapping[str, Any], errors: list[str])
         schema = _load_json(path)
         if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
             errors.append(f"implemented schema draft mismatch: {name}")
-        if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and _accepted_versions(schema)[-1:] != [row.get("target_version")]:
+        if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS, *VERSIONLESS_ANSWER_SCHEMAS} and _accepted_versions(schema)[-1:] != [row.get("target_version")]:
             errors.append(f"implemented schema version mismatch: {name}")
         if not _known_object_boundaries_are_closed(schema):
             errors.append(f"implemented schema closure mismatch: {name}")
@@ -374,6 +381,7 @@ def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[s
         if isinstance(row, Mapping) and not (root / "schemas" / str(row.get("answer_schema"))).is_file():
             errors.append(f"optional stage answer schema missing: {row.get('answer_schema')}")
     _error_if_not_equal(errors, "mutation tooling", contract.get("mutation_tooling"), EXPECTED_MUTATION_TOOLING)
+    _validate_mutation_pins(contract, root, errors)
     _error_if_not_equal(errors, "model runner", contract.get("model_runner"), EXPECTED_MODEL_RUNNER)
     _error_if_not_equal(errors, "disposition policies", contract.get("optional_disposition_policies"), EXPECTED_DISPOSITION_POLICIES)
     _error_if_not_equal(errors, "optional policy profiles", contract.get("optional_policy_profiles"), EXPECTED_OPTIONAL_PROFILES)
@@ -384,8 +392,47 @@ def _validate_amendments(contract: Mapping[str, Any], root: Path, errors: list[s
     # The quarantine default of local-pilot-v1 (after the wave-3 gate) keeps the frozen §17 item 2 selectable.
     if "cleanup" not in ((contract.get("optional_disposition_policies") or {}).get("values") or []):
         errors.append("disposition policies drop the frozen cleanup policy")
+    # An amendment that is on by default says so, and its default is the one the policy registry applies.
+    policies = contract.get("optional_disposition_policies") or {}
+    for row in contract.get("contract_amendments") or []:
+        if not isinstance(row, Mapping):
+            continue
+        defaults = row.get("default_on") or []
+        if bool(defaults) == (row.get("opt_in") is True):
+            errors.append("contract amendment opt-in flag contradicts its default_on")
+        for default in defaults:
+            if not isinstance(default, Mapping) or (policies.get("defaults") or {}).get(default.get("profile")) != default.get("value") \
+                    or default.get("opt_out") not in (policies.get("values") or []) or default.get("setting") != policies.get("setting"):
+                errors.append("contract amendment default_on does not match the disposition policy defaults")
+    for profile, value in (policies.get("defaults") or {}).items():
+        optional = {row.get("id") for row in contract.get("optional_policy_profiles") or [] if isinstance(row, Mapping)}
+        if profile not in optional and not any(default.get("profile") == profile and default.get("value") == value
+                                                 for row in contract.get("contract_amendments") or [] if isinstance(row, Mapping)
+                                                 for default in row.get("default_on") or [] if isinstance(default, Mapping)):
+            errors.append(f"disposition policy default of frozen profile {profile} is not declared by an amendment")
     _error_if_not_equal(errors, "suite contract", contract.get("suite_contract"), EXPECTED_SUITE_CONTRACT)
     _error_if_not_equal(errors, "requirement identity", contract.get("requirement_identity"), EXPECTED_REQUIREMENT_IDENTITY)
+
+
+def _validate_mutation_pins(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
+    """The pins file the contract names agrees with the contract (independent review 2.2): versions, roots and a
+    SHA-256 for every jar, among them the tool's and the plugin's own jars."""
+    java = (contract.get("mutation_tooling") or {}).get("java")
+    if not isinstance(java, Mapping):
+        return
+    try:
+        pins = _load_json(root / str(java.get("pins")))["java"]
+    except Exception as exception:  # noqa: BLE001
+        errors.append(f"mutation pins unavailable: {exception}")
+        return
+    files = {row.get("file"): row.get("sha256") for row in pins.get("jars") or [] if isinstance(row, Mapping)}
+    tool, plugin = str(java.get("tool")).split(":")[-1], str(java.get("plugin")).split(":")[-1]
+    if (pins.get("pit_version") != java.get("version") or pins.get("plugin_version") != java.get("plugin_version")
+            or pins.get("roots") != [f"{java.get('tool')}:{java.get('version')}", f"{java.get('plugin')}:{java.get('plugin_version')}"]
+            or f"{tool}-{java.get('version')}.jar" not in files or f"{plugin}-{java.get('plugin_version')}.jar" not in files
+            or not all(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) for digest in files.values())
+            or pins.get("launcher") != "org.junit.platform:junit-platform-launcher"):
+        errors.append("mutation pins do not match the contract's mutation tooling")
 
 
 def validate_pipeline_contract(contract: Mapping[str, Any], root: Path, check_drift: bool = False) -> dict[str, Any]:

@@ -56,7 +56,7 @@
   "projections": {"contracts":"CONTRACTS.md","pipeline":"PIPELINE.md"},
   "contract_amendments": [
     {"id":"pilot-contract-amendments-2026-10-07","document":"docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md","status":"ACCEPTED","opt_in":true,"wave":2,"sections":["1.2","1.5","17"]},
-    {"id":"pilot-contract-amendments-2026-10-07-wave-3","document":"docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md","status":"ACCEPTED","opt_in":true,"wave":3,"sections":["17.2","25"]}
+    {"id":"pilot-contract-amendments-2026-10-07-wave-3","document":"docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md","status":"ACCEPTED","opt_in":false,"wave":3,"sections":["17.2","25"],"default_on":[{"amendment":"A4","profile":"local-pilot-v1","setting":"--disposition-policy","value":"quarantine","opt_out":"cleanup","since":"2026-10-08"}]}
   ],
   "optional_lifecycle_stages": [
     {"stage":"MUTATION","after":"EXECUTION_TRACE","before":"RETAIN_OR_CLEANUP_DECISION","requires":["skillsrc_mutation_enabled","run_authorization_mutation_requested","authoritative_pass_or_fail"],"mutates":"passing_generated_methods_only","writes":"run_directory_only","proves":"project_inventory_unchanged","receipt":"mutation_receipt","axis":"test_strength","never_changes":["verification","accepted","dispositions","earlier_evidence"]}
@@ -75,6 +75,7 @@
   ],
   "optional_schema_registry": [
     {"id":"mutation-receipt.schema.json","phase":6,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true},
+    {"id":"mutation-triage-output.schema.json","phase":6,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true},
     {"id":"suite-manifest.schema.json","phase":7,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true},
     {"id":"suite-update-result.schema.json","phase":7,"implementation_status":"IMPLEMENTED","target_version":"1.0.0","semantic_ready":true}
   ],

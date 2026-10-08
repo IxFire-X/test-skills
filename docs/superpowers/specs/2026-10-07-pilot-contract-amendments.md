@@ -8,8 +8,13 @@ amendments, and the `optional_*`, `mutation_tooling` and `model_runner` sections
 machine-readable form. Like the [erratum of 2026-09-01](2026-09-01-portable-testing-skills-pilot-contract-erratum.md),
 this document replaces only the statements listed below.
 
-Every amendment is **opt-in**. A run that does not enable the new option is governed by the frozen
-contract and the erratum exactly as before: the same lifecycle, artifacts, results and exit codes.
+Every amendment is **opt-in**, with one exception: since the wave-3 gate (2026-10-08) A4 — the disposition
+policy `quarantine` — is the **default of `local-pilot-v1`** (`contract_amendments` row of wave 3:
+`opt_in: false`, `default_on`); `--disposition-policy cleanup` keeps the frozen §17 item 2 for a run, and a
+run created before the switch keeps cleanup. Apart from that default, a run that does not enable a new option
+is governed by the frozen contract and the erratum exactly as before: the same lifecycle, artifacts, results
+and exit codes. What the amendments changed in frozen registries is listed in
+[What changed in the frozen registries](#what-changed-in-the-frozen-registries).
 
 ## Wave 2
 
@@ -91,8 +96,9 @@ The linear lifecycle gains one optional stage:
 
 ### A4. §17 item 2 — disposition policy `quarantine`
 
-§17 item 2 still holds by default: after `FAIL` or `NOT_RUNNABLE` every byte-identical pipeline-owned
-materialized file receives `CLEANED`. As an option the run MAY use the disposition policy `quarantine`:
+§17 item 2 holds after `NOT_RUNNABLE`, and after `FAIL` whenever the policy is `cleanup`: every
+byte-identical pipeline-owned materialized file receives `CLEANED`. The run MAY use the disposition policy
+`quarantine` — in `local-pilot-v1` it is the default:
 
 - `local-pilot-v1` — the default since the wave-3 gate (2026-10-08): a new run records
   `disposition_policy: quarantine` in its run-scoped authorization unless it is started with
@@ -102,8 +108,10 @@ materialized file receives `CLEANED`. As an option the run MAY use the dispositi
 
 Rules:
 
-1. The policy applies only after an authoritative `FAIL` with per-method outcomes. `NOT_RUNNABLE`,
-   `EXECUTION_UNKNOWN`, partial materialization and every other branch keep the frozen rules.
+1. The policy applies only after an authoritative `FAIL` with per-method outcomes: a `FAIL` without a
+   failed method (an empty report, `NO_TESTS_COLLECTED`) is cleaned as in §17 item 2 (clarified 2026-10-08,
+   independent review, item 2). `NOT_RUNNABLE`, `EXECUTION_UNKNOWN`, partial materialization and every
+   other branch keep the frozen rules.
 2. A file whose selected methods all passed receives `RETAINED`.
 3. A file with failed methods receives `QUARANTINED`: the package rewrites only that file, only when its
    bytes equal the materialized digest, and changes only the failed methods — a JUnit 5 method gets
@@ -142,6 +150,35 @@ Rules:
 6. Product code, project dependencies, build configuration, secrets and files outside the suite and the
    manifest's test files are never changed.
 
+## What changed in the frozen registries
+
+Written down on 2026-10-08 after the independent review of waves 2–3 (section 2.2): the amendments are not
+confined to the `optional_*` sections. Each change below keeps every earlier artifact valid (a minor version
+keeps the earlier minors of its major in an `enum`; a new key or enum value is optional), but it does change a
+frozen registry or schema, and a reader of the frozen contract must know it.
+
+1. **Schema versions raised in `schema_registry`** (minor, earlier minors still accepted):
+   `skillsrc.schema.json` 5.0.0 → 5.2.0 (`mutation`, `review_runner` in 5.1.0; `requirements`, `suite` in
+   5.2.0), `context-marker-output.schema.json` 5.0.0 → 5.1.0 (`requirement_gaps`),
+   `review-part-output-compact.schema.json` 2.0.0 → 2.1.0 (`analyst_question`), `driver-summary.schema.json`
+   1.0.0 → 1.2.0 (`test_strength`, `strength_triage`, `analyst_questions`, `isolation_evidence` in 1.1.0;
+   `suite` in 1.2.0).
+2. **New top-level registry `acceptance_reason_codes`**: `UNRESOLVED_AUTOMATION_BLOCKER` for the predicate
+   `no_unresolved_blocker` of `local-pilot-v1`. It changes the default result of a run that was already not
+   accepted: such a run used to end with `reason_code: null` and now names the predicate; acceptance itself is
+   unchanged, and an earlier result without the reason stays valid (`legacy_results: reason_absent_stays_valid`).
+   It belongs to no amendment option — a fix made between the waves (commit `4b71652`).
+3. **Frozen schemas extended without a version change** (optional keys and enum values only):
+   `run-authorization-receipt` (`mutation_requested`, `require_driver_isolation`, `suite_requested`,
+   `disposition_policy`), `terminal-result` (`test_strength`, `isolation_evidence`,
+   `driver_isolation_required`), `disposition-receipt` (disposition `QUARANTINED`, plan rows with
+   `quarantine_symbols` and `quarantined_content_digest`), `materialization-receipt` and
+   `pre-finalization-trace` (disposition `QUARANTINED`), `driver-summary` 1.2.0 (`suite.quarantined` and
+   `paths.quarantine_markdown`, 2026-10-08, review item 6). The contract's own meta-schema
+   `pipeline.schema.json` gained the amendment sections and, on 2026-10-08, the `default_on` field.
+4. **The default of `local-pilot-v1` after `FAIL`** is the quarantine policy (A4) since 2026-10-08 — see the
+   introduction and `contract_amendments[wave 3].default_on`.
+
 ## What remains in force
 
 - The package creates no project copy, worktree, sandbox or virtual environment.
@@ -150,5 +187,7 @@ Rules:
 - It creates no commit, push, pull request, CI or cron job.
 - Model claims, host-declared isolation and absent runtime evidence are never treated as proof; reviewer
   independence is still proved by controller evidence (§2).
-- Without the new options every profile, artifact, result tuple and exit code is unchanged.
+- Without the new options every profile, artifact, result tuple and exit code is unchanged — except the
+  quarantine default of `local-pilot-v1` (A4): a `FAIL` keeps the passing generated tests and marks the failed
+  methods instead of cleaning every file; verification, acceptance, the result tuple and exit codes are the same.
 - `implemented_unverified` and `ready_tuple = null` remain in force; lifting them is the user's decision.

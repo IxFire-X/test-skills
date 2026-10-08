@@ -68,10 +68,11 @@ Version: `4.0`
 - `reason_code`: preterminal `absent`; terminal `written_once`
 - `accepted`: preterminal `absent`; terminal `boolean`
 
-## Opt-in amendments
+## Contract amendments
 
 - `pilot-contract-amendments-2026-10-07` (wave 2, `ACCEPTED`, opt-in `true`): §1.2, §1.5, §17 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
-- `pilot-contract-amendments-2026-10-07-wave-3` (wave 3, `ACCEPTED`, opt-in `true`): §17.2, §25 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+- `pilot-contract-amendments-2026-10-07-wave-3` (wave 3, `ACCEPTED`, opt-in `false`): §17.2, §25 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+  - on by default: A4 in `local-pilot-v1` (`--disposition-policy quarantine`) since 2026-10-08; `--disposition-policy cleanup` keeps the frozen rule
 - optional stage `MUTATION` between `EXECUTION_TRACE` and `RETAIN_OR_CLEANUP_DECISION`; requires `skillsrc_mutation_enabled, run_authorization_mutation_requested, authoritative_pass_or_fail`; mutates `passing_generated_methods_only`; writes `run_directory_only`; proves `project_inventory_unchanged`; receipt `mutation_receipt`; axis `test_strength`; never changes `verification, accepted, dispositions, earlier_evidence`
 - mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
 - model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
@@ -79,6 +80,7 @@ Version: `4.0`
 - optional skill `mutation-triage` — `skills/mutation-triage/SKILL.md`
 - optional stage `mutation-triage`: role `strength-analyst`, policy `mutation-triage-v1`, cardinality `post_terminal_per_task`, profiles `local-pilot-v1`, answer `mutation-triage-output.schema.json`, decisions `TEST_GAP, SPEC_GAP, EQUIVALENT, OUT_OF_SCOPE`, changes `nothing_in_the_attempt`
 - optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
+- optional schema `mutation-triage-output.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
 - optional schema `suite-manifest.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
 - optional schema `suite-update-result.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
 - optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)

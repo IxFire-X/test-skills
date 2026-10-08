@@ -453,7 +453,10 @@ materialization -> execution -> execution trace -> retain/cleanup decision
 Для всего generated file set:
 
 - `PASS` + valid trace/path/digests: `RETAINED` до finalization;
-- `FAIL`/`NOT_RUNNABLE`: byte-identical pipeline-owned files получают `CLEANED`
+- `FAIL` в `local-pilot-v1` (по умолчанию с 2026-10-08, политика `quarantine`): файл без упавших
+  методов — `RETAINED`, файл с упавшими — `QUARANTINED` (методы помечены `@Disabled`/`xfail`); `FAIL` без
+  исходов по методам и `--disposition-policy cleanup` — `CLEANED`;
+- `NOT_RUNNABLE`: byte-identical pipeline-owned files получают `CLEANED`
   (кроме `NOT_RUNNABLE/TESTS_DESELECTED`: файлы остаются `RETAINED`);
 - `UNKNOWN`: unchanged file получает `PRESERVED_EXECUTION_UNKNOWN`, изменённый —
   `PRESERVED_CONTENT_CONFLICT`; cleanup запрещён;
@@ -611,8 +614,9 @@ python -m tools.pipeline_driver run --project "$project" --runner process --prof
 
 ## 13. Живой набор (волна 3)
 
-Всё включается явно; без флагов профили и результаты прежние. Поправки к контракту A4 и
-A5 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
+Всё включается явно, кроме одного: с гейта волны 3 карантин (A4) — политика `local-pilot-v1` по
+умолчанию (`--disposition-policy cleanup` возвращает прежнюю очистку). Остальное без флагов прежнее.
+Поправки к контракту A4 и A5 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
 
 **Шаблон ID требований** (`.skillsrc` 5.2.0). Строка, начинающаяся с ID, открывает
 требование так же, как встроенные `REQ-…`/`AC-…`; без шаблона разбиение прежнее:

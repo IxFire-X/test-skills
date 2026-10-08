@@ -426,7 +426,8 @@ Disposition определяется для каждого materialized file и 
 | Verification | Неизменённый pipeline-owned file | Drift/conflict |
 |---|---|---|
 | `PASS` + valid trace | `RETAINED` | unaccepted conflict |
-| `FAIL` / `NOT_RUNNABLE` | `CLEANED` (`NOT_RUNNABLE/TESTS_DESELECTED` — `RETAINED`) | preserved с точной причиной |
+| `FAIL`, политика `quarantine` (по умолчанию в `local-pilot-v1`) | без упавших методов — `RETAINED`, с упавшими — `QUARANTINED` | preserved с точной причиной |
+| `FAIL` без исходов по методам или `--disposition-policy cleanup`; `NOT_RUNNABLE` | `CLEANED` (`NOT_RUNNABLE/TESTS_DESELECTED` — `RETAINED`) | preserved с точной причиной |
 | `UNKNOWN` | `PRESERVED_EXECUTION_UNKNOWN` | `PRESERVED_CONTENT_CONFLICT` |
 
 Cleanup при `UNKNOWN` запрещён. `RETAINED` — только физический pre-finalization факт;
@@ -481,7 +482,7 @@ evidence.
 ## 11. Опции волны 2: сила тестов, изоляция процессом, вопросы аналитикам
 
 Поправки к контракту: `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
-Каждая возможность включается только опцией; без неё артефакты и результаты прежние.
+Каждая возможность волны 2 включается только опцией; без неё артефакты и результаты прежние.
 
 ### Этап `MUTATION`
 
@@ -552,7 +553,8 @@ export --project … --run …` печатает комментарий для c
 ## 12. Волна 3: живой набор и поддержка тестов
 
 Поправки к контракту A4 (§17 п. 2, политика `quarantine`) и A5 (§25, свои тесты по
-манифесту и профиль `suite-update-v1`). Без опций всё прежнее.
+манифесту и профиль `suite-update-v1`). Без опций всё прежнее, кроме карантина: с гейта волны 3
+он — политика `local-pilot-v1` по умолчанию (`--disposition-policy cleanup` — прежняя очистка).
 
 - **Ключи требований** (`tools/requirement_identity.py`). OpenSpec — capability и имя
   requirement (с `RENAMED`), Markdown — явный ID (встроенный или `.skillsrc`

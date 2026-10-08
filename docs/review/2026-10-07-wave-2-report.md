@@ -33,11 +33,15 @@
 A2 — §1 п. 5, закреплённые по SHA-256 jar PIT разрешаются Maven проекта по согласию; A3 — §17,
 необязательный этап `MUTATION` между трассой исполнения и решением о сохранении. Всё — опциями;
 в силе остаются запреты на копии проекта, правку кода продукта, зависимостей, сборки и секретов,
-чужих и отредактированных людьми файлов, коммиты, push, PR и задачи CI. Замороженные реестры
-контракта не тронуты: новое — в `optional_lifecycle_stages`, `optional_result_axes`,
-`optional_skills`, `optional_stage_registry`, `optional_schema_registry`,
-`optional_artifact_registry`, `mutation_tooling`, `model_runner`; `contract_check` сверяет их
-точно и проверяет, что `MUTATION` стоит между двумя соседними замороженными стадиями.
+чужих и отредактированных людьми файлов, коммиты, push, PR и задачи CI. Новое — в
+`optional_lifecycle_stages`, `optional_result_axes`, `optional_skills`, `optional_stage_registry`,
+`optional_schema_registry`, `optional_artifact_registry`, `mutation_tooling`, `model_runner`;
+`contract_check` сверяет их точно и проверяет, что `MUTATION` стоит между двумя соседними
+замороженными стадиями. *Исправлено 2026-10-08 по независимому ревью (п. 2.2):* прежняя фраза
+«замороженные реестры контракта не тронуты» неверна — подняты минорные версии четырёх схем в
+`schema_registry`, добавлен реестр `acceptance_reason_codes`, замороженные схемы расширены
+необязательными полями без смены версии; полный перечень — раздел «What changed in the frozen
+registries» документа поправок.
 
 **M. Мутации** (`tools/mutation.py`, `tools/mutation_tools.json`, `tools/strength_report.py`).
 - Включение: `.skillsrc` `mutation.enabled: true` (схема `.skillsrc` 5.1.0; файлы 5.0.0 валидны)

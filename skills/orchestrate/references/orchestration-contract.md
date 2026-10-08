@@ -178,7 +178,8 @@ disposition. Execution не начинается при partial materialization.
 | Branch | Disposition |
 |---|---|
 | authoritative `PASS` + valid trace | unchanged file `RETAINED` |
-| `FAIL` / `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
+| `FAIL`, policy `quarantine` (default of `local-pilot-v1` since 2026-10-08) | file without failed methods `RETAINED`; file with failed methods `QUARANTINED` (methods marked) |
+| `FAIL` without per-method outcomes or `--disposition-policy cleanup`; `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
 | `NOT_RUNNABLE/TESTS_DESELECTED` | file остаётся `RETAINED` |
 | `UNKNOWN`, unchanged | `PRESERVED_EXECUTION_UNKNOWN` |
 | `UNKNOWN`, drifted | `PRESERVED_CONTENT_CONFLICT` + unknown evidence |

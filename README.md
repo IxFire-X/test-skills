@@ -156,7 +156,10 @@ receipt. Основные правила:
 
 - authoritative `PASS` и valid trace позволяют записать pre-finalization
   `RETAINED`; acceptance дополнительно требует valid finalization;
-- `FAIL` и `NOT_RUNNABLE` очищают только byte-identical pipeline-owned files;
+- `FAIL` (в `local-pilot-v1` по умолчанию — карантин): файлы без упавших методов остаются,
+  упавшие методы помечаются `@Disabled`/`xfail(strict=True)` с причиной; с `--disposition-policy
+  cleanup` и при `FAIL` без исходов по методам — очистка;
+- `NOT_RUNNABLE` очищает только byte-identical pipeline-owned files;
   исключение — `NOT_RUNNABLE/TESTS_DESELECTED` (настройки pytest проекта исключили
   выбранные тесты): файлы остаются;
 - `UNKNOWN` никогда не очищает generated delta;

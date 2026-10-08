@@ -61,10 +61,13 @@ def _acceptance_reason_lines(contract: Mapping[str, Any]) -> list[str]:
 
 
 def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
-    """Opt-in amendments (empty for a contract without them)."""
+    """Amendments (empty for a contract without them): options, except what ``default_on`` names."""
     lines: list[str] = []
     for row in contract.get("contract_amendments") or []:
         lines.append(f"- `{row['id']}` (wave {row['wave']}, `{row['status']}`, opt-in `{str(row['opt_in']).lower()}`): §{', §'.join(row['sections'])} — `{row['document']}`")
+        for default in row.get("default_on") or []:
+            lines.append(f"  - on by default: {default['amendment']} in `{default['profile']}` (`{default['setting']} {default['value']}`) since {default['since']}; "
+                         f"`{default['setting']} {default['opt_out']}` keeps the frozen rule")
     for stage in contract.get("optional_lifecycle_stages") or []:
         lines.append(f"- optional stage `{stage['stage']}` between `{stage['after']}` and `{stage['before']}`; requires `{', '.join(stage['requires'])}`; "
                      f"mutates `{stage['mutates']}`; writes `{stage['writes']}`; proves `{stage['proves']}`; receipt `{stage['receipt']}`; axis `{stage['axis']}`; "
@@ -141,7 +144,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
         contracts.extend(["", "## Acceptance reason codes", "", *reasons])
     amendments = _amendment_lines(contract)
     if amendments:
-        contracts.extend(["", "## Contract amendments (opt-in)", "", *amendments])
+        contracts.extend(["", "## Contract amendments", "", *amendments])
     contracts.extend(["", "## Artifact registry", "", *_table(artifact_rows, [("Artifact", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), "", "## Schema registry", "", *_table(schema_rows, [("Schema", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Target version", "target_version"), ("Semantic ready", "semantic_ready"), ("Component state", "component_state")]), ""])
     pipeline = [f"# Pipeline: {contract['pipeline']}", "", MARKER, "", f"Version: `{contract['version']}`", "", "## Phase 1 public runtime seam", ""]
     pipeline.extend(f"- `{name}{contract['runtime_signatures'][name]}`" for name in RUNTIME_SIGNATURE_ORDER)
@@ -157,7 +160,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
             pipeline.append(f"- `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
     amendments = _amendment_lines(contract)
     if amendments:
-        pipeline.extend(["", "## Opt-in amendments", "", *amendments])
+        pipeline.extend(["", "## Contract amendments", "", *amendments])
     pipeline.extend(["", "## Normative result tuples", ""])
     pipeline.extend(f"- `{name}`: `{json.dumps(contract['result_tuples'][name], ensure_ascii=False, sort_keys=True)}`" for name in ("complete_fail", "execution_unknown", "pre_execution_rework", "early_fatal", "review_context_limit", "invalid_finalization"))
     policies = {row["id"]: row for row in contract["policy_profiles"]}
