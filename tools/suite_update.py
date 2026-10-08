@@ -540,7 +540,7 @@ def _current_automation(project: Path, manifest: Mapping[str, Any], document: Ma
     file_of = {row["path"]: row for row in manifest["files"]}
     cases = {case["case_id"]: case for case in document["test_cases"]}
     for row in manifest["files"]:
-        content = (Path(project) / row["path"]).read_text(encoding="utf-8")
+        content = _source(Path(project) / row["path"])
         files.append({"file_id": row["file_id"], "path": row["path"], "language": row["language"], "framework": "pytest" if row["language"] == "python" else "junit5",
                       "content": content, "content_digest": sha256_bytes(content.encode("utf-8"))})
     seen = set()
@@ -597,6 +597,11 @@ _AUTOMATION_INSTRUCTIONS = {
 }
 
 
+def _source(path: Path) -> str:
+    """A test file's text with its own line endings (``read_text`` would turn CRLF into LF — review 2.3)."""
+    return Path(path).read_bytes().decode("utf-8")
+
+
 def _file_rows(manifest: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     return {row["path"]: row for row in manifest["files"]}
 
@@ -629,7 +634,7 @@ def _automation_brief(project: Path, run_root: Path, mode: str, case_ids: Sequen
         if failures and case_id in failures:
             row["failure"] = failures[case_id]
         rows.append(row)
-    targets = [{"path": path, "language": files[path]["language"], "content": (Path(project) / path).read_text(encoding="utf-8")} for path in paths]
+    targets = [{"path": path, "language": files[path]["language"], "content": _source(Path(project) / path)} for path in paths]
     return {"mode": mode, "target_file": targets[0] if targets else None, "target_files": targets, "cases": rows}
 
 
@@ -637,7 +642,7 @@ def _method_source(project: Path, method: Mapping[str, Any], manifest: Mapping[s
     from tools.suite_manifest import slices_of
 
     file_row = next(row for row in manifest["files"] if row["path"] == method["file"])
-    content = (Path(project) / method["file"]).read_text(encoding="utf-8")
+    content = _source(Path(project) / method["file"])
     slices = slices_of(method["file"], file_row["file_id"], content, [{"symbol_id": method["symbol_id"], "locator": parse_locator(method["locator"], file_row["language"])}])
     member = slices.symbols[method["symbol_id"]]
     return "\n".join(slices.lines[member.start - 1:member.end])
@@ -703,7 +708,7 @@ def _spliced(project: Path, run_root: Path, value: Mapping[str, Any], case_ids: 
         return None, {}, problems
     targets = [row["path"] for row in (_automation_brief(project, run_root, mode, case_ids, document).get("target_files") or [])]
     default = targets[0] if targets else manifest["files"][0]["path"]
-    current = {path: (Path(project) / path).read_text(encoding="utf-8") for path in files}
+    current = {path: _source(Path(project) / path) for path in files}
     replace: dict[str, dict[str, str]] = {}
     add: dict[str, list[str]] = {}
     table: dict[str, dict[str, Any]] = {}
@@ -851,7 +856,7 @@ def _apply(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> N
 
             for path, rows in removal.items():
                 locators = {method["locator"]: parse_locator(method["locator"], files[path]["language"]) for method in method_of.values() if method["file"] == path}
-                contents[path] = splice(path, (Path(project) / path).read_text(encoding="utf-8"), remove=rows, locators=locators)
+                contents[path] = splice(path, _source(Path(project) / path), remove=rows, locators=locators)
         edits = verify(project, manifest)
         touched = {row["locator"] for row in (facts.get("methods") or {}).values()} | {method_of[case_id]["locator"] for case_id in facts.get("removed") or [] if case_id in method_of}
         conflicts = sorted(touched & set(edits["methods"]))
@@ -989,7 +994,7 @@ def _triage(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
             released.append(locator)
     for path, todo in by_file.items():
         target = Path(project) / path
-        content = target.read_text(encoding="utf-8")
+        content = _source(target)
         content = release(path, content, todo["release"]) if todo["release"] else content
         content = mark(path, content, todo["mark"]) if todo["mark"] else content
         target.write_bytes(content.encode("utf-8"))
@@ -1113,7 +1118,7 @@ def _block_weaker_repairs(project: Path, run_root: Path, state: dict[str, Any], 
             f"`{locator}`: ремонт не принят — доля убитых мутантов кейса `{case_id}` упала {dropped[case_id]['before']} → {dropped[case_id]['after']}; тест в карантине")
     for path, marks in by_file.items():
         target = Path(project) / path
-        target.write_bytes(mark(path, target.read_text(encoding="utf-8"), marks).encode("utf-8"))
+        target.write_bytes(mark(path, _source(target), marks).encode("utf-8"))
     state["facts"]["quarantine"] = quarantined
     state["facts"]["repaired"] = sorted(repaired - set(blocked))
 

@@ -426,3 +426,40 @@ def test_a_suite_of_two_test_files_updates_the_file_that_holds_the_case(suite_pr
     assert {row["status"] for row in after["cases"]} == {"ACTIVE"} and verify(project, after)["methods"] == []
     [case] = [row for row in after["cases"] if row["case_id"] == "TC-B1-010"]
     assert case["methods"][0]["file"] == GENERATED_MORE
+
+
+
+def _to_crlf(project: Path) -> None:
+    import hashlib
+
+    from tools.suite_manifest import canonical_bytes
+
+    data = (project / GENERATED).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    (project / GENERATED).write_bytes(data)
+    manifest = read_suite(project, "test-cases/")
+    manifest["files"][0]["file_digest"] = "sha256:" + hashlib.sha256(data).hexdigest()
+    (project / "test-cases" / "suite-manifest.json").write_bytes(canonical_bytes(manifest))
+
+
+def _only_crlf(data: bytes) -> bool:
+    return data.count(b"\n") > 10 and data.count(b"\n") == data.count(b"\r\n")
+
+
+@needs_java
+@pytest.mark.parametrize("change", ["update", "quarantine"])
+def test_crlf_test_files_keep_their_line_endings(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    """Independent review 2.3: the package rewrites CRLF test files with CRLF (an update and a quarantine mark)."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _to_crlf(project)
+    if change == "update":
+        _replace_in(project / DOCS, OLD, NEW)
+        _replace_in(project / CONTROLLER, OLD, NEW)
+    else:
+        _replace_in(project / CONTROLLER, OLD, "Student removed")
+    result = _drive(replay)["result"]
+    assert result["outcome"] == "UPDATED", result
+    data = (project / GENERATED).read_bytes()
+    assert (NEW.encode() in data) if change == "update" else (b"test-skills quarantine" in data)
+    assert _only_crlf(data)
