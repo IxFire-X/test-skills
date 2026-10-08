@@ -578,7 +578,7 @@ def _automation_schema() -> dict[str, Any]:
             "properties": {
                 "methods": {"type": "array", "items": {"type": "object", "additionalProperties": False, "required": ["case_id", "method_name", "source"],
                                                        "properties": {"case_id": {"type": "string"}, "method_name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
-                                                                      "source": {"type": "string", "minLength": 1}}}},
+                                                                      "source": {"type": "string", "minLength": 1}, "file": {"type": "string", "minLength": 1}}}},
                 "helpers": {"type": "array", "items": {"type": "string", "minLength": 1}},
                 "imports": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 300}},
                 "diagnostics": {"type": "array"}}}
@@ -586,9 +586,10 @@ def _automation_schema() -> dict[str, Any]:
 
 _AUTOMATION_INSTRUCTIONS = {
     "update": ("Режим update автотестов набора. Первый файл — задание: обновлённые и новые кейсы, для обновлённого — его текущий метод (locator, "
-               "текст), целевой файл и его текущий текст; второй — новая ревизия документа набора. Верни methods: для каждого кейса задания один метод "
-               "целиком — для обновлённого с тем же method_name, для нового с новым уникальным именем; helpers — новые вспомогательные методы, если "
-               "нужны; imports — недостающие строки import. Каждая проверка кейса сохраняет свою метку ASSERT-… и ожидаемое значение кейса. "
+               "текст, файл), целевые файлы target_files и их текущий текст; второй — новая ревизия документа набора. Верни methods: для каждого кейса "
+               "задания один метод целиком — для обновлённого с тем же method_name (он остаётся в своём файле), для нового с новым уникальным именем "
+               "и, если не первый, file — путь одного из target_files; helpers — новые вспомогательные методы, если нужны (идут в первый целевой "
+               "файл); imports — недостающие строки import (добавляются в изменённые файлы). Каждая проверка кейса сохраняет свою метку ASSERT-… и ожидаемое значение кейса. "
                "Остальные методы и общий код файла драйвер сохранит сам; файлы проекта не пиши."),
     "repair": ("Режим repair: тест не компилируется или падает его собственный код, а кейс и требования не менялись. Первый файл — задание: кейс, "
                "текущий метод, вывод ошибки, целевой файл. Верни methods с тем же method_name и исправленным кодом; ожидания, литералы и метки "
@@ -596,23 +597,40 @@ _AUTOMATION_INSTRUCTIONS = {
 }
 
 
+def _file_rows(manifest: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    return {row["path"]: row for row in manifest["files"]}
+
+
+def _contents(facts: Mapping[str, Any], manifest: Mapping[str, Any]) -> dict[str, str]:
+    """New contents of the suite's test files written by an update or repair (``content`` — one file, older runs)."""
+    if facts.get("contents"):
+        return dict(facts["contents"])
+    return {manifest["files"][0]["path"]: facts["content"]} if facts.get("content") else {}
+
+
 def _automation_brief(project: Path, run_root: Path, mode: str, case_ids: Sequence[str], document: Mapping[str, Any], failures: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """The cases with their current methods and every test file they live in (a new case goes to the first target file
+    unless the answer names another one with ``file``) — a suite may hold several test files (review 2.3)."""
     _suite_dir, manifest, _old = _suite(project, run_root)
     method_of = {case["case_id"]: case["methods"][0] for case in manifest["cases"] if case["methods"]}
-    target = manifest["files"][0]
-    content = (Path(project) / target["path"]).read_text(encoding="utf-8")
     cases = {case["case_id"]: case for case in document["test_cases"]}
+    files = _file_rows(manifest)
+    paths = sorted({method_of[case_id]["file"] for case_id in case_ids if case_id in method_of})
+    if any(case_id not in method_of for case_id in case_ids) and manifest["files"] and manifest["files"][0]["path"] not in paths:
+        paths.append(manifest["files"][0]["path"])
     rows = []
     for case_id in case_ids:
         method = method_of.get(case_id)
         row = {"case_id": case_id, "case": cases[case_id], "method": None}
         if method is not None:
             source = _method_source(project, method, manifest)
-            row["method"] = {"locator": method["locator"], "method_name": method["locator"].rsplit("#", 1)[-1].rsplit(".", 1)[-1], "source": source}
+            row["method"] = {"locator": method["locator"], "method_name": method["locator"].rsplit("#", 1)[-1].rsplit(".", 1)[-1], "source": source,
+                             "file": method["file"]}
         if failures and case_id in failures:
             row["failure"] = failures[case_id]
         rows.append(row)
-    return {"mode": mode, "target_file": {"path": target["path"], "language": target["language"], "content": content}, "cases": rows}
+    targets = [{"path": path, "language": files[path]["language"], "content": (Path(project) / path).read_text(encoding="utf-8")} for path in paths]
+    return {"mode": mode, "target_file": targets[0] if targets else None, "target_files": targets, "cases": rows}
 
 
 def _method_source(project: Path, method: Mapping[str, Any], manifest: Mapping[str, Any]) -> str:
@@ -653,16 +671,29 @@ def _automation(project: Path, run_root: Path, state: dict[str, Any], _max: int)
                  instructions=_AUTOMATION_INSTRUCTIONS["update"], extra={"mode": "update"})
 
 
+def _java_owner(content: str) -> str | None:
+    """``package.Class`` of a Java test file (its first top-level class)."""
+    import re
+
+    package = re.search(r"^\s*package\s+([\w.]+)\s*;", content, re.M)
+    owner = re.search(r"^(?:public\s+|final\s+|abstract\s+)*class\s+(\w+)", content, re.M)
+    if owner is None:
+        return None
+    return f"{package.group(1)}.{owner.group(1)}" if package else owner.group(1)
+
+
 def _spliced(project: Path, run_root: Path, value: Mapping[str, Any], case_ids: Sequence[str], document: Mapping[str, Any], *, mode: str,
-             retired: Sequence[str] = ()) -> tuple[str | None, dict[str, Any], list[dict[str, str]]]:
-    """The target file with the answer's methods in place, the new method table, and the problems."""
+             retired: Sequence[str] = ()) -> tuple[dict[str, str] | None, dict[str, Any], list[dict[str, str]]]:
+    """Every touched test file with the answer's methods in place, the new method table, and the problems.
+
+    A changed method stays in its own file; a new one goes to the file the answer names (one of the
+    brief's target files) or the first target file; a retired method leaves its file.
+    """
     from tools.suite_manifest import slices_of
     from tools.suite_merge import MergeError, literal_diagnostics, repair_diagnostics, splice
 
     _suite_dir, manifest, _old = _suite(project, run_root)
-    target = manifest["files"][0]
-    content = (Path(project) / target["path"]).read_text(encoding="utf-8")
-    language = target["language"]
+    files = _file_rows(manifest)
     method_of = {case["case_id"]: case["methods"][0] for case in manifest["cases"] if case["methods"]}
     cases = {case["case_id"]: case for case in document["test_cases"]}
     problems: list[dict[str, str]] = []
@@ -670,50 +701,73 @@ def _spliced(project: Path, run_root: Path, value: Mapping[str, Any], case_ids: 
     if set(rows) != set(case_ids):
         problems.append({"path": "/methods", "code": "AUTOMATION_METHODS", "message": "return exactly one method for every case of the task: " + ", ".join(case_ids)})
         return None, {}, problems
-    replace, add, table = {}, [], {}
-    owner = next((method["locator"].rsplit("#", 1)[0] for method in method_of.values() if "#" in method["locator"]), None)
+    targets = [row["path"] for row in (_automation_brief(project, run_root, mode, case_ids, document).get("target_files") or [])]
+    default = targets[0] if targets else manifest["files"][0]["path"]
+    current = {path: (Path(project) / path).read_text(encoding="utf-8") for path in files}
+    replace: dict[str, dict[str, str]] = {}
+    add: dict[str, list[str]] = {}
+    table: dict[str, dict[str, Any]] = {}
     for case_id in case_ids:
         row = rows[case_id]
         name = row["method_name"]
+        old = method_of.get(case_id)
+        path = old["file"] if old is not None else str(row.get("file") or default)
+        if path not in files:
+            problems.append({"path": f"/methods/{case_id}/file", "code": "AUTOMATION_FILE_UNKNOWN", "message": "file names one of the target files: " + ", ".join(targets)})
+            continue
+        language = files[path]["language"]
         if language == "java" and f" {name}(" not in row["source"]:
             problems.append({"path": f"/methods/{case_id}", "code": "AUTOMATION_METHOD_NAME", "message": f"the source does not declare {name}(…)"})
             continue
-        old = method_of.get(case_id)
         if old is not None:
             if old["locator"].rsplit("#", 1)[-1].rsplit(".", 1)[-1] != name:
                 problems.append({"path": f"/methods/{case_id}", "code": "AUTOMATION_METHOD_NAME", "message": f"keep the method name of {case_id}"})
                 continue
-            replace[old["locator"]] = row["source"]
+            replace.setdefault(path, {})[old["locator"]] = row["source"]
             table[case_id] = {"locator": old["locator"], "symbol_id": old["symbol_id"], "kind": "updated" if mode == "update" else "repaired",
-                              "old_source": _method_source(project, old, manifest)}
+                              "old_source": _method_source(project, old, manifest), "file": path}
         elif mode == "update":
+            owner = next((method["locator"].rsplit("#", 1)[0] for method in method_of.values() if method["file"] == path and "#" in method["locator"]), None) \
+                or (_java_owner(current[path]) if language == "java" else None)
             locator = f"{owner}#{name}" if language == "java" else name
-            add.append(row["source"])
-            table[case_id] = {"locator": locator, "symbol_id": "SYMBOL-" + case_id.removeprefix("TC-"), "kind": "new", "old_source": None}
+            add.setdefault(path, []).append(row["source"])
+            table[case_id] = {"locator": locator, "symbol_id": "SYMBOL-" + case_id.removeprefix("TC-"), "kind": "new", "old_source": None, "file": path}
         else:
             problems.append({"path": f"/methods/{case_id}", "code": "REPAIR_UNKNOWN_METHOD", "message": f"{case_id} has no method to repair"})
     if problems:
         return None, {}, problems
-    locators = {method["locator"]: parse_locator(method["locator"], language) for method in method_of.values()}
-    removed = [{"name": method_of[case_id]["locator"]} for case_id in retired if case_id in method_of]
-    try:
-        new_content = splice(target["path"], content, replace=replace, add=add + list(value.get("helpers") or []), remove=removed,
-                             locators=locators, imports=list(value.get("imports") or []))
-    except MergeError as error:
-        return None, {}, error.diagnostics
-    symbols = [{"symbol_id": row["symbol_id"], "locator": parse_locator(row["locator"], language)} for row in table.values()]
-    try:
-        slices = slices_of(target["path"], target["file_id"], new_content, symbols)
-    except ValueError as error:
-        return None, {}, [{"path": target["path"], "code": "AUTOMATION_FILE_INVALID", "message": f"the file does not split into methods: {error}"}]
-    support = "\n".join(line for start, end in slices.support_ranges() for line in slices.lines[start - 1:end])
-    for case_id, row in table.items():
-        member = slices.symbols[row["symbol_id"]]
-        source = "\n".join(slices.lines[member.start - 1:member.end])
-        case = cases[case_id]
-        found = repair_diagnostics(case, row["old_source"], source, support) if mode == "repair" else literal_diagnostics(case, source, support)
-        problems += [{**item, "path": f"{case_id}:{item['path']}"} for item in found]
-    return (None if problems else new_content), table, problems
+    removed: dict[str, list[dict[str, str]]] = {}
+    for case_id in retired:
+        if case_id in method_of:
+            removed.setdefault(method_of[case_id]["file"], []).append({"name": method_of[case_id]["locator"]})
+    touched = sorted(set(replace) | set(add) | set(removed))
+    helpers_to = default if default in touched else (touched[0] if touched else default)
+    contents: dict[str, str] = {}
+    for path in touched:
+        language = files[path]["language"]
+        locators = {method["locator"]: parse_locator(method["locator"], language) for method in method_of.values() if method["file"] == path}
+        try:
+            contents[path] = splice(path, current[path], replace=replace.get(path), add=add.get(path, []) + (list(value.get("helpers") or []) if path == helpers_to else []),
+                                    remove=removed.get(path, []), locators=locators, imports=list(value.get("imports") or []) if path in replace or path in add else [])
+        except MergeError as error:
+            return None, {}, error.diagnostics
+    for path, content in contents.items():
+        own = {case_id: row for case_id, row in table.items() if row["file"] == path}
+        if not own:
+            continue
+        language = files[path]["language"]
+        symbols = [{"symbol_id": row["symbol_id"], "locator": parse_locator(row["locator"], language)} for row in own.values()]
+        try:
+            slices = slices_of(path, files[path]["file_id"], content, symbols)
+        except ValueError as error:
+            return None, {}, [{"path": path, "code": "AUTOMATION_FILE_INVALID", "message": f"the file does not split into methods: {error}"}]
+        support = "\n".join(line for start, end in slices.support_ranges() for line in slices.lines[start - 1:end])
+        for case_id, row in own.items():
+            member = slices.symbols[row["symbol_id"]]
+            source = "\n".join(slices.lines[member.start - 1:member.end])
+            found = repair_diagnostics(cases[case_id], row["old_source"], source, support) if mode == "repair" else literal_diagnostics(cases[case_id], source, support)
+            problems += [{**item, "path": f"{case_id}:{item['path']}"} for item in found]
+    return (None if problems else contents), table, problems
 
 
 def _check_automation(project: Path, run_root: Path, state: dict[str, Any], label: str, value: Any) -> list[dict[str, str]]:
@@ -727,11 +781,11 @@ def _check_automation(project: Path, run_root: Path, state: dict[str, Any], labe
         retired = []
     if not isinstance(value, Mapping):
         return [{"path": "", "code": "TASK_OUTPUT_INVALID", "message": "the answer is an object with methods"}]
-    content, table, problems = _spliced(project, run_root, value, case_ids, document, mode=mode, retired=retired)
+    contents, table, problems = _spliced(project, run_root, value, case_ids, document, mode=mode, retired=retired)
     if problems:
         return problems
     state = _state(run_root)
-    state["facts"]["automation" if mode == "update" else "repair_automation"] = {"content": content, "methods": {case_id: {key: row[key] for key in ("locator", "symbol_id", "kind")} for case_id, row in table.items()},
+    state["facts"]["automation" if mode == "update" else "repair_automation"] = {"contents": contents, "methods": {case_id: {key: row[key] for key in ("locator", "symbol_id", "kind", "file")} for case_id, row in table.items()},
                                                                                   "removed": retired}
     _save(run_root, state)
     return []
@@ -739,29 +793,38 @@ def _check_automation(project: Path, run_root: Path, state: dict[str, Any], labe
 
 def _static_snapshot(project: Path, run_root: Path, state: Mapping[str, Any], key: str) -> dict[str, Any] | None:
     facts = state["facts"]["automation" if key == "update" else "repair_automation"]
-    if not facts.get("content"):
-        return None
     _suite_dir, manifest, document = _suite(project, run_root)
+    contents = _contents(facts, manifest)
+    if not contents:
+        return None
     if key == "update":
         document = json.loads((_work(run_root) / "document.json").read_text(encoding="utf-8"))
-    target = manifest["files"][0]
+    files = _file_rows(manifest)
     cases = {case["case_id"]: case for case in document["test_cases"]}
     changed = sorted(facts["methods"])
-    symbols = [{"file_id": target["file_id"], "symbol_id": row["symbol_id"], "locator": parse_locator(row["locator"], target["language"])} for row in facts["methods"].values()]
-    relations = [relation for case_id in changed for relation in _relations(cases[case_id], target["file_id"], facts["methods"][case_id]["symbol_id"])]
+    file_of = {case_id: str(row.get("file") or manifest["files"][0]["path"]) for case_id, row in facts["methods"].items()}
+    symbols = [{"file_id": files[file_of[case_id]]["file_id"], "symbol_id": row["symbol_id"], "locator": parse_locator(row["locator"], files[file_of[case_id]]["language"])}
+               for case_id, row in facts["methods"].items()]
+    relations = [relation for case_id in changed for relation in _relations(cases[case_id], files[file_of[case_id]]["file_id"], facts["methods"][case_id]["symbol_id"])]
+    generated = [{"file_id": files[path]["file_id"], "path": path, "language": files[path]["language"],
+                  "framework": "pytest" if files[path]["language"] == "python" else "junit5", "content": content,
+                  "content_digest": sha256_bytes(content.encode("utf-8"))} for path, content in sorted(contents.items())]
     automation = {"schema_version": "5.0.0", "stage": "tc-to-autotest", "warnings": [],
                   "artifacts": {"automation_status": "GENERATED", "manual_dispositions": [], "diagnostics": [], "generated_symbols": symbols, "implementation_relations": relations,
-                                "generated_files": [{"file_id": target["file_id"], "path": target["path"], "language": target["language"],
-                                                     "framework": "pytest" if target["language"] == "python" else "junit5", "content": facts["content"],
-                                                     "content_digest": sha256_bytes(facts["content"].encode("utf-8"))}]}}
+                                "generated_files": generated}}
     from tools.suite_manifest import slices_of
 
-    try:
-        slices = slices_of(target["path"], target["file_id"], facts["content"], [{"symbol_id": row["symbol_id"], "locator": row["locator"]} for row in symbols])
-        code = "\n".join("\n".join(slices.lines[member.start - 1:member.end]) for member in slices.symbols.values())
-    except ValueError:
-        code = facts["content"]
-    return _review_snapshot(project, run_root, subset_document(document, changed), automation, code=code)
+    parts = []
+    for path, content in sorted(contents.items()):
+        own = [row for row in symbols if row["file_id"] == files[path]["file_id"]]
+        if not own:
+            continue
+        try:
+            slices = slices_of(path, files[path]["file_id"], content, [{"symbol_id": row["symbol_id"], "locator": row["locator"]} for row in own])
+            parts.append("\n".join("\n".join(slices.lines[member.start - 1:member.end]) for member in slices.symbols.values()))
+        except ValueError:
+            parts.append(content)
+    return _review_snapshot(project, run_root, subset_document(document, changed), automation, code="\n\n".join(parts))
 
 
 def _static_review(project: Path, run_root: Path, state: dict[str, Any], max_tasks: int) -> dict[str, Any] | None:
@@ -769,35 +832,41 @@ def _static_review(project: Path, run_root: Path, state: dict[str, Any], max_tas
 
 
 def _apply(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
-    """Write the reviewed test file; a method a person edited is never replaced (the whole change becomes a proposal)."""
+    """Write the reviewed test files; a method a person edited is never replaced (the whole change becomes a proposal)."""
     from tools.suite_manifest import verify
 
     facts = state["facts"].get("automation") or {}
     applied = True
-    if facts.get("content") or facts.get("removed"):
-        _suite_dir, manifest, _document = _suite(project, run_root)
-        target = manifest["files"][0]
-        path = Path(project) / target["path"]
-        content = facts.get("content")
+    _suite_dir, manifest, _document = _suite(project, run_root)
+    contents = _contents(facts, manifest)
+    if contents or facts.get("removed"):
+        files = _file_rows(manifest)
         method_of = {case["case_id"]: case["methods"][0] for case in manifest["cases"] if case["methods"]}
-        if content is None:
+        removal: dict[str, list[dict[str, str]]] = {}
+        for case_id in facts.get("removed") or []:
+            if case_id in method_of and method_of[case_id]["file"] not in contents:
+                removal.setdefault(method_of[case_id]["file"], []).append({"name": method_of[case_id]["locator"]})
+        if removal:
             from tools.suite_merge import splice
 
-            locators = {method["locator"]: parse_locator(method["locator"], target["language"]) for method in method_of.values()}
-            content = splice(target["path"], path.read_text(encoding="utf-8"), remove=[{"name": method_of[case_id]["locator"]} for case_id in facts["removed"] if case_id in method_of],
-                             locators=locators)
+            for path, rows in removal.items():
+                locators = {method["locator"]: parse_locator(method["locator"], files[path]["language"]) for method in method_of.values() if method["file"] == path}
+                contents[path] = splice(path, (Path(project) / path).read_text(encoding="utf-8"), remove=rows, locators=locators)
         edits = verify(project, manifest)
         touched = {row["locator"] for row in (facts.get("methods") or {}).values()} | {method_of[case_id]["locator"] for case_id in facts.get("removed") or [] if case_id in method_of}
         conflicts = sorted(touched & set(edits["methods"]))
         if conflicts:
             applied = False
             state["facts"].setdefault("proposals", []).append(
-                f"`{target['path']}`: методы {', '.join(f'`{item}`' for item in conflicts)} правил человек — обновление тестов не записано, оно в предложении")
-            _write(_work(run_root) / "proposed" / (target["path"].replace("/", "__") + ".json"), {"content": content})
+                f"{', '.join(f'`{path}`' for path in sorted(contents))}: методы {', '.join(f'`{item}`' for item in conflicts)} правил человек — "
+                "обновление тестов не записано, оно в предложении")
+            for path, content in contents.items():
+                _write(_work(run_root) / "proposed" / (path.replace("/", "__") + ".json"), {"content": content})
         else:
-            path.write_bytes(content.encode("utf-8"))
+            for path, content in sorted(contents.items()):
+                (Path(project) / path).write_bytes(content.encode("utf-8"))
     state["facts"]["update_applied"] = applied
-    state["facts"]["automation_applied"] = applied and bool(facts.get("content") or facts.get("removed"))
+    state["facts"]["automation_applied"] = applied and bool(contents or facts.get("removed"))
     _goto(run_root, state, "SUITE_RUN")
     return None
 
@@ -815,13 +884,13 @@ def _effective_manifest(project: Path, run_root: Path, state: Mapping[str, Any])
     _suite_dir, manifest, _document = _suite(project, run_root)
     manifest = copy.deepcopy(manifest)
     automation = (state["facts"].get("automation") or {}) if state["facts"].get("automation_applied") else {}
-    target = manifest["files"][0]
+    default = manifest["files"][0]["path"]
     rows = {case["case_id"]: case for case in manifest["cases"]}
     for case_id in automation.get("removed") or []:
         if case_id in rows:
             rows[case_id]["status"] = "RETIRED"
     for case_id, method in (automation.get("methods") or {}).items():
-        entry = {"file": target["path"], "symbol_id": method["symbol_id"], "locator": method["locator"], "slice_digest": "sha256:" + "0" * 64}
+        entry = {"file": str(method.get("file") or default), "symbol_id": method["symbol_id"], "locator": method["locator"], "slice_digest": "sha256:" + "0" * 64}
         if case_id in rows:
             rows[case_id]["methods"] = [entry]
             rows[case_id]["automation"] = "AUTOMATED"
@@ -950,8 +1019,8 @@ def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int)
 
     facts = state["facts"]["repair_automation"]
     _suite_dir, manifest, _document = _suite(project, run_root)
-    target = Path(project) / manifest["files"][0]["path"]
-    target.write_bytes(facts["content"].encode("utf-8"))
+    for path, content in sorted(_contents(facts, manifest).items()):
+        (Path(project) / path).write_bytes(content.encode("utf-8"))
     effective = _effective_manifest(project, run_root, state)
     locators = {row["locator"] for row in facts["methods"].values()}
     # The whole suite runs again: a build that did not compile ran none of its methods.

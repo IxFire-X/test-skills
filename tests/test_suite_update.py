@@ -365,3 +365,64 @@ def test_a_product_exception_is_quarantined_with_a_question_not_repaired(suite_p
     assert case["case_id"] == "TC-B1-010" and case["quarantine"]["reason"] == "BEHAVIOR_CHANGED_WITHOUT_SPEC"
     description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
     assert "Черновик баг-репорта" in description and "storage unavailable" in description
+
+
+GENERATED_MORE = GENERATED.replace("StudentControllerPipelineTest", "StudentControllerPipelineMoreTest")
+
+
+def _split_suite(project: Path) -> list[str]:
+    """The suite's test class split in two files (cases 7-12 in a second class); the manifest records both as the package's."""
+    import hashlib
+
+    from tools.suite_manifest import canonical_bytes, method_digests, parse_locator
+    from tools.suite_merge import splice
+
+    manifest = read_suite(project, "test-cases/")
+    content = (project / GENERATED).read_text(encoding="utf-8")
+    cases = [case for case in manifest["cases"] if case["methods"]]
+    moved = cases[6:]
+    locators = {method["locator"]: parse_locator(method["locator"], "java") for case in cases for method in case["methods"]}
+    first = splice(GENERATED, content, remove=[{"name": method["locator"]} for case in moved for method in case["methods"]], locators=locators)
+    second = splice(GENERATED, content, remove=[{"name": method["locator"]} for case in cases[:6] for method in case["methods"]], locators=locators)
+    second = second.replace("class StudentControllerPipelineTest", "class StudentControllerPipelineMoreTest")
+    (project / GENERATED).write_text(first, encoding="utf-8")
+    (project / GENERATED_MORE).write_text(second, encoding="utf-8")
+    old_owner, new_owner = "StudentControllerPipelineTest#", "StudentControllerPipelineMoreTest#"
+    for case in moved:
+        for method in case["methods"]:
+            method["file"] = GENERATED_MORE
+            method["locator"] = method["locator"].replace(old_owner, new_owner)
+    manifest["files"].append({**manifest["files"][0], "path": GENERATED_MORE, "file_id": "FILE-more"})
+    for row, text in ((manifest["files"][0], first), (manifest["files"][1], second)):
+        own = [method for case in cases for method in case["methods"] if method["file"] == row["path"]]
+        digests, support = method_digests(row["path"], row["file_id"], text, [{"symbol_id": method["symbol_id"], "locator": parse_locator(method["locator"], "java")} for method in own])
+        for method in own:
+            method["slice_digest"] = digests[method["symbol_id"]]
+        row["file_digest"] = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+        row["support_digest"] = support
+    (project / "test-cases" / "suite-manifest.json").write_bytes(canonical_bytes(manifest))
+    assert verify(project, read_suite(project, "test-cases/")) == {"suite_files": [], "cases": [], "methods": [], "support": [], "missing": []}
+    return [case["case_id"] for case in moved]
+
+
+@needs_java
+def test_a_suite_of_two_test_files_updates_the_file_that_holds_the_case(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Independent review 2.3: the suite is not one file — an update rewrites the method in the file that holds it."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    moved = _split_suite(project)
+    assert "TC-B1-010" in moved
+    first = (project / GENERATED).read_bytes()
+    _replace_in(project / DOCS, OLD, NEW)
+    _replace_in(project / CONTROLLER, OLD, NEW)
+    result = _drive(replay)["result"]
+    assert (result["outcome"], result["exit_code"]) == ("UPDATED", 0), result
+    assert (project / GENERATED).read_bytes() == first
+    more = (project / GENERATED_MORE).read_text(encoding="utf-8")
+    assert NEW in more and OLD not in more
+    after = read_suite(project, "test-cases/")
+    assert [row["path"] for row in after["files"]] == [GENERATED, GENERATED_MORE]
+    assert {row["status"] for row in after["cases"]} == {"ACTIVE"} and verify(project, after)["methods"] == []
+    [case] = [row for row in after["cases"] if row["case_id"] == "TC-B1-010"]
+    assert case["methods"][0]["file"] == GENERATED_MORE
