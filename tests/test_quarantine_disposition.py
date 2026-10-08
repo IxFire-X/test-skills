@@ -79,3 +79,15 @@ def test_the_cleanup_policy_still_cleans_the_file(tmp_path: Path, monkeypatch: p
     assert done["result"]["verification"] == "FAIL"
     final = read_attempt_receipt(replay.run_root(done), done["result"]["attempt_id"], "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     assert [row["disposition"] for row in final["files"]] == ["CLEANED"] and not (replay.project / GENERATED).exists()
+
+
+@pytest.mark.parametrize("evidence", [[], [{"file_id": "F1", "symbol_id": "S1", "status": "PASSED"}], None])
+def test_a_fail_without_failed_methods_falls_back_to_cleanup(evidence) -> None:
+    """Review 2.1 item 2 (A4.1): only a FAIL with per-method outcomes is quarantined; an empty report
+    (NO_TESTS_COLLECTED, a wrong module) keeps the frozen cleanup of §17 item 2 instead of retaining every file."""
+    from tools.generated_delta import quarantine_modes
+
+    payload = {"execution_evidence": evidence, "process_evidence": [{"kind": "NO_TESTS_COLLECTED"}]}
+    assert quarantine_modes({"disposition_policy": "quarantine"}, "FAIL", payload) is None
+    failed = {"execution_evidence": [{"file_id": "F1", "symbol_id": "S1", "status": "FAILED"}]}
+    assert quarantine_modes({"disposition_policy": "quarantine"}, "FAIL", failed) == {"F1": {"S1": "FAILED"}}

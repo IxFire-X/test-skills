@@ -624,7 +624,9 @@ def resolve_disposition_policy(
 def quarantine_modes(authorization: Mapping[str, Any], verification: str, execution_payload: Mapping[str, Any] | None) -> dict[str, dict[str, str]] | None:
     """``{file_id: {symbol_id: FAILED|ERROR}}`` of failed methods under the quarantine policy, else None.
 
-    A file that is absent from the map had no failed method and is retained.
+    A file that is absent from the map had no failed method and is retained.  A FAIL
+    without per-method outcomes (an empty report, ``NO_TESTS_COLLECTED``) is None: those
+    files never ran, so the frozen cleanup of §17 item 2 applies (amendment A4.1).
     """
     if authorization.get("disposition_policy") != "quarantine" or verification != "FAIL" or not isinstance(execution_payload, Mapping):
         return None
@@ -632,7 +634,7 @@ def quarantine_modes(authorization: Mapping[str, Any], verification: str, execut
     for row in execution_payload.get("execution_evidence") or []:
         if isinstance(row, Mapping) and row.get("status") in {"FAILED", "ERROR"}:
             failed.setdefault(str(row.get("file_id")), {})[str(row.get("symbol_id"))] = str(row["status"])
-    return failed
+    return failed or None
 
 
 def quarantined_bytes(content: bytes, path: str, failed: Mapping[str, str], symbols: Sequence[Mapping[str, Any]], run_id: str) -> bytes:
