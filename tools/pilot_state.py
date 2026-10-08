@@ -4474,6 +4474,13 @@ def available_review_parts(run_root: Path, attempt_id: str, review_key: str = "c
             if part["part_id"] not in completed and part["blocked_reason"] is None and part["part_id"] not in plan["unavailable"]]
 
 
+def sequential_review_part_ids(run_root: Path, attempt_id: str, review_key: str = "canonical") -> set[str]:
+    """Parts that must run after every earlier part: the extra parts of reviewers' required checks."""
+    state = derive_state(run_root)
+    plan = _review_plan_with_state(run_root, state, attempt_id, review_key)
+    return {part["part_id"] for part in [*plan["parts"], *plan.get("additions", [])] if part.get("requested_check") is not None}
+
+
 def next_review_part(run_root: Path, attempt_id: str, review_key: str = "canonical") -> dict[str, Any] | None:
     """Register discovered cross checks and return the next available bounded input."""
     available = available_review_parts(run_root, attempt_id, review_key)

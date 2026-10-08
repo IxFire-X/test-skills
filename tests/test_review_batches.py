@@ -102,3 +102,47 @@ def test_a_legacy_plan_stays_sequential_with_max_tasks(tmp_path: Path) -> None:
     code, first = replay.drive(until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
     code, again = replay.call("next", "--project", str(replay.project), "--run", first["run_id"], "--max-tasks", "4")
     assert again["action"] == "llm" and again["task_id"] == first["task_id"]
+
+
+
+def test_required_check_parts_are_issued_one_at_a_time_in_a_batch_run(tmp_path: Path) -> None:
+    """Live Petclinic run (2026-10-08): reviewers' required_checks become extra parts that must run in order;
+    `next --max-tasks 4` issued two of them at once and the driver failed (DRIVER_FAILURE: review parts must run sequentially)."""
+    import re
+
+    replay = Replay("2c10d733", tmp_path)
+    code, first = replay.drive(replay.start_with(*SMALL)[1], until=lambda task: str(task.get("stage", "")).startswith("tc-reviewer:"))
+    run_id = first["run_id"]
+    checks_asked = {"n": 0}
+
+    def answer(task):
+        value = clean_compact_answer(part_text(task))
+        cases = sorted(set(re.findall(r"\[(TC-[A-Z0-9-]+)\]", part_text(task))))
+        if checks_asked["n"] < 2 and len(cases) >= 2:
+            value["required_checks"] = [{"case_ids": [cases[0]], "reason": "Сверить ожидание с соседним кейсом."},
+                                        {"case_ids": [cases[-1]], "reason": "Сверить данные шага с соседним кейсом."}]
+            checks_asked["n"] += 1
+        return value
+
+    task = first
+    seen_batches = []
+    for _ in range(80):
+        if task.get("action") == "done" or not str(task.get("stage", task.get("review_key", ""))).startswith(("tc-reviewer", "canonical")) and task.get("action") != "batch":
+            break
+        tasks = task["tasks"] if task.get("action") == "batch" else [task]
+        seen_batches.append([item["part_id"] for item in tasks])
+        for item in tasks:
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            code, submitted = replay.call("submit", "--project", str(replay.project), "--run", run_id, "--task-id", item["task_id"])
+            assert submitted.get("action") != "error", submitted
+        code, task = replay.call("next", "--project", str(replay.project), "--run", run_id, "--max-tasks", "4")
+        assert task.get("action") != "error", task
+    assert checks_asked["n"] == 2
+    from tools.pilot_state import read_review_plan
+
+    root = replay.project / ".pilot-runs" / run_id
+    plan = read_review_plan(root, first["attempt_id"])
+    base = {part["part_id"] for part in plan["parts"]}
+    extra = {part_id for batch in seen_batches for part_id in batch} - base  # parts added for the required checks
+    assert extra, "the required checks became extra parts"
+    assert all(len(batch) == 1 for batch in seen_batches if extra & set(batch)), seen_batches

@@ -1006,7 +1006,7 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     tasks come back at once as ``{"action": "batch", "tasks": [...]}``.  A legacy
     plan stays sequential (one task).
     """
-    from tools.pilot_state import available_review_parts
+    from tools.pilot_state import available_review_parts, sequential_review_part_ids
 
     from tools import pipeline_driver_runner as runner
 
@@ -1023,13 +1023,22 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     compact = bool(available) and available[0].get("mode") == "compact-v1"
     room = limit if compact else 1
     open_ids = {task["part_id"] for task in tasks}
+    # Parts added for reviewers' required checks run in order, after every earlier part (the journal
+    # validator enforces it): never batched with another open part (live Petclinic run, 2026-10-08).
+    sequential = sequential_review_part_ids(run_root, attempt_id, review_key) if compact else set()
+    if open_ids & sequential:
+        room = 1
     for envelope in available:
         if len(tasks) >= room:
             break
         if envelope["part_id"] in open_ids:
             continue
+        if envelope["part_id"] in sequential and tasks:
+            break
         tasks.append(_issue_review_task(run_root, attempt, config, review_key, envelope))
         open_ids.add(envelope["part_id"])
+        if envelope["part_id"] in sequential:
+            break
     tasks = tasks[:room]
     if len(tasks) == 1:
         return tasks[0]
