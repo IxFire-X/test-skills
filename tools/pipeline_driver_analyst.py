@@ -29,6 +29,21 @@ def _review_parts(run_root: Path, attempt: Mapping[str, Any]) -> list[dict[str, 
     return rows
 
 
+def _too_broad(run_root: Path, attempt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Questions of the attempt's sealed review aggregates (reviewers' checks too broad for one check part)."""
+    from tools.analyst_report import too_broad_items
+    from tools.pilot_state import _receipt_target, _run_root, read_attempt_receipt
+
+    _project, root = _run_root(run_root)
+    items = []
+    for key in ("canonical", "r1", "r2"):
+        if not _receipt_target(root, str(attempt["attempt_id"]), f"review-aggregate-{key}").is_file():
+            continue  # this review was not sealed
+        aggregate = read_attempt_receipt(run_root, str(attempt["attempt_id"]), f"review-aggregate-{key}", "ARTIFACT_READ_BACK")["record"]["aggregate"]
+        items.extend(too_broad_items(key, aggregate))
+    return items
+
+
 def report_for(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
     from tools.analyst_report import build_report, marker_items, review_items, triage_items
     from tools.mutation_triage import decision_rows
@@ -36,7 +51,7 @@ def report_for(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
 
     attempt_id = str(attempt["attempt_id"])
     marker = driver._marker_artifact(run_root, attempt_id)
-    items = [*marker_items(None if marker is None else marker["artifact"]), *review_items(_review_parts(run_root, attempt)),
+    items = [*marker_items(None if marker is None else marker["artifact"]), *review_items(_review_parts(run_root, attempt)), *_too_broad(run_root, attempt),
              *triage_items(decision_rows(answers(run_root, attempt)))]
     return build_report(items, run_id=run_root.name, attempt_id=attempt_id, sources_of=_sources_of(run_root, attempt_id))
 

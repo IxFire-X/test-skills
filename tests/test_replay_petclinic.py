@@ -1,0 +1,119 @@
+"""Planner decisions of the live Petclinic runs of 2026-10-08, replayed offline on their recorded answers.
+
+No driver, no model: the plan is built by the current code from the recorded snapshot and the real answers are
+bound to it (``tests/replay_petclinic.py``).  Every live-run planning bug gets its test here, on real data.
+"""
+from __future__ import annotations
+
+import copy
+
+import replay_petclinic as rp
+from tools import review_compact as rc
+
+
+def _additions(key: str, results):
+    plan = rp.plan(key)
+    return plan, rc.additional_parts(plan, rp.payload(key), results)
+
+
+def _bound(key: str, **options):
+    plan = rp.plan(key)
+    return [rp.bind(plan, answer) for answer in rp.answers(key, **options)]
+
+
+def test_the_base_case_review_parts_are_those_run_d_answered() -> None:
+    """Answers of earlier runs can be carried into a new one only while the base parts stay byte for byte the same."""
+    recorded = rp.snapshot("canonical")
+    plan = rp.plan("canonical")
+    assert len(plan["parts"]) == 38
+    assert [part["text"] for part in plan["parts"]] == recorded["base_part_texts"]
+
+
+def test_every_recorded_answer_is_valid_for_the_current_plan() -> None:
+    for key, part_2 in (("canonical", "d"), ("canonical", "b"), ("r1", "d")):
+        plan = rp.plan(key)
+        payload = rp.payload(key)
+        parts = {part["part_id"]: part for part in plan["parts"]}
+        for result in _bound(key, part_2=part_2):
+            assert rc.validate_answer(plan, parts[result["part_id"]], result, payload["document"], payload.get("automation")) == [], (key, part_2, result["part_id"])
+
+
+def test_case_review_additions_fit_their_limit_and_budget() -> None:
+    for part_2 in ("d", "b"):
+        plan, additions = _additions("canonical", _bound("canonical", part_2=part_2))
+        assert 0 < len(additions) <= min(rc.check_limit(plan), 9), part_2
+        assert all(part["blocked_reason"] is None for part in additions), part_2
+        checks = rc.required_checks(plan, rp.payload("canonical"), _bound("canonical", part_2=part_2))
+        assert len({rc.review_digest(check) for check in checks}) == len(checks)
+
+
+def test_an_info_correction_is_never_rechecked() -> None:
+    plan = rp.plan("canonical")
+    results = _bound("canonical")
+    info = [item for result in results for item in result["corrections"] if rc._correction_level(result, item) == "INFO"]
+    assert info, "the recorded answers carry INFO corrections"
+    rechecked = [item for check in rc.required_checks(plan, rp.payload("canonical"), results) for item in check.get("corrections", [])]
+    assert not [item for item in info if item in rechecked]
+
+
+def test_a_check_part_naming_source_requirements_carries_their_text() -> None:
+    plan, additions = _additions("canonical", _bound("canonical"))
+    payload = rp.payload("canonical")
+    sreq = {item["source_requirement_id"]: item for item in payload["document"]["source_requirements"]}
+    named = [part for part in additions if "## SREQ" in part["text"]]
+    assert named
+    for part in named:
+        assert any(f"[{identifier}]" in part["text"] for identifier in sreq)
+
+
+def test_a_check_of_every_source_requirement_is_too_broad_not_81_cases() -> None:
+    """Run b: the source continuation part asked to check every SREQ — all 81 cases, a 577 KB part, the run PARTIAL.
+    A check whose requirement cases do not fit one check part checks only the cases it names; with none it is
+    reported to the analyst and does not count against the addition limit."""
+    plan = rp.plan("canonical")
+    payload = rp.payload("canonical")
+    results = _bound("canonical", part_2="b")
+    request = next(check for result in results if result["part_id"] == "part-000002" for check in result["required_checks"]
+                   if len(check.get("requirement_ids") or []) == 29)
+    checks = rc.required_checks(plan, payload, results)
+    assert all("часть 1 проверки" not in check["reason"] for check in checks)  # never split into pieces
+    assert not [check for check in checks if request["reason"] in check["reason"]]
+    aggregate = rc.aggregate(plan, payload, results)
+    broad = [row for row in aggregate.get("too_broad", []) if row["part_id"] == "part-000002"]
+    assert broad and broad[0]["question"] == request["reason"] and broad[0]["requirement_ids"] == request["requirement_ids"]
+    assert any(item["code"] == rc.TOO_BROAD_REASON and item["severity"] == "WARNING" for item in aggregate["findings"])
+    assert not any(rc.TOO_BROAD_REASON in row["reason"] or rc.CHECK_LIMIT_REASON in row["reason"] for row in aggregate["unchecked"])
+    from tools.analyst_report import too_broad_items
+
+    asked = too_broad_items("canonical", aggregate)
+    assert [item["question"] for item in asked if item["source"]["ref"].startswith("canonical:part-000002:")] == [request["reason"]]
+
+
+def test_a_broad_requirement_with_named_cases_checks_only_those_cases() -> None:
+    """Run d, part 2: two named cases and CREQ-B1-T-ISOLATION (linked to all 81 cases) — nine check parts in run d."""
+    plan = rp.plan("canonical")
+    payload = rp.payload("canonical")
+    results = _bound("canonical")
+    request = next(check for result in results if result["part_id"] == "part-000002" for check in result["required_checks"]
+                   if "CREQ-B1-T-ISOLATION" in (check.get("requirement_ids") or []))
+    checks = rc.required_checks(plan, payload, results)
+    holder = [check for check in checks if request["reason"] in check["reason"]]
+    assert len(holder) == 1 and set(request["case_ids"]) <= set(holder[0]["case_ids"]) and len(holder[0]["case_ids"]) < 81
+    assert all("часть 1 проверки" not in check["reason"] for check in checks)
+
+
+def test_an_unchecked_area_closes_as_too_broad_only_when_all_its_checks_are() -> None:
+    plan = rp.plan("canonical")
+    payload = rp.payload("canonical")
+    results = _bound("canonical", part_2="b")
+    # Run b's part 2 left its source area UNCHECKED with a too broad check and an ordinary one: it waits for the latter.
+    aggregate = rc.aggregate(plan, payload, results)
+    assert "source-000002" in {row["scope_id"] for row in aggregate["unchecked"]}
+    # Without the ordinary check the area is closed by the too broad one, with that reason.
+    alone = copy.deepcopy(results)
+    part = next(result for result in alone if result["part_id"] == "part-000002")
+    part["required_checks"] = [check for check in part["required_checks"] if len(check.get("requirement_ids") or []) == 29]
+    aggregate = rc.aggregate(plan, payload, alone)
+    assert "source-000002" not in {row["scope_id"] for row in aggregate["unchecked"]}
+    assert {"part_id": "part-000002", "scope_id": "source-000002", "resolved_by": [], "reason": rc.TOO_BROAD_REASON} in aggregate["resolved_unchecked"]
+

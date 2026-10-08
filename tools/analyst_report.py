@@ -6,7 +6,8 @@ Questions for analysts come from three sources and are joined deterministically:
   older answers, gap lines of the free ``warnings`` text («источник — наблюдение; недостающее: …;
   заблокированные проверки: …; вопрос: …», or the OpenSpec ``missing:/blocks:/question:`` form);
 * reviewer findings that carry ``analyst_question`` (compact answer 2.1.0): the problem is in the
-  requirement, not in the case;
+  requirement, not in the case; and reviewers' required checks too broad for one check part
+  (``too_broad`` of the review aggregate) — asked as the reviewer worded them;
 * ``SPEC_GAP`` decisions of the survivor triage.
 
 Duplicates are joined by requirement and normalized question; every item keeps all of its
@@ -111,6 +112,16 @@ def review_items(parts: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
                           "source": {"kind": kind, "ref": f"{part['review_key']}:{part['part_id']}:findings[{index}]", "location": finding.get("code"),
                                      "severity": finding.get("severity")}})
     return items
+
+
+def too_broad_items(review_key: str, aggregate: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A reviewer's required check too broad for one check part (``REVIEW_CHECK_TOO_BROAD`` in the review aggregate):
+    its request goes to the analyst as asked."""
+    kind = "tc-reviewer" if review_key == "canonical" else "autotest-reviewer"
+    return [{"requirement_ids": sorted(row["requirement_ids"]), "question": row["question"], "missing": None, "blocks": None,
+             "source": {"kind": kind, "ref": f"{review_key}:{row['part_id']}:too_broad[{index}]", "location": "REVIEW_CHECK_TOO_BROAD",
+                        "severity": "WARNING"}}
+            for index, row in enumerate(aggregate.get("too_broad") or [])]
 
 
 def triage_items(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

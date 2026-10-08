@@ -430,7 +430,11 @@ def test_a_check_naming_requirements_carries_their_source_requirements(tmp_path:
 
     plan, payload, results = _finished_review(tmp_path)
     document = payload["document"]
-    mapping = document["source_to_canonical_mappings"][0]
+    # The source requirement with the fewest cases: a check whose cases do not fit one check part is too broad (F1).
+    def cases_of(row):
+        return sum(1 for case in document["test_cases"] if set(row["canonical_requirement_ids"][:1]) & set(case["requirement_ids"]))
+
+    mapping = min((row for row in document["source_to_canonical_mappings"] if cases_of(row)), key=cases_of)
     sreq, creq = mapping["source_requirement_id"], mapping["canonical_requirement_ids"][0]
     base = {part["part_id"] for part in plan["parts"]}
     first = dict(next(row for row in results if row["part_id"] in base))

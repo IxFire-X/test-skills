@@ -38,6 +38,10 @@ PLAN_VERSION = "2.0.0"
 # rest stays unchecked with REVIEW_CHECK_LIMIT, so the review is incomplete instead of silently expensive.
 CHECK_POLICY = "merged-after-base-v1"
 CHECK_LIMIT_REASON = "REVIEW_CHECK_LIMIT"
+# A required check of a CHECK_POLICY plan whose requirements link more cases than one check part holds (live Petclinic
+# runs b and d: "every SREQ", CREQ-B1-T-ISOLATION — 81 cases) checks only the cases it names; naming none, it gets no
+# part: the aggregate keeps it as a WARNING finding and a question for the analyst, outside the addition limit.
+TOO_BROAD_REASON = "REVIEW_CHECK_TOO_BROAD"
 
 
 def check_limit(plan: Mapping[str, Any]) -> int:
@@ -655,6 +659,38 @@ def resolve_check(document: Mapping[str, Any], check: Mapping[str, Any]) -> dict
     return {"case_ids": [case_id for case_id in cases if case_id in set(wanted)], "reason": check["reason"]}
 
 
+_FITS: dict[tuple[str, tuple[str, ...]], bool] = {}
+
+
+def narrow_check(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    """A required check of a ``CHECK_POLICY`` plan normalized to the cases it must see, and the requirements dropped as
+    too broad: when the cases its requirements link do not fit one check part, only the cases it names are checked
+    (none named — no check).  A check that fits is exactly ``resolve_check``'s."""
+    document = payload["document"]
+    resolved = resolve_check(document, check)
+    named = [case_id for case_id in check.get("case_ids") or []]
+    if resolved is None or not check.get("requirement_ids") or set(resolved["case_ids"]) == set(named):
+        return resolved, []
+    key = (plan["digest"], tuple(resolved["case_ids"]))
+    if key not in _FITS:
+        if len(_FITS) >= 4096:
+            _FITS.clear()
+        _FITS[key] = check_part(plan, payload, {"case_ids": resolved["case_ids"], "reason": resolved["reason"]}, len(plan["parts"]) + 1)["blocked_reason"] is None
+    if _FITS[key]:
+        return resolved, []
+    dropped = list(check["requirement_ids"])
+    if not named:
+        return None, dropped
+    return {"case_ids": [case_id for case_id in resolved["case_ids"] if case_id in set(named)], "reason": resolved["reason"]}, dropped
+
+
+def _own_check(plan: Mapping[str, Any], payload: Mapping[str, Any], check: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    """How the plan's policy reads one required check of an answer."""
+    if plan.get("check_policy") == CHECK_POLICY:
+        return narrow_check(plan, payload, check)
+    return resolve_check(payload["document"], check), []
+
+
 def validate_answer(plan: Mapping[str, Any], part: Mapping[str, Any], result: Mapping[str, Any], document: Mapping[str, Any],
                     automation: Mapping[str, Any] | None = None) -> list[dict[str, str]]:
     """Every rule the controller enforces on a compact answer; the empty list accepts it."""
@@ -848,7 +884,7 @@ def _merged_checks(plan: Mapping[str, Any], payload: Mapping[str, Any], results:
 
     for result in valid:
         for check in result["required_checks"]:
-            resolved = resolve_check(document, check)
+            resolved, _dropped = narrow_check(plan, payload, check)
             if resolved is not None:
                 add(resolved["case_ids"], resolved["reason"], source=review_digest(resolved), sreq=source_requirements(check.get("requirement_ids")))
     if payload.get("automation") is None:
@@ -961,6 +997,10 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
         diagnostics.append(_row("REVIEW_FOREIGN_PART", "", "an answer names an unknown part"))
     open_rows: list[tuple[str, dict[str, Any], list[str]]] = []
     findings, corrections, checked, bindings, dispositions = [], [], [], [], []
+    resolved: list[dict[str, Any]] = []
+    too_broad: list[dict[str, Any]] = []
+    # Checks asked by check parts are never added (CHECK_POLICY); only base answers can be too broad.
+    base_ids = {item["part_id"] for item in plan["parts"]} if plan.get("check_policy") == CHECK_POLICY else set()
     for part in parts:
         candidates = by_id.get(part["part_id"], [])
         errors = (validate_answer(plan, part, candidates[0], document, payload.get("automation")) if len(candidates) == 1
@@ -972,10 +1012,24 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
             continue
         result = candidates[0]
         bindings.append({"part_id": part["part_id"], "result_digest": review_digest(result)})
-        own_checks = [review_digest(resolve_check(document, check)) for check in result["required_checks"]]
+        own_checks, own_broad = [], False
+        for check in result["required_checks"]:
+            narrowed, dropped = _own_check(plan, payload, check)
+            if dropped and part["part_id"] in base_ids:
+                too_broad.append({"part_id": part["part_id"], "requirement_ids": dropped, "case_ids": [] if narrowed is None else narrowed["case_ids"],
+                                  "question": check["reason"]})
+            if narrowed is None:
+                # An additional part's own checks are never added: none of its areas can wait for one.
+                own_broad = own_broad or (bool(dropped) and part["part_id"] in base_ids)
+            else:
+                own_checks.append(review_digest(narrowed))
         for row in result["coverage"]:
             if row["status"] == "CHECKED":
                 checked.append(row["area_id"])
+            elif not own_checks and own_broad:
+                # Every check this area waits for is too broad: closed with that reason, the review stays complete.
+                checked.append(row["area_id"])
+                resolved.append({"part_id": part["part_id"], "scope_id": row["area_id"], "resolved_by": [], "reason": TOO_BROAD_REASON})
             else:
                 open_rows.append((part["part_id"], {"scope_id": row["area_id"], "reason": row["note"] or "UNCHECKED"}, own_checks))
         for finding in result["findings"]:
@@ -1002,7 +1056,13 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
     carried = [{"scope_id": row["area"]["area_id"], "fingerprint": row["fingerprint"], "from_attempt_id": row["from_attempt_id"],
                 "from_plan_digest": row["from_plan_digest"]} for row in plan.get("carried", [])]
     checked.extend(row["scope_id"] for row in carried)
-    resolved: list[dict[str, Any]] = []
+    for row in too_broad:
+        findings.append({"severity": "WARNING", "code": TOO_BROAD_REASON,
+                         "message": (f"Проверка ревьюера части {row['part_id']} по требованиям {', '.join(row['requirement_ids'])} охватывает больше кейсов, "
+                                     "чем помещается в одну часть проверки: " + (f"проверены только названные кейсы {', '.join(row['case_ids'])}"
+                                                                                  if row["case_ids"] else "часть проверки не создана")
+                                     + f". Вопрос аналитику: {row['question']}")[:4000],
+                         "evidence": [row["part_id"]], "related_ids": list(row["requirement_ids"])})
     while True:
         closing = {part["requested_check"]: part["part_id"] for part in parts
                    if part["requested_check"] is not None and all(area["area_id"] in checked for area in answer_areas(part))}
@@ -1031,6 +1091,8 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
               "mode": MODE, "lint_dispositions": dispositions}
     if resolved:
         result["resolved_unchecked"] = resolved
+    if too_broad:
+        result["too_broad"] = too_broad
     if carried:
         result["carried"] = carried
     return result
