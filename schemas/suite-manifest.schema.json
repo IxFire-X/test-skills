@@ -40,7 +40,7 @@
       "file": {"$ref": "#/$defs/path"}, "symbol_id": {"type": "string", "minLength": 1, "maxLength": 128}, "locator": {"type": "string", "minLength": 3, "maxLength": 512},
       "slice_digest": {"$ref": "#/$defs/digest"}}},
     "quarantine": {"type": "object", "additionalProperties": false, "required": ["reason", "ref", "since_run"], "properties": {
-      "reason": {"enum": ["ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED"]}, "ref": {"type": "string", "minLength": 1, "maxLength": 512},
+      "reason": {"enum": ["ASSERTION_FAILED", "TEST_ERROR", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED"]}, "ref": {"type": "string", "minLength": 1, "maxLength": 512},
       "since_run": {"$ref": "#/$defs/run_id"}, "question": {"type": "string", "maxLength": 2000}}},
     "strength": {"type": "object", "additionalProperties": false, "required": ["covered", "killed", "run_id"], "properties": {
       "covered": {"type": "integer", "minimum": 0}, "killed": {"type": "integer", "minimum": 0}, "run_id": {"$ref": "#/$defs/run_id"}}},

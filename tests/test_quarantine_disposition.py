@@ -91,3 +91,46 @@ def test_a_fail_without_failed_methods_falls_back_to_cleanup(evidence) -> None:
     assert quarantine_modes({"disposition_policy": "quarantine"}, "FAIL", payload) is None
     failed = {"execution_evidence": [{"file_id": "F1", "symbol_id": "S1", "status": "FAILED"}]}
     assert quarantine_modes({"disposition_policy": "quarantine"}, "FAIL", failed) == {"F1": {"S1": "FAILED"}}
+
+
+@needs_java
+def test_the_suite_after_a_quarantined_fail_keeps_the_quarantine_with_reason_ref_and_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 6 (A5.2): --suite after a FAIL writes the failed method's case as QUARANTINED, not ACTIVE."""
+    from tools.suite_manifest import read_suite, verify
+
+    replay = _local(tmp_path, monkeypatch)
+    _change_product(replay.project)
+    _code, done = replay.drive(replay.start_with("--suite")[1])
+    result = done["result"]
+    assert result["verification"] == "FAIL" and result["suite"]["status"] == "WRITTEN", result["suite"]
+    run_id = result["run_id"]
+    manifest = read_suite(replay.project, "test-cases/")
+    quarantined = [case for case in manifest["cases"] if case["status"] == "QUARANTINED"]
+    [case] = quarantined
+    plan = read_attempt_receipt(replay.run_root(done), result["attempt_id"], "disposition-plan", "ARTIFACT_READ_BACK")["record"]["payload"]
+    [symbol] = plan["files"][0]["quarantine_symbols"]
+    assert case["quarantine"]["reason"] == "ASSERTION_FAILED" and case["quarantine"]["since_run"] == run_id
+    assert case["quarantine"]["ref"] == f"run {run_id[:8]} {symbol}"  # the text of the @Disabled mark
+    assert case["case_id"] in case["quarantine"]["question"] and "Student removed" in case["quarantine"]["question"]
+    assert case["last_green_run"] is None and {row["status"] for row in manifest["cases"] if row is not case} == {"ACTIVE"}
+    assert verify(replay.project, manifest)["methods"] == []  # the manifest describes the quarantined bytes on disk
+    drafts = Path(result["paths"]["quarantine_markdown"]).read_text(encoding="utf-8")
+    assert "Черновик баг-репорта" in drafts and case["case_id"] in drafts and case["quarantine"]["question"] in drafts
+    assert result["suite"]["quarantined"] == 1
+
+
+@needs_java
+def test_a_person_edit_before_the_suite_is_written_stays_a_person_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2.1 item 6: the manifest describes the bytes the package left (disposition receipts), not whatever is on disk."""
+    from tests.test_suite_migrate import _legacy
+    from tools.suite_manifest import read_suite, verify
+    from tools.suite_migrate import migrate
+
+    replay, _done, _document, _edited = _legacy(tmp_path, monkeypatch, edit_case=False)
+    target = replay.project / GENERATED
+    text = target.read_text(encoding="utf-8")
+    first = next(line for line in text.splitlines() if ".as(\"ASSERT-" in line)
+    target.write_text(text.replace(first, "        // уточнено вручную\n" + first, 1), encoding="utf-8")
+    migrate(replay.project)
+    manifest = read_suite(replay.project, "test-cases/")
+    assert len(verify(replay.project, manifest)["methods"]) == 1  # the person's method, never the package's own

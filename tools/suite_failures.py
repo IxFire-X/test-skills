@@ -54,12 +54,17 @@ def _expected_text(step: Mapping[str, Any]) -> list[str]:
     return [str(item.get("text") or "").strip() for item in step.get("expectations") or [] if str(item.get("text") or "").strip()]
 
 
-def bug_report(case: Mapping[str, Any], *, locator: str, failure: str | None, run_id: str) -> str:
-    """A bug report draft from the case: its steps and expectations, and what the run observed."""
+def bug_report(case: Mapping[str, Any], *, locator: str, failure: str | None, run_id: str, first_run: bool = False) -> str:
+    """A bug report draft from the case: its steps and expectations, and what the run observed.
+
+    ``first_run``: the test was generated from the requirement in this run (``local-pilot-v1``),
+    so nothing "changed" — the product does not meet the requirement's expectation.
+    """
     lines = [f"### Черновик баг-репорта: {case.get('title') or case.get('case_id')}", "",
              f"- Кейс: `{case.get('case_id')}`; требования: {', '.join(f'`{item}`' for item in case.get('requirement_ids') or []) or '—'}",
              f"- Тест: `{locator}`, прогон `{run_id}`",
-             "- Требование и тест не менялись: поведение продукта изменилось без спецификации. Тест в карантине до решения аналитика.", ""]
+             ("- Тест построен по требованию в этом прогоне и упал: продукт не выполняет ожидание требования. Тест в карантине до решения аналитика."
+              if first_run else "- Требование и тест не менялись: поведение продукта изменилось без спецификации. Тест в карантине до решения аналитика."), ""]
     preconditions = [str(item) for item in case.get("preconditions") or [] if str(item).strip()]
     if preconditions:
         lines += ["**Предусловия**", *[f"- {item}" for item in preconditions], ""]
@@ -74,7 +79,10 @@ def bug_report(case: Mapping[str, Any], *, locator: str, failure: str | None, ru
     return "\n".join(lines)
 
 
-def analyst_question(case: Mapping[str, Any], *, failure: str | None) -> str:
+def analyst_question(case: Mapping[str, Any], *, failure: str | None, first_run: bool = False) -> str:
     observed = _one_line(failure, 300) or "проверка не прошла"
+    if first_run:
+        return (f"Кейс {case.get('case_id')} «{case.get('title')}» построен по требованию и не проходит ({observed}). "
+                f"Это дефект продукта или требование нужно уточнить?")
     return (f"Кейс {case.get('case_id')} «{case.get('title')}» перестал проходить, хотя требование не менялось ({observed}). "
             f"Это дефект продукта или новое поведение, которое нужно описать в требовании?")

@@ -10,7 +10,7 @@ import difflib
 from typing import Any, Mapping, Sequence
 
 _REASONS = {
-    "ASSERTION_FAILED": "проверка не прошла", "BEHAVIOR_CHANGED_WITHOUT_SPEC": "поведение изменилось без изменения требования",
+    "ASSERTION_FAILED": "проверка не прошла", "TEST_ERROR": "тест упал с исключением", "BEHAVIOR_CHANGED_WITHOUT_SPEC": "поведение изменилось без изменения требования",
     "FLAKY": "результат меняется между повторами", "ENVIRONMENT": "окружение", "REPAIR_FAILED": "ремонт не помог",
 }
 

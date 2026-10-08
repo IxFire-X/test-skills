@@ -44,8 +44,10 @@ def _module(skillsrc: Mapping[str, Any], module_id: str | None) -> dict[str, Any
     return next((row for row in modules if row.get("id") == module_id), modules[0] if len(modules) == 1 else {"id": module_id or "root", "root": "."})
 
 
-def _case_state(run_id: str, report: Mapping[str, Any], automation: Mapping[str, Any], dispositions: Mapping[str, str]) -> dict[str, dict[str, Any]]:
-    """Per case: ACTIVE with this run as the last green one when every one of its methods passed."""
+def _case_state(run_id: str, report: Mapping[str, Any], automation: Mapping[str, Any], dispositions: Mapping[str, str],
+                plan: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Per case: ACTIVE with this run as the last green one when every one of its methods passed;
+    QUARANTINED with reason and reference when the quarantine policy marked one of its methods (A5.2)."""
     artifacts = automation.get("artifacts") or {}
     status_of = {row.get("symbol_id"): row.get("status") for row in report.get("execution_evidence") or []}
     file_of = {row["symbol_id"]: row["file_id"] for row in artifacts.get("generated_symbols") or []}
@@ -56,6 +58,15 @@ def _case_state(run_id: str, report: Mapping[str, Any], automation: Mapping[str,
     for case_id, symbols in methods.items():
         green = all(status_of.get(symbol) == "PASSED" for symbol in symbols) and all(dispositions.get(file_of.get(symbol)) in _KEPT for symbol in symbols)
         state[case_id] = {"status": "ACTIVE", "quarantine": None, "last_green_run": run_id if green else None}
+    marked = {symbol for row in (plan or {}).get("files") or [] if row.get("operation") == "QUARANTINE_IF_EXACT"
+              and dispositions.get(row.get("file_id")) == "QUARANTINED" for symbol in row.get("quarantine_symbols") or []}
+    for case_id, symbols in methods.items():
+        for symbol in sorted(symbols & marked):
+            # The reference is the text of the method's mark (generated_delta.quarantined_bytes).
+            reason = "ASSERTION_FAILED" if status_of.get(symbol) == "FAILED" else "TEST_ERROR"
+            state[case_id] = {"status": "QUARANTINED", "last_green_run": None,
+                              "quarantine": {"reason": reason, "ref": f"run {run_id[:8]} {symbol}", "since_run": run_id}}
+            break
     return state
 
 
@@ -123,12 +134,8 @@ def attempt_suite(project: Path, run_root: Path, attempt: Mapping[str, Any], *, 
             raise SuiteError("SUITE_REQUIREMENTS_MISMATCH", "the requirement scan does not reproduce the run's source requirements")
     automation = pilot_state.read_execution_inputs(run_root, attempt_id)["automation_artifact"]
     report = pilot_state.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
-    test_files = {}
-    for row in rows:
-        target = project / row["path"]
-        if not target.is_file():
-            raise SuiteError("SUITE_TEST_FILE_MISSING", f"{row['path']} is not in the project")
-        test_files[row["file_id"]] = {"path": row["path"], "content": target.read_text(encoding="utf-8")}
+    plan = pilot_state.read_attempt_receipt(run_root, attempt_id, "disposition-plan", "ARTIFACT_READ_BACK")["record"]["payload"]
+    test_files = _left_bytes(project, run_id, rows, {row["file_id"]: row for row in plan.get("files") or []}, automation, report)
     module = _module(skillsrc, config.get("module_id"))
     module_root = project / str(module.get("root") or ".")
     sources = list(((module.get("paths") or {}).get("source")) or ["src/main/java", "src", "app"])
@@ -139,10 +146,113 @@ def attempt_suite(project: Path, run_root: Path, attempt: Mapping[str, Any], *, 
         suite_id=f"SUITE-{_label(project.name)}-{_label(str(module.get('id') or 'root'))}", module_id=str(module.get("id") or "root"),
         package_version=package_version(), document=document, identities=identities,
         documents=documents, id_pattern=id_pattern, automation=automation,
-        test_files=test_files, case_state=_case_state(run_id, report, automation, dispositions), strength=_strength(run_root, attempt_id, run_id),
+        test_files=test_files, case_state=_case_state(run_id, report, automation, dispositions, plan), strength=_strength(run_root, attempt_id, run_id),
         surface=surface(module_root, sources), suite_dir=suite_dir, suite_digests={name: sha256_bytes(data) for name, data in rendered.items()},
         source_run=source_run, history=[{"run_id": run_id, "profile": "local-pilot-v1", "action": "CREATED"}])
+    _ask_about_quarantine(run_root, attempt_id, manifest, document)
     return suite_dir, manifest, {**rendered, "manifest": canonical_bytes(manifest)}
+
+
+def _left_bytes(project: Path, run_id: str, rows: list[Mapping[str, Any]], plan: Mapping[str, Mapping[str, Any]], automation: Mapping[str, Any],
+                report: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    """The bytes the package left in each test file, rebuilt from the attempt's receipts (review 2.1 item 6).
+
+    The manifest digests describe these bytes, never the file on disk: a person who edits the file
+    between the run and the suite (or the migration) stays the author of that edit, and
+    ``suite_manifest.verify`` reports it.  A RETAINED file is the generated content; a QUARANTINED
+    one is that content with its failed methods marked, checked against the plan's digest.
+    """
+    from tools.generated_delta import GeneratedDeltaError, quarantined_bytes
+
+    artifacts = automation.get("artifacts") or {}
+    generated = {item["file_id"]: item for item in artifacts.get("generated_files") or []}
+    symbols = list(artifacts.get("generated_symbols") or [])
+    failed_of: dict[str, dict[str, str]] = {}
+    for row in report.get("execution_evidence") or []:
+        if row.get("status") in {"FAILED", "ERROR"}:
+            failed_of.setdefault(str(row.get("file_id")), {})[str(row.get("symbol_id"))] = str(row["status"])
+    out = {}
+    for row in rows:
+        if not (project / row["path"]).is_file():
+            raise SuiteError("SUITE_TEST_FILE_MISSING", f"{row['path']} is not in the project")
+        source = generated.get(row["file_id"])
+        content = str((source or {}).get("content", "")).encode("utf-8")
+        if source is None or sha256_bytes(content) != row.get("content_digest"):
+            raise SuiteError("SUITE_RECEIPT_MISMATCH", f"{row['path']}: the generated content does not match the disposition receipt")
+        if row["disposition"] == "QUARANTINED":
+            plan_row = plan.get(row["file_id"]) or {}
+            failed = {symbol: failed_of.get(row["file_id"], {}).get(symbol, "FAILED") for symbol in plan_row.get("quarantine_symbols") or []}
+            try:
+                content = quarantined_bytes(content, str(row["path"]), failed, symbols, run_id)
+            except GeneratedDeltaError as error:
+                raise SuiteError("SUITE_RECEIPT_MISMATCH", f"{row['path']}: {error}") from error
+            if sha256_bytes(content) != plan_row.get("quarantined_content_digest"):
+                raise SuiteError("SUITE_RECEIPT_MISMATCH", f"{row['path']}: the quarantined content does not match the disposition plan")
+        out[row["file_id"]] = {"path": row["path"], "content": content.decode("utf-8")}
+    return out
+
+
+def quarantine_failures(run_root: Path, attempt_id: str, manifest: Mapping[str, Any]) -> dict[str, str | None]:
+    """The failure text of each quarantined case, from the runner output the attempt kept.
+
+    The durable JUnit copies keep only outcomes (no messages), so the text comes from the
+    redacted ``runner-output.txt``: the lines after the last mention of the method's name
+    (Surefire's ``Failures:`` summary, Gradle's ``FAILED`` block).
+    """
+    path = run_root / "artifacts" / attempt_id / "runner-output.txt"
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.is_file() else []
+    except OSError:
+        lines = []
+    out: dict[str, str | None] = {}
+    for case in manifest["cases"]:
+        if case["status"] != "QUARANTINED":
+            continue
+        text = None
+        for method in case["methods"]:
+            name = method["locator"].rsplit("#", 1)[-1].rsplit(".", 1)[-1]
+            hits = [index for index, line in enumerate(lines) if name in line and ("ERROR" in line or "FAILED" in line or "Failure" in line or "»" in line or "expected" in line.lower())]
+            if not hits:
+                continue
+            block = [lines[hits[-1]]]
+            for line in lines[hits[-1] + 1:hits[-1] + 12]:
+                if line.startswith("[INFO]") or line.startswith("[ERROR]   ") or line.startswith("[ERROR] Tests run") or not line.strip():
+                    break
+                block.append(line)
+            text = " ".join(" ".join(block).split())[:1500]
+            break
+        out[case["case_id"]] = text
+    return out
+
+
+def _ask_about_quarantine(run_root: Path, attempt_id: str, manifest: dict[str, Any], document: Mapping[str, Any]) -> None:
+    """A question for the analysts on every quarantined case, with the failure the run observed."""
+    from tools.suite_failures import analyst_question
+
+    cases = {case["case_id"]: case for case in document.get("test_cases") or []}
+    for case_id, failure in quarantine_failures(run_root, attempt_id, manifest).items():
+        row = next(case for case in manifest["cases"] if case["case_id"] == case_id)
+        row["quarantine"]["question"] = analyst_question(cases.get(case_id, {"case_id": case_id, "title": row.get("title")}), failure=failure, first_run=True)[:2000]
+
+
+def quarantine_report(manifest: Mapping[str, Any], document: Mapping[str, Any], run_id: str, failures: Mapping[str, str | None]) -> str | None:
+    """``quarantine.md``: the analysts' questions and a bug report draft per quarantined case."""
+    from tools.suite_failures import bug_report
+
+    quarantined = [case for case in manifest["cases"] if case["status"] == "QUARANTINED"]
+    if not quarantined:
+        return None
+    cases = {case["case_id"]: case for case in document.get("test_cases") or []}
+    lines = ["# Карантин после прогона", "", f"Прогон `{run_id}`: упавшие тесты отключены пометкой карантина, остальные тесты набора сохранены.",
+             "Карантинный тест запускается явно и снимается, когда продукт снова ведёт себя по требованию.", "",
+             "| Кейс | Тест | Причина | Ссылка |", "| --- | --- | --- | --- |"]
+    lines += [f"| {case['case_id']} | `{method['locator']}` | {case['quarantine']['reason']} | {case['quarantine']['ref']} |"
+              for case in quarantined for method in case["methods"]]
+    lines += ["", "## Вопросы аналитикам", ""] + [f"- {case['quarantine']['question']}" for case in quarantined if case["quarantine"].get("question")] + [""]
+    for case in quarantined:
+        locator = case["methods"][0]["locator"] if case["methods"] else case["case_id"]
+        lines += [bug_report(cases.get(case["case_id"], {"case_id": case["case_id"]}), locator=locator, failure=failures.get(case["case_id"]), run_id=run_id, first_run=True), ""]
+    return "\n".join(lines)
 
 
 def suite_summary(run_root: Path, attempt: Mapping[str, Any], summary: dict[str, Any]) -> None:
@@ -166,3 +276,14 @@ def suite_summary(run_root: Path, attempt: Mapping[str, Any], summary: dict[str,
     summary["suite"] = {"status": "WRITTEN", "reason_code": None, "message": None, "cases": len(manifest["cases"]), "files": len(manifest["files"])}
     summary["paths"]["suite_dir"] = str(project / suite_dir)
     summary["paths"]["suite_manifest"] = str(project / suite_dir / "suite-manifest.json")
+    quarantined = sum(case["status"] == "QUARANTINED" for case in manifest["cases"])
+    if quarantined:
+        from tools.pilot_state import read_effective_canonical
+
+        attempt_id = str(attempt["attempt_id"])
+        document = read_effective_canonical(run_root, attempt_id)["document"]
+        text = quarantine_report(manifest, document, run_root.name, quarantine_failures(run_root, attempt_id, manifest))
+        path = driver._bundle_dir(run_root, attempt) / "quarantine.md"
+        driver._write_text(path, text)
+        summary["suite"]["quarantined"] = quarantined
+        summary["paths"]["quarantine_markdown"] = str(path)
