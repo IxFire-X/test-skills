@@ -96,7 +96,7 @@ def test_pass_run_measures_strength_without_changing_acceptance(tmp_path: Path, 
 
 def test_a_failing_method_is_excluded_and_the_file_is_still_cleaned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replay = _replay(tmp_path, monkeypatch, edit=lambda text: text.replace('.isEqualTo("Hello World!")', '.isEqualTo("Hello, World")', 1))
-    code, done = replay.drive(replay.start_with("--mutation")[1])
+    code, done = replay.drive(replay.start_with("--mutation", "--disposition-policy", "cleanup")[1])
     result = done["result"]
     assert (result["verification"], result["accepted"]) == ("FAIL", False), result
     receipt = _receipt(replay, done)

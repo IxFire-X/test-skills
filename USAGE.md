@@ -633,8 +633,8 @@ suite:
 python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --suite
 ```
 
-**Карантин вместо очистки** (`local-pilot-v1`, `--disposition-policy quarantine`): после
-`FAIL` прошедшие тесты остаются, упавшие методы получают одну строку
+**Карантин вместо очистки** (`local-pilot-v1`; по умолчанию с гейта волны 3, прежняя очистка —
+`--disposition-policy cleanup`): после `FAIL` прошедшие тесты остаются, упавшие методы получают одну строку
 `@org.junit.jupiter.api.Disabled("test-skills quarantine: …")` (pytest —
 `@pytest.mark.xfail(strict=True, reason=…)`); диспозиция файла — `QUARANTINED`. `FAIL`
 по-прежнему не принимается.

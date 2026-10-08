@@ -28,7 +28,8 @@ def test_wave3_sections_are_opt_in_next_to_the_frozen_registries(pack_root: Path
     assert profile["id"] == "suite-update-v1" and profile["accepted"] == "not_applicable" and profile["commits"] is False
     assert profile["steps"][0] == "MIGRATION" and profile["steps"][-1] == "SUMMARY"
     policies = contract["optional_disposition_policies"]
-    assert policies["defaults"] == {"local-pilot-v1": "cleanup", "suite-update-v1": "quarantine"}
+    assert policies["defaults"] == {"local-pilot-v1": "quarantine", "suite-update-v1": "quarantine"}  # the default since the wave-3 gate
+    assert "cleanup" in policies["values"]  # the frozen §17 item 2 stays selectable
     assert policies["quarantine"]["never_changes"] == ["verification", "coverage", "accepted", "result_tuple"]
     assert contract["suite_contract"]["default_path"] == "test-cases/"
     assert contract["requirement_identity"]["sreq_format"] == "unchanged"
@@ -38,7 +39,7 @@ def test_wave3_sections_are_opt_in_next_to_the_frozen_registries(pack_root: Path
     (lambda c: c["contract_amendments"][1].__setitem__("sections", ["17.2"]), "contract amendments"),
     (lambda c: c["optional_policy_profiles"][0].__setitem__("id", "local-pilot-v1"), "optional policy profile"),
     (lambda c: c["optional_policy_profiles"][0].__setitem__("commits", True), "optional policy profile"),
-    (lambda c: c["optional_disposition_policies"]["defaults"].__setitem__("local-pilot-v1", "quarantine"), "disposition policies"),
+    (lambda c: c["optional_disposition_policies"].__setitem__("values", ["quarantine"]), "disposition policies"),
     (lambda c: c["suite_contract"].__setitem__("statuses", ["ACTIVE"]), "suite contract"),
     (lambda c: c["requirement_identity"].__setitem__("id_pattern_setting", "id_pattern"), "requirement identity"),
 ])

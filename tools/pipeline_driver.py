@@ -333,7 +333,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"require_driver_isolation": True} if options.get("require_driver_isolation") else {}),
         **({"analyst_report": True} if options.get("analyst_report") else {}),
         **({"suite": True} if options.get("suite") else {}),
-        **({"disposition_policy": "quarantine"} if options.get("disposition_policy") == "quarantine" else {}),
+        **({"disposition_policy": options["disposition_policy"]} if options.get("disposition_policy") else {}),
         **_runner_options(options),
     }
 
@@ -1519,7 +1519,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--mutation", action="store_true",
                                  help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
             command.add_argument("--disposition-policy", choices=("cleanup", "quarantine"),
-                                 help="quarantine: after FAIL keep passing generated tests and mark the failed methods disabled (local-pilot-v1; default cleanup).")
+                                 help="After FAIL (local-pilot-v1): quarantine — the default — keeps passing generated tests and marks failed methods disabled; "
+                                      "cleanup removes every generated file.")
             command.add_argument("--suite", action="store_true",
                                  help="Write the living suite (.skillsrc suite.path, default test-cases/) with its manifest after the terminal result (local-pilot-v1).")
             command.add_argument("--require-driver-isolation", action="store_true",

@@ -81,8 +81,10 @@ The linear lifecycle gains one optional stage:
 §17 item 2 still holds by default: after `FAIL` or `NOT_RUNNABLE` every byte-identical pipeline-owned
 materialized file receives `CLEANED`. As an option the run MAY use the disposition policy `quarantine`:
 
-- `local-pilot-v1` — only with `next … --disposition-policy quarantine` (recorded as
-  `disposition_policy: quarantine` in the run-scoped authorization); the default stays `cleanup`;
+- `local-pilot-v1` — the default since the wave-3 gate (2026-10-08): a new run records
+  `disposition_policy: quarantine` in its run-scoped authorization unless it is started with
+  `--disposition-policy cleanup`, which keeps the frozen §17 item 2; a run created before (without the key)
+  keeps cleanup;
 - `suite-update-v1` — the profile's default.
 
 Rules:

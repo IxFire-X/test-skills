@@ -38,7 +38,7 @@ def _maven(project: Path, *extra: str) -> dict[str, str]:
 def test_quarantine_keeps_the_file_and_disables_only_the_failed_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replay = _local(tmp_path, monkeypatch)
     original = _change_product(replay.project)
-    code, done = replay.drive(replay.start_with("--disposition-policy", "quarantine")[1])
+    code, done = replay.drive(replay.start()[1])  # quarantine is the default of local-pilot-v1 since the wave-3 gate
     result = done["result"]
     assert (result["verification"], result["accepted"]) == ("FAIL", False) and result["reason_code"] is None  # acceptance unchanged
     run_root = replay.run_root(done)
@@ -72,10 +72,10 @@ def test_quarantine_keeps_the_file_and_disables_only_the_failed_method(tmp_path:
 
 
 @needs_java
-def test_without_the_policy_a_failure_still_cleans_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_cleanup_policy_still_cleans_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     replay = _local(tmp_path, monkeypatch)
     _change_product(replay.project)
-    _code, done = replay.drive(replay.start()[1])
+    _code, done = replay.drive(replay.start_with("--disposition-policy", "cleanup")[1])
     assert done["result"]["verification"] == "FAIL"
     final = read_attempt_receipt(replay.run_root(done), done["result"]["attempt_id"], "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     assert [row["disposition"] for row in final["files"]] == ["CLEANED"] and not (replay.project / GENERATED).exists()

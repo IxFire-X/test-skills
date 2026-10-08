@@ -281,7 +281,9 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         authorization["mutation_requested"] = True
     if getattr(args, "require_driver_isolation", False):
         authorization["require_driver_isolation"] = True
-    if getattr(args, "disposition_policy", None) == "quarantine":
+    # Since the wave-3 gate (2026-10-08) quarantine is the default of local-pilot-v1; --disposition-policy cleanup keeps §17 item 2.
+    policy = getattr(args, "disposition_policy", None) or ("quarantine" if profile == "local-pilot-v1" else None)
+    if policy == "quarantine":
         if profile != "local-pilot-v1":
             raise HostStop("DISPOSITION_POLICY_PROFILE", "--disposition-policy quarantine needs the local-pilot-v1 profile")
         authorization["disposition_policy"] = "quarantine"
@@ -1691,8 +1693,9 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     scan_parser.add_argument("--mutation", action="store_true",
                              help="Consent to the opt-in MUTATION stage for this run (needs mutation.enabled in .skillsrc; may resolve pinned PIT jars).")
-    scan_parser.add_argument("--disposition-policy", choices=("cleanup", "quarantine"), default="cleanup",
-                             help="quarantine: after FAIL keep passing generated tests and mark failed methods disabled (contract amendment A4).")
+    scan_parser.add_argument("--disposition-policy", choices=("cleanup", "quarantine"),
+                             help="After FAIL: quarantine (default for local-pilot-v1) keeps passing generated tests and marks failed methods disabled; "
+                                  "cleanup removes every generated file (contract §17 item 2).")
     scan_parser.add_argument("--suite", action="store_true",
                              help="Consent to write the living suite with its manifest after the terminal result (local-pilot-v1).")
     scan_parser.add_argument("--require-driver-isolation", action="store_true",
