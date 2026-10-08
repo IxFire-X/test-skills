@@ -145,7 +145,7 @@ def changed_files(project: Path, git_range: str) -> list[str]:
 def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[str] = (), git_range: str | None = None) -> dict[str, Any]:
     from tools.code_surface import new_endpoints, surface
     from tools.pipeline_driver_suite import _module, _skillsrc
-    from tools.requirement_identity import identify
+    from tools.requirement_identity import identify_project
     from tools.run_pipeline import _docs_entries
 
     project = Path(project)
@@ -162,7 +162,7 @@ def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[
     id_pattern = (skillsrc.get("requirements") or {}).get("id_pattern")
     paths = list(docs) if docs else [row["path"] for row in manifest["documents"]]
     entries = _docs_entries(project, paths)
-    current = identify(entries, id_pattern)
+    current = identify_project(project, entries, id_pattern)
     requirements = compare_requirements(manifest["requirements"], current)
     cases = affected_cases(manifest, requirements)
     tests = test_outcomes(manifest, [Path(path) if Path(path).is_absolute() else project / path for path in junit]) if junit else {"failed": [], "broken": [], "skipped": []}

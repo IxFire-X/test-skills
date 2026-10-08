@@ -105,6 +105,24 @@ def identify(doc_entries: Sequence[Mapping[str, str]], id_pattern: str | None = 
     return keyed
 
 
+def identify_project(project: Any, doc_entries: Sequence[Mapping[str, str]], id_pattern: str | None = None) -> list[dict[str, Any]]:
+    """``identify`` with the document limits of the project's ``.skillsrc`` (as the pilot's context build).
+
+    A document over the limits, or an OpenSpec conflict, is a ``SuiteError`` with the scan's reason
+    code — a status the wave-3 paths report, never a traceback (review 2.1 item 15).
+    """
+    from pathlib import Path
+
+    from tools.build_context import RequirementConflict, _project_limits
+    from tools.suite_manifest import SuiteError
+
+    limits = _project_limits(Path(project).resolve())
+    try:
+        return identify(doc_entries, id_pattern, file_limit=limits["docs_file_bytes"], total_limit=limits["docs_total_bytes"])
+    except RequirementConflict as error:
+        raise SuiteError(str(getattr(error, "code", "") or "REQUIREMENTS_CONFLICT"), str(error)) from error
+
+
 def key_path(key: str) -> str:
     """The file (Markdown) or capability (OpenSpec) part of a key."""
     return key.split("#", 1)[0]

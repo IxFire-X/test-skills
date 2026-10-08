@@ -88,7 +88,7 @@ def attempt_suite(project: Path, run_root: Path, attempt: Mapping[str, Any], *, 
     """
     from tools import pilot_state, run_pipeline
     from tools.code_surface import surface
-    from tools.requirement_identity import identify, identities_from_record
+    from tools.requirement_identity import identify_project, identities_from_record
 
     attempt_id = str(attempt["attempt_id"])
     run_id = run_root.name
@@ -128,7 +128,7 @@ def attempt_suite(project: Path, run_root: Path, attempt: Mapping[str, Any], *, 
         identities = identities_from_record(document.get("source_requirements") or [], id_pattern)
         documents = [{"path": path, "sha256": digest} for path, digest in sorted(recorded_docs.items())]
     else:
-        identities = identify(entries, id_pattern)
+        identities = identify_project(project, entries, id_pattern)
         documents = [{"path": entry["path"], "sha256": entry["sha256"]} for entry in entries]
         if [(row["source_requirement_id"], row["text"]) for row in identities] != expected:
             raise SuiteError("SUITE_REQUIREMENTS_MISMATCH", "the requirement scan does not reproduce the run's source requirements")

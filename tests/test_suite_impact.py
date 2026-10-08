@@ -102,6 +102,26 @@ def test_a_heading_edit_updates_its_cases_and_a_parent_rename_only_relinks(tmp_p
     assert moved["cases"]["to_update"] == [] and set(moved["cases"]["relinked"]) >= linked
 
 
+def test_the_suite_paths_use_the_document_limits_of_the_skillsrc(tmp_path: Path, step5: dict) -> None:
+    """Review 2.1 item 15: a document the pilot accepts under .skillsrc limits is accepted by the suite paths too;
+    over the limit the impact analysis stops with a reason, not a traceback."""
+    from tools.suite_manifest import SuiteError
+
+    project = _project(tmp_path, step5)
+    doc = project / DOCS
+    raw = doc.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    doc.write_bytes((raw + newline + "## Приложение" + newline + ("Пояснение без требований. " * 12000) + newline).encode("utf-8"))
+    assert doc.stat().st_size > 256 * 1024
+    with pytest.raises(SuiteError) as stopped:
+        impact(project)
+    assert stopped.value.code == "NEED_DOCS_LIMIT"
+    skillsrc = project / ".skillsrc"
+    skillsrc.write_text(skillsrc.read_text(encoding="utf-8") + "limits:\n  docs_file_bytes: 1048576\n  docs_total_bytes: 4194304\n", encoding="utf-8")
+    result = impact(project)
+    assert [key.rsplit(" > ", 1)[-1] for key in result["requirements"]["added"]] == ["Приложение"]
+
+
 def test_cases_retire_only_when_all_their_requirements_are_gone() -> None:
     manifest = {"cases": [{"case_id": "TC-1", "status": "ACTIVE", "requirement_keys": ["a", "b"]}, {"case_id": "TC-2", "status": "ACTIVE", "requirement_keys": ["b"]},
                           {"case_id": "TC-3", "status": "ACTIVE", "requirement_keys": ["c"]}, {"case_id": "TC-4", "status": "RETIRED", "requirement_keys": ["b"]}]}

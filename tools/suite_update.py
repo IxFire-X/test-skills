@@ -179,13 +179,19 @@ def _suite(project: Path, run_root: Path) -> tuple[str, dict[str, Any], dict[str
 def _scan(project: Path, run_root: Path, manifest: Mapping[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     from tools.build_context import build_context
     from tools.pipeline_driver_suite import _skillsrc
-    from tools.requirement_identity import identify
+    from tools.requirement_identity import identify_project
     from tools.run_pipeline import _docs_entries
 
     config = driver._config(run_root)
     id_pattern = (_skillsrc(project).get("requirements") or {}).get("id_pattern")
     entries = _docs_entries(project, config["docs"] or [row["path"] for row in manifest["documents"]])
-    return identify(entries, id_pattern), build_context(project, docs_snapshot=entries, id_pattern=id_pattern)
+    from tools.build_context import RequirementConflict
+
+    scan = identify_project(project, entries, id_pattern)
+    try:
+        return scan, build_context(project, docs_snapshot=entries, id_pattern=id_pattern)
+    except RequirementConflict as error:
+        raise SuiteError(str(getattr(error, "code", "") or "REQUIREMENTS_CONFLICT"), str(error)) from error
 
 
 # ----------------------------------------------------------------------------------- tasks
