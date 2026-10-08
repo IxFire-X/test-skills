@@ -126,6 +126,29 @@ def test_pinned_jars_are_verified(tmp_path: Path) -> None:
     assert stop.value.code == "MUTATION_TOOL_MISSING"
 
 
+def test_launcher_family_jars_are_recorded_and_bound_to_the_project_platform(tmp_path: Path) -> None:
+    """Review 2.1 item 13: launcher-family jars are not pinned, but their SHA-256 goes to the receipt and a
+    junit-platform jar must be the project's own Platform version."""
+    import hashlib
+
+    pins_path, jars = _fake_pins(tmp_path)
+    pins = mutation.load_pins(pins_path)
+    repo = tmp_path / "m2"
+    repo.mkdir()
+    entries = []
+    for name, data in {**jars, "junit-platform-launcher-6.0.3.jar": b"launcher", "opentest4j-1.3.0.jar": b"o"}.items():
+        (repo / name).write_bytes(data)
+        entries.append(str(repo / name))
+    rows = mutation.verify_tool_jars(entries, pins, launcher_version="6.0.3")
+    family = {row["file"]: row for row in rows if not row["pinned"]}
+    assert family["junit-platform-launcher-6.0.3.jar"]["sha256"] == hashlib.sha256(b"launcher").hexdigest()
+    assert set(family) == {"junit-platform-launcher-6.0.3.jar", "opentest4j-1.3.0.jar"}
+    (repo / "junit-platform-launcher-1.9.0.jar").write_bytes(b"old")
+    with pytest.raises(mutation.MutationStop) as stop:
+        mutation.verify_tool_jars([*entries, str(repo / "junit-platform-launcher-1.9.0.jar")], pins, launcher_version="6.0.3")
+    assert stop.value.code == "MUTATION_TOOL_UNPINNED" and "1.9.0" in str(stop.value)
+
+
 def test_the_shipped_pins_cover_the_whole_closure() -> None:
     pins = mutation.load_pins()
     names = {row["file"] for row in pins["java"]["jars"]}

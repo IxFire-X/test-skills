@@ -44,7 +44,10 @@ A2 — §1 п. 5, закреплённые по SHA-256 jar PIT разрешаю
   **и** `next --mutation` (`mutation_requested` в разрешении прогона, только `local-pilot-v1`).
 - PIT 1.30.0 + `pitest-junit5-plugin` 1.2.3 из командной строки. Замыкание (15 jar) Maven проекта
   разрешает по временному POM в каталоге прогона (`maven-dependency-plugin:3.8.1`); SHA-256 каждого
-  jar сверяется с пином (SHA-1 пинов сверены с Maven Central); лишний jar → `MUTATION_TOOL_UNPINNED`,
+  jar замыкания PIT сверяется с пином (SHA-1 пинов сверены с Maven Central); jar семейства launcher JUnit Platform
+  (`junit-platform-*`, `opentest4j`, `apiguardian-api`, `jspecify`) не закреплены — их SHA-256 записываются в квитанцию,
+  а `junit-platform-*` с 2026-10-08 обязаны быть версии Platform проекта; `maven-dependency-plugin:3.8.1` закреплён только версией
+  (уточнено по независимому ревью, п. 13); лишний jar → `MUTATION_TOOL_UNPINNED`,
   подменённый → `MUTATION_TOOL_DIGEST_MISMATCH`. `junit-platform-launcher` — версии Platform проекта.
 - Classpath проекта — `dependency:build-classpath` (`-pl` для реактора; Gradle — init script из
   каталога прогона) в файл, `--classPathFile`; `--targetTests` — классы сгенерированных символов;

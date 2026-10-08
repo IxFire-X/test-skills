@@ -62,7 +62,10 @@ resolve the pinned mutation tool jars into its local repository:
 - PIT command line `org.pitest:pitest-command-line` and `org.pitest:pitest-junit5-plugin`, versions and
   SHA-256 of every jar of their closure fixed by the package (`tools/mutation_tools.json`);
 - `org.junit.platform:junit-platform-launcher` of the project's own JUnit Platform version (recorded with
-  its digest, not pinned).
+  its digest, not pinned). *Clarified 2026-10-08 (independent review, item 13):* the launcher family
+  (`junit-platform-*`, `opentest4j`, `apiguardian-api`, `jspecify`) is accepted by name, each jar's SHA-256
+  is recorded in the mutation receipt, and a `junit-platform-*` jar must carry the project's Platform version;
+  the resolver `maven-dependency-plugin` is fixed by version only.
 
 The resolver descriptor, classpath files and reports live in the run directory. No project file, build
 configuration or dependency declaration changes. A digest mismatch makes the mutation stage `NOT_RUNNABLE`

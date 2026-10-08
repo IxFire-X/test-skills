@@ -208,8 +208,12 @@ def _classpath_file(path: Path) -> list[str]:
     return [entry for entry in text.split(os.pathsep) if entry]
 
 
-def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Every pinned jar exactly once with its SHA-256; the rest only the project's JUnit Platform launcher family."""
+def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any], launcher_version: str | None = None) -> list[dict[str, Any]]:
+    """Every pinned jar exactly once with its SHA-256; the rest only the project's JUnit Platform launcher family.
+
+    The family is not pinned (amendment A2: "recorded, not pinned"): each jar's SHA-256 goes to the
+    receipt, and a ``junit-platform-*`` jar must be the project's own Platform version (review 2.1 item 13).
+    """
     java = pins["java"]
     pinned = {row["file"]: row["sha256"] for row in java["jars"]}
     family = tuple(java["launcher_family"])
@@ -226,6 +230,8 @@ def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any]) -> list[di
             seen.add(name)
             rows.append({"file": name, "sha256": digest, "pinned": True})
         elif any(name.startswith(prefix + "-") for prefix in family):
+            if launcher_version and name.startswith("junit-platform-") and not name.endswith(f"-{launcher_version}.jar"):
+                raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_UNPINNED", f"{name} is not the project's JUnit Platform {launcher_version}")
             rows.append({"file": name, "sha256": digest, "pinned": False})
         else:
             raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_UNPINNED", f"the resolved closure has an unpinned jar: {name}")
@@ -332,7 +338,7 @@ def resolve_tool(build: BuildTool, pins: Mapping[str, Any], workdir: Path, launc
     if getattr(outcome, "exit_code", 1) != 0 or not output.is_file():
         raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_RESOLUTION_FAILED", "the pinned mutation tool could not be resolved: " + _tail(outcome))
     entries = _classpath_file(output)
-    return entries, verify_tool_jars(entries, pins)
+    return entries, verify_tool_jars(entries, pins, launcher_version)
 
 
 # --------------------------------------------------------------------------------------
