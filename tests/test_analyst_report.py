@@ -50,14 +50,17 @@ def test_duplicates_from_other_sources_join_one_item() -> None:
                                    "question": "Какой статус и тело ошибки ожидаются для неверного тела запроса?"}]
     sources_of = {"CREQ-B1-003": ["SREQ-0006", "SREQ-0009"], "CREQ-B1-006": ["SREQ-0008"]}
     report = analyst_report.build_report(_items(marker, parts, triage), run_id="r" * 32, attempt_id="a" * 32, sources_of=sources_of)
-    rows = {row["question"]: row for row in report["items"]}
-    assert len(report["items"]) == 6 + 2  # the reviewer duplicate and the structured duplicate joined; one new reviewer question, one SPEC_GAP
+    # One item per requirement: the reviewer duplicate and the structured duplicate joined their gaps, the new reviewer
+    # question joined its requirement (SREQ-0010), the SPEC_GAP joined SREQ-0008 — as wordings with their sources.
+    assert len(report["items"]) == 6
     path_id = next(row for row in report["items"] if "нечислового сегмента пути" in (row["missing"] or ""))
     assert [source["kind"] for source in path_id["sources"]] == ["context-marker", "tc-reviewer"]
-    body = next(row for row in report["items"] if row["requirement_ids"] == ["SREQ-0008"] and "статус и тело ошибки" in row["question"])
-    assert [source["ref"] for source in body["sources"]] == ["requirement_gaps[0]", "warnings[1]"]
-    spec = rows["Нужно ли обрезать имя длиннее 40 символов?"]
-    assert spec["requirement_ids"] == ["SREQ-0008"] and spec["sources"] == [{"kind": "mutation-triage", "ref": "MUT-0006", "location": "MUT-0006:L62"}]
+    body = next(row for row in report["items"] if row["requirement_ids"] == ["SREQ-0008"])
+    assert "статус и тело ошибки" in body["question"] and body["also_asked"] == ["Нужно ли обрезать имя длиннее 40 символов?"]
+    assert [source["ref"] for source in body["sources"]] == ["requirement_gaps[0]", "warnings[1]", "MUT-0006"]
+    assert {"kind": "mutation-triage", "ref": "MUT-0006", "location": "MUT-0006:L62"} in body["sources"]
+    content_type = next(row for row in report["items"] if row["requirement_ids"][0] == "SREQ-0010")
+    assert "Content-Type" in content_type["question"] + " ".join(content_type["also_asked"])
     assert report["counts"] == {"context-marker": 6, "tc-reviewer": 1, "autotest-reviewer": 1, "mutation-triage": 1}
 
 
@@ -147,9 +150,13 @@ def test_near_duplicates_of_one_requirement_join_and_keep_their_wording() -> Non
     other = [{"group_id": "MUT-0009", "decision": "SPEC_GAP", "requirement_id": "SREQ-0008", "refs": ["MUT-0009:L70"], "rationale": "…",
               "question": "Нужно ли обрезать имя длиннее 40 символов?"}]
     report = analyst_report.build_report(analyst_report.triage_items(triage + other), run_id="r" * 32, attempt_id="a" * 32)
-    assert len(report["items"]) == 2
-    logging = next(row for row in report["items"] if "логирует" in row["question"])
-    assert [source["ref"] for source in logging["sources"]] == ["MUT-0001", "MUT-0002", "MUT-0003"] and len(logging["also_asked"]) == 2
+    assert len(report["items"]) == 1  # one item per requirement
+    logging = report["items"][0]
+    assert "логирует" in logging["question"] and [source["ref"] for source in logging["sources"]] == ["MUT-0001", "MUT-0002", "MUT-0003", "MUT-0009"]
+    assert len(logging["also_asked"]) == 3 and logging["also_asked"][-1] == "Нужно ли обрезать имя длиннее 40 символов?"
+    markdown = analyst_report.render_markdown(report)  # a rewording and another question of the requirement are told apart
+    assert "**Тот же вопрос иначе:** ещё 2 формулировки" in markdown and "**Ещё по этому требованию.** Нужно ли обрезать имя длиннее 40 символов?" in markdown
+    assert "**Спрошено 4 раза.**" in markdown
     # Cases are keyed by their requirements, so an automation reviewer's question meets the others.
     parts = [{"review_key": "r1", "part_id": "part-000001", "result": {"findings": [_finding("Какой канал журнала ожидается?", ["TC-B1-013"])]}}]
     keyed = analyst_report.build_report(analyst_report.review_items(parts), run_id="r" * 32, attempt_id="a" * 32, sources_of={"TC-B1-013": ["SREQ-0008"]})
@@ -163,7 +170,7 @@ def test_near_duplicates_of_one_requirement_join_and_keep_their_wording() -> Non
 ])
 def test_negations_and_numbers_keep_questions_apart(left: str, right: str) -> None:
     """Review 2.1 item 14: opposite or differently bounded questions are different questions."""
-    from tools.analyst_report import SIMILAR, normalize, similarity
+    from tools.analyst_report import normalize, rewording
 
-    assert similarity(normalize(left), normalize(right)) < SIMILAR
-    assert similarity(normalize(left), normalize(left + " ")) == 1.0
+    assert not rewording(normalize(left), normalize(right))
+    assert rewording(normalize(left), normalize(left + " "))

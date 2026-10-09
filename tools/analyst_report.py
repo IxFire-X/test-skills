@@ -10,8 +10,8 @@ Questions for analysts come from three sources and are joined deterministically:
   (``too_broad`` of the review aggregate) — asked as the reviewer worded them;
 * ``SPEC_GAP`` decisions of the survivor triage.
 
-Duplicates are joined by requirement and normalized question; every item keeps all of its
-sources with a reference.  Building twice from the same inputs gives the same bytes.  The
+Questions are joined per requirement (the most specific one a question names); every item keeps
+all of its wordings and sources with a reference.  Building twice from the same inputs gives the same bytes.  The
 package never writes into ``openspec/``: ``export`` prints a change comment to stdout.
 """
 from __future__ import annotations
@@ -35,8 +35,6 @@ _FIELDS = {
 _SOURCE_ORDER = {"context-marker": 0, "tc-reviewer": 1, "autotest-reviewer": 2, "mutation-triage": 3}
 
 
-SIMILAR = 0.7
-
 
 def normalize(text: str) -> str:
     value = unicodedata.normalize("NFC", text or "").casefold()
@@ -46,19 +44,6 @@ def normalize(text: str) -> str:
 
 _NEGATION = re.compile(r"(?<![\w-])(?:не|нет|ни|без|нельзя|not|no|never|none|without|cannot|can't|don't|doesn't|isn't|shouldn't|mustn't)(?![\w-])")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
-
-
-def similarity(left: str, right: str) -> float:
-    """Jaccard similarity of the words (3+ letters) of two normalized questions.
-
-    Questions that differ in a negation or in a number are different questions whatever their words
-    ("возвращать" / "не возвращать", "длиннее 40" / "длиннее 20") — review 2.1 item 14.
-    """
-    if sorted(_NEGATION.findall(left)) != sorted(_NEGATION.findall(right)) or sorted(_NUMBER.findall(left)) != sorted(_NUMBER.findall(right)):
-        return 0.0
-    words = [set(re.findall(r"[\w-]{3,}", value)) for value in (left, right)]
-    union = words[0] | words[1]
-    return 1.0 if not union else len(words[0] & words[1]) / len(union)
 
 
 def parse_warning(line: str) -> dict[str, Any] | None:
@@ -131,13 +116,23 @@ def triage_items(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def build_report(items: Sequence[Mapping[str, Any]], *, run_id: str, attempt_id: str, sources_of: Mapping[str, Sequence[str]] | None = None) -> dict[str, Any]:
-    """Join items by requirement and normalized question; ``sources_of`` maps a CREQ to its SREQs so both spellings meet."""
+    """One item per requirement: the questions of one requirement join, every wording and source kept.
+
+    ``sources_of`` maps a CREQ (and a case) to its SREQs so both spellings meet.  A requirement named
+    only inside a source label («docs/… (SREQ-0009, O07, …)») counts as that requirement, so the
+    context-marker's structured gap and its warning line are one question.  A question tied to several
+    requirements belongs to the most specific of them — the one the fewest cases map to (the general
+    requirements every case shares do not collect everybody's questions).  The most asked wording heads
+    the item, the others stay in ``also_asked`` (live run g, 2026-10-09: 47 questions, 15 requirements).
+    """
     joined: dict[tuple, dict[str, Any]] = {}
 
     def requirements(ids: Sequence[str]) -> tuple[str, ...]:
         mapped = set()
         for identifier in ids:
-            mapped.update((sources_of or {}).get(identifier) or [identifier])
+            named = [identifier] if _REQUIREMENT.fullmatch(identifier) else _REQUIREMENT.findall(identifier) or [identifier]
+            for name in named:
+                mapped.update((sources_of or {}).get(name) or [name])
         return tuple(sorted(mapped))
 
     for item in items:
@@ -150,41 +145,79 @@ def build_report(items: Sequence[Mapping[str, Any]], *, run_id: str, attempt_id:
         source = {name: value for name, value in item["source"].items() if value is not None}
         if source not in row["sources"]:
             row["sources"].append(source)
-    # Near-duplicates of one requirement (the same question about another field, say) join the first of
-    # them in sorted order when their words mostly coincide; the joined wording stays in ``also_asked``.
-    clusters: list[tuple[tuple, dict[str, Any]]] = []
+    # How general a requirement is: how many CREQs and cases map to it (without a mapping: how many questions name it).
+    spread: dict[str, int] = {}
+    for names in (sources_of.values() if sources_of else (key[0] for key in joined)):
+        for name in set(names):
+            spread[name] = spread.get(name, 0) + 1
+
+    def primary(names: tuple[str, ...]) -> str:
+        candidates = [name for name in names if _REQUIREMENT.fullmatch(name)] or list(names) or [""]
+        return min(candidates, key=lambda name: (spread.get(name, 0), name))
+
+    groups: dict[str, list[tuple]] = {}
     for key in sorted(joined):
-        row = joined[key]
-        home = next((cluster for cluster in clusters if cluster[0][0] == key[0] and similarity(cluster[0][1], key[1]) >= SIMILAR), None)
-        if home is None:
-            clusters.append((key, {**row, "also_asked": []}))
-            continue
-        target = home[1]
-        target["missing"] = target["missing"] or row["missing"]
-        target["blocks"] = target["blocks"] or row["blocks"]
-        target["also_asked"].append(row["question"])
-        target["sources"].extend(source for source in row["sources"] if source not in target["sources"])
+        groups.setdefault(primary(key[0]), []).append(key)
     rows = []
-    for key, row in clusters:
+    for home, keys in sorted(groups.items()):
+        head = max(keys, key=lambda key: len(joined[key]["sources"]))  # the most asked; the first in sorted order on a tie
+        ordered = [head, *[key for key in keys if key != head]]
+        row = {"requirement_ids": [home, *sorted({name for key in keys for name in key[0]} - {home})], "question": joined[head]["question"],
+               "also_asked": [joined[key]["question"] for key in ordered[1:]],
+               "missing": next((joined[key]["missing"] for key in ordered if joined[key]["missing"]), None),
+               "blocks": next((joined[key]["blocks"] for key in ordered if joined[key]["blocks"]), None),
+               "sources": [source for key in ordered for source in joined[key]["sources"]]}
+        row["sources"] = [source for index, source in enumerate(row["sources"]) if source not in row["sources"][:index]]
         row["sources"].sort(key=lambda source: (_SOURCE_ORDER.get(source["kind"], 9), source["ref"]))
-        row["item_id"] = "AQ-" + hashlib.sha256(json.dumps([list(key[0]), key[1]], ensure_ascii=False).encode("utf-8")).hexdigest()[:10].upper()
+        row["item_id"] = "AQ-" + hashlib.sha256(json.dumps([[home], head[1]], ensure_ascii=False).encode("utf-8")).hexdigest()[:10].upper()
         rows.append({name: row[name] for name in ("item_id", "requirement_ids", "question", "also_asked", "missing", "blocks", "sources")})
     return {"schema_version": "1.0.0", "run_id": run_id, "attempt_id": attempt_id, "items": rows,
             "counts": {kind: sum(any(source["kind"] == kind for source in row["sources"]) for row in rows) for kind in _SOURCE_ORDER}}
 
 
+REWORDING = 0.45
+
+
+def rewording(left: str, right: str) -> bool:
+    """One question in other words: the same negations, numbers that do not contradict (one wording may leave
+    a number out), and mostly the same words (Jaccard of the 3+ letter words).  Questions that differ in a
+    negation or a number are different questions ("возвращать" / "не возвращать", "длиннее 40" / "длиннее 20")
+    — review 2.1 item 14.  Live run g: nine reviewers asked
+    the V05 question at 0.48–0.70; different questions of one requirement stayed at 0–0.16."""
+    if sorted(_NEGATION.findall(left)) != sorted(_NEGATION.findall(right)):
+        return False
+    numbers = [set(_NUMBER.findall(value)) for value in (left, right)]
+    if not (numbers[0] <= numbers[1] or numbers[1] <= numbers[0]):
+        return False
+    words = [set(re.findall(r"[\w-]{3,}", value)) for value in (left, right)]
+    union = words[0] | words[1]
+    return not union or len(words[0] & words[1]) / len(union) >= REWORDING
+
+
+def _plural(count: int, one: str, few: str, many: str) -> str:
+    return one if count % 10 == 1 and count % 100 != 11 else few if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14) else many
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
-    lines = ["# Вопросы аналитикам", "", f"Прогон `{report['run_id']}`, попытка `{report['attempt_id']}`. Вопросов: {len(report['items'])}.", ""]
+    lines = ["# Вопросы аналитикам", "", f"Прогон `{report['run_id']}`, попытка `{report['attempt_id']}`. Требований с вопросами: {len(report['items'])}.", ""]
     if not report["items"]:
         lines += ["Вопросов нет.", ""]
         return "\n".join(lines)
     names = {"context-marker": "разметка требований", "tc-reviewer": "ревью кейсов", "autotest-reviewer": "ревью автотестов", "mutation-triage": "разбор мутантов"}
     for row in report["items"]:
-        lines.append(f"## {row['item_id']}: {', '.join(row['requirement_ids'])}")
+        # The heading names requirements only; the case, step and check ids stay in the JSON and in the sources.
+        heading = [name for name in row["requirement_ids"] if _REQUIREMENT.fullmatch(name)] or row["requirement_ids"]
+        lines.append(f"## {row['item_id']}: {', '.join(heading)}")
         lines.append("")
         lines.append(f"**Вопрос.** {row['question']}")
-        for variant in row.get("also_asked") or []:
-            lines.append(f"**Тот же вопрос иначе.** {variant}")
+        count = len(row["sources"])
+        if count > 1:
+            lines.append(f"**Спрошено {count} {_plural(count, 'раз', 'раза', 'раз')}.**")
+        variants = row.get("also_asked") or []
+        same = [variant for variant in variants if rewording(normalize(row["question"]), normalize(variant))]
+        if same:
+            lines.append(f"**Тот же вопрос иначе:** ещё {len(same)} {_plural(len(same), 'формулировка', 'формулировки', 'формулировок')} (в JSON, `also_asked`).")
+        lines += [f"**Ещё по этому требованию.** {variant}" for variant in variants if variant not in same]
         if row["missing"]:
             lines.append(f"**Чего не хватает.** {row['missing']}")
         if row["blocks"]:

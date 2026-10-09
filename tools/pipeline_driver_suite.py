@@ -251,7 +251,8 @@ def quarantine_report(manifest: Mapping[str, Any], document: Mapping[str, Any], 
     lines += ["", "## Вопросы аналитикам", ""] + [f"- {case['quarantine']['question']}" for case in quarantined if case["quarantine"].get("question")] + [""]
     for case in quarantined:
         locator = case["methods"][0]["locator"] if case["methods"] else case["case_id"]
-        lines += [bug_report(cases.get(case["case_id"], {"case_id": case["case_id"]}), locator=locator, failure=failures.get(case["case_id"]), run_id=run_id, first_run=True), ""]
+        lines += [bug_report(cases.get(case["case_id"], {"case_id": case["case_id"]}), locator=locator, failure=failures.get(case["case_id"]), run_id=run_id, first_run=True,
+                               document=document), ""]
     return "\n".join(lines)
 
 

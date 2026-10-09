@@ -65,6 +65,11 @@ def _sources_of(run_root: Path, attempt_id: str) -> dict[str, list[str]]:
     if document is None:
         path = driver.work_dir(run_root) / "artifacts" / "candidate.json"
         document = driver._read_json(path) if path.is_file() else {}
+    return sources_of_document(document)
+
+
+def sources_of_document(document: Mapping[str, Any]) -> dict[str, list[str]]:
+    """CREQ and case → SREQ of one canonical document."""
     table: dict[str, list[str]] = {}
     for row in document.get("source_to_canonical_mappings", []):
         for creq in row.get("canonical_requirement_ids", []):

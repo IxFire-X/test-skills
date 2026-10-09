@@ -244,3 +244,49 @@ def test_the_zephyr_export_of_the_petclinic_cases_uses_only_the_users_priorities
     assert set(by_name.values()) <= {"High", "Normal", "Low"}
     assert {by_name[title] for title in critical} == {"High"}
     assert b"Highest" not in render_zephyr_xml(document).payload
+
+
+def _report_items_of_run_g() -> list[dict]:
+    """The questions of live run g (2026-10-09) as the report builder got them: one item per recorded source."""
+    report = rp.load("analyst-report-g.json.gz")
+    return [{"requirement_ids": row["requirement_ids"], "question": row["question"], "missing": row["missing"], "blocks": row["blocks"], "source": source}
+            for row in report["items"] for source in row["sources"]]
+
+
+def test_the_analyst_report_of_run_g_has_one_item_per_requirement_and_keeps_every_source() -> None:
+    # Run g: 47 items for about 20 questions — the context-marker's 14 gaps twice (its structured gap and its warning line,
+    # whose requirement is only in the source label) and the V05 «POST without date» question asked by 9 reviewers.
+    from tools.analyst_report import build_report, render_markdown
+    from tools.pipeline_driver_analyst import sources_of_document
+
+    items = _report_items_of_run_g()
+    assert len(items) == 48
+    report = build_report(items, run_id="r" * 32, attempt_id="a" * 32, sources_of=sources_of_document(rp.payload("canonical")["document"]))
+    assert len(report["items"]) <= 20
+    sources = [source for row in report["items"] for source in row["sources"]]
+    assert sorted(map(repr, sources)) == sorted(repr({name: value for name, value in item["source"].items() if value is not None}) for item in items)
+    home = {source["ref"]: index for index, row in enumerate(report["items"]) for source in row["sources"] if source["kind"] == "context-marker"}
+    assert all(home[f"requirement_gaps[{gap}]"] == home[f"warnings[{gap}]"] for gap in range(14))  # no marker question twice
+    assert not any(name.startswith("docs/") for row in report["items"] for name in row["requirement_ids"])
+    v05 = next(row for row in report["items"] if row["requirement_ids"][0] == "SREQ-0024")
+    assert sum(source["kind"] == "tc-reviewer" for source in v05["sources"]) == 9
+    markdown = render_markdown(report)
+    block = markdown.split(f"## {v05['item_id']}:")[1].split("\n## ")[0]
+    assert sum(line.startswith(("**Тот же вопрос иначе", "**Ещё по этому требованию")) for line in block.splitlines()) <= 4
+    assert "**Тот же вопрос иначе:** ещё" in block and "**Спрошено 11 раз.**" in block
+    assert not any(name in line for line in markdown.splitlines() if line.startswith("## ") for name in ("ASSERT-", "EXP-", "STEP-"))
+
+
+def test_the_bug_report_draft_of_run_g_reads_like_the_zephyr_export() -> None:
+    from tools.suite_failures import bug_report
+
+    document = rp.payload("canonical")["document"]
+    case = next(row for row in document["test_cases"] if row["case_id"] == "TC-B1-V05-01")
+    failure = "[ERROR] OwnerLifecycleFormTests.rejectExplicitlyEmptyVisitDate:2538 [ASSERT-B1-0931 response_status] expected: 200 but was: 302"
+    text = bug_report(case, locator="OwnerLifecycleFormTests#rejectExplicitlyEmptyVisitDate", failure=failure, run_id="r" * 32, first_run=True,
+                      document=document)
+    assert "Данные:" not in text and "- Тестовые данные:" in text and "- Ожидаемый результат:" in text
+    assert "- Ожидалось: Форма нового визита возвращается с ошибкой поля date" in text and "- Получено: перенаправление (302)" in text
+    assert "`CREQ-B1-V05-EMPTY`: Явно пустая дата визита" in text and "CREQ-B1-T-" not in text and "CREQ-B1-S02-" not in text
+    assert "- Подготовка (шаг 1): Зафиксировать текущую дату сервера D" in text and "\n2. Создать владельца" in text
+    assert failure in text  # the raw message stays as the evidence
