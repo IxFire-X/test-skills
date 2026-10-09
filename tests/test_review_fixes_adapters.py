@@ -79,6 +79,47 @@ def test_maven_single_module_argv_has_batch_flags_and_no_undeclared_profile(tmp_
     assert request.report_paths == ("target/surefire-reports",)
 
 
+# Live run f (2026-10-09): 81 methods of one generated class gave `-Dtest=<FQCN>#m1,<FQCN>#m2,…` of 8.4k characters;
+# mvnw.cmd runs under cmd.exe, which refuses a line over 8191 characters, so no test ran and the verdict was UNKNOWN.
+PETCLINIC_CLASS = "org.springframework.samples.petclinic.lifecycle.OwnerLifecycleFormTests"
+PETCLINIC_METHODS = tuple(f"lifecycleCase{index:02d}ChecksOneObservableRule" for index in range(81))
+
+
+def test_maven_selectors_of_one_class_share_one_surefire_pattern(tmp_path: Path) -> None:
+    from tools.execution_adapters import build_request
+
+    wrapper = _executable(tmp_path / _host("mvnw", "mvnw.cmd"))
+    targets = [{"selector": "pkg.ATest#a"}, {"selector": "pkg.BTest#b"}, {"selector": "pkg.ATest#c"}]
+    request = build_request(MAVEN, _module(tmp_path, MAVEN, "mvnw"), targets)
+
+    assert request.argv == (str(wrapper.resolve()), "-Dtest=pkg.ATest#a+c,pkg.BTest#b", "-B", "-ntp", "test")
+    assert request.selectors == ("pkg.ATest#a", "pkg.BTest#b", "pkg.ATest#c")
+
+
+def test_maven_command_for_the_petclinic_class_fits_a_cmd_exe_line(tmp_path: Path) -> None:
+    from tools.execution_adapters import build_request
+
+    wrapper = tmp_path / "live" / "petclinic-20261009f" / "mvnw.cmd"
+    wrapper.parent.mkdir(parents=True)
+    _executable(wrapper)
+    module = _module(wrapper.parent, MAVEN, "mvnw")
+    request = build_request(MAVEN, module, [{"selector": f"{PETCLINIC_CLASS}#{name}"} for name in PETCLINIC_METHODS])
+
+    assert len(subprocess.list2cmdline(request.argv)) < 8191 - 512  # mvnw.cmd and mvn.cmd add their own paths to the line
+    assert request.argv[1] == f"-Dtest={PETCLINIC_CLASS}#" + "+".join(PETCLINIC_METHODS)
+
+
+def test_a_receipt_recorded_with_one_pattern_per_method_still_verifies(tmp_path: Path) -> None:
+    from tools.execution_adapters import build_request, command_for_request
+
+    _executable(tmp_path / _host("mvnw", "mvnw.cmd"))
+    request = build_request(MAVEN, _module(tmp_path, MAVEN, "mvnw"), [{"selector": "pkg.ATest#a"}, {"selector": "pkg.ATest#c"}])
+    earlier = replace(request, argv=(request.argv[0], "-Dtest=pkg.ATest#a,pkg.ATest#c", *request.argv[2:]))
+
+    assert command_for_request(request)[1] == request.argv
+    assert command_for_request(earlier)[1] == earlier.argv
+
+
 def test_maven_profile_declared_in_skillsrc_is_passed(tmp_path: Path) -> None:
     from tools.execution_adapters import build_request
 

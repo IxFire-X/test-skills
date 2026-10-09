@@ -83,7 +83,9 @@ def test_a_stable_failure_is_not_flaky_and_a_changing_one_is(tmp_path: Path, ste
     assert classify(by[locators[0]]["runs"])["reason"] == "BEHAVIOR_CHANGED_WITHOUT_SPEC"
     assert classify(by[locators[1]]["runs"])["reason"] == "FLAKY"
     assert all(row["runs"] == ["passed"] for locator, row in by.items() if locator not in locators[:2])
-    assert len(calls) == 3 and "-Dtest=" + ",".join(sorted([locators[0], locators[1]])) in calls[1]  # repeats run only the failed ones
+    first, second = sorted([locators[0], locators[1]])
+    assert first.split("#")[0] == second.split("#")[0]
+    assert len(calls) == 3 and f"-Dtest={first}+{second.split('#')[1]}" in calls[1]  # repeats run only the failed ones
     assert by[locators[0]]["failure"] == "expected 200 but was 500"
 
 

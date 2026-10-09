@@ -317,6 +317,24 @@ def _gradle_profile(profile: str) -> tuple[str, ...]:
     return () if profile == UNDECLARED_PROFILE else (f"-Pprofile={profile}",)
 
 
+def _surefire_patterns(selectors: Sequence[str]) -> str:
+    """``-Dtest`` value: the methods of one class share one Surefire pattern ``Class#a+b``.
+
+    The same set of tests as ``Class#a,Class#b``, with the class named once: the per-method form of 81 methods
+    exceeded cmd.exe's 8191-character line in mvnw.cmd (live run f, 2026-10-09).
+    """
+    patterns: dict[str, list[str] | None] = {}  # class -> its methods; None: the whole class was selected
+    for selector in selectors:
+        owner, separator, method = selector.partition("#")
+        if not separator or not method or "+" in method:
+            patterns[selector] = None
+        elif patterns.get(owner, []) is not None:
+            patterns.setdefault(owner, []).append(method)
+        else:
+            patterns[selector] = None  # the class is already selected whole; keep the exact selector as given
+    return ",".join(owner if names is None else f"{owner}#{'+'.join(names)}" for owner, names in patterns.items())
+
+
 def command_for(adapter_id: str, executable: str, profile: str, selectors: Sequence[str], *, module_path: str = "") -> tuple[tuple[str, ...], tuple[str, ...]]:
     """One closed command policy for construction, recovery, and receipt validation.
 
@@ -331,7 +349,7 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
         return (_REPORT_DIRECTORIES[PYTEST],), (executable, "-m", "pytest", "--junitxml", _REPORT_DIRECTORIES[PYTEST], *selectors)
     elif adapter_id in {MAVEN, SYSTEM_MAVEN}:
         reactor = ("-Dsurefire.failIfNoSpecifiedTests=false",) if module_path else ()
-        return (_REPORT_DIRECTORIES[adapter_id],), (executable, *_maven_scope(profile, module_path), f"-Dtest={','.join(selectors)}", *reactor, "-B", "-ntp", "test")
+        return (_REPORT_DIRECTORIES[adapter_id],), (executable, *_maven_scope(profile, module_path), f"-Dtest={_surefire_patterns(selectors)}", *reactor, "-B", "-ntp", "test")
     elif adapter_id == GRADLE:
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)
         # ``cleanTest`` forces only the test task to rerun and exists in every Gradle
@@ -400,6 +418,11 @@ def command_for_request(request: ExecutionRequest) -> tuple[tuple[str, ...], tup
     current = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors, module_path=request_module_path(request))
     if request.adapter_id == GRADLE and current[1][-2:] == ("--init-script", str(GRADLE_SELECTED_INIT)) and request.argv == current[1][:-2]:
         return current[0], current[1][:-2]  # recorded before the coverage-gate init script (2026-10-08)
+    if request.adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        grouped = f"-Dtest={_surefire_patterns(request.selectors)}"
+        per_method = tuple(f"-Dtest={','.join(request.selectors)}" if token == grouped else token for token in current[1])
+        if request.argv == per_method:
+            return current[0], per_method  # recorded before one pattern per class (2026-10-09)
     return current
 
 
