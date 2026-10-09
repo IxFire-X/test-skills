@@ -127,6 +127,42 @@ def test_b1_lock_wait_is_bounded_and_reports_a_busy_run(tmp_path: Path, monkeypa
     assert len(derive_state(root)["events"]) == 2
 
 
+def test_b1_a_held_run_lock_leaves_the_lock_file_readable_to_the_projects_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Live run e (2026-10-09): Petclinic's nohttp checkstyle reads every file under the project, the driver held the
+    # Windows byte lock on .pilot-runs/<run>/.lock during the Maven gate, the read failed and the gate removed the tests.
+    root = _run(tmp_path)
+    holder = _script("""
+        import sys
+        from pathlib import Path
+        from tools import pilot_state
+        with pilot_state.run_lock(Path(sys.argv[1])):
+            print("locked", flush=True)
+            sys.stdin.readline()
+    """, str(root), stdin=subprocess.PIPE)
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        assert (root / ".lock").read_bytes() == b""
+        monkeypatch.setattr(pilot_state, "_RUN_LOCK_TIMEOUT_SECONDS", 0.3)
+        with pytest.raises(ValueError, match="run is locked"):
+            derive_state(root)
+    finally:
+        holder.stdin.write("\n"); holder.stdin.flush()
+        holder.wait(timeout=30)
+
+
+def test_b1_a_held_review_runner_lock_leaves_its_file_readable(tmp_path: Path) -> None:
+    from tools import model_runner
+
+    path = tmp_path / "lock"
+    held = model_runner._lock(path, blocking=False)
+    assert held is not None
+    try:
+        assert path.read_bytes() == b""
+        assert model_runner._lock(path, blocking=False) is None
+    finally:
+        held.close()
+
+
 def test_b1_concurrent_status_polling_never_corrupts_the_journal(tmp_path: Path) -> None:
     root = _run(tmp_path)
     reader = _script("""

@@ -233,7 +233,7 @@ def _lock(path: Path, *, blocking: bool) -> Any:
         if os.name == "nt":
             import msvcrt
 
-            handle.seek(0)
+            handle.seek(0x7FFFFFF0)  # past the end, as pilot_state's run lock: a locked byte 0 blocks every reader
             msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
         else:
             import fcntl

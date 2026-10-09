@@ -95,6 +95,10 @@ _REVIEW_FAILURE_CLASSES = ("TRANSPORT", "CONTENT")
 _RUN_LOCK_NAME = ".lock"
 _RUN_LOCK_TIMEOUT_SECONDS = 120.0
 _RUN_LOCK_POLL_SECONDS = 0.02
+# Windows byte locks are mandatory: a locked byte 0 makes even the empty lock file unreadable to other processes, and
+# the project's build (Petclinic's nohttp checkstyle reads every file of the tree) runs while the driver holds the lock.
+# A byte far past the end of the file excludes a second holder just the same and blocks no reader.
+_WINDOWS_LOCK_OFFSET = 0x7FFFFFF0
 
 
 class _RunLockState:
@@ -126,7 +130,7 @@ def _acquire_os_run_lock(path: Path) -> int:
                 if os.name == "nt":
                     import msvcrt
 
-                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    os.lseek(descriptor, _WINDOWS_LOCK_OFFSET, os.SEEK_SET)
                     msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
                 else:
                     import fcntl
@@ -147,7 +151,7 @@ def _release_os_run_lock(descriptor: int) -> None:
         if os.name == "nt":
             import msvcrt
 
-            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.lseek(descriptor, _WINDOWS_LOCK_OFFSET, os.SEEK_SET)
             msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
