@@ -226,3 +226,21 @@ def test_a_symbol_id_of_a_case_of_the_part_is_a_valid_ref() -> None:
         answer["coverage"][index]["refs"] = refs
         found = [item["code"] for item in rc.validate_answer(plan, part, answer, payload["document"], payload["automation"])]
         assert found == codes, (refs, found)
+
+
+def test_the_zephyr_export_of_the_petclinic_cases_uses_only_the_users_priorities() -> None:
+    # Finding 10 (live run g, 2026-10-09): the user's Zephyr knows High / Normal / Low only; the 9 CRITICAL cases were
+    # exported as `Highest` and would not import.  CRITICAL now maps to High.
+    import csv
+    import io
+
+    from tools.test_case_projections import render_zephyr_csv, render_zephyr_xml
+
+    document = rp.payload("canonical")["document"]
+    critical = {case["title"] for case in document["test_cases"] if case["priority"] == "CRITICAL"}
+    assert len(critical) == 9
+    rows = list(csv.DictReader(io.StringIO(render_zephyr_csv(document).payload.decode("utf-8-sig"))))
+    by_name = {row["Name"]: row["Priority"] for row in rows if row["Name"]}  # Name is the case title
+    assert set(by_name.values()) <= {"High", "Normal", "Low"}
+    assert {by_name[title] for title in critical} == {"High"}
+    assert b"Highest" not in render_zephyr_xml(document).payload

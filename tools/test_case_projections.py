@@ -27,7 +27,8 @@ _PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROF
 _PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
 _XML_PROFILE = "zephyr-scale-xml-observed-v1"
-_PRIORITIES = {"CRITICAL": "Highest", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
+# Zephyr Scale's default priorities are High / Normal / Low: a `Highest` value does not import (live run g, finding 10).
+_PRIORITIES = {"CRITICAL": "High", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
 _HEADERS = (
     "Key", "Name", "Status", "Precondition", "Objective", "Folder", "Priority",
     "Component", "Labels", "Owner", "Estimated Time", "Coverage (Issues)",
