@@ -46,6 +46,12 @@
                      "quarantine_markdown": {"type": "string"}}
     },
     "exec": {"type": "object"},
+    "build_failure": {
+      "description": "NOT_RUNNABLE/BUILD_FAILED_BEFORE_TESTS: the build step that failed and the tail of runner-output.txt.",
+      "type": "object", "additionalProperties": false, "required": ["message", "output_tail"],
+      "properties": {"message": {"type": "string", "minLength": 1},
+                     "output_tail": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}}}
+    },
     "test_strength": {
       "type": "object",
       "additionalProperties": false,

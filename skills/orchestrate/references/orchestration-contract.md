@@ -102,8 +102,8 @@ Inventory учитывает файлы выбранного модуля, paren
     correction/review -> generated delta -> per-file materialization -> шлюз
     компиляции/сбора -> one exact project-native execution. После
     `NOT_RUNNABLE/GENERATED_TEST_INVALID` исправленная ревизия допускается один раз в
-    child attempt с `retry_reason=GENERATED_TEST_INVALID`; после `LAUNCH_FAILED` и
-    `TESTS_DESELECTED` регенерации нет.
+    child attempt с `retry_reason=GENERATED_TEST_INVALID`; после `LAUNCH_FAILED`,
+    `TESTS_DESELECTED` и `BUILD_FAILED_BEFORE_TESTS` регенерации нет.
 11. Построй execution trace, определи disposition всего generated set, затем выполни
     pre-finalization trace -> finalization receipt/readback -> terminal result -> derived
     terminal trace -> terminal event.

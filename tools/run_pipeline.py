@@ -1109,7 +1109,7 @@ def _not_runnable_guidance(result: Mapping[str, Any], automation: Mapping[str, A
     (FAIL) is never regenerated.
     """
     reason = result.get("reason_code")
-    if result.get("verification") != "NOT_RUNNABLE" or reason not in {"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED"}:
+    if result.get("verification") != "NOT_RUNNABLE" or reason not in {"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED", "BUILD_FAILED_BEFORE_TESTS"}:
         return {}
     guidance: dict[str, Any] = {"reason": reason}
     if reason == "GENERATED_TEST_INVALID":

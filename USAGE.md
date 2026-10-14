@@ -457,7 +457,10 @@ pytest запускается из module root. Maven запускается и�
 
 Другие причины `NOT_RUNNABLE` после старта: `LAUNCH_FAILED` — процесс не запустился;
 `TESTS_DESELECTED` — pytest собрал 0 тестов по явно выбранным nodeid из-за `addopts`,
-`-m` или `PYTEST_ADDOPTS` (файлы тестов остаются `RETAINED`).
+`-m` или `PYTEST_ADDOPTS` (файлы тестов остаются `RETAINED`);
+`BUILD_FAILED_BEFORE_TESTS` — сборка проекта (Maven/Gradle) упала до компиляции тестов:
+плагин фазы `validate`, основной код и т. п.; тесты ни при чём, перегенерации нет, итог
+драйвера несёт `build_failure` — шаг сборки и хвост runner-output.
 
 После запуска с замороженным baseline сравниваются только его входы: изменённый или
 удалённый файл — drift, новые файлы (coverage, `.gradle`, логи) drift не считаются.

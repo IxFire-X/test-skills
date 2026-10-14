@@ -1255,6 +1255,8 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
     }
+    if terminal.get("reason_code") == "BUILD_FAILED_BEFORE_TESTS":
+        summary["build_failure"] = _build_failure(run_root, attempt)
     if attempt["policy_profile"] == "local-pilot-v1":
         from tools.pipeline_driver_strength import strength_summary
 
@@ -1267,6 +1269,26 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
 
         suite_summary(run_root, attempt, summary)  # opt-in --suite: the living suite (summary 1.2.0)
     return summary
+
+
+_BUILD_FAILURE_TAIL_LINES = 20
+
+
+def _build_failure(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
+    """What failed the project's build before the tests, and the tail of the runner output that shows it."""
+    from tools.execution_adapters import GRADLE, MAVEN
+    from tools.run_tests import build_failure_before_tests
+
+    path = run_root / "artifacts" / str(attempt["attempt_id"]) / "runner-output.txt"
+    try:
+        output = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    except OSError:
+        output = ""
+    # The reason is already classified; the Maven and Gradle failure lines cannot be confused.
+    step = build_failure_before_tests(MAVEN, output) or build_failure_before_tests(GRADLE, output) or "шаг не распознан"
+    lines = [line[:300] for line in output.splitlines() if line.strip()]
+    return {"message": f"сборка проекта упала до запуска тестов: {step}. Исправьте окружение проекта и начните новый прогон; перегенерация тестов не нужна.",
+            "output_tail": lines[-_BUILD_FAILURE_TAIL_LINES:]}
 
 
 def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
@@ -1624,7 +1646,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
     entry["duration_ms"] = int((time.monotonic() - started) * 1000)
     result = {key: payload.get(key) for key in ("action", "task_id", "stage", "status", "code") if payload.get(key) is not None}
     if payload.get("action") == "done":
-        result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason") if payload.get("result", {}).get(key) is not None})
+        result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason", "build_failure") if payload.get("result", {}).get(key) is not None})
     entry["result"] = result
     _log(path, entry)
     for task in payload.get("tasks", [payload]) if payload.get("action") == "batch" else [payload]:

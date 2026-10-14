@@ -382,6 +382,9 @@ Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`.
 - `TESTS_DESELECTED` — pytest собрал 0 явно выбранных тестов из-за `addopts`, `-m` или
   `PYTEST_ADDOPTS`. Файлы тестов остаются (`RETAINED`), тест не перегенерируй: это
   настройка проекта, сообщи её пользователю.
+- `BUILD_FAILED_BEFORE_TESTS` — сборка проекта упала до компиляции тестов (плагин фазы
+  `validate`, основной код). Тест не перегенерируй: сообщи шаг сборки и хвост
+  runner-output.
 
 `FAIL` — падение продуктовой проверки: регенерации нет. После `UNKNOWN` child attempt
 разрешён только при доказанной остановке процессов (`WINDOWS_JOB_TERMINATED` на

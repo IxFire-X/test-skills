@@ -368,6 +368,10 @@ sandbox. Execution запускает exact reviewed symbols только оди
 Падение продуктовой проверки — `FAIL`, без регенерации. Процесс, который не
 запустился, даёт `NOT_RUNNABLE/LAUNCH_FAILED`; pytest, собравший 0 явно выбранных
 тестов из-за `addopts`, `-m` или `PYTEST_ADDOPTS`, — `NOT_RUNNABLE/TESTS_DESELECTED`.
+Сборка Maven/Gradle, упавшая на шаге до компиляции тестов (`Failed to execute goal` не
+`testCompile`/`test`, задача Gradle не `compileTest*`/`testClasses`), —
+`NOT_RUNNABLE/BUILD_FAILED_BEFORE_TESTS`, без вопроса о регенерации; итог драйвера и
+driver-log несут `build_failure`: шаг и хвост runner-output.
 
 Timeout имеет два разных смысла:
 

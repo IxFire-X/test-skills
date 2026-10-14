@@ -256,8 +256,9 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
   без `reason_code`;
 - `FAIL` — упала продуктовая проверка: тест не перегенерируется и не правится;
 - `NOT_RUNNABLE` с `LAUNCH_FAILED` — тестовый процесс не запустился; с
-  `TESTS_DESELECTED` — настройки проекта отфильтровали выбранные тесты. Тест не
-  перегенерируется: сообщи причину;
+  `TESTS_DESELECTED` — настройки проекта отфильтровали выбранные тесты; с
+  `BUILD_FAILED_BEFORE_TESTS` — сборка проекта упала до компиляции тестов (шаг и хвост
+  вывода — в `build_failure`). Тест не перегенерируется: сообщи причину;
 - `UNKNOWN` — исход запуска не установлен; повтор без доказанной остановки процессов
   запрещён;
 - `AUTOMATION_REVIEW_REJECTED`, `AUTOMATION_REVISION_BUDGET`,

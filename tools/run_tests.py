@@ -65,16 +65,18 @@ _PROCESS_ERROR_CLASSES = {
     "GENERATED_TEST_INVALID": "GeneratedTestInvalid",
     "LAUNCH_FAILED": "LaunchFailed",
     "TESTS_DESELECTED": "TestsDeselected",
+    "BUILD_FAILED_BEFORE_TESTS": "BuildFailedBeforeTests",
     "NONZERO_EXIT_GREEN_REPORT": "NonzeroExitGreenReport",
     "ARTIFACT_PERSISTENCE_FAILED": "ArtifactPersistenceFailed",
 }
 # Process outcomes that prove the reviewed tests never ran: the attempt is
 # NOT_RUNNABLE (cleanup or regeneration is safe), never an ambiguous UNKNOWN.
-NOT_RUNNABLE_PROCESS_KINDS = frozenset({"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED"})
+NOT_RUNNABLE_PROCESS_KINDS = frozenset({"GENERATED_TEST_INVALID", "LAUNCH_FAILED", "TESTS_DESELECTED", "BUILD_FAILED_BEFORE_TESTS"})
 _NOT_RUNNABLE_MESSAGES = {
     "GENERATED_TEST_INVALID": "Generated tests failed the compile/collect gate or did not compile or import in the run.",
     "LAUNCH_FAILED": "The test process could not be launched.",
     "TESTS_DESELECTED": "The explicitly selected tests were deselected by the project's pytest configuration or environment.",
+    "BUILD_FAILED_BEFORE_TESTS": "The project's build failed before the tests were compiled (a plugin or main-source failure, not the generated tests).",
 }
 STOP_PROOFS = frozenset({
     "WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP", "WINDOWS_JOB_TERMINATED",
@@ -442,7 +444,7 @@ def validate_process_evidence(process_evidence: Sequence[Mapping[str, Any]], run
             exit_valid = type(exit_code) is int and exit_code == 124 and cause == "TIMEOUT"
         elif kind in {"OS_ERROR", "LAUNCH_FAILED"}:
             exit_valid = type(exit_code) is int and exit_code == 127 and cause == "OS_ERROR"
-        elif kind == "GENERATED_TEST_INVALID":
+        elif kind in {"GENERATED_TEST_INVALID", "BUILD_FAILED_BEFORE_TESTS"}:
             exit_valid = type(exit_code) is int and exit_code > 0 and cause == "NONZERO_EXIT"
         elif kind == "NONZERO_EXIT_GREEN_REPORT":
             exit_valid = type(exit_code) is int and exit_code > 0 and cause == "NONZERO_EXIT"
@@ -1860,7 +1862,39 @@ def gate_failure_kind(adapter_id: str | None, outcome: ProcessOutcome) -> str | 
         return "JUNIT_MISSING"  # killed by a signal: nothing is known about the tests
     if adapter_id == PYTEST and outcome.exit_code == 5:
         return "TESTS_DESELECTED"  # explicit node IDs, zero collected
+    if build_failure_before_tests(adapter_id, f"{outcome.stdout or ''}\n{outcome.stderr or ''}") is not None:
+        return "BUILD_FAILED_BEFORE_TESTS"
     return "GENERATED_TEST_INVALID"
+
+
+_MAVEN_FAILED_GOAL = re.compile(r"Failed to execute goal ([\w.-]+):([\w.-]+):([\w.-]+):([\w-]+)(?: \(([^)\r\n]*)\))?")
+_GRADLE_FAILED_TASK = re.compile(r"Execution failed for task '([^'\r\n]+)'")
+# Goals and tasks that build or run the tests themselves: a failure there is the tests' own.
+_MAVEN_TEST_GOALS = frozenset({"testCompile", "test-compile", "compileTests", "testResources", "test", "integration-test"})
+_GRADLE_TEST_TASK = re.compile(r"(?:compile\w*Test\w*|process\w*TestResources|\w*testClasses|\w*[tT]est|check)", re.IGNORECASE)
+
+
+def build_failure_before_tests(adapter_id: str | None, output: str) -> str | None:
+    """The plugin goal or task that failed the project's build before the tests, if that is what happened.
+
+    Maven and Gradle name the failed step (``Failed to execute goal …``, ``Execution failed for
+    task …``).  A test-compile/test step, an unrecognised output or another adapter is ``None``:
+    the old ``GENERATED_TEST_INVALID`` classification stays.
+    """
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN
+
+    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        goals = _MAVEN_FAILED_GOAL.findall(output or "")
+        if not goals or any(goal in _MAVEN_TEST_GOALS for _group, _plugin, _version, goal, _execution in goals):
+            return None
+        _group, plugin, version, goal, execution = goals[-1]
+        return f"{plugin}:{version}:{goal}" + (f" ({execution})" if execution else "")
+    if adapter_id == GRADLE:
+        tasks = _GRADLE_FAILED_TASK.findall(output or "")
+        if not tasks or any(_GRADLE_TEST_TASK.fullmatch(task.rsplit(":", 1)[-1]) for task in tasks):
+            return None
+        return f"task '{tasks[-1]}'"
+    return None
 
 
 _PYTEST_IMPORT_FAILURE = re.compile(
@@ -1953,6 +1987,8 @@ def classify_process_result(
         if exit_code != 0:
             return "UNKNOWN", "NONZERO_EXIT_GREEN_REPORT"
         return "PASS", None
+    if exit_code > 0 and not has_report and build_failure_before_tests(adapter_id, output) is not None:
+        return "NOT_RUNNABLE", "BUILD_FAILED_BEFORE_TESTS"
     if exit_code > 0 and (collection_error or (not has_report and _output_reports_build_failure(adapter_id, exit_code, output))):
         return "NOT_RUNNABLE", "GENERATED_TEST_INVALID"
     return "UNKNOWN", "JUNIT_INVALID" if has_report else "JUNIT_MISSING"

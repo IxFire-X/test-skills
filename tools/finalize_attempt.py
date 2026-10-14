@@ -1122,7 +1122,7 @@ def finalize_durable_execution_attempt(
         else "NO_TESTS_COLLECTED" if verification == "FAIL" and zero_collect
         else "BASELINE_INCOMPLETE" if "BASELINE_INCOMPLETE" in diagnostic_codes
         else operational_reason_code if operational_reason_code is not None
-        # GENERATED_TEST_INVALID, LAUNCH_FAILED or TESTS_DESELECTED from a started run.
+        # GENERATED_TEST_INVALID, LAUNCH_FAILED, TESTS_DESELECTED or BUILD_FAILED_BEFORE_TESTS from a started run.
         else started_not_runnable
     )
     facts = {
