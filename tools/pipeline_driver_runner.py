@@ -66,7 +66,20 @@ def _role(review_key: str) -> str:
 
 
 def runner_directory(run_root: Path, task_id: str) -> Path:
-    return driver.work_dir(run_root) / "runner" / task_id
+    """``<runner dir>/<run_id>/runner/<task>``, outside the project (``--runner-dir``, default ``<temp>/test-skills``).
+
+    A run started before the runner left the project tree (2026-10-14) keeps its processes beside the run.
+    """
+    base = (driver._config(run_root).get("review_runner") or {}).get("dir")
+    if not base:
+        return driver.work_dir(run_root) / "runner" / task_id
+    return Path(base) / run_root.name / "runner" / task_id
+
+
+def _private(directory: Path) -> None:
+    """The run's runner directories, readable by the user only (``<temp>`` is shared on POSIX)."""
+    for path in (directory.parent.parent, directory.parent):
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
 
 def _log(run_root: Path, entry: Mapping[str, Any]) -> None:
@@ -136,11 +149,12 @@ def launch_task(run_root: Path, task: Mapping[str, Any], runner: model_runner.Ru
     """Start the detached process of one issued task (review part, triage, or any model task in ``run``)."""
     schema = json.loads(Path(task["schema_path"]).read_text(encoding="utf-8"))
     directory = runner_directory(run_root, str(task["task_id"]))
+    _private(directory)
     stdin = model_runner.compose_input(Path(task["skill_path"]), str(task["instructions"]), schema, [Path(path) for path in task["inputs"]])
     argv = model_runner.build_argv(runner, model=model, schema=schema, directory=directory)
     model_runner.launch(directory, argv, stdin, timeout=runner.timeout_seconds, digest=model_runner.command_digest(runner, model=model, schema=schema))
     _log(run_root, {"event": "runner_launched", "task_id": task["task_id"], "stage": task.get("stage"), "preset": runner.preset, "model": model,
-                    "input_bytes": len(stdin.encode("utf-8"))})
+                    "input_bytes": len(stdin.encode("utf-8")), "directory": str(directory)})
 
 
 def _collect(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], task: Mapping[str, Any],

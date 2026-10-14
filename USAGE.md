@@ -634,6 +634,23 @@ python -m tools.pipeline_driver run --project "$project" --runner process --prof
   --docs docs/feature.md --answer reviewer-isolation=fresh
 ```
 
+**Каталог процессов — вне проекта.** Файлы процессного раннера (вход задачи `stdin.txt` — копии
+файлов проекта, вывод CLI, результат) лежат в `<--runner-dir>/<run_id>/runner/<задача>/`; по
+умолчанию `--runner-dir` — `<временный каталог ОС>/test-skills`, путь — в `config.json` прогона и в
+`driver-log.jsonl` (`runner_launched.directory`). Каталог внутри проекта не принимается. Каталоги
+`<run_id>` и `runner` создаются только для владельца (0o700); общий родитель (`<temp>/test-skills`)
+— с правами по умолчанию, его защищают права на `<run_id>` и непредсказуемый `run_id`. Для
+долгого прогона задайте долговечный путь вне дерева проекта (не `/tmp`): очистка временного
+каталога между прерыванием и `run --run` превращает запущенные процессы в потерянные, и задачи
+запускаются заново.
+
+**Линтеры, читающие всё дерево.** Сборку проекта пакет запускает в самом проекте, а журнал прогона
+лежит в `.pilot-runs/`. Линтер, который проверяет каждый файл от `${basedir}` (Petclinic: `nohttp` в
+`maven-checkstyle-plugin`; также spotless, apache-rat, license-плагины с такой областью), читает и
+`.pilot-runs`. Что журнал его проходит — лишь свойство данных: вывод упавшей сборки Maven со
+ссылкой `http://…` (`runner-output.txt`) ломает следующую сборку. Исключите `.pilot-runs/**` в
+конфигурации такого линтера на ветке прогона, например `<excludes>…,**/.pilot-runs/**/*</excludes>`.
+
 **Отчёт для аналитиков:** `next … --analyst-report` → `analyst-report.json`/`.md` рядом с
 проекциями, `analyst_questions` в сводке; комментарий для OpenSpec —
 `python -m tools.analyst_report export --project "$project" --run <run_id> --change <имя>`.

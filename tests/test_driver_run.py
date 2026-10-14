@@ -50,6 +50,33 @@ def test_a_cases_only_run_needs_no_orchestrator(tmp_path: Path) -> None:
     assert len(stages) == len(set(stages))
 
 
+def test_the_process_runner_keeps_its_files_outside_the_project(tmp_path: Path) -> None:
+    """Live S2 (2026-10-14): the runner's stdin.txt (copies of project files) in .pilot-runs broke Petclinic's nohttp check,
+    which reads the whole tree, so the tests never ran.  The runner directory lives outside the project now."""
+    project = _project(tmp_path)
+    home = tmp_path / "runner home"  # a path with a space, as Windows temp directories often have
+    code, payload = _run(project, "--profile", "cases-only-v1", "--runner-dir", str(home))
+    assert payload["action"] == "done", payload
+    assert not [path for path in project.rglob("*") if path.name in {"stdin.txt", "stdout.txt", "last-message.txt"}]
+    tasks = list((home / payload["run_id"] / "runner").iterdir())
+    assert tasks and all((task / "stdin.txt").is_file() and (task / "result.json").is_file() for task in tasks)
+    log = [json.loads(line) for line in (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    launched = [row for row in log if row.get("event") == "runner_launched"]
+    assert launched and all(Path(row["directory"]).parent.parent == home / payload["run_id"] for row in launched)
+
+
+def test_without_a_runner_dir_the_runner_works_under_the_temp_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp dir"))
+    (tmp_path / "temp dir").mkdir()
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "cases-only-v1")
+    assert payload["action"] == "done", payload
+    assert (tmp_path / "temp dir" / "test-skills" / payload["run_id"] / "runner").is_dir()
+    assert not list(project.rglob("stdin.txt"))
+
+
 def test_an_unanswered_question_stops_with_exit_3(tmp_path: Path) -> None:
     project = _project(tmp_path)
     (project / ".skillsrc").unlink()  # discovery asks which test framework the module uses
@@ -99,17 +126,22 @@ def test_an_interrupted_run_continues_with_its_run_id(tmp_path: Path) -> None:
 
     project = _project(tmp_path)
     command = json.dumps([sys.executable, str(FAKE), "--script", "ok", "--state", str(project.parent / "fake-state")])
-    options = {"profile": "cases-only-v1", "docs": [DOCS], "subject": "StudentController", "model_id": "fake-model-1", "review_runner_command": command}
+    home = tmp_path / "runner home"
+    options = {"profile": "cases-only-v1", "docs": [DOCS], "subject": "StudentController", "model_id": "fake-model-1", "review_runner_command": command,
+               "runner_dir": str(home)}
     with pytest.raises(DriverError) as stopped:
         run(project, options, answers={}, limit_seconds=0.5)
     assert stopped.value.code == "RUNNER_TIMEOUT"
     [run_id] = [path.name for path in (project / ".pilot-runs").iterdir() if path.is_dir() and len(path.name) == 32]
+    launched_before = {path.name for path in (home / run_id / "runner").iterdir()}  # collected after the resume, not launched again
+    assert launched_before
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = driver.main(["run", "--project", str(project), "--runner", "process", "--run", run_id])
     payload = json.loads(buffer.getvalue())
     assert payload["action"] == "done" and payload["run_id"] == run_id and payload["result"]["completion"] == "COMPLETE", payload
     assert code == 1  # cases-only is always a draft
+    assert all((home / run_id / "runner" / name / "result.json").is_file() for name in launched_before) and not list(project.rglob("stdin.txt"))
 
 
 @pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven and PIT")

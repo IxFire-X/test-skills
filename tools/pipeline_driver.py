@@ -334,16 +334,25 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"analyst_report": True} if options.get("analyst_report") else {}),
         **({"suite": True} if options.get("suite") else {}),
         **({"disposition_policy": options["disposition_policy"]} if options.get("disposition_policy") else {}),
-        **_runner_options(options),
+        **_runner_options(options, project),
     }
 
 
-def _runner_options(options: Mapping[str, Any]) -> dict[str, Any]:
-    """``--review-runner process``: the driver runs review parts itself (a template only from the launch flag)."""
+def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]:
+    """``--review-runner process``: the driver runs review parts itself (a template only from the launch flag).
+
+    The runner's files (the task input — copies of project files —, the output, the result) live outside the project:
+    a linter that reads the whole tree (Petclinic's nohttp) failed the build on them (live S2, 2026-10-14).
+    """
     if options.get("review_runner") != "process":
-        if options.get("review_runner_command") or options.get("review_runner_preset") or options.get("review_runner_cli"):
-            raise DriverError("DRIVER_INPUT", "--review-runner-preset/-command/-cli need --review-runner process")
+        if options.get("review_runner_command") or options.get("review_runner_preset") or options.get("review_runner_cli") or options.get("runner_dir"):
+            raise DriverError("DRIVER_INPUT", "--review-runner-preset/-command/-cli and --runner-dir need --review-runner process")
         return {}
+    import tempfile
+
+    base = Path(options["runner_dir"]).resolve() if options.get("runner_dir") else Path(tempfile.gettempdir()).resolve() / "test-skills"
+    if base == Path(project).resolve() or base.is_relative_to(Path(project).resolve()):
+        raise DriverError("DRIVER_INPUT", "--runner-dir must be outside the project (the project's own checks read its whole tree)")
     command = options.get("review_runner_command")
     if command is not None:
         try:
@@ -353,7 +362,7 @@ def _runner_options(options: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
             raise DriverError("DRIVER_INPUT", "--review-runner-command is a JSON array of strings")
     return {"reviewer_isolation": "fresh", "review_runner": {"mode": "process", "preset": options.get("review_runner_preset"), "command": command,
-                                                             "cli": options.get("review_runner_cli")}}
+                                                             "cli": options.get("review_runner_cli"), "dir": str(base)}}
 
 
 def _review_mode(value: Any) -> str:
@@ -1544,6 +1553,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--review-runner-preset", choices=("claude", "codex"), help="Runner preset (default: .skillsrc review_runner.preset, else claude).")
             command.add_argument("--review-runner-command", help="Custom command template as a JSON array ({model}, {schema_path}, {schema_json}, {last_message}); launch flag only.")
             command.add_argument("--review-runner-cli", help="Path of the preset's CLI executable when it is not on PATH.")
+            command.add_argument("--runner-dir", help="Directory for the process runner's files (task input, output, result), outside the project "
+                                                      "(default: <temp>/test-skills); the run's processes live in <dir>/<run_id>/runner/<task>.")
             command.add_argument("--analyst-report", action="store_true",
                                  help="Ask roles for structured requirement gaps and analyst questions; write analyst-report.json/.md beside the projections.")
         if name == "submit":
@@ -1629,7 +1640,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                   "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                  "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")
+                  "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")
 
 
 def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any], started: float) -> int:
@@ -1684,7 +1695,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
                 "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
-                "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli")},
+                "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")},
                                 max_tasks=args.max_tasks)
         else:
             from tools.pilot_state import run_lock
