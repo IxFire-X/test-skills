@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 
 import replay_petclinic as rp
+from tests.review_scaling_helpers import clean_compact_answer
 from tools import review_compact as rc
 
 
@@ -290,3 +291,34 @@ def test_the_bug_report_draft_of_run_g_reads_like_the_zephyr_export() -> None:
     assert "`CREQ-B1-V05-EMPTY`: Явно пустая дата визита" in text and "CREQ-B1-T-" not in text and "CREQ-B1-S02-" not in text
     assert "- Подготовка (шаг 1): Зафиксировать текущую дату сервера D" in text and "\n2. Создать владельца" in text
     assert failure in text  # the raw message stays as the evidence
+
+
+def test_a_too_broad_check_of_an_addition_part_is_reported_not_dropped() -> None:
+    """Backlog R2: a check part asks for no new parts (CHECK_POLICY), so its too broad check vanished silently and
+    its UNCHECKED area stayed open with no explanation.  It is reported like a base part's: WARNING and a question."""
+    plan = _plan("r1")
+    payload = rp.payload("r1")
+    results = _bound("r1")
+    broad = next(check for result in results if result["part_id"] == "part-000004" for check in result["required_checks"]
+                 if check.get("requirement_ids") == ["CREQ-B1-T-ISOLATION"])
+    for result in results:  # only the addition asks the broad check
+        result["required_checks"] = [check for check in result["required_checks"] if check != broad]
+    plan["additions"] = rc.additional_parts(plan, payload, results)
+    assert plan["additions"]
+    addition = plan["additions"][0]
+    answer = clean_compact_answer(addition["text"])
+    answer["coverage"][0] = {**answer["coverage"][0], "status": "UNCHECKED", "note": "Нужна схема всей базы."}
+    answer["required_checks"] = [broad]
+    others = [rp.bind(plan, {**clean_compact_answer(part["text"]), "part_id": part["part_id"]}) for part in plan["additions"][1:]]
+    all_results = [*results, rp.bind(plan, {**answer, "part_id": addition["part_id"]}), *others]
+    assert rc.validate_answer(plan, addition, all_results[len(results)], payload["document"], payload.get("automation")) == []
+    aggregate = rc.aggregate(plan, payload, all_results)
+    assert [(row["part_id"], row["requirement_ids"], row["case_ids"]) for row in aggregate.get("too_broad", [])] == [
+        (addition["part_id"], ["CREQ-B1-T-ISOLATION"], [])]
+    warning = [item for item in aggregate["findings"] if item["code"] == rc.TOO_BROAD_REASON]
+    assert len(warning) == 1 and warning[0]["severity"] == "WARNING" and addition["part_id"] in warning[0]["message"]
+    assert broad["reason"] in warning[0]["message"]
+    assert answer["coverage"][0]["area_id"] in {row["scope_id"] for row in aggregate["unchecked"]}  # still open
+    from tools.analyst_report import too_broad_items
+
+    assert [item["question"] for item in too_broad_items("r1", aggregate)] == [broad["reason"]]

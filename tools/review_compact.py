@@ -1029,8 +1029,10 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
     findings, corrections, checked, bindings, dispositions = [], [], [], [], []
     resolved: list[dict[str, Any]] = []
     too_broad: list[dict[str, Any]] = []
-    # Checks asked by check parts are never added (CHECK_POLICY); only base answers can be too broad.
-    base_ids = {item["part_id"] for item in plan["parts"]} if plan.get("check_policy") == CHECK_POLICY else set()
+    # Checks asked by check parts are never added (CHECK_POLICY): their too broad check is still reported (WARNING and
+    # a question for the analyst), with no cases checked, so their UNCHECKED area does not stay open unexplained.
+    policy = plan.get("check_policy") == CHECK_POLICY
+    base_ids = {item["part_id"] for item in plan["parts"]}
     for part in parts:
         candidates = by_id.get(part["part_id"], [])
         errors = (validate_answer(plan, part, candidates[0], document, payload.get("automation")) if len(candidates) == 1
@@ -1045,8 +1047,9 @@ def aggregate(plan: Mapping[str, Any], payload: Mapping[str, Any], results: Sequ
         own_checks = []
         for check in result["required_checks"]:
             narrowed, dropped = _own_check(plan, payload, check)
-            if dropped and part["part_id"] in base_ids:
-                too_broad.append({"part_id": part["part_id"], "requirement_ids": dropped, "case_ids": [] if narrowed is None else narrowed["case_ids"],
+            if dropped and policy:
+                checked_cases = [] if narrowed is None or part["part_id"] not in base_ids else narrowed["case_ids"]
+                too_broad.append({"part_id": part["part_id"], "requirement_ids": dropped, "case_ids": checked_cases,
                                   "question": check["reason"]})
             if narrowed is not None:
                 own_checks.append(review_digest(narrowed))
