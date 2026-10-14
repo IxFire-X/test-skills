@@ -73,6 +73,21 @@ def test_g_mut_0001_with_50_cases_is_cut_to_the_budget() -> None:
     assert "MUT-0001:L48" in mt.anchors(task["text"])
 
 
+def test_g_requirements_of_cases_cut_by_the_budget_stay_anchors() -> None:
+    """B5b: a SPEC_GAP naming a requirement whose cases did not fit is accepted, not TRIAGE_REF_UNKNOWN."""
+    (task,) = _tasks(100_000, ["MUT-0001"])
+    group = _group("MUT-0001")
+    defined = set(mt.anchors(task["text"]))
+    assert {*group["requirement_ids"], *group["source_requirement_ids"]} <= defined
+    included = {anchor for anchor in defined if anchor.startswith("TC-")}
+    cases = {case["case_id"]: case for case in FIXTURE["document"]["test_cases"]}
+    cut = sorted(set(group["requirement_ids"]) - {requirement for case in included & set(cases) for requirement in cases[case]["requirement_ids"]})
+    assert cut, "the budget leaves some requirements without their cases"
+    answer = {"groups": [{"group_id": "MUT-0001", "decision": "SPEC_GAP", "refs": ["MUT-0001:L48", cut[0]], "rationale": "Требование не задаёт формат.",
+                          "question": "Каким должен быть toString?", "requirement_id": cut[0]}]}
+    assert mt.validate(task, answer, FIXTURE["receipt"], FIXTURE["document"]) == []
+
+
 def test_g_callers_come_in_when_the_budget_allows() -> None:
     # MUT-0002 Owner#addPet: PetController creates and updates pets through it.
     (task,) = _tasks(10_000_000, ["MUT-0002"])

@@ -77,8 +77,9 @@ def test_pass_run_measures_strength_without_changing_acceptance(tmp_path: Path, 
     result = done["result"]
     assert (result["verification"], result["accepted"], code) == ("PASS", True, 0), result
     strength = result["test_strength"]
-    assert strength["status"] == "MEASURED" and strength["killed"] + strength["survived"] > 0, strength
-    receipt = _receipt(replay, done)
+    receipt = _receipt(replay, done) or {}
+    assert strength["status"] == "MEASURED" and strength["killed"] + strength["survived"] > 0, (strength, receipt.get("reason_code"), receipt.get("message"))
+    assert strength["survivor_groups"] > 0, strength  # strength_triage below exists only with survivors
     assert receipt["project_inventory"]["unchanged"] is True and receipt["excluded_methods"] == []
     assert receipt["target_tests"] == [CLASS] and receipt["tool"]["launcher_version"].startswith("1.")
     assert all(row["pinned"] for row in receipt["tool"]["jars"] if row["file"].startswith("pitest"))

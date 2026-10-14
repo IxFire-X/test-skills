@@ -20,7 +20,8 @@ survivors (one group = one product method and line) and everything needed to jud
 The task fits the run's review part budget: the class and at least one covering test method with
 its cases always come in; other methods (each with its cases) and the callers only while they fit.
 What did not fit is listed on a line `… не вошли по бюджету: …` — those case IDs are still valid for
-`TEST_GAP` and `SPEC_GAP`. Judge `EQUIVALENT` only from the code in the input, never from what
+`TEST_GAP` and `SPEC_GAP`. The group's requirements whose cases did not fit are listed one line each
+(`[CREQ-…]`, `[SREQ-…]`): they are anchors, a `SPEC_GAP` may name them. Judge `EQUIVALENT` only from the code in the input, never from what
 you know about the project otherwise.
 
 The task input is the only input. Do not read other files, the project or earlier answers.

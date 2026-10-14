@@ -35,6 +35,15 @@ def _run(project: Path, *extra: str, script: str = "ok") -> tuple[int, dict]:
     return code, json.loads(buffer.getvalue())
 
 
+def _measured_with_survivors(run_root: Path, result: dict) -> None:
+    """``strength_triage`` exists only when PIT measured survivors; otherwise say why (CI ubuntu/3.11 on b64a6f4 only showed a KeyError)."""
+    from tools.pilot_state import read_mutation_receipt_if_present
+
+    strength = result.get("test_strength") or {}
+    receipt = read_mutation_receipt_if_present(run_root, result["attempt_id"]) or {}
+    assert strength.get("status") == "MEASURED" and strength.get("survivor_groups", 0) > 0, (strength, receipt.get("reason_code"), receipt.get("message"))
+
+
 def test_a_cases_only_run_needs_no_orchestrator(tmp_path: Path) -> None:
     project = _project(tmp_path)
     code, payload = _run(project, "--profile", "cases-only-v1")
@@ -157,6 +166,7 @@ def test_a_post_terminal_task_that_never_fits_does_not_undo_the_terminal_result(
     assert payload["action"] == "done", payload
     result = payload["result"]
     assert (code, result["verification"], result["accepted"]) == (0, "PASS", True), result
+    _measured_with_survivors(project / ".pilot-runs" / payload["run_id"], result)
     assert result["strength_triage"]["triaged"] == 0 and result["strength_triage"]["pending"] == result["strength_triage"]["groups"] > 0
     log = (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8")
     assert '"event": "triage_failed"' in log

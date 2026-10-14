@@ -17,7 +17,8 @@ A task fits ``budget`` bytes (``--review-input-bytes``): the class always goes i
 least one covering test method with its cases; then the other methods, each with its cases
 (whole or not at all), most specific first — those that killed other mutants of the same
 method — and the callers with what is left.  What did not fit is named on a line
-``… не вошли по бюджету: …`` (case IDs stay valid for ``TEST_GAP``/``SPEC_GAP``).
+``… не вошли по бюджету: …`` (case IDs stay valid for ``TEST_GAP``/``SPEC_GAP``); the group's
+requirements whose cases did not fit are listed one line each, so they stay anchors.
 
 The driver accepts an answer only when every reference is an anchor of that task, each
 group of the task is answered once, a ``TEST_GAP`` proposal names one of the group's
@@ -132,6 +133,18 @@ def _requirement_block(document: Mapping[str, Any], marker_requirements: Sequenc
     out = [requirement_text(row) for row in document.get("requirements", []) if row.get("requirement_id") in creq_ids]
     out.extend(source_requirement_text(row) for row in marker_requirements if row.get("source_requirement_id") in sreq_ids)
     return out
+
+
+def _one_line(text: Any, limit: int = 160) -> str:
+    line = " ".join(str(text or "").split())
+    return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
+
+
+def _requirement_lines(document: Mapping[str, Any], marker_requirements: Sequence[Mapping[str, Any]], creq_ids: set[str], sreq_ids: set[str]) -> list[str]:
+    """The group's requirements not given in full, one line each: still anchors for ``SPEC_GAP`` and refs."""
+    out = [f"[{row['requirement_id']}] {_one_line(row.get('text'))}" for row in document.get("requirements", []) if row.get("requirement_id") in creq_ids]
+    out.extend(f"[{row['source_requirement_id']}] {_one_line(row.get('text'))}" for row in marker_requirements if row.get("source_requirement_id") in sreq_ids)
+    return ["", "Остальные требования группы — одной строкой (их кейсы не вошли по бюджету):", *out] if out else []
 
 
 def _ranked_methods(groups: Sequence[Mapping[str, Any]], mutants: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -280,6 +293,7 @@ def task_text(groups: Sequence[Mapping[str, Any]], document: Mapping[str, Any], 
         if budget is not None:
             out += _omitted("Кейсы", [case for case in linked_cases if case not in included])
         out += ["", "## Требования", "", *_requirement_block(document, marker_requirements, creq, sreq)]
+        out += _requirement_lines(document, marker_requirements, group_creq - creq, group_sreq - sreq)
         out += ["", "## Код тестов", "", *(_test_block(sliced, methods) or ["Срезы методов недоступны."])]
         if budget is not None:
             out += _omitted("Срезы методов", [method for method in ranked if method not in methods])
