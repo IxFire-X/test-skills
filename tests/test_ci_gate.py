@@ -73,3 +73,19 @@ def test_the_workflow_gives_the_java_tests_a_jdk(pack_root: Path) -> None:
     gate = workflow.index("python -m tools.ci_gate --root .")
     assert workflow.index("actions/setup-java@") < gate
     assert "TEST_SKILLS_JAVA_HOME: ${{ env.JAVA_HOME }}" in workflow[gate:gate + 200]
+
+
+def test_every_tracked_build_wrapper_is_executable_in_the_index(pack_root: Path) -> None:
+    """A wrapper committed from Windows (core.filemode=false) lands as 100644: on Linux it is not executable, the
+    adapters do not recognise it (os.access X_OK) and every Maven test of the fixture fails (ubuntu CI since 30eea11)."""
+    import shutil
+
+    import pytest
+
+    if shutil.which("git") is None or not (pack_root / ".git").exists():
+        pytest.skip("not a git checkout")
+    listed = subprocess.run(["git", "-c", f"safe.directory={pack_root.as_posix()}", "ls-files", "-s"], cwd=pack_root, capture_output=True,
+                            text=True, encoding="utf-8", check=True).stdout.splitlines()
+    wrappers = [line.split("\t", 1) for line in listed if line.rsplit("/", 1)[-1].split("\t")[-1] in {"mvnw", "gradlew"} or line.endswith(".sh")]
+    assert wrappers
+    assert [path for head, path in wrappers if not head.startswith("100755")] == []

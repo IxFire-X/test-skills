@@ -26,7 +26,8 @@ def suite_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     monkeypatch = pytest.MonkeyPatch()
     replay = _local(tmp_path_factory.mktemp("suite"), monkeypatch)
     _code, done = replay.drive(replay.start_with("--suite")[1])
-    assert done["result"]["suite"]["status"] == "WRITTEN"
+    suite = done["result"]["suite"]
+    assert suite["status"] == "WRITTEN", (suite.get("reason_code"), suite.get("message"), done["result"].get("reason_code"))
     return replay
 
 

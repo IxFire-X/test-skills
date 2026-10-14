@@ -99,7 +99,7 @@ def test_maven_selectors_of_one_class_share_one_surefire_pattern(tmp_path: Path)
 def test_maven_command_for_the_petclinic_class_fits_a_cmd_exe_line(tmp_path: Path) -> None:
     from tools.execution_adapters import build_request
 
-    wrapper = tmp_path / "live" / "petclinic-20261009f" / "mvnw.cmd"
+    wrapper = tmp_path / "live" / "petclinic-20261009f" / _host("mvnw", "mvnw.cmd")
     wrapper.parent.mkdir(parents=True)
     _executable(wrapper)
     module = _module(wrapper.parent, MAVEN, "mvnw")
