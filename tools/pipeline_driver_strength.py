@@ -35,6 +35,39 @@ def _receipt(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | Non
     return read_mutation_receipt_if_present(run_root, str(attempt["attempt_id"]))
 
 
+def triage_budget(config: Mapping[str, Any]) -> int:
+    """Bytes of one triage task input: the run's review part budget (--review-input-bytes), else the triage default."""
+    from tools.mutation_triage import TASK_BUDGET_BYTES
+
+    value = config.get("review_input_bytes")
+    return int(value) if type(value) is int and value > 0 else TASK_BUDGET_BYTES
+
+
+def _mutants(run_root: Path, receipt: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The receipt's own PIT rows (which tests killed which mutant), or none when the stored report does not match."""
+    from tools.mutation import MutationStop, parse_report
+
+    report = receipt.get("report") or {}
+    try:
+        data = (run_root / str(report["path"])).read_bytes()
+    except (KeyError, OSError, TypeError):
+        return []
+    if "sha256:" + hashlib.sha256(data).hexdigest() != report.get("sha256"):
+        return []
+    try:
+        return parse_report(data)
+    except MutationStop:
+        return []
+
+
+def _product_paths(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
+    """Module-relative paths of the product files the attempt's context selected."""
+    module = str(attempt["module"])
+    prefix = "" if module == "." else module + "/"
+    paths = {str(item["project_path"]) for receipt in driver._context_receipts(run_root, str(attempt["attempt_id"])) for item in receipt["files"]}
+    return sorted(path[len(prefix):] for path in paths if path.startswith(prefix))
+
+
 def _product_lines(project: Path, run_root: Path, attempt: Mapping[str, Any]):
     """Masked lines of a product file the attempt's context selected (None outside the context)."""
     from tools.project_inventory import select_context_batches
@@ -71,7 +104,8 @@ def _plan(project: Path, run_root: Path, attempt: Mapping[str, Any], receipt: Ma
     automation = read_execution_inputs(run_root, attempt_id)["automation_artifact"]
     marker = driver._marker_artifact(run_root, attempt_id)
     marker_requirements = marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"] if marker else []
-    tasks = build_tasks(receipt, document, automation, marker_requirements, _product_lines(project, run_root, attempt))
+    tasks = build_tasks(receipt, document, automation, marker_requirements, _product_lines(project, run_root, attempt),
+                        budget=triage_budget(driver._config(run_root)), mutants=_mutants(run_root, receipt), product_paths=_product_paths(run_root, attempt))
     rows = []
     for task in tasks:
         input_path = driver._write_text(directory / "inputs" / f"{task['label']}.input.md", task["text"])

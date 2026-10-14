@@ -13,7 +13,15 @@ survivors (one group = one product method and line) and everything needed to jud
 - every mutation of the group (`[MUT-0001-1]` with the PIT mutator and description);
 - the linked cases as the automation reviewer sees them (`[TC-…]`, `[STEP-…]`, `[EXP-…]`, `[ASSERT-…]`);
 - the linked canonical and source requirements with their text (`[CREQ-…]`, `[SREQ-…]`);
-- the exact slices of the generated test methods that ran on the line (`[T:L0120]`).
+- the exact slices of the generated test methods that ran on the line (`[T:L0120]`);
+- the mutated class whole (`[F1:L0048]`) and, as the budget allows, the product methods that call
+  the mutated method (`[F2:L…]`, one key per file).
+
+The task fits the run's review part budget: the class and at least one covering test method with
+its cases always come in; other methods (each with its cases) and the callers only while they fit.
+What did not fit is listed on a line `… не вошли по бюджету: …` — those case IDs are still valid for
+`TEST_GAP` and `SPEC_GAP`. Judge `EQUIVALENT` only from the code in the input, never from what
+you know about the project otherwise.
 
 The task input is the only input. Do not read other files, the project or earlier answers.
 
