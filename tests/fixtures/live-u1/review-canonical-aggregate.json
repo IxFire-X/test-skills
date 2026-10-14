@@ -1,0 +1,124 @@
+{
+  "addition_digests": [
+    "sha256:63d760a172b95739cbc9c9ea16118f5200815ede496767816ce7aace343090f6"
+  ],
+  "blocked": true,
+  "checked_scope_ids": [
+    "source-000001",
+    "local-TC-B1-O05-02",
+    "cross-c5068e031634c947"
+  ],
+  "complete": false,
+  "corrections": [],
+  "diagnostics": [],
+  "eligible": false,
+  "findings": [
+    {
+      "code": "SOURCE_CONDITION_WITHOUT_CREQ",
+      "evidence": [
+        "SREQ-0007",
+        "TC-B1-O05-02"
+      ],
+      "message": "SRC-1:L20 (O05) начинается условием «При открытии редактирования видны текущие пять полей владельца». Среди CREQ, отображающих SREQ-0007, его нет, и ни один шаг кейса не открывает форму редактирования (GET /owners/{ownerId}/edit). Условие нужно покрыть отдельным CREQ и кейсом либо подтвердить, что оно закрыто другим кейсом набора.",
+      "related_ids": [
+        "SREQ-0007",
+        "TC-B1-O05-02"
+      ],
+      "severity": "WARNING"
+    },
+    {
+      "code": "SNAPSHOT_COMPARISON_INCOMPLETE",
+      "evidence": [
+        "STEP-B1-0032",
+        "STEP-B1-0036",
+        "EXP-B1-0053",
+        "EXP-B1-0057"
+      ],
+      "message": "Шаги 5 и 9 описаны как снимки и сравнение количества владельцев, питомцев и визитов (data/action шага 9, EXP-B1-0053 говорит об исходных записях всех трёх видов), но проверяются только owner_count (ASSERT-B1-0139 >0, ASSERT-B1-0158 равенство). CREQ-B1-O05-COUNT требует лишь владельцев, поэтому описание шире проверки: либо сузить текст до владельцев, либо добавить сравнение pet_count и visit_count.",
+      "related_ids": [
+        "STEP-B1-0032",
+        "STEP-B1-0036",
+        "EXP-B1-0053",
+        "EXP-B1-0057"
+      ],
+      "severity": "WARNING"
+    },
+    {
+      "code": "SOURCE_TESTING_CONSTRAINTS_PARTIAL",
+      "evidence": [
+        "SREQ-0029",
+        "CREQ-B1-T-ISOLATION",
+        "CREQ-B1-T-REALSTORE"
+      ],
+      "message": "SREQ-0029 (SRC-1:L68-L74) отображён двумя CREQ. В части нет условий: не менять приложение, прежние тесты, pom.xml, .skillsrc, Docker Compose; без новых зависимостей, Docker и внешних сервисов; значения параметризованных проверок не заменять общей фразой; при дефекте не ослаблять ожидание. Проверить, что они сохранены другими CREQ набора.",
+      "related_ids": [
+        "SREQ-0029",
+        "CREQ-B1-T-ISOLATION",
+        "CREQ-B1-T-REALSTORE"
+      ],
+      "severity": "WARNING"
+    },
+    {
+      "code": "UNUSED_DATE_OUTPUTS",
+      "evidence": [
+        "STEP-B1-0028"
+      ],
+      "message": "Шаг 1 выводит D, D-1 и D+2, но кейс использует только D+1 для даты визита; отдельный шаг календаря несёт лишние для сценария значения. Не блокирует: D+1 и проверка запаса до полуночи нужны для воспроизводимости.",
+      "related_ids": [
+        "STEP-B1-0028"
+      ],
+      "severity": "INFO"
+    },
+    {
+      "code": "O05_EDIT_FORM_VISIBILITY_NOT_IN_PART",
+      "evidence": [
+        "SREQ-0007",
+        "TC-B1-O05-02"
+      ],
+      "message": "Первое условие SREQ-0007 (при открытии редактирования видны пять полей владельца) не имеет CREQ и не проверяется кейсом TC-B1-O05-02: в нём нет чтения формы редактирования. Индекс части содержит только этот кейс, поэтому покрытие в другом кейсе набора здесь подтвердить нельзя.",
+      "related_ids": [
+        "SREQ-0007",
+        "TC-B1-O05-02"
+      ],
+      "severity": "INFO"
+    }
+  ],
+  "lint_dispositions": [],
+  "mode": "compact-v1",
+  "parts": [
+    {
+      "part_id": "part-000001",
+      "result_digest": "sha256:bee0286f5e84c90a26da89f3125d803c3b82e855e417d1e1c94a96e136ec50bb"
+    },
+    {
+      "part_id": "part-000002",
+      "result_digest": "sha256:019c31866d007fe59015777180ce624c03145150f1d040ab4523d5dfcfd17621"
+    }
+  ],
+  "plan_digest": "sha256:d1d24adb62b96eaeb24114fdae958ece83324d91bd20a8931aac281a82cbbf3d",
+  "required_checks": [
+    {
+      "case_ids": [
+        "TC-B1-O05-02"
+      ],
+      "reason": "Подтвердить, что условие O05 о видимости пяти полей при открытии редактирования покрыто в другом кейсе набора (в этой части для него нет CREQ).",
+      "source_requirement_ids": [
+        "SREQ-0007"
+      ],
+      "sources": [
+        "sha256:c1eeeb305d2441ba37e23d95ade9c18800295fd243c7663c28a6f6c8dcba9c9b"
+      ]
+    }
+  ],
+  "snapshot_digest": "sha256:5db4e48105b381d6175074faad5c352ce756744db7d90c1a06b4ef51da7ca0de",
+  "unchecked": [
+    {
+      "reason": "В части один кейс; он не проверяет видимость пяти полей при открытии редактирования (нет GET-формы и CREQ). Покрытие в другом кейсе набора не подтверждено.",
+      "scope_id": "cross-666d4860460eefcec003b6897ebed87f6c6fb9095457b60036351df1f2799d21"
+    },
+    {
+      "reason": "Подтвердить, что условие O05 о видимости пяти полей при открытии редактирования покрыто в другом кейсе набора (в этой части для него нет CREQ).",
+      "scope_id": "cross-666d4860460eefcec003b6897ebed87f6c6fb9095457b60036351df1f2799d21"
+    }
+  ]
+}

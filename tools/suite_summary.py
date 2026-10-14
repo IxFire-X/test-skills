@@ -15,6 +15,12 @@ _REASONS = {
 }
 
 
+def _areas(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return "область"
+    return "области" if count % 10 in {2, 3, 4} and count % 100 not in {12, 13, 14} else "областей"
+
+
 def _key_label(key: str) -> str:
     return key.split("#", 1)[-1]
 
@@ -87,9 +93,18 @@ def pr_description(facts: Mapping[str, Any]) -> str:
     if facts.get("migration") and facts["migration"].get("status") == "MIGRATED":
         lines += ["## Миграция набора", "", f"Формат {facts['migration']['from_format']} → {facts['migration']['to_format']}: "
                   + "; ".join(facts["migration"].get("steps") or []) + ".", ""]
+    blocking = [row for row in facts.get("review_findings") or [] if row.get("severity") == "BLOCKING"]
+    unchecked = facts.get("review_unchecked") or []
     if facts.get("review_blocked"):
-        lines += ["## Ревью не пропустило обновление", "", "Изменения кейсов не применены: ревью нашло блокирующие замечания.", ""]
-        lines += [f"- **{row['severity']}** `{', '.join(row.get('related_ids') or [])}`: {row.get('message', '')}" for row in facts["review_findings"]] + [""]
+        lines += ["## Ревью не пропустило обновление", ""]
+        if blocking:
+            lines += ["Изменения кейсов не применены: ревью нашло блокирующие замечания.", ""]
+            lines += [f"- **{row['severity']}** `{', '.join(row.get('related_ids') or [])}`: {row.get('message', '')}" for row in blocking] + [""]
+        if unchecked:
+            lines += [f"Изменения кейсов не применены: ревью неполно: {len(unchecked)} {_areas(len(unchecked))} UNCHECKED — ревьюер не смог их проверить.", ""]
+            lines += [f"- {_code(row['scope_id'])}: " + " / ".join(row["reasons"]) for row in unchecked] + [""]
+        if not blocking and not unchecked:
+            lines += ["Изменения кейсов не применены: ревью не подтвердило обновление.", ""]
     if any(requirements[name] for name in ("added", "changed", "removed", "renamed")):
         lines += ["## Требования (по ключам)", ""]
         lines += [f"- добавлено: {_code(_key_label(key))}" for key in requirements["added"]]
@@ -115,7 +130,9 @@ def pr_description(facts: Mapping[str, Any]) -> str:
         lines += [f"- удалён `{locator}`" for locator in tests["removed"]]
         lines.append("")
     notes = [row for row in facts.get("review_notes") or [] if row.get("severity") in {"BLOCKING", "WARNING"}]
-    if notes and not facts.get("review_blocked"):
+    if facts.get("review_blocked"):
+        notes = [row for row in facts.get("review_findings") or [] if row.get("severity") != "BLOCKING"]
+    if notes:
         lines += ["## Замечания ревью (не блокируют)", ""]
         lines += [f"- **{row['severity']}** {row.get('code', '')} `{', '.join(row.get('related_ids') or [])}`: {row.get('message', '')}" for row in notes] + [""]
     if facts["quarantine"]:

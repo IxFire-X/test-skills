@@ -447,6 +447,39 @@ def _blocked(state: Mapping[str, Any]) -> bool:
     return any(not review["eligible"] for key, review in (state["facts"].get("reviews") or {}).items() if key in {"canonical", "static"})
 
 
+def review_record(state: dict[str, Any], key: str, verdict: Mapping[str, Any], *, parts: int, input_bytes: int) -> None:
+    """Keep one review's aggregate in the run facts: its findings and, when it is not eligible, why."""
+    unchecked: dict[str, list[str]] = {}
+    for row in verdict.get("unchecked") or []:
+        reasons = unchecked.setdefault(str(row["scope_id"]), [])
+        if row.get("reason") and row["reason"] not in reasons:
+            reasons.append(str(row["reason"]))
+    state["facts"].setdefault("reviews", {})[key] = {
+        "eligible": verdict["eligible"], "blocked": verdict["blocked"], "findings": verdict["findings"], "corrections": verdict["corrections"],
+        "unchecked": [{"scope_id": scope_id, "reasons": reasons} for scope_id, reasons in sorted(unchecked.items())],
+        "parts": parts, "input_bytes": input_bytes}
+    if not verdict["eligible"]:
+        state["facts"].setdefault("review_findings", []).extend(
+            {**row, "review": key} for row in ([row for row in verdict["findings"] if row["severity"] == "BLOCKING"] or verdict["findings"]))
+
+
+def summary_review_facts(state: Mapping[str, Any]) -> dict[str, Any]:
+    """The review part of ``summary_facts``: blocked or not, its findings, and the scopes nobody checked."""
+    facts = state["facts"]
+    reviews = facts.get("reviews") or {}
+    unchecked: dict[str, list[str]] = {}
+    for key, review in sorted(reviews.items()):
+        if key in {"canonical", "static"} and not review["eligible"]:
+            for row in review.get("unchecked") or []:
+                reasons = unchecked.setdefault(row["scope_id"], [])
+                reasons.extend(reason for reason in row["reasons"] if reason not in reasons)
+    return {
+        "review_blocked": _blocked(state), "review_findings": facts.get("review_findings") or [],
+        "review_unchecked": [{"scope_id": scope_id, "reasons": reasons} for scope_id, reasons in sorted(unchecked.items())],
+        "review_notes": [row for review in reviews.values() for row in review.get("findings") or []],
+    }
+
+
 def _review_step(project: Path, run_root: Path, state: dict[str, Any], key: str, snapshot_of, next_step: str, max_tasks: int,
                  blocked_step: str = "SUITE_RUN") -> dict[str, Any] | None:
     from tools.review_compact import compact_payload, review_policy
@@ -478,12 +511,8 @@ def _review_step(project: Path, run_root: Path, state: dict[str, Any], key: str,
     verdict = aggregate(plan, results, payload)
     _write(_work(run_root) / f"review-{key}-aggregate.json", verdict)
     state = _state(run_root)
-    review = {"eligible": verdict["eligible"], "blocked": verdict["blocked"], "findings": verdict["findings"], "corrections": verdict["corrections"],
-              "parts": len(parts), "input_bytes": sum(len(part_input(plan, part)["text"].encode("utf-8")) for part in parts)}
-    state["facts"].setdefault("reviews", {})[key] = review
+    review_record(state, key, verdict, parts=len(parts), input_bytes=sum(len(part_input(plan, part)["text"].encode("utf-8")) for part in parts))
     if not verdict["eligible"]:
-        state["facts"].setdefault("review_findings", []).extend(
-            {**row, "review": key} for row in ([row for row in verdict["findings"] if row["severity"] == "BLOCKING"] or verdict["findings"]))
         if key == "repair":
             state["facts"]["repair_ran"] = True
         _goto(run_root, state, blocked_step)
@@ -1262,8 +1291,7 @@ def summary_facts(project: Path, run_root: Path, state: Mapping[str, Any]) -> di
                           "not_run": sum(row["outcome"] == "NOT_RUN" for row in decisions.values())}},
         "quarantine": facts.get("quarantine") or [], "released": facts.get("released") or [], "questions": sorted(set(facts.get("questions") or [])),
         "proposals": facts.get("proposals") or [], "strength": strength, "strength_drops": facts.get("strength_drops") or [],
-        "review_blocked": _blocked(state), "review_findings": facts.get("review_findings") or [],
-        "review_notes": [row for review in (facts.get("reviews") or {}).values() for row in review.get("findings") or []],
+        **summary_review_facts(state),
         "stop": facts.get("stop"),
     }
 

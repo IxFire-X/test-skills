@@ -167,6 +167,8 @@ def module_runtime_path(project_root: Path, relative_path: str) -> Path:
     candidate = project
     for part in text.split("/"):
         candidate /= part
+        if not os.path.lexists(candidate):
+            raise InventoryError(f"runtime path does not exist: {project / text}")
         if _is_reparse(candidate):
             if candidate != project / text or os.name == "nt" or not candidate.is_symlink():
                 raise InventoryError("runtime path contains a symlink or reparse point")
