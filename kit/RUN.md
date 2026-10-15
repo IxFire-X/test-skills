@@ -1,7 +1,7 @@
 # Запуск test-skills на внутреннем проекте (Linux, свой CLI и модели)
 
-Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит bbee84b, без `tests/`,
-`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-bbee84b.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
+Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит b3366e0, без `tests/`,
+`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-b3366e0.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
@@ -34,7 +34,7 @@
   `<home>`, а не только `.runner` и `.tmp`: в нём лежит и сам пакет, а в его документации есть `http://` (nohttp);
 - `<home>` добавить в `.gitignore` ветки прогона (или `.git/info/exclude`), чтобы комплект не попал в коммит.
 
-Каталог раннера внутри проекта пакет bbee84b ещё отвергает (`DRIVER_INPUT: --runner-dir must be outside the project`) —
+Каталог раннера внутри проекта пакет b3366e0 ещё отвергает (`DRIVER_INPUT: --runner-dir must be outside the project`) —
 это снимается обновлением пакета (пункт S2b). До него `operate.py` на этой ошибке останавливается с подсказкой:
 обновить пакет или задать `--runner-dir` вне проекта, если это допустимо.
 
@@ -79,7 +79,7 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
-sha256sum -c --quiet test-skills-bbee84b.files.sha256             # молчит = все файлы пакета совпадают
+sha256sum -c --quiet test-skills-b3366e0.files.sha256             # молчит = все файлы пакета совпадают
 chmod +x wrap/wrap.py preflight.py bench/bench.py
 python3 --version                                                 # нужен 3.11+
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
@@ -176,7 +176,7 @@ python3 -m tools.pipeline_driver run --project <проект> --runner process \
   --mutation --analyst-report --suite
 ```
 
-- `--runner-dir` — долговечный каталог (не `/tmp`): там входы и выходы процессов модели. В пакете bbee84b — только
+- `--runner-dir` — долговечный каталог (не `/tmp`): там входы и выходы процессов модели. В пакете b3366e0 — только
   **вне** проекта; внутри проекта (`<home>/.runner`) — с обновлением пакета (раздел «Размещение внутри проекта»).
 - Прервался (Ctrl+C, обрыв)? Продолжить тот же прогон: `… run --project <проект> --runner process --run <run_id>`. Каталог
   процессов прогон помнит сам (`config.json`), флаг повторять не нужно — но `~/ts/runner/<run_id>` не удалять и не

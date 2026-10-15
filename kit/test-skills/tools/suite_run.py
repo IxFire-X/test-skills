@@ -83,13 +83,32 @@ def _row_selector(row: Mapping[str, str], adapter_id: str) -> str:
     return f"{row['classname']}#{row['name']}"
 
 
+def runtime_executable(module: Mapping[str, Any]) -> str:
+    """The launcher of the module's closed adapter, resolved as on the main path (security review note 4).
+
+    A module-local wrapper or interpreter goes through ``module_runtime_path``, system Maven through
+    ``system_maven_path``; any other executable of the ``.skillsrc`` is ``AdapterRequestError`` (NOT_RUNNABLE).
+    """
+    from tools.project_inventory import InventoryError, system_maven_path
+
+    adapter_id = module["test"]["adapter_id"]
+    if adapter_id in {adapters.PYTEST, adapters.MAVEN, adapters.GRADLE}:
+        base, runtime = adapters.resolve_module_runtime(module)
+        return str(base / runtime)
+    if adapter_id == adapters.SYSTEM_MAVEN:
+        try:
+            return str(system_maven_path(module["test"].get("executable")))
+        except (InventoryError, OSError) as error:
+            raise adapters.AdapterRequestError(f"system Maven is unavailable or unsafe: {error}") from error
+    raise adapters.AdapterRequestError(f"adapter {adapter_id!r} is not in the closed pilot set")
+
+
 def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str], *, explicit: bool, timeout: int) -> dict[str, Any]:
     module_root = (Path(project) / str(module.get("root") or ".")).resolve()
     request_module = {**module, "module_root": str(module_root)}
     adapter_id = request_module["test"]["adapter_id"]
     layout = adapters.launch_layout(request_module)
-    base, runtime = adapters.resolve_module_runtime(request_module) if adapter_id in {adapters.PYTEST, adapters.MAVEN, adapters.GRADLE} else (layout.build_root, str(request_module["test"]["executable"]))
-    executable = str(base / runtime) if adapter_id in {adapters.PYTEST, adapters.MAVEN, adapters.GRADLE} else runtime
+    executable = runtime_executable(request_module)
     reports, argv = adapters.command_for(adapter_id, executable, str(request_module["test"]["build_profile"]), list(selectors), module_path=layout.module_path)
     argv = list(argv)
     explicit_applied = False
@@ -186,7 +205,11 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
     for attempt in range(1 + max(0, int(repeats))):
         if not pending:
             break
-        outcome = run_once(project, module, pending, explicit=explicit, timeout=timeout)
+        try:
+            outcome = run_once(project, module, pending, explicit=explicit, timeout=timeout)
+        except adapters.AdapterRequestError as error:
+            return {"methods": [methods[locator] for locator in sorted(methods)], "commands": commands, "execution": execution,
+                    "build_broken": [], "not_runnable": str(error)}
         commands.append({"argv": outcome["argv"], "returncode": outcome["returncode"], "selectors": len(pending), "reported": len(outcome["rows"]),
                          "output_tail": outcome["output_tail"][-1500:]})
         execution = execution or outcome["execution"]
@@ -234,7 +257,10 @@ def not_run_reason(result: Mapping[str, Any]) -> tuple[str, str] | None:
     error) — ``SUITE_NOT_RUN``; the build failed although every reported method passed —
     ``SUITE_RUN_NONZERO_EXIT``; a compile error outside every method — ``SUITE_BUILD_BROKEN``.  Either
     way the run proves nothing about the methods and must not read as green or end in quarantine.
+    The launcher of the ``.skillsrc`` is not a closed runtime — ``NOT_RUNNABLE``, nothing started.
     """
+    if result.get("not_runnable"):
+        return "NOT_RUNNABLE", f"the suite was not started: {result['not_runnable']}"
     methods = result.get("methods") or []
     commands = result.get("commands") or []
     if not methods or not commands:
