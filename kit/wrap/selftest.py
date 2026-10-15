@@ -16,8 +16,8 @@ from pathlib import Path
 ROWS: list[tuple[str, str, str]] = []
 
 
-def note(ok: bool, check: str, detail: str = "") -> None:
-    ROWS.append(("ок" if ok else "стоп", check, detail))
+def note(ok: bool, check: str, detail: str = "", soft: bool = False) -> None:
+    ROWS.append(("ок" if ok else "внимание" if soft else "стоп", check, detail))
 
 
 def call(here: Path, config: dict, prompt: str, work: Path, name: str) -> tuple[int, list[dict], str | None, str]:
@@ -40,6 +40,23 @@ def local(here: Path, config: dict) -> dict:
     """An example config with this machine's Python and the fake CLI's absolute path (the CLI runs in a temp directory)."""
     command = [sys.executable if item == "python3" else str(here / "fake_cli.py") if item == "fake_cli.py" else item for item in config["command"]]
     return {**config, "command": command}
+
+
+def note_sandbox(here: Path) -> None:
+    """The working wrap.json: its own extra_env passes the secret check, and the CLI runs without tools if it can."""
+    path = Path(os.environ.get("WRAP_CONFIG") or here / "wrap.json")
+    sys.path.insert(0, str(here))
+    from wrap import load_config
+
+    try:
+        config = load_config(path)
+    except (OSError, ValueError, SystemExit) as error:
+        note(False, f"рабочий {path.name}", str(error)[:200])
+        return
+    note(True, f"рабочий {path.name}", f"extra_env: {', '.join(config['extra_env']) or 'пусто'}; tmp_dir: {config.get('tmp_dir') or 'системный temp'}")
+    note(bool(config["sandbox_args"]), "режим CLI без инструментов (sandbox_args)", " ".join(config["sandbox_args"]) or
+         "не задан: если у CLI есть флаг «без инструментов / read-only» — указать его в sandbox_args, иначе модель в CLI может читать "
+         "и менять файлы сама", soft=True)
 
 
 def selftest(here: Path, pack: str | None) -> int:
@@ -76,9 +93,22 @@ def selftest(here: Path, pack: str | None) -> int:
         too_long = local(here, json.loads((here / "examples" / "arg-stdout.json").read_text(encoding="utf-8")))
         code, events, _last, _stderr = call(here, too_long, prompt, work, "arg-too-long")
         note(code != 0 and any("too long" in event.get("message", "") for event in events), "длинная задача аргументом → понятная ошибка", f"код {code}")
+        in_tmp = local(here, json.loads((here / "examples" / "stdin-stdout.json").read_text(encoding="utf-8")))
+        in_tmp["tmp_dir"] = "own-tmp"  # relative to the config file: work/own-tmp
+        code, _events, last, stderr = call(here, in_tmp, prompt, work, "tmp-dir")
+        left = sorted(path.name for path in (work / "own-tmp").iterdir()) if (work / "own-tmp").is_dir() else None
+        note(code == 0 and last is not None and left == [], "tmp_dir: временный каталог вызова — внутри него и убран",
+             f"код {code}, каталог {'создан, пуст' if left == [] else left}" + (f", stderr: {stderr[-200:]}" if code else ""))
+        secret = local(here, json.loads((here / "examples" / "stdin-stdout.json").read_text(encoding="utf-8")))
+        secret["extra_env"] = {"LLM_ENDPOINT": "http://127.0.0.1:1", "LLM_API_KEY": "x"}
+        code, _events, last, stderr = call(here, secret, prompt, work, "secret-env")
+        note(code != 0 and last is None and "LLM_API_KEY" in stderr and "LLM_ENDPOINT" not in stderr,
+             "extra_env с секретом → отказ конфигурации", f"код {code}: {stderr.strip()[-160:]}")
+    note_sandbox(here)
     width = max(len(row[1]) for row in ROWS)
     for status, check, detail in ROWS:
-        print(f"{status:5} {check:{width}}  {detail}")
+        print(f"{status:8} {check:{width}}  {detail}")
     failed = sum(row[0] == "стоп" for row in ROWS)
-    print(f"\nИтог: {'ок' if not failed else f'стоп {failed}'}")
+    warned = sum(row[0] == "внимание" for row in ROWS)
+    print(f"\nИтог: {'ок' if not failed else f'стоп {failed}'}" + (f", внимание {warned}" if warned else ""))
     return 1 if failed else 0

@@ -1,7 +1,7 @@
 """Preflight of a project before a test-skills run (no network, read-only).
 
 usage: python3 preflight.py --pack <test-skills copy> --project <project root> [--docs <spec inside the project>]...
-       [--m2 ~/.m2/repository] [--json report.json]
+       [--m2 ~/.m2/repository] [--exclude-dir <kit directory inside the project>]... [--json report.json]
 
 Prints a table «ок / внимание / стоп» with what to do.  Exit code: 0 — no stop, 1 — at least one stop.
 Checks: Python ≥ 3.11; the package (tools.doctor); the project scan (tools.scan_project); JDK 17+; the build
@@ -156,24 +156,33 @@ def check_maven_repository(m2: Path, pack: Path) -> None:
             add(severity, f"~/.m2: {name}", f"нет ({path})", hint)
 
 
-def _exclude_line(name: str, path: Path, text: str) -> str:
-    """A ready line that keeps the linter away from .pilot-runs."""
+def _exclude_line(name: str, path: Path, text: str, dirs: list[str]) -> str:
+    """A ready line that keeps the linter away from .pilot-runs and the kit's directories inside the project."""
     if path.suffix in {".gradle", ".kts"}:
-        return {"spotless": "в блоке format/java: targetExclude('.pilot-runs/**')",
-                "checkstyle": "tasks.withType(Checkstyle) { exclude('**/.pilot-runs/**') }",
-                "nohttp": "nohttp { source.exclude('**/.pilot-runs/**') }"}.get(name, "exclude('**/.pilot-runs/**') в задаче линтера")
+        quoted = ", ".join(f"'**/{item}/**'" for item in dirs)
+        return {"spotless": "в блоке format/java: targetExclude(" + ", ".join(f"'{item}/**'" for item in dirs) + ")",
+                "checkstyle": f"tasks.withType(Checkstyle) {{ exclude({quoted}) }}",
+                "nohttp": f"nohttp {{ source.exclude({quoted}) }}"}.get(name, f"exclude({quoted}) в задаче линтера")
     if name in {"nohttp", "checkstyle"}:
+        added = ",".join(f"**/{item}/**/*" for item in dirs)
         current = re.search(r"<excludes>([^<]*)</excludes>", text)
         if current:
-            return f"<excludes>{current.group(1)},**/.pilot-runs/**/*</excludes>  (было: <excludes>{current.group(1)}</excludes>)"
-        return "<excludes>**/.pilot-runs/**/*</excludes> в <configuration> плагина"
-    return "<excludes><exclude>.pilot-runs/**</exclude></excludes> в <configuration> плагина"
+            return f"<excludes>{current.group(1)},{added}</excludes>  (было: <excludes>{current.group(1)}</excludes>)"
+        return f"<excludes>{added}</excludes> в <configuration> плагина"
+    return "<excludes>" + "".join(f"<exclude>{item}/**</exclude>" for item in dirs) + "</excludes> в <configuration> плагина"
 
 
-def check_linters(project: Path, build: str | None) -> None:
+def _excluded(path: Path, project: Path, extra: list[str]) -> bool:
+    relative = path.relative_to(project)
+    return bool(set(relative.parts) & SKIP_DIRS) or any(relative.as_posix() == item or relative.as_posix().startswith(item + "/") for item in extra)
+
+
+def check_linters(project: Path, build: str | None, extra: list[str]) -> None:
     """Only the build files of the build the pipeline runs (a Maven project's build.gradle never runs)."""
     patterns = ("pom.xml",) if build == "maven" else ("*.gradle", "*.gradle.kts") if build == "gradle" else ("pom.xml", "*.gradle", "*.gradle.kts")
-    builds = [path for pattern in patterns for path in project.rglob(pattern) if not (set(path.relative_to(project).parts) & SKIP_DIRS)]
+    builds = [path for pattern in patterns for path in project.rglob(pattern) if not _excluded(path, project, extra)]
+    dirs = [".pilot-runs", *extra]
+    where = " и ".join(dirs)
     found = False
     for path in builds:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -184,8 +193,8 @@ def check_linters(project: Path, build: str | None) -> None:
             whole_tree = bool(re.search(r"<sourceDirector(?:y|ies)>\s*\$\{(?:basedir|project\.basedir)\}|<includes?>\s*\*\*/\*\s*<|target\s*=?\s*fileTree\(['\"]?\.", text))
             found = True
             if whole_tree or name in {"nohttp", "apache-rat", "license"}:
-                add(STOP if name == "nohttp" else WARN, f"линтер {name}", f"{path.relative_to(project)}: читает всё дерево — и .pilot-runs (находка № 1)",
-                    "на ветке прогона исключить .pilot-runs: " + _exclude_line(name, path, text) +
+                add(STOP if name == "nohttp" else WARN, f"линтер {name}", f"{path.relative_to(project)}: читает всё дерево — и {where} (находка № 1)",
+                    f"на ветке прогона исключить {where}: " + _exclude_line(name, path, text, dirs) +
                     ". Иначе --runner process гарантированно не дойдёт до тестов (stdin.txt раннера — копии файлов проекта), "
                     "а оркестрованный прогон ломается после первой упавшей сборки (вывод Maven с http:// в .pilot-runs)")
             else:
@@ -194,10 +203,10 @@ def check_linters(project: Path, build: str | None) -> None:
         add(OK, "линтеры по всему дереву", "не найдены")
 
 
-def check_services(project: Path) -> None:
+def check_services(project: Path, extra: list[str]) -> None:
     composes = [path for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml") for path in [project / name] if path.is_file()]
-    poms = " ".join(path.read_text(encoding="utf-8", errors="replace") for path in project.rglob("pom.xml") if not (set(path.relative_to(project).parts) & SKIP_DIRS))
-    configs = [path for path in project.rglob("application*.*") if path.suffix in {".properties", ".yml", ".yaml"} and not (set(path.relative_to(project).parts) & SKIP_DIRS)]
+    poms = " ".join(path.read_text(encoding="utf-8", errors="replace") for path in project.rglob("pom.xml") if not _excluded(path, project, extra))
+    configs = [path for path in project.rglob("application*.*") if path.suffix in {".properties", ".yml", ".yaml"} and not _excluded(path, project, extra)]
     urls = sorted({match for path in configs for match in re.findall(r"jdbc:([a-z0-9]+):", path.read_text(encoding="utf-8", errors="replace"))})
     if composes:
         add(WARN, "docker-compose", ", ".join(path.name for path in composes), "тестам фичи не должен нужен внешний сервис; если нужен — поднять до прогона (docker на машине?)")
@@ -208,9 +217,9 @@ def check_services(project: Path) -> None:
         add(WARN if external else OK, "БД в конфигурации", ", ".join(urls), "внешняя БД — тесты пакета должны работать на тестовом профиле со встроенной БД" if external else "")
 
 
-def check_sensitive(project: Path, docs: list[str]) -> None:
+def check_sensitive(project: Path, docs: list[str], extra: list[str]) -> None:
     files = [project / item for item in docs] + [project / ".skillsrc"]
-    files += [path for path in project.rglob("*") if path.is_file() and path.suffix in TEXT_SUFFIXES and not (set(path.relative_to(project).parts) & SKIP_DIRS)
+    files += [path for path in project.rglob("*") if path.is_file() and path.suffix in TEXT_SUFFIXES and not _excluded(path, project, extra)
               and path.stat().st_size < 1_000_000]
     hits: dict[str, list[str]] = {"секреты": [], "email": [], "телефоны": [], "СНИЛС/ИНН": []}
     for path in dict.fromkeys(files):
@@ -236,9 +245,12 @@ def main() -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--docs", action="append", default=[])
     parser.add_argument("--m2", default=str(Path.home() / ".m2" / "repository"))
+    parser.add_argument("--exclude-dir", action="append", default=[],
+                        help="kit directory inside the project (relative): not scanned, added to the linter excludes; repeatable")
     parser.add_argument("--json")
     args = parser.parse_args()
     pack, project = Path(args.pack).resolve(), Path(args.project).resolve()
+    extra = [item.strip("/").replace("\\", "/") for item in args.exclude_dir if item.strip("/")]
     check_python()
     check_pack(pack)
     check_scan(pack, project)
@@ -246,13 +258,13 @@ def main() -> int:
     build = check_wrapper(project)
     if build == "maven":
         check_maven_repository(Path(args.m2), pack)
-    check_linters(project, build)
-    check_services(project)
+    check_linters(project, build, extra)
+    check_services(project, extra)
     for doc in args.docs:
         add(OK if (project / doc).is_file() else STOP, "спецификация", doc, "" if (project / doc).is_file() else "путь --docs — внутри проекта")
     if not (project / ".skillsrc").is_file():
         add(WARN, ".skillsrc", "нет", "первый next создаст по разметке; для внутреннего проекта лучше положить свой (review_runner, requirements.id_pattern)")
-    check_sensitive(project, args.docs)
+    check_sensitive(project, args.docs, extra)
     width = max(len(row[1]) for row in rows)
     for status, check, finding, hint in rows:
         print(f"{status:9} {check:{width}}  {finding}" + (f"\n{'':9} {'':{width}}  → {hint}" if hint and status != OK else ""))

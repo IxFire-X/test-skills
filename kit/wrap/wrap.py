@@ -13,10 +13,14 @@ file (or ``$WRAP_CONFIG``), without code changes:
      "prompt_via": "stdin" | "file" | "arg",   # how the task reaches the CLI
      "answer_from": "stdout" | "file",         # where the CLI leaves its answer
      "answer_file": "{tmp}/answer.txt",        # with answer_from = file
-     "timeout_seconds": 1700, "extra_env": {"NAME": "value"}, "version": "inhouse-cli 1.2"}
+     "timeout_seconds": 1700, "extra_env": {"NAME": "value"}, "version": "inhouse-cli 1.2",
+     "tmp_dir": ".tmp",                        # where the per-call temp directory goes (relative: to wrap.json)
+     "sandbox_args": ["--no-tools"]}           # the CLI's own "no tools / read-only" flags, if it has them
 
 Placeholders: {model}, {prompt_file}, {prompt} (prompt_via = arg; Linux caps one argument at 128 KiB), {answer_file},
-{schema_file}, {tmp}.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
+{schema_file}, {tmp}.  ``sandbox_args`` replace an item "{sandbox_args}" of command, else go at its end.
+``extra_env`` must not carry secrets (names with TOKEN, SECRET, PASSWORD, PASSWD, API_KEY, APIKEY, AWS_*, AZURE_*,
+GOOGLE_APPLICATION_CREDENTIALS): the CLI's credentials belong in the CLI's own config, not in wrap.json.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
 --output-last-message; stdout gets codex `--json` events (thread.started, item.completed, turn.completed with usage —
 the CLI's own when its stdout is JSON with `usage`, else an estimate by bytes, marked "estimated").  A CLI failure
 prints an `error` event (with its text, so rate limits are recognised) and exits non-zero.
@@ -38,6 +42,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ARG_LIMIT = 120_000  # Linux MAX_ARG_STRLEN is 128 KiB per argument
+SECRET_ENV = re.compile(r"(?i)TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
 
 
 def config_path() -> Path:
@@ -45,7 +50,8 @@ def config_path() -> Path:
 
 
 def load_config(path: Path | None = None) -> dict:
-    value = json.loads((path or config_path()).read_text(encoding="utf-8"))
+    path = path or config_path()
+    value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value.get("command"), list) or not value["command"]:
         raise SystemExit("wrap.json: command must be a non-empty list")
     if value.setdefault("prompt_via", "stdin") not in {"stdin", "file", "arg"}:
@@ -55,7 +61,25 @@ def load_config(path: Path | None = None) -> dict:
     value.setdefault("answer_file", "{tmp}/answer.txt")
     value.setdefault("timeout_seconds", 1700)
     value.setdefault("extra_env", {})
+    if not isinstance(value["extra_env"], dict):
+        raise SystemExit("wrap.json: extra_env must be an object")
+    secrets = sorted(str(name) for name in value["extra_env"] if SECRET_ENV.search(str(name)))
+    if secrets:
+        raise SystemExit(f"wrap.json: extra_env carries secret-like names ({', '.join(secrets)}) — secrets go to the CLI's own config, "
+                         "not to wrap.json")
+    sandbox = value.setdefault("sandbox_args", [])
+    if not isinstance(sandbox, list) or not all(isinstance(item, str) for item in sandbox):
+        raise SystemExit("wrap.json: sandbox_args must be a list of strings")
+    if value.get("tmp_dir"):
+        tmp_dir = Path(os.path.expanduser(str(value["tmp_dir"])))
+        value["tmp_dir"] = str(tmp_dir if tmp_dir.is_absolute() else (path.parent / tmp_dir).resolve())
     return value
+
+
+def build_command(config: dict, values: dict) -> list[str]:
+    sandbox = list(config.get("sandbox_args") or [])
+    command = [part for item in config["command"] for part in (sandbox if item == "{sandbox_args}" else [item.format(**values)])]
+    return command if "{sandbox_args}" in config["command"] else [*command, *sandbox]
 
 
 def option(argv: list[str], name: str) -> str | None:
@@ -125,7 +149,9 @@ def run_exec(argv: list[str], prompt: str, config: dict) -> int:
     if not last:
         event({"type": "error", "message": "wrap: --output-last-message is missing"})
         return 2
-    tmp = Path(tempfile.mkdtemp(prefix="wrap-"))
+    if config.get("tmp_dir"):
+        Path(config["tmp_dir"]).mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = Path(tempfile.mkdtemp(prefix="wrap-", dir=config.get("tmp_dir") or None))
     try:
         prompt_file = tmp / "prompt.txt"
         prompt_file.write_bytes(prompt.encode("utf-8"))
@@ -134,7 +160,7 @@ def run_exec(argv: list[str], prompt: str, config: dict) -> int:
         if config["prompt_via"] == "arg" and len(prompt.encode("utf-8")) > ARG_LIMIT:
             event({"type": "error", "message": f"wrap: the task is {len(prompt.encode('utf-8'))} bytes, too long for one argument (prompt_via=arg); use stdin or file"})
             return 2
-        command = [item.format(**values) for item in config["command"]]
+        command = build_command(config, values)
         env = {**os.environ, **{str(key): str(value) for key, value in (config.get("extra_env") or {}).items()}}
         try:
             done = subprocess.run(command, input=prompt.encode("utf-8") if config["prompt_via"] == "stdin" else None, capture_output=True, env=env,

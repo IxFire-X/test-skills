@@ -3,15 +3,27 @@
 
     python3 operate.py --home ~/ts --project <project> --docs <spec> [--docs …] --subject "<тема>"
         --models glm-5.3,… --cli-command '<CLI command with {model}>' --prompt-via stdin|file|arg
-        --answer-from stdout|file [--answer-file …] [--runner-dir ~/ts/runner] [--review-input-bytes 100000]
-        [--max-tasks 2] [--no-mutation] [--from-step N] [--only 0,2,3] [--yes] [--dry-run]
+        --answer-from stdout|file [--answer-file …] [--sandbox-args '<CLI no-tools flags>'] [--runner-dir DIR]
+        [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--no-mutation] [--from-step N] [--only 0,2,3]
+        [--yes] [--yes-skillsrc] [--yes-chmod] [--no-pip] [--dry-run]
 
-Steps are the sections of RUN.md: 0 kit check, 1 preflight, 2 wrap.json + selftest + one live call, 3 model
-benchmark and models by role, 4 .skillsrc (review_runner, requirements.id_pattern, mutation), 5a cases-only trial,
-5 full local-pilot-v1 run (ask_user answered here; regenerate-after-gate and BUILD_FAILED_BEFORE_TESTS stop with the
-runner output tail), 7 ~/ts/report/ with the figures, 8 Zephyr CSV.  Every step prints its commands, exit codes and
-main lines; everything goes to ~/ts/operate.log.  A failing step stops with a hint; --from-step continues.
-Nothing leaves the machine.  Python 3.11+, stdlib only; Linux (a Windows branch exists only for checks).
+Steps are the sections of RUN.md: 0 kit check (the test-skills folder against test-skills-*.files.sha256, doctor),
+1 preflight, 2 wrap.json + selftest + one live call, 3 model benchmark and models by role, 4 .skillsrc
+(review_runner, requirements.id_pattern, mutation), 5a cases-only trial, 5 full local-pilot-v1 run (ask_user answered
+here; regenerate-after-gate and BUILD_FAILED_BEFORE_TESTS stop with the runner output tail), 7 <home>/report/ with the
+figures, 8 Zephyr CSV.  Every step prints its commands, exit codes and main lines; everything goes to
+<home>/operate.log.  A failing step stops with a hint; --from-step continues.
+
+With --home inside the project everything stays there: the runner directory defaults to <home>/.runner and the
+wrapper's temp files go to <home>/.tmp (preflight prints the linter excludes for .pilot-runs and <home>).
+
+operate.py itself opens no network connection and installs nothing (a missing pip dependency stops step 0 with the
+command to run).  The processes it starts do what the package does: the model CLI (via wrap.py) sends the tasks —
+parts of the specification and of the project's code — to the model endpoint configured in that CLI; the project's
+Maven/Gradle build and PIT run the project's and the generated tests and may reach the artifact repositories unless
+the build is offline.  See USAGE.md «Права, сеть и исполнение» and RUN.md «Права и сеть».
+--yes confirms the operator's questions but never the edit of the project's .skillsrc (--yes-skillsrc) nor chmod +x
+of the project's files (--yes-chmod).  Python 3.11+, stdlib only; Linux (a Windows branch exists only for checks).
 """
 from __future__ import annotations
 
@@ -29,13 +41,12 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
-import zipfile
 from pathlib import Path
 from typing import Any
 
 STEPS = ("0", "1", "2", "3", "4", "5a", "5", "7", "8")
 TITLES = {"0": "Проверка комплекта", "1": "Preflight проекта", "2": "Обёртка CLI", "3": "Бенчмарк моделей", "4": ".skillsrc проекта",
-          "5a": "Пробный прогон (cases-only-v1)", "5": "Полный прогон (local-pilot-v1)", "7": "Что принести (~/ts/report)", "8": "Экспорт Zephyr"}
+          "5a": "Пробный прогон (cases-only-v1)", "5": "Полный прогон (local-pilot-v1)", "7": "Что принести (<home>/report)", "8": "Экспорт Zephyr"}
 ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
 REVIEW_ROLES = ("tc-reviewer", "autotest-reviewer")
 PROBE = "test-skills-probe: проверка обёртки. Ответь только JSON-объектом {\"ok\": true} без пояснений.\n"
@@ -164,7 +175,10 @@ class Operator:
         self.project = Path(args.project).expanduser().resolve()
         self.models = [item.strip() for item in args.models.split(",") if item.strip()]
         self.default_model = args.default_model or self.models[0]
-        self.runner_dir = Path(args.runner_dir).expanduser().resolve() if args.runner_dir else self.home / "runner"
+        self.in_project = self.home.is_relative_to(self.project)
+        default_runner = self.home / (".runner" if self.in_project else "runner")
+        self.runner_dir = Path(args.runner_dir).expanduser().resolve() if args.runner_dir else default_runner
+        self.tmp_dir = self.home / ".tmp" if self.in_project else None
         self.home.mkdir(parents=True, exist_ok=True)
         self.log_file = (self.home / "operate.log").open("a", encoding="utf-8")
         self.state_path = self.home / "operate-state.json"
@@ -190,11 +204,16 @@ class Operator:
         if not self.dry:
             self.state_path.write_text(json.dumps(self.state, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    def confirm(self, question: str) -> bool:
-        if self.dry or self.args.yes:
-            self.say(f"{question} → да ({'dry-run' if self.dry else '--yes'})")
+    def confirm(self, question: str, flag: str = "yes") -> bool:
+        """y/n; ``flag`` is the option that answers it: --yes for the operator's own questions, --yes-skillsrc and
+        --yes-chmod for changes to the project's files (--yes does not answer those)."""
+        if self.dry or getattr(self.args, flag.replace("-", "_")):
+            self.say(f"{question} → да ({'dry-run' if self.dry else '--' + flag})")
             return True
-        answer = input(f"{question} [y/n] ").strip().lower()
+        try:
+            answer = input(f"{question} [y/n] ").strip().lower()
+        except EOFError:
+            answer = ""
         self.log(f"{question} [y/n] {answer}")
         return answer in {"y", "yes", "д", "да"}
 
@@ -238,40 +257,33 @@ class Operator:
 
     # -- step 0
     def step_0(self) -> None:
-        zips = sorted(self.home.glob("test-skills-*.zip"), key=lambda path: path.stat().st_mtime)
-        if not zips and not self.pack.is_dir():
-            raise Stop(f"в {self.home} нет ни test-skills-*.zip, ни распакованного test-skills", f"скопировать комплект целиком в {self.home}")
-        if zips:
-            archive = zips[-1]
-            if len(zips) > 1:
-                self.say(f"  внимание: архивов несколько, беру самый новый: {archive.name}")
-            sums = archive.with_name(archive.name + ".sha256")
-            self.action(f"sha256 {archive.name} против {sums.name}")
-            if not self.dry:
-                if not sums.is_file():
-                    raise Stop(f"нет {sums.name}", "скопировать комплект целиком (архив и его .sha256)")
-                expected, actual = sums.read_text(encoding="utf-8").split()[0].lower(), _sha256(archive)
-                if expected != actual:
-                    raise Stop(f"sha256 архива не совпадает: {actual[:12]}… вместо {expected[:12]}…", "скопировать архив заново, он повреждён")
-                self.say(f"  sha256 архива: ок ({actual[:12]}…)")
-            if not self.pack.is_dir():
-                self.action(f"распаковать {archive.name} → {self.pack}")
-                if not self.dry:
-                    with zipfile.ZipFile(archive) as bundle:
-                        bundle.extractall(self.home)
-            files = self.home / (archive.name[:-4] + ".files.sha256")
-            self.action(f"сверить файлы пакета по {files.name}")
-            if not self.dry and files.is_file():
-                bad = []
-                rows = [line.split(None, 1) for line in files.read_text(encoding="utf-8").splitlines() if line.strip()]
-                for digest, name in rows:
-                    path = self.home / name.lstrip("*").strip()
-                    if not path.is_file() or _sha256(path) != digest:
-                        bad.append(name.strip())
-                if bad:
-                    raise Stop(f"файлы пакета отличаются от архива ({len(bad)}): {', '.join(bad[:5])}",
-                               f"удалить {self.pack} и запустить шаг 0 заново — он распакует архив")
-                self.say(f"  файлы пакета: {len(rows)} совпадают")
+        if not self.pack.is_dir():
+            raise Stop(f"в {self.home} нет папки test-skills", f"скопировать комплект целиком (папку kit/ из ветки) в {self.home}")
+        listings = sorted(self.home.glob("test-skills-*.files.sha256"), key=lambda path: path.stat().st_mtime)
+        if not listings:
+            raise Stop(f"в {self.home} нет test-skills-*.files.sha256", "скопировать комплект целиком: без списка сумм пакет не проверить")
+        files = listings[-1]
+        if len(listings) > 1:
+            self.say(f"  внимание: списков сумм несколько, беру самый новый: {files.name}")
+        self.action(f"сверить файлы {self.pack} по {files.name}")
+        if self.in_project:
+            self.say(f"  комплект внутри проекта ({self.home.relative_to(self.project)}): каталог раннера {self.runner_dir}, "
+                     f"временные файлы обёртки {self.tmp_dir}")
+        if not self.dry:
+            rows = [line.split(None, 1) for line in files.read_text(encoding="utf-8").splitlines() if line.strip()]
+            listed = {name.lstrip("*").strip() for _digest, name in rows}
+            bad = [name for digest, name in ((digest, name.lstrip("*").strip()) for digest, name in rows)
+                   if not (self.home / name).is_file() or _sha256(self.home / name) != digest]
+            extra = sorted(path.relative_to(self.home).as_posix() for path in self.pack.rglob("*")
+                           if path.is_file() and "__pycache__" not in path.parts and path.relative_to(self.home).as_posix() not in listed)
+            if bad:
+                raise Stop(f"файлы пакета отличаются от {files.name} ({len(bad)}): {', '.join(bad[:5])}",
+                           f"удалить {self.pack} и скопировать папку test-skills из комплекта заново")
+            code = [name for name in extra if name.endswith(".py")]
+            if code:
+                raise Stop(f"в пакете лишние .py, которых нет в {files.name} ({len(code)}): {', '.join(code[:5])}",
+                           f"удалить {self.pack} и скопировать папку test-skills из комплекта заново")
+            self.say(f"  файлы пакета: {len(rows)} совпадают" + (f"; лишних файлов {len(extra)}: {', '.join(extra[:5])}" if extra else ""))
         if not WINDOWS:
             for path in (self.wrap_dir / "wrap.py", self.home / "preflight.py", self.home / "bench" / "bench.py"):
                 self.action(f"chmod +x {path}")
@@ -282,10 +294,17 @@ class Operator:
         self.say(f"  Python {sys.version.split()[0]}: ок")
         modules = self.run([PY, "-c", "import jsonschema, yaml"])
         if modules.code != 0:
-            self.say("  нет jsonschema/pyyaml — ставлю из локального зеркала pip")
-            pip = self.run([PY, "-m", "pip", "install", "-r", self.pack / "requirements.txt"], echo=True)
-            if pip.code != 0:
-                raise Stop("pip не поставил зависимости пакета", "проверить настройку локального зеркала pip (pip config list) и повторить шаг 0")
+            if self.args.no_pip:
+                raise Stop("нет модулей jsonschema/pyyaml", "поставить их средствами окружения (пакеты ОС python3-jsonschema и python3-yaml "
+                           "или как принято на машине) и запустить --from-step 0; operate.py pip не вызывает")
+            requirements = self.pack / "requirements.txt"
+            hashed = "--hash=" in requirements.read_text(encoding="utf-8", errors="replace") if requirements.is_file() else False
+            self.say("  нет jsonschema/pyyaml; operate.py сам ничего не ставит. Команда установки:")
+            self.say("    " + shlex.join([PY, "-m", "pip", "install", *(["--require-hashes"] if hashed else []), "-r", str(requirements)]))
+            if not hashed:
+                self.say("    (в requirements.txt этой версии пакета нет хешей — --require-hashes появится с обновлением пакета; "
+                         "ставить только из доверенного зеркала: pip config list)")
+            raise Stop("нет зависимостей пакета", "выполнить команду выше и запустить --from-step 0")
         doctor = self.run([PY, "-m", "tools.doctor", "--root", "."], cwd=self.pack)
         if self.dry:
             return
@@ -302,7 +321,11 @@ class Operator:
         if not os.environ.get("JAVA_HOME"):
             self.say("  внимание: JAVA_HOME не задан (export JAVA_HOME=<JDK 17+>)")
         report = self.home / "preflight.json"
-        done = self.run([PY, self.home / "preflight.py", "--pack", self.pack, "--project", self.project, *self._docs_args(), "--json", report])
+        inside = [self.home.relative_to(self.project).as_posix()] if self.in_project else []
+        inside += [self.runner_dir.relative_to(self.project).as_posix()] if self.runner_dir.is_relative_to(self.project) and not \
+            self.runner_dir.is_relative_to(self.home) else []
+        done = self.run([PY, self.home / "preflight.py", "--pack", self.pack, "--project", self.project, *self._docs_args(),
+                         *[item for path in inside for item in ("--exclude-dir", path)], "--json", report])
         if self.dry:
             self.say("  (при «стоп» только из-за неисполняемого mvnw/gradlew — chmod +x с подтверждением и повтор preflight)")
             self.state["mutation"] = not self.args.no_mutation
@@ -321,7 +344,7 @@ class Operator:
             fixable = [re.match(r"chmod \+x (.+?)(?:\s{2}|$)", row["hint"]) for row in stops]
             if all(fixable) and not again:
                 paths = [Path(match.group(1)) for match in fixable]
-                if self.confirm("Сделать исполняемыми " + ", ".join(str(path) for path in paths) + "?"):
+                if self.confirm("Сделать исполняемыми файлы проекта " + ", ".join(str(path) for path in paths) + "?", "yes-chmod"):
                     for path in paths:
                         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                         self.say(f"  chmod +x {path}")
@@ -336,8 +359,16 @@ class Operator:
     # -- step 2
     def wrap_config(self) -> dict[str, Any]:
         command = shlex.split(self.args.cli_command)
+        try:  # extra_env and sandbox_args set by hand in the current wrap.json stay (wrap.py rejects secrets in extra_env)
+            current = json.loads((self.wrap_dir / "wrap.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        sandbox = shlex.split(self.args.sandbox_args) if self.args.sandbox_args is not None else list(current.get("sandbox_args") or [])
         config: dict[str, Any] = {"command": command, "prompt_via": self.args.prompt_via, "answer_from": self.args.answer_from,
-                                  "timeout_seconds": self.args.cli_timeout, "extra_env": {}}
+                                  "timeout_seconds": self.args.cli_timeout, "extra_env": dict(current.get("extra_env") or {}),
+                                  "sandbox_args": sandbox}
+        if self.tmp_dir:
+            config["tmp_dir"] = str(self.tmp_dir)
         if self.args.answer_file:
             config["answer_file"] = self.args.answer_file
         if self.args.cli_version:
@@ -355,6 +386,9 @@ class Operator:
             self.say("  внимание: prompt_via=arg — части ревью 126–552 КБ не пройдут одним аргументом (Linux: 128 КиБ); лучше stdin или file")
         if config["answer_from"] == "file" and "answer_file" not in config:
             self.say("  answer_file по умолчанию: {tmp}/answer.txt")
+        if not config["sandbox_args"]:
+            self.say("  внимание: --sandbox-args не задан — если у CLI есть флаг «без инструментов / read-only», передать его: "
+                     "иначе модель внутри CLI может сама читать и менять файлы")
         path = self.wrap_dir / "wrap.json"
         self.action(f"записать {path}: {json.dumps(config, ensure_ascii=False)}")
         if not self.dry:
@@ -512,8 +546,9 @@ class Operator:
             return
         for line in difflib.unified_diff(before.splitlines(), after.splitlines(), ".skillsrc", ".skillsrc (новый)", lineterm="", n=1):
             self.say("  " + line)
-        if not self.confirm(f"Записать {skillsrc}?"):
-            raise Stop(".skillsrc не записан", "поправить руками по RUN.md п. 4 и запустить --from-step 5a")
+        if not self.confirm(f"Записать {skillsrc}?", "yes-skillsrc"):
+            raise Stop(".skillsrc не записан", "поправить руками по RUN.md п. 4 и запустить --from-step 5a "
+                       "(или повторить --from-step 4 и ответить y; без терминала — флаг --yes-skillsrc)")
         self.action(f"копия прежнего .skillsrc → {self.home}/skillsrc.bak-<время>; запись {skillsrc}")
         if not self.dry:
             shutil.copy2(skillsrc, self.home / f"skillsrc.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}")
@@ -527,7 +562,8 @@ class Operator:
                 *self._docs_args(), "--subject", self.args.subject, "--model-id", self.default_model, "--host-cli", host_cli,
                 "--host-cli-version", self.state.get("host_cli_version") or self.args.cli_version or "unknown", "--reviewer-isolation", "fresh",
                 "--review-runner-preset", "codex", "--review-runner-cli", str(self.runner_cli()), "--runner-dir", str(self.runner_dir),
-                "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks), *extra]
+                "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
+                *(["--target", self.args.target] if self.args.target else []), *extra]
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
         return [PY, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
@@ -577,10 +613,21 @@ class Operator:
         self.log(f"stdout ({out}):\n{text}\nstderr:\n{err.read_text(encoding='utf-8', errors='replace')[-20000:]}")
         self.say(f"  код выхода: {process.returncode}; время {int(time.time() - started) // 60} мин")
         payload = _json_tail(text)
+        if isinstance(payload, dict) and payload.get("action") == "error" and payload.get("code") == "DRIVER_INPUT":
+            self._runner_dir_refused(str(payload.get("message")))
         if not isinstance(payload, dict):
+            self._runner_dir_refused(err.read_text(encoding="utf-8", errors="replace")[-4000:])
             tail = _main_lines(err.read_text(encoding="utf-8", errors="replace"), 3)
             raise Stop(f"драйвер не вернул JSON (код {process.returncode}): {' | '.join(tail)}", f"смотреть {err}; текст ошибки — в отчёт (п. 7)")
         return process.returncode, payload
+
+    def _runner_dir_refused(self, text: str) -> None:
+        """A package before S2b refuses a runner directory inside the project (as a JSON error or a traceback)."""
+        if "--runner-dir must be outside the project" in text:
+            raise Stop(f"эта версия пакета не принимает каталог раннера внутри проекта: {self.runner_dir}",
+                       "обновить пакет до версии, где --runner-dir внутри проекта разрешён (S2b), или задать --runner-dir вне проекта "
+                       f"(если политика это позволяет) и запустить тот же шаг заново; пустой прогон, который драйвер успел завести в "
+                       f"{self.project / '.pilot-runs'}, можно удалить")
 
     def _runner_output_tail(self, run_id: str, lines: int = 30) -> None:
         outputs = sorted((self.project / ".pilot-runs" / run_id / "artifacts").glob("*/runner-output.txt"), key=lambda path: path.stat().st_mtime)
@@ -867,7 +914,8 @@ def _figures(result: dict[str, Any], events: list[dict[str, Any]], run_root: Pat
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Внутренний прогон test-skills по RUN.md, шаг за шагом (шаги: " + ", ".join(STEPS) + ").")
-    parser.add_argument("--home", default="~/ts", help="каталог комплекта (там test-skills-*.zip, wrap/, bench/, preflight.py)")
+    parser.add_argument("--home", default="~/ts", help="каталог комплекта (там test-skills/, test-skills-*.files.sha256, wrap/, bench/, "
+                                                       "preflight.py); может лежать внутри проекта")
     parser.add_argument("--project", required=True, help="корень проекта")
     parser.add_argument("--docs", action="append", required=True, help="спека (путь внутри проекта); можно несколько")
     parser.add_argument("--subject", required=True, help="тема прогона по-русски")
@@ -878,10 +926,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-via", choices=("stdin", "file", "arg"), default="stdin")
     parser.add_argument("--answer-from", choices=("stdout", "file"), default="stdout")
     parser.add_argument("--answer-file", help="файл ответа CLI при --answer-from file (можно с {tmp})")
+    parser.add_argument("--sandbox-args", help="флаги CLI «без инструментов / read-only» одной строкой → sandbox_args в wrap.json")
     parser.add_argument("--cli-version", help="строка версии CLI для квитанций (иначе — wrap.py --version)")
     parser.add_argument("--cli-timeout", type=int, default=1700, help="тайм-аут одного вызова CLI в обёртке, с")
     parser.add_argument("--id-pattern", help="шаблон ID требований (иначе — вывести из спеки и подтвердить)")
-    parser.add_argument("--runner-dir", help="каталог процессов модели вне проекта (по умолчанию <home>/runner)")
+    parser.add_argument("--runner-dir", help="каталог процессов модели (по умолчанию <home>/runner, а при --home внутри проекта — "
+                                             "<home>/.runner: так драйвер принимает его только с версии пакета с S2b)")
+    parser.add_argument("--target", help="цель прогона для драйвера (pipeline_driver run --target), если в проекте их несколько")
     parser.add_argument("--review-input-bytes", type=int, default=100_000)
     parser.add_argument("--max-tasks", type=int, default=2)
     parser.add_argument("--max-parallel", type=int, default=2, help="review_runner.max_parallel в .skillsrc")
@@ -891,7 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", help="только эти шаги, через запятую (например 7,8)")
     parser.add_argument("--run", help="run_id прерванного или ждущего прогона — продолжить его (шаг 5)")
     parser.add_argument("--answer", action="append", default=[], help="метка=значение для продолжения с --run")
-    parser.add_argument("--yes", action="store_true", help="подтверждать всё без вопросов (ответы ask_user всё равно вводятся)")
+    parser.add_argument("--yes", action="store_true", help="подтверждать вопросы оператора без вопросов (ответы ask_user всё равно вводятся; "
+                                                           "правку .skillsrc и chmod +x файлов проекта не подтверждает)")
+    parser.add_argument("--yes-skillsrc", action="store_true", help="записать .skillsrc проекта без вопроса (diff всё равно печатается)")
+    parser.add_argument("--yes-chmod", action="store_true", help="chmod +x mvnw/gradlew проекта без вопроса")
+    parser.add_argument("--no-pip", action="store_true", help="не предлагать команду pip: зависимости ставятся средствами окружения")
     parser.add_argument("--dry-run", action="store_true", help="только напечатать команды и действия")
     return parser
 
