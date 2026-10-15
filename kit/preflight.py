@@ -6,7 +6,8 @@ usage: python3 preflight.py --pack <test-skills copy> --project <project root> [
 Prints a table «ок / внимание / стоп» with what to do.  Exit code: 0 — no stop, 1 — at least one stop.
 Checks: Python ≥ 3.11; the package (tools.doctor); the project scan (tools.scan_project); JDK 17+; the build
 wrapper (mvnw executable on POSIX, mvnw.cmd on Windows) or Maven on PATH; the Maven repository has surefire,
-the dependency plugin and the pinned PIT jars (offline machine); linters that read the whole tree
+the pinned PIT jars, the resolver maven-dependency-plugin jar by its pinned SHA-256 and the project's
+junit-platform-launcher version (offline machine, S2c); linters that read the whole tree
 (nohttp, spotless, checkstyle/rat/license with ${basedir} or **/*) — they also read .pilot-runs (finding 1);
 docker-compose / Testcontainers / an external database of the feature; secrets and personal data in the files
 the pipeline reads (the specification, .skillsrc, config, the source tree).
@@ -14,6 +15,7 @@ the pipeline reads (the specification, .skillsrc, config, the source tree).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -29,6 +31,8 @@ SECRET = re.compile(r"(?i)(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|(
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE = re.compile(r"(?<!\d)(?:\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}(?!\d)")
 SNILS_INN = re.compile(r"(?<!\d)(?:\d{3}-\d{3}-\d{3} \d{2}|\d{12})(?!\d)")
+# tools/mutation_tools.json java.resolver_plugin_jar of the package with S2 (a package before S2 has no pin)
+RESOLVER_PIN = {"file": "maven-dependency-plugin-3.8.1.jar", "sha256": "9fc3d435085983b16bc53903f9413aede9de30e20c57c0cece94614f328b14b5"}
 rows: list[tuple[str, str, str, str]] = []
 
 
@@ -140,12 +144,10 @@ def check_maven_repository(m2: Path, pack: Path) -> None:
         add(STOP, "репозиторий Maven", f"{m2} нет", "собрать проект один раз (mvnw test) с доступом к внутреннему репозиторию — он наполнит ~/.m2")
         return
     pins = json.loads((pack / "tools" / "mutation_tools.json").read_text(encoding="utf-8"))["java"]
-    wanted = {"maven-surefire-plugin": m2 / "org/apache/maven/plugins/maven-surefire-plugin",
-              "maven-dependency-plugin " + pins["resolver_plugin"].rsplit(":", 1)[1]: m2 / "org/apache/maven/plugins/maven-dependency-plugin" / pins["resolver_plugin"].rsplit(":", 1)[1]}
+    wanted = {"maven-surefire-plugin": m2 / "org/apache/maven/plugins/maven-surefire-plugin"}
     for root in pins["roots"]:
         group, artifact, version = root.split(":")
         wanted[f"{artifact} {version}"] = m2 / group.replace(".", "/") / artifact / version
-    wanted["junit-platform-launcher"] = m2 / "org/junit/platform/junit-platform-launcher"
     for name, path in wanted.items():
         if path.is_dir() and any(path.rglob("*.jar")):
             add(OK, f"~/.m2: {name}", "есть")
@@ -154,6 +156,95 @@ def check_maven_repository(m2: Path, pack: Path) -> None:
             hint = ("без него мутации будут NOT_RUNNABLE: положить артефакт из внутреннего репозитория "
                     f"(mvn dependency:get -Dartifact=...) или запускать без --mutation" if severity == WARN else "без surefire тесты не запустятся")
             add(severity, f"~/.m2: {name}", f"нет ({path})", hint)
+    check_resolver_plugin(m2, pins)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _jar(m2: Path, coordinates: str) -> Path:
+    group, artifact, version = coordinates.split(":")
+    return m2 / group.replace(".", "/") / artifact / version / f"{artifact}-{version}.jar"
+
+
+def check_resolver_plugin(m2: Path, pins: dict) -> None:
+    """The PIT resolver (maven-dependency-plugin) runs inside Maven: the package checks its jar by the pinned SHA-256
+    before Maven starts (S2c); the pin is read from the package (resolver_plugin_jar), else the S2 value."""
+    row = pins.get("resolver_plugin_jar") or RESOLVER_PIN
+    path = _jar(m2, pins["resolver_plugin"])
+    name = f"~/.m2: {row['file']}"
+    if not path.is_file():
+        add(WARN, name, f"нет ({path})", f"без него мутации будут NOT_RUNNABLE: mvn dependency:get -Dartifact={pins['resolver_plugin']} "
+                                        "из внутреннего репозитория или запускать без --mutation")
+    elif _sha256(path) != row["sha256"]:
+        add(WARN, name, f"SHA-256 {_sha256(path)[:12]}… не совпадает с закреплённым {row['sha256'][:12]}…",
+            f"jar не тот, что закреплён в пакете: удалить {path.parent} и скачать заново из доверенного репозитория, сверить SHA-256; "
+            "до этого — без --mutation")
+    else:
+        add(OK, name, f"SHA-256 совпадает с закреплённым ({row['sha256'][:12]}…)")
+
+
+_PLATFORM_VERSION = (
+    (r"<artifactId>junit-platform-[a-z-]+</artifactId>\s*<version>([\d.]+(?:-[\w.]+)?)</version>", False),
+    (r"<junit-platform\.version>([\d.]+(?:-[\w.]+)?)</junit-platform\.version>", False),
+    (r"org\.junit\.platform:junit-platform-[a-z-]+:([\d.]+(?:-[\w.]+)?)", False),
+    (r"<(?:junit-jupiter|junit-bom|junit5)\.version>([\d.]+(?:-[\w.]+)?)</", True),
+    (r"<artifactId>junit-(?:jupiter[a-z-]*|bom)</artifactId>\s*<version>([\d.]+(?:-[\w.]+)?)</version>", True),
+    (r"org\.junit(?:\.jupiter)?:junit-(?:jupiter[a-z-]*|bom):([\d.]+(?:-[\w.]+)?)", True),
+)
+
+
+def _platform_of_jupiter(version: str) -> str:
+    """JUnit 5.x.y goes with Platform 1.x.y; from JUnit 6 the versions are the same."""
+    return "1." + version.split(".", 1)[1] if version.startswith("5.") else version
+
+
+def _platform_versions(texts: list[str]) -> list[str]:
+    versions = [_platform_of_jupiter(found) if jupiter else found for pattern, jupiter in _PLATFORM_VERSION for text in texts
+                for found in re.findall(pattern, text)]
+    return list(dict.fromkeys(version for version in versions if not version.startswith("4.")))
+
+
+def check_launcher(project: Path, m2: Path, extra: list[str]) -> None:
+    """The project's JUnit Platform launcher must lie in ~/.m2 before the PIT resolver runs (S2c).  The version: declared
+    in the build files, else from the Spring Boot BOM in ~/.m2, else the junit-platform-engine versions in ~/.m2."""
+    texts = [path.read_text(encoding="utf-8", errors="replace") for pattern in ("pom.xml", "*.gradle", "*.gradle.kts", "gradle.properties", "libs.versions.toml")
+             for path in project.rglob(pattern) if not _excluded(path, project, extra)]
+    versions = _platform_versions(texts)
+    source = "из сборки проекта"
+    if not versions:
+        boots = sorted({found for text in texts for found in re.findall(
+            r"<artifactId>spring-boot-(?:starter-parent|dependencies)</artifactId>\s*<version>([\w.-]+)</version>|"
+            r"org\.springframework\.boot['\"]?\)?\s+version\s+['\"]([\w.-]+)['\"]", text) for found in found if found})
+        for boot in boots:
+            bom = m2 / "org/springframework/boot/spring-boot-dependencies" / boot / f"spring-boot-dependencies-{boot}.pom"
+            if bom.is_file():
+                versions += _platform_versions([bom.read_text(encoding="utf-8", errors="replace")])
+        source = f"из BOM Spring Boot {', '.join(boots)} в ~/.m2"
+    if not versions:
+        engine = m2 / "org/junit/platform/junit-platform-engine"
+        versions = sorted(path.name for path in engine.iterdir() if path.is_dir()) if engine.is_dir() else []
+        source = "версия проекта не определена — по junit-platform-engine в ~/.m2"
+    versions = list(dict.fromkeys(versions))
+    if not versions:
+        add(WARN, "~/.m2: junit-platform-launcher", "версию JUnit Platform проекта не определить (нет ни в сборке, ни в ~/.m2)",
+            "собрать проект один раз (mvnw test), затем повторить preflight; иначе мутации — без --mutation")
+        return
+    missing = [version for version in versions if not _jar(m2, f"org.junit.platform:junit-platform-launcher:{version}").is_file()]
+    if missing and "engine" in source and len(missing) < len(versions):  # a guess over several versions: the project's is likely there
+        add(OK, "~/.m2: junit-platform-launcher", f"есть {', '.join(version for version in versions if version not in missing)}, "
+            f"нет {', '.join(missing)} ({source}); если проект именно на версии без launcher — мутации остановятся с MUTATION_TOOL_MISSING")
+    elif missing:
+        add(WARN, "~/.m2: junit-platform-launcher", f"нет версии {', '.join(missing)} ({source})",
+            "без неё мутации будут NOT_RUNNABLE: mvn dependency:get -Dartifact=org.junit.platform:junit-platform-launcher:"
+            f"{missing[0]} из внутреннего репозитория или запускать без --mutation")
+    else:
+        add(OK, "~/.m2: junit-platform-launcher", f"{', '.join(versions)} есть ({source})")
 
 
 def _exclude_line(name: str, path: Path, text: str, dirs: list[str]) -> str:
@@ -258,6 +349,8 @@ def main() -> int:
     build = check_wrapper(project)
     if build == "maven":
         check_maven_repository(Path(args.m2), pack)
+        if Path(args.m2).is_dir():
+            check_launcher(project, Path(args.m2), extra)
     check_linters(project, build, extra)
     check_services(project, extra)
     for doc in args.docs:

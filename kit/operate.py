@@ -4,12 +4,12 @@
     python3 operate.py --home ~/ts --project <project> --docs <spec> [--docs …] --subject "<тема>"
         --models glm-5.3,… --cli-command '<CLI command with {model}>' --prompt-via stdin|file|arg
         --answer-from stdout|file [--answer-file …] [--sandbox-args '<CLI no-tools flags>'] [--runner-dir DIR]
-        [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--no-mutation] [--from-step N] [--only 0,2,3]
+        [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--no-mutation] [--online] [--from-step N] [--only 0,2,3]
         [--yes] [--yes-skillsrc] [--yes-chmod] [--no-pip] [--dry-run]
 
 Steps are the sections of RUN.md: 0 kit check (the test-skills folder against test-skills-*.files.sha256, doctor),
 1 preflight, 2 wrap.json + selftest + one live call, 3 model benchmark and models by role, 4 .skillsrc
-(review_runner, requirements.id_pattern, mutation), 5a cases-only trial, 5 full local-pilot-v1 run (ask_user answered
+(review_runner, requirements.id_pattern, mutation, modules[].test.offline unless --online), 5a cases-only trial, 5 full local-pilot-v1 run (ask_user answered
 here; regenerate-after-gate and BUILD_FAILED_BEFORE_TESTS stop with the runner output tail), 7 <home>/report/ with the
 figures, 8 Zephyr CSV.  Every step prints its commands, exit codes and main lines; everything goes to
 <home>/operate.log.  A failing step stops with a hint; --from-step continues.
@@ -20,8 +20,7 @@ wrapper's temp files go to <home>/.tmp (preflight prints the linter excludes for
 operate.py itself opens no network connection and installs nothing (a missing pip dependency stops step 0 with the
 command to run).  The processes it starts do what the package does: the model CLI (via wrap.py) sends the tasks —
 parts of the specification and of the project's code — to the model endpoint configured in that CLI; the project's
-Maven/Gradle build and PIT run the project's and the generated tests and may reach the artifact repositories unless
-the build is offline.  See USAGE.md «Права, сеть и исполнение» and RUN.md «Права и сеть».
+Maven/Gradle build and PIT run the project's and the generated tests, offline (local repository only) unless --online.  See USAGE.md «Права, сеть и исполнение» and RUN.md «Права и сеть».
 --yes confirms the operator's questions but never the edit of the project's .skillsrc (--yes-skillsrc) nor chmod +x
 of the project's files (--yes-chmod).  Python 3.11+, stdlib only; Linux (a Windows branch exists only for checks).
 """
@@ -103,7 +102,7 @@ def _top_block(lines: list[str], key: str) -> tuple[int, int] | None:
     for index, line in enumerate(lines):
         if re.match(rf"^{re.escape(key)}\s*:", line):
             end = index + 1
-            while end < len(lines) and (lines[end].startswith((" ", "\t")) or not lines[end].strip()):
+            while end < len(lines) and (lines[end].startswith((" ", "\t")) or re.match(r"^-(\s|$)", lines[end]) or not lines[end].strip()):
                 end += 1
             while end > index + 1 and not lines[end - 1].strip():
                 end -= 1
@@ -134,6 +133,42 @@ def set_child(lines: list[str], key: str, child: str, value: str) -> list[str]:
         if re.match(rf"^{indent}{re.escape(child)}\s*:", line):
             return [*lines[:start + 1 + offset], f"{indent}{child}: {value}", *lines[start + 2 + offset:]]
     return [*lines[:start + 1], f"{indent}{child}: {value}", *lines[start + 1:]]
+
+
+def set_modules_test(lines: list[str], child: str, value: str, add: bool = True) -> tuple[list[str], list[str]]:
+    """Set ``child`` in the ``test:`` block of every item of the top-level ``modules:`` list (``add`` False: only where the
+    key is already there).  Returns the lines and the notes on modules it could not edit (no ``test:`` block, flow form)."""
+    found = _top_block(lines, "modules")
+    if found is None:
+        return lines, ["в .skillsrc нет modules"]
+    start, end = found
+    lines, notes, index = list(lines), [], start + 1
+    while index < end:
+        test = re.match(r"^(\s*)(?:-\s+)?test\s*:\s*(.*)$", lines[index])
+        if not test:
+            index += 1
+            continue
+        indent = len(lines[index]) - len(lines[index].lstrip(" -")) if lines[index].lstrip().startswith("-") else len(test.group(1))
+        if test.group(2).strip():
+            notes.append(f"test в строке {index + 1} записан одной строкой ({test.group(2).strip()[:40]}) — {child} не добавлен")
+            index += 1
+            continue
+        body_end = index + 1
+        while body_end < end and (not lines[body_end].strip() or len(lines[body_end]) - len(lines[body_end].lstrip(" ")) > indent):
+            body_end += 1
+        body = [row for row in range(index + 1, body_end) if lines[row].strip()]
+        child_indent = " " * (len(lines[body[0]]) - len(lines[body[0]].lstrip())) if body else " " * (indent + 2)
+        existing = next((row for row in body if re.match(rf"^{child_indent}{re.escape(child)}\s*:", lines[row])), None)
+        if existing is not None:
+            lines[existing] = f"{child_indent}{child}: {value}"
+        elif add:
+            lines.insert(index + 1, f"{child_indent}{child}: {value}")
+            end += 1
+            body_end += 1
+        index = body_end
+    if not any(re.match(r"^\s*(?:-\s+)?test\s*:", line) for line in lines[start:end]):
+        notes.append("ни у одного модуля нет блока test — пакет создаст его при первом прогоне; шаг 4 повторится перед полным прогоном")
+    return lines, notes
 
 
 _ID_LINE = re.compile(r"^[ \t>*#-]*(?:\*\*)?([A-Za-zА-Яа-яЁё]{1,12})([-_]?)(\d{1,4})((?:[.-]\d{1,4})*)(\.?)(?=[\s*:)\]])", re.M)
@@ -539,6 +574,16 @@ class Operator:
                 lines = [*lines, "mutation:", "  enabled: true", "  threads: 2", "  timeout_seconds: 3600"]
             else:
                 lines = set_child(lines, "mutation", "enabled", "true")
+        # S2a: builds only from the local repository (Maven -o / Gradle --offline); --online leaves the network to the build
+        schema = self.pack / "schemas" / "skillsrc.schema.json"
+        if schema.is_file() and '"offline"' not in schema.read_text(encoding="utf-8"):
+            self.say("  внимание: эта версия пакета не знает test.offline (нужен пакет с S2a) — сборка пойдёт онлайн; обновить пакет")
+        else:
+            lines, notes = set_modules_test(lines, "offline", "false" if self.args.online else "true", add=not self.args.online)
+            for note in notes:
+                self.say(f"  внимание: test.offline: {note}")
+            self.say("  сборка: " + ("онлайн (--online)" if self.args.online else
+                                     "offline — только ~/.m2; нет артефакта → BUILD_FAILED_BEFORE_TESTS / MUTATION_TOOL_MISSING"))
         after = "\n".join(lines) + "\n"
         if after == before:
             self.say("  .skillsrc уже такой — без изменений")
@@ -938,6 +983,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-parallel", type=int, default=2, help="review_runner.max_parallel в .skillsrc")
     parser.add_argument("--runner-timeout", type=int, default=3600, help="review_runner.timeout_seconds в .skillsrc")
     parser.add_argument("--no-mutation", action="store_true", help="без PIT")
+    parser.add_argument("--online", action="store_true", help="не писать modules[].test.offline: true в .skillsrc (сборка может ходить "
+                                                              "в репозитории артефактов); по умолчанию — offline")
     parser.add_argument("--from-step", choices=STEPS, default="0")
     parser.add_argument("--only", help="только эти шаги, через запятую (например 7,8)")
     parser.add_argument("--run", help="run_id прерванного или ждущего прогона — продолжить его (шаг 5)")

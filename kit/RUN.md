@@ -14,9 +14,16 @@
   `wrap.json`) на тот адрес, который настроен в самом CLI. Сам `wrap.py` в сеть не ходит. Секреты в `extra_env` обёртка
   не принимает: учётные данные модели — в конфиге CLI. Если у CLI есть режим «без инструментов / read-only», его флаги —
   в `sandbox_args` (`--sandbox-args` у `operate.py`), иначе модель внутри CLI может сама читать и менять файлы.
-- **Сборка и тесты.** Пакет запускает сборку проекта (Maven/Gradle), сгенерированные моделью тесты и PIT. Сборка без
-  offline-режима может ходить в репозитории артефактов (свои настройки `~/.m2/settings.xml`).
-- **pip.** `operate.py` ничего не ставит: если нет `jsonschema`/`pyyaml`, он печатает команду установки и
+- **Сборка и тесты.** Пакет запускает сборку проекта (Maven/Gradle), сгенерированные моделью тесты и PIT. Шаг 4
+  `operate.py` пишет в `.skillsrc` `modules[].test.offline: true`: все сборки модуля и этапа мутаций идут с `-o` /
+  `--offline`, только из `~/.m2` (кэша Gradle), без сети; нет артефакта — прогон останавливается
+  (`BUILD_FAILED_BEFORE_TESTS` с «offline: артефакт не найден…» или `MUTATION_TOOL_MISSING`), а не скачивает его.
+  `--online` — не включать offline: тогда сборка может ходить в репозитории из `~/.m2/settings.xml`.
+- **Пины мутаций.** Jar'ы PIT и плагина-резолвера `maven-dependency-plugin` 3.8.1 закреплены по SHA-256
+  (`test-skills/tools/mutation_tools.json`); резолвер и `junit-platform-launcher` версии проекта должны заранее лежать
+  в `~/.m2` — preflight проверяет оба (резолвер — по SHA-256), пакет проверяет их до запуска Maven.
+- **pip.** `operate.py` ничего не ставит: если нет `jsonschema`/`pyyaml`, он печатает команду
+  `pip install --require-hashes -r test-skills/requirements.txt` (хеши всех файлов — в `requirements.txt`) и
   останавливается.
 - **`operate.py` и `preflight.py`** сами в сеть не ходят; пишут только в каталог комплекта, а в проект — `.skillsrc`
   (шаг 4, после показа diff и подтверждения) и `chmod +x mvnw/gradlew` (шаг 1, с подтверждением). `--yes` эти два
@@ -64,9 +71,11 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
   остальных ролей — первая из `--models` (или `--default-model`). Свои назначения — `--role-model роль=модель`.
 - **Шаг 4.** Пишет в `.skillsrc`:
   - `review_runner` и `requirements.id_pattern` (шаблон выводится из спеки или задаётся `--id-pattern`);
-  - `mutation.enabled`, если мутации включены.
+  - `mutation.enabled`, если мутации включены;
+  - `test.offline: true` в каждом модуле (`--online` — не писать; если ключ уже есть — `false`).
 
-  Прежний `.skillsrc` копирует в `~/ts/skillsrc.bak-*`.
+  Перед записью показывает diff и спрашивает (`--yes` не отвечает, без терминала — `--yes-skillsrc`). Прежний
+  `.skillsrc` копирует в `~/ts/skillsrc.bak-*`.
 - **Мутации.** `--mutation` ставится, если preflight нашёл PIT в `~/.m2`; выключить — `--no-mutation`.
 - **Шаг 5.** На `ask_user` показывает вопрос и ждёт ответа. На `regenerate-after-gate` и `BUILD_FAILED_BEFORE_TESTS`
   печатает хвост `runner-output.txt` и останавливается. Прерванный прогон продолжается так:
@@ -86,9 +95,10 @@ python3 -c 'import jsonschema, yaml'                              # ошибка
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid
 ```
 
-Зависимости (`jsonschema`, `pyyaml`), если их нет: `python3 -m pip install -r test-skills/requirements.txt` из
-доверенного зеркала pip (`pip config list`); когда в `requirements.txt` появятся хеши (обновление пакета) — с
-`--require-hashes`. Либо пакетами ОС (`python3-jsonschema`, `python3-yaml`).
+Зависимости (`jsonschema`, `pyyaml`), если их нет: только
+`python3 -m pip install --require-hashes -r test-skills/requirements.txt` — pip поставит лишь файлы, чьи SHA-256
+записаны в `requirements.txt` (колёса CPython 3.11–3.13 для Linux x86_64/aarch64 и Windows x64, sdist); зеркало
+(`pip config list`) должно отдавать те же файлы. Либо пакетами ОС (`python3-jsonschema`, `python3-yaml`).
 
 ## 1. Preflight проекта
 
@@ -97,8 +107,11 @@ export JAVA_HOME=<JDK 17+>
 python3 preflight.py --pack ~/ts/test-skills --project <проект> --docs <спека в проекте>
 ```
 
-Код 1 = есть «стоп». Частые: `mvnw` не исполняемый → `chmod +x mvnw`; нет PIT в `~/.m2` → без `--mutation` или
-положить артефакты; **линтер по всему дереву** (nohttp, spotless, checkstyle с `${basedir}`) → на ветке прогона
+Код 1 = есть «стоп». Частые: `mvnw` не исполняемый → `chmod +x mvnw`; нет PIT, резолвера
+`maven-dependency-plugin-3.8.1.jar` (или его SHA-256 не совпадает с закреплённым) либо `junit-platform-launcher` версии
+проекта в `~/.m2` → без `--mutation` или положить артефакты (`mvn dependency:get -Dartifact=…` из внутреннего
+репозитория — preflight печатает координаты). При offline-сборке (шаг 4) в `~/.m2` должно быть всё, что нужно
+проекту: собрать его один раз `mvnw test` с доступом к внутреннему репозиторию. **Линтер по всему дереву** (nohttp, spotless, checkstyle с `${basedir}`) → на ветке прогона
 вставить строку excludes, которую печатает preflight (`…,**/.pilot-runs/**/*`). Без неё сборка падает на файлах пакета.
 
 ## 2. Обёртка CLI
@@ -145,6 +158,8 @@ review_runner:
 requirements: {id_pattern: '<шаблон ID требований спеки>'}
 mutation: {enabled: true, threads: 2, timeout_seconds: 3600}   # для --mutation (без этого test_strength = NOT_APPLICABLE)
 ```
+
+И в блоке `test` каждого модуля (`modules: - id: … test: …`) — `offline: true`: сборка и мутации только из `~/.m2`.
 
 Бюджет части ревью: `--review-input-bytes` ≈ окно модели (токены) × «Б на токен» × 0,4; при окне 262k и ~3,5 Б/токен —
 порядка 100 000 (меньше, если модель слабеет после 64–128k).
