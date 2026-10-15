@@ -976,7 +976,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cli-timeout", type=int, default=1700, help="тайм-аут одного вызова CLI в обёртке, с")
     parser.add_argument("--id-pattern", help="шаблон ID требований (иначе — вывести из спеки и подтвердить)")
     parser.add_argument("--runner-dir", help="каталог процессов модели (по умолчанию <home>/runner, а при --home внутри проекта — "
-                                             "<home>/.runner: так драйвер принимает его только с версии пакета с S2b)")
+                                             "<home>/.runner; драйвер пишет предупреждение RUNNER_DIR_INSIDE_PROJECT)")
     parser.add_argument("--target", help="цель прогона для драйвера (pipeline_driver run --target), если в проекте их несколько")
     parser.add_argument("--review-input-bytes", type=int, default=100_000)
     parser.add_argument("--max-tasks", type=int, default=2)

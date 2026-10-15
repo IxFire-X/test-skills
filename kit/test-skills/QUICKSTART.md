@@ -29,16 +29,18 @@ python -m venv .tools/test-skills/.venv
 **Windows / PowerShell:**
 
 ```powershell
-.\.tools\test-skills\.venv\Scripts\python.exe -m pip install -r .tools\test-skills\requirements.txt
+.\.tools\test-skills\.venv\Scripts\python.exe -m pip install --require-hashes -r .tools\test-skills\requirements.txt
 ```
 
 **Linux:**
 
 ```bash
-.tools/test-skills/.venv/bin/python -m pip install -r .tools/test-skills/requirements.txt
+.tools/test-skills/.venv/bin/python -m pip install --require-hashes -r .tools/test-skills/requirements.txt
 ```
 
-В рабочей сети используйте разрешённый в компании источник Python-пакетов. Это окружение обслуживает инструменты пайплайна; автотесты используют среду самого проекта.
+`--require-hashes`: pip ставит только файлы, чьи SHA-256 записаны в `requirements.txt` (колёса
+CPython 3.11–3.13 для Windows x64 и Linux x86_64/aarch64 и sdist), включая зависимости.
+В рабочей сети используйте разрешённый в компании источник Python-пакетов — он должен отдавать те же файлы. Это окружение обслуживает инструменты пайплайна; автотесты используют среду самого проекта.
 
 ## 3. Дать модели один из двух запросов
 

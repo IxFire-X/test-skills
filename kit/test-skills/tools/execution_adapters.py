@@ -75,7 +75,7 @@ DEFAULT_TIMEOUT_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 86400
 # ``build_profile`` is a required manifest field; this value means "no profile declared".
 UNDECLARED_PROFILE = "default"
-_OPTIONAL_TEST_KEYS = frozenset({"build_root", "timeout_seconds"})
+_OPTIONAL_TEST_KEYS = frozenset({"build_root", "timeout_seconds", "offline"})
 _REPORT_DIRECTORIES = {
     PYTEST: "test-results/pytest.xml",
     MAVEN: "target/surefire-reports",
@@ -100,6 +100,7 @@ class LaunchLayout:
     build_root: Path
     module_path: str
     timeout_seconds: int
+    offline: bool = False
 
 
 def _safe_relative(value: Any, label: str) -> str:
@@ -237,9 +238,12 @@ def launch_layout(module: Mapping[str, Any]) -> LaunchLayout:
     timeout = test.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     if not timeout_is_closed(timeout):
         raise AdapterRequestError("timeout_seconds must be a whole number of seconds from 1 to 86400")
+    offline = test.get("offline", False)
+    if not isinstance(offline, bool) or (offline and test.get("adapter_id") not in {MAVEN, SYSTEM_MAVEN, GRADLE}):
+        raise AdapterRequestError("offline is a boolean of a Maven or Gradle module")
     declared = test.get("build_root")
     if declared is None:
-        return LaunchLayout(root, "", timeout)
+        return LaunchLayout(root, "", timeout, offline)
     adapter_id = test.get("adapter_id")
     if adapter_id not in _BUILD_ROOT_MARKERS:
         raise AdapterRequestError("build_root applies only to Maven and Gradle modules")
@@ -257,7 +261,7 @@ def launch_layout(module: Mapping[str, Any]) -> LaunchLayout:
         build_root = build_root.parent
     if not any((build_root / marker).is_file() for marker in _BUILD_ROOT_MARKERS[adapter_id]):
         raise AdapterRequestError("build_root does not contain the build's root manifest")
-    return LaunchLayout(build_root, module_path, timeout)
+    return LaunchLayout(build_root, module_path, timeout, offline)
 
 
 def resolve_module_runtime(module: Mapping[str, Any]) -> tuple[Path, str]:
@@ -282,9 +286,9 @@ def _build(adapter_id: str, module: Mapping[str, Any], reviewed_targets: Sequenc
     runtime, profile = _resolve_runtime(layout.build_root, test, adapter_id), test["build_profile"]
     parameters = tuple(sorted((str(key), str(value)) for key, value in test["adapter_parameters"].items()))
     if gate:
-        reports, argv = (), gate_command_for(adapter_id, str(runtime), profile, selectors, module_path=layout.module_path)
+        reports, argv = (), gate_command_for(adapter_id, str(runtime), profile, selectors, module_path=layout.module_path, offline=layout.offline)
     else:
-        reports, argv = command_for(adapter_id, str(runtime), profile, selectors, module_path=layout.module_path)
+        reports, argv = command_for(adapter_id, str(runtime), profile, selectors, module_path=layout.module_path, offline=layout.offline)
     return ExecutionRequest(adapter_id, str(runtime), argv, str(layout.build_root), selectors, layout.timeout_seconds, reports, ("PROJECT_NATIVE_ENV",), profile, parameters)
 
 
@@ -335,7 +339,25 @@ def _surefire_patterns(selectors: Sequence[str]) -> str:
     return ",".join(owner if names is None else f"{owner}#{'+'.join(names)}" for owner, names in patterns.items())
 
 
-def command_for(adapter_id: str, executable: str, profile: str, selectors: Sequence[str], *, module_path: str = "") -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _offline_flags(adapter_id: str, offline: bool) -> tuple[str, ...]:
+    """S2a: `.skillsrc` ``test.offline`` — Maven ``-o``, Gradle ``--offline``; nothing is resolved from the network."""
+    if not offline:
+        return ()
+    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        return ("-o",)
+    if adapter_id == GRADLE:
+        return ("--offline",)
+    raise AdapterRequestError("offline applies only to Maven and Gradle modules")
+
+
+def command_is_offline(adapter_id: str, argv: Sequence[str]) -> bool:
+    """Whether a recorded command ran offline: its own argv is the proof."""
+    flag = "-o" if adapter_id in {MAVEN, SYSTEM_MAVEN} else "--offline" if adapter_id == GRADLE else None
+    return flag is not None and flag in tuple(argv)[1:]
+
+
+def command_for(adapter_id: str, executable: str, profile: str, selectors: Sequence[str], *, module_path: str = "",
+                offline: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """One closed command policy for construction, recovery, and receipt validation.
 
     ``module_path`` is the module's portable path inside the build root (the launch
@@ -346,10 +368,12 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
     if adapter_id == PYTEST:
         if module_path:
             raise AdapterRequestError("pytest runs from the module root")
+        _offline_flags(adapter_id, offline)
         return (_REPORT_DIRECTORIES[PYTEST],), (executable, "-m", "pytest", "--junitxml", _REPORT_DIRECTORIES[PYTEST], *selectors)
     elif adapter_id in {MAVEN, SYSTEM_MAVEN}:
         reactor = ("-Dsurefire.failIfNoSpecifiedTests=false",) if module_path else ()
-        return (_REPORT_DIRECTORIES[adapter_id],), (executable, *_maven_scope(profile, module_path), f"-Dtest={_surefire_patterns(selectors)}", *reactor, "-B", "-ntp", "test")
+        return (_REPORT_DIRECTORIES[adapter_id],), (executable, *_maven_scope(profile, module_path), f"-Dtest={_surefire_patterns(selectors)}", *reactor,
+                                                    *_offline_flags(adapter_id, offline), "-B", "-ntp", "test")
     elif adapter_id == GRADLE:
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)
         # ``cleanTest`` forces only the test task to rerun and exists in every Gradle
@@ -357,22 +381,24 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
         return (_REPORT_DIRECTORIES[GRADLE],), (
             executable, _gradle_task(module_path, "cleanTest"), _gradle_task(module_path, "test"),
             *(part for selector in gradle_selectors for part in ("--tests", selector)),
-            *_gradle_profile(profile), "--no-daemon", "--init-script", str(GRADLE_SELECTED_INIT),
+            *_gradle_profile(profile), "--no-daemon", *_offline_flags(adapter_id, offline), "--init-script", str(GRADLE_SELECTED_INIT),
         )
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
 
-def gate_command_for(adapter_id: str, executable: str, profile: str, selectors: Sequence[str], *, module_path: str = "") -> tuple[str, ...]:
+def gate_command_for(adapter_id: str, executable: str, profile: str, selectors: Sequence[str], *, module_path: str = "",
+                     offline: bool = False) -> tuple[str, ...]:
     """Closed compile/collect-only argv that runs no test body."""
     module_path = _safe_module_path(module_path)
     if adapter_id == PYTEST:
         if module_path:
             raise AdapterRequestError("pytest runs from the module root")
+        _offline_flags(adapter_id, offline)
         return (executable, "-m", "pytest", "--collect-only", "-q", *selectors)
     if adapter_id in {MAVEN, SYSTEM_MAVEN}:
-        return (executable, *_maven_scope(profile, module_path), "-B", "-ntp", "test-compile")
+        return (executable, *_maven_scope(profile, module_path), *_offline_flags(adapter_id, offline), "-B", "-ntp", "test-compile")
     if adapter_id == GRADLE:
-        return (executable, _gradle_task(module_path, "testClasses"), *_gradle_profile(profile), "--no-daemon")
+        return (executable, _gradle_task(module_path, "testClasses"), *_gradle_profile(profile), "--no-daemon", *_offline_flags(adapter_id, offline))
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
 
@@ -415,7 +441,8 @@ def command_for_request(request: ExecutionRequest) -> tuple[tuple[str, ...], tup
     legacy = _legacy_command_for(request.adapter_id, request.executable, request.build_profile, request.selectors)
     if legacy is not None and request.argv == legacy[1]:
         return legacy
-    current = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors, module_path=request_module_path(request))
+    current = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors, module_path=request_module_path(request),
+                          offline=command_is_offline(request.adapter_id, request.argv))
     if request.adapter_id == GRADLE and current[1][-2:] == ("--init-script", str(GRADLE_SELECTED_INIT)) and request.argv == current[1][:-2]:
         return current[0], current[1][:-2]  # recorded before the coverage-gate init script (2026-10-08)
     if request.adapter_id in {MAVEN, SYSTEM_MAVEN}:

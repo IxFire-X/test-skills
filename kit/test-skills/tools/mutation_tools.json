@@ -5,6 +5,7 @@
     "plugin_version": "1.2.3",
     "main_class": "org.pitest.mutationtest.commandline.MutationCoverageReport",
     "resolver_plugin": "org.apache.maven.plugins:maven-dependency-plugin:3.8.1",
+    "resolver_plugin_jar": {"file": "maven-dependency-plugin-3.8.1.jar", "sha256": "9fc3d435085983b16bc53903f9413aede9de30e20c57c0cece94614f328b14b5"},
     "roots": [
       "org.pitest:pitest-command-line:1.30.0",
       "org.pitest:pitest-junit5-plugin:1.2.3"

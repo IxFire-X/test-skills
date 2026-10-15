@@ -124,10 +124,16 @@ class BuildTool:
     module_path: str
     module_root: Path
     profile_args: tuple[str, ...] = ()
+    # S2a: the tests ran offline (`.skillsrc` test.offline) — the classpath and the PIT resolver run offline too.
+    offline: bool = False
+
+    @property
+    def offline_args(self) -> tuple[str, ...]:
+        return () if not self.offline else ("--offline",) if self.adapter_id == GRADLE_ADAPTER else ("-o",)
 
     @classmethod
     def from_execution(cls, execution: Mapping[str, Any]) -> "BuildTool":
-        from tools.execution_adapters import UNDECLARED_PROFILE
+        from tools.execution_adapters import UNDECLARED_PROFILE, command_is_offline
 
         adapter = execution.get("adapter_id")
         argv = [str(item) for item in execution.get("argv") or []]
@@ -142,7 +148,7 @@ class BuildTool:
         profile = str(execution.get("build_profile") or UNDECLARED_PROFILE)
         profile_args = () if profile == UNDECLARED_PROFILE else ((f"-P{profile}",) if adapter in MAVEN_ADAPTERS else (f"-Pprofile={profile}",))
         return cls(str(adapter), Path(str(execution["executable_path"])), cwd, module_path,
-                   cwd.joinpath(*module_path.split("/")) if module_path else cwd, profile_args)
+                   cwd.joinpath(*module_path.split("/")) if module_path else cwd, profile_args, command_is_offline(str(adapter), argv))
 
 
 def method_outcomes(report: Mapping[str, Any], automation: Mapping[str, Any]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -196,6 +202,40 @@ def java_executable(environment: Mapping[str, str] | None = None) -> Path:
 # resolution of the pinned tool and the project classpath
 # --------------------------------------------------------------------------------------
 
+def local_repository() -> Path:
+    """The Maven local repository the stage checks before it starts Maven (the default ``~/.m2/repository``)."""
+    return Path.home() / ".m2" / "repository"
+
+
+def _repository_jar(repository: Path, coordinates: str) -> Path:
+    group, artifact, version = coordinates.split(":")
+    return Path(repository).joinpath(*group.split("."), artifact, version, f"{artifact}-{version}.jar")
+
+
+def check_resolver_plugin(pins: Mapping[str, Any], repository: Path) -> dict[str, Any]:
+    """S2c: the resolver plugin runs inside Maven, so its jar is pinned and checked before Maven starts at all."""
+    row = pins["java"]["resolver_plugin_jar"]
+    path = _repository_jar(repository, pins["java"]["resolver_plugin"])
+    if not path.is_file():
+        raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_MISSING",
+                           f"{row['file']} нет в локальном репозитории {repository}: положите его туда заранее "
+                           f"(mvn dependency:get -Dartifact={pins['java']['resolver_plugin']}) и запустите этап снова")
+    digest = _sha256_file(path)
+    if digest != row["sha256"]:
+        raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_DIGEST_MISMATCH", f"{row['file']}: SHA-256 {digest} differs from the pinned {row['sha256']}")
+    return {"file": row["file"], "sha256": digest, "pinned": True}
+
+
+def check_launcher(pins: Mapping[str, Any], launcher_version: str, repository: Path) -> str:
+    """S2c: the project's JUnit Platform launcher is in the local repository before the resolver runs; its SHA-256."""
+    path = _repository_jar(repository, f"{pins['java']['launcher']}:{launcher_version}")
+    if not path.is_file():
+        raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_MISSING",
+                           f"{path.name} (JUnit Platform проекта) нет в локальном репозитории {repository}: положите его туда заранее "
+                           f"(mvn dependency:get -Dartifact={pins['java']['launcher']}:{launcher_version}) и запустите этап снова")
+    return _sha256_file(path)
+
+
 def resolver_pom(pins: Mapping[str, Any], launcher_version: str) -> str:
     """A throwaway descriptor in the run directory: the pinned PIT roots plus the project's launcher."""
     java = pins["java"]
@@ -214,11 +254,13 @@ def _classpath_file(path: Path) -> list[str]:
     return [entry for entry in text.split(os.pathsep) if entry]
 
 
-def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any], launcher_version: str | None = None) -> list[dict[str, Any]]:
+def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any], launcher_version: str | None = None,
+                     launcher_sha256: str | None = None) -> list[dict[str, Any]]:
     """Every pinned jar exactly once with its SHA-256; the rest only the project's JUnit Platform launcher family.
 
     The family is not pinned (amendment A2: "recorded, not pinned"): each jar's SHA-256 goes to the
     receipt, and a ``junit-platform-*`` jar must be the project's own Platform version (review 2.1 item 13).
+    With ``launcher_sha256`` (S2c) the resolved launcher must be the very jar checked in the local repository.
     """
     java = pins["java"]
     pinned = {row["file"]: row["sha256"] for row in java["jars"]}
@@ -238,6 +280,9 @@ def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any], launcher_v
         elif any(name.startswith(prefix + "-") for prefix in family):
             if launcher_version and name.startswith("junit-platform-") and not name.endswith(f"-{launcher_version}.jar"):
                 raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_UNPINNED", f"{name} is not the project's JUnit Platform {launcher_version}")
+            if launcher_sha256 and name == f"junit-platform-launcher-{launcher_version}.jar" and digest != launcher_sha256:
+                raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_DIGEST_MISMATCH",
+                                   f"{name}: SHA-256 {digest} differs from the local repository's {launcher_sha256}")
             rows.append({"file": name, "sha256": digest, "pinned": False})
         else:
             raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_UNPINNED", f"the resolved closure has an unpinned jar: {name}")
@@ -271,13 +316,21 @@ def _tail(outcome: Any) -> str:
     return text[-600:]
 
 
+def _offline_missing(build: "BuildTool", outcome: Any) -> None:
+    """Offline, a failed resolution is a missing artifact of the local repository: say so, never retry online."""
+    if build.offline:
+        raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_MISSING", "offline: артефакт не найден в локальном репозитории — "
+                           "положите его в ~/.m2 (или кэш Gradle) и запустите этап снова: " + _tail(outcome))
+
+
 def _maven_build_classpath(build: BuildTool, pins: Mapping[str, Any], output: Path, *, run: Runner, timeout: int) -> list[str]:
     scope = (*build.profile_args, "-pl", build.module_path) if build.module_path else build.profile_args
-    argv = [str(build.executable), *scope, "-q", "-B", "-ntp", f"{pins['java']['resolver_plugin']}:build-classpath",
+    argv = [str(build.executable), *scope, *build.offline_args, "-q", "-B", "-ntp", f"{pins['java']['resolver_plugin']}:build-classpath",
             "-Dmdep.includeScope=test", f"-Dmdep.outputFile={output}"]
     outcome = _run(run, argv, build.cwd, timeout)
     entries = _classpath_file(output)
     if getattr(outcome, "exit_code", 1) != 0 or not output.is_file():
+        _offline_missing(build, outcome)
         raise MutationStop("NOT_RUNNABLE", "MUTATION_CLASSPATH_FAILED", "the project classpath could not be built: " + _tail(outcome))
     return entries
 
@@ -306,9 +359,11 @@ def _gradle_build_classpath(build: BuildTool, output: Path, workdir: Path, *, ru
     script = workdir / "mutation-classpath.gradle"
     script.write_text(_GRADLE_INIT, encoding="utf-8", newline="\n")
     task = ":" + ":".join([*(build.module_path.split("/") if build.module_path else ()), "testSkillsMutationClasspath"])
-    argv = [str(build.executable), "--init-script", str(script), task, f"-DtestSkills.classpathFile={output}", *build.profile_args, "--no-daemon", "-q"]
+    argv = [str(build.executable), "--init-script", str(script), task, f"-DtestSkills.classpathFile={output}", *build.profile_args, "--no-daemon",
+            *build.offline_args, "-q"]
     outcome = _run(run, argv, build.cwd, timeout)
     if getattr(outcome, "exit_code", 1) != 0 or not output.is_file():
+        _offline_missing(build, outcome)
         raise MutationStop("NOT_RUNNABLE", "MUTATION_CLASSPATH_FAILED", "the project classpath could not be built: " + _tail(outcome))
     return _classpath_file(output)
 
@@ -325,7 +380,8 @@ def project_classpath(build: BuildTool, pins: Mapping[str, Any], workdir: Path, 
     return _gradle_build_classpath(build, output, workdir, run=run, timeout=timeout)
 
 
-def resolve_tool(build: BuildTool, pins: Mapping[str, Any], workdir: Path, launcher_version: str, *, run: Runner, timeout: int) -> tuple[list[str], list[dict[str, Any]]]:
+def resolve_tool(build: BuildTool, pins: Mapping[str, Any], workdir: Path, launcher_version: str, *, run: Runner, timeout: int,
+                 launcher_sha256: str | None = None) -> tuple[list[str], list[dict[str, Any]]]:
     """Resolve the pinned PIT closure with the project's Maven and verify every jar."""
     resolver = workdir / "resolver"
     resolver.mkdir(parents=True, exist_ok=True)
@@ -339,12 +395,14 @@ def resolve_tool(build: BuildTool, pins: Mapping[str, Any], workdir: Path, launc
         if located is None:
             raise MutationStop("NOT_RUNNABLE", "MUTATION_RESOLVER_MISSING", "a Gradle project needs Maven on PATH to resolve the pinned PIT jars")
         maven = Path(located)
-    argv = [str(maven), "-q", "-B", "-ntp", "-f", str(pom), f"{pins['java']['resolver_plugin']}:build-classpath", f"-Dmdep.outputFile={output}"]
+    offline = ("-o",) if build.offline else ()
+    argv = [str(maven), *offline, "-q", "-B", "-ntp", "-f", str(pom), f"{pins['java']['resolver_plugin']}:build-classpath", f"-Dmdep.outputFile={output}"]
     outcome = _run(run, argv, build.cwd, timeout)
     if getattr(outcome, "exit_code", 1) != 0 or not output.is_file():
+        _offline_missing(build, outcome)
         raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_RESOLUTION_FAILED", "the pinned mutation tool could not be resolved: " + _tail(outcome))
     entries = _classpath_file(output)
-    return entries, verify_tool_jars(entries, pins, launcher_version)
+    return entries, verify_tool_jars(entries, pins, launcher_version, launcher_sha256)
 
 
 # --------------------------------------------------------------------------------------
@@ -517,6 +575,7 @@ class StageInputs:
     clock: Callable[[], float] = time.monotonic
     pins_path: Path | None = None
     timings: dict[str, float] = field(default_factory=dict)
+    local_repository: Path | None = None  # S2c: where the resolver plugin and the launcher are checked (default ~/.m2/repository)
 
 
 def measure(inputs: StageInputs) -> dict[str, Any]:
@@ -551,15 +610,19 @@ def measure(inputs: StageInputs) -> dict[str, Any]:
             raise MutationStop("NOT_APPLICABLE", "MUTATION_NO_PASSING_METHODS", "no generated method passed")
         tests = target_tests(inputs.automation)
         facts["target_tests"] = tests
+        repository = inputs.local_repository or local_repository()
+        plugin = check_resolver_plugin(pins, repository)
+        facts["tool"]["jars"] = [plugin]
         inputs.workdir.mkdir(parents=True, exist_ok=True)
         step = inputs.clock()
         classpath = project_classpath(build, pins, inputs.workdir, run=inputs.run, timeout=remaining())
         lap("project_classpath", step)
         launcher = junit_platform_version(classpath)
+        launcher_sha256 = check_launcher(pins, launcher, repository)
         step = inputs.clock()
-        tool_classpath, jars = resolve_tool(build, pins, inputs.workdir, launcher, run=inputs.run, timeout=remaining())
+        tool_classpath, jars = resolve_tool(build, pins, inputs.workdir, launcher, run=inputs.run, timeout=remaining(), launcher_sha256=launcher_sha256)
         lap("tool_resolution", step)
-        facts["tool"]["jars"] = jars
+        facts["tool"]["jars"] = [plugin, *jars]
         facts["tool"]["launcher_version"] = launcher
         classes = target_classes(inputs.settings, inputs.document, build.module_root, tests)
         facts["target_classes"] = classes

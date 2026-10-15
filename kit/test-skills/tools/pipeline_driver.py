@@ -277,6 +277,9 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
         raise DriverError("DRIVER_INPUT", "starting a run requires --profile cases-only-v1 or local-pilot-v1")
     if not docs:
         raise DriverError("DRIVER_INPUT", "starting a run requires at least one --docs requirement document")
+    # Launch options are checked before scan creates the run: a refused option leaves no empty run behind (S2b).
+    runner = _runner_options(options, project)
+    _review_mode(options.get("review_mode"))
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
                                 mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
                                 suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"))
@@ -299,17 +302,28 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
         # .skillsrc needs a person: the run exists, so the question becomes an
         # ask_user task and the same run continues after the answer.
         run_root = Path(payload["run_root"])
-        _save_config(run_root, {**_start_config(project, run_root, options, payload), "scan_pending": True})
+        _save_config(run_root, {**_start_config(project, run_root, options, payload, runner), "scan_pending": True})
+        _warn_runner_inside(run_root, runner)
         return advance(project, run_root, max_tasks=max_tasks)
     if code != 0 or payload.get("status") != "ok":
         return {"action": "done", "result": {"status": "stopped" if code == 3 else "error", "stage": "scan", "exit_code": code if code else 2,
                                              **{key: payload.get(key) for key in ("reason", "detail", "message", "run_id", "stop_reason", "scope") if key in payload}}}
     run_root = Path(payload["run_root"])
-    _save_config(run_root, _start_config(project, run_root, options, payload))
+    _save_config(run_root, _start_config(project, run_root, options, payload, runner))
+    _warn_runner_inside(run_root, runner)
     return advance(project, run_root, max_tasks=max_tasks)
 
 
-def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+def _warn_runner_inside(run_root: Path, runner: Mapping[str, Any]) -> None:
+    settings = runner.get("review_runner") or {}
+    if settings.get("inside_project"):
+        _log(_log_path(run_root.parents[1], run_root.name), {
+            "event": "warning", "code": "RUNNER_DIR_INSIDE_PROJECT", "directory": settings["dir"],
+            "message": ("Каталог раннера внутри проекта: входы задач (копии файлов проекта) и вывод CLI лежат в дереве проекта. "
+                        "Исключите его в линтерах, которые читают всё дерево (nohttp, spotless, apache-rat, license-плагины).")})
+
+
+def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], payload: Mapping[str, Any], runner: Mapping[str, Any]) -> dict[str, Any]:
     from tools import run_pipeline
 
     snapshot = run_pipeline._docs_entries(project, list(options.get("docs") or []))
@@ -334,15 +348,17 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"analyst_report": True} if options.get("analyst_report") else {}),
         **({"suite": True} if options.get("suite") else {}),
         **({"disposition_policy": options["disposition_policy"]} if options.get("disposition_policy") else {}),
-        **_runner_options(options, project),
+        **runner,
     }
 
 
 def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]:
     """``--review-runner process``: the driver runs review parts itself (a template only from the launch flag).
 
-    The runner's files (the task input — copies of project files —, the output, the result) live outside the project:
-    a linter that reads the whole tree (Petclinic's nohttp) failed the build on them (live S2, 2026-10-14).
+    The runner's files (the task input — copies of project files —, the output, the result) live outside the project
+    by default: a linter that reads the whole tree (Petclinic's nohttp) failed the build on them (live S2, 2026-10-14).
+    An explicit ``--runner-dir`` inside the project is the operator's choice (S2b: a policy that keeps everything in the
+    project); the run then warns about such linters in the driver-log.
     """
     if options.get("review_runner") != "process":
         if options.get("review_runner_command") or options.get("review_runner_preset") or options.get("review_runner_cli") or options.get("runner_dir"):
@@ -351,8 +367,10 @@ def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]
     import tempfile
 
     base = Path(options["runner_dir"]).resolve() if options.get("runner_dir") else Path(tempfile.gettempdir()).resolve() / "test-skills"
-    if base == Path(project).resolve() or base.is_relative_to(Path(project).resolve()):
-        raise DriverError("DRIVER_INPUT", "--runner-dir must be outside the project (the project's own checks read its whole tree)")
+    root = Path(project).resolve()
+    if base == root or base == root / ".pilot-runs" or base.is_relative_to(root / ".pilot-runs") or base.is_relative_to(root / ".git"):
+        raise DriverError("DRIVER_INPUT", "--runner-dir cannot be the project root, its .pilot-runs or .git")
+    inside = base.is_relative_to(root)
     command = options.get("review_runner_command")
     if command is not None:
         try:
@@ -362,7 +380,8 @@ def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]
         if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
             raise DriverError("DRIVER_INPUT", "--review-runner-command is a JSON array of strings")
     return {"reviewer_isolation": "fresh", "review_runner": {"mode": "process", "preset": options.get("review_runner_preset"), "command": command,
-                                                             "cli": options.get("review_runner_cli"), "dir": str(base)}}
+                                                             "cli": options.get("review_runner_cli"), "dir": str(base),
+                                                             **({"inside_project": True} if inside else {})}}
 
 
 def _review_mode(value: Any) -> str:

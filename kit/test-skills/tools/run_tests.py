@@ -1747,8 +1747,8 @@ def build_closed_execution_request(
             "build_profile": test["build_profile"],
             "adapter_parameters": test["adapter_parameters"],
             runtime_key: test[runtime_key],
-            # Optional launch facts from .skillsrc: build root (B5) and timeout (P07).
-            **{key: test[key] for key in ("build_root", "timeout_seconds") if key in test},
+            # Optional launch facts from .skillsrc: build root (B5), timeout (P07) and offline (S2a).
+            **{key: test[key] for key in ("build_root", "timeout_seconds", "offline") if key in test},
         }
         return build_request(adapter_id, request_module, selectors), compatibility
     except AdapterRequestError as error:
@@ -1799,14 +1799,14 @@ def _invoke_closed_request(argv: tuple[str, ...], *, cwd: str, timeout: int, she
 
 def gate_request_is_closed(gate_request: Any, request: Any) -> bool:
     """The gate may differ from the reviewed request only by its closed gate argv."""
-    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, gate_command_for, request_module_path
+    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, command_is_offline, gate_command_for, request_module_path
 
     if not isinstance(gate_request, ExecutionRequest) or not isinstance(request, ExecutionRequest):
         return False
     try:
         expected = gate_command_for(
             request.adapter_id, request.executable, request.build_profile, request.selectors,
-            module_path=request_module_path(request),
+            module_path=request_module_path(request), offline=command_is_offline(request.adapter_id, request.argv),
         )
     except (AdapterRequestError, TypeError, ValueError):
         return False
@@ -1833,7 +1833,7 @@ def build_closed_gate_request(request: Any) -> Any:
     """
     from dataclasses import replace
 
-    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, gate_command_for, request_module_path
+    from tools.execution_adapters import AdapterRequestError, ExecutionRequest, command_is_offline, gate_command_for, request_module_path
 
     failure = RunnerInputError(
         "RUNNER_REQUEST",
@@ -1844,7 +1844,7 @@ def build_closed_gate_request(request: Any) -> Any:
     try:
         argv = gate_command_for(
             request.adapter_id, request.executable, request.build_profile, request.selectors,
-            module_path=request_module_path(request),
+            module_path=request_module_path(request), offline=command_is_offline(request.adapter_id, request.argv),
         )
     except (AdapterRequestError, TypeError, ValueError) as error:
         raise failure from error
@@ -1874,6 +1874,10 @@ _MAVEN_FAILED_GOAL = re.compile(r"Failed to execute goal ([\w.-]+):([\w.-]+):([\
 _GRADLE_FAILED_TASK = re.compile(r"Execution failed for task '([^'\r\n]+)'")
 # Goals and tasks that build or run the tests themselves: a failure there is the tests' own.
 _MAVEN_TEST_GOALS = frozenset({"testCompile", "test-compile", "compileTests", "testResources", "test", "integration-test"})
+_OFFLINE_MISSING = {
+    "maven": re.compile(r"in offline mode and the artifact (\S+) has not been downloaded"),
+    "gradle": re.compile(r"No cached version of (\S+) available for offline mode"),
+}
 _GRADLE_TEST_TASK = re.compile(r"(?:compile\w*Test\w*|process\w*TestResources|\w*testClasses|\w*[tT]est|check)", re.IGNORECASE)
 
 
@@ -1886,6 +1890,12 @@ def build_failure_before_tests(adapter_id: str | None, output: str) -> str | Non
     """
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN
 
+    # S2a: offline (`.skillsrc` test.offline), a dependency or plugin missing from the local repository fails the
+    # build before the tests — the environment's problem, never a defect of the generated tests.
+    offline = _OFFLINE_MISSING.get("maven" if adapter_id in {MAVEN, SYSTEM_MAVEN} else "gradle" if adapter_id == GRADLE else "", None)
+    found = offline.search(output or "") if offline is not None else None
+    if found is not None:
+        return f"offline: артефакт не найден в локальном репозитории ({found.group(1)})"
     if adapter_id in {MAVEN, SYSTEM_MAVEN}:
         goals = _MAVEN_FAILED_GOAL.findall(output or "")
         if not goals or any(goal in _MAVEN_TEST_GOALS for _group, _plugin, _version, goal, _execution in goals):

@@ -800,7 +800,7 @@ def _reconstruct_started_request(
         executable = str(system_maven_path(str(runtime_path)) if adapter_id == SYSTEM_MAVEN else module_runtime_path(layout.build_root, runtime_path.as_posix()))
         profile = str(baseline["build_profile"])
         typed = tuple(sorted((str(key), str(value)) for key, value in baseline["adapter_parameters"].items()))
-        reports, argv = command_for(adapter_id, executable, profile, selectors, module_path=layout.module_path)
+        reports, argv = command_for(adapter_id, executable, profile, selectors, module_path=layout.module_path, offline=layout.offline)
         language = "python" if adapter_id == PYTEST else "java"
         request = ExecutionRequest(
             adapter_id, executable, tuple(argv), str(layout.build_root), tuple(selectors), layout.timeout_seconds,

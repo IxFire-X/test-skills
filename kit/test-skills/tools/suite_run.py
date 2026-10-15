@@ -109,7 +109,8 @@ def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str],
     adapter_id = request_module["test"]["adapter_id"]
     layout = adapters.launch_layout(request_module)
     executable = runtime_executable(request_module)
-    reports, argv = adapters.command_for(adapter_id, executable, str(request_module["test"]["build_profile"]), list(selectors), module_path=layout.module_path)
+    reports, argv = adapters.command_for(adapter_id, executable, str(request_module["test"]["build_profile"]), list(selectors), module_path=layout.module_path,
+                                         offline=layout.offline)
     argv = list(argv)
     explicit_applied = False
     if explicit:

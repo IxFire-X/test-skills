@@ -31,8 +31,6 @@ SECRET = re.compile(r"(?i)(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|(
 EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 PHONE = re.compile(r"(?<!\d)(?:\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}(?!\d)")
 SNILS_INN = re.compile(r"(?<!\d)(?:\d{3}-\d{3}-\d{3} \d{2}|\d{12})(?!\d)")
-# tools/mutation_tools.json java.resolver_plugin_jar of the package with S2 (a package before S2 has no pin)
-RESOLVER_PIN = {"file": "maven-dependency-plugin-3.8.1.jar", "sha256": "9fc3d435085983b16bc53903f9413aede9de30e20c57c0cece94614f328b14b5"}
 rows: list[tuple[str, str, str, str]] = []
 
 
@@ -174,11 +172,13 @@ def _jar(m2: Path, coordinates: str) -> Path:
 
 def check_resolver_plugin(m2: Path, pins: dict) -> None:
     """The PIT resolver (maven-dependency-plugin) runs inside Maven: the package checks its jar by the pinned SHA-256
-    before Maven starts (S2c); the pin is read from the package (resolver_plugin_jar), else the S2 value."""
-    row = pins.get("resolver_plugin_jar") or RESOLVER_PIN
+    before Maven starts (S2c); the pin is the package's tools/mutation_tools.json java.resolver_plugin_jar."""
+    row = pins.get("resolver_plugin_jar")
     path = _jar(m2, pins["resolver_plugin"])
-    name = f"~/.m2: {row['file']}"
-    if not path.is_file():
+    name = f"~/.m2: {path.name}"
+    if not row:
+        add(WARN, name, "в пакете нет пина резолвера (resolver_plugin_jar) — пакет старше S2", "обновить пакет; до этого — без --mutation")
+    elif not path.is_file():
         add(WARN, name, f"нет ({path})", f"без него мутации будут NOT_RUNNABLE: mvn dependency:get -Dartifact={pins['resolver_plugin']} "
                                         "из внутреннего репозитория или запускать без --mutation")
     elif _sha256(path) != row["sha256"]:
