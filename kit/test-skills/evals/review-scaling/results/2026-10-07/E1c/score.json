@@ -1,0 +1,204 @@
+{
+  "set": "E1",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55992,
+  "answer_bytes": [
+    10770
+  ],
+  "answer_bytes_total": 10770,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "S1",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_INPUT",
+          "related_ids": [
+            "TC-B1-005",
+            "STEP-B1-005-01",
+            "ASSERT-B1-005-01-1-2",
+            "CREQ-B1-004",
+            "SREQ-0015"
+          ],
+          "message": "ASSERT-B1-005-01-1-2 требует jsonObject {\"firstName\":\"Ramesh\",\"id\":8,\"lastName\":\"Mishra\"}, тогда как INPUT-B1-005-01-3 передаёт id=7, текст EXP-B1-005-01-1 ожидает id 7, а CREQ-B1-004/AC-4 (SRC-1:L57, L87) требуют объект с id, равным переданному. Проверка не соответствует своему требованию и своему входу; литерал проверки не подлежит механическому исправлению — требуется доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S2",
+      "class": "contradicts-source-and-other-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-004",
+            "STEP-B1-004-01",
+            "EXP-B1-004-01-1",
+            "ASSERT-B1-004-01-1-2",
+            "CREQ-B1-003",
+            "SREQ-0006",
+            "TC-B1-003"
+          ],
+          "message": "CREQ-B1-003 (SRC-1:L51) фиксирует для любого id тело {\"id\": <id>, \"firstName\": \"Ramsesh\", \"lastName\": \"Mishra\"}, а EXP-B1-004-01-1 и ASSERT-B1-004-01-1-2 ожидают firstName «Ramesh». Тот же вызов GET /students/{n} в TC-B1-003 (ASSERT-B1-003-01-1-2) верно ожидает «Ramsesh». Оракул TC-B1-004 неверен; литерал проверки не исправляется механически — доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S3",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-010",
+            "STEP-B1-010-01",
+            "EXP-B1-010-01-1",
+            "ASSERT-B1-010-01-1-2",
+            "CREQ-B1-009",
+            "SREQ-0010",
+            "SREQ-0018"
+          ],
+          "message": "CREQ-B1-009 и AC-7 (SRC-1:L76, L90) требуют текст «Student Successfully Deleted!», а EXP-B1-010-01-1 и ASSERT-B1-010-01-1-2 ожидают «Student Deleted!». Ожидаемый результат ослаблен/искажён относительно явного требования; литерал проверки не подлежит механической правке — доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S4",
+      "class": "shared-state-list",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "STEP-B1-012-03",
+            "EXP-B1-012-02-1",
+            "EXP-B1-012-03-1",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "CREQ-B1-012",
+            "CREQ-B1-002",
+            "TC-B1-002"
+          ],
+          "message": "Кейс привязан к CREQ-B1-012 («POST /students/create не изменяет ответ GET /students», SRC-1:L95) и CREQ-B1-002 (ровно четыре студента), но objective, EXP-B1-012-02-1/03-1 и ASSERT-B1-012-02-1-2/03-1-2 требуют список из пяти студентов с созданным id 9. Ожидание противоречит обоим требованиям и конфликтует с ASSERT-B1-002-01-1-4 для того же вызова GET /students. Оракул для CREQ-B1-012 — неизменный список из 4 после POST и одинаковый ответ при повторе; семантическая правка — доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S5",
+      "class": "wrong-component",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "WRONG_COMPONENT",
+          "related_ids": [
+            "TC-B1-007",
+            "CREQ-B1-006"
+          ],
+          "message": "management.components TC-B1-007 = [\"HelloWorldController\"], хотя кейс проверяет POST /students/create контроллера StudentController (SRC-1:L60, папка «StudentController REST API», остальные кейсы — StudentController). Механическая правка предложена в corrections."
+        }
+      ],
+      "corrections": [
+        {
+          "path": "/test_cases/6/management/components/0",
+          "after": "StudentController"
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-010",
+            "SREQ-0011",
+            "SREQ-0019"
+          ],
+          "message": "CREQ-B1-010 (GET /hello-world → 200 OK, текст «Hello World!», SRC-1:L78–L80, AC-8 SRC-1:L91) не связано ни с одним кейсом — критерий приёмки AC-8 выпал из покрытия. Возможность CAP-B1-mockmvc_exchange перечисляет маршрут /hello-world в источниках, оракул (статус и текст) определён, поэтому ручной/блокирующий пробел не обоснован; нужен кейс."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 2,
+    "WARNING": 1,
+    "BLOCKING": 5
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [
+    {
+      "path": "/test_cases/6/management/components/0",
+      "related_ids": [
+        "TC-B1-007"
+      ],
+      "after": "StudentController"
+    }
+  ],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-810195B8A1",
+      "decision": "confirmed",
+      "reason": "ASSERT-B1-005-01-1-2 ждёт id 8 при входе id=7 и тексте ожидания id 7; CREQ-B1-004/AC-4 требуют id 7. Finding BLOCKING."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-C621671AD4",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-010 (GET /hello-world, AC-8) не связано ни с одним кейсом; оракул определён, пробел не обоснован. Finding BLOCKING."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EAA185637A",
+      "decision": "confirmed",
+      "reason": "TC-B1-012 ждёт 5 студентов после POST вопреки CREQ-B1-012/CREQ-B1-002; TC-B1-002 верен. Finding BLOCKING."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-B6937281D1",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-003 фиксирует «Ramsesh» для любого id; TC-B1-004 ждёт «Ramesh» — неверный оракул. Finding BLOCKING."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-1909D9DE81",
+      "decision": "confirmed",
+      "reason": "Конфликт 4 vs 5 реален; причина не общее состояние (его нет, CREQ-B1-012), а неверное ожидание TC-B1-012. Finding BLOCKING."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324091.8049374,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

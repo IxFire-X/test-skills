@@ -1,0 +1,74 @@
+# Обычно этот файл создаёт tools/init_skillsrc.py.
+# Редактируйте подтверждённые значения; при конфликте следующий запуск покажет diff.
+schema_version: "5.2.0"   # 5.1.0 — mutation, review_runner; 5.2.0 — requirements, suite (ниже)
+version: "3.0"
+
+project:
+  name: "example-workspace"
+  methodology: "sdd"
+
+discovery:
+  on_missing: "automatic"
+  conflict_policy: "ask_user"
+
+modules:
+  - id: "backend"
+    root: "backend"
+    stack:
+      language: "python"
+      build_tool: "pip"
+    paths:
+      source: ["src"]
+      tests: ["tests"]
+    test:
+      framework: "pytest"
+      adapter_id: "pytest:selected-symbols-v1"
+      # Логическое имя: "python" — интерпретатор из .venv модуля на текущей ОС
+      # (.venv/bin/python или .venv\Scripts\python.exe). Для Java: wrapper "mvnw" /
+      # "gradlew" или executable "mvn". Старые пути конкретной ОС читаются как раньше.
+      interpreter: "python"
+      # "default" означает «профиль не объявлен»: -P<профиль> в команду не добавляется.
+      build_profile: "default"
+      adapter_parameters: {}
+      # Необязательно: таймаут тестового процесса в секундах (по умолчанию 600).
+      # timeout_seconds: 600
+      # Необязательно, только Maven/Gradle: корень сборки относительно проекта
+      # (корень реактора Maven или каталог с settings.gradle); "." — корень проекта.
+      # build_root: "."
+    feature_sources:
+      requirements: ["docs/requirements"]
+    detected_from: ["backend/pyproject.toml"]
+
+  - id: "frontend"
+    root: "frontend"
+    stack:
+      language: "typescript"
+      build_tool: "npm"
+    paths:
+      source: ["src"]
+      tests: ["tests"]
+    feature_sources:
+      requirements: ["docs/requirements"]
+    detected_from: ["frontend/package.json"]
+
+# Необязательные разделы волны 2 (schema 5.1.0; файлы 5.0.0 без них остаются валидными).
+# Этап мутаций: работает только вместе с флагом run --mutation (Java, local-pilot-v1).
+# mutation:
+#   enabled: true
+#   threads: 2
+#   timeout_seconds: 1800
+#   triage_limit: 30
+# Ревью процессами драйвера (--review-runner process): только пресет, модели, параллельность, таймаут.
+# Команду процесса файл проекта задать не может.
+# review_runner:
+#   preset: "claude"
+#   models: {tc-reviewer: "claude-sonnet-5-5", autotest-reviewer: "claude-sonnet-5-5"}
+#   max_parallel: 4
+#   timeout_seconds: 1800
+# Необязательные разделы волны 3 (schema 5.2.0).
+# Шаблон явного ID требования: строка, начинающаяся с него, — отдельное требование.
+# requirements:
+#   id_pattern: '[OPVX]\d\d\.'
+# Каталог живого набора (local-pilot-v1 --suite, suite-update-v1).
+# suite:
+#   path: "test-cases/"

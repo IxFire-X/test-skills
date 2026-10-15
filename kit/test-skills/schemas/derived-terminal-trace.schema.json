@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/derived-terminal-trace.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "policy_profile", "pre_finalization_trace_digest", "finalization_receipt_digest", "terminal_result_digest", "run_id", "attempt_id", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "stage": {"const": "terminal_trace"},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "pre_finalization_trace_digest": {"$ref": "#/$defs/digest"},
+    "finalization_receipt_digest": {"$ref": "#/$defs/digest"},
+    "terminal_result_digest": {"$ref": "#/$defs/digest"},
+    "run_id": {"$ref": "#/$defs/id"},
+    "attempt_id": {"$ref": "#/$defs/id"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+  }
+}

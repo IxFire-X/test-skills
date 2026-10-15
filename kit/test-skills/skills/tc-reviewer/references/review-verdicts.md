@@ -1,0 +1,127 @@
+# Pilot reviewer-session and verdict contract
+
+The controller publishes/reads back canonical r1 as `UNREVIEWED`, freezes the exact
+original sources, context and candidate in a review snapshot, and publishes one plan.
+One logical reviewer-session ledger owns all declared parts and any additional bounded
+cross checks. Each part uses a sequential fresh isolated invocation with
+`tc-reviewer:canonical:part-000001` (its actual ordinal) and `canonical-reviewer-v2`.
+The same path handles a one-part input. Host evidence is verified for every invocation;
+self-attestation, generator reasoning, growing shared dialogue and silent truncation
+cannot establish isolation or completeness.
+
+Scopes of one part overlap, so the part envelope carries each distinct input once:
+the first occurrence has `content`, and an exact repeat carries
+`content_ref: {scope_id, input}` (the scope and zero-based input index of the first
+occurrence in the same part) instead of `content`. The reviewer resolves the reference
+and treats the entry as fully supplied evidence.
+
+A part whose invocation produced no valid assessment may be reopened with a new
+invocation, at most three invocations per part. The controller records the failure with
+`fail-part --failure-class TRANSPORT|CONTENT`; retried invocations use stage IDs ending
+in `-try2` and `-try3` and require a new `reviewer_invocation_id`. An incomplete review
+whose blocked parts are all `TRANSPORT` failures ends as `REVIEW_SESSION_ABORTED` with
+`REVIEW_TRANSPORT_FAILED`, not `REWORK`. Any other incomplete review (unchecked scopes,
+content failures) ends with `REVIEW_INCOMPLETE`; `REWORK` always needs one REJECTED verdict.
+
+The model returns only the assessment fields `coverage`, `findings`, `corrections` and
+`required_checks` for the supplied scopes. Controller `submit-part` binds service fields
+and saves the validated part output. `finish-review` recomputes exact original-source,
+local and cross-part coverage and publishes one aggregate, then seals the logical ledger.
+A required check is addressed by `scope_ids` of the reviewer's own envelope, `case_ids`
+or `requirement_ids` (the envelope's `document_index.case_ids` lists every case); the controller
+resolves cases and requirements to the local scopes holding them. An UNCHECKED scope
+whose answer requested checks is closed once every such check part comes back CHECKED;
+the aggregate lists the link in `resolved_unchecked`. Otherwise it stays unchecked and the
+review ends as `REVIEW_INCOMPLETE`, never as rework.
+The v6 `tc-reviewer-output` is its controller projection, never a model response. It binds
+`artifacts.review_aggregate.plan_digest` and `aggregate_digest`. A completed logical
+review has exactly one authoritative verdict; a pre-verdict abort has zero. Content
+findings do not stop later trustworthy parts. Unchecked, stale or untrusted required
+scope forbids acceptance; damage to the shared snapshot blocks trustworthy continuation.
+
+In `compact-v1` the part input is the review projection text instead of the JSON envelope: the same
+evidence with ID anchors, whole cases per part, every pair of cases together in at least one part,
+and an answer whose refs, lint dispositions and corrections the controller checks at submit.
+
+Use those authorized context receipts to compare against the original requirements,
+not only their model-normalized subset. Reject dropped acceptance criteria, requirements
+linked to irrelevant cases, and expected results weakened to match an implementation
+defect. When original evidence is unavailable within the budget, report the gap or the
+existing context-limit abort; never infer complete coverage from a valid mapping graph.
+
+Audit coverage in two passes using the existing canonical requirements and mappings.
+First derive the distinct conditions from the original authorized request yourself
+and reconcile them with `requirements`: check each input variant, boundary, branch,
+field rule and state transition, including several conditions in one source paragraph.
+Do not use the generator's inventory as the sole list of what should be tested.
+Second, trace every behavioral canonical condition to its actual case inputs,
+operations and assertions (or justified manual/blocker gap). For example, linking a
+length-30 case to a length-31 rejection condition does not cover that rejection.
+Check all jointly required observations, such as rejection and unchanged storage.
+Report a missing condition against its source/mapping and a missing check against
+the affected canonical requirement and case/step. Do not claim full coverage from
+the number of conditions, cases or relations. This audit belongs to the same single
+authoritative review; no additional reviewer role or user-supplied checklist is required.
+
+`tools.revision_selection` validates candidate digest, full successor lineage, source/canonical/case traceability, and identity preservation; `tools.canonical_document` validates canonical semantics. Canonical review has revision 1 and at most one complete mechanical successor revision 2; revision 3, destructive, partial, and choice-bearing changes are `ТРЕБУЕТ ДОРАБОТКИ`.
+
+The verdict is canonical evidence, not the terminal pipeline result. Acceptance remains a
+versioned policy decision after branch-valid trace and finalization; local execution also
+requires generated-delta, execution, and disposition evidence.
+
+| Verdict | Required output |
+|---|---|
+| `ПРИНЯТО` | candidate is selected; no successor |
+| `AUTO_FIX_APPLIED` | one complete successor document built by the controller from the mechanical `corrections`, incremented lineage, preserved identity graph |
+| `ТРЕБУЕТ ДОРАБОТКИ` | blocking findings; no successor |
+
+`reviewed_case_ids` in a complete accepted aggregate lists all candidate cases exactly once in physical order; a partial report exposes only checked cases and never authorizes selection. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
+
+Review every human Action/Test Data/Expected Result triple against the mandatory
+[human scenario rules](../../tc-generator/references/case-generation-contract.md#human-scenario-rules),
+which are the shared format authority for generator and reviewer. Verify machine
+operation/input/output/assertion ownership, previous-step data flow and manual/blocker
+branches. A violation needs a precise location and a concrete ambiguity, semantic error
+or broken format rule; a preference for different Russian wording is not rework.
+Check that testing-work instructions remain in linked canonical requirements rather than
+human case fields, while necessary setup and actual product constraints remain testable.
+Do not demand extra cases or assertions to test the author of the tests. A mixed source
+paragraph must retain both its product meaning and its instructions without copying the
+instructions into the scenario. Cite the shared rule and exact field for a violation.
+Check that a reader unfamiliar with the project can understand the purpose and result;
+technical execution details must not obscure the meaningful action.
+Expected is a pre-execution criterion, not «Проверено автотестом» or «проверка
+пройдена». Check every step, including the last; reject a service-only replacement
+with its exact field and the required observable result. An incidental autotest mention
+inside a substantive result is allowed. Actual PASS/FAIL belongs in execution reports.
+Use the generator contract's short HTTP example and confirmed status/body facts;
+do not impose HTTP format on `project_action`. The common canonical validator owns
+mechanical checks; a meaningful one-action case needs no minimum length or mandatory
+ID transfer. Standalone linter recommendations do not by themselves justify rework.
+For baseline snapshots, verify that human fields identify the initial state from
+Preconditions or a concrete preceding action, and the captured data used later;
+“before this step” alone does not identify that state.
+Check the shared rules on scenario-specific setup, helper controls in Test Data,
+object-specific preservation and an objective that adds meaning to the title. Trace a
+date/control dependency to the actual scenario, not just to a required helper argument.
+Distinguish required behavior from source-derived exception/message characterization:
+verify its provenance, selected boundary and stated scope; explicit requirement error
+codes remain authoritative. Unsupported or contradictory oracles are correctness
+findings. Redundant but accurate wording is a readability observation, not by itself a
+blocking defect; cite concrete ambiguity when comprehension or execution is impaired.
+
+Review native operation capabilities against the shared generation contract. A
+composition of confirmed application/framework calls need not already exist as an
+application helper or runtime provider; a route need not use direct HTTP binding when
+the declared native test boundary exercises it faithfully. Reject unsupported calls,
+fabricated observations and changed transport semantics. Also challenge a blocker
+based only on the lack of a ready-made helper when the authorized evidence supports
+the required composition. Check its argument/result bindings and real persistence
+boundary, not merely its label. Missing evidence remains a gap, never a guessed API.
+
+Compare candidate requirements with the input context without losing behavior classes.
+Each relevant product-behavior warning needs either a testable canonical step or a concrete gap for
+missing oracle, input, access or setup. A known defect with a clear oracle stays testable.
+Every structured assertion must inspect the intended behavior; relations and warnings
+cannot stand in for coverage. The report binds the exact bare candidate digest, and a
+successor is validated as a whole, never merged with its candidate.

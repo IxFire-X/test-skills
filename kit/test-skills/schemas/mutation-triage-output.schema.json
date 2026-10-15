@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/mutation-triage-output.schema.json",
+  "title": "Survivor triage answer (mutation-triage-v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["groups"],
+  "properties": {
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["group_id", "decision", "refs", "rationale"],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^MUT-[0-9]{4}$"},
+          "decision": {"enum": ["TEST_GAP", "SPEC_GAP", "EQUIVALENT", "OUT_OF_SCOPE"]},
+          "refs": {"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 160}},
+          "rationale": {"type": "string", "minLength": 1, "maxLength": 600},
+          "proposal": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["case_id", "text"],
+            "properties": {
+              "case_id": {"type": "string", "minLength": 1},
+              "step_id": {"type": "string", "minLength": 1},
+              "text": {"type": "string", "minLength": 1, "maxLength": 600}
+            }
+          },
+          "question": {"type": "string", "minLength": 1, "maxLength": 300},
+          "requirement_id": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {"if": {"properties": {"decision": {"const": "TEST_GAP"}}}, "then": {"required": ["proposal"], "not": {"anyOf": [{"required": ["question"]}]}}},
+          {"if": {"properties": {"decision": {"const": "SPEC_GAP"}}}, "then": {"required": ["question", "requirement_id"], "not": {"anyOf": [{"required": ["proposal"]}]}}},
+          {"if": {"properties": {"decision": {"enum": ["EQUIVALENT", "OUT_OF_SCOPE"]}}}, "then": {"not": {"anyOf": [{"required": ["proposal"]}, {"required": ["question"]}, {"required": ["requirement_id"]}]}}}
+        ]
+      }
+    }
+  }
+}

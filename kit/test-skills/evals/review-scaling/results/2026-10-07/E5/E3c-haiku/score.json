@@ -1,0 +1,181 @@
+{
+  "set": "E3",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 49005,
+  "answer_bytes": [
+    5146
+  ],
+  "answer_bytes_total": 5146,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 4,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "A1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_STATUS_CODE_MISMATCH",
+          "related_ids": [
+            "TC-B1-006",
+            "ASSERT-B1-006-01-1-1",
+            "CREQ-B1-005"
+          ],
+          "message": "Assertion isEqualTo(404) but CREQ-B1-005 and STEP-B1-006-01 specify 400 Bad Request. Assertion must use isEqualTo(400)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A2",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUEST_PATH_MISMATCH",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "CREQ-B1-008"
+          ],
+          "message": "Uses path /students/42/update but STEP-B1-009-01 specifies /students/10/update. Path variable must match requirement."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A3",
+      "class": "request-input",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "A4",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "INCOMPLETE_HELPER_RESULT",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "CREQ-B1-002"
+          ],
+          "message": "Helper fourStudents() returns only 3 students (id 1,2,3) but CREQ-B1-002 and assertions expect 4 including Sanjay (id 4). Missing student(4,Sanjay,Mishra)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A5",
+      "class": "shared-static-state",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "A6",
+      "class": "weakened-check",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "ASSERT-B1-011-01-1-2",
+            "CREQ-B1-010"
+          ],
+          "message": "Uses isNotNull() instead of isEqualTo(\"Hello World!\"). Expected text is not verified, only existence of response."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 0,
+    "BLOCKING": 4
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-542CFAB338",
+      "decision": "rejected",
+      "reason": "pathId initialized to 5 at L0035; TC-B1-003 executes with pathId=5, so path /students/5 is correct."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EE64C7CCAC",
+      "decision": "rejected",
+      "reason": "pathId set to 0 at L0287 after TC-B1-003; TC-B1-004 executes with pathId=0, so path /students/0 is correct."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-BF1FB0A36A",
+      "decision": "confirmed",
+      "reason": "L146 asserts 404 but requirement specifies 400. Status code in assertion is wrong."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-FC54E69D5E",
+      "decision": "rejected",
+      "reason": "Input has no lastName, code adds null, and expected JSON includes lastName:null. This is correct Jackson serialization behavior for partial objects."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-688AA3DA9D",
+      "decision": "confirmed",
+      "reason": "L479 uses /students/42/update but STEP-B1-009-01 specifies /students/10/update. Path must match requirement."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-F795BD7551",
+      "decision": "confirmed",
+      "reason": "L512 uses isNotNull() but requirement expects equals(\"Hello World!\"). Assertion does not verify the actual expected text."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791367433.2832835,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791367449.9439769,
+        "accepted": false,
+        "codes": [
+          "REVIEW_FINDING_UNKNOWN_ID",
+          "REVIEW_REF_UNKNOWN"
+        ]
+      },
+      {
+        "at": 1791367495.85751,
+        "accepted": false,
+        "codes": [
+          "REVIEW_REF_UNKNOWN"
+        ]
+      },
+      {
+        "at": 1791367528.884411,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

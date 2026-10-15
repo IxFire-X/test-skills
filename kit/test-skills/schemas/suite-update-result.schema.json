@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/suite-update-result.schema.json",
+  "title": "suite-update-v1 result (wave 3)",
+  "description": "The `result` of a driver `done` payload of the suite-update-v1 profile and suite-update-result.json beside it. A proposal for people: no `accepted` claim, no pilot result tuple.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "profile", "run_id", "outcome", "exit_code", "reason_code", "message", "counts", "reviews", "paths", "accepted"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "status": {"const": "terminal"},
+    "profile": {"const": "suite-update-v1"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "outcome": {"enum": ["UPDATED", "NO_CHANGES", "REVIEW_BLOCKED", "STOPPED"]},
+    "exit_code": {"enum": [0, 1, 2]},
+    "reason_code": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+    "message": {"type": ["string", "null"]},
+    "counts": {"type": "object", "additionalProperties": false, "required": ["requirements", "cases", "quarantined", "released", "questions", "proposals", "repaired"],
+      "properties": {
+        "requirements": {"type": "object", "additionalProperties": false, "required": ["added", "changed", "removed", "renamed"],
+          "properties": {"added": {"$ref": "#/$defs/count"}, "changed": {"$ref": "#/$defs/count"}, "removed": {"$ref": "#/$defs/count"}, "renamed": {"$ref": "#/$defs/count"}}},
+        "cases": {"type": "object", "additionalProperties": false, "required": ["changed", "new", "retired", "unchanged"],
+          "properties": {"changed": {"$ref": "#/$defs/count"}, "new": {"$ref": "#/$defs/count"}, "retired": {"$ref": "#/$defs/count"}, "unchanged": {"$ref": "#/$defs/count"}}},
+        "quarantined": {"$ref": "#/$defs/count"}, "released": {"$ref": "#/$defs/count"}, "questions": {"$ref": "#/$defs/count"},
+        "proposals": {"$ref": "#/$defs/count"}, "repaired": {"$ref": "#/$defs/count"}}},
+    "reviews": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["eligible", "parts", "input_bytes"],
+      "properties": {"eligible": {"type": "boolean"}, "parts": {"$ref": "#/$defs/count"}, "input_bytes": {"$ref": "#/$defs/count"}}}},
+    "paths": {"type": "object", "additionalProperties": false, "required": ["pr_description", "patch", "result", "suite_dir"],
+      "properties": {"pr_description": {"type": "string"}, "patch": {"type": "string"}, "result": {"type": "string"}, "suite_dir": {"type": "string"}}},
+    "accepted": {"type": "null"}
+  },
+  "$defs": {"count": {"type": "integer", "minimum": 0}}
+}

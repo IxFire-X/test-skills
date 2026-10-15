@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/company-execution-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "status", "input_snapshot_digest", "autotest_commit_digest", "source_digest", "automation_digest", "review_digest", "runner_profile", "request_digest", "execution_report_digest", "result", "error"],
+  "properties": {
+    "version": {"const": 1},
+    "status": {"enum": ["completed", "error"]},
+    "input_snapshot_digest": {"$ref": "#/$defs/digest"},
+    "autotest_commit_digest": {"$ref": "#/$defs/digest"},
+    "source_digest": {"type": ["string", "null"]},
+    "automation_digest": {"type": ["string", "null"]},
+    "review_digest": {"type": ["string", "null"]},
+    "runner_profile": {"type": ["string", "null"]},
+    "request_digest": {"type": ["string", "null"]},
+    "execution_report_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "result": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["run_id", "request_digest", "source_digest", "environment", "exit_code", "exit_cause", "duration_sec", "junit_digest", "job_id"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "request_digest": {"$ref": "#/$defs/digest"},
+        "source_digest": {"$ref": "#/$defs/digest"},
+        "environment": {"type": "string"},
+        "exit_code": {"type": "integer"},
+        "exit_cause": {"type": "string"},
+        "duration_sec": {"type": "number", "minimum": 0},
+        "junit_digest": {"type": ["string", "null"]},
+        "job_id": {"type": "string"}
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {"code": {"type": "string"}}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "completed"}}}, "then": {"properties": {"result": {"type": "object"}, "error": {"type": "null"}, "source_digest": {"$ref": "#/$defs/digest"}, "automation_digest": {"$ref": "#/$defs/digest"}, "review_digest": {"$ref": "#/$defs/digest"}, "runner_profile": {"type": "string", "minLength": 1}, "request_digest": {"$ref": "#/$defs/digest"}, "execution_report_digest": {"$ref": "#/$defs/digest"}}}},
+    {"if": {"properties": {"status": {"const": "error"}}}, "then": {"properties": {"error": {"type": "object"}, "execution_report_digest": {"type": "null"}}}}
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

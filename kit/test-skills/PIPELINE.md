@@ -1,0 +1,148 @@
+# Pipeline: portable-testing-skills-frozen-pilot
+
+Generated from `contracts/pipeline.json`. Do not edit manually.
+
+Version: `4.0`
+
+## Phase 1 public runtime seam
+
+- `create_run(project: 'Path', policy_profile: 'str', authorization: 'Mapping[str, Any]') -> 'Mapping[str, Any]'`
+- `append_event(run_root: 'Path', event_type: 'str', *, actor: 'str', attempt_id: 'str | None' = None, batch_id: 'str | None' = None, artifact_digest: 'str | None' = None, stage_instance_id: 'str | None' = None, transport_attempts: 'int | None' = None) -> 'Mapping[str, Any]'`
+- `create_attempt(run_root: 'Path', identity: 'Mapping[str, Any]', baseline: 'Mapping[str, Any]') -> 'Mapping[str, Any]'`
+- `derive_state(run_root: 'Path') -> 'Mapping[str, Any]'`
+- `terminal_result(facts: 'Mapping[str, Any]', policy_profile: 'str') -> 'Mapping[str, Any]'`
+- `exit_code(result: 'Mapping[str, Any] | None', controller_error: 'bool' = False) -> 'int'`
+
+## Event order
+
+`RUN_CREATED` → `MODULE_SELECTED` → `INVENTORY_READY` → `SNAPSHOT_BOUND` → `EXECUTION_BASELINE_FROZEN` → `ATTEMPT_CREATED` → `CONTEXT_SELECTED` → `MODEL_REQUESTED` → `MODEL_RESPONSE_RECEIVED` → `CANDIDATE_PUBLISHED` → `REVIEW_REQUESTED` → `ARTIFACT_READ_BACK` → `WAITING_FOR_MODEL`
+
+## Global ordering constraints
+
+- `RUN_CREATED → SCAN_OR_MODEL_REQUEST`
+- `MODULE_SELECTED → ATTEMPT_CREATED`
+- `SNAPSHOT_BOUND → ATTEMPT_CREATED`
+- `EXECUTION_BASELINE_FROZEN → ATTEMPT_CREATED`
+- `ATTEMPT_CREATED → SOURCE_BYTES_TRANSMITTED_TO_MODEL`
+- `INVENTORY_READY → MODEL_REQUESTED`
+- `SNAPSHOT_BOUND → MODEL_REQUESTED`
+- `CONTEXT_SELECTED → MODEL_REQUESTED`
+- `MODEL_RESPONSE_RECEIVED → CANDIDATE_PUBLISHED`
+- `CANDIDATE_PUBLISHED → REVIEW_REQUESTED`
+- `FINALIZATION_RECEIPT_READ_BACK → TERMINAL_EVENT`
+- `TERMINAL_EVENT → TERMINAL_RETRY_OBSERVED` (narrow exception)
+- `SCENARIO_OBSERVATION_READ_BACK → TERMINAL_RETRY_OBSERVED` (narrow exception)
+- `TERMINAL_EVENT → RETAINED_NATIVE_RERUN` (narrow exception)
+- `RETAINED_NATIVE_RERUN_RECEIPT_READ_BACK → RETAINED_NATIVE_RERUN` (narrow exception)
+- `EXECUTION_UNKNOWN → PROCESS_STOPPED` (narrow exception)
+
+## Reviewer session
+
+- logical reviews `one_per_branch_or_revision`; fresh contexts `one_per_declared_part`; order `sequential`; successful verdicts `1`
+- coverage `original_source, local, cross_part`; aggregation `controller`; incomplete `never_accepted`
+- terminal pre-verdict abort verdicts `0`
+- forbidden: `shared_growing_context, hierarchical_reviewers, multiple_authoritative_aggregates`
+- rework: at most `1` per run as a `CANONICAL_REWORK` child attempt after `authoritative_verdict_rejected`
+- rework generator: input `canonical_r1, findings_blocking_warning, affected_case_ids`; output `changed_test_cases_only`; successor `canonical_r2_parent_sha256_r1`
+- rework review: `new_session_incremental_carry_identical_checked_inputs`; never reworked: `unchecked_scope, pre_verdict_abort`; after r2 rejected: `terminal_rework`
+- isolation `none`: `continue_same_parts_and_format`; axis `review_independence`: `ISOLATED, SELF`
+- `SELF` without `--accept-self-review`: accepted `false`, reason `REVIEW_NOT_INDEPENDENT`
+- review inputs above `500000` bytes (run parameter) without isolation: warning `SELF_REVIEW_CONTEXT_OVERFLOW`
+- review mode `--review-mode`: `pairs, compact-v1`; default `compact-v1`
+- `compact-v1` model input: `review_projection_text` (`review-projection-v1`, `canonical_document_digest_in_snapshot`); never model inputs: `html, markdown, csv`
+- `compact-v1` plan `review-plan-compact.schema.json`, answer `review-part-output-compact.schema.json`; packing `whole_cases_content_defined_blocks_block_pairs`; `every_case_pair_in_one_part`; areas `source, case_home_part, cross_per_part`
+- `compact-v1` order `independent_parts_batchable` (`--max-tasks`); answer checks `refs_are_part_anchors, case_area_cites_own_anchor, every_lint_suspicion_answered, info_findings_at_most_5, related_ids_known`
+- `compact-v1` corrections `closed_field_dictionary_one_pointer_before_checked`; carry key `area_fingerprint, role_policy, skill_digest, instructions_digest, model_id, mode`
+
+## Physical lifecycle
+
+`MATERIALIZATION` → `EXECUTION` → `EXECUTION_TRACE` → `RETAIN_OR_CLEANUP_DECISION` → `DISPOSITION_RECEIPTS` → `PRE_FINALIZATION_TRACE` → `FINALIZATION_VERIFICATION` → `FINALIZATION_RECEIPT_READ_BACK` → `TERMINAL_RESULT` → `DERIVED_TERMINAL_TRACE` → `TERMINAL_EVENT`
+
+## Result axes
+
+- `attempt_state`: `ACTIVE, WAITING_FOR_INPUT, WAITING_FOR_MODEL, TERMINAL`; nullable `False`
+- `completion`: `COMPLETE, PARTIAL, FATAL`; nullable `True`
+- `verification`: `PASS, FAIL, UNKNOWN, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
+- `coverage`: `FULL, MIXED, MANUAL_ONLY`; nullable `True`
+- `review_independence`: `ISOLATED, SELF`; nullable `True`
+- `reason_code`: preterminal `absent`; terminal `written_once`
+- `accepted`: preterminal `absent`; terminal `boolean`
+
+## Contract amendments
+
+- `pilot-contract-amendments-2026-10-07` (wave 2, `ACCEPTED`, opt-in `true`): §1.2, §1.5, §17 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+- `pilot-contract-amendments-2026-10-07-wave-3` (wave 3, `ACCEPTED`, opt-in `false`): §17.2, §25 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`
+  - on by default: A4 in `local-pilot-v1` (`--disposition-policy quarantine`) since 2026-10-08; `--disposition-policy cleanup` keeps the frozen rule
+- optional stage `MUTATION` between `EXECUTION_TRACE` and `RETAIN_OR_CLEANUP_DECISION`; requires `skillsrc_mutation_enabled, run_authorization_mutation_requested, authoritative_pass_or_fail`; mutates `passing_generated_methods_only`; writes `run_directory_only`; proves `project_inventory_unchanged`; receipt `mutation_receipt`; axis `test_strength`; never changes `verification, accepted, dispositions, earlier_evidence`
+- mutation tool (Java): `org.pitest:pitest-command-line:1.30.0` + `org.pitest:pitest-junit5-plugin:1.2.3`, pins `tools/mutation_tools.json`, resolution `project_build_tool_local_repository`, launcher `junit_platform_launcher_of_project_version`, consent `skillsrc_mutation_enabled, run_authorization_mutation_requested`, digest mismatch `NOT_RUNNABLE`, mutators `DEFAULTS`, report `xml_full_mutation_matrix`; Python: `not_implemented`
+- model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
+- runner evidence `command_digest, cli_name_version, model, started_finished, exit_code, session_id, stdout_digest, tokens, user_settings_loaded` → axis `isolation_evidence`; `--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`
+- optional skill `mutation-triage` — `skills/mutation-triage/SKILL.md`
+- optional stage `mutation-triage`: role `strength-analyst`, policy `mutation-triage-v1`, cardinality `post_terminal_per_task`, profiles `local-pilot-v1`, answer `mutation-triage-output.schema.json`, decisions `TEST_GAP, SPEC_GAP, EQUIVALENT, OUT_OF_SCOPE`, changes `nothing_in_the_attempt`
+- optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
+- optional schema `mutation-triage-output.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
+- optional schema `suite-manifest.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
+- optional schema `suite-update-result.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
+- optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
+- optional artifact `mutation_triage` (phase 6, `IMPLEMENTED`)
+- optional artifact `analyst_report` (phase 7, `IMPLEMENTED`)
+- optional artifact `runner_process_evidence` (phase 4, `IMPLEMENTED`)
+- optional artifact `suite_manifest` (phase 7, `IMPLEMENTED`)
+- optional artifact `suite_update_result` (phase 7, `IMPLEMENTED`)
+- optional axis `test_strength`: `MEASURED, NOT_RUNNABLE, NOT_APPLICABLE`; nullable `True`
+- optional axis `isolation_evidence`: `DRIVER_PROCESS, HOST_DECLARED, NONE`; nullable `True`
+- disposition policy `--disposition-policy`: `cleanup, quarantine`; defaults: local-pilot-v1 `quarantine`, suite-update-v1 `quarantine`; authorization key `disposition_policy`
+- disposition policy `quarantine`: applies to `authoritative_fail_with_method_outcomes`; all methods passed → `RETAINED`, failed methods → `QUARANTINED`; rewrite `exact_owned_bytes_failed_methods_only`; marks junit5 `org.junit.jupiter.api.Disabled`, pytest `pytest.mark.xfail(strict=True)`; explicit run junit5 `junit.jupiter.conditions.deactivate`, pytest `--runxfail`; never changes `verification, coverage, accepted, result_tuple`
+- optional profile `suite-update-v1` (suite_proposal): steps `MIGRATION -> IMPACT -> UPDATE_AND_REPAIR -> REVIEW -> AUTOMATION -> STATIC_REVIEW -> SUITE_RUN -> FAILURE_TRIAGE -> MUTATION -> MANIFEST -> SUMMARY`; disposition policy `quarantine`; repair `one_try_static_review_expectations_unchanged`; writes `suite_directory, manifest_owned_tests`; outputs `pr_description, suite_patch, suite_update_result`; accepted `not_applicable`; commits `false`
+- suite `suite.path` (default `test-cases/`): manifest `suite-manifest.schema.json` 1.0.0, migrations `0->1.0.0`, statuses `ACTIVE, QUARANTINED, RETIRED`, created by `local-pilot-v1 --suite` (`suite_requested`); owned change proof `manifest_slice_digest`; human edit `never_overwritten_proposal_in_pr`
+- requirement identity: OpenSpec `capability_and_requirement_name_with_renames`, Markdown `explicit_id_else_path_and_heading_chain` (built-in IDs `REQ, AC, US, FR, BR, TR, ТР, ПС`, `requirements.id_pattern`); text digest `sha256_nfc_collapsed_whitespace`; SREQ format `unchanged`; stored in `suite_manifest`
+
+## Normative result tuples
+
+- `complete_fail`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "COMPLETE", "verification": "FAIL"}`
+- `execution_unknown`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "PARTIAL", "reason_code": "EXECUTION_UNKNOWN", "verification": "UNKNOWN"}`
+- `pre_execution_rework`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "PARTIAL", "reason_code": "REWORK", "verification": "NOT_APPLICABLE"}`
+- `early_fatal`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "FATAL", "coverage": null}`
+- `review_context_limit`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "PARTIAL", "reason_code": "REVIEW_CONTEXT_LIMIT", "verification": "NOT_APPLICABLE"}`
+- `invalid_finalization`: `{"accepted": false, "attempt_state": "TERMINAL", "coverage": "PRESERVED", "reason_code": "FINALIZATION_INVALID", "verification": "PRESERVED"}`
+
+## Policies
+
+| Policy | Version | Semantic ready |
+|---|---|---|
+| `cases-only-v1` | `v1` | `True` |
+| `local-pilot-v1` | `v1` | `True` |
+
+## Adapters
+
+| Adapter | Phase | Status | Version |
+|---|---|---|---|
+| `pytest:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
+| `maven-wrapper:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
+| `maven:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
+| `gradle-wrapper:selected-symbols-v1` | `6` | `IMPLEMENTED` | `v1` |
+
+## Acceptance predicates
+
+- `cases-only-v1`: `coverage_full_mixed_or_manual_only, verification_not_applicable, canonical_schema_semantic_provenance_valid, successful_full_document_authoritative_review, exactly_one_authoritative_verdict, reviewer_isolation_verified, no_unresolved_blocker, branch_valid_trace, finalization_valid, materialization_not_applicable, execution_not_applicable, draft_artifact_only_not_accepted`
+- `local-pilot-v1`: `accepted_canonical, accepted_automation, complete_generated_delta_materialization, authoritative_exact_target_pass, valid_trace, every_required_generated_file_retained, finalization_valid, reviewer_isolation_verified, review_isolated_or_self_review_accepted, no_unresolved_blocker, mixed_manual_coverage_traceable`
+- `no_unresolved_blocker` failed (`local-pilot-v1`): reason `UNRESOLVED_AUTOMATION_BLOCKER` on `blocker_count_positive`, when `verification_pass_without_earlier_reason`, precedence `after_review_reasons`; legacy results `reason_absent_stays_valid`
+
+## Exit priority
+
+- `controller_error_without_trustworthy_attempt_result => 2`
+- `waiting_for_input_or_model => 3`
+- `cases_only_fatal_invalid_closure_or_unreliable_evidence => 2`
+- `valid_terminal_cases_only_v1 => 1`
+- `accepted_terminal => 0`
+- `unknown_not_runnable_fatal_invalid_closure_or_unreliable_evidence => 2`
+- `other_trustworthy_terminal_unaccepted => 1`
+
+## Release qualification
+
+- package: `0.5.0-pilot` via `release/manifest.json`
+- compatibility contract: `portable-cli-v1`
+- execution profile: `v1`
+- release eval: `adaptive-1-3-5-v1` / `pilot-critical-v1`
+- component state: `implemented_unverified`; ready tuple: `null`
+- core-pilot N/A: `company_runner, zephyr_tenant, production_rollback`

@@ -1,0 +1,1149 @@
+{
+  "set": "E2",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 11,
+  "missing_answers": [],
+  "input_bytes": 1842103,
+  "answer_bytes": [
+    6611,
+    11696,
+    6686,
+    7877,
+    7373,
+    10371,
+    8083,
+    5572,
+    7634,
+    4732,
+    8793
+  ],
+  "answer_bytes_total": 85428,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "cross-9fb7c92cecea4306f855fccf4b895de03e35814634313f4a702b5643753ef17b",
+      "reason": "Есть ли шаг открытия формы нового владельца с полями (CREQ-B1-008) и проверка сохранённого телефона 0123456789 с начальным нулём (CREQ-B1-024)."
+    },
+    {
+      "scope_id": "cross-b739c9b640b37937f75d97dc90c726eed594c420942f110dfcf7ba9f71a4ea95",
+      "reason": "Название 'Сохранение' противоречит CREQ-B1-026 (11 цифр отклоняются): проверить шаги и ожидания на отклонение с ошибкой telephone и отсутствие записи."
+    },
+    {
+      "scope_id": "cross-ddc78d7e917cb90a12fda050d07d5e9d9cd6fcbc1cd341c3dbee2347003d096e",
+      "reason": "TC-B1-033 привязан к CREQ-B1-047, не к 045: проверить ввод 31 символа и ожидание name/size. TC-B1-041: проверить ожидание name/duplicate по CREQ-B1-054."
+    },
+    {
+      "scope_id": "cross-bbffa8fddab4ea715926efaf01a90b149180b6292f71202fd7e2b67701cbdd59",
+      "reason": "TC-B1-017 этой части ожидает приём телефона из 11 цифр вопреки CREQ-B1-026. Нужно убедиться, что кейс изменения контактов при ошибочном телефоне (TC-B1-020, CREQ-B1-030) сохраняет ожидание отклонения с ошибкой telephone и не ослаблен аналогично."
+    },
+    {
+      "scope_id": "cross-a492a6767879a9d52f4e048c13ffe5164f0d52354691f7f099f354b85bdeabf6",
+      "reason": "EXP-B1-057-03-1 и EXP-B1-058-04-1 характеризуют ошибку как java.lang.IllegalArgumentException из loadPetWithVisit с сообщением «not found for owner with id»; CREQ-B1-070/071 говорят лишь о серверной ошибке «питомец не найден у указанного владельца» без HTTP-кода. Исходный текст требований (SRC) в этой части отсутствует: нужно подтвердить провенанс класса исключения и фрагмента сообщения по исходнику, иначе это неподтверждённый оракул."
+    },
+    {
+      "scope_id": "cross-cf0ac1da26972110c17e917343c8f948caf11277951c39cc226272ca8c6860da",
+      "reason": "Сверить оракул чужого/неизвестного ID питомца при GET и POST формы визита (ResponseStatusException против IllegalArgumentException) с TC-B1-059 и TC-B1-060."
+    },
+    {
+      "scope_id": "cross-612f0df416387724f8fd2ce348866bd915ac10472ef00988598b313a4c802b08",
+      "reason": "TC-B1-033 (31 символ, name/size) привязан к CREQ-B1-047 (D-1 допускается). Проверить по исходнику docs/portable-owner-lifecycle-requirements.md#L0033, есть ли отдельное требование об отклонении 31 символа и коде name/size, и корректна ли привязка."
+    },
+    {
+      "scope_id": "cross-e2534b14da0873b76ade62033c6bc65e59b1cf177d78b6a6a712325f6f9dd5aa",
+      "reason": "TC-B1-020 отправляет telephone=1112223344 вместо 12345A7890 из CREQ-B1-030. Подтвердить по исходнику #L0022 и по TC-B1-018 требуемое ошибочное значение и правило поля telephone (10 цифр)."
+    },
+    {
+      "scope_id": "cross-c413a27aca0b7080df16930d95bbb9ae369929d1abc58168621502a8e9b3622e",
+      "reason": "TC-B1-024 ожидает ровно 12 владельцев («10 исходных») и объявляет общую базу. Проверить по исходнику, задано ли число исходных владельцев и изолированность базы, и согласовать с предусловиями остальных кейсов."
+    },
+    {
+      "scope_id": "cross-c85b6d636fe2ab3da25458ae1d435032135cbbd169240d7457acc789f57c166e",
+      "reason": "По индексу TC-B1-033 (имя питомца из 31 символа) и TC-B1-035 (вчерашняя дата рождения) привязаны к одному CREQ-B1-047. Проверить, что привязка TC-B1-033 верна и у обоих условий есть покрытие."
+    },
+    {
+      "scope_id": "cross-8eeb298caf805ae141e30f612af1728bc4b7ec50435ba55c8393ecb35de38888",
+      "reason": "Кейсы с чужим ID питомца в visits/new используют тот же путь загрузки питомца, что TC-B1-059/060. Нужно сверить, какой оракул ошибки (класс исключения/сообщение, наличие 404) там выбран, чтобы по документу был один согласованный механизм «питомец не найден у указанного владельца» для GET и POST."
+    },
+    {
+      "scope_id": "cross-37f1754061b96ea391e46eafc06d004cc85c37d066c4b5851d9fcb4750d69cf6",
+      "reason": "Проверь, что предложенные правки сохраняют смысл кейсов TC-B1-057, TC-B1-058 и не создают противоречий с остальными кейсами этой части."
+    },
+    {
+      "scope_id": "cross-c0abeeebf8c114fe1924015612a3d3401a8a7b97eb871ab9249f76071ca3515f",
+      "reason": "Проверь, что предложенные правки сохраняют смысл кейсов TC-B1-057, TC-B1-058 и не создают противоречий с остальными кейсами этой части."
+    },
+    {
+      "scope_id": "cross-e793f0eab6fc8317f2b7f3504d3d03b60aca2babfefc5421867c7f03e994d45a",
+      "reason": "Проверь, что предложенные правки сохраняют смысл кейсов TC-B1-057, TC-B1-058 и не создают противоречий с остальными кейсами этой части."
+    },
+    {
+      "scope_id": "cross-15466eae08f06f85facb310b9957c852aa56709001bd5b46eeb75c701c33254c",
+      "reason": "Проверь, что предложенные правки сохраняют смысл кейсов TC-B1-057, TC-B1-058 и не создают противоречий с остальными кейсами этой части."
+    }
+  ],
+  "found": 12,
+  "seeds": 12,
+  "rows": [
+    {
+      "id": "L1",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "BOUNDARY_VALUE_WRONG_LENGTH",
+          "related_ids": [
+            "TC-B1-012",
+            "ASSERT-B1-012-03-1-1",
+            "INPUT-B1-012-02-3",
+            "CREQ-B1-020"
+          ],
+          "message": "ASSERT-B1-012-03-1-1 ждёт firstName из 29 латинских A, тогда как INPUT-B1-012-02-3 передаёт 30 (граница CREQ-B1-020, тот же текст в EXP-012-03-1: «30 латинских A»). Сохранённое значение никогда не совпадёт: ожидание неверно, граница не доказана."
+        },
+        {
+          "severity": "WARNING",
+          "code": "VACUOUS_BASELINE_ASSERTION",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "TC-B1-016",
+            "TC-B1-024",
+            "TC-B1-028"
+          ],
+          "message": "Во вводных шагах кейсов TC-B1-002..018, TC-B1-024..026, TC-B1-028 ожидание «Зафиксированы записи... количество» не наблюдаемо, assertion project_result:count greater_or_equal 0 всегда истинно (например ASSERT-B1-002-01-1-1, ASSERT-B1-024-02-1-1). Шаг ничего не доказывает; значимую проверку несёт только последующая delta/сравнение."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_LITERAL_MISMATCH",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "INPUT-B1-012-02-3",
+            "STEP-B1-012-03",
+            "ASSERT-B1-012-03-1-1",
+            "CREQ-B1-020",
+            "TC-B1-014"
+          ],
+          "message": "Парные граничные кейсы TC-B1-012 и TC-B1-014 построены одинаково, но расходятся в литерале проверки: в TC-B1-014 ASSERT-B1-014-03-1-2 сравнивает lastName с 30 A (как отправлено), а в TC-B1-012 ASSERT-B1-012-03-1-1 сравнивает firstName с 29 A, хотя INPUT-B1-012-02-3 отправляет 30 A (CREQ-B1-020). При корректном сохранении assertion упадёт; требование «имя из 30 A принимается и сохраняется» фактически не проверяется. Литерал не подлежит механической правке."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "BOUNDARY_LITERAL_MISMATCH",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-03",
+            "EXP-B1-012-03-1",
+            "ASSERT-B1-012-03-1-1",
+            "INPUT-B1-012-02-3",
+            "CREQ-B1-020"
+          ],
+          "message": "В TC-B1-012 отправлено firstName из 30 латинских A (INPUT-B1-012-02-3, test_data STEP-B1-012-02), EXP-B1-012-03-1 обещает сохранение 30 A, но ASSERT-B1-012-03-1-1 сравнивает firstName с строкой из 29 A. Парный кейс TC-B1-014 для lastName корректно сверяет 30 A (ASSERT-B1-014-03-1-2). Assertion не проверяет границу CREQ-B1-020 и упадёт на корректной реализации; литерал assertion механически не правится."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "LITERAL_LENGTH_MISMATCH",
+          "related_ids": [
+            "TC-B1-012",
+            "ASSERT-B1-012-03-1-1",
+            "CREQ-B1-020"
+          ],
+          "message": "ASSERT-B1-012-03-1-1 сравнивает firstName с 29 символами A, а отправлено 30 (INPUT-B1-012-02-3, CREQ-B1-020); проверка сохранения граничного значения не сможет пройти."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "L2",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_EXPECTATION",
+          "related_ids": [
+            "TC-B1-016",
+            "ASSERT-B1-016-03-1-1",
+            "EXP-B1-016-03-1",
+            "CREQ-B1-025"
+          ],
+          "message": "ASSERT-B1-016-03-1-1: project_result:delta equals 1, но EXP-B1-016-03-1 говорит, что количество изменилось на 0, а CREQ-B1-025 требует отклонить телефон 123456789 без создания владельца. Ожидаемое значение должно быть 0 (все остальные отрицательные кейсы проверяют delta 0)."
+        },
+        {
+          "severity": "WARNING",
+          "code": "VACUOUS_BASELINE_ASSERTION",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "TC-B1-016",
+            "TC-B1-024",
+            "TC-B1-028"
+          ],
+          "message": "Во вводных шагах кейсов TC-B1-002..018, TC-B1-024..026, TC-B1-028 ожидание «Зафиксированы записи... количество» не наблюдаемо, assertion project_result:count greater_or_equal 0 всегда истинно (например ASSERT-B1-002-01-1-1, ASSERT-B1-024-02-1-1). Шаг ничего не доказывает; значимую проверку несёт только последующая delta/сравнение."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_EXPECTATION",
+          "related_ids": [
+            "TC-B1-016",
+            "STEP-B1-016-03",
+            "EXP-B1-016-03-1",
+            "ASSERT-B1-016-03-1-1",
+            "CREQ-B1-025",
+            "TC-B1-018"
+          ],
+          "message": "Один и тот же вызов owner_count_delta после отклонённой формы: во всех соседних кейсах отклонения (TC-B1-002…011, 013, 015, 018) assertion delta equals 0, а в TC-B1-016 ASSERT-B1-016-03-1-1 требует delta equals 1, хотя EXP-B1-016-03-1 говорит «изменилось на 0» и CREQ-B1-025 требует «без создания владельца». Assertion противоречит собственному ожиданию и требованию; при корректном поведении шаг упадёт, при дефекте (владелец создан) — пройдёт. Литерал не исправляется механически — нужна доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "STEP-B1-017-02",
+            "EXP-B1-017-02-1",
+            "ASSERT-B1-017-02-1-1",
+            "EXP-B1-017-03-1",
+            "ASSERT-B1-017-03-1-1",
+            "CREQ-B1-026",
+            "TC-B1-016",
+            "TC-B1-018"
+          ],
+          "message": "Один вызов POST /owners/new с телефоном вне формата 10 цифр: TC-B1-016 (9 цифр) и TC-B1-018 (буква) ожидают форму с ошибкой telephone и delta 0, а TC-B1-017 (11 цифр) ожидает создание владельца (view owners/ownerDetails, errorFields [], delta 1), титул «Сохранение владельца…». CREQ-B1-026 требует отклонение без создания владельца; категория кейса negative. Ожидание инвертировано (CREQ-B1-007 запрещает ослабление). Также после успешного POST TC-B1-001/012/014 наблюдают redirect (redirectOwnerId, createdRedirectMatches), а не view ownerDetails."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_EXPECTED",
+          "related_ids": [
+            "TC-B1-016",
+            "STEP-B1-016-03",
+            "EXP-B1-016-03-1",
+            "ASSERT-B1-016-03-1-1",
+            "CREQ-B1-025"
+          ],
+          "message": "В TC-B1-016 EXP-B1-016-03-1 гласит «Количество владельцев изменилось на 0», а ASSERT-B1-016-03-1-1 проверяет delta equals 1. CREQ-B1-025 требует отклонение телефона 123456789 без создания владельца. Тот же вызов owner_count_delta после отклонённого POST /owners/new во всех остальных негативных кейсах части (TC-B1-002…015, TC-B1-018) ожидает delta equals 0. Assertion проверяет противоположное требованию и собственному ожиданию; литерал не подлежит механической правке — требуется доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_CONTRADICTS_EXPECTATION",
+          "related_ids": [
+            "TC-B1-016",
+            "ASSERT-B1-016-03-1-1",
+            "EXP-B1-016-03-1",
+            "CREQ-B1-025"
+          ],
+          "message": "ASSERT-B1-016-03-1-1: delta equals 1, а EXP-B1-016-03-1 и CREQ-B1-025 требуют отклонения без создания владельца (изменение на 0). Утверждение противоречит ожиданию и ломает проверку непроникновения записи."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "SR1",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "CASE_TITLE_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "CREQ-B1-026"
+          ],
+          "message": "TC-B1-017 'Сохранение владельца с телефоном 12345678901' связан с CREQ-B1-026 (SRC-1:L18): 11 цифр отклоняются с ошибкой telephone без создания записи. Название декларирует сохранение, обратное требованию; нужно проверить шаги и ожидания кейса на ожидание успеха."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "EXP-B1-017-02-1",
+            "ASSERT-B1-017-02-1-1",
+            "ASSERT-B1-017-03-1-1",
+            "CREQ-B1-026"
+          ],
+          "message": "CREQ-B1-026: телефон 12345678901 отклоняется ошибкой telephone без создания владельца. TC-B1-017 (категория negative, цель «не допустить телефон вне формата десяти цифр») ожидает создание, view owners/ownerDetails, errorFields [] и delta 1. Ожидание ослаблено до фактического поведения, название «Сохранение...» тоже противоречит требованию."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "STEP-B1-017-02",
+            "EXP-B1-017-02-1",
+            "ASSERT-B1-017-02-1-1",
+            "EXP-B1-017-03-1",
+            "ASSERT-B1-017-03-1-1",
+            "CREQ-B1-026",
+            "TC-B1-016",
+            "TC-B1-018"
+          ],
+          "message": "Один вызов POST /owners/new с телефоном вне формата 10 цифр: TC-B1-016 (9 цифр) и TC-B1-018 (буква) ожидают форму с ошибкой telephone и delta 0, а TC-B1-017 (11 цифр) ожидает создание владельца (view owners/ownerDetails, errorFields [], delta 1), титул «Сохранение владельца…». CREQ-B1-026 требует отклонение без создания владельца; категория кейса negative. Ожидание инвертировано (CREQ-B1-007 запрещает ослабление). Также после успешного POST TC-B1-001/012/014 наблюдают redirect (redirectOwnerId, createdRedirectMatches), а не view ownerDetails."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_WEAKENED_AGAINST_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-017",
+            "STEP-B1-017-02",
+            "EXP-B1-017-02-1",
+            "ASSERT-B1-017-02-1-1",
+            "ASSERT-B1-017-02-1-2",
+            "EXP-B1-017-03-1",
+            "ASSERT-B1-017-03-1-1",
+            "CREQ-B1-026"
+          ],
+          "message": "CREQ-B1-026: телефон 12345678901 отклоняется с ошибкой telephone без создания владельца. TC-B1-017 ожидает обратное: заголовок «Сохранение…», EXP-B1-017-02-1 «Создан владелец», errorFields [], delta 1. Соседние TC-B1-016 (9 цифр) и TC-B1-018 (буква) для того же POST /owners/new ожидают createOrUpdateOwnerForm, errorFields [\"telephone\"], delta 0. ASSERT-B1-017-02-1-1 view \"owners/ownerDetails\" также противоречит успешным POST в TC-B1-001/012/014, где результат — redirect (redirectOwnerId, createdRedirectMatches). Ожидание перевёрнуто относительно требования."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_WEAKENED_TO_IMPLEMENTATION",
+          "related_ids": [
+            "TC-B1-017",
+            "EXP-B1-017-02-1",
+            "ASSERT-B1-017-02-1-1",
+            "CREQ-B1-026"
+          ],
+          "message": "CREQ-B1-026: телефон 12345678901 отклоняется с ошибкой telephone без создания владельца. TC-B1-017 (EXP-B1-017-02-1, ASSERT-B1-017-02-1-1/-1-2, STEP-B1-017-03 delta 1) ждёт создание владельца и view ownerDetails: ожидание подогнано под реализацию вопреки CREQ-B1-007."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "SR2",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "CASE_TITLE_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-041",
+            "CREQ-B1-054"
+          ],
+          "message": "TC-B1-041 'Создание второго питомца Rex у владельца Rex' связан с CREQ-B1-054 (P05, SRC-1:L39): создание Rex при сохранённом Rex того же владельца возвращает name/duplicate. Название говорит о создании, требование - об отклонении (ср. TC-B1-042); проверить ожидания кейса."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-041",
+            "STEP-B1-041-03",
+            "EXP-B1-041-03-1",
+            "ASSERT-B1-041-03-1-1",
+            "STEP-B1-041-04",
+            "ASSERT-B1-041-04-1-1",
+            "ASSERT-B1-041-04-1-2",
+            "CREQ-B1-054",
+            "TC-B1-042"
+          ],
+          "message": "Один вызов POST /owners/{ownerId}/pets/new при уже сохранённом Rex того же владельца: TC-B1-042 (rEx) ожидает name/duplicate и petCount 1, а TC-B1-041 (точное имя Rex) ожидает создание второго Rex (view owners/ownerDetails, errorCodes []) и petCount 2. CREQ-B1-054 требует name/duplicate с неизменным числом записей; категория negative. В шаге 4 assertions несовместимы: graph equals STEP-B1-041-02.graph (карточка не изменилась) и petCount equals 2. TC-B1-043 после успешного создания наблюдает redirectOwnerId, а не view ownerDetails."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-041",
+            "CREQ-B1-054",
+            "TC-B1-042"
+          ],
+          "message": "TC-B1-041, STEP-B1-041-03/EXP-B1-041-03-1 и STEP-B1-041-04: CREQ-B1-054 требует отклонить второй Rex у того же владельца с name/duplicate без изменения числа записей, тогда как кейс ожидает создание второго Rex, view owners/ownerDetails и petCount=2. Цель «Не допустить дубликат» противоречит ожиданию. Также ASSERT-B1-041-04-1-1 (граф равен STEP-B1-041-02.graph, один питомец) несовместим с ASSERT-B1-041-04-1-2 (petCount=2). Ожидание ослаблено под реализацию."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-041",
+            "CREQ-B1-054",
+            "TC-B1-042"
+          ],
+          "message": "TC-B1-041, шаг 3 (EXP-B1-041-03-1): ожидается успешное создание второго Rex (view owners/ownerDetails, errorFields []). CREQ-B1-054 требует name/duplicate и неизменные исходный питомец и число записей. Ожидание инвертировано; TC-B1-042 (тот же вызов, rEx) ждёт name/duplicate. Название, objective и категория negative требуют отклонения."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INTERNALLY_CONTRADICTORY_ASSERTIONS",
+          "related_ids": [
+            "TC-B1-041",
+            "CREQ-B1-054"
+          ],
+          "message": "TC-B1-041, шаг 4 (EXP-B1-041-04-1): ASSERT-B1-041-04-1-1 требует граф, равный графу шага 2 (один питомец), а ASSERT-B1-041-04-1-2 — petCount равно 2. Оба не выполнимы одновременно, кейс не может пройти. Нужно привести шаги 3-4 и название к отклонению Rex с name/duplicate."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CONTRADICTORY_EXPECTATION_SAME_CALL",
+          "related_ids": [
+            "TC-B1-041",
+            "TC-B1-042",
+            "CREQ-B1-054",
+            "CREQ-B1-055",
+            "EXP-B1-041-03-1",
+            "EXP-B1-041-04-1",
+            "ASSERT-B1-041-03-1-1",
+            "ASSERT-B1-041-04-1-1",
+            "ASSERT-B1-041-04-1-2"
+          ],
+          "message": "Один вызов POST /owners/{ownerId}/pets/new при сохранённом Rex у Anna: TC-B1-042 (rEx) ожидает name/duplicate, TC-B1-041 (Rex) — создание второго питомца (view owners/ownerDetails, petCount 2). CREQ-B1-054 требует для Rex ту же ошибку name/duplicate и неизменное число записей; ожидание TC-B1-041 противоречит требованию (категория negative, objective «не допустить дубликат»). В STEP-B1-041-04 graph equals STEP-B1-041-02.graph несовместим с petCount equals 2; оракул view=\"owners/ownerDetails\" расходится с redirectOwnerId в STEP-B1-036-04/043-04/062-06 для того же вызова."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "X1",
+      "class": "same-call-different-expectations",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_DOES_NOT_MATCH_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-020",
+            "STEP-B1-020-03",
+            "INPUT-B1-020-03-3",
+            "CREQ-B1-030"
+          ],
+          "message": "CREQ-B1-030 и название кейса требуют ошибочный телефон 12345A7890, но STEP-B1-020-03 (data и INPUT-B1-020-03-3) отправляет валидный telephone=\"1112223344\" (как в TC-B1-019, где он принимается), а EXP/ASSERT-020-03 ждут ошибку telephone. Шаг не может дать заявленный результат; отклонение ошибочного телефона не проверяется."
+        },
+        {
+          "severity": "WARNING",
+          "code": "BASELINE_NOT_ASSERTED",
+          "related_ids": [
+            "TC-B1-019",
+            "EXP-B1-019-02-1",
+            "TC-B1-020",
+            "EXP-B1-020-02-1"
+          ],
+          "message": "EXP-B1-019-02-1 и EXP-B1-020-02-1 обещают, что исходная карточка содержит контакты Anna и Rex с визитом «Контрольный осмотр», а assertions проверяют только petCount=1 и cardMatchesStorage. Имя питомца, контакты и визит в базовом снимке не проверены, затем кейсы сравнивают с этим снимком."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CASE_DATA_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-020",
+            "STEP-B1-020-03",
+            "INPUT-B1-020-03-3",
+            "CREQ-B1-030"
+          ],
+          "message": "CREQ-B1-030 требует ошибочный телефон 12345A7890 при редактировании; TC-B1-020 шаг 3 отправляет telephone=\"1112223344\" (10 цифр — допустимое значение по правилу поля, см. индекс TC-B1-016/017/018) и ожидает ошибку telephone и неизменный граф. Целевая ветвь отклонения не достигается, кейс не покрывает CREQ-B1-030 и расходится с TC-B1-018, где то же значение 12345A7890 отклоняется при создании. Литерал не исправляется механически — доработка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "X2",
+      "class": "same-call-different-expectations",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "EXPECTED_WITHOUT_ASSERTION",
+          "related_ids": [
+            "TC-B1-057",
+            "STEP-B1-057-02",
+            "EXP-B1-057-02-1",
+            "TC-B1-058",
+            "STEP-B1-058-02",
+            "EXP-B1-058-02-1"
+          ],
+          "message": "В TC-B1-057 и TC-B1-058 шаг visits_state озаглавлен «Запомнить визиты и определить отсутствующий ID питомца», а EXP обещает «выбранный отсутствующий ID не принадлежит ни одному питомцу», хотя сценарий использует foreignPetId (Rex владельца Boris) из шага 1, выход absentPetId не привязан, и единственный assertion — count greater_than 0. Ожидание описывает проверку, которой в кейсе нет и которая относится к сценарию неизвестного ID (CREQ-B1-072/073), а не чужого питомца."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "UNSUPPORTED_ORACLE_CONTRADICTS_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-059",
+            "STEP-B1-059-03",
+            "EXP-B1-059-03-1",
+            "ASSERT-B1-059-03-1-1",
+            "ASSERT-B1-059-03-1-2",
+            "CREQ-B1-072",
+            "TC-B1-060"
+          ],
+          "message": "STEP-B1-059-03 ждёт 404 Not Found / ResponseStatusException (EXP-B1-059-03-1, ASSERT-...-1-1/-1-2), но CREQ-B1-072 говорит «HTTP-код не задан» и требует ошибку «питомец не найден у указанного владельца»; текста ошибки нет. Тот же случай в POST (TC-B1-060) ждёт IllegalArgumentException. Оракул выдуман и несогласован между GET и POST."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "UNSUPPORTED_AND_INCONSISTENT_ORACLE",
+          "related_ids": [
+            "TC-B1-059",
+            "TC-B1-060",
+            "CREQ-B1-072",
+            "CREQ-B1-073",
+            "EXP-B1-059-03-1"
+          ],
+          "message": "EXP-B1-059-03-1 фиксирует «404 Not Found» и ResponseStatusException/404 NOT_FOUND, но CREQ-B1-072 прямо говорит «HTTP-код не задан» и требует ошибку «питомец не найден у указанного владельца». Тот же отсутствующий petId в пути в TC-B1-060 (CREQ-B1-073, POST) ожидает IllegalArgumentException из loadPetWithVisit «not found for owner with id». Для одной и той же ситуации оракулы различаются без доказанного источника; код 404 не подтверждён требованием."
+        },
+        {
+          "severity": "WARNING",
+          "code": "STEP_DESCRIBES_UNUSED_ABSENT_ID",
+          "related_ids": [
+            "TC-B1-057",
+            "TC-B1-058"
+          ],
+          "message": "TC-B1-057 и TC-B1-058, шаг 2: действие «определить отсутствующий ID питомца» и ожидание «выбранный отсутствующий ID не принадлежит ни одному питомцу» не относятся к сценарию чужого ID (используется foreignPetId Boris); ID не выбирается, проверяется лишь count > 0. Формулировка вводит в заблуждение, это шаблон кейсов с неизвестным ID."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INCONSISTENT_NOT_FOUND_ORACLE",
+          "related_ids": [
+            "TC-B1-059",
+            "TC-B1-060",
+            "CREQ-B1-072",
+            "CREQ-B1-073",
+            "EXP-B1-059-03-1",
+            "ASSERT-B1-059-03-1-1",
+            "ASSERT-B1-059-03-1-2",
+            "EXP-B1-060-04-1",
+            "ASSERT-B1-060-04-1-1"
+          ],
+          "message": "GET и POST /owners/{ownerId}/pets/{petId}/visits/new с одинаково отсутствующим petId (та же подготовка, один путь загрузки питомца loadPetWithVisit) ожидают разные ошибки: TC-B1-060 — IllegalArgumentException «not found for owner with id», TC-B1-059 — ResponseStatusException «404 NOT_FOUND» и «Сервер отвечает 404 Not Found». CREQ-B1-072/073 задают одну ошибку «питомец не найден у указанного владельца» и явно говорят «HTTP-код не задан»: оракул 404 в EXP-B1-059-03-1 не подтверждён требованием и противоречит TC-B1-060. Нужен один обоснованный оракул для обоих кейсов."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "UNSUPPORTED_HTTP_STATUS_ORACLE",
+          "related_ids": [
+            "TC-B1-059",
+            "EXP-B1-059-03-1",
+            "CREQ-B1-072"
+          ],
+          "message": "EXP-B1-059-03-1 и ASSERT-B1-059-03-1-1/-2 требуют 404 NOT_FOUND и ResponseStatusException, а CREQ-B1-072 задаёт серверную ошибку «питомец не найден у указанного владельца» и прямо говорит, что HTTP-код не задан. Для того же условия TC-B1-060 (POST) и TC-B1-057 ждут IllegalArgumentException «not found for owner with id». Происхождение 404 не указано: неподдержанный и противоречивый оракул."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "C1",
+      "class": "count-of-shared-resource",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_DB_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "ASSERT-B1-001-01-1-1",
+            "TC-B1-024",
+            "ASSERT-B1-024-03-1-2"
+          ],
+          "message": "TC-B1-001 и TC-B1-024 заявляют общую базу, которую меняют остальные сценарии, но жёстко проверяют состав базы: ASSERT-B1-001-01-1-1 count=10 и ASSERT-B1-024-03-1-2 count=12. Результат зависит от порядка запуска (CREQ-B1-004), TC-B1-025/026 тот же сценарий ведут в отдельной базе. Нужна изолированная исходная база либо проверка без фиксированного числа."
+        },
+        {
+          "severity": "WARNING",
+          "code": "VACUOUS_BASELINE_ASSERTION",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "TC-B1-016",
+            "TC-B1-024",
+            "TC-B1-028"
+          ],
+          "message": "Во вводных шагах кейсов TC-B1-002..018, TC-B1-024..026, TC-B1-028 ожидание «Зафиксированы записи... количество» не наблюдаемо, assertion project_result:count greater_or_equal 0 всегда истинно (например ASSERT-B1-002-01-1-1, ASSERT-B1-024-02-1-1). Шаг ничего не доказывает; значимую проверку несёт только последующая delta/сравнение."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "UNSUPPORTED_ORACLE_SHARED_STATE",
+          "related_ids": [
+            "TC-B1-024",
+            "CREQ-B1-033"
+          ],
+          "message": "TC-B1-024, preconditions и STEP-B1-024-03/ASSERT-B1-024-03-1-2: предусловие описывает общую базу, где другие сценарии создают и меняют владельцев, а ожидание и assert требуют ровно 12 владельцев (10 исходных, Anna, Boris). Число зависит от порядка запуска и противоречит TC-B1-025/026, где база отдельная и сверка идёт со снимком шага 2. CREQ-B1-033 не задаёт число 12."
+        },
+        {
+          "severity": "WARNING",
+          "code": "VACUOUS_ASSERTION",
+          "related_ids": [
+            "TC-B1-024",
+            "TC-B1-025",
+            "TC-B1-026",
+            "TC-B1-028"
+          ],
+          "message": "STEP-B1-024-02, STEP-B1-025-02, STEP-B1-026-02, STEP-B1-028-01 (ASSERT-…-1 count greater_or_equal 0) и STEP-B1-028-02 (state exists): проверка выполняется для любого результата, хотя ожидание обещает зафиксированные записи и количество. Снимок используется позже, потому критично лишь для читаемости ожиданий."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ORDER_DEPENDENT_ABSOLUTE_COUNT",
+          "related_ids": [
+            "TC-B1-024",
+            "ASSERT-B1-024-03-1-2",
+            "EXP-B1-024-03-1",
+            "CREQ-B1-004",
+            "CREQ-B1-033"
+          ],
+          "message": "TC-B1-024 утверждает абсолютное число владельцев 12 («10 исходных, Anna и Boris»), а его предусловие объявляет общую базу, которую меняют остальные сценарии (TC-B1-021/022/025/026/027/029 создают владельцев); остальные 25 кейсов части заявляют отдельную базу. В объявленной среде оракул зависит от порядка запуска — нарушение CREQ-B1-004; CREQ-B1-033 требует лишь поиск всех владельцев, число 12 источником не задано. TC-B1-025/026 используют относительную проверку из шага 2. Нужна доработка: согласовать предусловие и заменить абсолютный счётчик."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ABSOLUTE_COUNT_ON_SHARED_STATE",
+          "related_ids": [
+            "TC-B1-024",
+            "STEP-B1-024-03",
+            "ASSERT-B1-024-03-1-2",
+            "TC-B1-025",
+            "TC-B1-026"
+          ],
+          "message": "ASSERT-B1-024-03-1-2 (STEP-B1-024-03) требует count equals 12 (10 исходных + Anna и Boris), хотя предусловие TC-B1-024 говорит об общей базе, где другие сценарии набора создают владельцев. Число 12 ненадёжно и не следует из CREQ-B1-033. Аналогичные TC-B1-025 и TC-B1-026 сравнивают с зафиксированным STEP-02.count. Нужен тот же относительный оракул без абсолютного числа."
+        },
+        {
+          "severity": "WARNING",
+          "code": "PRECONDITION_SHARED_STATE_CONFLICT",
+          "related_ids": [
+            "TC-B1-024",
+            "TC-B1-025",
+            "TC-B1-026",
+            "TC-B1-021",
+            "TC-B1-027"
+          ],
+          "message": "Preconditions[0] TC-B1-024 заявляет «общую базу клиники», изменяемую другими сценариями, тогда как TC-B1-021, 022, 025, 026, 027 и остальные используют «отдельную исходную базу». Кейсы 021/022/027 ожидают единственного Anna PilotLifecycle и totalItems=6, что невозможно при общей базе. Условие изоляции TC-B1-024 противоречит остальным; это выбор поведения, не механическая правка."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "C2",
+      "class": "count-of-shared-resource",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "REQUIREMENT_COVERED_ONLY_IN_COMPOSITE",
+          "related_ids": [
+            "CREQ-B1-024",
+            "TC-B1-001"
+          ],
+          "message": "O04 (SRC-1:L18): корректный телефон 0123456789 принимается, начальный ноль сохраняется. CREQ-B1-024 связано лишь с составным TC-B1-001; отдельного кейса нет. Нужно убедиться, что TC-B1-001 проверяет строку телефона 0123456789 в независимом чтении, а не только число полей."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_DB_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "ASSERT-B1-001-01-1-1",
+            "TC-B1-024",
+            "ASSERT-B1-024-03-1-2"
+          ],
+          "message": "TC-B1-001 и TC-B1-024 заявляют общую базу, которую меняют остальные сценарии, но жёстко проверяют состав базы: ASSERT-B1-001-01-1-1 count=10 и ASSERT-B1-024-03-1-2 count=12. Результат зависит от порядка запуска (CREQ-B1-004), TC-B1-025/026 тот же сценарий ведут в отдельной базе. Нужна изолированная исходная база либо проверка без фиксированного числа."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ABSOLUTE_COUNT_ON_SHARED_STATE",
+          "related_ids": [
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "EXP-B1-001-01-1",
+            "ASSERT-B1-001-01-1-1",
+            "CREQ-B1-004"
+          ],
+          "message": "TC-B1-001 единственный в части заявляет в preconditions общую базу («остальные сценарии набора создают и меняют в ней владельцев») и при этом фиксирует абсолютное число владельцев: EXP-B1-001-01-1 «ровно 10 владельцев», ASSERT-B1-001-01-1-1 count equals 10. Владельцев создают TC-B1-012, 014, 017, 019, 036–047 (prepare/POST /owners/new), поэтому результат зависит от порядка запуска и нарушает CREQ-B1-004 (изоляция, независимость от порядка). Остальные 30 кейсов используют «отдельная исходная база» и count greater_or_equal 0 с относительной delta. Число 10 ничем в части не подтверждено."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ABSOLUTE_COUNT_SHARED_STATE",
+          "related_ids": [
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "EXP-B1-001-01-1",
+            "ASSERT-B1-001-01-1-1",
+            "CREQ-B1-004"
+          ],
+          "message": "ASSERT-B1-001-01-1-1 требует ровно 10 владельцев в базе (EXP-B1-001-01-1 «ровно 10 владельцев»), а предусловие TC-B1-001 объявляет общую базу, которую меняют остальные сценарии; TC-B1-012, TC-B1-014, TC-B1-017 и все кейсы с CAP-B1-prepare (019, 048–058) создают владельцев в той же базе. Абсолютный счётчик ресурса, который меняют другие кейсы, нарушает CREQ-B1-004 (изоляция и независимость от порядка) и расходится с остальными 29 кейсами части, где тот же шаг owners_state ожидает count greater_or_equal 0, а предусловие — «отдельная исходная база». Число 10 не выводится ни из одного CREQ."
+        },
+        {
+          "severity": "WARNING",
+          "code": "CROSS_SHARED_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-001",
+            "STEP-B1-001-01",
+            "ASSERT-B1-001-01-1-1",
+            "CREQ-B1-004"
+          ],
+          "message": "TC-B1-001 pre: «общая база, другие сценарии в ней создают и меняют данные», но ASSERT-B1-001-01-1-1 фиксирует ровно 10 владельцев (число нигде не в CREQ). В остальных кейсах — «отдельная исходная база» и count >= 0. Это противоречит изоляции и независимости от порядка (CREQ-B1-004)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "R1",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-036",
+            "SREQ-0010"
+          ],
+          "message": "Исходник O07 (SRC-1:L24): несуществующий префикс NoSuchLifecycle возвращает форму поиска с ошибкой lastName/notFound. CREQ-B1-036 не связано ни с одним кейсом индекса, проверки нет; capability search выдаёт view и errorCodes. В нумерации TC-B1-022 -> TC-B1-024 нет TC-B1-023: похоже, кейс потерян. Нужен кейс."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "F1",
+      "class": "foreign-requirement-link",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_WITHOUT_CASE",
+          "related_ids": [
+            "CREQ-B1-045",
+            "TC-B1-033",
+            "CREQ-B1-047"
+          ],
+          "message": "P02 (SRC-1:L33): имя питомца из 31 символа даёт ошибку name/size без создания. CREQ-B1-045 не связано с кейсами. TC-B1-033 'Отклонение питомца при имени из 31 символа' связан с CREQ-B1-047 (дата рождения D-1 допускается) - ссылка на нерелевантное требование; CREQ-B1-047 при этом ссылается и TC-B1-035. Привязать TC-B1-033 к CREQ-B1-045."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_LINKED_TO_WRONG_CASE",
+          "related_ids": [
+            "TC-B1-033",
+            "CREQ-B1-047",
+            "CREQ-B1-044"
+          ],
+          "message": "TC-B1-033 (31 символ в имени питомца, name/size) связан с CREQ-B1-047 (дата рождения D-1 допускается), то есть с нерелевантным требованием. Требования об отклонении имени из 31 символа в нумерации CREQ-B1-044..046 нет (045 пропущен), и кейс на него не ссылается: трассировка условия нарушена."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "WRONG_REQUIREMENT_LINK",
+          "related_ids": [
+            "TC-B1-033",
+            "CREQ-B1-047"
+          ],
+          "message": "TC-B1-033 (отклонение имени питомца из 31 символа, name/size) привязан к CREQ-B1-047 — «дата рождения D-1 допускается». Требование про 31 символ в части не представлено, так что отклонение имени длиной 31 не отслежено на нужное CREQ, а CREQ-B1-047 оказался связан с несвязанным кейсом. Нужно исправить связь."
+        },
+        {
+          "severity": "WARNING",
+          "code": "REQUIREMENT_LINK_IRRELEVANT",
+          "related_ids": [
+            "TC-B1-033",
+            "TC-B1-035",
+            "CREQ-B1-047",
+            "CREQ-B1-044"
+          ],
+          "message": "TC-B1-033 (имя из 31 символа отклоняется с name/size) привязан только к CREQ-B1-047 «дата рождения D-1 допускается» — к тому же требованию, что и TC-B1-035. Ни одно требование части не задаёт отклонение 31 символа и код name/size (CREQ-B1-044 покрывает только 30 символов; CREQ-B1-045 в части отсутствует). Требование привязано к нерелевантному кейсу; покрытие условия 31 символа не доказано. Нужна сверка с исходником."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "REQUIREMENT_LINKED_TO_IRRELEVANT_CASE",
+          "related_ids": [
+            "TC-B1-033",
+            "TC-B1-035",
+            "CREQ-B1-047"
+          ],
+          "message": "TC-B1-033 (отклонение имени питомца из 31 символа, name/size) привязан к CREQ-B1-047 «дата рождения D-1 допускается», как и TC-B1-035. Условие отклонения имени из 31 символа (между CREQ-B1-044 и CREQ-B1-046; CREQ-B1-045 в индексе документа не связан ни с одним кейсом) остаётся без корректной ссылки, а CREQ-B1-047 связан с нерелевантным кейсом. Ссылка на требование не равна покрытию."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "M1",
+      "class": "wrong-component",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "MANAGEMENT_COMPONENT_INCONSISTENT",
+          "related_ids": [
+            "TC-B1-050"
+          ],
+          "message": "TC-B1-050 (запись визита питомцу владельца) имеет management.components [\"Ветеринары\"], тогда как остальные 29 кейсов части, включая соседние визитные TC-B1-049 и TC-B1-051…058, относятся к компоненту «Владельцы и питомцы»; CREQ-B1-002 явно исключает ветеринаров из объёма. Предложена механическая правка."
+        },
+        {
+          "severity": "WARNING",
+          "code": "MANAGEMENT_COMPONENT_INCONSISTENT",
+          "related_ids": [
+            "TC-B1-050",
+            "CREQ-B1-002"
+          ],
+          "message": "TC-B1-050 management.components=[\"Ветеринары\"], тогда как остальные 25 кейсов части используют \"Владельцы и питомцы\"; CREQ-B1-002 исключает ветеринаров из объёма. Кейс о визите питомца владельца Anna относится к тому же компоненту. Предложена механическая правка."
+        },
+        {
+          "severity": "WARNING",
+          "code": "COMPONENT_LABEL_INCONSISTENT",
+          "related_ids": [
+            "TC-B1-050",
+            "CREQ-B1-002"
+          ],
+          "message": "TC-B1-050, management.components[0]=«Ветеринары»: кейс про запись визита выбранному питомцу владельца, а ветеринары исключены из границ (CREQ-B1-002). Остальные кейсы части используют «Владельцы и питомцы»."
+        },
+        {
+          "severity": "WARNING",
+          "code": "WRONG_COMPONENT_LABEL",
+          "related_ids": [
+            "TC-B1-050",
+            "CREQ-B1-002"
+          ],
+          "message": "У TC-B1-050 management.components[0] = «Ветеринары», хотя кейс про запись визита владельца у выбранного питомца, а CREQ-B1-002 исключает ветеринаров из границ. Остальные кейсы части (TC-B1-049, -051..-064) имеют «Владельцы и питомцы»."
+        }
+      ],
+      "corrections": [
+        {
+          "path": "/test_cases/48/management/components/0",
+          "after": "Владельцы и питомцы"
+        }
+      ]
+    },
+    {
+      "id": "P1",
+      "class": "result-not-in-capability",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "RESULT_NOT_IN_CAPABILITY",
+          "related_ids": [
+            "TC-B1-032",
+            "ASSERT-B1-032-04-1-5",
+            "STEP-B1-032-04",
+            "CAP-B1-pet_read"
+          ],
+          "message": "ASSERT-B1-032-04-1-5 читает project_result:species, которого нет в результатах CAP-B1-pet_read (есть type). Другие кейсы (TC-B1-029 ASSERT-029-05-1-5, TC-B1-035) проверяют project_result:type equals \"dog\". Утверждение неисполнимо; тип питомца не проверен."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "RESULT_NOT_IN_CAPABILITY",
+          "related_ids": [
+            "TC-B1-032",
+            "CAP-B1-pet_read",
+            "CREQ-B1-044"
+          ],
+          "message": "TC-B1-032, STEP-B1-032-04, ASSERT-B1-032-04-1-5: проверка project_result:species equals \"dog\" читает результат, которого нет у CAP-B1-pet_read (есть type). Тип питомца не проверен; в TC-B1-029/035/036 та же проверка записана как type. Нужно заменить species на type, это смена структуры и не механическая правка текста."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_RESULT_NOT_IN_CAPABILITY",
+          "related_ids": [
+            "TC-B1-032",
+            "STEP-B1-032-04",
+            "ASSERT-B1-032-04-1-5",
+            "CAP-B1-pet_read"
+          ],
+          "message": "Один и тот же вызов CAP-B1-pet_read в TC-B1-029 (ASSERT-B1-029-05-1-5) и TC-B1-035 (ASSERT-B1-035-05-1-5) проверяет результат type, а TC-B1-032 проверяет species, которого нет среди результатов CAP-B1-pet_read. Тип сохранённого питомца с именем из 30 символов не наблюдается; оракул не поддержан (CREQ-B1-044 «принимается и сохраняется»). Селектор assertion — структура, механической правки нет; требуется доработка."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_RESULT_NOT_IN_CAPABILITY",
+          "related_ids": [
+            "TC-B1-032",
+            "STEP-B1-032-04",
+            "ASSERT-B1-032-04-1-5",
+            "CAP-B1-pet_read"
+          ],
+          "message": "ASSERT-B1-032-04-1-5 (STEP-B1-032-04, TC-B1-032) проверяет project_result:species, но CAP-B1-pet_read такого результата не возвращает (есть type). Остальные кейсы (TC-B1-029, TC-B1-035, TC-B1-062) для того же типа питомца используют type. Проверка типа dog у питомца с именем из 30 символов не выполнима; исправление меняет структуру assertion, поэтому не механическое."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 21,
+    "WARNING": 19,
+    "BLOCKING": 40
+  },
+  "unseeded_blocking_warning": [
+    {
+      "severity": "BLOCKING",
+      "code": "REQUIREMENT_WITHOUT_CASE",
+      "message": "O01 (SRC-1:L12): открытие формы создания владельца показывает поля имени, фамилии, адреса, города и телефона. CREQ-B1-008 не входит ни в один кейс индекса (TC-B1-001 связан только с 009 и 024). Линтер этого не отметил. Проверка formFields возможна через capability mvc; нужен шаг или кейс.",
+      "evidence": [
+        "CREQ-B1-008",
+        "SREQ-0004"
+      ],
+      "related_ids": [
+        "CREQ-B1-008",
+        "SREQ-0004"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "TEST_DATA_AMBIGUOUS_OWNER_ID",
+      "message": "Test Data шагов читает карточку Boris, но указывает «Владелец в адресе: ID из шага 1», а шаг 1 выдаёт ID обоих владельцев (ownerId Anna, otherId Boris). Человек не узнает, чей ID использовать; нужно явно указать ID Boris.",
+      "evidence": [
+        "STEP-B1-063-03",
+        "STEP-B1-063-06",
+        "STEP-B1-064-03",
+        "STEP-B1-064-08"
+      ],
+      "related_ids": [
+        "STEP-B1-063-03",
+        "STEP-B1-063-06",
+        "STEP-B1-064-03",
+        "STEP-B1-064-08"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "BASELINE_NOT_ASSERTED",
+      "message": "Ожидания говорят о визите (Anna с Rex и визитом; Rex, Luna и визит Rex), но проверяется только petCount и cardMatchesStorage. Позже visits сравниваются с этой базой (ASSERT-B1-063-05-1-8, ASSERT-B1-064-07-1-3, ASSERT-B1-062-16-1-8), и пустой визит прошёл бы: сохранность визита не доказана.",
+      "evidence": [
+        "STEP-B1-063-02",
+        "EXP-B1-063-02-1",
+        "STEP-B1-064-02",
+        "EXP-B1-064-02-1",
+        "STEP-B1-062-13",
+        "EXP-B1-062-13-1"
+      ],
+      "related_ids": [
+        "STEP-B1-063-02",
+        "EXP-B1-063-02-1",
+        "STEP-B1-064-02",
+        "EXP-B1-064-02-1",
+        "STEP-B1-062-13",
+        "EXP-B1-062-13-1"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "HUMAN_FIELD_OWNER_AMBIGUOUS",
+      "message": "TC-B1-029, STEP-B1-029-02 и STEP-B1-029-06: Test Data говорит «ID владельца получен в предыдущем шаге создания; Владелец в адресе: ID из шага 1», а вход ownerId — STEP-B1-029-01.otherId (Boris). Шаг 1 создаёт двух владельцев, и по тексту нельзя понять, чью карточку открывают; по ожиданию это Boris. В Test Data нужно назвать Boris и его ID из шага 1.",
+      "evidence": [
+        "TC-B1-029"
+      ],
+      "related_ids": [
+        "TC-B1-029"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "ORACLE_STRICTER_THAN_REQUIREMENT",
+      "message": "TC-B1-040 (шаг 3) и TC-B1-053 (шаг 3) проверяют bindingErrorFields и пишут «ошибка относится к связыванию». CREQ-B1-052 и CREQ-B1-066 требуют лишь ошибку поля type/date; связывание названо только в CREQ-B1-050. Происхождение условия в требованиях не подтверждено, оно ужесточает оракул.",
+      "evidence": [
+        "TC-B1-040",
+        "TC-B1-053",
+        "CREQ-B1-052",
+        "CREQ-B1-066"
+      ],
+      "related_ids": [
+        "TC-B1-040",
+        "TC-B1-053",
+        "CREQ-B1-052",
+        "CREQ-B1-066"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "STEP_PURPOSE_MISMATCH",
+      "message": "В TC-B1-057 и TC-B1-058 шаг 02 называется «Запомнить визиты и определить отсутствующий ID питомца», а EXP-..-02-1 утверждает, что выбранный отсутствующий ID не принадлежит питомцу. Кейсы используют чужой foreignPetId из шага 1, absentPetId не берётся и не проверяется. Ожидание описывает несуществующий результат и вводит читателя в заблуждение (human scenario rules: результат соответствует действию шага).",
+      "evidence": [
+        "STEP-B1-057-02",
+        "EXP-B1-057-02-1",
+        "STEP-B1-058-02",
+        "EXP-B1-058-02-1"
+      ],
+      "related_ids": [
+        "STEP-B1-057-02",
+        "EXP-B1-057-02-1",
+        "STEP-B1-058-02",
+        "EXP-B1-058-02-1"
+      ]
+    }
+  ],
+  "corrections": [
+    {
+      "path": "/test_cases/48/management/components/0",
+      "related_ids": [
+        "TC-B1-050"
+      ],
+      "after": "Владельцы и питомцы"
+    },
+    {
+      "path": "/test_cases/55/steps/1/action",
+      "related_ids": [
+        "TC-B1-057",
+        "STEP-B1-057-02"
+      ],
+      "after": "Запомнить сохранённую историю визитов."
+    },
+    {
+      "path": "/test_cases/55/steps/1/expectations/0/text",
+      "related_ids": [
+        "TC-B1-057",
+        "EXP-B1-057-02-1"
+      ],
+      "after": "Исходная история визитов прочитана и сохранена для последующего сравнения."
+    },
+    {
+      "path": "/test_cases/56/steps/1/action",
+      "related_ids": [
+        "TC-B1-058",
+        "STEP-B1-058-02"
+      ],
+      "after": "Запомнить сохранённую историю визитов."
+    },
+    {
+      "path": "/test_cases/56/steps/1/expectations/0/text",
+      "related_ids": [
+        "TC-B1-058",
+        "EXP-B1-058-02-1"
+      ],
+      "after": "Исходная история визитов прочитана и сохранена для последующего сравнения."
+    }
+  ],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-E309C083E2",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-036 (NoSuchLifecycle, lastName/notFound) отсутствует в индексе кейсов; исходник O07 требует его."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-1CFBF57880",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-045 (31 символ, name/size) нигде не связано; TC-B1-033 ошибочно привязан к CREQ-B1-047."
+    },
+    {
+      "part_id": "part-000002",
+      "lint_id": "LINT-62361B475D",
+      "decision": "confirmed",
+      "reason": "project_result:species нет в CAP-B1-pet_read, поле называется type; ASSERT-B1-032-04-1-5 неисполним."
+    },
+    {
+      "part_id": "part-000006",
+      "lint_id": "LINT-62361B475D",
+      "decision": "confirmed",
+      "reason": "У CAP-B1-pet_read нет результата species, есть type; ASSERT-B1-032-04-1-5 читает несуществующий результат."
+    },
+    {
+      "part_id": "part-000007",
+      "lint_id": "LINT-62361B475D",
+      "decision": "confirmed",
+      "reason": "CAP-B1-pet_read не возвращает species; TC-B1-029/035 на том же вызове проверяют type. Вынесено в finding ASSERTION_RESULT_NOT_IN_CAPABILITY."
+    },
+    {
+      "part_id": "part-000008",
+      "lint_id": "LINT-62361B475D",
+      "decision": "confirmed",
+      "reason": "CAP-B1-pet_read возвращает type, но не species; ASSERT-B1-032-04-1-5 ссылается на отсутствующий результат."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791349192.2503898,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [
+      {
+        "at": 1791349227.5302637,
+        "accepted": false,
+        "codes": [
+          "REVIEW_CHECK_SCOPE"
+        ]
+      },
+      {
+        "at": 1791349236.3869975,
+        "accepted": false,
+        "codes": [
+          "REVIEW_CHECK_SCOPE"
+        ]
+      },
+      {
+        "at": 1791349246.0613627,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000003": [
+      {
+        "at": 1791324391.5311882,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324413.8318386,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000004": [
+      {
+        "at": 1791324416.1498876,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324430.17276,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000005": [
+      {
+        "at": 1791349246.0613627,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000006": [
+      {
+        "at": 1791349197.584331,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000007": [
+      {
+        "at": 1791324450.9313352,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324463.4733949,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000008": [
+      {
+        "at": 1791349216.5872204,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000009": [
+      {
+        "at": 1791349207.0928597,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000010": [
+      {
+        "at": 1791324425.226408,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324447.9113863,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000011": [
+      {
+        "at": 1791349192.247387,
+        "accepted": false,
+        "codes": [
+          "REVIEW_PART_COVERAGE"
+        ]
+      },
+      {
+        "at": 1791349200.1684587,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

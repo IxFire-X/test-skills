@@ -1,0 +1,67 @@
+{
+  "set": "L-d1834358",
+  "mode": "compact-v1",
+  "clean": true,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55586,
+  "answer_bytes": [
+    7139
+  ],
+  "answer_bytes_total": 7139,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 0,
+  "seeds": 0,
+  "rows": [],
+  "severity_counts": {
+    "INFO": 3,
+    "WARNING": 1,
+    "BLOCKING": 0
+  },
+  "unseeded_blocking_warning": [
+    {
+      "severity": "WARNING",
+      "code": "REQUIREMENT_LINK_WITHOUT_ASSERTION",
+      "message": "CREQ-B1-011 (ровно три поля в порядке id, firstName, lastName) привязан к TC-B1-002 и TC-B1-007, но оба кейса проверяют только jsonArray/jsonObject (сравнение Map/List, порядок ключей не учитывается); проверка порядка через project_result:text есть только в TC-B1-001 (ASSERT-B1-001-01-1-4). По контракту ревью привязка ID без фактической проверки не образует покрытие: требование покрыто TC-B1-001, а связь в TC-B1-002/TC-B1-007 завышает покрытие. Нужно либо снять CREQ-B1-011 из requirements этих кейсов, либо добавить проверку text (структурное изменение — не механическая правка).",
+      "evidence": [
+        "TC-B1-002",
+        "TC-B1-007",
+        "CREQ-B1-011",
+        "ASSERT-B1-002-01-1-4",
+        "ASSERT-B1-007-01-1-2"
+      ],
+      "related_ids": [
+        "TC-B1-002",
+        "TC-B1-007",
+        "CREQ-B1-011",
+        "ASSERT-B1-002-01-1-4",
+        "ASSERT-B1-007-01-1-2"
+      ]
+    }
+  ],
+  "corrections": [],
+  "lint_dispositions": [],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324457.0447023,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791324471.201769,
+        "accepted": true,
+        "codes": []
+      },
+      {
+        "at": 1791349030.8990135,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

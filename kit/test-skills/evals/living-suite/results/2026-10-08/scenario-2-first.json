@@ -1,0 +1,31 @@
+{
+  "scenario": 2,
+  "outcome": null,
+  "counts": null,
+  "reviews": null,
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 12,
+    "by_status": {
+      "ACTIVE": 12,
+      "QUARANTINED": 0,
+      "RETIRED": 0
+    },
+    "quarantine": [],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "8b82e1c2bcd547d49da1ee6b48dd1e72"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [],
+      "methods": [],
+      "support": [],
+      "missing": []
+    }
+  },
+  "seconds_from_start": 275.5
+}

@@ -1,0 +1,640 @@
+{
+  "set": "E3",
+  "mode": "pairs",
+  "clean": false,
+  "parts": 6,
+  "missing_answers": [],
+  "input_bytes": 1061289,
+  "answer_bytes": [
+    25189,
+    27915,
+    24842,
+    28144,
+    23616,
+    56594
+  ],
+  "answer_bytes_total": 186300,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "cross-6fc628fc3c699f13ecb2daaa3b540dea8c4e4b59204b4fc41536af9f2e37df7e",
+      "reason": "The shared file FILE-B1-student-controller-pipeline-test (L89-99 tcB1001GetStudentReturnsFixedStudent, literals \"Ramseh\" and the compact JSON string for ASSERT-B1-001-01-1-4) is in this part but the canonical case TC-B1-001 is not; confirm its input/expected literals and the text-order oracle against the canonical case and SREQ-0020 in the part that owns TC-B1-001."
+    },
+    {
+      "scope_id": "cross-d3e4ab4b58ca875861189519eadd602894408521c4d98dede25a0fd3f357a0bc",
+      "reason": "The shared helper fourStudents() (StudentControllerPipelineTest L080-L085) returns three students instead of the canonical four; tcB1002GetStudentsReturnsFourStudentsInOrder compares jsonArray(response) with it at L110 (ASSERT-B1-002-01-1-4). TC-B1-002 is not a target of this part; its own scope must confirm the drift and that hasSize(4) at L109 plus the missing Sanjay element make the method fail against a conforming application."
+    },
+    {
+      "scope_id": "cross-282ba0cbaa4696b9a34602ac84269a18c33d2454b0360af29ce26fe52310be10",
+      "reason": "SYMBOL-B1-003 mutates the static field pathId (5 -> 0) that SYMBOL-B1-004 reads; confirm in the local scope of TC-B1-003 that its own path binding (\"/students/5\") is literal-safe under any method order and that the side effect on TC-B1-004 is removed together with the ORDER_DEPENDENT_SHARED_STATE finding."
+    },
+    {
+      "scope_id": "cross-1d6e540942657e758717115ea79b51c9102be8725ee01d786be1418da174a2bf",
+      "reason": "The shared helper fourStudents() returns 3 students; the local scope of TC-B1-002 must confirm that ASSERT-B1-002-01-1-4 (isEqualTo(fourStudents())) drifts from the canonical 4-element literal and contradicts ASSERT-B1-002-01-1-3 hasSize(4)."
+    },
+    {
+      "scope_id": "cross-d7da1c973bbc2e6310ce7ab764019e76430c8d80c85ff877e2bb8bef7dcacc60",
+      "reason": "Shared helper fourStudents() (L80-84) returns 3 students; tcB1002 asserts hasSize(4) (L109) and then isEqualTo(fourStudents()) (L110). Confirm against canonical TC-B1-002 expected literal in its own part and treat as the same EXPECTED_LITERAL_DRIFT defect."
+    },
+    {
+      "scope_id": "cross-3274e176bf58be4de1fa456c2889fe6a76c133c3c41eb3cf0c211b72790154b7",
+      "reason": "Static mutable pathId (L35) is set to 0 in tcB1003 (L117) and consumed by tcB1004 (L126): verify canonical path literals (/students/5 and /students/0) and confirm order dependence between the two methods in their own parts."
+    },
+    {
+      "scope_id": "cross-fec4b0b95630e2bd028f599be07d0f0cd7c2a526123eee22d6a1efb04999fc07",
+      "reason": "tcB1006GetStudentWithoutIdParameterIsBadRequest asserts status 404 (L146) while the method name says BadRequest; canonical TC-B1-006 is not in this part - verify ASSERT-B1-006-01-1-1 expected literal against the generated 404."
+    }
+  ],
+  "found": 6,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "A1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "STEP-B1-006-01",
+            "ASSERT-B1-006-01-1-1",
+            "SYMBOL-B1-006",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-005"
+          ],
+          "message": "ASSERT-B1-006-01-1-1 is generated as isEqualTo(404) while the canonical assertion expects status 400 (CREQ-B1-005: GET /students/query without id returns 400 Bad Request; Spring answers a missing required @RequestParam with 400). The test would fail against the correct application and would pass only for wrong behavior. Regenerate with the canonical literal 400."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "ASSERT-B1-006-01-1-1",
+            "SYMBOL-B1-006",
+            "CREQ-B1-005",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "ASSERT-B1-006-01-1-1 requires status 400 (CREQ-B1-005: missing required id -> 400 Bad Request), but L146 asserts isEqualTo(404). The generated test rejects the required behavior; the method name (...IsBadRequest) even states the intended value. Rework: isEqualTo(400)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "ASSERT-B1-006-01-1-1",
+            "STEP-B1-006-01",
+            "SYMBOL-B1-006",
+            "CREQ-B1-005",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-006 asserts HTTP status 404 (L146) while the canonical ASSERT-B1-006-01-1-1 expects 400 (CREQ-B1-005, SREQ-0007: missing required id -> 400 Bad Request). The negative case would fail against the real application or pass only if the behaviour is wrong."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "STEP-B1-006-01",
+            "ASSERT-B1-006-01-1-1",
+            "SYMBOL-B1-006",
+            "CREQ-B1-005"
+          ],
+          "message": "TC-B1-006: ASSERT-B1-006-01-1-1 expects status 400 (CREQ-B1-005 and SREQ-0007: missing required id -> 400 Bad Request), but tcB1006GetStudentWithoutIdParameterIsBadRequest asserts isEqualTo(404) at L146. The generated oracle contradicts the canonical Expected and the requirement; against a conforming application the test fails, and it would pass only for a non-conforming 404. The request itself (GET /students/query with Map.of(), L144) matches INPUT-B1-006-01-1..3. Rework: assert 400."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-006",
+            "STEP-B1-006-01",
+            "ASSERT-B1-006-01-1-1",
+            "EXP-B1-006-01-1",
+            "SYMBOL-B1-006",
+            "CREQ-B1-005"
+          ],
+          "message": "TC-B1-006: ASSERT-B1-006-01-1-1 requires status equals 400 (CREQ-B1-005, SREQ-0007 '400 Bad Request'), but SYMBOL-B1-006 asserts isEqualTo(404). The generated oracle contradicts the canonical Expected and the method name (IsBadRequest); against the real application a missing required @RequestParam yields 400, so the test would fail for the wrong reason. Rework required."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A2",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_INPUT_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "SYMBOL-B1-009",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-008"
+          ],
+          "message": "TC-B1-009 sends PUT /students/42/update instead of the canonical path \"/students/10/update\" (INPUT-B1-009-01-2). With path id 42 equal to body id 42 the echo assertion can no longer show that the path id is not substituted into the response (case objective, CREQ-B1-008); the generated test would also pass against an implementation that does substitute the path id. Regenerate with the canonical path literal."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT_OBJECTIVE_LOST",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "SYMBOL-B1-009",
+            "CREQ-B1-008",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Canonical path is /students/10/update with body id 42 so that the oracle proves the path id is not substituted into the response. L179 sends PUT /students/42/update, making path id equal to body id; L182 then passes even if the controller substitutes the path id, so the case objective and CREQ-B1-008 are no longer exercised. Rework: use \"/students/10/update\"."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT_WEAKENED_ORACLE",
+          "related_ids": [
+            "TC-B1-009",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "STEP-B1-009-01",
+            "SYMBOL-B1-009",
+            "CREQ-B1-008",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-009 sends PUT /students/42/update (L179) instead of the canonical path INPUT-B1-009-01-2 \"/students/10/update\". The case objective and CREQ-B1-008 require the path id (10) to differ from the body id (42) so that ASSERT-B1-009-01-1-2 proves the path id is not substituted; with both equal to 42 the assertion passes whether or not substitution happens, so Expected is weakened."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "SYMBOL-B1-009",
+            "CREQ-B1-008"
+          ],
+          "message": "TC-B1-009: INPUT-B1-009-01-2 is the literal \"/students/10/update\" with body id 42 so that the echo-without-path-substitution behaviour (CREQ-B1-008, SREQ-0009) is observable. tcB1009UpdateStudentEchoesBodyWithoutPathId sends \"/students/42/update\" at L179, making the path id equal to the body id; a controller that substituted the path id would return the identical body and ASSERT-B1-009-01-1-2 could not distinguish the two behaviours. The case objective is lost even though the status/body assertions (L181-L182) match the canonical literals. Rework: use /students/10/update."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "SYMBOL-B1-009",
+            "CREQ-B1-008"
+          ],
+          "message": "TC-B1-009: INPUT-B1-009-01-2 is the path \"/students/10/update\" with body id 42 so that the case proves the path id is not substituted (objective, CREQ-B1-008, AC-6). SYMBOL-B1-009 sends PUT \"/students/42/update\", making path id and body id identical; the echo assertion then cannot distinguish substitution from echo. Input literal drift; rework required: use \"/students/10/update\"."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-009",
+            "STEP-B1-009-01",
+            "INPUT-B1-009-01-2",
+            "ASSERT-B1-009-01-1-2",
+            "SYMBOL-B1-009",
+            "CREQ-B1-008"
+          ],
+          "message": "TC-B1-009: generated request path is \"/students/42/update\" but canonical INPUT-B1-009-01-2 is \"/students/10/update\". The case objective (path id 10 must not replace body id 42) is defeated: with path id == body id the ASSERT-B1-009-01-1-2 oracle cannot observe whether the controller substitutes the path variable. Literal drift requires rework."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A3",
+      "class": "request-input",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_INPUT_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3",
+            "SYMBOL-B1-008",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-007"
+          ],
+          "message": "TC-B1-008 canonically posts a body without the lastName field ({\"id\":6,\"firstName\":\"Olga\"}, INPUT-B1-008-01-3, CREQ-B1-007 'без lastName'), but the generated body puts an explicit \"lastName\": null, which ObjectMapper serializes as {\"id\":6,\"firstName\":\"Olga\",\"lastName\":null}. The test exercises explicit-null deserialization instead of the partial-JSON behavior the case targets. Regenerate the body with only id and firstName."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3",
+            "SYMBOL-B1-008",
+            "CREQ-B1-007",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Canonical jsonBody for TC-B1-008 is {\"firstName\":\"Olga\",\"id\":6} (lastName absent); the generated body explicitly puts \"lastName\" = null (L166), so the request literal becomes {\"id\":6,\"firstName\":\"Olga\",\"lastName\":null} and the scenario changes from 'field absent' to 'field explicitly null'. Jackson maps both to null for a String property, so the oracle (L171) still observes the canonical Expected, but the input binding drifts from the case. Rework: drop the lastName entry from the body map."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "INPUT-B1-008-01-3",
+            "STEP-B1-008-01",
+            "SYMBOL-B1-008",
+            "CREQ-B1-007",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-008 sends a body with an explicit \"lastName\":null (L163-166 LinkedHashMap put(\"lastName\", null), serialized by ObjectMapper), whereas the canonical input INPUT-B1-008-01-3 is {\"firstName\":\"Olga\",\"id\":6} with no lastName key (step action 'без поля lastName', CREQ-B1-007). The boundary condition 'field absent' is replaced by 'field present with null'; the assertion literals (201, {id:6, Olga, null}) are canonical but the exercised input is not."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3",
+            "SYMBOL-B1-008",
+            "CREQ-B1-007"
+          ],
+          "message": "TC-B1-008: INPUT-B1-008-01-3 is the body literal {\"firstName\":\"Olga\",\"id\":6} with no lastName key (CREQ-B1-007 and the step action: body without the lastName field). tcB1008CreateStudentWithoutLastNameEchoesNull builds the body with body.put(\"lastName\", null) at L166, and exchange() serializes it through objectMapper.writeValueAsString (L055), so the request carries an explicit \"lastName\":null. Absent field and explicit null are different Jackson inputs (they diverge under null-handling configuration), so the generated test exercises a different boundary than the canonical case and does not prove the absent-field behaviour. The oracle (L170-L171) matches ASSERT-B1-008-01-1-1/2. Rework: omit the lastName key from the request body."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3",
+            "SYMBOL-B1-008",
+            "CREQ-B1-007"
+          ],
+          "message": "TC-B1-008: INPUT-B1-008-01-3 is the body {\"id\":6,\"firstName\":\"Olga\"} without a lastName key (step action: 'JSON-телом без поля lastName', objective: absent field returned as null). SYMBOL-B1-008 sends body.put(\"lastName\", null), i.e. {\"id\":6,\"firstName\":\"Olga\",\"lastName\":null}. The request literal differs from the canonical input and the absent-field scenario of CREQ-B1-007 is not exercised. Rework required: omit the lastName key."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-008",
+            "STEP-B1-008-01",
+            "INPUT-B1-008-01-3",
+            "SYMBOL-B1-008",
+            "CREQ-B1-007"
+          ],
+          "message": "TC-B1-008: canonical INPUT-B1-008-01-3 jsonBody is {\"firstName\":\"Olga\",\"id\":6} (lastName absent; case title/objective: body without lastName), but the generated body explicitly puts \"lastName\": null, so the serialized request is {\"id\":6,\"firstName\":\"Olga\",\"lastName\":null}. The test exercises an explicit-null input instead of the canonical missing-field input (CREQ-B1-007). Input binding drift requires rework (drop the lastName put)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A4",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-002",
+            "ASSERT-B1-002-01-1-4",
+            "TC-B1-012",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-002",
+            "SYMBOL-B1-012",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-002",
+            "CREQ-B1-012"
+          ],
+          "message": "Helper fourStudents() returns three students (ids 1..3) while the canonical expected literals of ASSERT-B1-002-01-1-4, ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 contain four elements ending with {\"id\":4,\"firstName\":\"Sanjay\",\"lastName\":\"Mishra\"} (CREQ-B1-002). The three isEqualTo(fourStudents()) assertions therefore encode a wrong Expected and contradict the sibling hasSize(4) at L109; against the correct application they fail. Regenerate fourStudents() with the fourth canonical element."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "LITERAL_DRIFT_SHARED_HELPER",
+          "related_ids": [
+            "TC-B1-002",
+            "ASSERT-B1-002-01-1-4",
+            "TC-B1-012",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-002",
+            "SYMBOL-B1-012",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-002",
+            "CREQ-B1-012"
+          ],
+          "message": "fourStudents() (L080-L084) returns only three students (ids 1..3) although the canonical expected literal for ASSERT-B1-002-01-1-4, ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 is the 4-element array ending with {\"id\":4,\"firstName\":\"Sanjay\",\"lastName\":\"Mishra\"}. L109 hasSize(4) and L110 isEqualTo(fourStudents()) contradict each other; the equality assertions in TC-B1-002 and TC-B1-012 cannot hold for the required response. Rework: add student(4, \"Sanjay\", \"Mishra\") to fourStudents()."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-002",
+            "TC-B1-012",
+            "ASSERT-B1-002-01-1-4",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-002",
+            "SYMBOL-B1-012",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-002"
+          ],
+          "message": "Shared helper fourStudents() (StudentControllerPipelineTest L80-85) returns only students 1..3 (Ramesh, Umesh, Ram); the canonical expected array of ASSERT-B1-002-01-1-4, ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 has four elements ending with {id:4, firstName:Sanjay, lastName:Mishra}. The three isEqualTo(fourStudents()) assertions (L110, L214, L219) compare the real response with a wrong literal; ASSERT-B1-002-01-1-3 hasSize(4) at L109 contradicts it in the same method."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "STEP-B1-012-03",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-012",
+            "CREQ-B1-002",
+            "CREQ-B1-012",
+            "TC-B1-002",
+            "ASSERT-B1-002-01-1-4"
+          ],
+          "message": "TC-B1-012 (steps 2 and 3): ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 expect the four-element array [(1 Ramesh Mishra), (2 Umesh Mishra), (3 Ram Mishra), (4 Sanjay Mishra)] (CREQ-B1-002, SREQ-0005). The shared helper fourStudents() at L080-L085 returns only three students; the (4, Sanjay, Mishra) element is missing. tcB1012StudentListIsUnchangedAfterCreate compares jsonArray(...) with fourStudents() at L214 and L219, so both assertions assert a list that differs from the canonical Expected: they fail against a conforming application and would accept a wrong three-element response. The same helper is used by tcB1002 (L110), outside this part. Rework: add student(4, \"Sanjay\", \"Mishra\") to fourStudents()."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-012",
+            "STEP-B1-012-02",
+            "STEP-B1-012-03",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-012",
+            "TC-B1-002",
+            "ASSERT-B1-002-01-1-4",
+            "SYMBOL-B1-002",
+            "CREQ-B1-002",
+            "CREQ-B1-012"
+          ],
+          "message": "TC-B1-012: ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 expect the 4-element array [(1,Ramesh),(2,Umesh),(3,Ram),(4,Sanjay)] (CREQ-B1-002, CREQ-B1-012). SYMBOL-B1-012 compares jsonArray(response) with the shared helper fourStudents(), which returns only 3 students and omits {\"id\":4,\"firstName\":\"Sanjay\",\"lastName\":\"Mishra\"}. The expected literal drifts from the canonical value; the same broken helper is also the oracle of ASSERT-B1-002-01-1-4 in SYMBOL-B1-002, where hasSize(4) and isEqualTo(fourStudents()) are mutually contradictory. Rework required: add student(4, \"Sanjay\", \"Mishra\")."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTED_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-012",
+            "ASSERT-B1-012-02-1-2",
+            "ASSERT-B1-012-03-1-2",
+            "SYMBOL-B1-012",
+            "CREQ-B1-002",
+            "CREQ-B1-012",
+            "TC-B1-002"
+          ],
+          "message": "TC-B1-012: ASSERT-B1-012-02-1-2 and ASSERT-B1-012-03-1-2 compare GET /students to fourStudents(), but the helper returns only three entries (ids 1..3) and omits {\"firstName\":\"Sanjay\",\"id\":4,\"lastName\":\"Mishra\"} required by the canonical literal and CREQ-B1-002. The oracle does not observe the canonical Expected and would fail against the real application. The same helper is used by TC-B1-002 (L109 hasSize(4) then L110 isEqualTo(fourStudents()) are contradictory). Rework required."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A5",
+      "class": "shared-static-state",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_ORDER_DEPENDENT_STATE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "STEP-B1-003-01",
+            "STEP-B1-004-01",
+            "INPUT-B1-003-01-2",
+            "INPUT-B1-004-01-2",
+            "ASSERT-B1-003-01-1-2",
+            "ASSERT-B1-004-01-1-2",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "The request paths of TC-B1-003 and TC-B1-004 are built from the mutable class-static field pathId instead of the canonical literals \"/students/5\" (INPUT-B1-003-01-2) and \"/students/0\" (INPUT-B1-004-01-2). tcB1003 reads pathId (5) and then sets it to 0; tcB1004 expects pathId to already be 0. JUnit 5 does not guarantee declaration order, and a single or repeated run of either method sends the other case's path while asserting its own id, so the tests are order-dependent and can fail against a correct application. Bind both paths as literals and remove the shared state."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_MUTABLE_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "STEP-B1-003-01",
+            "STEP-B1-004-01",
+            "INPUT-B1-003-01-2",
+            "INPUT-B1-004-01-2",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "The request path of TC-B1-003 and TC-B1-004 is built from a mutable static field pathId (L035, initial 5) instead of the canonical literals \"/students/5\" and \"/students/0\"; tcB1003 mutates it to 0 (L117) and tcB1004 relies on that side effect (L126). With JUnit 5 default (non-declaration) method ordering, or when tcB1004 runs alone, it sends GET /students/5 and L129 fails; the tests are order-dependent and their input bindings drift from the canonical inputs. Rework: use the literal paths and remove the static field."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "SHARED_MUTABLE_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "INPUT-B1-003-01-2",
+            "INPUT-B1-004-01-2",
+            "STEP-B1-003-01",
+            "STEP-B1-004-01",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-003 and TC-B1-004 build their request path from the static mutable field pathId (L35, initial 5) instead of the canonical literals INPUT-B1-003-01-2 \"/students/5\" and INPUT-B1-004-01-2 \"/students/0\". tcB1003 writes pathId = 0 after its request (L117) and tcB1004 (L126) relies on that side effect: run first, alone, or under JUnit 5's default (non-declaration) method order it sends GET /students/5 while asserting id 0. No cleanup restores the field. Input binding drift plus execution-order dependence; rework required."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CROSS_SHARED_STATE_INPUT_DRIFT",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "STEP-B1-003-01",
+            "STEP-B1-004-01",
+            "INPUT-B1-003-01-2",
+            "INPUT-B1-004-01-2",
+            "ASSERT-B1-004-01-1-2",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-003 and TC-B1-004 build the request path from a shared mutable static field instead of the canonical literals. StudentControllerPipelineTest L035 declares private static int pathId = 5; tcB1003 (L116) requests \"/students/\" + pathId and then sets pathId = 0 (L117); tcB1004 (L126) requests \"/students/\" + pathId and asserts id 0. INPUT-B1-003-01-2 is the literal \"/students/5\" and INPUT-B1-004-01-2 is \"/students/0\"; neither literal appears in the code. The outcome depends on execution order (JUnit 5 default order is not declaration order and the class has no @TestMethodOrder) and on JVM history: run first, tcB1004 sends /students/5 and fails on id; rerun in the same JVM, tcB1003 sends /students/0 and fails. This violates deterministic data and order independence and is a literal/binding drift requiring rework: use the canonical path literals directly and remove the static field."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ORDER_DEPENDENT_SHARED_STATE",
+          "related_ids": [
+            "TC-B1-004",
+            "TC-B1-003",
+            "STEP-B1-004-01",
+            "INPUT-B1-004-01-2",
+            "ASSERT-B1-004-01-1-2",
+            "SYMBOL-B1-004",
+            "SYMBOL-B1-003",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-004 does not bind the canonical path literal \"/students/0\" (INPUT-B1-004-01-2). SYMBOL-B1-004 builds the path from the static field pathId (initialised to 5) that SYMBOL-B1-003 mutates to 0 after its own request. The outcome of TC-B1-004 therefore depends on TC-B1-003 running first; with JUnit 5 default method ordering (not declaration order) or when run alone, the request becomes GET /students/5 and ASSERT-B1-004-01-1-2 (expected id 0) fails. Independence from execution order is violated and the input literal drifts; rework required: bind \"/students/0\" directly and remove the mutable static."
+        },
+        {
+          "severity": "WARNING",
+          "code": "SHARED_MUTABLE_STATE_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-003",
+            "TC-B1-004",
+            "SYMBOL-B1-003",
+            "SYMBOL-B1-004",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "Shared file state: static field pathId (L35) is mutated by tcB1003 (L117 pathId = 0) and read by tcB1004 (L126) as the request path id. tcB1004 only hits /students/0 if tcB1003 ran first in the same JVM; under JUnit 5 default method ordering or when run alone it requests /students/5 and ASSERT-B1-004-01-1-2 (expects id 0) fails. Cases of this part (TC-B1-007..012) do not touch pathId, but the defect lives in the shared file reviewed here."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "A6",
+      "class": "weakened-check",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "AUTOMATION_WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "STEP-B1-011-01",
+            "ASSERT-B1-011-01-1-2",
+            "SYMBOL-B1-011",
+            "FILE-B1-student-controller-pipeline-test",
+            "CREQ-B1-010"
+          ],
+          "message": "ASSERT-B1-011-01-1-2 canonically requires text equals \"Hello World!\" (CREQ-B1-010), but the generated assertion is isNotNull() on response.getContentAsString(...), which cannot fail for any response body. The assertion keeps the canonical ID but no longer observes Expected (tautological check). Regenerate with isEqualTo(\"Hello World!\")."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ORACLE",
+          "related_ids": [
+            "TC-B1-011",
+            "ASSERT-B1-011-01-1-2",
+            "SYMBOL-B1-011",
+            "CREQ-B1-010",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "ASSERT-B1-011-01-1-2 requires text equals \"Hello World!\"; L200 only asserts isNotNull() on getContentAsString(), which never returns null - the assertion is effectively tautological and the greeting text is not verified. Rework: isEqualTo(\"Hello World!\")."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "ASSERT-B1-011-01-1-2",
+            "STEP-B1-011-01",
+            "SYMBOL-B1-011",
+            "CREQ-B1-010",
+            "FILE-B1-student-controller-pipeline-test"
+          ],
+          "message": "TC-B1-011 replaces the canonical comparator/literal of ASSERT-B1-011-01-1-2 (text equals \"Hello World!\") with isNotNull() (L200). MockHttpServletResponse.getContentAsString never returns null, so the check is tautological and the greeting text (CREQ-B1-010) is not observed."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "STEP-B1-011-01",
+            "ASSERT-B1-011-01-1-2",
+            "SYMBOL-B1-011",
+            "CREQ-B1-010"
+          ],
+          "message": "TC-B1-011: ASSERT-B1-011-01-1-2 requires text equals \"Hello World!\" (CREQ-B1-010, SREQ-0011, SREQ-0019). tcB1011HelloWorldReturnsGreeting replaces it with assertThat(text(response)).as(\"ASSERT-B1-011-01-1-2\").isNotNull() at L200. text() returns MockHttpServletResponse.getContentAsString(UTF_8), which never yields null, so the check is tautological: it observes nothing of the Expected value and passes for any body, including an empty one. The relation /artifacts/implementation_relations/35 therefore claims coverage the symbol does not provide. Rework: isEqualTo(\"Hello World!\")."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "WEAKENED_ASSERTION",
+          "related_ids": [
+            "TC-B1-011",
+            "STEP-B1-011-01",
+            "ASSERT-B1-011-01-1-2",
+            "EXP-B1-011-01-1",
+            "SYMBOL-B1-011",
+            "CREQ-B1-010"
+          ],
+          "message": "TC-B1-011: ASSERT-B1-011-01-1-2 requires text equals \"Hello World!\" (CREQ-B1-010, AC-8). SYMBOL-B1-011 asserts isNotNull() on text(response); MockHttpServletResponse.getContentAsString never returns null, so the check is tautological and the canonical Expected is not observed. Rework required: isEqualTo(\"Hello World!\")."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERTION_WEAKENED",
+          "related_ids": [
+            "TC-B1-011",
+            "ASSERT-B1-011-01-1-2",
+            "EXP-B1-011-01-1",
+            "SYMBOL-B1-011",
+            "CREQ-B1-010"
+          ],
+          "message": "TC-B1-011: ASSERT-B1-011-01-1-2 requires text equals \"Hello World!\" (CREQ-B1-010), but the generated assertion is isNotNull(), which any response body satisfies. The relation claims the assertion yet the symbol does not observe the canonical Expected. Rework required."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 1,
+    "WARNING": 1,
+    "BLOCKING": 34
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791324235.5114326,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [
+      {
+        "at": 1791324264.4146976,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000003": [
+      {
+        "at": 1791324213.2183244,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000004": [
+      {
+        "at": 1791324276.0387094,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000005": [
+      {
+        "at": 1791324202.8050013,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000006": [
+      {
+        "at": 1791324176.5352304,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

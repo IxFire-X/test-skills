@@ -1,0 +1,598 @@
+# Как работает frozen pilot Pipeline 4.0
+
+## Архитектурная граница
+
+```text
+пользователь
+  -> совместимая model-enabled CLI
+       -> skills/orchestrate/SKILL.md
+       -> драйвер tools.pipeline_driver: next -> задача -> submit
+       -> model stages в отдельных declared roles
+       -> deterministic Python controller/tools
+            -> durable evidence в <project>/.pilot-runs/<run_id>
+            -> project-native pytest/Maven/Gradle для exact reviewed targets
+```
+
+CLI управляет моделями. Python не вызывает LLM и не хранит credentials. Project-native
+executor запускается только в `local-pilot-v1` после run-scoped authorization. Pipeline
+не создаёт isolated workspace: он работает в обычном проекте, где environment уже
+настроен пользователем.
+
+## Что делает код и что делает модель
+
+Ход запуска ведёт драйвер `tools.pipeline_driver`. Это обычная программа без модели
+внутри. У неё три команды: `next`, `submit` и `status`.
+
+Простыми словами:
+
+1. Оркестратор вызывает `next`. Драйвер выполняет подряд все шаги, где думать не надо:
+   создаёт run, читает проект, фиксирует baseline, делит требования на батчи,
+   собирает и публикует документы, готовит части ревью, записывает файлы тестов,
+   запускает их и закрывает попытку.
+2. Когда нужен содержательный ответ, драйвер останавливается и печатает одну задачу
+   (`action: "llm"`): какую инструкцию роли прочитать (`skill_path`), какие файлы
+   прочитать (`inputs`), куда записать ответ (`output_path`) и по какой схеме
+   (`schema_path`).
+3. Модель читает входы, пишет ответ в файл и вызывает `submit`.
+4. `submit` проверяет ответ. Если он годится, драйвер дописывает служебные поля,
+   публикует результат и сразу выдаёт следующую задачу. Если нет — возвращает ту же
+   задачу со `"status": "rejected"` и списком ошибок; ничего не публикуется.
+5. Так продолжается, пока драйвер не вернёт `done` (итог) или `ask_user` (вопрос
+   человеку).
+
+Что остаётся модели: разметить контекст и пробелы требований, написать кейсы для
+батча, оценить часть ревью, написать автотесты. Схема задачи содержит только
+содержательные поля.
+
+Что модель больше не делает:
+
+- не считает SHA-256 и другие digests;
+- не сортирует массивы и не нумерует `display_order`;
+- не заполняет служебные поля (`batch_id`, версии схем, ссылки на квитанции, lineage);
+- не переносит пути и digests от одного шага к другому: все пути есть в задаче;
+- не решает, какой шаг следующий.
+
+Вопросов к человеку два. `reviewer-isolation`: может ли хост выполнить каждую часть
+ревью в отдельном вызове без истории генерации — субагентом или новым процессом CLI
+(`claude -p`, `codex exec` и т. п.); без изоляции (`none`) ревью не останавливается: части проверяются тем же порядком и в
+том же формате в текущей сессии, результат получает `review_independence: SELF` и
+`accepted=false` с `reason_code: REVIEW_NOT_INDEPENDENT` (кейсы публикуются, в
+`local-pilot-v1` автотесты проходят ревью и запускаются). Флаг `--accept-self-review`
+разрешает принятие; пометка `SELF` остаётся. Изоляцию пакет не проверяет
+(ответ хоста записывается как есть), поэтому честный ответ «нет» больше не ведёт к
+остановке. Ось результата `review_independence` (`ISOLATED` или `SELF`) есть в terminal
+result и сводке драйвера.
+`regenerate-after-gate`: после `NOT_RUNNABLE/GENERATED_TEST_INVALID` создать одну
+дочернюю попытку или завершить.
+
+Свои рабочие файлы (задачи, входы, ответы, копию опубликованного набора кейсов)
+драйвер хранит в `<project>/.pilot-runs/<run_id>.driver/`, там же служебный лог
+`driver-log.jsonl` (каждая команда, выдача задач, сбои с traceback). Их можно построить заново;
+источник истины — журнал и квитанции в `.pilot-runs/<run_id>/`. После перерыва
+`next --run <run_id>` возвращает ту же незакрытую задачу или продолжает с последнего
+подтверждённого шага.
+
+Ограничения драйвера:
+
+- он не вызывает модель и не может сам доказать изоляцию ревьюера: это сообщает хост;
+- один модуль на run;
+- код проекта модель получает целиком одним входом; если он не помещается в окно
+  модели, драйвер ничего не обрезает — размер входа виден в поле `input_bytes` задачи,
+  и решение (сузить контекст через `--target` или взять другую модель) принимает человек;
+- он продолжает только run, созданный его же `next`;
+- он не проверен на Windows и на живой модели; состояние релиза —
+  `implemented_unverified`, ready tuple — `null`.
+
+Команды, которые упоминаются в разделах ниже (`run_pipeline scan`, `exec`,
+`prepare-review`, `open-part`, `submit-part`, `fail-part`, `finish-review`), — это
+внутренние шаги. При обычном запуске их выполняет драйвер; отдельно они остаются для
+диагностики и ручного хода
+([manual-sequence.md](skills/orchestrate/references/manual-sequence.md)).
+
+## 1. Release identity
+
+`release/manifest.json` связывает package `0.5.0-pilot` с exact digest каждого runtime
+файла под `contracts/`, `schemas/`, `skills/`, `tools/` и `evals/`. Сам manifest не
+входит в registry, поэтому digest graph ацикличен:
+
+```text
+runtime bytes -> sorted path/file digests -> skill_pack_digest
+-> manifest body -> manifest digest
+```
+
+Manifest также связывает Pipeline `4.0`, compatibility `portable-cli-v1`, execution
+profile `v1`, stage/profile/adapter registries и `pilot-critical-v1` eval suite.
+`implemented_unverified` означает, что bytes и contract реализованы, но exact host/model
+tuple ещё не получил release-eval evidence.
+
+## 2. Run раньше scan
+
+Явный invocation сначала вызывает durable Phase 1 boundary:
+
+```text
+run authorization receipt
+  -> run-manifest.json
+  -> RUN_CREATED
+```
+
+Каждая публикация атомарна и немедленно читается обратно. Если достоверную boundary
+создать не удалось, это controller error, а не фиктивный attempt result. Эту boundary
+создаёт сама команда `run_pipeline scan`: она не принимает `--run` и каждый раз
+начинает новый run, после чего выполняет inventory. Первый `next` драйвера вызывает
+именно её.
+
+Писатели и читатели одного run сериализуются межпроцессной блокировкой
+`.pilot-runs/<run_id>/.lock`. Читатели (`status`, `derive_state`) не удаляют
+pending-маркеры незавершённой записи; восстановление после сбоя писателя делает
+следующий писатель под блокировкой. Ожидание блокировки ограничено 120 секундами,
+затем команда завершается ошибкой `run is locked by another process`.
+
+Run создаётся до module selection, затем навсегда связывается с одной exact
+project/module identity. Child attempts образуют последовательную append-only lineage;
+два nonterminal attempts одновременно запрещены.
+
+## 3. Inventory и frozen baseline
+
+Scanner делает локальный read-only inventory eligible tree. В model context попадают
+только deterministic batches из разрешённых source roots. Исключаются `.git`,
+dependencies, build outputs, binaries, generated artifacts и потенциальные secrets.
+Inventory учитывает `.gitignore` через `git ls-files -co --exclude-standard`; при сбое
+git используется обход файловой системы. По умолчанию исключены также `.gradle`,
+`.kotlin`, `.idea`, `.vscode`, отчёты `coverage*` и `*.log`; каталоги `build`,
+`generated` и `coverage`, в которых лежит исходный код, остаются.
+
+Секреты по имени — только `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.kdbx`, `id_*`
+и каталоги `secrets/`, `credentials/`. По содержимому — сигнатуры токенов, PEM-блок
+приватного ключа и присваивание строкового литерала от 16 символов. Файл кода или
+настроек с совпадением исключается целиком. В документах и спецификациях совпавшие
+строки заменяются на `[REDACTED:<rule>]`, в inventory у файла появляется поле
+`redactions`, а сам файл остаётся входом; `select_context_batches` отдаёт модели уже
+замаскированные байты. Файл больше бюджета контекста пропускается явно: квитанция выбора
+контекста получает `gaps` и `byte_budget`, ответ `scan` — `context_gaps`.
+
+После exact module selection controller фиксирует:
+
+- project/module identity;
+- requirements bytes/provenance;
+- authoritative `.skillsrc`;
+- eligible source/config/build/fixture inputs;
+- parent/wrapper/build inputs, которые входят в declared execution baseline;
+- module cwd, test root, interpreter/wrapper, adapter ID, build profile и typed params.
+
+Baseline публикуется и читается обратно до `ATTEMPT_CREATED`. Поздно найденный
+undeclared execution input не добавляется в текущий attempt: branch закрывается как
+`NOT_RUNNABLE/BASELINE_INCOMPLETE`, продолжение возможно только child attempt.
+
+## 4. Requirement batches и canonical
+
+```text
+source requirement + provenance/digest
+  -> normalized requirement
+  -> deterministic batch plan
+  -> candidate fragments
+  -> assembled canonical revision 1
+  -> schema + semantic + provenance audit
+```
+
+Mapping many-to-many связывает source requirements с canonical requirements, cases,
+steps, expectations, assertions и последующим execution evidence. `out-of-scope`
+разрешён только относительно заранее выбранного feature/module scope.
+
+Canonical JSON `1.0.0` — semantic source. Stage envelopes имеют version `5.0.0`.
+Ответ `tc-generator` — исключение: это не envelope, а сам фрагмент по
+`schemas/candidate-fragment.schema.json` с `batch_id` и собственным digest.
+Модель возвращает драйверу только содержательную часть фрагмента; `batch_id`, digest,
+`display_order` и порядок массивов добавляет `submit`.
+HTML, Markdown и CSV строятся только из canonical JSON и никогда не становятся
+downstream model input. CSV по умолчанию имеет профиль `zephyr-scale-step-row-24-v5`
+(только человеческие поля шага); V4 доступен по явному `--csv-profile`.
+
+При сборке фрагментов controller сам сортирует capabilities. Одинаковая capability из
+разных batches с разным provenance сливается; различие в её семантике даёт
+`BATCH_CAPABILITY_CONFLICT` с обоими `batch_id`. Ошибки сборки и схемы содержат все
+диагностики с JSON-pointer.
+
+## 5. Одно authoritative ревью по частям
+
+Controller сначала публикует revision 1 как `UNREVIEWED`, проверяет exact bytes и
+замораживает исходные требования, контекст и candidate в одном review snapshot. По нему
+строится план частей (`per_review_part`): original-source, local и cross-part scopes.
+Reviewer получает candidate, exact requirements, context/source evidence и provenance,
+но не generator dialogue/reasoning.
+
+```text
+REVIEW_SESSION_STARTED
+  -> для каждой части: свой fresh isolated invocation
+     (open-part -> ответ модели -> submit-part)
+  -> finish-review: controller aggregate, ровно один AUTHORITATIVE_VERDICT
+  -> REVIEW_SESSION_COMPLETED
+
+или, если проверены не все части:
+
+REVIEW_SESSION_STARTED
+  -> части, которые удалось проверить
+  -> REVIEW_SESSION_ABORTED
+```
+
+Шаги `open-part`, `submit-part` и `finish-review` выполняет драйвер: каждая часть
+приходит модели задачей `tc-reviewer:*` с `requires_fresh_context=true`.
+
+Каждая часть — отдельный вызов модели со своим boundary и host evidence; событий
+`EVIDENCE_REQUESTED`/`EVIDENCE_PROVIDED` нет. Логическое ревью одно, и authoritative
+verdict один: его вычисляет controller в `finish-review` из сохранённых оценок частей.
+Модель возвращает только оценку своей части. Содержимое, повторяющееся внутри одной
+части, приходит один раз; у повторов вместо `content` стоит
+`content_ref: {scope_id, input}` — ссылка на первое вхождение в этой же части.
+
+Если вызов части не дал пригодной оценки, сбой фиксируется через
+`submit --failed TRANSPORT|CONTENT --reason "..."` драйвера (при ручном ходе — командой
+`fail-part` с `--failure-class TRANSPORT|CONTENT`), и часть открывается новым
+invocation — всего не
+более трёх вызовов на часть (stages `…:part-NNNNNN-try2`, `-try3`). Незавершённое
+ревью закрывается как `REVIEW_SESSION_ABORTED`: `REVIEW_CONTEXT_LIMIT`, если часть не
+поместилась в бюджет; `REVIEW_TRANSPORT_FAILED`, если все заблокированные части не
+удалось доставить reviewer; иначе `REVIEW_INCOMPLETE` (остались непроверенные области).
+Прерванное ревью никогда не даёт `REWORK`: эта причина требует одного вердикта REJECTED.
+
+Host/controller доказывает isolation каждой части. Если доказательства нет, фиксируется
+`independence_unverified`, и effective canonical не может быть accepted.
+При `AUTO_FIX_APPLIED` revision 2 строит controller
+(`review_parts.apply_review_corrections`) из механических исправлений, которые
+reviewer предложил в частях; сам reviewer документ не пишет. Controller проверяет
+schema, semantics, provenance, lineage и readback до выбора effective canonical;
+отдельного generator invocation или второго reviewer verdict нет.
+
+Если ревью кейсов вынесло вердикт REJECTED, попытка завершается с `REWORK`, и драйвер
+сам начинает одну доработку — дочернюю попытку `CANONICAL_REWORK`. Её context-marker
+получает прошлый ответ как готовый черновик, а генератор — документ r1, находки ревью
+уровня BLOCKING и WARNING (без INFO) и список затронутых кейсов; он возвращает только
+изменённые кейсы. Драйвер собирает из них canonical r2 (`revision: 2`, `parent_sha256` от
+r1) и проводит новую сессию ревью. Она инкрементальная: области, входы которых
+совпадают с проверенными областями r1 и которых не касается находка BLOCKING, не
+отправляются заново, и агрегат перечисляет их в `carried`. Доработка одна: отклонённый
+r2 даёт окончательный `REWORK`. Непроверенные области (UNCHECKED, `REVIEW_INCOMPLETE`)
+генератору не отдаются: это не вердикт REJECTED.
+
+### Режим `compact-v1`
+
+Формат ревью — параметр прогона `--review-mode pairs|compact-v1` (по умолчанию
+`compact-v1` с 2026-10-07; прогоны, начатые раньше, остаются в `pairs`). Он записывается в `config.json` драйвера и в review snapshot, а читатели плана
+выбирают правила по замороженному плану, поэтому прогон проверяется теми правилами, с
+которыми он начат.
+
+В `compact-v1` вход модели — детерминированная текстовая проекция канона
+(`tools/review_projection.py`): каждый ID канона — ровно один якорь `[ID]`, каждое
+смысловое поле видно в тексте, проекция привязана к дайджесту канона и хранится в
+snapshot. HTML, Markdown и CSV по-прежнему не входы. Кейсы упаковываются целиком: если
+документ помещается в одну часть, ревью идёт одной частью; иначе кейсы делятся на блоки
+(граница — по хешу `case_id` или по пределу размера), и каждая часть — пара блоков,
+так что любые два кейса встречаются вместе хотя бы в одной части. У каждого кейса одна
+домашняя часть с его областью `local-<case>`, в каждой части есть область `cross` по
+всем её кейсам; исходник (документы дословно с номерами строк, SREQ → CREQ, возможности)
+идёт в первую часть или в свои части. Общий контекст части — индекс всех кейсов,
+тексты CREQ, сигнатуры возможностей и подозрения линтера (`tools/review_lint.py`).
+
+Ответ части короткий (`review-part-output-compact.schema.json`): строка покрытия на
+область со статусом, 1–3 ссылками на якоря части и заметкой до 200 символов, находки
+(сообщение до 600 символов, INFO не больше 5), правки по `target_id` и полю из закрытого
+словаря, решение по каждому подозрению линтера и проверки по `case_ids`/`requirement_ids`.
+Драйвер при `submit` проверяет, что ссылки — якоря этой части, область кейса ссылается
+на свой кейс, на каждое подозрение есть ответ, ID находок существуют; иначе задача
+возвращается с `status: rejected`. Правка переводится в один JSON pointer со сверкой
+`before`; правка `management.*` не перепроверяется, остальные перепроверяются только в
+частях, где есть исправленный кейс.
+
+Ревью автотестов в `compact-v1` строится по срезам (`tools/code_slices.py`): метод кейса
+с точными номерами строк, хелперы, которые он вызывает (в общем коде), общий код файла
+(SUPPORT) с таблицей общего состояния и подозрения сверок кода (ID проверок, литералы,
+метод, путь и тело запроса). Пар методов нет: взаимодействия проверяют области SUPPORT
+и `cross`. Файл, который не удалось разрезать, идёт целиком или блокирует часть.
+Кейсы здесь идут в виде для автотестов (`automation_case_text`): те же якоря и все привязки,
+что в проекции, но выходы шага одной строкой `out:`, человеческие Test Data — только у шагов
+без входов (код реализует входы `[INPUT-…]`), без management, приоритета и категорий.
+Части набираются так: кейсы по убыванию размера, каждый в первую часть, где помещается
+(first fit decreasing); внутри части кейсы идут по порядку документа. Общий код файла и полные
+возможности учитываются только в части, где отвечает его область SUPPORT (первой с кейсом этого файла).
+
+Части `compact-v1` независимы: `next --max-tasks K` возвращает до K задач
+(`{"action": "batch", ...}`), по субагенту на часть; ответы отправляются по одному,
+команды драйвера выполняются под замком run. При доработке r2 область кейса переносится,
+если совпали отпечаток её проекции и политика ревью (роль, дайджесты SKILL и
+инструкций, модель, режим) и на кейс нет BLOCKING.
+
+## 6. Два branch-профиля
+
+### `cases-only-v1`
+
+После canonical review automation, materialization, execution и dispositions
+имеют `NOT_APPLICABLE`. Это draft/artifact-only: `accepted=false`, полный pipeline
+не даёт exit 0: валидное завершение — exit 1; FATAL, `FINALIZATION_INVALID`, невалидный
+trace или ненадёжное закрытие — exit 2. Controller всё равно создаёт branch-valid pre-finalization
+trace, finalization receipt, terminal result и derived terminal trace.
+
+### `local-pilot-v1`
+
+```text
+effective canonical
+  -> automation revision 1
+  -> static reviewer invocation
+  -> optional one complete correction/review (revision 2)
+  -> complete generated delta
+  -> per-file materialization receipts
+  -> exact project-native execution
+```
+
+Automation initial + максимум одна correction означает не более двух полных revisions.
+Следующее отклонение закрывает branch как `PARTIAL`; все revisions и reviews
+остаются append-only evidence. Драйвер записывает для статического ревью автотестов
+собственные причины завершения: `AUTOMATION_REVIEW_REJECTED` (ревью отклонило),
+`AUTOMATION_REVISION_BUDGET` (исправления нужны и после revision 2),
+`AUTOMATION_REVIEW_CONTEXT_LIMIT`, `AUTOMATION_REVIEW_TRANSPORT_FAILED` и
+`AUTOMATION_REVIEW_INCOMPLETE` (ревью прервано). Файлы тестов в проект при этом не пишутся.
+
+Canonical blocker блокирует только свой кейс. Для остальных кейсов автоматизация
+генерируется (`GENERATED`), каждый шаг заблокированного кейса получает строку в
+`manual_dispositions`, а `diagnostics` обязательны. Статус `BLOCKED` допустим, только
+когда автоматизировать нечего. При наличии blockers `accepted=false`.
+
+Generated source сначала существует как pipeline-owned delta. Controller проверяет
+path, digest, accepted static review и ownership до записи каждого файла в active test
+root. Partial materialization запрещает execution.
+
+## 7. Project-native execution
+
+Closed adapter строит argv из typed fields; user shell strings отсутствуют.
+
+- Python: выбранный interpreter/venv, обычные pytest config, conftest, fixtures и
+  plugins, module cwd.
+- Java: `mvnw`, системный `mvn` из PATH (адаптер `maven:selected-symbols-v1`) или
+  `gradlew`; declared profile и actual project JDK. Maven и Gradle запускаются из
+  корня сборки (`test.build_root`, по умолчанию module root) с указанием модуля.
+
+`.skillsrc` хранит логические имена `python`, `mvnw`, `gradlew`, `mvn`; путь под
+текущую ОС разрешается при запуске. Таймаут процесса — `test.timeout_seconds`
+(по умолчанию 600 секунд).
+
+Плагины и lifecycle hooks могут выполнить код: это доверенный обычный проект, не
+sandbox. Execution запускает exact reviewed symbols только один раз в attempt.
+
+Перед основным запуском controller выполняет шлюз компиляции/сбора: pytest
+`--collect-only` по выбранным nodeid, Maven `test-compile`, Gradle `testClasses`.
+Провал шлюза и ошибка компиляции/импорта в основном запуске дают
+`NOT_RUNNABLE/GENERATED_TEST_INVALID`: сгенерированные файлы убираются, вывод
+сохраняется в run root. После этого исправленная ревизия автоматизации допускается
+один раз, в child attempt с `retry_reason=GENERATED_TEST_INVALID`, если родитель не
+потратил revision 2 в статическом ревью и сам не является таким child attempt.
+Драйвер перед этим задаёт вопрос `regenerate-after-gate` и создаёт child attempt
+только при ответе `regenerate`.
+Падение продуктовой проверки — `FAIL`, без регенерации. Процесс, который не
+запустился, даёт `NOT_RUNNABLE/LAUNCH_FAILED`; pytest, собравший 0 явно выбранных
+тестов из-за `addopts`, `-m` или `PYTEST_ADDOPTS`, — `NOT_RUNNABLE/TESTS_DESELECTED`.
+Сборка Maven/Gradle, упавшая на шаге до компиляции тестов (`Failed to execute goal` не
+`testCompile`/`test`, задача Gradle не `compileTest*`/`testClasses`), —
+`NOT_RUNNABLE/BUILD_FAILED_BEFORE_TESTS`, без вопроса о регенерации; итог драйвера и
+driver-log несут `build_failure`: шаг и хвост runner-output.
+
+Timeout имеет два разных смысла:
+
+- controller/process timeout без authoritative framework result -> `UNKNOWN`;
+- framework-reported exact-test timeout с authoritative evidence -> `FAIL`.
+
+Для Maven/Gradle valid process-bound report с нулём собранных tests — authoritative
+`FAIL/NO_TESTS_COLLECTED`; missing, corrupt или unbound report остаётся `UNKNOWN`
+(`JUNIT_MISSING`, `JUNIT_INVALID`), как и ненулевой exit при зелёном отчёте
+(`NONZERO_EXIT_GREEN_REPORT`) и сбой сохранения артефактов
+(`ARTIFACT_PERSISTENCE_FAILED`).
+До disposition execution receipt сохраняет native report, exact generated bytes и
+ограниченный scrubbed runner output (хвост до 64 КиБ) под run root и проверяет их
+readback/digests. В `execution.environment_inputs` записываются имена и SHA-256
+значений `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, `MAVEN_OPTS`, `MAVEN_ARGS`,
+`JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `GRADLE_OPTS`, `JAVA_HOME`; сами значения не
+пишутся. После запуска drift определяется только по входам baseline: изменённый или
+удалённый вход — drift, новые файлы (coverage, `.gradle`, логи) — нет.
+
+После `EXECUTION_STARTED` interruption не перезапускается автоматически. Для retry
+нужны доказанная остановка process scope и explicit child execution attempt.
+Доказательство выдаётся при остановке по таймауту. На Windows тестовый процесс
+запускается внутри Job Object; proof `WINDOWS_JOB_TERMINATED` означает, что завершён
+весь Job. На POSIX proof `POSIX_PROCESS_GROUP` выдаётся, только когда живых процессов
+нет ни в группе процесса, ни среди ушедших из неё через `setsid`. Если остановку
+доказать не удалось, proof нет и child attempt после `UNKNOWN` запрещён.
+
+## 8. Trace, disposition и finalization
+
+Нормативный физический порядок:
+
+```text
+MATERIALIZATION
+-> EXECUTION
+-> EXECUTION_TRACE
+-> RETAIN_OR_CLEANUP_DECISION
+-> DISPOSITION_RECEIPTS
+-> PRE_FINALIZATION_TRACE
+-> FINALIZATION_VERIFICATION
+-> FINALIZATION_RECEIPT_READ_BACK
+-> TERMINAL_RESULT
+-> DERIVED_TERMINAL_TRACE
+-> TERMINAL_EVENT
+```
+
+С опцией мутаций (поправки к контракту 2026-10-07, A3) между `EXECUTION_TRACE` и
+`RETAIN_OR_CLEANUP_DECISION` стоит необязательный этап `MUTATION` (раздел 11). Без опции
+порядок прежний.
+
+Pre-finalization trace заканчивается execution/dispositions и не ссылается на ещё не
+существующий finalization receipt. После verification публикуется derived terminal
+trace со ссылкой на receipt/result — цикла нет.
+
+Disposition определяется для каждого materialized file и всего generated delta:
+
+| Verification | Неизменённый pipeline-owned file | Drift/conflict |
+|---|---|---|
+| `PASS` + valid trace | `RETAINED` | unaccepted conflict |
+| `FAIL`, политика `quarantine` (по умолчанию в `local-pilot-v1`) | без упавших методов — `RETAINED`, с упавшими — `QUARANTINED` | preserved с точной причиной |
+| `FAIL` без исходов по методам или `--disposition-policy cleanup`; `NOT_RUNNABLE` | `CLEANED` (`NOT_RUNNABLE/TESTS_DESELECTED` — `RETAINED`) | preserved с точной причиной |
+| `UNKNOWN` | `PRESERVED_EXECUTION_UNKNOWN` | `PRESERVED_CONTENT_CONFLICT` |
+
+Cleanup при `UNKNOWN` запрещён. `RETAINED` — только физический pre-finalization факт;
+сам по себе он не означает `accepted=true`.
+
+После `FAIL` live generated bytes очищаются только после проверки уже связанного
+execution receipt; durable копия, native report и structured execution result остаются.
+Очистка удаляет файлы: пустые каталоги пакетов, созданные под них, и отчёт
+`test-results/pytest.xml` могут остаться в проекте.
+
+Terminal transition требует completed/read-back receipt, но не `valid=true`. Invalid
+receipt даёт `FINALIZATION_INVALID`, сохраняет фактические verification/coverage и
+делает `accepted=false`. Terminal `reason_code` устанавливается один раз; stage causes
+остаются в append-only events/trace.
+
+Повторный finalize не создаёт второй execution или terminal result. После readback
+scenario observation controller добавляет единственный attempt-bound
+`TERMINAL_RETRY_OBSERVED`; loader проверяет неизменные terminal/closure digests и counts.
+
+## 9. Result projection
+
+```text
+attempt_state: ACTIVE | WAITING_FOR_INPUT | WAITING_FOR_MODEL | TERMINAL
+completion:    COMPLETE | PARTIAL | FATAL | null
+verification:  PASS | FAIL | UNKNOWN | NOT_RUNNABLE | NOT_APPLICABLE | null
+coverage:      FULL | MIXED | MANUAL_ONLY | null
+accepted:      boolean только terminal
+reason_code:   один раз только terminal
+```
+
+Оси независимы: `COMPLETE + FAIL` корректен. Early FATAL может иметь `coverage=null`.
+`REVIEW_CONTEXT_LIMIT` до execution имеет `verification=NOT_APPLICABLE`.
+`attempt_state` возвращается в `ACTIVE`, когда после `WAITING_FOR_MODEL` или
+`WAITING_FOR_INPUT` записан прогресс.
+
+## 10. Release eval
+
+Readiness всегда выглядит как `core-pilot-ready for <exact verified tuple>` и включает
+pack version/digest, CLI host/runtime, role policy, generator/reviewer models, OS,
+language runtime, framework, build tool, adapter/profile и immutable project snapshot.
+
+Policy `adaptive-1-3-5-v1` требует:
+
+1. один smoke;
+2. три fresh repetitions каждого critical scenario;
+3. пять после любой instability или protocol violation.
+
+Protocol violation всегда блокирует readiness. Company runner, production rollback и
+Zephyr tenant round-trip не нужны для core pilot и остаются `N/A` без отдельного
+evidence.
+
+## 11. Опции волны 2: сила тестов, изоляция процессом, вопросы аналитикам
+
+Поправки к контракту: `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
+Каждая возможность волны 2 включается только опцией; без неё артефакты и результаты прежние.
+
+### Этап `MUTATION`
+
+- **Когда.** `.skillsrc` `mutation.enabled: true` **и** согласие run (`next --mutation` →
+  `mutation_requested` в разрешении прогона), `local-pilot-v1`, Java, verification `PASS`
+  или `FAIL` из авторитетного отчёта. Файлы тестов ещё в проекте даже после `FAIL`.
+- **Инструмент.** PIT 1.30.0 из командной строки и `pitest-junit5-plugin` 1.2.3. Maven
+  проекта разрешает их замыкание по временному POM в каталоге прогона в свой локальный
+  репозиторий; SHA-256 каждого из 15 jar сверяется с `tools/mutation_tools.json`, лишний
+  или подменённый jar → `NOT_RUNNABLE`. `junit-platform-launcher` берётся той же версии,
+  что JUnit Platform проекта (5.x или 6.x, у 6.x ещё `jspecify`).
+- **Что мутируется.** `--targetTests` — только сгенерированные классы; упавшие методы
+  исключены (`--skipFailingTests`, `--includedTestMethods`); `--targetClasses` — пакеты
+  файлов продукта из provenance возможностей (или `mutation.target_classes`). Classpath
+  проекта — `dependency:build-classpath` (Gradle — init script из каталога прогона) в
+  файл (`--classPathFile`); отчёт XML с полной матрицей — в каталог прогона.
+- **Проверки.** Дайджест всего дерева проекта (кроме `.pilot-runs` и `.git`) до и после
+  этапа; изменение → `MUTATION_PROJECT_CHANGED`. Любая остановка — статус квитанции с
+  причиной, а не сбой финализации.
+- **Результат.** Квитанция `mutation-receipt` (счётчики без дробей), отдельная ось
+  `test_strength` (`MEASURED`, `NOT_RUNNABLE`, `NOT_APPLICABLE`) в терминальном результате
+  и в сводке драйвера, отчёт `test-strength.json`/`.md` рядом с проекциями попытки.
+  Доля — убитые / (убитые + выжившие) среди покрытых мутантов; `NO_COVERAGE`,
+  `TIMED_OUT`, `MEMORY_ERROR` считаются отдельно. По кейсу и требованию — через полную
+  матрицу: метод → символ (`generated_symbols`) → кейс (`implementation_relations`) →
+  CREQ → SREQ. `verification` и `accepted` этап не меняет.
+
+### Разбор выживших (`mutation-triage`)
+
+Выжившие группируются по методу и строке продукта; первые `mutation.triage_limit`
+(30) групп после терминального результата уходят модели задачами `mutation-triage`
+(SKILL `skills/mutation-triage`). Вход — строка мутанта с соседями, кейсы, требования с
+текстом, срезы методов теста; ответ — одно решение на группу (`TEST_GAP`, `SPEC_GAP`,
+`EQUIVALENT`, `OUT_OF_SCOPE`) со ссылками на якоря задачи, которые проверяет драйвер.
+Разбор ничего не меняет в попытке: `TEST_GAP` копятся как предложения усиления
+(`strength/<attempt>/proposals.json`), `SPEC_GAP` уходят в отчёт для аналитиков.
+
+### Части ревью процессами драйвера (A2)
+
+`next … --review-runner process`: драйвер сам запускает каждую часть ревью отдельным
+процессом CLI (пресеты `claude -p --output-format json --tools ""` и
+`codex exec --sandbox read-only --ephemeral --json`), во временном каталоге вне проекта,
+с полным входом в stdin, и сразу возвращает `wait`. Следующий `next` собирает готовые
+ответы: та же проверка, что у `submit`, до трёх процессов на часть; лимит частоты или
+подписки — пауза без траты попытки (60 с, вдвое дольше каждый раз, до 30 мин, не больше
+8 пауз на задачу); всё — в `driver-log.jsonl`. На каждую часть публикуется квитанция процесса
+(дайджест команды, CLI, модель, время, код выхода, сессия, дайджест stdout, токены,
+`user_settings_loaded`). Уровень доказательства `isolation_evidence`:
+`DRIVER_PROCESS` — только у частей, ответ которых пришёл из процесса драйвера с
+отдельной сессией; ответ хоста — не выше `HOST_DECLARED`; самопроверка — `NONE`.
+`result.json` процесса привязан к запуску одноразовым токеном, который получает только
+оболочка процесса (в каталоге задачи — лишь его дайджест): файл, записанный хостом в
+каталог раннера, не принимается (`RUNNER_RESULT_UNBOUND`). Это защита от ошибки хоста,
+а не от пользователя машины, который может переписать и запись запуска: против
+недобросовестного хоста `DRIVER_PROCESS` значит не больше, чем `HOST_DECLARED`.
+С `--require-driver-isolation` результат ниже `DRIVER_PROCESS` не принимается
+(`REVIEW_ISOLATION_UNVERIFIED`). `run --runner process` отдаёт раннеру все задачи модели.
+
+### Отчёт для аналитиков
+
+С `next --analyst-report`: context-marker пишет структурные `requirement_gaps`, ревьюеры —
+`analyst_question` у находок, когда проблема в требовании; вместе со `SPEC_GAP` разбора
+они собираются детерминированно в `analyst-report.json`/`.md` (дубли склеиваются по SREQ
+и нормализованному вопросу, у каждого пункта — источники). `python -m tools.analyst_report
+export --project … --run …` печатает комментарий для change OpenSpec; в `openspec/` пакет
+сам не пишет.
+
+## 12. Волна 3: живой набор и поддержка тестов
+
+Поправки к контракту A4 (§17 п. 2, политика `quarantine`) и A5 (§25, свои тесты по
+манифесту и профиль `suite-update-v1`). Без опций всё прежнее, кроме карантина: с гейта волны 3
+он — политика `local-pilot-v1` по умолчанию (`--disposition-policy cleanup` — прежняя очистка).
+
+- **Ключи требований** (`tools/requirement_identity.py`). OpenSpec — capability и имя
+  requirement (с `RENAMED`), Markdown — явный ID (встроенный или `.skillsrc`
+  `requirements.id_pattern`), иначе путь и цепочка заголовков. Хеш — текст без строки
+  заголовка и ID, NFC, схлопнутые пробелы: переименование заголовка не меняет хеш,
+  правка текста меняет только свой. Строки берутся тем же проходом, что SREQ
+  (`build_context.scan_documents`); формат `SREQ-NNNN` прежний, связь — по ключам.
+- **Набор и манифест** (`tools/suite_manifest.py`, `pipeline_driver_suite.py`). Пишется
+  после терминального результата `local-pilot-v1 --suite`, только когда тесты остались в
+  проекте; файлы создаются эксклюзивно. `verify` сравнивает дайджесты кейсов, срезов
+  методов и SUPPORT (концы строк и пустые строки не считаются) — так видны правки людей.
+- **Миграция** (`tools/suite_migrate.py`): формат 0 — bundle прогона без манифеста →
+  1.0.0; документ людей остаётся каноническим JSON набора, ключи — из скана документов
+  или, если они изменились, из записи прогона.
+- **Влияние и поверхность кода** (`tools/suite_impact.py`, `tools/code_surface.py`):
+  Spring MVC (с маскированием комментариев), Flask, FastAPI; переименование по равному
+  хешу текста; вопросы об эндпоинтах без требования.
+- **Карантин в попытке** (`generated_delta`, `finalize_attempt`, `pilot_state`; с гейта волны 3 —
+  политика `local-pilot-v1` по умолчанию, `--disposition-policy cleanup` — прежняя очистка):
+  операция `QUARANTINE_IF_EXACT`, план фиксирует дайджест помеченного файла заранее,
+  эффект пишет только точные байты своего файла; валидатор заново выводит режим из
+  разрешения прогона и упавших методов квитанции исполнения.
+- **`suite-update-v1`** (`tools/suite_update.py`, `suite_merge.py`, `suite_run.py`,
+  `suite_failures.py`, `suite_summary.py`) — профиль драйвера со своим журналом шагов
+  (`.pilot-runs/<run>/suite-update.json`), не попытка пилота. Генератор возвращает только
+  изменённое; драйвер сливает ответ в ревизию N+1 (перенумерация SREQ по ключам, связи
+  неизменённых требований, удаление CREQ без источника) и проверяет её тем же
+  каноническим валидатором и grounding, что свежий документ. Ревью — производственные
+  планировщик и валидатор compact-v1 на документе из изменённых кейсов; ревью методов
+  получает исходники продукта, на которые методы ссылаются. Методы вставляются по
+  срезам; обновлённый метод должен сохранить метки `ASSERT-…` и ожидаемые литералы
+  кейса, отремонтированный — ещё и все литералы старого метода. Ошибка компиляции
+  приписывается методу по номеру строки. Описание PR и patch строятся детерминированно.
+- **Сила тестов во времени.** `--mutation` в `suite-update-v1` измеряет весь набор, доли
+  по кейсам идут в манифест, падение — в описание PR. Файлы истории PIT ядро 1.30 не
+  поддерживает (нужен плагин), поэтому каждый замер полный, а прошлые замеры лежат в
+  `.pilot-runs/suite-strength/<suite_id>/` вне набора.

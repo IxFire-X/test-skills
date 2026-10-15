@@ -1,0 +1,69 @@
+{
+  "scenario": 2,
+  "outcome": "UPDATED",
+  "counts": {
+    "cases": {
+      "changed": 0,
+      "new": 0,
+      "retired": 0,
+      "unchanged": 12
+    },
+    "proposals": 0,
+    "quarantined": 0,
+    "questions": 0,
+    "released": 0,
+    "repaired": 1,
+    "requirements": {
+      "added": 0,
+      "changed": 0,
+      "removed": 0,
+      "renamed": 0
+    }
+  },
+  "reviews": {
+    "repair": {
+      "eligible": true,
+      "input_bytes": 26003,
+      "parts": 1
+    }
+  },
+  "manifest": {
+    "format_version": "1.0.0",
+    "cases": 12,
+    "by_status": {
+      "ACTIVE": 12,
+      "QUARANTINED": 0,
+      "RETIRED": 0
+    },
+    "quarantine": [],
+    "history": [
+      {
+        "action": "CREATED",
+        "profile": "local-pilot-v1",
+        "run_id": "9056085db2c74b828195a6dff8888a30"
+      },
+      {
+        "action": "UPDATED",
+        "profile": "suite-update-v1",
+        "run_id": "ebcf1223357641fb8b846103e7195433"
+      }
+    ],
+    "edited": {
+      "suite_files": [],
+      "cases": [],
+      "methods": [],
+      "support": [],
+      "missing": []
+    }
+  },
+  "pr_description": {
+    "bytes": 1446,
+    "sections": [
+      "Итог",
+      "Тесты",
+      "Что сделать человеку"
+    ]
+  },
+  "patch_bytes": 8899,
+  "seconds_from_start": 386.0
+}

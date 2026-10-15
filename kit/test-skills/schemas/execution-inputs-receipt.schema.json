@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/execution-inputs-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "run_id", "attempt_id", "policy_profile", "automation_artifact", "autotest_review", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "kind": {"const": "execution-inputs"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"const": "local-pilot-v1"},
+    "automation_artifact": {"type": "object"},
+    "autotest_review": {"type": "object"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

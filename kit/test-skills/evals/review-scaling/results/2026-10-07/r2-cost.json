@@ -1,0 +1,41 @@
+{
+  "r1": {
+    "parts": 11,
+    "input_bytes": 1852926,
+    "blocks": 5
+  },
+  "trials": 30,
+  "seed": 5,
+  "scenarios": [
+    {
+      "scenario": "1 кейс, текст ±5 %",
+      "parts_median": 4.0,
+      "parts_min": 4,
+      "parts_max": 4,
+      "input_bytes_median": 668056,
+      "input_bytes_max": 682119,
+      "new_blocks_median": 0.0,
+      "new_blocks_max": 0
+    },
+    {
+      "scenario": "1 кейс, текст ±30 %",
+      "parts_median": 4.0,
+      "parts_min": 4,
+      "parts_max": 9,
+      "input_bytes_median": 672349,
+      "input_bytes_max": 1512474,
+      "new_blocks_median": 0.0,
+      "new_blocks_max": 3
+    },
+    {
+      "scenario": "3 кейса, текст ±30 %",
+      "parts_median": 9.0,
+      "parts_min": 7,
+      "parts_max": 15,
+      "input_bytes_median": 1510638,
+      "input_bytes_max": 2172636,
+      "new_blocks_median": 0.0,
+      "new_blocks_max": 4
+    }
+  ]
+}

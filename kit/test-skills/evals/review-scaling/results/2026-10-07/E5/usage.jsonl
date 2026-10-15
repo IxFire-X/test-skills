@@ -1,0 +1,13 @@
+{"run":"E5-E1c-clean-sonnet","part":"part-000001","model":"claude-sonnet-5-5","tokens":78148,"tool_uses":8,"ms":32547}
+{"run":"E5-E1c-sonnet","part":"part-000001","model":"claude-sonnet-5-5","tokens":80864,"tool_uses":7,"ms":45642}
+{"run":"E5-E1c-haiku","part":"part-000001","model":"claude-haiku-4-5-20251001","tokens":75258,"tool_uses":12,"ms":132815}
+{"run":"E5-E1c-clean-haiku","part":"part-000001","model":"claude-haiku-4-5-20251001","tokens":76237,"tool_uses":11,"ms":135020}
+{"run":"E5-E3c-haiku","part":"part-000001","model":"claude-haiku-4-5-20251001","tokens":80988,"tool_uses":17,"ms":169788}
+{"run":"E5-gen-auto-sonnet","part":"tc-to-autotest:r1","model":"claude-sonnet-5-5","tokens":121012,"tool_uses":17,"ms":100155}
+{"run":"E5-gen-auto-haiku","part":"tc-to-autotest:r1","model":"claude-haiku-4-5-20251001","tokens":97869,"tool_uses":13,"ms":153442}
+{"run":"E5-gen-cases-sonnet","part":"tc-generator:B1","model":"claude-sonnet-5-5","tokens":143545,"tool_uses":22,"ms":245746}
+{"run":"E5-gen-auto-sonnet-review","part":"autotest-reviewer:r1:part-000001","model":"claude-fable-5-1","tokens":90086,"tool_uses":20,"ms":149142}
+{"run":"E5-gen-cases-sonnet-review","part":"tc-reviewer:canonical:part-000001","model":"claude-fable-5-1","tokens":103376,"tool_uses":12,"ms":145875}
+{"run":"E5-gen-auto-haiku-review","part":"autotest-reviewer:r1:part-000001","model":"claude-fable-5-1","tokens":103319,"tool_uses":12,"ms":254354}
+{"run":"E5-gen-cases-haiku","part":"tc-generator:B1 3 submissions","model":"claude-haiku-4-5-20251001","tokens":134813,"tool_uses":35,"ms":498420}
+{"run":"E5-gen-cases-sonnet-review","part":"tc-reviewer:canonical:part-000002","model":"claude-fable-5-1","tokens":87366,"tool_uses":12,"ms":102371}

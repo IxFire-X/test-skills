@@ -1,0 +1,21 @@
+{
+  "set": "E4",
+  "base": "Petclinic b7733d39 automation r1 (OwnerLifecycleB7733d39Tests.java, 250 016 bytes, 4288 lines) with its canon",
+  "note": "Four defects in different slices. Every case method calls the same six helpers, so the helper defect is matched by the file ID with a keyword.",
+  "defects": [
+    {"id": "P1", "class": "literal", "min_severity": "WARNING", "locus": ["TC-B1-001", "ASSERT-B1-001-05-03"],
+     "description": "case001 expects address «10 Test Str» while the case sends and expects «10 Test Street».",
+     "mutations": [{"op": "code", "file": "FILE-owner-lifecycle-b7733d39", "old": "assertEquals(\"10 Test Street\", r5.get(\"address\"), \"ASSERT-B1-001-05-03\")", "new": "assertEquals(\"10 Test Str\", r5.get(\"address\"), \"ASSERT-B1-001-05-03\")"}]},
+    {"id": "P2", "class": "shared-helper", "min_severity": "WARNING", "locus": ["FILE-owner-lifecycle-b7733d39"], "keywords": ["calendar", "tomorrow", "plusDays(2)", "завтра", "D+1"],
+     "description": "The shared helper calendar() returns the day after tomorrow as «tomorrow».",
+     "mutations": [{"op": "code", "file": "FILE-owner-lifecycle-b7733d39", "old": "\"tomorrow\",\n\t\t\t\td.plusDays(1).toString()", "new": "\"tomorrow\",\n\t\t\t\td.plusDays(2).toString()"}]},
+    {"id": "P3", "class": "shared-static-state", "min_severity": "WARNING", "locus": ["TC-B1-030", "TC-B1-029"],
+     "description": "case030 compares storage with a static snapshot that case029 leaves behind: it relies on case029's side effect and order.",
+     "mutations": [{"op": "code", "file": "FILE-owner-lifecycle-b7733d39", "old": "\t@Autowired\n\tprivate DataSource dataSource;\n", "new": "\t@Autowired\n\tprivate DataSource dataSource;\n\n\tprivate static Object lastSnapshot;\n"},
+                   {"op": "code", "file": "FILE-owner-lifecycle-b7733d39", "old": "\t\t// STEP-B1-029-03 CAP-B1-request\n", "new": "\t\tlastSnapshot = r2.get(\"snapshot\");\n\t\t// STEP-B1-029-03 CAP-B1-request\n"},
+                   {"op": "code", "file": "FILE-owner-lifecycle-b7733d39", "old": "\t\tMap<String, Object> r4 = read(m(\"before\", r2.get(\"snapshot\"), \"entity\", \"none\"));\n\t\tchecks.add(() -> assertEquals(r2.get(\"snapshot\"), r4.get(\"snapshot\"), \"ASSERT-B1-030-04-01\"));", "new": "\t\tMap<String, Object> r4 = read(m(\"before\", lastSnapshot, \"entity\", \"none\"));\n\t\tchecks.add(() -> assertEquals(lastSnapshot, r4.get(\"snapshot\"), \"ASSERT-B1-030-04-01\"));"}]},
+    {"id": "P4", "class": "stub-instead-of-application", "min_severity": "WARNING", "locus": ["TC-B1-040", "STEP-B1-040-03"],
+     "description": "case040 replaces the real POST /owners/{ownerId}/pets/new with a hard-coded map: the application is never called.",
+     "mutations": [{"op": "code_regex", "file": "FILE-owner-lifecycle-b7733d39", "pattern": "Map<String, Object> r3 = request\\(\"STEP-B1-040-03\",[^;]*;", "new": "Map<String, Object> r3 = m(\"view\", \"pets/createOrUpdatePetForm\", \"errorFields\", l(\"type\"), \"exceptionType\", \"\");"}]}
+  ]
+}

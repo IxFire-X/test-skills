@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/release-eval-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy",
+    "campaign_id",
+    "tuple",
+    "scenario_suite",
+    "scenario_counts",
+    "smoke_runs",
+    "critical_runs",
+    "required_critical_runs",
+    "instability_observed",
+    "protocol_violations",
+    "require_real_execution",
+    "require_independent_review",
+    "ready",
+    "predecessor_evaluation_digest",
+    "evaluated_run_digests",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "policy": {"const": "adaptive-1-3-5-v1"},
+    "campaign_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "tuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skill_pack_version",
+        "skill_pack_digest",
+        "compatibility_contract_version",
+        "execution_profile_version",
+        "cli_host",
+        "cli_runtime",
+        "role_policy",
+        "generator_model",
+        "reviewer_model",
+        "os",
+        "language_runtime",
+        "framework",
+        "build_tool",
+        "execution_adapter",
+        "project_snapshot_digest",
+        "module",
+        "policy_profile",
+        "model_stages"
+      ],
+      "properties": {
+        "skill_pack_version": {"$ref": "#/$defs/verified_label"},
+        "skill_pack_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "compatibility_contract_version": {"$ref": "#/$defs/verified_label"},
+        "execution_profile_version": {"$ref": "#/$defs/verified_label"},
+        "cli_host": {"$ref": "#/$defs/observed_label"},
+        "cli_runtime": {"$ref": "#/$defs/observed_label"},
+        "role_policy": {"$ref": "#/$defs/verified_label"},
+        "generator_model": {"$ref": "#/$defs/observed_label"},
+        "reviewer_model": {"$ref": "#/$defs/observed_label"},
+        "os": {"$ref": "#/$defs/observed_label"},
+        "language_runtime": {"$ref": "#/$defs/observed_label"},
+        "framework": {"$ref": "#/$defs/verified_label"},
+        "build_tool": {"$ref": "#/$defs/verified_label"},
+        "execution_adapter": {"$ref": "#/$defs/verified_label"},
+        "project_snapshot_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "module": {"type": "string", "pattern": "^(?:\\.|[A-Za-z0-9][A-Za-z0-9._/-]{0,255})$"},
+        "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+        "model_stages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer"],
+          "properties": {
+            "context-marker": {"$ref": "#/$defs/observed_label"},
+            "tc-generator": {"$ref": "#/$defs/observed_label"},
+            "tc-reviewer": {"$ref": "#/$defs/observed_label"},
+            "tc-to-autotest": {"$ref": "#/$defs/observed_label"},
+            "autotest-reviewer": {"$ref": "#/$defs/observed_label"}
+          }
+        }
+      }
+    },
+    "scenario_suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suite_id", "digest"],
+      "properties": {
+        "suite_id": {"$ref": "#/$defs/label"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "scenario_counts": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "smoke_runs": {"const": 1},
+    "critical_runs": {"type": "integer", "minimum": 0},
+    "required_critical_runs": {"enum": [3, 5]},
+    "instability_observed": {"type": "boolean"},
+    "protocol_violations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/label"}},
+    "require_real_execution": {"type": "boolean"},
+    "require_independent_review": {"type": "boolean"},
+    "ready": {"type": "boolean"},
+    "predecessor_evaluation_digest": {
+      "anyOf": [
+        {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "evaluated_run_digests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    },
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [{
+    "if": {"properties": {"ready": {"const": true}}, "required": ["ready"]},
+    "then": {
+      "properties": {
+        "critical_runs": {"minimum": 3},
+        "scenario_counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 3}
+        },
+        "protocol_violations": {"maxItems": 0},
+        "instability_observed": {"const": false},
+        "require_real_execution": {"const": true},
+        "require_independent_review": {"const": true},
+        "tuple": {
+          "properties": {
+            "cli_host": {"$ref": "#/$defs/verified_label"},
+            "cli_runtime": {"$ref": "#/$defs/verified_label"},
+            "generator_model": {"$ref": "#/$defs/verified_label"},
+            "reviewer_model": {"$ref": "#/$defs/verified_label"},
+            "os": {"$ref": "#/$defs/verified_label"},
+            "language_runtime": {"$ref": "#/$defs/verified_label"},
+            "model_stages": {
+              "properties": {
+                "context-marker": {"$ref": "#/$defs/verified_label"},
+                "tc-generator": {"$ref": "#/$defs/verified_label"},
+                "tc-reviewer": {"$ref": "#/$defs/verified_label"},
+                "tc-to-autotest": {"$ref": "#/$defs/observed_label"},
+                "autotest-reviewer": {"$ref": "#/$defs/observed_label"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }, {
+    "if": {
+      "properties": {
+        "ready": {"const": true},
+        "required_critical_runs": {"const": 5}
+      },
+      "required": ["ready", "required_critical_runs"]
+    },
+    "then": {
+      "properties": {
+        "critical_runs": {"minimum": 5},
+        "scenario_counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 5}
+        },
+        "predecessor_evaluation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  }],
+  "$defs": {
+    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "verified_label": {"type": "string", "pattern": "^(?!unverified-)[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "observed_label": {"anyOf": [{"$ref": "#/$defs/verified_label"}, {"type": "null"}]}
+  }
+}

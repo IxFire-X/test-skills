@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/scenario-observation-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "run_id", "attempt_id", "policy_profile", "scenario_id", "precondition", "action", "before", "after", "event_digests", "receipt_digests", "result", "digest"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "kind": {"const": "scenario-observation"},
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+    "scenario_id": {"enum": ["fresh-non-git", "dirty-git-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]},
+    "precondition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "snapshot_digest"],
+      "properties": {
+        "kind": {"enum": ["NON_GIT_PROJECT", "DIRTY_GIT_TREE", "MODEL_WAITING", "USER_QUESTION_PENDING", "TERMINAL_ATTEMPT", "RETAINED_FILE_SET"]},
+        "snapshot_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "action": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "before_digest", "after_digest"],
+      "properties": {
+        "kind": {"enum": ["RUN_PIPELINE", "RUN_PRESERVING_DIRTY_TREE", "RESUME_MODEL_ATTEMPT", "RESUME_AFTER_USER_ANSWER", "RETRY_TERMINAL_ATTEMPT", "PROJECT_NATIVE_RERUN"]},
+        "before_digest": {"$ref": "#/$defs/digest"},
+        "after_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "before": {"$ref": "#/$defs/snapshot"},
+    "after": {"$ref": "#/$defs/snapshot"},
+    "event_digests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+    "receipt_digests": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "digest"],
+      "properties": {"kind": {"const": "TERMINAL_RESULT"}, "digest": {"$ref": "#/$defs/digest"}}
+    },
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "observed_file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "retained_file": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file_id", "path", "digest"],
+      "properties": {
+        "file_id": {"$ref": "#/$defs/label"},
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "snapshot": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "path", "entries", "digest"],
+          "properties": {"kind": {"const": "GIT_DIRECTORY"}, "path": {"const": ".git"}, "entries": {"const": []}, "digest": {"$ref": "#/$defs/digest"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "status", "files", "digest"],
+          "properties": {
+            "kind": {"const": "GIT_TREE"},
+            "status": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/observed_file"}},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "event_digest", "digest"],
+          "properties": {"kind": {"const": "EVENT"}, "event_digest": {"$ref": "#/$defs/digest"}, "digest": {"$ref": "#/$defs/digest"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "question_digests", "answer_digests", "digest"],
+          "properties": {
+            "kind": {"const": "USER_INTERACTION"},
+            "question_digests": {"type": "array", "maxItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+            "answer_digests": {"type": "array", "maxItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "terminal_digest", "terminal_event_count", "execution_start_count", "terminal_artifact_digests", "digest"],
+          "properties": {
+            "kind": {"const": "TERMINAL"},
+            "terminal_digest": {"$ref": "#/$defs/digest"},
+            "terminal_event_count": {"const": 1},
+            "execution_start_count": {"type": "integer", "minimum": 0, "maximum": 1},
+            "terminal_artifact_digests": {
+              "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true,
+              "items": {"$ref": "#/$defs/digest"}
+            },
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "files", "digest"],
+          "properties": {
+            "kind": {"const": "RETAINED_FILES"},
+            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/retained_file"}},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        }
+      ]
+    }
+  }
+}

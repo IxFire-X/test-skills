@@ -1,0 +1,35 @@
+{
+  "set": "E1",
+  "mode": "compact-v1",
+  "clean": true,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55531,
+  "answer_bytes": [
+    3415
+  ],
+  "answer_bytes_total": 3415,
+  "complete": true,
+  "diagnostics": [],
+  "unchecked": [],
+  "found": 0,
+  "seeds": 0,
+  "rows": [],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 0,
+    "BLOCKING": 0
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [],
+  "lint_dispositions": [],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791367394.2172573,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,515 @@
+{
+  "set": "E4",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 11,
+  "missing_answers": [],
+  "input_bytes": 1461246,
+  "answer_bytes": [
+    4654,
+    4939,
+    3064,
+    3974,
+    3498,
+    4468,
+    3437,
+    3245,
+    3713,
+    3018,
+    1415
+  ],
+  "answer_bytes_total": 39425,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "cross-49496d1a4e024a070e184f35d60e6f51f6935d5a9c071e061454ced041665438",
+      "reason": "Общее static-поле lastSnapshot (L60) пишет case029 и читает case030: зависимость от порядка запуска, нарушающая требование изолированности (CREQ-B1-S30). Проверить в части с этими кейсами."
+    },
+    {
+      "scope_id": "cross-db8377c804d407c0ccef992f238ccae90710cc1088c391d7baa997a32d115ce0",
+      "reason": "Static lastSnapshot (L60) записывает case029 и читает case030: проверить, что case030 не зависит от порядка запуска и от записи case029."
+    },
+    {
+      "scope_id": "cross-a3dc201dc5af41c97643d811b19aa842e29e6718b6eff8934cb9dc802d24f61b",
+      "reason": "Проверить, что другие части не используют calendar.tomorrow как D+1 (L106-L107) и не получают неверные даты визитов."
+    },
+    {
+      "scope_id": "cross-2e0754dd23df60bef55f26e590297049e902d713e1482e13e3b16f6597d2cb9d",
+      "reason": "Shared-state table shows static lastSnapshot (L60) written by case029 and read by case030; each method has its own Spring context, so check order independence and that case030 does not rely on case029 running first."
+    },
+    {
+      "scope_id": "cross-58d1d210cce28097ea2e7d873f21fab5e2c18d7df73022dbfbceed83ce7285cb",
+      "reason": "Таблица общего состояния: static lastSnapshot (L60) пишет case029 и читает case030, при DirtiesContext на метод и неопределённом порядке запуска это зависимость от порядка; проверить вне этой части."
+    },
+    {
+      "scope_id": "cross-be414b7b347c2d0bd52cdc6a1a61432d1a3d00408401fdfeffccf07ea45baed8",
+      "reason": "Определение D, D-1, D+1 и дат сценария: нужно найти кейсы других частей, использующие calendar().tomorrow (дрейф D+2 вместо D+1 в L106-L107) и оценить их влияние."
+    },
+    {
+      "scope_id": "cross-9d00a0ef503356492df81a772cce467d99ff77d4d12a98b4b0dba93878fbd99d",
+      "reason": "Confirm which later cases consume calendar.tomorrow (D+1) and whether their expectations are affected by the plusDays(2) drift in calendar() L106-107; also check no other case reads static lastSnapshot."
+    },
+    {
+      "scope_id": "cross-34e6d28f071d6ecad2ae9b78961efd86db1cb204c3d514698b0652b0547597cf",
+      "reason": "Статическое поле lastSnapshot (L60) пишет case029 и читает case030; в этой части оно не используется, порядок и изоляцию нужно проверить в части с этими кейсами."
+    },
+    {
+      "scope_id": "cross-aa6b8fb85c85c6f98098bb4727a8b604d7a1b9cdb1f8dc8d7d253310fe322399",
+      "reason": "Verify that case030 does not depend on lastSnapshot written by case029 (static field L60), i.e. is independent of execution order and DirtiesContext per-method isolation."
+    },
+    {
+      "scope_id": "cross-61f1493ec59d10b46b5837d67f4f68dea3919ee9346b39aacef3e07c9a33f10f",
+      "reason": "calendar() является общим хелпером с ошибочным tomorrow=D+2: проверить остальные кейсы документа, использующие calendar().tomorrow или minVisitDate, на тот же дрейф."
+    },
+    {
+      "scope_id": "cross-bf22fb5bc346cf8fca84cd432664c6b2ab00850a5c3c8c89d656d866cb5f8fb9",
+      "reason": "Static lastSnapshot (L60) записывает case029 и читает case030: проверить зависимость от порядка запуска; вне этой части."
+    }
+  ],
+  "found": 4,
+  "seeds": 4,
+  "rows": [
+    {
+      "id": "P1",
+      "class": "literal",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "ASSERT_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-001",
+            "ASSERT-B1-001-05-03",
+            "SYMBOL-TC-B1-001"
+          ],
+          "message": "L636: assertEquals(\"10 Test Str\", r5.get(\"address\")) — литерал усечён, канон и ввод шага 4 (INPUT-B1-001-04-06) требуют \"10 Test Street\". Тест упадёт на корректном приложении (ложный FAIL) и не проверяет сохранение address. Нужен литерал \"10 Test Street\"."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39",
+            "TC-B1-001",
+            "TC-B1-002",
+            "TC-B1-003",
+            "TC-B1-004",
+            "TC-B1-005",
+            "TC-B1-006",
+            "TC-B1-007",
+            "TC-B1-008"
+          ],
+          "message": "L106-107: calendar() кладёт tomorrow=d.plusDays(2), хотя канон требует D+1 (дублирует dayAfter). Выход tomorrow из общего хелпера всех кейсов неверен; в кейсах 1-8 проверяется только формат даты, поэтому дрейф не виден, но кейсы с датой D+1 дадут неверный вход/оракул. Исправить на plusDays(1)."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P2",
+      "class": "shared-helper",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39",
+            "TC-B1-001",
+            "TC-B1-002",
+            "TC-B1-003",
+            "TC-B1-004",
+            "TC-B1-005",
+            "TC-B1-006",
+            "TC-B1-007",
+            "TC-B1-008"
+          ],
+          "message": "L106-107: calendar() кладёт tomorrow=d.plusDays(2), хотя канон требует D+1 (дублирует dayAfter). Выход tomorrow из общего хелпера всех кейсов неверен; в кейсах 1-8 проверяется только формат даты, поэтому дрейф не виден, но кейсы с датой D+1 дадут неверный вход/оракул. Исправить на plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39",
+            "TC-B1-009",
+            "TC-B1-010",
+            "TC-B1-011",
+            "TC-B1-012",
+            "TC-B1-013",
+            "TC-B1-014",
+            "TC-B1-015",
+            "TC-B1-016"
+          ],
+          "message": "Общий хелпер calendar (L104-L110) кладёт tomorrow = LocalDate.now().plusDays(2) (L106-L107), хотя кейс и CAP-B1-calendar требуют D+1; tomorrow совпадает с dayAfter. В кейсах 009-016 значение не используется, ASSERT-xx-01-03 лишь проверяет формат yyyy-MM-dd и дрейф не ловит. Кейсы с датой визита D+1 в других частях получат неверную дату. Нужна регенерация: plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "TC-B1-017",
+            "TC-B1-018",
+            "TC-B1-019",
+            "TC-B1-020",
+            "TC-B1-021",
+            "TC-B1-022",
+            "TC-B1-023",
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar"
+          ],
+          "message": "calendar() L104-L110 sets tomorrow = d.plusDays(2) (L106-L107), identical to dayAfter, but STEP-01 requires D+1 (D, D-1, D+1, D+2, D+3). The step-1 assertions are regex-only, so the wrong value is never detected here, and the shared helper hands D+2 to every case that uses tomorrow as D+1 (dates in other parts). Fix: plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar",
+            "TC-B1-024",
+            "TC-B1-025",
+            "TC-B1-026",
+            "TC-B1-027",
+            "TC-B1-028"
+          ],
+          "message": "Общий хелпер calendar() (L106-L107) кладёт в \"tomorrow\" d.plusDays(2), а не d.plusDays(1): tomorrow и dayAfter совпадают (D+2). Канон шага 01 требует D+1 и D+2 как разные даты. ASSERT-xx-01-03 лишь проверяет формат yyyy-MM-dd и дрейф не ловит. В кейсах 024-028 tomorrow не используется, поэтому их исход не меняется, но во всех кейсах с tomorrow дата будет неверной."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "TC-B1-037",
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39",
+            "STEP-B1-037-03",
+            "INPUT-B1-037-03-06"
+          ],
+          "message": "Общий хелпер calendar() (L106-L107) считает tomorrow как d.plusDays(2), совпадая с dayAfter, а не D+1. TC-B1-037 (L2530) отправляет birthDate=r1.get(\"tomorrow\")=D+2, хотя кейс требует граничное D+1 и ошибку birthDate/typeMismatch.birthDate. Тест не отличит приложение, принимающее D+1. Проверки ASSERT-*-01-03 только регулярка и дрейф не ловят. Нужна переработка: tomorrow = d.plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "INPUT_LITERAL_DRIFT_TOMORROW",
+          "related_ids": [
+            "TC-B1-048",
+            "STEP-B1-048-03",
+            "INPUT-B1-048-03-05",
+            "CAP-B1-calendar",
+            "FILE-owner-lifecycle-b7733d39"
+          ],
+          "message": "calendar() (L106-107) кладёт в tomorrow d.plusDays(2) вместо d.plusDays(1), совпадая с dayAfter. case048 (L3156) отправляет birthDate = r1.get(\"tomorrow\") = D+2, тогда как кейс и CREQ-B1-P08 требуют D+1 (граница будущей даты). Тест не проверяет заявленное граничное значение; при дефекте приложения на D+1 он бы пропустил его. Нужно plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "SYMBOL-TC-B1-049",
+            "SYMBOL-TC-B1-050",
+            "SYMBOL-TC-B1-054",
+            "ASSERT-B1-049-03-04",
+            "ASSERT-B1-049-03-05",
+            "ASSERT-B1-050-04-01"
+          ],
+          "message": "calendar() (L106-107) computes \"tomorrow\" as d.plusDays(2), identical to dayAfter; canonical D+1 is plusDays(1). TC-B1-049 expects the form date and minVisitDate (D+1 per CREQ-B1-V01-form) to equal D+2 (L3217-3218), so it fails against a correct app or hides a D+1 defect. TC-B1-050 POSTs D+2 instead of D+1 (L3269) and ASSERT-04-01 compares with the same wrong value; TC-B1-054 sends D+2 (L3507). Rework: tomorrow = d.plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "TC-B1-055",
+            "TC-B1-059",
+            "TC-B1-060",
+            "TC-B1-056",
+            "TC-B1-057",
+            "TC-B1-058",
+            "FILE-owner-lifecycle-b7733d39",
+            "INPUT-B1-055-03-06",
+            "INPUT-B1-059-03-06",
+            "INPUT-B1-060-03-06",
+            "ASSERT-B1-055-01-03"
+          ],
+          "message": "Общий хелпер calendar() (L106-107) считает tomorrow как d.plusDays(2), совпадая с dayAfter; по кейсам tomorrow = D+1. Литерал date шагов 055-03, 059-03, 060-03 уходит в сервер как D+2, а не D+1. Проверки шага 1 (ASSERT-..-01-03) лишь regex формата и дрейф не ловят. Нужна доработка: plusDays(1) и, лучше, assertion на tomorrow == today+1."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+          "related_ids": [
+            "FILE-owner-lifecycle-b7733d39",
+            "CAP-B1-calendar",
+            "TC-B1-061",
+            "TC-B1-062",
+            "ASSERT-B1-061-08-04",
+            "ASSERT-B1-062-11-01"
+          ],
+          "message": "Хелпер calendar() (L106-L107) считает tomorrow как d.plusDays(2), тогда как кейс задаёт D+1 (прибавления -1, 1, 2, 3 дня). tomorrow совпадает с dayAfter. Шаги с date=tomorrow (061-05, 062-10) шлют D+2 вместо D+1; ASSERT-061-06-01, 061-08-04, 061-08-05 (visitDate/minVisitDate), 062-11-01 сравниваются с D+2, а не D+1. Нужна правка: d.plusDays(1)."
+        },
+        {
+          "severity": "BLOCKING",
+          "code": "CALENDAR_TOMORROW_DRIFT",
+          "related_ids": [
+            "CAP-B1-calendar",
+            "STEP-B1-063-01",
+            "STEP-B1-064-01",
+            "FILE-owner-lifecycle-b7733d39",
+            "TC-B1-063",
+            "TC-B1-064"
+          ],
+          "message": "calendar() L106-107 returns tomorrow = d.plusDays(2), equal to dayAfter, while the canonical step requires D+1 (steps 01: D-1, D+1, D+2, D+3). The ASSERT-*-01-03 check is regex-only and cannot detect it, so the drifted shared symbol passes silently. Fix: plusDays(1). Not used by 063/064 later steps; affects every case that consumes tomorrow."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P3",
+      "class": "shared-static-state",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "STATIC_SNAPSHOT_ORDER_DEPENDENCE",
+          "related_ids": [
+            "TC-B1-030",
+            "STEP-B1-030-04",
+            "ASSERT-B1-030-04-01",
+            "TC-B1-029"
+          ],
+          "message": "case030 (L2153-L2154) reads static lastSnapshot (L60), written only by case029 (L2073), instead of its own seed snapshot r2.get(\"snapshot\") required by canonical STEP-B1-030-04 (before/equals STEP-B1-030-02.snapshot). Run alone or earlier, lastSnapshot is null and read() NPEs at rows(before,..); after case029 it holds another context's DB state (incl. Boris's Rex), so the assertion compares unrelated data. Violates order independence; no valid check that nothing was saved."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "P4",
+      "class": "stub-instead-of-application",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "STUBBED_REQUEST_RESULT",
+          "related_ids": [
+            "TC-B1-040",
+            "STEP-B1-040-03",
+            "ASSERT-B1-040-03-01",
+            "ASSERT-B1-040-03-02",
+            "SYMBOL-TC-B1-040"
+          ],
+          "message": "В case040 шаг STEP-B1-040-03 не выполняет request(): r3 на L2674 — литерал m(view=pets/createOrUpdatePetForm, errorFields=[type], exceptionType=\"\"), и ASSERT-B1-040-03-01/02 сравнивают его с теми же константами. POST /owners/{ownerId}/pets/new с type=dragon не уходит в приложение; ASSERT-B1-040-04-01 тривиален, так как ничего не изменялось. Отклонение несуществующего типа не проверяется (подтверждение LINT)."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 5,
+    "WARNING": 1,
+    "BLOCKING": 15
+  },
+  "unseeded_blocking_warning": [
+    {
+      "severity": "BLOCKING",
+      "code": "CALENDAR_TOMORROW_LITERAL_DRIFT",
+      "message": "calendar() L106-107 puts d.plusDays(2) into \"tomorrow\" (same as dayAfter), while canonical D+1 is required. Steps in this part assert only date format for tomorrow, so it passes, but any case using tomorrow as D+1 (e.g. visit dates) gets the wrong date. Fix: d.plusDays(1).",
+      "evidence": [
+        "CAP-B1-calendar",
+        "STEP-B1-029-01",
+        "ASSERT-B1-029-01-03"
+      ],
+      "related_ids": [
+        "CAP-B1-calendar",
+        "STEP-B1-029-01",
+        "ASSERT-B1-029-01-03"
+      ]
+    },
+    {
+      "severity": "WARNING",
+      "code": "CALENDAR_ASSERTS_FORMAT_ONLY",
+      "message": "Проверки шага 1 (L2800-L2814 и аналоги) сверяют только формат yyyy-MM-dd, не смещения от D. Поэтому ошибка tomorrow=D+2 в calendar() ни одной проверкой не обнаруживается. Остальные кейсы части используют только today и thirdDay, их значения корректны.",
+      "evidence": [
+        "ASSERT-B1-048-01-03",
+        "ASSERT-B1-048-01-04",
+        "TC-B1-043",
+        "TC-B1-044",
+        "TC-B1-045",
+        "TC-B1-046",
+        "TC-B1-047",
+        "TC-B1-048"
+      ],
+      "related_ids": [
+        "ASSERT-B1-048-01-03",
+        "ASSERT-B1-048-01-04",
+        "TC-B1-043",
+        "TC-B1-044",
+        "TC-B1-045",
+        "TC-B1-046",
+        "TC-B1-047",
+        "TC-B1-048"
+      ]
+    },
+    {
+      "severity": "BLOCKING",
+      "code": "VISIT_ORDER_NOT_EXERCISED",
+      "message": "TC-B1-061 проверяет упорядочение истории по возрастанию даты (CREQ-B1-V07-order): визиты D+2 'Повторный осмотр' и D+1 'Первичный осмотр'. Из-за tomorrow=D+2 оба нового визита получают одну дату D+2, а старый - D+3; порядок D+2 до D+1 не создаётся, сравнение ownerGraph (модель против SQL) для разных дат не проверяется.",
+      "evidence": [
+        "TC-B1-061",
+        "CREQ-B1-V07-order",
+        "ASSERT-B1-061-07-03",
+        "ASSERT-B1-061-11-03"
+      ],
+      "related_ids": [
+        "TC-B1-061",
+        "CREQ-B1-V07-order",
+        "ASSERT-B1-061-07-03",
+        "ASSERT-B1-061-11-03"
+      ]
+    }
+  ],
+  "corrections": [],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-B333CE572A",
+      "decision": "confirmed",
+      "reason": "L636 содержит \"10 Test Str\" вместо \"10 Test Street\"; реальный дрейф литерала в ASSERT-B1-001-05-03."
+    },
+    {
+      "part_id": "part-000006",
+      "lint_id": "LINT-DE7E9A0B3B",
+      "decision": "confirmed",
+      "reason": "case040 (L2674) не вызывает request(); метод POST шага 3 в коде метода отсутствует."
+    },
+    {
+      "part_id": "part-000006",
+      "lint_id": "LINT-8D05A12977",
+      "decision": "confirmed",
+      "reason": "Путь /owners/{ownerId}/pets/new в case040 отсутствует: вместо запроса стоит литерал r3."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791349246.8500183,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000002": [
+      {
+        "at": 1791349234.2451332,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349250.659379,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000003": [
+      {
+        "at": 1791349237.3198028,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000004": [
+      {
+        "at": 1791349231.7538753,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349245.3948176,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000005": [
+      {
+        "at": 1791349239.9736223,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349253.9664285,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000006": [
+      {
+        "at": 1791349235.849941,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349248.563017,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000007": [
+      {
+        "at": 1791349221.1661088,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349234.2497215,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000008": [
+      {
+        "at": 1791349233.4890397,
+        "accepted": false,
+        "codes": [
+          "SCHEMA_MAX_LENGTH"
+        ]
+      },
+      {
+        "at": 1791349240.6978009,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000009": [
+      {
+        "at": 1791349236.0708349,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000010": [
+      {
+        "at": 1791349240.037791,
+        "accepted": true,
+        "codes": []
+      }
+    ],
+    "part-000011": [
+      {
+        "at": 1791349228.3563838,
+        "accepted": false,
+        "codes": [
+          "ANSWER_UNREADABLE"
+        ]
+      },
+      {
+        "at": 1791349236.8582242,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

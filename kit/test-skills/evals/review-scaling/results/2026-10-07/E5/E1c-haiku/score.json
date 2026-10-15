@@ -1,0 +1,210 @@
+{
+  "set": "E1",
+  "mode": "compact-v1",
+  "clean": false,
+  "parts": 1,
+  "missing_answers": [],
+  "input_bytes": 55992,
+  "answer_bytes": [
+    5188
+  ],
+  "answer_bytes_total": 5188,
+  "complete": false,
+  "diagnostics": [],
+  "unchecked": [
+    {
+      "scope_id": "local-TC-B1-004",
+      "reason": "firstName mismatch: expectation shows 'Ramesh' but CREQ-B1-003 requires 'Ramsesh'."
+    },
+    {
+      "scope_id": "local-TC-B1-005",
+      "reason": "Expected id mismatch: input id=7 but assertion checks id=8."
+    },
+    {
+      "scope_id": "local-TC-B1-010",
+      "reason": "Response text mismatch: expectation shows 'Student Deleted!' but CREQ-B1-009 requires 'Student Successfully Deleted!'."
+    },
+    {
+      "scope_id": "local-TC-B1-012",
+      "reason": "Test assumes stateful behavior (5 students after create) but CREQ-B1-012 requires stateless responses."
+    },
+    {
+      "scope_id": "cross-b776313358255ad0",
+      "reason": "Multiple cross-case conflicts: GET /students expectations differ, /students/{id} firstName differs, missing CREQ-B1-010 test."
+    },
+    {
+      "scope_id": "cross-304e5bcf33917a85c01c4b815ce6be91822fe41408cbedacf8a3f3dc96346d84",
+      "reason": "Verify coverage: does another part test CREQ-B1-010 (GET /hello-world)?"
+    },
+    {
+      "scope_id": "cross-94329ac02e264f391de90657cfbb19dbb256be9f2361f964f989b634dedb6758",
+      "reason": "Resolve contradiction: TC-B1-012 assumes state persistence but CREQ-B1-012 forbids it."
+    },
+    {
+      "scope_id": "cross-7aa0c8773d277846af3d0f6b370b7f2c0d93128802cb5ac78f5681f963fce297",
+      "reason": "Проверь, что предложенные правки сохраняют смысл кейсов TC-B1-012 и не создают противоречий с остальными кейсами этой части."
+    }
+  ],
+  "found": 5,
+  "seeds": 6,
+  "rows": [
+    {
+      "id": "S1",
+      "class": "literal-vs-input-or-text",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "EXPECTATION_ID_MISMATCH",
+          "related_ids": [
+            "TC-B1-005",
+            "INPUT-B1-005-01-3",
+            "EXP-B1-005-01-1"
+          ],
+          "message": "TC-B1-005 expectation body shows id=8 but input specifies query id=7. Assertion does not match request data."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S2",
+      "class": "contradicts-source-and-other-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "FIRSTNAME_SPELLING_INCONSISTENT",
+          "related_ids": [
+            "TC-B1-004",
+            "CREQ-B1-003",
+            "EXP-B1-004-01-1"
+          ],
+          "message": "TC-B1-004 expectation shows firstName='Ramesh' but CREQ-B1-003 requires 'Ramsesh'. Same endpoint GET /students/{id}."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S3",
+      "class": "contradicts-source",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "RESPONSE_TEXT_MISMATCH",
+          "related_ids": [
+            "TC-B1-010",
+            "CREQ-B1-009",
+            "EXP-B1-010-01-1"
+          ],
+          "message": "TC-B1-010 expectation text is 'Student Deleted!' but CREQ-B1-009 requires 'Student Successfully Deleted!'."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S4",
+      "class": "shared-state-list",
+      "found": true,
+      "findings": [
+        {
+          "severity": "BLOCKING",
+          "code": "STATEFUL_TEST_VIOLATES_REQUIREMENT",
+          "related_ids": [
+            "TC-B1-012",
+            "CREQ-B1-012",
+            "STEP-B1-012-02"
+          ],
+          "message": "TC-B1-012 assumes POST creates persistent state affecting GET /students. CREQ-B1-012: 'Эндпоинты не хранят состояние'."
+        }
+      ],
+      "corrections": []
+    },
+    {
+      "id": "S5",
+      "class": "wrong-component",
+      "found": false,
+      "findings": [],
+      "corrections": []
+    },
+    {
+      "id": "S6",
+      "class": "requirement-without-case",
+      "found": true,
+      "findings": [
+        {
+          "severity": "WARNING",
+          "code": "REQUIREMENT_UNCOVERED",
+          "related_ids": [
+            "CREQ-B1-010"
+          ],
+          "message": "CREQ-B1-010 (GET /hello-world) not covered by any test case in this part."
+        }
+      ],
+      "corrections": []
+    }
+  ],
+  "severity_counts": {
+    "INFO": 0,
+    "WARNING": 1,
+    "BLOCKING": 4
+  },
+  "unseeded_blocking_warning": [],
+  "corrections": [
+    {
+      "path": "/test_cases/10/objective",
+      "related_ids": [
+        "TC-B1-012"
+      ],
+      "after": "Verify stateless behavior: GET /students returns unchanged 4-student list regardless of prior POST operations."
+    }
+  ],
+  "lint_dispositions": [
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-810195B8A1",
+      "decision": "confirmed",
+      "reason": "Input id=7 but expectation body shows id=8. Data-response expectation mismatch in TC-B1-005."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-C621671AD4",
+      "decision": "confirmed",
+      "reason": "CREQ-B1-010 (GET /hello-world) genuinely uncovered by any test case in this part."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-EAA185637A",
+      "decision": "confirmed",
+      "reason": "TC-B1-002 expects 4 students; TC-B1-012 expects 5. Violates CREQ-B1-012 stateless requirement."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-B6937281D1",
+      "decision": "confirmed",
+      "reason": "TC-B1-003/004 expect different firstName values for same GET /students/{id} endpoint."
+    },
+    {
+      "part_id": "part-000001",
+      "lint_id": "LINT-1909D9DE81",
+      "decision": "confirmed",
+      "reason": "Count mismatch stems from TC-B1-012 assuming stateful list updates."
+    }
+  ],
+  "tries": {
+    "part-000001": [
+      {
+        "at": 1791367449.267452,
+        "accepted": false,
+        "codes": [
+          "REVIEW_CORRECTION_TARGET"
+        ]
+      },
+      {
+        "at": 1791367490.7476494,
+        "accepted": true,
+        "codes": []
+      }
+    ]
+  }
+}

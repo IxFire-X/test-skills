@@ -1,0 +1,60 @@
+{
+  "scenario": 6,
+  "migration": {
+    "migration": {
+      "attempt_id": "1c89d6fcc448409f911bbd42d27f7255",
+      "cases": 12,
+      "cases_added_by_people": [],
+      "cases_edited_by_people": [],
+      "cases_missing_from_bundle": [],
+      "files": 1,
+      "from_format": "0",
+      "legacy_files": [
+        "TCDOC-step5-java-demo-9340016c.r1.html",
+        "TCDOC-step5-java-demo-9340016c.r1.json",
+        "TCDOC-step5-java-demo-9340016c.r1.md",
+        "TCDOC-step5-java-demo-9340016c.r1.zephyr-scale.csv"
+      ],
+      "manifest": "test-cases/suite-manifest.json",
+      "requirement_keys_from": "scan",
+      "run_id": "0fb9f40d9aea4fa083b6571382dcafd6",
+      "source": "TCDOC-step5-java-demo-9340016c.r1.json",
+      "status": "MIGRATED",
+      "steps": [
+        "0->1.0.0: manifest from the run's retained tests; the bundle's document kept as the suite's canonical JSON"
+      ],
+      "suite_dir": "test-cases/",
+      "to_format": "1.0.0"
+    },
+    "status": "ok"
+  },
+  "status": {
+    "edited": {
+      "cases": [],
+      "methods": [],
+      "missing": [],
+      "suite_files": [],
+      "support": []
+    },
+    "migration_needed": false,
+    "status": "ok",
+    "suite": {
+      "automated": 12,
+      "by_status": {
+        "ACTIVE": 12
+      },
+      "cases": 12,
+      "files": [
+        "src/test/java/net/javaguides/springboot/controller/StudentControllerPipelineTest.java"
+      ],
+      "format_version": "1.0.0",
+      "last_run": "0fb9f40d9aea4fa083b6571382dcafd6",
+      "quarantined": [],
+      "source_run": "0fb9f40d9aea4fa083b6571382dcafd6",
+      "suite_id": "SUITE-project-root"
+    },
+    "suite_dir": "test-cases/"
+  },
+  "prepare_seconds": 24.1,
+  "update_seconds": 1.3
+}
