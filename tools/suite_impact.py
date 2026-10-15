@@ -18,6 +18,7 @@ project's ordinary CI and a git range.  Output:
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -131,9 +132,24 @@ def test_outcomes(manifest: Mapping[str, Any], reports: Sequence[Path]) -> dict[
     return {key: sorted(value, key=lambda item: item["test"]) for key, value in out.items()}
 
 
+# One revision or ``BASE..HEAD`` / ``BASE...HEAD``: a side never starts with ``-`` (an option for git,
+# e.g. ``--output=<file>``) or ``.`` and never holds ``..`` (no ref name does).
+_REVISION = r"(?![-.])(?:[A-Za-z0-9_/~^@{}-]|\.(?!\.))+"
+GIT_RANGE = re.compile(rf"{_REVISION}(?:\.\.\.?{_REVISION})?")
+
+
+def checked_git_range(git_range: str) -> str:
+    if not isinstance(git_range, str) or GIT_RANGE.fullmatch(git_range) is None:
+        raise SuiteError("SUITE_INPUT", f"--git-range {git_range!r} is not a revision range (BASE..HEAD)")
+    return git_range
+
+
 def changed_files(project: Path, git_range: str) -> list[str]:
+    git_range = checked_git_range(git_range)
     try:
-        completed = subprocess.run(["git", "-c", f"safe.directory={Path(project).resolve().as_posix()}", "-C", str(project), "diff", "--name-only", git_range],
+        # Git's ownership check (safe.directory) stays in force, as in pilot_state; the range is passed
+        # after --end-of-options, and the closing -- keeps it from being read as a path.
+        completed = subprocess.run(["git", "-C", str(project), "diff", "--name-only", "--end-of-options", git_range, "--"],
                                    capture_output=True, text=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         raise SuiteError("IMPACT_GIT_RANGE", f"git diff {git_range}: {error}") from error
@@ -149,6 +165,8 @@ def impact(project: Path, *, docs: Sequence[str] | None = None, junit: Sequence[
     from tools.run_pipeline import _docs_entries
 
     project = Path(project)
+    if git_range is not None:
+        checked_git_range(git_range)
     skillsrc = _skillsrc(project)
     suite_dir = suite_directory(project, skillsrc)
     manifest = read_suite(project, suite_dir)

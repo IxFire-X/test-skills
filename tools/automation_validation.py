@@ -31,6 +31,7 @@ _MESSAGES = {
     "AUTOMATION_DUPLICATE_PATH": "generated file path must be document-unique",
     "AUTOMATION_MIXED_LANGUAGE": "generated files must use one language",
     "AUTOMATION_PORTABLE_PATH": "path must be a portable relative slash path",
+    "AUTOMATION_PATH_NOT_A_TEST": "generated file must be named as a test: Java *Test.java, *Tests.java or *IT.java; Python test_*.py or *_test.py",
     "AUTOMATION_CONTENT_DIGEST": "content_digest must identify exact UTF-8 generated file bytes",
     "AUTOMATION_UNKNOWN_FILE": "file_id is not declared by generated_files",
     "AUTOMATION_DUPLICATE_SYMBOL": "symbol_id must be unique within its file",
@@ -140,6 +141,22 @@ def _portable(path: str) -> bool:
     return all(segment and segment not in {".", ".."} and not segment.endswith((".", " ")) for segment in path.split("/"))
 
 
+# Security review note 5: a generated file is only ever a test the framework collects by its name — never a
+# collection or build hook (conftest.py, __init__.py, pytest.ini, setup.cfg, pom.xml, build.gradle*) or a helper.
+_JAVA_TEST_FILE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*(?:Test|Tests|IT)\.java")
+_PYTHON_TEST_FILE = re.compile(r"test_[a-z0-9_]+\.py|[a-z0-9_]+_test\.py")
+
+
+def is_generated_test_path(path: str, language: str) -> bool:
+    """Whether the file name of a generated file names a test of its language (Python names case-insensitively)."""
+    name = str(path).rsplit("/", 1)[-1]
+    if language == "java":
+        return _JAVA_TEST_FILE.fullmatch(name) is not None
+    if language == "python":
+        return _PYTHON_TEST_FILE.fullmatch(name.casefold()) is not None
+    return False
+
+
 def _python_name(name: str) -> bool:
     return name.isidentifier() and not keyword.iskeyword(name)
 
@@ -205,6 +222,8 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         path_seen.add(path_key)
         if not _portable(path):
             diagnostics.append(_diagnostic("AUTOMATION_PORTABLE_PATH", _pointer("artifacts", "generated_files", index, "path")))
+        elif not is_generated_test_path(path, row["language"]):
+            diagnostics.append(_diagnostic("AUTOMATION_PATH_NOT_A_TEST", _pointer("artifacts", "generated_files", index, "path")))
         if row["content_digest"] != "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest():
             diagnostics.append(_diagnostic("AUTOMATION_CONTENT_DIGEST", _pointer("artifacts", "generated_files", index, "content_digest")))
         if languages and row["language"] not in languages:

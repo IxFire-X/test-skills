@@ -1648,6 +1648,11 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
     if payload.get("action") == "done":
         result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason", "build_failure") if payload.get("result", {}).get(key) is not None})
     entry["result"] = result
+    from tools.child_environment import removed_names
+
+    removed = removed_names()
+    if removed:
+        entry["child_env_removed"] = removed  # names only: the build, the tests and PIT of this command start without them
     _log(path, entry)
     for task in payload.get("tasks", [payload]) if payload.get("action") == "batch" else [payload]:
         if task.get("action") not in {"llm", "ask_user"}:

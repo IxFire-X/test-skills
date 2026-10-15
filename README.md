@@ -63,7 +63,9 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
 берутся из собственной таблицы пакета (`tools/http_reason.py`), а не из стандартной
 библиотеки.
 Project-native выполнение поддерживает Java/JUnit 5 (Maven Wrapper, системный Maven
-или Gradle Wrapper) и Python/pytest; пакет ничего не устанавливает.
+или Gradle Wrapper) и Python/pytest. Пакет сам ничего не ставит, но запускаемая им сборка
+проекта может скачивать зависимости, а с `--mutation` — PIT; полный перечень — USAGE.md,
+раздел «Права, сеть и исполнение».
 
 ## Два профиля
 

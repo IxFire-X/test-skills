@@ -88,7 +88,7 @@ def pr_description(facts: Mapping[str, Any]) -> str:
     if stop:
         lines += [f"## Остановка: `{stop['reason']}`", "",
                   "Прогон остановлен до конца: изменения ниже не проверены прогоном набора, манифест набора не обновлён."
-                  + (" Тесты набора не выполнялись — цифры прогона в таблице выше не являются результатом." if stop["reason"] in {"SUITE_NOT_RUN", "SUITE_RUN_NONZERO_EXIT"} else ""),
+                  + (" Тесты набора не выполнялись — цифры прогона в таблице выше не являются результатом." if stop["reason"] in {"SUITE_NOT_RUN", "SUITE_RUN_NONZERO_EXIT", "NOT_RUNNABLE"} else ""),
                   "", f"Причина: {' '.join(str(stop.get('message') or '').split())[:1200]}", ""]
     if facts.get("migration") and facts["migration"].get("status") == "MIGRATED":
         lines += ["## Миграция набора", "", f"Формат {facts['migration']['from_format']} → {facts['migration']['to_format']}: "

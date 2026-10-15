@@ -622,7 +622,10 @@ def _output_tail(stream: Any) -> str:
 
 def _run_subprocess(command: list[str], project: Path, environment: Mapping[str, str] | None, timeout: int, stdout_file: Any, stderr_file: Any) -> ProcessOutcome:
     scope_marker = uuid.uuid4().hex
-    child_environment = dict(environment) if environment is not None else dict(os.environ)
+    from tools.child_environment import build_environment
+
+    # The build, the tests and PIT never see a secret-like variable of the operator's shell (S1d).
+    child_environment = build_environment(environment)
     # The marker is inherited by every descendant, including one that leaves the
     # process group with setsid, so a POSIX stop proof can account for it.
     child_environment[_SCOPE_MARKER_NAME] = scope_marker

@@ -240,3 +240,57 @@ def test_quarantined_methods_run_explicitly(tmp_path: Path, step5: dict, monkeyp
     quarantined = next(row for row in result["methods"] if row["locator"] == locators[0])
     assert quarantined["quarantined"] is True and classify(quarantined["runs"], quarantined=True)["outcome"] == "FIXED"
     json.dumps(result)  # the result is plain data
+
+
+def _step5_suite(tmp_path: Path, step5: dict) -> tuple[Path, dict]:
+    import shutil
+
+    project = tmp_path / "project"
+    shutil.copytree(step5["project"], project, ignore=shutil.ignore_patterns(".pilot-runs"))
+    manifest = _manifest(step5)
+    _write(project, step5, manifest)
+    return project, manifest
+
+
+def _system_maven(executable: str) -> dict:
+    return {"id": "root", "root": ".", "test": {"framework": "junit5", "adapter_id": "maven:selected-symbols-v1", "executable": executable,
+                                                "build_profile": "default", "adapter_parameters": {}}}
+
+
+@pytest.mark.parametrize("module", [
+    _system_maven("C:/Windows/System32/calc.exe"),
+    _system_maven("tools/evil.cmd"),
+    {"id": "root", "root": ".", "test": {"framework": "junit5", "adapter_id": "custom:anything", "executable": "C:/Windows/System32/calc.exe",
+                                         "build_profile": "default", "adapter_parameters": {}}},
+    {"id": "root", "root": ".", "test": {"framework": "junit5", "adapter_id": "maven-wrapper:selected-symbols-v1", "wrapper": "../outside/mvnw.cmd",
+                                         "build_profile": "default", "adapter_parameters": {}}},
+])
+def test_an_executable_of_the_skillsrc_outside_the_closed_runtimes_never_runs(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch, module: dict) -> None:
+    """S1b (security review note 4): the suite run resolves ``test.executable`` like the main path, or stops NOT_RUNNABLE."""
+    project, manifest = _step5_suite(tmp_path, step5)
+    monkeypatch.setattr(suite_run, "RUNNER", lambda argv, **_kwargs: pytest.fail(f"ran {argv[0]}"))
+    result = suite_run.run_suite(project, manifest, module)
+    assert result["commands"] == [] and result["not_runnable"]
+    reason, message = suite_run.not_run_reason(result)
+    assert reason == "NOT_RUNNABLE" and message
+    json.dumps(result)
+
+
+def test_the_system_maven_launcher_runs_resolved(tmp_path: Path, step5: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    project, manifest = _step5_suite(tmp_path, step5)
+    launcher = tmp_path / "maven" / "bin" / ("mvn.cmd" if os.name == "nt" else "mvn")
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    seen = []
+
+    def fake(argv, **_kwargs):
+        seen.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(suite_run, "RUNNER", fake)
+    result = suite_run.run_suite(project, manifest, _system_maven(str(launcher)), repeats=0)
+    assert seen and seen[0][0] == str(launcher.resolve())
+    assert result.get("not_runnable") is None

@@ -280,3 +280,62 @@ def test_code_surface_noise_on_step5_and_petclinic_variations(tmp_path: Path) ->
         pytest.skip("the Petclinic clone is not on this machine")
     false, true, total = _noise(PETCLINIC, "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java", "showOwner", "ownerId", tmp_path)
     assert true == 1 and false == 0, (false, true, total)
+
+
+@pytest.mark.parametrize("value", ["--output=x", "-p", "HEAD..--output=x", "HEAD;rm", "a b", "HEAD\n--output=x", "", "....", "a....b"])
+def test_a_git_range_that_is_not_a_range_stops_before_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    """S1a (security review note 3): an option in place of a range would make ``git diff`` write a file."""
+    from tools import suite_impact
+    from tools.suite_manifest import SuiteError
+
+    monkeypatch.setattr(suite_impact.subprocess, "run", lambda *args, **kwargs: pytest.fail(f"git ran for {value!r}"))
+    with pytest.raises(SuiteError) as stopped:
+        suite_impact.changed_files(tmp_path, value)
+    assert stopped.value.code == "SUITE_INPUT"
+
+
+def test_the_suite_command_refuses_an_option_as_a_git_range(tmp_path: Path, step5: dict, capsys: pytest.CaptureFixture) -> None:
+    project = _project(tmp_path, step5)
+    assert suite_main(["impact", "--project", str(project), "--git-range=--output=" + str(tmp_path / "written.txt")]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "SUITE_INPUT"
+    assert not (tmp_path / "written.txt").exists()
+
+
+@pytest.mark.parametrize("value", ["HEAD~1..HEAD", "HEAD~1...HEAD", "main@{1}..HEAD", "HEAD^"])
+def test_a_git_range_reaches_git_after_the_end_of_options_and_without_safe_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    from tools import suite_impact
+
+    calls = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "src/A.java\n", ""
+
+    monkeypatch.setattr(suite_impact.subprocess, "run", lambda argv, **kwargs: calls.append(argv) or Done())
+    assert suite_impact.changed_files(tmp_path, value) == ["src/A.java"]
+    argv = calls[0]
+    assert not any("safe.directory" in part for part in argv)
+    assert argv[argv.index("--end-of-options") + 1] == value and argv[-1] == "--"
+
+
+def test_a_git_range_lists_the_changed_files_of_a_real_repository(tmp_path: Path) -> None:
+    import subprocess
+
+    from tools.suite_impact import changed_files
+
+    if shutil.which("git") is None:
+        pytest.skip("git is not on PATH")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    git("add", "a.txt")
+    git("commit", "-q", "-m", "one")
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    git("add", "b.txt")
+    git("commit", "-q", "-m", "two")
+    assert changed_files(repo, "HEAD~1..HEAD") == ["b.txt"]
