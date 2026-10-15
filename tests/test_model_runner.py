@@ -292,8 +292,13 @@ def test_presets_forbid_writes_and_project_files_cannot_set_a_command(tmp_path: 
     assert model_runner.configure({"review_runner": {"preset": "codex", "models": {"tc-reviewer": "m"}}}).models == {"tc-reviewer": "m"}
     with pytest.raises(driver.DriverError):
         driver._runner_options({"review_runner_command": "[\"x\"]"}, tmp_path)  # a template needs --review-runner process
-    with pytest.raises(driver.DriverError, match="outside the project"):
-        driver._runner_options({"review_runner": "process", "runner_dir": str(tmp_path / "project" / "runner")}, tmp_path / "project")
+    # S2b: an explicit directory inside the project is allowed (with a warning), never the root, .pilot-runs or .git.
+    inside = driver._runner_options({"review_runner": "process", "runner_dir": str(tmp_path / "project" / "runner")}, tmp_path / "project")
+    assert inside["review_runner"]["inside_project"] is True
+    assert "inside_project" not in driver._runner_options({"review_runner": "process", "runner_dir": str(tmp_path / "elsewhere")}, tmp_path / "project")["review_runner"]
+    for refused in ("", ".pilot-runs", ".pilot-runs/x", ".git/runner"):
+        with pytest.raises(driver.DriverError, match="cannot be the project root"):
+            driver._runner_options({"review_runner": "process", "runner_dir": str(tmp_path / "project" / refused)}, tmp_path / "project")
     # A .skillsrc with a command in review_runner stops the run at scan (schema) before anything is launched.
     project = _project(tmp_path / "skillsrc", local=False)
     skillsrc = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))

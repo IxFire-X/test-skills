@@ -221,7 +221,8 @@
         "build_profile": {"type": "string", "minLength": 1},
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
         "build_root": {"$ref": "#/$defs/build_root"},
-        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"}
+        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"},
+        "offline": {"$ref": "#/$defs/offline"}
       }
     },
     "maven_test": {
@@ -237,7 +238,8 @@
         "build_profile": {"type": "string", "minLength": 1},
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
         "build_root": {"$ref": "#/$defs/build_root"},
-        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"}
+        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"},
+        "offline": {"$ref": "#/$defs/offline"}
       }
     },
     "gradle_test": {
@@ -251,7 +253,8 @@
         "build_profile": {"type": "string", "minLength": 1},
         "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
         "build_root": {"$ref": "#/$defs/build_root"},
-        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"}
+        "timeout_seconds": {"$ref": "#/$defs/timeout_seconds"},
+        "offline": {"$ref": "#/$defs/offline"}
       }
     },
     "build_root": {
@@ -264,6 +267,10 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 86400
+    },
+    "offline": {
+      "description": "Optional, additive (security review S2a, 2026-10-16). true: Maven -o / Gradle --offline in every build command of the module and of the mutation stage; a missing artifact stops the run instead of downloading it.",
+      "type": "boolean"
     },
     "v2_sdd": {
       "type": "object",

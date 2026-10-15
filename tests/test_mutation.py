@@ -96,6 +96,7 @@ def _fake_pins(tmp_path: Path) -> tuple[Path, dict[str, bytes]]:
     jars = {"pitest-1.30.0.jar": b"pit", "pitest-junit5-plugin-1.2.3.jar": b"plugin"}
     pins = json.loads(mutation.PINS_PATH.read_text(encoding="utf-8"))
     pins["java"]["jars"] = [{"file": name, "sha256": hashlib.sha256(data).hexdigest()} for name, data in jars.items()]
+    pins["java"]["resolver_plugin_jar"] = {**pins["java"]["resolver_plugin_jar"], "sha256": hashlib.sha256(RESOLVER_PLUGIN).hexdigest()}
     path = tmp_path / "pins.json"
     path.write_text(json.dumps(pins), encoding="utf-8")
     return path, jars
@@ -254,12 +255,31 @@ class FakeBuild:
         return SimpleNamespace(exit_code=0, stdout="", stderr="", kind="EXIT")
 
 
-def _inputs(tmp_path: Path, automation: dict, document: dict, report: dict, fake: FakeBuild, pins_path: Path) -> mutation.StageInputs:
+RESOLVER_PLUGIN = b"dependency-plugin"
+
+
+def local_repository(tmp_path: Path, *, plugin: bytes | None = RESOLVER_PLUGIN, launcher: bytes | None = b"l", version: str = "5.11.4") -> Path:
+    """A Maven local repository with the resolver plugin and the project's launcher, as a prepared machine has them (S2c)."""
+    repository = tmp_path / "local-repository"
+    if plugin is not None:
+        path = repository / "org" / "apache" / "maven" / "plugins" / "maven-dependency-plugin" / "3.8.1" / "maven-dependency-plugin-3.8.1.jar"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plugin)
+    if launcher is not None:
+        path = repository / "org" / "junit" / "platform" / "junit-platform-launcher" / version / f"junit-platform-launcher-{version}.jar"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(launcher)
+    repository.mkdir(parents=True, exist_ok=True)
+    return repository
+
+
+def _inputs(tmp_path: Path, automation: dict, document: dict, report: dict, fake: FakeBuild, pins_path: Path, repository: Path | None = None) -> mutation.StageInputs:
     java = tmp_path / "jdk" / "bin" / ("java.exe" if mutation.os.name == "nt" else "java")
     java.parent.mkdir(parents=True, exist_ok=True)
     java.write_bytes(b"")
     return mutation.StageInputs(project=tmp_path / "project", workdir=tmp_path / "run" / "mutation", report=report, automation=automation, document=document,
-                                settings=dict(mutation.DEFAULTS), run=fake, environment={"JAVA_HOME": str(tmp_path / "jdk")}, pins_path=pins_path)
+                                settings=dict(mutation.DEFAULTS), run=fake, environment={"JAVA_HOME": str(tmp_path / "jdk")}, pins_path=pins_path,
+                                local_repository=local_repository(tmp_path) if repository is None else repository)
 
 
 def test_the_stage_measures_and_proves_the_project_unchanged(tmp_path: Path) -> None:
@@ -273,7 +293,8 @@ def test_the_stage_measures_and_proves_the_project_unchanged(tmp_path: Path) -> 
     assert facts["target_tests"] == ["net.javaguides.springboot.controller.StudentControllerPipelineTest"] and facts["excluded_methods"] == []
     pit = fake.calls[-1]
     assert "--includedTestMethods" not in pit and Path(pit[pit.index("--reportDir") + 1]).is_relative_to(tmp_path / "run")
-    assert [row["pinned"] for row in facts["tool"]["jars"]] == [True, True, False] and facts["tool"]["launcher_version"] == "5.11.4"
+    assert [row["pinned"] for row in facts["tool"]["jars"]] == [True, True, True, False] and facts["tool"]["launcher_version"] == "5.11.4"
+    assert facts["tool"]["jars"][0] == {"file": "maven-dependency-plugin-3.8.1.jar", "sha256": hashlib.sha256(RESOLVER_PLUGIN).hexdigest(), "pinned": True}
     summary = mutation.summary(facts)
     assert summary["score"] == round(11 / 17, 4) and summary["status"] == "MEASURED"
 
@@ -383,6 +404,46 @@ def test_inapplicable_runs_are_not_applicable_without_any_process(tmp_path: Path
     change(report)
     facts = mutation.measure(_inputs(tmp_path, automation, document, report, fake, pins_path))
     assert (facts["status"], facts["reason_code"]) == ("NOT_APPLICABLE", code) and fake.calls == []
+
+
+@pytest.mark.parametrize("plugin,code", [(None, "MUTATION_TOOL_MISSING"), (b"tampered", "MUTATION_TOOL_DIGEST_MISMATCH")])
+def test_the_resolver_plugin_is_checked_in_the_local_repository_before_any_build_call(tmp_path: Path, plugin, code: str) -> None:
+    """S2c: maven-dependency-plugin runs inside Maven; its jar is pinned and checked before Maven is started at all."""
+    automation, document = _step5()
+    pins_path, jars = _fake_pins(tmp_path)
+    fake = FakeBuild(tmp_path, mutation.load_pins(pins_path), jars, xml=b"")
+    inputs = _inputs(tmp_path, automation, document, _report(tmp_path, automation), fake, pins_path, repository=local_repository(tmp_path, plugin=plugin))
+    facts = mutation.measure(inputs)
+    assert (facts["status"], facts["reason_code"]) == ("NOT_RUNNABLE", code) and fake.calls == []
+    assert "maven-dependency-plugin-3.8.1.jar" in facts["message"]
+
+
+@pytest.mark.parametrize("launcher,code", [(None, "MUTATION_TOOL_MISSING"), (b"other", "MUTATION_TOOL_DIGEST_MISMATCH")])
+def test_the_launcher_of_the_project_platform_is_checked_before_the_resolver(tmp_path: Path, launcher, code: str) -> None:
+    """S2c: the launcher is the project's JUnit Platform version, read from the local repository before the resolver;
+    the resolved jar must be that very file (its SHA-256 goes to the receipt)."""
+    automation, document = _step5()
+    pins_path, jars = _fake_pins(tmp_path)
+    fake = FakeBuild(tmp_path, mutation.load_pins(pins_path), jars, xml=_xml("step5-9340016c-mutations.xml.gz"))
+    inputs = _inputs(tmp_path, automation, document, _report(tmp_path, automation), fake, pins_path, repository=local_repository(tmp_path, launcher=launcher))
+    facts = mutation.measure(inputs)
+    assert (facts["status"], facts["reason_code"]) == ("NOT_RUNNABLE", code), facts["message"]
+    assert "junit-platform-launcher-5.11.4.jar" in facts["message"]
+    assert not any("--reportDir" in call for call in fake.calls)
+    if launcher is None:
+        assert not any("-f" in call for call in fake.calls)  # the resolver never started
+
+
+def test_the_shipped_pins_name_the_resolver_plugin_jar() -> None:
+    pins = mutation.load_pins()
+    row = pins["java"]["resolver_plugin_jar"]
+    group, artifact, version = pins["java"]["resolver_plugin"].split(":")
+    assert row["file"] == f"{artifact}-{version}.jar" and len(row["sha256"]) == 64
+    # The pinned digest is the jar Maven Central serves: on a machine that has it, the local copy (its .sha1 written by Maven) matches.
+    local = mutation.local_repository() / Path(*group.split(".")) / artifact / version / row["file"]
+    if not local.is_file():
+        pytest.skip("the resolver plugin is not in this machine's local repository")
+    assert hashlib.sha256(local.read_bytes()).hexdigest() == row["sha256"]
 
 
 def test_settings_need_an_explicit_enable() -> None:

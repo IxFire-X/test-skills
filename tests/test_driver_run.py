@@ -170,3 +170,79 @@ def test_a_post_terminal_task_that_never_fits_does_not_undo_the_terminal_result(
     assert result["strength_triage"]["triaged"] == 0 and result["strength_triage"]["pending"] == result["strength_triage"]["groups"] > 0
     log = (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8")
     assert '"event": "triage_failed"' in log
+
+
+@pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven")
+def test_an_offline_local_pilot_run_passes_from_the_local_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2a: `.skillsrc` test.offline — every Maven command of the run has -o; the driver-log says the build ran offline."""
+    monkeypatch.setenv("JAVA_HOME", str(JAVA_HOME))
+    monkeypatch.setenv("PATH", str(Path(JAVA_HOME) / "bin") + os.pathsep + os.environ.get("PATH", ""))
+    project = _project(tmp_path)
+    skillsrc = project / ".skillsrc"
+    skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("    adapter_parameters: {}", "    adapter_parameters: {}\n    offline: true", 1), encoding="utf-8")
+    code, payload = _run(project, "--profile", "local-pilot-v1")
+    result = payload["result"]
+    assert (code, result["verification"], result["accepted"]) == (0, "PASS", True), result
+    run_root = project / ".pilot-runs" / payload["run_id"]
+    starts = [event for event in derive_state(run_root)["events"] if event["event_type"] == "EXECUTION_STARTED"]
+    assert starts
+    log = [json.loads(line) for line in (run_root.with_name(payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["build_offline"] for row in log if row.get("event") == "execution_launch"] == [True]
+    output = json.loads((run_root.with_name(payload["run_id"] + ".driver") / "artifacts" / f"exec-output-{result['attempt_id'][:8]}.json").read_text(encoding="utf-8"))
+    executions = []
+
+    def collect(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("argv"), list) and node.get("adapter_id"):
+                executions.append(node["argv"])
+            for value in node.values():
+                collect(value)
+        elif isinstance(node, list):
+            for value in node:
+                collect(value)
+
+    collect(output)
+    for path in run_root.rglob("*.json"):  # the durable receipts of the run: the execution report carries the argv that ran
+        try:
+            collect(json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, UnicodeDecodeError):
+            continue
+    maven = [argv for argv in executions if "-ntp" in argv]
+    assert maven and all("-o" in argv for argv in maven), executions
+
+
+def test_an_explicit_runner_dir_inside_the_project_is_allowed_with_a_warning(tmp_path: Path) -> None:
+    """S2b: the operator may keep everything inside the project (company policy); the linter warning goes to the driver-log."""
+    project = _project(tmp_path)
+    code, payload = _run(project, "--profile", "cases-only-v1", "--runner-dir", str(project / ".runner"))
+    assert payload["action"] == "done", payload
+    assert (project / ".runner" / payload["run_id"] / "runner").is_dir()
+    log = [json.loads(line) for line in (project / ".pilot-runs" / (payload["run_id"] + ".driver") / "driver-log.jsonl").read_text(encoding="utf-8").splitlines()]
+    [warning] = [row for row in log if row.get("event") == "warning" and row.get("code") == "RUNNER_DIR_INSIDE_PROJECT"]
+    assert warning["directory"] == str((project / ".runner").resolve()) and "линтер" in warning["message"]
+
+
+def _main(*argv: str) -> tuple[int, dict]:
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = driver.main(list(argv))
+    return code, json.loads(buffer.getvalue())
+
+
+@pytest.mark.parametrize("commands,extra", [
+    (("next",), ("--runner-dir", "elsewhere")),                                        # needs --review-runner process (run always has it)
+    (("next", "run"), ("--review-runner", "process", "--review-runner-command", "not json")),
+    (("next", "run"), ("--review-runner", "process", "--review-runner-command", "[]")),
+    (("next", "run"), ("--review-runner", "process", "--runner-dir", ".pilot-runs")),  # resolved from cwd: made absolute below
+])
+def test_a_bad_launch_option_is_a_json_refusal_before_the_run_exists(tmp_path: Path, commands: tuple[str, ...], extra: tuple[str, ...]) -> None:
+    """S2b: options are checked before scan creates .pilot-runs/<run_id>; the refusal is the driver's JSON error, never a traceback."""
+    project = _project(tmp_path)
+    extra = tuple(str(project / value) if value == ".pilot-runs" else str(tmp_path / value) if value == "elsewhere" else value for value in extra)
+    before = sorted(path.name for path in (project / ".pilot-runs").iterdir()) if (project / ".pilot-runs").is_dir() else []
+    for command in commands:
+        argv = [command, "--project", str(project), "--docs", DOCS, "--profile", "cases-only-v1", *extra] + (["--runner", "process"] if command == "run" else [])
+        code, payload = _main(*argv)
+        assert (code, payload["action"], payload["code"]) == (2, "error", "DRIVER_INPUT"), (command, payload)
+        after = sorted(path.name for path in (project / ".pilot-runs").iterdir()) if (project / ".pilot-runs").is_dir() else []
+        assert after == before, (command, after)

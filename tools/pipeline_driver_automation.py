@@ -221,6 +221,7 @@ def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
     }
     arguments = SimpleNamespace(project=str(project), run=run_root.name, module=config.get("module_id"), language=None, target=config.get("target"),
                                 executor="local", docs=None, **{name: str(path) for name, path in paths.items()})
+    driver._log(driver._log_path(project, run_root.name), {"event": "execution_launch", "attempt_id": attempt_id, "build_offline": _build_offline(project, attempt)})
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = run_pipeline.cmd_exec(arguments)
@@ -230,6 +231,16 @@ def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
         output = {"status": "error", "raw": buffer.getvalue()[-2000:]}
     driver._write_json(_execution_path(run_root, attempt_id), {"exit_code": code, "output": output})
     return {"exit_code": code, "output": output}
+
+
+def _build_offline(project: Path, attempt: Mapping[str, Any]) -> bool:
+    """S2a: whether the module's builds run offline (`.skillsrc` test.offline); the receipt's argv is the proof."""
+    from tools.skillsrc_manifest import SkillsrcError, load_module_by_root
+
+    try:
+        return (load_module_by_root(project, str(attempt["module"])).get("test") or {}).get("offline") is True
+    except (SkillsrcError, OSError, KeyError, ValueError):
+        return False
 
 
 def _execution_path(run_root: Path, attempt_id: str) -> Path:

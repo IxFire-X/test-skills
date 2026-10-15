@@ -95,9 +95,17 @@ JaCoCo для выбранного подмножества). С `--mutation` �
 запускает:
 
 - сборка проекта — Maven/Gradle разрешают зависимости и плагины из репозиториев
-  `~/.m2/settings.xml` / настроек Gradle, если их нет в локальном кэше;
+  `~/.m2/settings.xml` / настроек Gradle, если их нет в локальном кэше; с `test.offline: true`
+  модуля (раздел 3) — только из локального кэша (`-o` / `--offline`), сеть не используется;
 - `--mutation` — Maven скачивает PIT и его зависимости (SHA-256 закреплены в
-  `tools/mutation_tools.json`);
+  `tools/mutation_tools.json` и сверяются после разрешения); плагин-резолвер
+  `maven-dependency-plugin` и `junit-platform-launcher` версии проекта должны уже лежать в
+  `~/.m2/repository` (плагин сверяется по закреплённому SHA-256) — иначе этап
+  останавливается до запуска Maven; с `test.offline: true` и PIT разрешается offline.
+  Путь к локальному репозиторию из `settings.xml` (`localRepository`) пакет не читает: проверяется
+  только `~/.m2/repository`;
+- установка зависимостей пакета — только командой человека
+  `pip install --require-hashes -r requirements.txt` (хеши всех файлов в `requirements.txt`);
 - CLI модели (`--review-runner process`, `run --runner process`, а в основном режиме —
   сама ведущая сессия CLI) — провайдер модели из конфигурации CLI; уходит текст задачи
   с выбранными файлами проекта, требованиями, кейсами и тестами (маскирование секретов —
@@ -153,7 +161,13 @@ Linux и Windows используют один пайплайн и project-nativ
 конкретной ОС читаются как раньше. Необязательные поля раздела `test`:
 `timeout_seconds` — таймаут тестового процесса от 1 до 86400 секунд (по умолчанию 600);
 `build_root` — корень сборки многомодульного Maven/Gradle-проекта относительно проекта
-(по умолчанию module root). `build_profile: "default"` означает, что профиль не объявлен.
+(по умолчанию module root); `offline: true` (Maven и Gradle) — все команды сборки модуля,
+гейта, прогона набора и этапа мутаций идут с `-o` / `--offline`: зависимости берутся только из
+локального репозитория, а отсутствующий артефакт останавливает прогон с
+`BUILD_FAILED_BEFORE_TESTS` («offline: артефакт не найден в локальном репозитории», перегенерация
+тестов не нужна) или `MUTATION_TOOL_MISSING`; что сборка шла offline, видно по argv в квитанции
+исполнения и по `execution_launch.build_offline` в `driver-log.jsonl`.
+`build_profile: "default"` означает, что профиль не объявлен.
 Необязательный раздел `limits` задаёт лимиты в байтах: `context_batch_bytes`,
 `docs_file_bytes`, `docs_total_bytes`. В контекст модели не попадают обёртки сборки
 (`mvnw`, `mvnw.cmd`, `gradlew`, `gradlew.bat`, `.mvn/wrapper/`, `gradle/wrapper/`),
@@ -693,10 +707,14 @@ python -m tools.pipeline_driver run --project "$project" --runner process --prof
   --docs docs/feature.md --answer reviewer-isolation=fresh
 ```
 
-**Каталог процессов — вне проекта.** Файлы процессного раннера (вход задачи `stdin.txt` — копии
+**Каталог процессов — по умолчанию вне проекта.** Файлы процессного раннера (вход задачи `stdin.txt` — копии
 файлов проекта, вывод CLI, результат) лежат в `<--runner-dir>/<run_id>/runner/<задача>/`; по
 умолчанию `--runner-dir` — `<временный каталог ОС>/test-skills`, путь — в `config.json` прогона и в
-`driver-log.jsonl` (`runner_launched.directory`). Каталог внутри проекта не принимается. Каталоги
+`driver-log.jsonl` (`runner_launched.directory`). Явный `--runner-dir` внутри проекта допускается
+(например, `<проект>/.runner`, если политика требует держать всё в проекте) — тогда в
+`driver-log.jsonl` пишется предупреждение `RUNNER_DIR_INSIDE_PROJECT`: исключите этот каталог в
+линтерах, читающих всё дерево (ниже). Корень проекта, `.pilot-runs` и `.git` не принимаются; неверные
+опции запуска отклоняются JSON-ответом `DRIVER_INPUT` до создания прогона. Каталоги
 `<run_id>` и `runner` создаются только для владельца (0o700); общий родитель (`<temp>/test-skills`)
 — с правами по умолчанию, его защищают права на `<run_id>` и непредсказуемый `run_id`. Для
 долгого прогона задайте долговечный путь вне дерева проекта (не `/tmp`): очистка временного
