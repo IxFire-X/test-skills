@@ -1,0 +1,9 @@
+{
+  "comment": "The CLI reads the task from a file and writes its answer to a file.",
+  "command": ["python3", "fake_cli.py", "--mode", "file", "--prompt-file", "{prompt_file}", "--answer-file", "{answer_file}", "--model", "{model}"],
+  "prompt_via": "file",
+  "answer_from": "file",
+  "answer_file": "{tmp}/answer.txt",
+  "timeout_seconds": 1700,
+  "extra_env": {}
+}
