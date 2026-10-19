@@ -5,7 +5,8 @@
         --models glm-5.3,… --cli-command '<CLI command with {model}>' --prompt-via stdin|file|arg
         --answer-from stdout|file [--answer-file …] [--sandbox-args '<CLI no-tools flags>'] [--runner-dir DIR]
         [--module ID] [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--tokens-per-byte 0.24] [--model-context 239144]
-        [--no-mutation] [--online] [--from-step N] [--only 0,2,3] [--yes] [--yes-skillsrc] [--yes-chmod] [--no-pip] [--dry-run]
+        [--no-mutation] [--online] [--from-step N] [--only 0,2,3] [--yes] [--yes-skillsrc] [--yes-chmod]
+        [--yes-send] [--yes-exec] [--no-pip] [--dry-run]
 
 preflight.py, wrap/ and bench/ are taken from beside operate.py itself; --home is only where the package (test-skills/ and
 its test-skills-*.files.sha256), the runner directory, the state and the report live.  The package runs under
@@ -65,7 +66,16 @@ MODULES_CODE = ("import json, sys\nfrom pathlib import Path\nfrom tools.skillsrc
                 "    sys.exit(f'{error.code}: {error} {json.dumps(error.details, ensure_ascii=False)[:400]}')\n"
                 "print(json.dumps([{'id': m['id'], 'root': m.get('root', '.'), 'test': m.get('test') or {}} for m in modules], ensure_ascii=False))")
 CODEX_ARGV_CODE = "import json\nfrom tools.model_runner import PRESETS\nprint(json.dumps(PRESETS['codex']['argv']))"
-WRAPPER_ADAPTER, SYSTEM_MAVEN = "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
+# The driver's stops (ask_user) operate.py knows: label → (what is being decided, what to show, the flag that answers it).
+# The payload is shown as it comes (question, options, then any other list or value it carries) — no field names are
+# assumed.  A flag answers only a stop with a single option; --yes never answers these.  Other questions are asked as is.
+ASK_STOPS: dict[str, tuple[str, str, str | None]] = {
+    "confirm-context": ("отправка выбранных файлов проекта в модель", "payload", "yes-send"),
+    "approve-generated-tests": ("исполнение сгенерированных тестов сборкой проекта", "payload", "yes-exec"),
+    "regenerate-after-gate": ("перегенерация тестов после гейта сборки", "runner-tail", None),
+}
+ASK_KNOWN_KEYS = {"action", "task_id", "question", "options", "run_id", "attempt_id", "stage", "skillsrc_question_id"}
+WRAPPER_ADAPTER, SYSTEM_MAVEN ="maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
 
 
 def pack_python(pack: Path) -> str:
@@ -303,9 +313,23 @@ class Operator:
         return answer in {"y", "yes", "д", "да"}
 
     def ask(self, question: str) -> str:
-        answer = input(question).strip()
+        try:
+            answer = input(question).strip()
+        except EOFError:  # no terminal: the caller stops with the command to continue
+            answer = ""
         self.log(f"{question}{answer}")
         return answer
+
+    def command(self, step: str, *extra: str) -> str:
+        """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
+        argv, skip = [], {"--from-step", "--only", "--run", "--answer"}
+        items = iter(sys.argv[1:])
+        for item in items:
+            if item in skip:
+                next(items, None)
+            elif item != "--dry-run" and not any(item.startswith(flag + "=") for flag in skip):
+                argv.append(item)
+        return shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), *argv, "--from-step", step, *extra])
 
     # -- commands
     def run(self, argv: list[Any], *, cwd: Path | None = None, stdin: str | None = None, echo: bool = False, timeout: int | None = None) -> Result:
@@ -813,6 +837,49 @@ class Operator:
         for line in outputs[-1].read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]:
             self.say("    " + line[:300])
 
+    def show_payload(self, payload: dict[str, Any], limit: int = 30) -> None:
+        """Whatever else the stop carries besides question/options (file lists, digests …), as it comes."""
+        for key, value in payload.items():
+            if key in ASK_KNOWN_KEYS or value in (None, "", [], {}):
+                continue
+            if isinstance(value, list):
+                self.say(f"  {key}: {len(value)}")
+                for item in value[:limit]:
+                    self.say("    " + (item if isinstance(item, str) else json.dumps(item, ensure_ascii=False))[:200])
+                if len(value) > limit:
+                    self.say(f"    … ещё {len(value) - limit} (полностью — {self.home / 'operate.log'})")
+                    self.log(json.dumps(value[limit:], ensure_ascii=False))
+            else:
+                self.say(f"  {key}: " + (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))[:300])
+
+    def answer_ask(self, payload: dict[str, Any], name: str, run_id: str, step: str) -> str:
+        """The answer to a driver stop: from its flag (one option only), else from the terminal; none — a stop whose hint
+        is one ready command."""
+        kind = next((key for key in ASK_STOPS if key in name), None)
+        what, show, flag = ASK_STOPS.get(kind, ("вопрос драйвера", "payload", None))
+        self.say(f"  остановка «{what}» ({name}): {payload.get('question')}")
+        options = [option for option in payload.get("options") or [] if isinstance(option, dict)]
+        for option in options:
+            self.say("    - " + (" — ".join(str(option[key]) for key in ("value", "label", "description") if option.get(key)) or json.dumps(option, ensure_ascii=False)))
+        if show == "runner-tail":
+            self._runner_output_tail(run_id)
+            raise Stop("тесты не прошли гейт сборки — перегенерацию сразу не делать; линтер/сборка проекта в хвосте выше — исправить "
+                       "окружение (п. 1) и начать новый прогон, ошибки компиляции самих тестов — перегенерировать:",
+                       self.command(step, "--run", run_id, "--answer", f"{name}=<значение из списка выше>"))
+        self.show_payload(payload)
+        if flag and (self.dry or getattr(self.args, flag.replace("-", "_"))):
+            if len(options) == 1 and options[0].get("value"):
+                self.say(f"  ответ {options[0]['value']} (--{flag})")
+                return str(options[0]["value"])
+            self.say(f"  --{flag} отвечает только остановку с одним вариантом, здесь их {len(options)} — нужен ответ человека")
+        value = self.ask("Ответ (значение; пусто — остановиться): ")
+        if value:
+            return value
+        sole = options[0].get("value") if len(options) == 1 else None
+        raise Stop(f"прогон ждёт ответа: {what}",
+                   self.command(step, "--run", run_id, f"--{flag}") if flag and sole else
+                   self.command(step, "--run", run_id, "--answer", f"{name}=<значение>"))
+
     def drive(self, profile: str, extra: list[str], label: str) -> tuple[int, dict[str, Any] | None]:
         run_id, self.args.run = self.args.run, None  # --run resumes the first driven step only
         starting = not run_id  # until the first model task is sized, the run goes by `next`/`submit` (no process launched)
@@ -827,7 +894,9 @@ class Operator:
             if self.dry:
                 self.say(f"  (первая задача модели: вход × {self.args.tokens_per_byte} ток/Б против окна {self.args.model_context} — больше → стоп "
                          "с подсказкой --target; иначе тот же прогон: … run --project <проект> --runner process --run <run_id>)")
-                self.say("  (ask_user — показать вопрос, ждать ответа, повтор: … run --project <проект> --runner process --run <run_id> --answer <метка>=<значение>)")
+                self.say("  (ask_user — показать вопрос и всё, что несёт остановка; confirm-context отвечает --yes-send, approve-generated-tests — "
+                         "--yes-exec (только при одном варианте, --yes не отвечает); иначе ответ с терминала или стоп с готовой командой "
+                         "… --from-step <шаг> --run <run_id> --answer <метка>=<значение>)")
                 self.say("  (ask regenerate-after-gate или BUILD_FAILED_BEFORE_TESTS — хвост runner-output.txt и стоп)")
                 return 0, None
             run_id = payload.get("run_id") or run_id
@@ -849,18 +918,8 @@ class Operator:
                 return code, payload
             if action == "ask_user":
                 task_id = str(payload.get("task_id") or "")
-                self.say(f"  драйвер спрашивает ({task_id}): {payload.get('question')}")
-                for option in payload.get("options") or []:
-                    self.say("    - " + (" — ".join(str(option[key]) for key in ("value", "label", "description") if option.get(key)) or json.dumps(option, ensure_ascii=False)))
-                if "regenerate-after-gate" in task_id:
-                    self._runner_output_tail(run_id)
-                    raise Stop("тесты не прошли гейт сборки — перегенерацию сразу не делать",
-                               "если в хвосте линтер/сборка проекта — исправить окружение (п. 1) и начать новый прогон; если ошибки компиляции самих тестов — "
-                               f"ответить: operate.py … --from-step {'5' if label == 'run' else '5a'} --run {run_id} --answer {task_id.split('.ask.', 1)[-1]}=<значение>")
                 name = task_id.split(".ask.", 1)[1] if ".ask." in task_id else task_id
-                value = self.ask("Ответ (значение; пусто — остановиться): ")
-                if not value:
-                    raise Stop("прогон ждёт ответа", f"продолжить: operate.py … --from-step {'5' if label == 'run' else '5a'} --run {run_id} --answer {name}=<значение>")
+                value = self.answer_ask(payload, name, run_id, "5" if label == "run" else "5a")
                 argv = [self.py, "-m", "tools.pipeline_driver", "submit", "--project", str(self.project), "--run", run_id, "--task-id", task_id,
                         "--answer", value] if starting else self.resume_argv(run_id, [f"{name}={value}"])
                 continue
@@ -1031,7 +1090,8 @@ class Operator:
             self.say(f"СТОП на шаге {step}: {stop.message}")
             if stop.hint:
                 self.say(f"Что делать: {stop.hint}")
-            self.say(f"Продолжить после исправления: python3 operate.py <те же аргументы> --from-step {step}")
+            if not stop.hint.startswith(shlex.quote(sys.executable)):
+                self.say(f"Продолжить после исправления: {self.command(step)}")
             self.save_state()
             return False
         self.save_state()
@@ -1153,6 +1213,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                            "правку .skillsrc и chmod +x файлов проекта не подтверждает)")
     parser.add_argument("--yes-skillsrc", action="store_true", help="записать .skillsrc проекта без вопроса (diff всё равно печатается)")
     parser.add_argument("--yes-chmod", action="store_true", help="chmod +x mvnw/gradlew проекта без вопроса")
+    parser.add_argument("--yes-send", action="store_true", help="подтвердить остановку confirm-context (отправка показанных файлов "
+                                                                "в модель), если у неё один вариант; --yes её не подтверждает")
+    parser.add_argument("--yes-exec", action="store_true", help="подтвердить остановку approve-generated-tests (исполнение показанных "
+                                                                "сгенерированных тестов), если у неё один вариант; --yes её не подтверждает")
     parser.add_argument("--no-pip", action="store_true", help="не предлагать команду pip: зависимости ставятся средствами окружения")
     parser.add_argument("--dry-run", action="store_true", help="только напечатать команды и действия")
     return parser
