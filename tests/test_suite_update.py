@@ -225,6 +225,52 @@ def test_a_behaviour_change_without_a_requirement_goes_to_quarantine(suite_proje
 
 
 @needs_java
+def test_in_human_mode_the_person_runs_the_suite_and_hands_back_the_reports(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S9b: suite-update-v1 with execution.mode human — one stop for the suite run, no process started by the package."""
+    import subprocess
+
+    from tools import suite_run
+
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _replace_in(project / DOCS, OLD, NEW)
+    _replace_in(project / CONTROLLER, OLD, NEW)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("the package started a build or test process in human mode")
+
+    monkeypatch.setattr(suite_run, "RUNNER", forbidden)
+    config = replay.config
+    code, task = replay.call("next", "--project", str(project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
+                             "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"],
+                             "--execution-mode", "human")
+    stops = []
+    for _ in range(60):
+        if task.get("action") == "done":
+            break
+        if task.get("action") == "human_exec":
+            assert task["kind"] == "suite" and len(task["commands"]) == 1 and code == 3, task
+            stops.append(task["step"])
+            command = task["commands"][0]
+            completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+            expected = Path(command["expected_output"])
+            reports = [str(expected)] if expected.is_file() else [str(path) for path in expected.rglob("*.xml")]
+            assert reports, (completed.stdout[-2000:], completed.stderr[-2000:])
+            code, task = replay.call("next", "--project", str(project), "--run", task["run_id"], *[item for path in reports for item in ("--junit", path)],
+                                     "--exit-code", str(completed.returncode))
+            continue
+        for item in task["tasks"] if task.get("action") == "batch" else [task]:
+            Path(item["output_path"]).write_text(json.dumps(_answer(item), ensure_ascii=False), encoding="utf-8")
+            code, task = replay.submit(item)
+            assert task.get("status") != "rejected", task.get("errors")
+    assert stops == ["suite-run"], stops
+    result = task["result"]
+    assert result["outcome"] == "UPDATED" and result["executor"] == "human", result
+    assert NEW in (project / GENERATED).read_text(encoding="utf-8")
+
+
+@needs_java
 @pytest.mark.human_gates
 def test_updated_methods_run_only_after_a_person_approved_their_bytes(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """S3/S5: with the defaults the first model task waits for the confirmation of its input and the suite run for the approval of the written files."""
@@ -266,17 +312,77 @@ def test_updated_methods_run_only_after_a_person_approved_their_bytes(suite_proj
 @needs_java
 def test_a_broken_owned_method_is_repaired_once_without_changing_expectations(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools.pipeline_driver_suite import attempt_suite  # noqa: F401  (the suite module is importable)
-    from tools.suite_manifest import canonical_bytes, method_digests
 
     replay = _copy(suite_project, tmp_path)
     project = replay.project
     monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
-    # The package's own method no longer compiles (as if an older package version wrote it); the manifest records it as the package's.
+    _break_owned_method(project)
+    done = _drive(replay)
+    result = done["result"]
+    assert result["counts"]["repaired"] == 1 and result["counts"]["quarantined"] == 0, result
+    assert "textOfResponse" not in (project / GENERATED).read_text(encoding="utf-8")
+    assert {row["status"] for row in read_suite(project, "test-cases/")["cases"]} == {"ACTIVE"}
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "отремонтирован" in description and "ожидания не менялись" in description
+
+
+@needs_java
+@pytest.mark.human_gates
+def test_in_human_mode_a_repair_runs_after_its_approval_as_a_second_stop(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S9b: the suite run, the S3 approval of the repaired method, the repair run — the package starts no process."""
+    import subprocess
+
+    from tools import suite_run
+
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _break_owned_method(project)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("the package started a build or test process in human mode")
+
+    monkeypatch.setattr(suite_run, "RUNNER", forbidden)
+    config = replay.config
+    code, task = replay.call("next", "--project", str(project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
+                             "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"],
+                             "--execution-mode", "human", "--confirm-context", "no")
+    stops = []
+    for _ in range(60):
+        if task.get("action") == "done":
+            break
+        if task.get("action") == "human_exec":
+            stops.append(task["step"])
+            command = task["commands"][0]
+            completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+            expected = Path(command["expected_output"])
+            reports = [str(expected)] if expected.is_file() else [str(path) for path in expected.rglob("*.xml")]
+            log = tmp_path / f"build-{len(stops)}.log"  # the person keeps the build output: no report when the build fails
+            log.write_bytes(completed.stdout + completed.stderr)
+            code, task = replay.call("next", "--project", str(project), "--run", task["run_id"], *[item for path in reports for item in ("--junit", path)],
+                                     "--exit-code", str(completed.returncode), "--build-log", str(log))
+            continue
+        if task.get("action") == "ask_user":
+            stops.append(task["task_id"].rsplit(".", 1)[1])
+            code, task = replay.submit(task, "--answer", task["options"][0]["value"])
+            continue
+        for item in task["tasks"] if task.get("action") == "batch" else [task]:
+            Path(item["output_path"]).write_text(json.dumps(_answer(item), ensure_ascii=False), encoding="utf-8")
+            code, task = replay.submit(item)
+            assert task.get("status") != "rejected", task.get("errors")
+    assert stops == ["suite-run", "approve-generated-tests-repair", "repair-run"], stops
+    result = task["result"]
+    assert result["counts"]["repaired"] == 1 and result["executor"] == "human", result
+    assert "FLAKY не" in Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+
+
+def _break_owned_method(project: Path) -> None:
+    """The package's own method no longer compiles (as if an older package version wrote it); the manifest records it as the package's."""
+    from tools.suite_manifest import canonical_bytes, method_digests, parse_locator
+
     _replace_in(project / GENERATED, 'assertThat(text(response)).as("ASSERT-B1-010-01-1-2")', 'assertThat(textOfResponse(response)).as("ASSERT-B1-010-01-1-2")')
     manifest = read_suite(project, "test-cases/")
     content = (project / GENERATED).read_text(encoding="utf-8")
-    from tools.suite_manifest import parse_locator
-
     methods = [method for case in manifest["cases"] for method in case["methods"]]
     symbols = [{"symbol_id": method["symbol_id"], "locator": parse_locator(method["locator"], "java")} for method in methods]
     digests, support = method_digests(GENERATED, manifest["files"][0]["file_id"], content, symbols)
@@ -286,13 +392,6 @@ def test_a_broken_owned_method_is_repaired_once_without_changing_expectations(su
     manifest["files"][0]["file_digest"] = "sha256:" + __import__("hashlib").sha256(content.encode("utf-8")).hexdigest()
     manifest["files"][0]["support_digest"] = support
     (project / "test-cases" / "suite-manifest.json").write_bytes(canonical_bytes(manifest))
-    done = _drive(replay)
-    result = done["result"]
-    assert result["counts"]["repaired"] == 1 and result["counts"]["quarantined"] == 0, result
-    assert "textOfResponse" not in (project / GENERATED).read_text(encoding="utf-8")
-    assert {row["status"] for row in read_suite(project, "test-cases/")["cases"]} == {"ACTIVE"}
-    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
-    assert "отремонтирован" in description and "ожидания не менялись" in description
 
 
 @needs_java

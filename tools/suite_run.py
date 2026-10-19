@@ -8,10 +8,13 @@ again up to ``repeats`` times: a stable failure stays a failure, a changing resu
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from tools import execution_adapters as adapters
@@ -103,7 +106,101 @@ def runtime_executable(module: Mapping[str, Any]) -> str:
     raise adapters.AdapterRequestError(f"adapter {adapter_id!r} is not in the closed pilot set")
 
 
-def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str], *, explicit: bool, timeout: int) -> dict[str, Any]:
+class HumanSuitePending(BaseException):
+    """S9b execution.mode human: a person must run the suite command first (passes error handling, like an interruption)."""
+
+    def __init__(self, command: Mapping[str, Any]) -> None:
+        self.command = dict(command)
+        super().__init__(f"human suite step {command.get('step')}")
+
+
+class HumanStepIncomplete(ValueError):
+    def __init__(self, message: str) -> None:
+        self.code = "HUMAN_STEP_INCOMPLETE"
+        super().__init__(message)
+
+
+def _human_state(workdir: Path) -> dict[str, Any]:
+    path = Path(workdir) / "human.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"issued": [], "done": {}}
+
+
+def _save_human_state(workdir: Path, state: Mapping[str, Any]) -> None:
+    Path(workdir).mkdir(parents=True, exist_ok=True)
+    (Path(workdir) / "human.json").write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+
+
+def _report_files(report: Path) -> list[Path]:
+    """The non-empty JUnit reports of an adapter's report location (a directory or one file)."""
+    candidates = [report] if report.is_file() else sorted(report.rglob("*.xml")) if report.is_dir() else []
+    return [path for path in candidates if path.is_file() and path.stat().st_size > 0]
+
+
+def _human_digest(argv: Sequence[str]) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(list(argv), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _human_run(workdir: Path, argv: Sequence[str], cwd: str, report: Path, step: str) -> Any:
+    """Start nothing: a command a person ran (its reports present) returns their exit code, any other stops the run.
+
+    The step is part of the key: the repair run repeats the very command of the suite run, and is a new step.
+    """
+    digest = _human_digest([step, *argv])
+    state = _human_state(workdir)
+    if digest in state["done"]:
+        done = state["done"][digest]
+        if _report_files(report) or done["returncode"] != 0:
+            # The person's build log (if given) is the output: compile errors are found in it as in a package run.
+            return SimpleNamespace(returncode=int(done["returncode"]), stdout=str(done.get("output") or "human-executed"), stderr="")
+        # Done once, but the reports are gone: the step is issued again (never a dead end).
+        state["done"].pop(digest)
+        state["issued"] = [row for row in state["issued"] if row["digest"] != digest]
+    if digest not in {row["digest"] for row in state["issued"]}:
+        # Only the adapter's report location is removed (not target/): its new content proves the person's run.
+        if report.is_dir():
+            shutil.rmtree(report, ignore_errors=True)
+        elif report.is_file():
+            report.unlink()
+        state["issued"].append({"digest": digest, "step": step, "expected_output": str(report)})
+        _save_human_state(workdir, state)
+    raise HumanSuitePending({"step": step, "argv": [str(item) for item in argv], "cwd": str(cwd), "expected_output": str(report)})
+
+
+def human_continue(workdir: Path, reports: Sequence[str], exit_code: int | None, build_log: str | None = None) -> None:
+    """Mark the issued suite command done (S9b): its reports exist inside its report location, or it failed before any report.
+
+    A build that failed before the tests (a compile error) writes no report: the person passes a nonzero ``--exit-code``
+    and, to let the package find the failing file as in its own run, the build output with ``--build-log``.
+    """
+    state = _human_state(workdir)
+    pending = [row for row in state["issued"] if row["digest"] not in state["done"]]
+    if not pending:
+        raise HumanStepIncomplete("no suite command is waiting for its result")
+    row = pending[-1]
+    expected = Path(row["expected_output"]).resolve()
+    for raw in reports:
+        path = Path(raw).resolve()
+        if not (path == expected or path.is_relative_to(expected)) or not path.is_file() or path.stat().st_size == 0:
+            raise HumanStepIncomplete(f"a report must be a non-empty file of {expected}: {raw}")
+    output = None
+    if build_log is not None:
+        log = Path(build_log)
+        if not log.is_file():
+            raise HumanStepIncomplete(f"the build log is not a file: {build_log}")
+        output = log.read_text(encoding="utf-8", errors="replace")[-20000:]
+    if not reports or not _report_files(expected):
+        if exit_code is None or int(exit_code) == 0:
+            raise HumanStepIncomplete(f"the command wrote no report into {expected}: pass --junit <report>, or a nonzero --exit-code "
+                                      "(and --build-log <file>) when the build failed before the tests")
+    elif exit_code is None:
+        rows = _report_rows(expected)
+        exit_code = 1 if any(item["status"] in {"failed", "broken"} for item in rows) else 0
+    state["done"][row["digest"]] = {"returncode": int(exit_code), **({"output": output} if output is not None else {})}
+    _save_human_state(workdir, state)
+
+
+def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str], *, explicit: bool, timeout: int,
+             human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     module_root = (Path(project) / str(module.get("root") or ".")).resolve()
     request_module = {**module, "module_root": str(module_root)}
     adapter_id = request_module["test"]["adapter_id"]
@@ -121,11 +218,14 @@ def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str],
             argv.append(EXPLICIT_RUN["pytest"])
             explicit_applied = True
     report_dir = module_root / reports[0]
-    if report_dir.is_dir():
-        shutil.rmtree(report_dir, ignore_errors=True)
-    elif report_dir.is_file():
-        report_dir.unlink()
-    completed = RUNNER(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False)
+    if human is not None:
+        completed = _human_run(Path(human["workdir"]), argv, str(layout.build_root), report_dir, str(human["step"]))
+    else:
+        if report_dir.is_dir():
+            shutil.rmtree(report_dir, ignore_errors=True)
+        elif report_dir.is_file():
+            report_dir.unlink()
+        completed = RUNNER(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False)
     output = (completed.stdout or "") + (completed.stderr or "")
     rows = _report_rows(report_dir)
     compile_lines = compile_lines_of(output)
@@ -180,7 +280,7 @@ def _blame(project: Path, manifest: Mapping[str, Any], methods: dict[str, dict[s
 
 
 def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, Any], *, repeats: int = 2, timeout: int = 1800,
-              only: set[str] | None = None) -> dict[str, Any]:
+              only: set[str] | None = None, human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Statuses per method locator over the first run and the repeats of the failed ones."""
     module_root = str(module.get("root") or ".")
     adapter_id = module["test"]["adapter_id"]
@@ -207,7 +307,7 @@ def run_suite(project: Path, manifest: Mapping[str, Any], module: Mapping[str, A
         if not pending:
             break
         try:
-            outcome = run_once(project, module, pending, explicit=explicit, timeout=timeout)
+            outcome = run_once(project, module, pending, explicit=explicit, timeout=timeout, human=human)
         except adapters.AdapterRequestError as error:
             return {"methods": [methods[locator] for locator in sorted(methods)], "commands": commands, "execution": execution,
                     "build_broken": [], "not_runnable": str(error)}

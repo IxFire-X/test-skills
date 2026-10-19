@@ -591,8 +591,17 @@ jar'ы PIT под версию JUnit Platform проекта (`resolve-tool`) и
 `next --run <id> --mutation-step-done` после резолверов и `next --run <id> --pit-report
 <expected_output>` после PIT (ровно этот путь). Jar'ы сверяет с пинами сам драйвер, ничего не
 запуская; квитанция мутаций — `executor: human` и `commands_digest`, проверка «проект не
-изменился за стадию» остаётся. `suite-update-v1` пока исполняет сам (режим human для
-него — следующим шагом).
+изменился за стадию» остаётся. В `suite-update-v1` режим тот же (`.skillsrc` `execution.mode` или
+`next --profile suite-update-v1 --execution-mode human`): прогон набора и повторный прогон после
+ремонта запускает человек — драйвер отвечает `{"action": "human_exec", "kind": "suite"}` с
+одной командой (`step: suite-run` или `repair-run`, `expected_output` — каталог или файл
+отчётов адаптера, только он удаляется перед выдачей команды), продолжение —
+`next --run <id> --junit <отчёт в expected_output> [--exit-code N]`; если сборка упала до
+отчёта (ошибка компиляции), — `next --run <id> --exit-code N --build-log <вывод сборки>`, по
+которому пакет, как и в своём прогоне, находит упавший файл. Без отчёта и с нулевым кодом —
+`HUMAN_STEP_INCOMPLETE`. Повторы упавших методов в этом режиме не выполняются, поэтому метка
+FLAKY не присваивается: упавший метод считается стабильно упавшим и проходит triage как
+таковой; в итоге run — `executor: human`, `repeats: 0`, в описании PR — та же пометка.
 
 Все эти шаги ведёт драйвер. Модель получает задачи `tc-to-autotest:r1` (и `r2` при
 `AUTO_FIX_APPLIED`) и части статического ревью `autotest-reviewer:*`. Если ревью не

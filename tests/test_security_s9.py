@@ -180,3 +180,35 @@ def test_a_mutation_step_is_done_only_when_its_output_exists(tmp_path: Path) -> 
         mutation.human_continue(workdir)
     mutation.human_continue(workdir, pit_report=str(report_dir / "mutations.xml"))
     assert runner(pit, tmp_path, None, timeout=10).exit_code == 0
+
+
+def test_a_suite_step_is_done_only_with_its_reports_or_a_failed_build(tmp_path: Path) -> None:
+    """S9b, suite-update in human mode: reports inside the report location, or a nonzero exit code; a lost report re-issues the step."""
+    from tools import suite_run
+
+    workdir = tmp_path / "human"
+    report = tmp_path / "module" / "target" / "surefire-reports"
+    report.mkdir(parents=True)
+    (report / "old.xml").write_text("<testsuite/>", encoding="utf-8")
+    with pytest.raises(suite_run.HumanSuitePending) as pending:
+        suite_run._human_run(workdir, ["mvn", "test"], str(tmp_path), report, "suite-run")
+    assert pending.value.command["expected_output"] == str(report) and not report.exists()  # only the report location is removed
+    with pytest.raises(suite_run.HumanStepIncomplete):
+        suite_run.human_continue(workdir, [], None)
+    with pytest.raises(suite_run.HumanStepIncomplete):
+        suite_run.human_continue(workdir, [str(tmp_path / "elsewhere.xml")], 0)
+    report.mkdir()
+    (report / "TEST-x.xml").write_text('<testsuite><testcase classname="A" name="b"/></testsuite>', encoding="utf-8")
+    suite_run.human_continue(workdir, [str(report / "TEST-x.xml")], None)
+    assert suite_run._human_run(workdir, ["mvn", "test"], str(tmp_path), report, "suite-run").returncode == 0
+    with pytest.raises(suite_run.HumanSuitePending):  # the same command as another step is a new step
+        suite_run._human_run(workdir, ["mvn", "test"], str(tmp_path), report, "repair-run")
+    log = tmp_path / "build.log"
+    log.write_text("[ERROR] COMPILATION ERROR\n", encoding="utf-8")
+    suite_run.human_continue(workdir, [], 1, str(log))  # the build failed before any report
+    outcome = suite_run._human_run(workdir, ["mvn", "test"], str(tmp_path), report, "repair-run")
+    assert outcome.returncode == 1 and "COMPILATION ERROR" in outcome.stdout
+    for path in report.glob("*.xml"):
+        path.unlink()
+    with pytest.raises(suite_run.HumanSuitePending):  # suite-run reports are gone: issued again, never a dead end
+        suite_run._human_run(workdir, ["mvn", "test"], str(tmp_path), report, "suite-run")

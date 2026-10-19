@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from tools import pipeline_driver as driver
+from tools.suite_run import HumanSuitePending
 from tools.suite_manifest import (MANIFEST, SUITE_FILES, SuiteError, build_manifest, canonical_bytes, case_digest, locator_text, method_digests,
                                   parse_locator, projections, read_suite, sha256_bytes, suite_directory, write_suite)
 
@@ -89,7 +90,11 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
               "host_cli_version": options.get("host_cli_version") or "unspecified", "reviewer_isolation": options.get("reviewer_isolation") or "fresh",
               "mutation": bool(options.get("mutation")), "repeats": 2, "suite_dir": suite_dir,
               "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES),
-              "execution_review": driver._execution_review(project, options), "context_confirm": driver._confirm_context(project, options)}
+              "execution_review": driver._execution_review(project, options), "context_confirm": driver._confirm_context(project, options),
+              "execution_mode": driver._execution_mode(project, options, PROFILE)}
+    if config["execution_mode"] == "human":
+        # S9b: a person runs every suite command; repeats are not run, so no method can be labelled FLAKY.
+        config["repeats"] = 0
     driver._save_config(run_root, config)
     _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {}, "tries": {}})
     _snapshot_before(project, run_root, suite_dir)
@@ -113,8 +118,16 @@ def _snapshot_before(project: Path, run_root: Path, suite_dir: str) -> None:
 
 # ----------------------------------------------------------------------------------- advance
 
-def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, Any]:
+def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     project = Path(project).resolve()
+    if human and (human.get("junit") or human.get("exit_code") is not None or human.get("build_log")):
+        # S9b: the result of the suite command a person ran; checked before the step repeats.
+        from tools.suite_run import HumanStepIncomplete, human_continue
+
+        try:
+            human_continue(_work(run_root) / "human", list(human.get("junit") or []), human.get("exit_code"), human.get("build_log"))
+        except HumanStepIncomplete as error:
+            raise driver.DriverError(error.code, str(error)) from error
     for _ in range(64):
         state = _state(run_root)
         step = state["step"]
@@ -1027,6 +1040,29 @@ def _approval(project: Path, run_root: Path, state: dict[str, Any], key: str, pa
     return task
 
 
+def _human(run_root: Path, step: str) -> dict[str, Any] | None:
+    """S9b: the human-runner settings of a suite command, or None when the package runs it."""
+    if driver._config(run_root).get("execution_mode") != "human":
+        return None
+    return {"workdir": str(_work(run_root) / "human"), "step": step}
+
+
+def _human_exec(run_root: Path, pending: Any) -> dict[str, Any]:
+    import shlex
+
+    from tools.run_pipeline import _powershell_line
+
+    command = pending.command
+    argv = list(command["argv"])
+    _log(run_root.parents[1], run_root, {"event": "human_exec", "step": command["step"], "expected_output": command["expected_output"]})
+    return {"action": "human_exec", "kind": "suite", "step": command["step"], "run_id": run_root.name, "attempt_id": None,
+            "report_path": command["expected_output"],
+            "commands": [{"kind": command["step"], "argv": argv, "cwd": command["cwd"], "expected_output": command["expected_output"],
+                          "bash": shlex.join(argv), "powershell": f"Set-Location -LiteralPath '{command['cwd']}'; " + _powershell_line(argv)}],
+            "continue": f"next --run {run_root.name} --junit <report in {command['expected_output']}> [--exit-code N]",
+            "instructions": "Выполните команду сами, в своём окружении; пакет её не запускает. Повторы упавших методов в этом режиме не выполняются."}
+
+
 def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
     from tools.suite_run import not_run_reason, run_suite
 
@@ -1038,7 +1074,10 @@ def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) 
         if waiting is not None:
             return waiting
     manifest = _effective_manifest(project, run_root, state)
-    result = run_suite(project, manifest, _module(project, manifest), repeats=int(driver._config(run_root)["repeats"]))
+    try:
+        result = run_suite(project, manifest, _module(project, manifest), repeats=int(driver._config(run_root)["repeats"]), human=_human(run_root, "suite-run"))
+    except HumanSuitePending as pending:
+        return _human_exec(run_root, pending)
     _write(_work(run_root) / "suite-run.json", result)
     state["facts"]["suite_run"] = {"methods": len(result["methods"]), "commands": len(result["commands"])}
     stopped = not_run_reason(result)
@@ -1162,7 +1201,10 @@ def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int)
     effective = _effective_manifest(project, run_root, state)
     locators = {row["locator"] for row in facts["methods"].values()}
     # The whole suite runs again: a build that did not compile ran none of its methods.
-    result = run_suite(project, effective, _module(project, effective), repeats=int(driver._config(run_root)["repeats"]))
+    try:
+        result = run_suite(project, effective, _module(project, effective), repeats=int(driver._config(run_root)["repeats"]), human=_human(run_root, "repair-run"))
+    except HumanSuitePending as pending:
+        return _human_exec(run_root, pending)
     _write(_work(run_root) / "repair-run.json", result)
     state["facts"]["repair_ran"] = True
     stopped = not_run_reason(result)
@@ -1387,6 +1429,7 @@ def summary_facts(project: Path, run_root: Path, state: Mapping[str, Any]) -> di
         "proposals": facts.get("proposals") or [], "strength": strength, "strength_drops": facts.get("strength_drops") or [],
         **summary_review_facts(state),
         "stop": facts.get("stop"),
+        **({"executor": "human"} if driver._config(run_root).get("execution_mode") == "human" else {}),
     }
 
 
@@ -1411,7 +1454,7 @@ def _summary(project: Path, run_root: Path, state: dict[str, Any], _max: int) ->
               "reviews": {key: {name: value[name] for name in ("eligible", "parts", "input_bytes")} for key, value in (state["facts"].get("reviews") or {}).items()},
               "paths": {"pr_description": str(work / "pr-description.md"), "patch": str(work / "suite.patch"), "result": str(work / "suite-update-result.json"),
                         "suite_dir": str(Path(project) / facts["suite_dir"])},
-              "accepted": None}
+              "accepted": None, **({"executor": "human", "repeats": 0} if facts.get("executor") == "human" else {})}
     from tools.schema_validation import schema_diagnostics
 
     problems = schema_diagnostics(result, Path(driver.ROOT) / "schemas" / "suite-update-result.schema.json", Path(driver.ROOT))
