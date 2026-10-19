@@ -49,9 +49,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-STEPS = ("0", "1", "2", "3", "4", "5a", "5", "7", "8")
+STEPS = ("0", "1", "2", "3", "4", "5a", "5", "7", "8", "9")
 TITLES = {"0": "Проверка комплекта", "1": "Preflight проекта", "2": "Обёртка CLI", "3": "Бенчмарк моделей", "4": ".skillsrc проекта",
-          "5a": "Пробный прогон (cases-only-v1)", "5": "Полный прогон (local-pilot-v1)", "7": "Что принести (<home>/report)", "8": "Экспорт Zephyr"}
+          "5a": "Пробный прогон (cases-only-v1)", "5": "Полный прогон (local-pilot-v1)", "7": "Что принести (<home>/report)", "8": "Экспорт Zephyr",
+          "9": "Обновление живого набора (suite-update-v1)"}
 ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
 REVIEW_ROLES = ("tc-reviewer", "autotest-reviewer")
 PROBE = "test-skills-probe: проверка обёртки. Ответь только JSON-объектом {\"ok\": true} без пояснений.\n"
@@ -334,12 +335,12 @@ class Operator:
 
     def command(self, step: str, *extra: str) -> str:
         """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
-        argv, skip = [], {"--from-step", "--only", "--run", "--answer", "--junit", "--exit-code", "--gate-exit-code"}
+        argv, skip = [], {"--from-step", "--only", "--run", "--answer", "--junit", "--exit-code", "--gate-exit-code", "--pit-report", "--build-log"}
         items = iter(sys.argv[1:])
         for item in items:
             if item in skip:
                 next(items, None)
-            elif item != "--dry-run" and not any(item.startswith(flag + "=") for flag in skip):
+            elif item not in {"--dry-run", "--mutation-step-done"} and not any(item.startswith(flag + "=") for flag in skip):
                 argv.append(item)
         return shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), *argv, "--from-step", step, *extra])
 
@@ -766,6 +767,14 @@ class Operator:
         """The run's start as ``next --review-runner process``: the driver scans and returns the first task without
         launching a model, so its size is checked first (``resume_argv`` then drives the same run with ``run --run``)."""
         host_cli = Path(shlex.split(self.args.cli_command)[0]).name
+        if profile == "suite-update-v1":
+            return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--profile", profile,
+                    "--model-id", self.default_model, "--host-cli", host_cli, "--host-cli-version",
+                    self.state.get("host_cli_version") or self.args.cli_version or "unknown", "--reviewer-isolation", "fresh",
+                    "--review-runner-preset", "codex", "--review-runner-command", json.dumps(self.runner_command(), ensure_ascii=False),
+                    "--runner-dir", str(self.runner_dir), "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
+                    *(["--execution-mode", self.args.execution_mode] if self.args.execution_mode else []),
+                    *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []), *extra]
         command = self.runner_command() if self.pack.is_dir() or not self.dry else [self.py, str(self.wrap_dir / "wrap.py"), "exec", "…"]
         return [self.py, "-m", "tools.pipeline_driver", "next", "--project", str(self.project), "--review-runner", "process", "--profile", profile,
                 *self._docs_args(), "--subject", self.args.subject, "--model-id", self.default_model, "--host-cli", host_cli,
@@ -789,34 +798,92 @@ class Operator:
             reports += [str(report) for report in found]
         return reports
 
+    def human_flags(self) -> list[str]:
+        """What the person hands back after a human_exec stop (reports, exit codes, a mutation step, the PIT report, a build log)."""
+        return [*[item for path in self.junit_reports() for item in ("--junit", path)],
+                *(["--exit-code", str(self.args.exit_code)] if self.args.exit_code is not None else []),
+                *(["--gate-exit-code", str(self.args.gate_exit_code)] if self.args.gate_exit_code is not None else []),
+                *(["--mutation-step-done"] if self.args.mutation_step_done else []),
+                *(["--pit-report", str(Path(self.args.pit_report).expanduser().resolve())] if self.args.pit_report else []),
+                *(["--build-log", str(Path(self.args.build_log).expanduser().resolve())] if self.args.build_log else [])]
+
+    def human_given(self) -> bool:
+        return bool(self.args.junit or self.args.mutation_step_done or self.args.pit_report or self.args.build_log or self.args.exit_code is not None)
+
+    def check_human_outputs(self, run_id: str, step: str) -> None:
+        """Before the driver is called: the output the printed command had to write exists and is not empty (the driver
+        refuses it as HUMAN_STEP_INCOMPLETE anyway; this stop says it in one line and calls nothing)."""
+        saved = self.state.get(f"human_exec_{run_id}") or {}
+        expected = saved.get("expected_output")
+        again = ["--mutation-step-done"]
+        if self.args.pit_report:
+            again = ["--pit-report", str(self.args.pit_report)]
+            if expected and Path(self.args.pit_report).expanduser().resolve() != Path(expected).resolve():
+                raise Stop(f"--pit-report должен быть ровно напечатанным путём {expected}", self.command(step, "--run", run_id, "--pit-report", expected))
+        if (self.args.mutation_step_done or self.args.pit_report) and (expected or self.args.pit_report):
+            path = Path(self.args.pit_report or expected).expanduser()
+            empty = not path.exists() or (path.is_file() and path.stat().st_size == 0) or (path.is_dir() and not any(path.iterdir()))
+            if empty:
+                raise Stop(f"команда шага мутаций не записала {path} (нет или пуст): выполнить её и повторить", self.command(step, "--run", run_id, *again))
+        if self.args.build_log:
+            log = Path(self.args.build_log).expanduser()
+            if not log.is_file() or log.stat().st_size == 0:
+                raise Stop(f"--build-log {log}: нет или пуст — сохранить вывод команды сборки в файл",
+                           self.command(step, "--run", run_id, "--exit-code", "<код>", "--build-log", "<файл с выводом сборки>"))
+            if not self.args.exit_code:
+                raise Stop("--build-log передаётся вместе с ненулевым --exit-code (сборка упала до отчёта)",
+                           self.command(step, "--run", run_id, "--exit-code", "<код выхода команды>", "--build-log", str(log)))
+
     def human_argv(self, run_id: str) -> list[str]:
-        """S9: the person ran the printed commands — the reports go to the driver: ``run --runner process --run <id> --junit …``
-        (a driver that stops run on human_exec), else ``next --run <id> --junit …``."""
+        """S9: the person ran the printed command(s): ``run --runner process --run <id> ...`` (a driver that stops run on
+        human_exec), else ``next --run <id> ...``."""
         runner = self.pack / "tools" / "pipeline_driver_run.py"
         by_run = runner.is_file() and "HUMAN_EXECUTION" in runner.read_text(encoding="utf-8", errors="replace")
-        head = ["run", "--project", str(self.project), "--runner", "process", "--run", run_id, "--max-tasks", str(self.args.max_tasks)] if by_run             else ["next", "--project", str(self.project), "--run", run_id]
-        return [self.py, "-m", "tools.pipeline_driver", *head, *[item for path in self.junit_reports() for item in ("--junit", path)],
-                *(["--exit-code", str(self.args.exit_code)] if self.args.exit_code is not None else []),
-                *(["--gate-exit-code", str(self.args.gate_exit_code)] if self.args.gate_exit_code is not None else [])]
+        head = (["run", "--project", str(self.project), "--runner", "process", "--run", run_id, "--max-tasks", str(self.args.max_tasks)] if by_run
+                else ["next", "--project", str(self.project), "--run", run_id])
+        return [self.py, "-m", "tools.pipeline_driver", *head, *self.human_flags()]
 
     def human_exec(self, payload: dict[str, Any], run_id: str, step: str) -> None:
-        """S9 human_exec: the package runs nothing — print the exact commands and stop with the ready continue command."""
+        """S9 human_exec: the package runs nothing: print the exact command(s) and stop with the ready continue command.
+        kind tests (default): the gate and the tests; mutation: one of three steps; suite: the suite run or the repair run."""
         shell = "powershell" if os.name == "nt" else "bash"
-        self.say("  исполнение человеком (execution.mode human): пакет сборку и тесты не запускает — выполните команды по порядку сами:")
-        for number, command in enumerate(payload.get("commands") or [], 1):
-            self.say(f"  {number}. [{command.get('kind')}] в {command.get('cwd')}:")
+        kind, name = payload.get("kind") or "tests", str(payload.get("step") or "")
+        commands = payload.get("commands") or []
+        if kind == "mutation":
+            self.say(f"  мутации, шаг {payload.get('step_index')} из {payload.get('steps_total')} ({name}): пакет команду не запускает — выполните её сами:")
+        elif kind == "suite":
+            self.say(f"  живой набор, {'прогон после ремонта' if name == 'repair-run' else 'прогон набора'} ({name}): пакет команду не запускает — "
+                     "выполните её сами:")
+            if not self.state.get(f"suite_note_{run_id}"):
+                self.say("  в этом режиме повторы упавших методов не выполняются и метка FLAKY не присваивается: упавший метод считается упавшим")
+                self.state[f"suite_note_{run_id}"] = True
+        else:
+            self.say("  исполнение человеком (execution.mode human): пакет сборку и тесты не запускает — выполните команды по порядку сами:")
+        for number, command in enumerate(commands, 1):
+            self.say(f"  {number}. [{command.get('kind') or name}] в {command.get('cwd')}:")
             self.say(f"     {command.get(shell) or shlex.join(command.get('argv') or [])}")
             other = "bash" if shell == "powershell" else "powershell"
             if command.get(other):
                 self.log(f"     ({other}) {command[other]}")
+            if command.get("expected_output"):
+                self.say(f"     команда должна записать: {command['expected_output']}")
         selectors = payload.get("selectors") or []
         if selectors:
             self.say(f"  проверяемые тесты ({len(selectors)}): " + ", ".join(str(item) for item in selectors[:10]) + (" …" if len(selectors) > 10 else ""))
+        expected = next((command.get("expected_output") for command in commands if command.get("expected_output")), None) or payload.get("report_path")
         report = payload.get("report_path") or payload.get("report_dir")
+        self.state[f"human_exec_{run_id}"] = {"kind": kind, "step": name, "expected_output": expected, "report": report}
+        if kind == "mutation":
+            done = ["--pit-report", str(expected)] if name == "pit" else ["--mutation-step-done"]
+            raise Stop(f"прогон ждёт шага мутаций {payload.get('step_index')}/{payload.get('steps_total')} ({name}): выполните команду выше, она "
+                       f"должна записать {expected}", self.command(step, "--run", run_id, *done))
+        if kind == "suite":
+            self.say("  если сборка упала до отчёта: та же команда продолжения, но вместо --junit — --exit-code <код> --build-log <файл с выводом сборки>")
+            raise Stop("прогон ждёт отчёта человека: выполните команду выше; код выхода — --exit-code (иначе из отчёта)",
+                       self.command(step, "--run", run_id, "--junit", str(expected or "<отчёт JUnit или каталог отчётов>")))
         self.say(f"  отчёт JUnit: {report}" + (f" (каталог отчётов {payload['report_dir']})" if payload.get("report_path") and payload.get("report_dir") else ""))
-        self.state[f"human_exec_{run_id}"] = {"report": report, "commands": len(payload.get("commands") or [])}
         raise Stop("прогон ждёт отчёта человека: выполните команды выше; код выхода тестов — --exit-code, шлюза — --gate-exit-code (иначе из отчёта)",
-                   self.command(step, "--run", run_id, "--junit", str(payload.get("report_path") or payload.get("report_dir") or "<отчёт JUnit или каталог отчётов>")))
+                   self.command(step, "--run", run_id, "--junit", str(report or "<отчёт JUnit или каталог отчётов>")))
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
         return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
@@ -999,11 +1066,14 @@ class Operator:
         run_id, self.args.run = self.args.run, None  # --run resumes the first driven step only
         starting = not run_id  # until the first model task is sized, the run goes by `next`/`submit` (no process launched)
         if run_id:
-            argv = self.human_argv(run_id) if self.args.junit else self.resume_argv(run_id, self.args.answer)
+            if self.human_given():
+                self.check_human_outputs(run_id, "9" if label == "suite" else "5" if label == "run" else "5a")
+            argv = self.human_argv(run_id) if self.human_given() else self.resume_argv(run_id, self.args.answer)
         else:
             if not self.dry or self.pack.is_dir():
                 self.check_module()
             argv = self.driver_argv(profile, extra)
+            starting = profile != "suite-update-v1"
         while True:
             code, payload = self.run_watched(argv, label, run_id)
             if self.dry:
@@ -1025,7 +1095,7 @@ class Operator:
                 argv = self.resume_argv(run_id, [])
                 continue
             if action == "human_exec":
-                self.human_exec(payload, run_id, "5" if label == "run" else "5a")
+                self.human_exec(payload, run_id, "9" if label == "suite" else "5" if label == "run" else "5a")
             if action in {"llm", "batch", "wait"} and run_id:  # after the person's reports (next --junit): the run goes on
                 argv = self.resume_argv(run_id, [])
                 continue
@@ -1105,6 +1175,19 @@ class Operator:
             raise Stop(f"прогон не завершён: {result.get('completion')} {result.get('reason_code')}", "reason_code — в отчёт (шаг 7 соберёт его): --from-step 7")
         if result.get("verification") == "FAIL":
             self.say("  verification FAIL — ожидаемо при дефекте продукта: quarantine.md (вопрос аналитику и черновик баг-репорта)")
+
+    # -- step 9
+    def step_9(self) -> None:
+        """suite-update-v1: the living suite against the current requirements and code (a suite written by step 5 --suite)."""
+        code, payload = self.drive("suite-update-v1", [], "suite")
+        if self.dry:
+            return
+        result = payload.get("result") or {}
+        self.say(f"  итог: {result.get('outcome') or result.get('status')}, исполнитель {result.get('executor') or '—'}, "
+                 f"счётчики {json.dumps(result.get('counts') or {}, ensure_ascii=False)}, код {code}")
+        if result.get("status") == "error" or result.get("reason"):
+            raise Stop(f"обновление набора: {result.get('reason') or result.get('status')}: {str(result.get('message') or '')[:300]}",
+                       "SUITE_MISSING — сначала полный прогон с набором (шаг 5); иначе код и message — в отчёт (п. 7)")
 
     # -- step 7
     def _run_payload(self) -> dict[str, Any]:
@@ -1196,6 +1279,8 @@ class Operator:
     def main(self) -> int:
         self.log(f"\n===== operate.py {datetime.datetime.now().isoformat(timespec='seconds')} {shlex.join(sys.argv[1:])}")
         steps = STEPS[STEPS.index(self.args.from_step):]
+        if self.args.from_step != "9":  # the living suite update runs only on request (--only 9 or --from-step 9)
+            steps = tuple(step for step in steps if step != "9")
         if self.args.only:
             wanted = [item.strip() for item in self.args.only.split(",")]
             steps = tuple(step for step in STEPS if step in wanted)
@@ -1810,6 +1895,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "отчёт: продолжение — та же команда с --from-step 5 --run <id> --junit <отчёт>")
     parser.add_argument("--junit", action="append", default=[], help="отчёт JUnit или каталог отчётов (все *.xml) после выполнения напечатанных "
                                                                      "команд (режим human); можно несколько")
+    parser.add_argument("--mutation-step-done", action="store_true", help="режим human, мутации: напечатанная команда резолвера выполнена "
+                        "(её вывод должен существовать и быть непустым)")
+    parser.add_argument("--pit-report", help="режим human, мутации: mutations.xml, который записал PIT человека (ровно напечатанный путь)")
+    parser.add_argument("--build-log", help="режим human, обновление набора: файл с выводом сборки, если она упала до отчёта "
+                        "(вместе с ненулевым --exit-code)")
     parser.add_argument("--exit-code", type=int, help="режим human: код выхода команды тестов (по умолчанию — из отчёта)")
     parser.add_argument("--gate-exit-code", type=int, help="режим human: код выхода команды шлюза компиляции (по умолчанию — из отчёта)")
     parser.add_argument("--confirm-context", choices=("yes", "no"), help="подтверждение отправки файлов в модель (pipeline_driver "
