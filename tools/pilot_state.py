@@ -36,9 +36,10 @@ on_confined_write(_forget_validated_evidence)
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
 _AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy",
-              "execution_review_required", "context_confirm_required"}
+              "execution_review_required", "context_confirm_required", "execution_mode_human"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
-_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required", "context_confirm_required")
+_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required", "context_confirm_required",
+                     "execution_mode_human")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -575,7 +576,7 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
     if "disposition_policy" in authorization and authorization["disposition_policy"] != "quarantine":
         raise ValueError("unsafe authorization")
     if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization
-            or "execution_review_required" in authorization) and policy_profile != "local-pilot-v1":
+            or "execution_review_required" in authorization or "execution_mode_human" in authorization) and policy_profile != "local-pilot-v1":
         raise ValueError("authorization policy mismatch")
     return dict(authorization)
 

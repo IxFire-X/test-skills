@@ -1411,7 +1411,20 @@ def _report_digest_evidence(snapshots: Mapping[Path, bytes], module: Path) -> li
     return rows
 
 
-def _records_from_snapshots(snapshots: Mapping[Path, bytes], compatibility: RunnerCompatibility, run_id: str, source: Mapping[str, Any], *, java: bool) -> tuple[list[dict[str, str]], list[str]]:
+def _extra_testcases(snapshots: Mapping[Path, bytes], compatibility: RunnerCompatibility, *, java: bool) -> int:
+    """S9: test cases of a person's reports that match no reviewed pair (they ran more than the selectors)."""
+    count = 0
+    for content in snapshots.values():
+        try:
+            parsed = parse_junit_element(ET.fromstring(content))
+        except ET.ParseError:
+            continue
+        count += sum(1 for case in parsed.cases if not any(_case_matches_pair(case, binding, java) for binding in compatibility.bindings.values()))
+    return count
+
+
+def _records_from_snapshots(snapshots: Mapping[Path, bytes], compatibility: RunnerCompatibility, run_id: str, source: Mapping[str, Any], *, java: bool,
+                            allow_unmatched: bool = False) -> tuple[list[dict[str, str]], list[str]]:
     cases: list[JUnitCase] = []
     malformed: list[str] = []
     duplicates: list[tuple[str, str, str | None]] = []
@@ -1428,10 +1441,14 @@ def _records_from_snapshots(snapshots: Mapping[Path, bytes], compatibility: Runn
             identities.add(case.identity)
             cases.append(case)
         malformed.extend(parsed.malformed)
-    return match_junit_cases(
+    rows, errors = match_junit_cases(
         JUnitParseResult(tuple(cases), tuple(malformed), tuple(duplicates)),
         compatibility, run_id, source, java, strict=True,
     )
+    if allow_unmatched:
+        # A person may run the whole class or module: extra cases are counted, the reviewed pairs still decide.
+        errors = [error for error in errors if error != "unmatched JUnit testcase"]
+    return rows, errors
 
 
 def _post_run_file_digests(compatibility: RunnerCompatibility) -> Mapping[str, str]:
@@ -1523,7 +1540,7 @@ def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]
     }
 
 
-def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, environment_inputs: Sequence[Mapping[str, str]] | None = None) -> dict[str, Any]:
+def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, environment_inputs: Sequence[Mapping[str, str]] | None = None, human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     prestart = verdict == "NOT_RUNNABLE" and run_id is None
@@ -1539,7 +1556,7 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
         safe_key_labels = request.environment_labels
     source = dict(source)
     source.setdefault("effective_bundle_receipt_digest", "sha256:" + "0" * 64)
-    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
+    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": {**_execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs), **(dict(human) if human else {})}, "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
     from tools.schema_validation import schema_diagnostics
     if schema_diagnostics(report, _ROOT / "schemas" / "run-tests-output.schema.json", _ROOT):
         raise RuntimeError("RUNNER_REPORT_SCHEMA")
@@ -2041,11 +2058,15 @@ def _has_one_new_durable_execution_start(run_root: Path | None, attempt_id: str 
     return starts is not None and len(starts) == 1 and starts[0].get("artifact_digest") == expected
 
 
-def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], *, host_isolation_receipt: Mapping[str, Any] | None = None, generated_delta_receipt: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None, on_execution_start: Callable[[Any], None] | None = None, post_execution_check: Callable[[], str | None] | None = None, gate_request: Any = None) -> dict[str, Any]:
+def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], *, host_isolation_receipt: Mapping[str, Any] | None = None, generated_delta_receipt: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None, on_execution_start: Callable[[Any], None] | None = None, post_execution_check: Callable[[], str | None] | None = None, gate_request: Any = None, human_execution: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Execute exactly one closed project-native adapter request after authorization.
 
     ``gate_request`` is the controller-built compile/collect gate for the same
     request; when present it runs first, under the same execution-start claim.
+
+    ``human_execution`` (S9, execution.mode human): a person already ran the printed commands.  No process starts here:
+    ``before`` is the report-directory snapshot taken when the commands were issued, ``reports`` the reports the person
+    handed back, ``exit_code``/``gate_exit_code`` what the person reported.  The acceptance rules are the same.
     """
     from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
     from tools.execution_adapters import (
@@ -2107,25 +2128,37 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     if not _has_one_new_durable_execution_start(run_root, attempt_id, request):
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/execution", "RUNNER_EXECUTION_GATE", "Execution-start claim is absent, ambiguous, or bound to another request.")], request=request, run_root=run_root, attempt_id=attempt_id)
     run_id, started = "RUN-" + uuid.uuid4().hex, time.monotonic()
-    environment_inputs = launch_environment_inputs()
-    before = _report_inventory(report_path)
+    human = human_execution
+    # In human mode the environment of the run was the person's: nothing to record from this process.
+    environment_inputs = None if human is not None else launch_environment_inputs()
+    before = ({Path(path): tuple(value) for path, value in human["before"].items()} if human is not None else _report_inventory(report_path))
     gate_kind: str | None = None
     outcome: ProcessOutcome | None = None
     if gate_request is not None:
         # Compile/collect gate: the same closed runtime and selectors, no test body.
-        gate_outcome = _outcome(invoke_request(gate_request, _invoke_closed_request))
+        if human is not None:
+            gate_outcome = ProcessOutcome(int(human.get("gate_exit_code") or 0), "human-executed", "")
+        else:
+            gate_outcome = _outcome(invoke_request(gate_request, _invoke_closed_request))
         gate_kind = gate_failure_kind(adapter_id, gate_outcome)
         if gate_kind is not None:
             outcome = gate_outcome
     if outcome is None:
-        outcome = _outcome(invoke_request(request, _invoke_closed_request))
+        outcome = ProcessOutcome(int(human["exit_code"]), "human-executed", "") if human is not None else _outcome(invoke_request(request, _invoke_closed_request))
     duration_sec = time.monotonic() - started
     snapshots: dict[Path, bytes] = {}
     if gate_kind is None:
         after = _report_inventory(report_path)
         fresh = {path for path, fingerprint in after.items() if before.get(path) != fingerprint}
+        if human is not None:
+            fresh &= {Path(path).resolve() for path in human["reports"]}  # only what the person handed back
         snapshots = _report_snapshots(tuple(fresh))
-    evidence, match_errors = _records_from_snapshots(snapshots, compatibility, run_id, source, java=language == "java")
+    evidence, match_errors = _records_from_snapshots(snapshots, compatibility, run_id, source, java=language == "java", allow_unmatched=human is not None)
+    human_receipt = None if human is None else {"executor": "human", "extra_testcases": _extra_testcases(snapshots, compatibility, java=language == "java")}
+    if human_receipt and human_receipt["extra_testcases"] and gate_kind is None:
+        # The person ran more than the selectors: the exit code of that run says nothing about the reviewed pairs alone.
+        passed = len(evidence) == len(compatibility.required_pairs) and all(row["status"] == "PASSED" for row in evidence)
+        outcome = ProcessOutcome(0 if passed else 1, "human-executed", "")
     zero_report = bool(snapshots) and all(
         is_zero_test_report(content) for content in snapshots.values()
     )
@@ -2211,7 +2244,7 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
         [_diag("/execution", process_kind, _NOT_RUNNABLE_MESSAGES[process_kind])]
         if classified == "NOT_RUNNABLE" and process_kind in NOT_RUNNABLE_PROCESS_KINDS else ()
     )
-    return _report(classified, project, language, source, automation_digest, review_digest, diagnostics, run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs)
+    return _report(classified, project, language, source, automation_digest, review_digest, diagnostics, run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, environment_inputs=environment_inputs, human=human_receipt)
 
 
 def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], provider_resolver: Any | None = None, adapter_registry: Any | None = None, *, runner_profile: str | None = None) -> dict[str, Any]:

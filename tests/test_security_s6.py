@@ -22,9 +22,10 @@ DUMP = [sys.executable, "-c", "import json, os; print(json.dumps(sorted(os.envir
 
 def test_the_allowlist_keeps_what_a_process_needs_and_drops_the_rest() -> None:
     source = {"PATH": "/bin", "HOME": "/home/u", "LANG": "ru_RU.UTF-8", "LC_ALL": "C", "TMPDIR": "/tmp", "TEMP": "/tmp", "JAVA_HOME": "/jdk",
+              "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",  # a Python CLI on Windows needs them for Cyrillic output
               "MY_API_TOKEN": SECRET, "AWS_SECRET_ACCESS_KEY": SECRET, "HTTPS_PROXY": "http://proxy:3128", "GIT_ASKPASS": "x"}
     env, names = model_runner.cli_environment(source)
-    assert set(env) == {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "JAVA_HOME"} and names == sorted(env)
+    assert set(env) == {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "JAVA_HOME", "PYTHONUTF8", "PYTHONIOENCODING"} and names == sorted(env)
     env, names = model_runner.cli_environment(source, passthrough=("HTTPS_PROXY", "MY_API_TOKEN", "ABSENT"))
     assert {"HTTPS_PROXY", "MY_API_TOKEN"} <= set(env) and "ABSENT" not in env and "AWS_SECRET_ACCESS_KEY" not in env
     prefixed, _names = model_runner.cli_environment({**source, "GIGACODE_URL": "u", "GIGACODE_KEY": "k", "GIGA": "g"}, passthrough=("GIGACODE_*", "HTTP*"))

@@ -198,6 +198,7 @@ def command_digest(config: RunnerConfig, *, model: str | None, schema: Mapping[s
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}\*?$")  # a name, or a prefix pattern with `*` at the end (GIGACODE_*)
 # S6: what the model CLI gets by default — enough to start, find itself and its profile, keep the locale and a temp dir.
 _ENV_ALLOW = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP",
+              "PYTHONUTF8", "PYTHONIOENCODING",  # a Python CLI on Windows fails on Cyrillic output without them; no secrets
               # the Windows minimum: without it a process does not start or the CLI does not find its profile
               "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"}
 _ENV_ALLOW_PREFIXES = ("LC_", "TMP")
