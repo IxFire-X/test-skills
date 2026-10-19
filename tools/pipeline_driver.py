@@ -470,11 +470,17 @@ def _confirm_context_step(project: Path, run_root: Path, attempt: Mapping[str, A
     documents = [{"path": row["path"], "content_digest": row["sha256"], "size": len(row["content"].encode("utf-8"))}
                  for row in run_pipeline._docs_entries(project, list(config["docs"]))]
     total = sum(row["size"] for row in [*files, *documents])
+    # S8: what the inventory kept out as secret material, by rule (the paths only; they never reach a task).
+    _baseline, inventory = _baseline_and_inventory(run_root, attempt)
+    withheld = sorted((str(item["project_path"]), str(item.get("scanner_rule_id"))) for item in inventory.get("exclusions", [])
+                      if item.get("reason_code") == "SECRET_SUSPECTED")
     listing = work_dir(run_root) / "context-files.txt"
     listing.parent.mkdir(parents=True, exist_ok=True)
     listing.write_text("\n".join([f"# В модель уйдут {len(documents)} документ(ов) требований и {len(files)} файл(ов) проекта, {total} байт",
                                   *[f"требования\t{row['size']}\t{row['path']}" for row in documents],
-                                  *[f"контекст\t{row['size']}\t{row['path']}" for row in files]]) + "\n", encoding="utf-8", newline="\n")
+                                  *[f"контекст\t{row['size']}\t{row['path']}" for row in files],
+                                  f"# Не уйдут как секреты: {len(withheld)}",
+                                  *[f"исключено\t{rule}\t{path}" for path, rule in withheld]]) + "\n", encoding="utf-8", newline="\n")
     names = ", ".join(row["path"] for row in documents)
     return _ask_task(
         run_root, attempt_id, "confirm-context",
