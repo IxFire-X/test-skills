@@ -15,7 +15,114 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from typing import Any, Mapping, Sequence
+
+AUTOMATION_FIELDS = ("automation_status", "generated_files", "generated_symbols", "implementation_relations", "manual_dispositions", "diagnostics")
+
+
+def normalize_automation(content: Mapping[str, Any], document: Mapping[str, Any], *, revision: int, effective: Mapping[str, Any],
+                         predecessor: Mapping[str, Any] | None, previous_review: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Build the full automation artifact: digests, lineage and canonical order come from code."""
+    from tools.automation_validation import automation_sha256, autotest_review_sha256
+
+    value = deepcopy({name: content.get(name) for name in AUTOMATION_FIELDS})
+    for row in value["generated_files"] if isinstance(value["generated_files"], list) else []:
+        if isinstance(row, dict) and isinstance(row.get("content"), str):
+            row["content_digest"] = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
+    cases = {case["case_id"]: (index, case) for index, case in enumerate(document.get("test_cases", []))}
+
+    def position(row: Mapping[str, Any]) -> tuple[Any, ...] | None:
+        case = cases.get(row.get("case_id"))
+        if case is None:
+            return None
+        steps = {step["step_id"]: (index, step) for index, step in enumerate(case[1]["steps"])}
+        step = steps.get(row.get("step_id"))
+        if step is None:
+            return None
+        expectation_index = assertion_index = -1
+        if row.get("kind") == "assertion":
+            expectations = {item["expectation_id"]: (index, item) for index, item in enumerate(step[1]["expectations"])}
+            expectation = expectations.get(row.get("expectation_id"))
+            if expectation is None:
+                return None
+            expectation_index = expectation[0]
+            assertions = {item["assertion_id"]: index for index, item in enumerate(expectation[1]["assertions"])}
+            if row.get("assertion_id") not in assertions:
+                return None
+            assertion_index = assertions[row["assertion_id"]]
+        return (case[0], step[0], 0 if row.get("kind") == "operation" else 1, expectation_index, assertion_index, str(row.get("file_id")), str(row.get("symbol_id")))
+
+    for name in ("implementation_relations", "manual_dispositions"):
+        rows = value[name]
+        if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
+            keys = [position(row) for row in rows]
+            if all(key is not None for key in keys):
+                value[name] = [row for _key, row in sorted(zip(keys, rows), key=lambda pair: pair[0])]
+    return {
+        "schema_version": "5.0.0", "stage": "tc-to-autotest",
+        "artifacts": {
+            "automation_status": value["automation_status"],
+            "source": {"document_id": document["document_id"], "revision": document["revision"], "source_digest": effective["document_digest"],
+                       "effective_bundle_receipt_digest": effective["effective_bundle_receipt_digest"]},
+            "automation_revision": revision,
+            "predecessor_automation_sha256": None if predecessor is None else automation_sha256(predecessor),
+            "correction_review_sha256": None if previous_review is None else autotest_review_sha256(previous_review),
+            "generated_files": value["generated_files"], "generated_symbols": value["generated_symbols"],
+            "implementation_relations": value["implementation_relations"], "manual_dispositions": value["manual_dispositions"], "diagnostics": value["diagnostics"],
+        },
+        "warnings": list(content.get("warnings") or []),
+    }
+
+
+def answer_of(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    """The model-written fields of an automation artifact (what a part answered), without digests and lineage."""
+    artifacts = artifact["artifacts"]
+    files = [{key: value for key, value in row.items() if key != "content_digest"} for row in artifacts.get("generated_files") or []]
+    return {"automation_status": artifacts["automation_status"], "generated_files": files,
+            **{name: deepcopy(artifacts.get(name) or []) for name in AUTOMATION_FIELDS if name not in {"automation_status", "generated_files"}},
+            "warnings": list(artifact.get("warnings") or [])}
+
+
+def merged_artifact(part_artifacts: Sequence[Mapping[str, Any]], document: Mapping[str, Any], *, revision: int, effective: Mapping[str, Any],
+                    predecessor: Mapping[str, Any] | None, previous_review: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The one automation artifact of a split revision: the parts' answers merged, then normalized as a single answer."""
+    return normalize_automation(merge_part_answers([answer_of(item) for item in part_artifacts]), document, revision=revision, effective=effective,
+                                predecessor=predecessor, previous_review=previous_review)
+
+
+def part_related_ids(document: Mapping[str, Any], case_ids: Sequence[str]) -> set[str]:
+    """Every ID inside the part's cases (case, step, input, expectation, assertion): what a review correction may name."""
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            for key, value in node.items():
+                if key.endswith("_id") and isinstance(value, str):
+                    found.add(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for case in part_document(document, case_ids)["test_cases"]:
+        walk(case)
+    return found
+
+
+def corrections_of_part(review: Mapping[str, Any], document: Mapping[str, Any], part: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The r1 review corrections of one part: they name its file IDs or IDs of its cases; a correction no part owns goes to every part."""
+    corrections = ((review.get("artifacts") or {}).get("autotest_review") or {}).get("corrections") or []
+    prefix, own = file_id_prefix(part["part_id"]), part_related_ids(document, part["case_ids"])
+    every = set().union(*(part_related_ids(document, [case["case_id"]]) for case in document.get("test_cases", [])))
+
+    def owned(row: Mapping[str, Any]) -> bool:
+        ids = [str(item) for item in row.get("related_ids") or []]
+        mine = any(item.startswith(prefix) or item in own for item in ids)
+        anyone = any(item.startswith("FILE-P") or item in every for item in ids)
+        return mine or not anyone
+
+    return [dict(row) for row in corrections if owned(row)]
 
 
 class PartPlanError(ValueError):
@@ -125,6 +232,21 @@ def part_answer_problems(part_id: str, case_ids: Sequence[str], value: Mapping[s
         problems.append({"path": "/implementation_relations", "code": "AUTOMATION_PART_COVERAGE",
                          "message": "every case of the part needs a relation or a manual disposition: " + ", ".join(missing)})
     return problems
+
+
+def validate_part_artifact(artifact: Mapping[str, Any], document: Mapping[str, Any], case_ids: Sequence[str]) -> list[dict[str, str]]:
+    """The automation validator on the full document, without the missing-coverage findings of the other parts' cases."""
+    from tools.automation_validation import validate_automation_artifact
+
+    owned = {index for index, case in enumerate(document.get("test_cases", [])) if case.get("case_id") in set(case_ids)}
+    rows = []
+    for row in validate_automation_artifact(dict(artifact), dict(document)):
+        path = str(row.get("path", ""))
+        if str(row.get("code", "")).startswith("AUTOMATION_MISSING_") and path.startswith("/test_cases/"):
+            if int(path.split("/")[2]) not in owned:
+                continue  # another part covers this case
+        rows.append(row)
+    return rows
 
 
 def merge_part_answers(answers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

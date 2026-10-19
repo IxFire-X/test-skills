@@ -153,3 +153,172 @@ def test_the_part_brief_names_its_cases_prefix_and_marker() -> None:
     brief = parts.part_brief({"part_id": "part-003", "case_ids": ["TC-7", "TC-8"]}, count=7)
     assert brief["owned_case_ids"] == ["TC-7", "TC-8"] and brief["file_id_prefix"] == "FILE-P003-" and brief["name_marker"] == "Part003"
     assert "3 из 7" in brief["instructions"] and "Part003" in brief["instructions"]
+
+
+# --------------------------------------------------------------------------------------
+# step (b): the driver runs the parts, the journal binds the merge
+# --------------------------------------------------------------------------------------
+
+from tests.test_review_fixes_driver import SavedModel, _drive, _load, _project, _run_root, _saved, _start  # noqa: E402
+from tools import pipeline_driver as driver  # noqa: E402
+
+
+class PartModel(SavedModel):
+    """The saved automation answer, cut to the cases of each part (its file named and identified for the part)."""
+
+    def answer(self, task):
+        if not (task.get("stage", "").startswith("tc-to-autotest:") and ":part-" in task["stage"]):
+            return super().answer(task)
+        from tools.pilot_state import read_effective_canonical
+
+        self.stages.append(task["stage"])
+        brief = _load(task["inputs"][0])
+        run_root = Path(task["output_path"]).parents[1].with_name(task["run_id"])
+        document = read_effective_canonical(run_root, task["attempt_id"])["document"]
+        automatable = next(case for case in document["test_cases"] if not case["steps"][0]["manual_only"])
+        manual = next(case for case in document["test_cases"] if case["steps"][0]["manual_only"])
+        bindings = {}
+        for index, case in ((1, automatable), (2, manual)):
+            step = case["steps"][0]
+            bindings.update({f"case:{index}": case["case_id"], f"step:{index}": step["step_id"], f"expectation:{index}": step["expectations"][0]["expectation_id"]})
+            if step["expectations"][0]["assertions"]:
+                bindings[f"assertion:{index}"] = step["expectations"][0]["assertions"][0]["assertion_id"]
+        value = _saved("tc-to-autotest.passing.answer.json", bindings)
+        owned, prefix, marker = set(brief["owned_case_ids"]), brief["file_id_prefix"], brief["name_marker"].lower()
+        value["implementation_relations"] = [row for row in value["implementation_relations"] if row["case_id"] in owned]
+        value["manual_dispositions"] = [row for row in value["manual_dispositions"] if row["case_id"] in owned]
+        if value["implementation_relations"]:
+            for row in [*value["generated_files"], *value["generated_symbols"], *value["implementation_relations"]]:
+                row["file_id"] = prefix + "1"
+            value["generated_files"][0]["path"] = f"tests/test_generated_{marker}.py"
+        else:
+            value["generated_files"], value["generated_symbols"] = [], []
+        return value
+
+
+def _split_project(tmp_path: Path) -> Path:
+    project = _project(tmp_path, local=True)
+    skillsrc = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
+    skillsrc["limits"] = {"automation_cases_per_part": 1}  # two cases: two parts
+    (project / ".skillsrc").write_text(json.dumps(skillsrc, ensure_ascii=False) + "\n", encoding="utf-8")
+    return project
+
+
+def test_the_driver_generates_the_automation_by_parts_and_the_run_passes(tmp_path: Path) -> None:
+    from tools.pilot_state import derive_state, read_model_request
+
+    project = _split_project(tmp_path)
+    model = PartModel("local-pilot-v1")
+    done = _drive(project, _start(project, "local-pilot-v1"), model)
+    assert done["action"] == "done" and done["result"]["verification"] == "PASS", done
+    assert [stage for stage in model.stages if stage.startswith("tc-to-autotest")] == ["tc-to-autotest:r1:part-001", "tc-to-autotest:r1:part-002"]
+    run_root = _run_root(project, done)
+    events = [event for event in derive_state(run_root)["events"] if event.get("attempt_id") == done["result"]["attempt_id"]]
+    merged = next(event for event in events if event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == "tc-to-autotest:r1")
+    request = read_model_request(run_root, done["result"]["attempt_id"], "tc-to-autotest:r1", merged["artifact_digest"])
+    answers = [event["artifact_digest"] for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and str(event.get("stage_instance_id")).startswith("tc-to-autotest:r1:part-")]
+    assert request["input_digests"][3:] == answers and request["invocation_id"].startswith("automation-merge-")
+    candidates = [event.get("stage_instance_id") for event in events if event["event_type"] == "CANDIDATE_PUBLISHED" and "tc-to-autotest" in str(event.get("stage_instance_id"))]
+    assert candidates == ["tc-to-autotest:r1"]  # parts are no candidates
+    from tools.pilot_state import read_model_stage_artifact
+
+    response = next(event for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == "tc-to-autotest:r1")
+    merged_artifact = read_model_stage_artifact(run_root, done["result"]["attempt_id"], "tc-to-autotest:r1", response["artifact_digest"])["artifact"]
+    [generated] = merged_artifact["artifacts"]["generated_files"]  # the automatable case lives in one part
+    number = generated["file_id"][len("FILE-P"):len("FILE-P") + 3]
+    assert generated["path"] == f"tests/test_generated_part{number}.py"
+    assert len(merged_artifact["artifacts"]["manual_dispositions"]) == 1  # the manual case came from part 2
+
+
+def test_a_forged_merged_automation_and_a_part_outside_its_part_are_refused_by_the_journal(tmp_path: Path) -> None:
+    from tools import pipeline_driver_automation as automation
+    from tools.pilot_state import publish_model_request, publish_model_stage_artifact, read_effective_canonical
+
+    project = _split_project(tmp_path)
+    model = PartModel("local-pilot-v1")
+    task = _drive(project, _start(project, "local-pilot-v1"), model, until=lambda task: task.get("stage") == "tc-to-autotest:r1:part-002")
+    run_root, attempt_id = _run_root(project, task), task["attempt_id"]
+    attempt, config = driver._attempt(run_root), driver._config(run_root)
+    effective = read_effective_canonical(run_root, attempt_id)
+    plan = config["automation_plans"]["r1"]
+    with pytest.raises(ValueError):  # a part request must name its own part document
+        publish_model_request(run_root, attempt_id, "tc-to-autotest:r1:part-002", model_id="m", invocation_id="automation-x",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"], plan["digest"], plan["rows"][0]["document_digest"]])
+    automation.submit_automation(project, run_root, attempt, config, task, model.answer(task))  # the part only: no merge yet
+    with pytest.raises(ValueError):  # the merged request names every part answer, in plan order
+        publish_model_request(run_root, attempt_id, "tc-to-autotest:r1", model_id="m", invocation_id="automation-merge-x",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"], plan["digest"]])
+    with pytest.raises(ValueError):  # a split revision is never closed by a single-task answer past the merge
+        publish_model_request(run_root, attempt_id, "tc-to-autotest:r1", model_id="m", invocation_id="automation-x",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]])
+    automation._request_merged_automation(project, run_root, attempt, config, "r1")
+    merged = automation._merged_automation(run_root, attempt_id, "r1")
+    forged = json.loads(json.dumps(merged))
+    forged["artifacts"]["generated_files"][0]["content"] += "\n# not from a part\n"
+    forged["artifacts"]["generated_files"][0]["content_digest"] = "sha256:" + __import__("hashlib").sha256(
+        forged["artifacts"]["generated_files"][0]["content"].encode("utf-8")).hexdigest()
+    with pytest.raises(ValueError):
+        publish_model_stage_artifact(run_root, attempt_id, "tc-to-autotest:r1", forged)
+    publish_model_stage_artifact(run_root, attempt_id, "tc-to-autotest:r1", merged)
+
+
+def test_r2_regenerates_only_the_corrected_part_and_carries_the_other(tmp_path: Path) -> None:
+    from tests.test_review_fixes_driver import review_answer
+    from tools.pilot_state import derive_state, publish_model_request, publish_model_stage_artifact, read_effective_canonical, read_model_request
+
+    project = _split_project(tmp_path)
+    model = PartModel("local-pilot-v1")
+    task = _drive(project, _start(project, "local-pilot-v1"), model, until=lambda task: task.get("stage", "").startswith("autotest-reviewer:r1"))
+    run_root, attempt_id = _run_root(project, task), task["attempt_id"]
+    plan = driver._config(run_root)["automation_plans"]["r1"]
+    from tools import pipeline_driver_automation as automation
+
+    merged = automation._stage_artifact(run_root, attempt_id, "tc-to-autotest:r1")["artifact"]
+    generated = merged["artifacts"]["generated_files"][0]
+    envelope = _load(task["inputs"][0])
+    scope = envelope["scopes"][0]
+    correction = {"id": "FIX-001", "correction_kind": "MECHANICAL", "path": "/artifacts/generated_files/0/content", "before": generated["content"],
+                  "after": generated["content"] + "\n", "related_ids": [scope["scope_id"], generated["file_id"]], "description": "Убрать лишнее.",
+                  "evidence": [scope["inputs"][0]["artifact_digest"]]}
+    Path(task["output_path"]).write_text(json.dumps(review_answer(task, corrections=[correction]), ensure_ascii=False), encoding="utf-8")
+    second = driver.submit(project, run_root, task["task_id"])
+    assert second.get("status") != "rejected", second.get("errors")
+    corrected = "part-" + generated["file_id"][len("FILE-P"):len("FILE-P") + 3]
+    carried = next(row["part_id"] for row in plan["rows"] if row["part_id"] != corrected)
+    assert second["stage"] == f"tc-to-autotest:r2:{corrected}", second  # only the corrected part goes to the model
+    events = [event for event in derive_state(run_root)["events"] if event.get("attempt_id") == attempt_id]
+    request = next(event for event in events if event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == f"tc-to-autotest:r2:{carried}")
+    assert read_model_request(run_root, attempt_id, f"tc-to-autotest:r2:{carried}", request["artifact_digest"])["invocation_id"].startswith("automation-carry-")
+    done = _drive(project, second, model)
+    assert (done["result"]["verification"], done["result"]["accepted"]) == ("PASS", True), done
+    assert automation._stage_artifact(run_root, attempt_id, "tc-to-autotest:r2")["artifact"]["artifacts"]["automation_revision"] == 2
+
+
+def test_a_forged_carried_part_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A part carried into r2 without a model call must equal its r1 answer: the journal refuses anything else."""
+    from tests.test_review_fixes_driver import review_answer
+    from tools import pipeline_driver_automation as automation
+    from tools.pilot_state import derive_state
+
+    project = _split_project(tmp_path)
+    model = PartModel("local-pilot-v1")
+    task = _drive(project, _start(project, "local-pilot-v1"), model, until=lambda task: task.get("stage", "").startswith("autotest-reviewer:r1"))
+    run_root, attempt_id = _run_root(project, task), task["attempt_id"]
+    merged = automation._stage_artifact(run_root, attempt_id, "tc-to-autotest:r1")["artifact"]
+    generated = merged["artifacts"]["generated_files"][0]
+    scope = _load(task["inputs"][0])["scopes"][0]
+    correction = {"id": "FIX-001", "correction_kind": "MECHANICAL", "path": "/artifacts/generated_files/0/content", "before": generated["content"],
+                  "after": generated["content"] + "\n", "related_ids": [scope["scope_id"], generated["file_id"]], "description": "Убрать лишнее.",
+                  "evidence": [scope["inputs"][0]["artifact_digest"]]}
+    Path(task["output_path"]).write_text(json.dumps(review_answer(task, corrections=[correction]), ensure_ascii=False), encoding="utf-8")
+    genuine = automation.normalize_automation
+
+    def forging(content, *args, **kwargs):  # the carry of the driver writes something the r1 part never answered
+        return genuine({**content, "warnings": [*content.get("warnings", []), "подложено — не из r1"]}, *args, **kwargs)
+
+    monkeypatch.setattr(automation, "normalize_automation", forging)
+    with pytest.raises(ValueError):
+        driver.submit(project, run_root, task["task_id"])
+    carried = [event for event in derive_state(run_root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+               and str(event.get("stage_instance_id")).startswith("tc-to-autotest:r2:")]
+    assert carried == []  # nothing was recorded for the forged part

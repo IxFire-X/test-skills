@@ -16,9 +16,8 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 from tools import pipeline_driver as driver
+from tools.automation_parts import AUTOMATION_FIELDS as _AUTOMATION_FIELDS, normalize_automation  # noqa: F401  (normalize_automation is public here too)
 from tools.pipeline_driver import DriverError, ROOT
-
-_AUTOMATION_FIELDS = ("automation_status", "generated_files", "generated_symbols", "implementation_relations", "manual_dispositions", "diagnostics")
 _REGENERATION_REASON = "GENERATED_TEST_INVALID"
 
 
@@ -63,6 +62,216 @@ def _automation_task(project: Path, run_root: Path, attempt: Mapping[str, Any], 
 
     attempt_id = str(attempt["attempt_id"])
     stage = f"tc-to-autotest:r{revision}"
+    inputs = _automation_inputs(project, run_root, attempt, config, effective, revision)
+    if "MODEL_REQUESTED" not in driver._stage_events(driver._events(run_root, attempt_id), stage):
+        driver._check_task_input(project, config, stage, inputs)
+        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-{uuid.uuid4().hex[:16]}",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]])
+    return driver._llm_task(
+        run_root, attempt_id, f"tc-to-autotest.r{revision}", stage=stage, skill="tc-to-autotest", inputs=inputs, schema=_automation_schema(),
+        instructions=_AUTOMATION_INSTRUCTIONS, extra={"automation_revision": revision},
+    )
+
+
+_AUTOMATION_INSTRUCTIONS = ("Первый файл — задание, второй — принятый набор кейсов (единственный источник смысла). Верни automation_status, generated_files "
+                            "(file_id, path относительно корня модуля, language, framework, content), generated_symbols, implementation_relations, "
+                            "manual_dispositions и diagnostics. Дайджесты, source, номер ревизии и порядок массивов заполнит драйвер.")
+_DEFAULT_CASES_PER_PART = 12
+
+
+def _cases_per_part(project: Path) -> int:
+    """P2: ``.skillsrc`` ``limits.automation_cases_per_part``, else 12; 0 = no case limit."""
+    from tools.human_gates import _skillsrc
+
+    limits = _skillsrc(project).get("limits")
+    value = limits.get("automation_cases_per_part") if isinstance(limits, Mapping) else None
+    return value if type(value) is int and value >= 0 else _DEFAULT_CASES_PER_PART
+
+
+def _part_plan(project: Path, run_root: Path, attempt: Mapping[str, Any], config: dict[str, Any], effective: Mapping[str, Any], revision: int) -> dict[str, Any] | None:
+    """The part plan of a revision, published once; None when the single task fits both limits (the behaviour so far)."""
+    from tools import automation_parts as parts
+    from tools.pilot_state import publish_automation_part_plan
+
+    key = f"r{revision}"
+    known = (config.get("automation_plans") or {}).get(key)
+    if known:
+        return dict(known)
+    document = effective["document"]
+    inputs = _automation_inputs(project, run_root, attempt, config, effective, revision)
+    single = sum(Path(path).stat().st_size for path in inputs if Path(path).is_file())
+    budget, limit, count = driver._task_input_budget(project, config), _cases_per_part(project), len(document.get("test_cases", []))
+    if single <= budget and (limit == 0 or count <= limit):
+        return None
+    document_path = driver.work_dir(run_root) / "inputs" / "effective-canonical.json"
+    # Context, brief and the revision's extra inputs travel with every part; the brief of a part is a little longer.
+    fixed = single - document_path.stat().st_size + 2_048
+    header = len(parts.part_document_bytes(document, []))
+    if fixed + header >= budget:
+        raise DriverError("TASK_INPUT_TOO_LARGE", f"the context and the brief of an automation part need {fixed + header} bytes, over the task input "
+                          f"budget of {budget} bytes", [{"code": "TASK_INPUT_TOO_LARGE", "stage": f"tc-to-autotest:{key}", "input_bytes": fixed + header,
+                                                       "threshold": budget, "hint": "Сузьте контекст: --target <путь> или paths/exclusions модуля в .skillsrc; "
+                                                       "либо поднимите --task-input-bytes под окно модели."}])
+    try:
+        plan = parts.plan_parts(document, budget - fixed, cases_per_part=limit)
+    except parts.PartPlanError as error:
+        raise DriverError(error.code, str(error)) from error
+    receipt = {**parts.plan_receipt(document, plan, fixed_bytes=fixed, budget=budget - fixed, cases_per_part=limit, single_task_input_bytes=single),
+               "revision": key}
+    digest = publish_automation_part_plan(run_root, str(attempt["attempt_id"]), receipt)
+    driver._log(driver._log_path(project, run_root.name), {"event": "automation_parts", "revision": key, "parts": receipt["parts"],
+                                                           "total_input_bytes": receipt["total_input_bytes"], "single_task_input_bytes": single})
+    config.setdefault("automation_plans", {})[key] = {**receipt, "digest": digest}
+    driver._save_config(run_root, config)
+    return dict(config["automation_plans"][key])
+
+
+def _part_stage(key: str, part_id: str) -> str:
+    return f"tc-to-autotest:{key}:{part_id}"
+
+
+def _automation_part_task(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], effective: Mapping[str, Any],
+                          revision: int, plan: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, Any]:
+    """One part: its brief, its part document (only its cases) and the context; r2 adds its r1 answer and its corrections."""
+    from tools import automation_parts as parts
+    from tools.pilot_state import publish_model_request
+
+    attempt_id, key = str(attempt["attempt_id"]), f"r{revision}"
+    stage = _part_stage(key, row["part_id"])
+    directory = driver.work_dir(run_root) / "inputs" / "automation-parts"
+    brief = {**parts.part_brief(row, count=int(plan["parts"])), "automation_revision": revision, "module": attempt["module"],
+             "module_root": str(_module_root(project, attempt))}
+    extra_inputs: list[Path] = []
+    if revision == 2:
+        previous = _part_artifact(run_root, attempt_id, "r1", row["part_id"])
+        review = _review_output(run_root, attempt_id, "r1")
+        extra_inputs.append(driver._write_json(directory / f"r1-{row['part_id']}.json", previous["artifact"]))
+        extra_inputs.append(driver._write_json(directory / f"r1-{row['part_id']}-corrections.json",
+                                               parts.corrections_of_part(review, effective["document"], row)))
+        brief["correction"] = "Примени corrections из ревью r1, относящиеся к твоей части, и верни полный исправленный набор файлов своей части."
+    brief_path = driver._write_json(directory / f"{key}-{row['part_id']}-brief.json", brief)
+    document_path = directory / f"{key}-{row['part_id']}-document.json"
+    document_path.write_bytes(parts.part_document_bytes(effective["document"], row["case_ids"]))
+    inputs = [brief_path, document_path, *extra_inputs, *driver._context_inputs(project, run_root, attempt)]
+    if "MODEL_REQUESTED" not in driver._stage_events(driver._events(run_root, attempt_id), stage):
+        driver._check_task_input(project, config, stage, inputs)
+        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-{uuid.uuid4().hex[:16]}",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"], plan["digest"], row["document_digest"]])
+    return driver._llm_task(
+        run_root, attempt_id, f"tc-to-autotest.{key}.{row['part_id']}", stage=stage, skill="tc-to-autotest", inputs=inputs, schema=_automation_schema(),
+        instructions=_AUTOMATION_INSTRUCTIONS + " " + brief["instructions"],
+        extra={"automation_revision": revision, "part_id": row["part_id"], "plan_digest": plan["digest"]},
+    )
+
+
+def _part_artifact(run_root: Path, attempt_id: str, key: str, part_id: str) -> dict[str, Any] | None:
+    return _stage_artifact(run_root, attempt_id, _part_stage(key, part_id))
+
+
+def _lineage(run_root: Path, attempt_id: str, revision: int) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if revision != 2:
+        return None, None
+    return _stage_artifact(run_root, attempt_id, "tc-to-autotest:r1")["artifact"], _review_output(run_root, attempt_id, "r1")
+
+
+def _carry_part(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], effective: Mapping[str, Any],
+                plan: Mapping[str, Any], row: Mapping[str, Any]) -> None:
+    """r2: a part no r1 correction names is carried over unchanged, without a model call (the journal checks the equality)."""
+    from tools import automation_parts as parts
+    from tools.pilot_state import publish_model_request, publish_model_stage_artifact
+
+    attempt_id = str(attempt["attempt_id"])
+    stage = _part_stage("r2", row["part_id"])
+    previous = _part_artifact(run_root, attempt_id, "r1", row["part_id"])["artifact"]
+    predecessor, review = _lineage(run_root, attempt_id, 2)
+    artifact = normalize_automation(parts.answer_of(previous), effective["document"], revision=2, effective=effective,
+                                    predecessor=predecessor, previous_review=review)
+    if "MODEL_REQUESTED" not in driver._stage_events(driver._events(run_root, attempt_id), stage):
+        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-carry-{uuid.uuid4().hex[:16]}",
+                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"], plan["digest"], row["document_digest"]])
+    publish_model_stage_artifact(run_root, attempt_id, stage, artifact)
+    driver._log(driver._log_path(project, run_root.name), {"event": "automation_part_carried", "part_id": row["part_id"]})
+
+
+def _merged_automation(run_root: Path, attempt_id: str, key: str) -> dict[str, Any]:
+    from tools import automation_parts as parts
+    from tools.pilot_state import read_effective_canonical
+
+    config = driver._config(run_root)
+    plan = config["automation_plans"][key]
+    effective = dict(read_effective_canonical(run_root, attempt_id))
+    predecessor, review = _lineage(run_root, attempt_id, int(key[1]))
+    answers = [_part_artifact(run_root, attempt_id, key, row["part_id"])["artifact"] for row in plan["rows"]]
+    return parts.merged_artifact(answers, effective["document"], revision=int(key[1]), effective=effective, predecessor=predecessor, previous_review=review)
+
+
+def _request_merged_automation(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], key: str) -> None:
+    from tools.pilot_state import publish_model_request, read_effective_canonical
+
+    attempt_id = str(attempt["attempt_id"])
+    stage = f"tc-to-autotest:{key}"
+    if "MODEL_REQUESTED" in driver._stage_events(driver._events(run_root, attempt_id), stage):
+        return
+    plan = config["automation_plans"][key]
+    effective = read_effective_canonical(run_root, attempt_id)
+    events = driver._events(run_root, attempt_id)
+    answers = [driver._stage_events(events, _part_stage(key, row["part_id"]))["MODEL_RESPONSE_RECEIVED"]["artifact_digest"] for row in plan["rows"]]
+    publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-merge-{uuid.uuid4().hex[:16]}",
+                          input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"], plan["digest"], *answers])
+
+
+def _publish_merged_automation(project: Path, run_root: Path, attempt: Mapping[str, Any], key: str) -> None:
+    from tools.automation_validation import validate_automation_artifact
+    from tools.pilot_state import publish_model_stage_artifact, read_effective_canonical
+
+    attempt_id = str(attempt["attempt_id"])
+    merged = _merged_automation(run_root, attempt_id, key)
+    rows = validate_automation_artifact(merged, read_effective_canonical(run_root, attempt_id)["document"])
+    if rows:
+        raise DriverError("AUTOMATION_PARTS_INVALID", "the merged automation is invalid", [
+            {"path": str(row.get("path", "")), "code": row.get("code", ""), "message": row.get("message", "")} for row in rows])
+    publish_model_stage_artifact(run_root, attempt_id, f"tc-to-autotest:{key}", merged)
+    driver._log(driver._log_path(project, run_root.name), {"event": "automation_merged", "revision": key, "parts": len(driver._config(run_root)["automation_plans"][key]["rows"])})
+
+
+def _automation_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: dict[str, Any], effective: Mapping[str, Any],
+                     revision: int) -> dict[str, Any] | None:
+    """The automation task(s) of a revision, or None once its artifact is published.
+
+    Within both limits (task_input_bytes, automation_cases_per_part): the single task, as before.  Otherwise one task per
+    part, up to ``--max-tasks`` at once; in r2 a part no correction names is carried over; then the driver merges.
+    """
+    from tools import automation_parts as parts
+
+    attempt_id, key = str(attempt["attempt_id"]), f"r{revision}"
+    if _stage_artifact(run_root, attempt_id, f"tc-to-autotest:{key}") is not None:
+        return None
+    plan = _part_plan(project, run_root, attempt, config, effective, revision)
+    if plan is None:
+        return _automation_task(project, run_root, attempt, config, effective, revision)
+    rows = list(plan["rows"])
+    if revision == 2:
+        review = _review_output(run_root, attempt_id, "r1")
+        for row in rows:
+            if _part_artifact(run_root, attempt_id, key, row["part_id"]) is None and not parts.corrections_of_part(review, effective["document"], row):
+                _carry_part(project, run_root, attempt, config, effective, plan, row)
+    open_rows = [row for row in rows if _part_artifact(run_root, attempt_id, key, row["part_id"]) is None]
+    if not open_rows:
+        _request_merged_automation(project, run_root, attempt, config, key)
+        _publish_merged_automation(project, run_root, attempt, key)
+        return None
+    limit = max(1, int(config.get("_max_tasks") or 1))
+    tasks = [_automation_part_task(project, run_root, attempt, config, effective, revision, plan, row) for row in open_rows[:limit]]
+    if len(tasks) == 1:
+        return tasks[0]
+    return {"action": "batch", "run_id": run_root.name, "attempt_id": attempt_id, "tasks": tasks,
+            "instructions": "Независимые части автоматизации: выполни каждую задачу в отдельном свежем вызове, затем отправь ответы по одному."}
+
+
+def _automation_inputs(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], effective: Mapping[str, Any],
+                       revision: int) -> list[Path]:
+    """The inputs of the single automation task (written to the driver's inputs)."""
+    attempt_id = str(attempt["attempt_id"])
     directory = driver.work_dir(run_root)
     document_path = driver._write_json(directory / "inputs" / "effective-canonical.json", effective["document"])
     inputs = [document_path]
@@ -85,72 +294,8 @@ def _automation_task(project: Path, run_root: Path, attempt: Mapping[str, Any], 
                 inputs.append(Path(name))
     inputs.insert(0, driver._write_json(directory / "inputs" / f"automation-r{revision}-brief.json", brief))
     inputs.extend(driver._context_inputs(project, run_root, attempt))
-    if "MODEL_REQUESTED" not in driver._stage_events(driver._events(run_root, attempt_id), stage):
-        driver._check_task_input(project, config, stage, inputs)
-        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-{uuid.uuid4().hex[:16]}",
-                              input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]])
-    return driver._llm_task(
-        run_root, attempt_id, f"tc-to-autotest.r{revision}", stage=stage, skill="tc-to-autotest", inputs=inputs, schema=_automation_schema(),
-        instructions=("Первый файл — задание, второй — принятый набор кейсов (единственный источник смысла). Верни automation_status, generated_files "
-                      "(file_id, path относительно корня модуля, language, framework, content), generated_symbols, implementation_relations, "
-                      "manual_dispositions и diagnostics. Дайджесты, source, номер ревизии и порядок массивов заполнит драйвер."),
-        extra={"automation_revision": revision},
-    )
+    return inputs
 
-
-def normalize_automation(content: Mapping[str, Any], document: Mapping[str, Any], *, revision: int, effective: Mapping[str, Any],
-                         predecessor: Mapping[str, Any] | None, previous_review: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Build the full automation artifact: digests, lineage and canonical order come from code."""
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
-
-    value = deepcopy({name: content.get(name) for name in _AUTOMATION_FIELDS})
-    for row in value["generated_files"] if isinstance(value["generated_files"], list) else []:
-        if isinstance(row, dict) and isinstance(row.get("content"), str):
-            row["content_digest"] = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
-    cases = {case["case_id"]: (index, case) for index, case in enumerate(document.get("test_cases", []))}
-
-    def position(row: Mapping[str, Any]) -> tuple[Any, ...] | None:
-        case = cases.get(row.get("case_id"))
-        if case is None:
-            return None
-        steps = {step["step_id"]: (index, step) for index, step in enumerate(case[1]["steps"])}
-        step = steps.get(row.get("step_id"))
-        if step is None:
-            return None
-        expectation_index = assertion_index = -1
-        if row.get("kind") == "assertion":
-            expectations = {item["expectation_id"]: (index, item) for index, item in enumerate(step[1]["expectations"])}
-            expectation = expectations.get(row.get("expectation_id"))
-            if expectation is None:
-                return None
-            expectation_index = expectation[0]
-            assertions = {item["assertion_id"]: index for index, item in enumerate(expectation[1]["assertions"])}
-            if row.get("assertion_id") not in assertions:
-                return None
-            assertion_index = assertions[row["assertion_id"]]
-        return (case[0], step[0], 0 if row.get("kind") == "operation" else 1, expectation_index, assertion_index, str(row.get("file_id")), str(row.get("symbol_id")))
-
-    for name in ("implementation_relations", "manual_dispositions"):
-        rows = value[name]
-        if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
-            keys = [position(row) for row in rows]
-            if all(key is not None for key in keys):
-                value[name] = [row for _key, row in sorted(zip(keys, rows), key=lambda pair: pair[0])]
-    artifact = {
-        "schema_version": "5.0.0", "stage": "tc-to-autotest",
-        "artifacts": {
-            "automation_status": value["automation_status"],
-            "source": {"document_id": document["document_id"], "revision": document["revision"], "source_digest": effective["document_digest"],
-                       "effective_bundle_receipt_digest": effective["effective_bundle_receipt_digest"]},
-            "automation_revision": revision,
-            "predecessor_automation_sha256": None if predecessor is None else automation_sha256(predecessor),
-            "correction_review_sha256": None if previous_review is None else autotest_review_sha256(previous_review),
-            "generated_files": value["generated_files"], "generated_symbols": value["generated_symbols"],
-            "implementation_relations": value["implementation_relations"], "manual_dispositions": value["manual_dispositions"], "diagnostics": value["diagnostics"],
-        },
-        "warnings": list(content.get("warnings") or []),
-    }
-    return artifact
 
 
 def submit_automation(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], task: Mapping[str, Any], value: Any) -> None:
@@ -167,16 +312,23 @@ def submit_automation(project: Path, run_root: Path, attempt: Mapping[str, Any],
     attempt_id = str(attempt["attempt_id"])
     revision = int(task["automation_revision"])
     effective = dict(read_effective_canonical(run_root, attempt_id))
-    predecessor = previous_review = None
-    if revision == 2:
-        predecessor = _stage_artifact(run_root, attempt_id, "tc-to-autotest:r1")["artifact"]
-        previous_review = _review_output(run_root, attempt_id, "r1")
-    artifact = normalize_automation(value, effective["document"], revision=revision, effective=effective, predecessor=predecessor, previous_review=previous_review)
-    rows = schema_diagnostics(artifact, ROOT / "schemas" / "tc-to-autotest-output.schema.json", ROOT) or validate_automation_artifact(artifact, effective["document"])
+    predecessor, previous_review = _lineage(run_root, attempt_id, revision)
+    document = effective["document"]
+    artifact = normalize_automation(value, document, revision=revision, effective=effective, predecessor=predecessor, previous_review=previous_review)
+    if task.get("part_id"):
+        # P2: a part answers for its cases only: its prefix, marker and cases, then the validator without the other parts' coverage.
+        from tools import automation_parts as parts
+
+        row = next(item for item in driver._config(run_root)["automation_plans"][f"r{revision}"]["rows"] if item["part_id"] == task["part_id"])
+        rows = (parts.part_answer_problems(row["part_id"], row["case_ids"], value)
+                or schema_diagnostics(artifact, ROOT / "schemas" / "tc-to-autotest-output.schema.json", ROOT)
+                or parts.validate_part_artifact(artifact, document, row["case_ids"]))
+    else:
+        rows = schema_diagnostics(artifact, ROOT / "schemas" / "tc-to-autotest-output.schema.json", ROOT) or validate_automation_artifact(artifact, document)
     if rows:
         raise DriverError("TASK_OUTPUT_INVALID", "automation artifact is invalid", [
             {"path": str(row.get("path", "")).replace("/artifacts/", "/", 1), "code": row.get("code", ""), "message": row.get("message", "")} for row in rows])
-    publish_model_stage_artifact(run_root, attempt_id, f"tc-to-autotest:r{revision}", artifact, transport_attempts=int(task.get("transport_attempts", 1)))
+    publish_model_stage_artifact(run_root, attempt_id, str(task["stage"]), artifact, transport_attempts=int(task.get("transport_attempts", 1)))
 
 
 def _finalize_rejected_automation(project: Path, run_root: Path, attempt: Mapping[str, Any], effective: Mapping[str, Any], reason: str) -> None:
@@ -315,9 +467,10 @@ def advance_automation(project: Path, run_root: Path, attempt: Mapping[str, Any]
     while True:
         key = f"r{revision}"
         stage = f"tc-to-autotest:{key}"
+        waiting = _automation_step(project, run_root, attempt, config, effective, revision)
+        if waiting is not None:
+            return waiting
         published = _stage_artifact(run_root, attempt_id, stage)
-        if published is None:
-            return _automation_task(project, run_root, attempt, config, effective, revision)
         automation = published["artifact"]
         ledger = driver._ledger(run_root, attempt_id, key)
         if ledger is None:
