@@ -376,6 +376,49 @@ def test_in_human_mode_a_repair_runs_after_its_approval_as_a_second_stop(suite_p
     assert "FLAKY не" in Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
 
 
+@needs_java
+def test_the_process_runner_drives_a_human_mode_repair(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kit run on 22d882e: `run --runner process` for suite-update-v1 had no review_runner in its config (KeyError at the first model task)."""
+    import contextlib
+    import io
+    import subprocess
+    import sys
+
+    from tools import pipeline_driver as driver
+
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _break_owned_method(project)
+    fake = Path(__file__).resolve().parent / "fixtures" / "fake_cli.py"
+
+    def call(*argv: str) -> tuple[int, dict]:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = driver.main(list(argv))
+        return code, json.loads(buffer.getvalue())
+
+    code, payload = call("run", "--project", str(project), "--runner", "process", "--profile", "suite-update-v1", "--model-id", "fake-model-1",
+                         "--execution-mode", "human", "--review-runner-command",
+                         json.dumps([sys.executable, str(fake), "--script", "ok", "--state", str(tmp_path / "fake-state")]))
+    stops = []
+    for _ in range(6):
+        if payload.get("action") != "human_exec":
+            break
+        assert payload.get("stopped") == "HUMAN_EXECUTION", payload
+        stops.append(payload["step"])
+        command = payload["commands"][0]
+        completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+        expected = Path(command["expected_output"])
+        reports = [str(expected)] if expected.is_file() else [str(path) for path in expected.rglob("*.xml")]
+        log = tmp_path / f"build-{len(stops)}.log"
+        log.write_bytes(completed.stdout + completed.stderr)
+        code, payload = call("run", "--project", str(project), "--runner", "process", "--run", payload["run_id"],
+                             *[item for path in reports for item in ("--junit", path)], "--exit-code", str(completed.returncode), "--build-log", str(log))
+    assert stops == ["suite-run", "repair-run"], (stops, payload)
+    assert payload["action"] == "done" and payload["result"]["counts"]["repaired"] == 1, payload
+
+
 def _break_owned_method(project: Path) -> None:
     """The package's own method no longer compiles (as if an older package version wrote it); the manifest records it as the package's."""
     from tools.suite_manifest import canonical_bytes, method_digests, parse_locator

@@ -82,6 +82,8 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
     if detect(project, suite_dir) is None:
         return driver._done(None, {"status": "error", "stage": "suite-update", "exit_code": 2, "reason": "SUITE_MISSING",
                                    "message": f"{suite_dir} holds no suite: create one with local-pilot-v1 --suite first"})
+    # The process runner (`run --runner process`, --review-runner process) needs its section like local-pilot-v1 (kit run, 2026-10-20).
+    runner = driver._runner_options(options, project)
     run_id = uuid.uuid4().hex
     run_root = project / ".pilot-runs" / run_id
     run_root.mkdir(parents=True)
@@ -91,7 +93,7 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
               "mutation": bool(options.get("mutation")), "repeats": 2, "suite_dir": suite_dir,
               "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES),
               "execution_review": driver._execution_review(project, options), "context_confirm": driver._confirm_context(project, options),
-              "execution_mode": driver._execution_mode(project, options, PROFILE)}
+              "execution_mode": driver._execution_mode(project, options, PROFILE), **runner}
     if config["execution_mode"] == "human":
         # S9b: a person runs every suite command; repeats are not run, so no method can be labelled FLAKY.
         config["repeats"] = 0

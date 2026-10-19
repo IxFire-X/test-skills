@@ -57,6 +57,11 @@ def answer(prompt: str) -> dict:
         return next(value for label, value in recorded.items() if label.startswith("tc-generator."))
     if "### Файл automation-r1-brief.json" in prompt:
         return next(value for label, value in recorded.items() if label.startswith("tc-to-autotest."))
+    if "### Файл repair-brief.json" in prompt:
+        # suite-update repair of step5 (tests/test_suite_update.py): the method stays, the helper call is fixed.
+        brief = json.loads(re.search(r"### Файл repair-brief\.json\n\n(.*?)\n\n(?:### Файл|Ответ — только)", prompt, re.S).group(1))
+        return {"methods": [{"case_id": row["case_id"], "method_name": row["method"]["method_name"],
+                             "source": row["method"]["source"].replace("textOfResponse(response)", "text(response)")} for row in brief["cases"]]}
     raise SystemExit("fake cli: unknown task")
 
 
