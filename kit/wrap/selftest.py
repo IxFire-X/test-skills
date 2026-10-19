@@ -104,6 +104,29 @@ def selftest(here: Path, pack: str | None) -> int:
         code, _events, last, stderr = call(here, secret, prompt, work, "secret-env")
         note(code != 0 and last is None and "LLM_API_KEY" in stderr and "LLM_ENDPOINT" not in stderr,
              "extra_env с секретом → отказ конфигурации", f"код {code}: {stderr.strip()[-160:]}")
+        # S6: the CLI gets the base list and env_passthrough only — a token in the wrapper's environment does not reach it
+        os.environ["FOO_TOKEN"], os.environ["UNLISTED_VAR"] = "selftest-not-a-secret", "x"
+        try:
+            seen = {}
+            for name, passthrough in (("env-base", []), ("env-passthrough", ["FOO_*"])):
+                dump = work / f"{name}.json"
+                config = local(here, json.loads((here / "examples" / "stdin-stdout.json").read_text(encoding="utf-8")))
+                config["command"] = [*config["command"], "--dump-env", str(dump)]
+                config["env_passthrough"] = passthrough
+                code, _events, _last, stderr = call(here, config, prompt, work, name)
+                seen[name] = set(json.loads(dump.read_text(encoding="utf-8"))) if dump.is_file() else None
+            base, passed = seen["env-base"] or set(), seen["env-passthrough"] or set()
+            note(seen["env-base"] is not None and "FOO_TOKEN" not in base and "UNLISTED_VAR" not in base and any(key.upper() == "PATH" for key in base),
+                 "окружение CLI — белый список: FOO_TOKEN и прочее не доходят", f"передано: {len(base)} имён")
+            note("FOO_TOKEN" in passed and "UNLISTED_VAR" not in passed, "env_passthrough [\"FOO_*\"] пропускает FOO_TOKEN, и только его",
+                 f"передано: {len(passed)} имён")
+            bad = local(here, json.loads((here / "examples" / "stdin-stdout.json").read_text(encoding="utf-8")))
+            bad["env_passthrough"] = ["FOO*BAR"]
+            code, _events, last, stderr = call(here, bad, prompt, work, "env-bad")
+            note(code != 0 and last is None and "env_passthrough" in stderr, "env_passthrough с * не в конце → отказ конфигурации", f"код {code}")
+        finally:
+            os.environ.pop("FOO_TOKEN", None)
+            os.environ.pop("UNLISTED_VAR", None)
     note_sandbox(here)
     width = max(len(row[1]) for row in ROWS)
     for status, check, detail in ROWS:

@@ -320,11 +320,17 @@ class Operator:
         self.log(f"{question}{answer}")
         return answer
 
-    def mark_first_call(self) -> None:
+    def mark_first_call(self, when: datetime.datetime | None = None) -> None:
         """The first answered model call (S10 KPI); later calls do not move it."""
         log = self.home / "operate.log"
         if FIRST_CALL not in log.read_text(encoding="utf-8", errors="replace"):
-            self.log(f"{FIRST_CALL} {datetime.datetime.now().isoformat(timespec='seconds')}")
+            self.log(f"{FIRST_CALL} {(when or datetime.datetime.now()).isoformat(timespec='milliseconds')}")
+
+    def mark_first_call_of(self, run_id: str) -> None:
+        """Without init or step 2 the first model answer of the run is the KPI mark (from the driver's log)."""
+        epochs = [float(event["epoch"]) for event in self._log_events(run_id) if event.get("event") == "runner_collected" and event.get("epoch")]
+        if epochs:
+            self.mark_first_call(datetime.datetime.fromtimestamp(min(epochs)))
 
     def command(self, step: str, *extra: str) -> str:
         """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
@@ -516,6 +522,15 @@ class Operator:
         self.say(f"  мутации: {'да' if self.state['mutation'] else 'нет'}")
 
     # -- step 2
+    def passthrough(self) -> list[str]:
+        """--env-passthrough: the variables the model CLI needs beyond wrap.py's base list (names, or prefixes ending in *)."""
+        items = [item.strip() for item in (self.args.env_passthrough or "").split(",") if item.strip()]
+        bad = [item for item in items if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\*?", item)]
+        if bad:
+            raise Stop(f"--env-passthrough: не имя и не префикс со * в конце: {', '.join(bad)}", self.command(getattr(self, "current_step", "2")) +
+                       " --env-passthrough 'GIGACODE_*,HTTPS_PROXY'")
+        return items
+
     def wrap_config(self) -> dict[str, Any]:
         command = shlex.split(self.args.cli_command)
         try:  # extra_env and sandbox_args set by hand in the current wrap.json stay (wrap.py rejects secrets in extra_env)
@@ -525,7 +540,8 @@ class Operator:
         sandbox = shlex.split(self.args.sandbox_args) if self.args.sandbox_args is not None else list(current.get("sandbox_args") or [])
         config: dict[str, Any] = {"command": command, "prompt_via": self.args.prompt_via, "answer_from": self.args.answer_from,
                                   "timeout_seconds": self.args.cli_timeout, "extra_env": dict(current.get("extra_env") or {}),
-                                  "sandbox_args": sandbox}
+                                  "sandbox_args": sandbox,
+                                  "env_passthrough": self.passthrough() if self.args.env_passthrough is not None else list(current.get("env_passthrough") or [])}
         if self.tmp_dir:
             config["tmp_dir"] = str(self.tmp_dir)
         if self.args.answer_file:
@@ -674,6 +690,16 @@ class Operator:
             raise Stop("шаблон ID совпадает с пустой строкой", "шаблон должен описывать сам ID, например [OPVX]\\d\\d\\.")
         return pattern
 
+    def _skillsrc_passthrough(self) -> list[str]:
+        """review_runner.env_passthrough for the package's own CLI launch — only a package that knows the field (S6)."""
+        if self.args.env_passthrough is None:
+            return []
+        schema = self.pack / "schemas" / "skillsrc.schema.json"
+        if not (schema.is_file() and "env_passthrough" in schema.read_text(encoding="utf-8")):
+            self.say("  --env-passthrough: записан только в wrap/wrap.json — эта версия пакета не знает review_runner.env_passthrough")
+            return []
+        return ["  env_passthrough:", *[f"    - {_q(item)}" for item in self.passthrough()]]
+
     def step_4(self) -> None:
         models = self.state.get("models") or {role: self.default_model for role in ROLES}
         if not self.state.get("models"):
@@ -688,7 +714,8 @@ class Operator:
         lines = before.splitlines()
         lines = set_block(lines, "review_runner", ["review_runner:", "  preset: codex", "  models:",
                                                    *[f"    {role}: {_q(models[role])}" for role in ROLES],
-                                                   f"  max_parallel: {self.args.max_parallel}", f"  timeout_seconds: {self.args.runner_timeout}"])
+                                                   f"  max_parallel: {self.args.max_parallel}", f"  timeout_seconds: {self.args.runner_timeout}",
+                                                   *self._skillsrc_passthrough()])
         if pattern:
             lines = set_child(lines, "requirements", "id_pattern", _q(pattern))
         if self.state.get("mutation", not self.args.no_mutation):
@@ -746,11 +773,21 @@ class Operator:
                 "--review-runner-preset", "codex", "--review-runner-command", json.dumps(command, ensure_ascii=False),
                 "--runner-dir", str(self.runner_dir), "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
                 *(["--module", self.args.module] if self.args.module else []), *(["--target", self.args.target] if self.args.target else []),
-                *(["--execution-review", self.args.execution_review] if self.args.execution_review else []), *extra]
+                *(["--execution-review", self.args.execution_review] if self.args.execution_review else []),
+                *(["--task-input-bytes", str(self.task_input_bytes())] if self.driver_knows("--task-input-bytes") else []),
+                *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []), *extra]
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
         return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
                 "--max-tasks", str(self.args.max_tasks), *[item for answer in answers for item in ("--answer", answer)]]
+
+    def task_input_bytes(self) -> int:
+        """The driver's task input budget: --task-input-bytes, else 0.8 of the model window in bytes (P1b stops above it)."""
+        return int(self.args.task_input_bytes or self.args.model_context / self.args.tokens_per_byte * 0.8)
+
+    def driver_knows(self, flag: str) -> bool:
+        path = self.pack / "tools" / "pipeline_driver.py"
+        return path.is_file() and f'"{flag}"' in path.read_text(encoding="utf-8", errors="replace")
 
     def check_task_size(self, payload: dict[str, Any]) -> None:
         """Before the first model call: the task's input (its files, SKILL and schema — what goes to stdin) in tokens
@@ -767,7 +804,7 @@ class Operator:
         budget = int(context / tpb)
         for task_id, size in rows:
             tokens = int(size * tpb)
-            self.say(f"  первая задача модели {task_id}: вход ≈ {size:,} Б ≈ {tokens:,} токенов ({tpb} ток/Б); окно {context:,} токенов "
+            self.say(f"  {'первая задача модели' if len(rows) == 1 else f'задача модели (первые {len(rows)} — частями)'} {task_id}: вход ≈ {size:,} Б ≈ {tokens:,} токенов ({tpb} ток/Б); окно {context:,} токенов "
                      f"≈ {budget:,} Б".replace(",", " "))
             if tokens > context:
                 raise Stop(f"задача {task_id} не влезет в окно модели: {tokens / context:.2f}× (≈ {tokens:,} > {context:,} токенов); модель не вызывалась"
@@ -824,6 +861,15 @@ class Operator:
             self._runner_dir_refused(str(payload.get("message")))
         if not isinstance(payload, dict):
             self._runner_dir_refused(err.read_text(encoding="utf-8", errors="replace")[-4000:])
+            # `run --runner process` reports a DriverError as a traceback, not as JSON: its last line names the code
+            raised = re.findall(r"^tools\.pipeline_driver\.DriverError: ([A-Z_]+): (.*)$", err.read_text(encoding="utf-8", errors="replace"), re.M)
+            if raised:
+                code, message = raised[-1][0], raised[-1][1].strip()
+                step = getattr(self, "current_step", "5")
+                if code == "TASK_INPUT_TOO_LARGE":
+                    raise Stop(f"драйвер: {code}: {message[:300]} — модель не вызывалась; сузить вход новым прогоном",
+                               self.command(step, "--target", "<каталог фичи внутри модуля>"))
+                raise Stop(f"драйвер: {code}: {message[:400]}", f"смотреть {err}; код и message — в отчёт (п. 7)")
             tail = _main_lines(err.read_text(encoding="utf-8", errors="replace"), 3)
             raise Stop(f"драйвер не вернул JSON (код {process.returncode}): {' | '.join(tail)}", f"смотреть {err}; текст ошибки — в отчёт (п. 7)")
         return process.returncode, payload
@@ -853,7 +899,9 @@ class Operator:
             if isinstance(value, list):
                 self.say(f"  {key}: {len(value)}")
                 for item in value[:limit]:
-                    if isinstance(item, dict) and "path" in item:  # file rows (approve-generated-tests: path, content_digest)
+                    if isinstance(item, dict) and "size" in item and "path" in item:  # confirm-context: path, content_digest, size
+                        self.say(f"    {item['path']}  {int(item['size']):,} Б".replace(",", " "))
+                    elif isinstance(item, dict) and "path" in item:  # approve-generated-tests: path, content_digest
                         rest = {name: field for name, field in item.items() if name != "path"}
                         self.say(f"    {item['path']}  " + "  ".join(str(field) for field in rest.values())[:160])
                     else:
@@ -863,6 +911,9 @@ class Operator:
                     self.log(json.dumps(value[limit:], ensure_ascii=False))
             else:
                 self.say(f"  {key}: " + (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))[:300])
+        sized = [row for value in payload.values() if isinstance(value, list) for row in value if isinstance(row, dict) and "size" in row]
+        if sized:
+            self.say(f"  итого: {len(sized)} файл(ов), {sum(int(row['size']) for row in sized):,} Б".replace(",", " "))
 
     def answer_ask(self, payload: dict[str, Any], name: str, run_id: str, step: str) -> str:
         """The answer to a driver stop: from its flag (one option only), else from the terminal; none — a stop whose hint
@@ -883,8 +934,14 @@ class Operator:
                        "окружение (п. 1) и начать новый прогон, ошибки компиляции самих тестов — перегенерировать:",
                        self.command(step, "--run", run_id, "--answer", f"{name}=<значение из списка выше>"))
         self.show_payload(payload)
+        given = dict(item.split("=", 1) for item in self.args.answer if "=" in item).get(name)
+        if given is not None:  # e.g. init's --answer confirm-context=<digest>: valid only for the very same list
+            if not options or given in {str(option.get("value")) for option in options}:
+                self.say(f"  ответ {given} (--answer {name}=…)")
+                return given
+            self.say(f"  --answer {name}=… не совпадает с этой остановкой (список изменился) — нужен новый ответ")
         if flag and (self.dry or getattr(self.args, flag.replace("-", "_"))):
-            digest = payload.get("approval_digest")  # S3: the flag answers exactly the digest of the shown files
+            digest = payload.get("approval_digest") or payload.get("confirmation_digest")  # S3/S5: exactly the digest of the shown list
             if len(options) == 1 and options[0].get("value") and (digest is None or options[0]["value"] == digest):
                 self.say(f"  ответ {options[0]['value']} (--{flag})")
                 return str(options[0]["value"])
@@ -961,6 +1018,7 @@ class Operator:
         if self.dry:
             return
         result = payload["result"]
+        self.mark_first_call_of(payload["run_id"])
         events = self._log_events(payload["run_id"])
         failed: dict[str, int] = {}
         for event in events:
@@ -984,6 +1042,7 @@ class Operator:
         if self.dry:
             return
         result = payload["result"]
+        self.mark_first_call_of(payload["run_id"])
         (self.home / "run-result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
         self.state["run_id"] = payload["run_id"]
         strength = result.get("test_strength") or {}
@@ -1104,11 +1163,13 @@ class Operator:
         return 0
 
     def run_step(self, step: str) -> bool:
+        self.current_step = step
         self.say(f"\n=== Шаг {step}. {TITLES[step]} ===")
         try:
             getattr(self, "step_" + step)()
         except Stop as stop:
             self.say(f"СТОП на шаге {step}: {stop.message}")
+            self.log(f"stop_at {datetime.datetime.now().isoformat(timespec='milliseconds')}")
             if stop.hint:
                 self.say(f"Что делать: {stop.hint}")
             if not stop.hint.startswith(shlex.quote(sys.executable)):
@@ -1199,13 +1260,15 @@ class Init(Operator):
         self.log(f"\n===== operate.py {datetime.datetime.now().isoformat(timespec='seconds')} init {shlex.join(self.init_argv)}")
         self.say(f"init: проект {self.project}, спека {', '.join(self.args.docs)}, тема: {self.args.subject}")
         for title, part in (("комплект и интерпретатор", self.step_0), ("модуль и сборка", self.init_module), ("CLI модели", self.init_cli),
-                            ("цель контекста (--target)", self.init_target), ("размер первой задачи", self.init_measure),
+                            ("цель контекста (--target)", self.init_target), (".skillsrc проекта (шаг 4)", self.init_skillsrc),
+                            ("размер первой задачи", self.init_measure),
                             ("проверки проекта", self.init_preflight)):
             self.say(f"\n=== init: {title} ===")
             try:
                 part()
             except Stop as stop:
                 self.say(f"СТОП на шаге init: {stop.message}")
+                self.log(f"stop_at {datetime.datetime.now().isoformat(timespec='milliseconds')}")
                 self.say(f"Что делать: {stop.hint}")
                 self.save_init()
                 return 1
@@ -1399,6 +1462,15 @@ class Init(Operator):
         raise Stop(f"модуль ({total:,} Б) не влезет в окно модели целиком — выберите каталог фичи из списка выше".replace(",", " "),
                    self.init_command(target=ranked[0]))
 
+    # -- step 4 before the measurement: .skillsrc is itself in the context, so its final form is what gets confirmed
+    def init_skillsrc(self) -> None:
+        try:
+            self.step_4()
+        except Stop as stop:
+            if ".skillsrc не записан" in stop.message:
+                raise Stop(".skillsrc не записан (diff выше): без терминала — подтверждение флагом", self.init_command() + " --yes-skillsrc") from None
+            raise
+
     # -- the first task, measured without a model
     def _git_status(self) -> str:
         done = subprocess.run(["git", "-C", str(self.project), "status", "--porcelain", "--untracked-files=all"], capture_output=True, text=True,
@@ -1411,6 +1483,8 @@ class Init(Operator):
         code, payload = self.run_watched(self.driver_argv("cases-only-v1", []), "init-measure", None)
         run_id = payload.get("run_id")
         try:
+            if payload.get("action") == "ask_user" and str(payload.get("task_id") or "").endswith(".ask.confirm-context") and run_id:
+                payload = self._measure_past_confirmation(payload, run_id)
             action = payload.get("action")
             if action in {"llm", "batch"}:
                 try:
@@ -1435,6 +1509,31 @@ class Init(Operator):
             self.facts["first_task"] = {key: payload.get(key) for key in ("task_id", "input_bytes") if payload.get(key)}
         finally:
             self._remove_measuring_run(run_id, runs_existed, skillsrc_existed, before)
+
+    def _measure_past_confirmation(self, payload: dict[str, Any], run_id: str) -> dict[str, Any]:
+        """S5 in the measuring run: show what the run will send and ask the person here (y/n; --yes-send answers).  Yes —
+        the digest answers the measuring run (to reach and size the first task) and goes to the ready command as
+        ``--answer confirm-context=<digest>``: the real run with the same files does not ask again, with other files it does.
+        No — a stop: narrow the input."""
+        rows = [row for key in ("documents", "files") for row in payload.get(key) or [] if isinstance(row, dict)]
+        total = sum(int(row.get("size") or 0) for row in rows)
+        self.say(f"  в модель уйдут {len(payload.get('documents') or [])} документ(ов) требований и {len(payload.get('files') or [])} файл(ов) "
+                 f"проекта, {total:,} Б ≈ {int(total * self.args.tokens_per_byte):,} токенов".replace(",", " "))
+        listing = Path(str(payload.get("listing_path") or ""))
+        if listing.is_file():
+            shutil.copy2(listing, self.home / "context-files.txt")
+            self.say(f"  полный список с размерами: {self.home / 'context-files.txt'}")
+        self.facts["context"] = {"files": len(payload.get("files") or []), "documents": len(payload.get("documents") or []), "bytes": total}
+        digest = str(payload.get("confirmation_digest") or "")
+        if not self.confirm(f"Отправлять эти файлы в модель (список выше и в {self.home / 'context-files.txt'})?", "yes-send"):
+            self.decisions.append("отправка в модель: не подтверждена")
+            raise Stop("отправка файлов в модель не подтверждена — сузить вход и повторить init",
+                       self.init_command(target="<каталог фичи внутри модуля>") + "  (или исключить файлы: paths модуля в .skillsrc, .gitignore)")
+        self.facts["confirmation_digest"] = digest
+        self.log(f"init: отправка подтверждена человеком ({digest}); ответ — в замерный прогон {run_id} и в готовую команду")
+        _code, after = self.run_watched([self.py, "-m", "tools.pipeline_driver", "submit", "--project", str(self.project), "--run", run_id,
+                                         "--task-id", str(payload["task_id"]), "--answer", digest], "init-measure", run_id)
+        return after
 
     def _remove_measuring_run(self, run_id: str | None, runs_existed: bool, skillsrc_existed: bool, before: str) -> None:
         runs = self.project / ".pilot-runs"
@@ -1484,16 +1583,20 @@ class Init(Operator):
                 "--models", self.default_model, "--cli-command", self.args.cli_command, "--prompt-via", self.args.prompt_via,
                 "--answer-from", self.args.answer_from, *(["--module", self.args.module] if self.args.module else []),
                 *(["--target", self.args.target] if self.args.target else []),
-                *(["--cli-version", self.args.cli_version] if self.args.cli_version else []), "--only", "4,5a"]
+                *(["--cli-version", self.args.cli_version] if self.args.cli_version else []),
+                *(["--answer", f"confirm-context={self.facts['confirmation_digest']}"] if self.facts.get("confirmation_digest") else []),
+                "--only", "5a"]
         command = shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), *argv])
         self.facts["command"] = command
         self.save_init()
         kpi = dict(_first_call_figures((self.home / "operate.log").read_text(encoding="utf-8", errors="replace")))
         self.say("\n=== init: готово ===")
-        self.say(f"Запуск (шаги 0–2 init уже сделал): {command}")
-        asks = ["запись .skillsrc проекта — покажет diff (без терминала: --yes-skillsrc)",
-                "отправка файлов модуля в модель — покажет список и размер (подтверждение отправки: --yes-send, когда его выдаёт драйвер)"]
-        self.say("Что ещё спросит прогон: " + "; ".join(f"№{index} {text}" for index, text in enumerate([*self.decisions, *asks], 1)))
+        self.say(f"Запуск (шаги 0–2 и 4 init уже сделал): {command}")
+        asks = [] if self.facts.get("confirmation_digest") else [
+            "отправка в модель — остановка confirm-context покажет документы и файлы с размерами (список — context-files.txt); "
+            "подтверждение — ввод дайджеста или --yes-send"]
+        self.say("Что ещё спросит прогон: " + ("; ".join(f"№{index} {text}" for index, text in enumerate([*self.decisions, *asks], 1)) or
+                                              "ничего до первого ответа модели"))
         if self.later:
             self.say("До полного прогона (шаг 5), не сейчас:")
             for line in self.later:
@@ -1529,6 +1632,10 @@ def build_init_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", help="каталог фичи внутри модуля, если init не угадал его сам")
     parser.add_argument("--cli-version", help="строка версии CLI для квитанций")
     parser.add_argument("--sandbox-args", help="флаги CLI «без инструментов / read-only»")
+    parser.add_argument("--env-passthrough", help="переменные окружения для CLI сверх базового списка wrap.py (GIGACODE_*,HTTPS_PROXY)")
+    parser.add_argument("--yes-send", action="store_true", help="подтвердить отправку показанного списка файлов в модель без вопроса")
+    parser.add_argument("--yes-skillsrc", action="store_true", help="записать .skillsrc проекта (шаг 4) без вопроса; diff печатается")
+    parser.add_argument("--yes", action="store_true", help="подтверждать вопросы оператора (шаблон ID требований); .skillsrc и отправку — нет")
     parser.add_argument("--runner-dir", help="каталог процессов модели")
     parser.add_argument("--tokens-per-byte", type=float, default=TOKENS_PER_BYTE)
     parser.add_argument("--model-context", type=int, default=MODEL_CONTEXT)
@@ -1543,7 +1650,8 @@ def init_main(argv: list[str]) -> int:
     main_argv = ["--home", home, "--project", str(project), *[item for doc in options.docs for item in ("--docs", doc)], "--subject", subject,
                  "--models", options.model, "--cli-command", options.cli_command, "--tokens-per-byte", str(options.tokens_per_byte),
                  "--model-context", str(options.model_context)]
-    for key in ("module", "target", "cli_version", "sandbox_args", "runner_dir"):
+    main_argv += [flag for flag, on in (("--yes-send", options.yes_send), ("--yes-skillsrc", options.yes_skillsrc), ("--yes", options.yes)) if on]
+    for key in ("module", "target", "cli_version", "sandbox_args", "env_passthrough", "runner_dir"):
         if getattr(options, key) is not None:
             main_argv += [f"--{key.replace('_', '-')}", getattr(options, key)]
     return Init(build_parser().parse_args(main_argv), argv).run_init()
@@ -1559,8 +1667,10 @@ def _first_call_figures(log: str) -> list[tuple[str, str]]:
     if not call:
         return [("Время до первого вызова модели", "— (вызова не было)"),
                 ("Остановок до первого вызова модели", str(len(re.findall(r"^СТОП на шаге", log, re.M))))]
-    seconds = int((datetime.datetime.fromisoformat(call.group(1)) - datetime.datetime.fromisoformat(started.group(1))).total_seconds())
-    stops = len(re.findall(r"^СТОП на шаге", log[started.start():call.start()], re.M))
+    first = datetime.datetime.fromisoformat(call.group(1))
+    seconds = int((first - datetime.datetime.fromisoformat(started.group(1))).total_seconds())
+    stamped = [datetime.datetime.fromisoformat(item) for item in re.findall(r"^stop_at (\S+)", log, re.M)]  # the mark may be written late
+    stops = sum(item < first for item in stamped) if stamped else len(re.findall(r"^СТОП на шаге", log[started.start():call.start()], re.M))
     return [("Время до первого вызова модели", f"{seconds // 60} мин {seconds % 60} с"), ("Остановок до первого вызова модели", str(stops))]
 
 
@@ -1646,6 +1756,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--execution-review", choices=("human", "none"), help="одобрение сгенерированных тестов перед запуском "
                         "(pipeline_driver --execution-review; пакет с S3): по умолчанию — как у пакета (human, остановка "
                         "approve-generated-tests); none — без остановки, для повторов на учебном проекте")
+    parser.add_argument("--env-passthrough", help="переменные окружения для CLI модели сверх базового списка wrap.py, через запятую "
+                        "(имя или префикс со * в конце: GIGACODE_*,HTTPS_PROXY) → env_passthrough в wrap/wrap.json и, если пакет "
+                        "это знает, в .skillsrc review_runner")
+    parser.add_argument("--confirm-context", choices=("yes", "no"), help="подтверждение отправки файлов в модель (pipeline_driver "
+                        "--confirm-context; пакет с S5): по умолчанию — как у пакета (yes, остановка confirm-context до первой задачи "
+                        "модели); no — без остановки, для повторов на учебном проекте")
+    parser.add_argument("--task-input-bytes", type=int, help="порог входа одной задачи модели у драйвера (pipeline_driver "
+                        "--task-input-bytes; пакет с P1): по умолчанию 0,8 окна модели в байтах (--model-context / --tokens-per-byte); "
+                        "больше — стоп TASK_INPUT_TOO_LARGE до вызова модели")
     parser.add_argument("--yes-send", action="store_true", help="подтвердить остановку confirm-context (отправка показанных файлов "
                                                                 "в модель), если у неё один вариант; --yes её не подтверждает")
     parser.add_argument("--yes-exec", action="store_true", help="подтвердить остановку approve-generated-tests (исполнение показанных "

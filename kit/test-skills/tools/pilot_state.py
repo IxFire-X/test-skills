@@ -35,16 +35,17 @@ on_confined_write(_forget_validated_evidence)
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy",
+              "execution_review_required", "context_confirm_required"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
-_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested")
+_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required", "context_confirm_required")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:baseline|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12]|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
+    r"^(?:context-marker:(?:baseline|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12]|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
 )
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _MODEL_STAGE_REGISTRY = {
@@ -54,9 +55,9 @@ _MODEL_STAGE_REGISTRY = {
     "tc-to-autotest": ("automation-generator", "tc-to-autotest-v1"),
     "autotest-reviewer": ("automation-reviewer", "autotest-static-reviewer-v2"),
 }
-_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "CONTEXT_CONFIRMED", "EXECUTION_APPROVED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _ACTORS = {"controller"}
-_ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "CONTEXT_CONFIRMED", "EXECUTION_APPROVED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _PROGRESS_EVENTS = {*_MODEL_EVENT_TYPES, "CONTEXT_SELECTED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "PROCESS_STOPPED"}
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
 _PACK_ROOT = _SCHEMA_ROOT.parent
@@ -573,7 +574,8 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
         raise ValueError("unsafe authorization")
     if "disposition_policy" in authorization and authorization["disposition_policy"] != "quarantine":
         raise ValueError("unsafe authorization")
-    if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization) and policy_profile != "local-pilot-v1":
+    if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization
+            or "execution_review_required" in authorization) and policy_profile != "local-pilot-v1":
         raise ValueError("authorization policy mismatch")
     return dict(authorization)
 
@@ -602,6 +604,8 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
     unknown: set[str] = set()
     stopped: set[str] = set()
     execution_started: set[str] = set()
+    execution_approved: set[str] = set()
+    context_confirmed: set[str] = set()
     terminal_retries: set[str] = set()
     retained_reruns: set[str] = set()
     model_requests: set[tuple[str, str]] = set()
@@ -659,7 +663,17 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                 continue
             elif states.get(attempt_id) == "TERMINAL":
                 raise ValueError("invalid event journal")
-            if event_type == "EXECUTION_STARTED":
+            if event_type == "CONTEXT_CONFIRMED":
+                # S5: a person confirms the files that go to the model once, before the attempt's first model request.
+                if attempt_id in context_confirmed or attempt_id not in context_selected or any(key[0] == attempt_id for key in model_requests):
+                    raise ValueError("invalid context confirmation")
+                context_confirmed.add(attempt_id)
+            elif event_type == "EXECUTION_APPROVED":
+                # S3: a person approves the generated tests once, before the execution starts.
+                if attempt_id in execution_started or attempt_id in execution_approved:
+                    raise ValueError("invalid execution approval")
+                execution_approved.add(attempt_id)
+            elif event_type == "EXECUTION_STARTED":
                 if attempt_id in execution_started or any(
                     key[0] == attempt_id and key not in model_responses
                     for key in model_requests
@@ -682,6 +696,14 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                 if event_type == "MODEL_REQUESTED":
                     if key in model_requests:
                         raise ValueError("duplicate model request")
+                    if stage.startswith("context-marker:batch-") and (attempt_id, "context-marker:baseline") in model_requests:
+                        raise ValueError("context-marker batch request after the merged request")
+                    if stage == "context-marker:baseline" and any(
+                        request_attempt == attempt_id and request_stage.startswith("context-marker:batch-")
+                        and (request_attempt, request_stage) not in model_responses
+                        for request_attempt, request_stage in model_requests
+                    ):
+                        raise ValueError("merged context-marker request requires every batch response")
                     if stage.startswith("tc-generator:BATCH-") and attempt_id not in context_selected:
                         raise ValueError("model request requires selected context")
                     if stage.startswith("tc-generator:") and (
@@ -1378,6 +1400,10 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
         raise ValueError("MODEL_REQUESTED requires publish_model_request")
     if event_type == "EXECUTION_STARTED":
         raise ValueError("EXECUTION_STARTED requires claim_execution_start")
+    if event_type == "EXECUTION_APPROVED":
+        raise ValueError("EXECUTION_APPROVED requires record_execution_approval")
+    if event_type == "CONTEXT_CONFIRMED":
+        raise ValueError("CONTEXT_CONFIRMED requires record_context_confirmation")
     if event_type == "EXECUTION_UNKNOWN":
         raise ValueError("EXECUTION_UNKNOWN requires record_execution_unknown")
     if event_type == "PROCESS_STOPPED":
@@ -1388,6 +1414,85 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
         raise ValueError("RETAINED_NATIVE_RERUN requires the retained-rerun controller")
     project, root = _run_root(run_root)
     return _append_event(project, root, event_type, actor=actor, attempt_id=attempt_id, batch_id=batch_id, artifact_digest=artifact_digest, stage_instance_id=stage_instance_id, transport_attempts=transport_attempts)
+
+
+def generated_tests_approval_digest(run_root: Path, attempt_id: str) -> str:
+    """Digest of the materialized generated files (path and content digest) a person approves (S3)."""
+    from tools.human_gates import approval_digest
+
+    record = read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]
+    return approval_digest(record["delta"]["files"])
+
+
+def context_confirmation_digest(run_root: Path, attempt_id: str) -> str:
+    """Digest of what the attempt's model tasks may carry (S5): the requirements snapshot and every selected file."""
+    from tools.human_gates import context_digest, context_rows
+
+    project, root = _run_root(run_root)
+    digests = [event["artifact_digest"] for event in derive_state(root)["events"]
+               if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
+    receipts = [read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(digests)]
+    if not receipts:
+        raise ValueError("context confirmation requires selected context")
+    baseline = read_execution_baseline_for_attempt(root, attempt_id)
+    return context_digest(context_rows(receipts), baseline["requirements"]["digest"])
+
+
+def context_confirm_required(run_root: Path) -> bool:
+    """Whether the run was created with ``context.confirm`` on (recorded in its authorization receipt)."""
+    project, root = _run_root(run_root)
+    _manifest, authorization = _run_boundary(project, root)
+    return authorization.get("context_confirm_required") is True
+
+
+def _context_confirmed(root: Path, state: Mapping[str, Any], attempt_id: str) -> bool:
+    """One confirmation per run: any attempt's CONTEXT_CONFIRMED of the same files covers this attempt."""
+    confirmed = {event.get("artifact_digest") for event in state["events"] if event["event_type"] == "CONTEXT_CONFIRMED"}
+    return bool(confirmed) and context_confirmation_digest(root, attempt_id) in confirmed
+
+
+def record_context_confirmation(run_root: Path, attempt_id: str, confirmation_digest: str) -> Mapping[str, Any]:
+    """Record that a person confirmed exactly the files the attempt sends to the model (S5)."""
+    project, root = _run_root(run_root)
+    if not isinstance(confirmation_digest, str) or not _DIGEST.fullmatch(confirmation_digest):
+        raise ValueError("invalid context confirmation digest")
+    state = derive_state(root)
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None or attempt["state"] == "TERMINAL":
+        raise ValueError("invalid context confirmation attempt")
+    if any(event.get("attempt_id") == attempt_id and event["event_type"] in {"CONTEXT_CONFIRMED", "MODEL_REQUESTED"} for event in state["events"]):
+        raise ValueError("context confirmation is already decided")
+    if confirmation_digest != context_confirmation_digest(root, attempt_id):
+        raise ValueError("context confirmation names other files than the selected context")
+    return _append_event(project, root, "CONTEXT_CONFIRMED", actor="controller", attempt_id=attempt_id, batch_id=None, artifact_digest=confirmation_digest)
+
+
+def execution_review_required(run_root: Path) -> bool:
+    """Whether the run was created with ``execution.review: human`` (recorded in its authorization receipt)."""
+    project, root = _run_root(run_root)
+    _manifest, authorization = _run_boundary(project, root)
+    return authorization.get("execution_review_required") is True
+
+
+def record_execution_approval(run_root: Path, attempt_id: str, approval_digest: str) -> Mapping[str, Any]:
+    """Record that a person approved exactly the materialized generated tests of an attempt (S3)."""
+    project, root = _run_root(run_root)
+    if not isinstance(approval_digest, str) or not _DIGEST.fullmatch(approval_digest):
+        raise ValueError("invalid execution approval digest")
+    state = derive_state(root)
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None or attempt["state"] == "TERMINAL" or attempt["policy_profile"] != "local-pilot-v1":
+        raise ValueError("invalid execution approval attempt")
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+    if any(event["event_type"] in {"EXECUTION_STARTED", "EXECUTION_APPROVED"} for event in events):
+        raise ValueError("execution approval is already decided")
+    try:
+        expected = generated_tests_approval_digest(root, attempt_id)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("execution approval requires materialized generated tests") from error
+    if approval_digest != expected:
+        raise ValueError("execution approval names other files than the materialized generated tests")
+    return _append_event(project, root, "EXECUTION_APPROVED", actor="controller", attempt_id=attempt_id, batch_id=None, artifact_digest=approval_digest)
 
 
 def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) -> Mapping[str, Any]:
@@ -1404,6 +1509,11 @@ def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) 
         raise ValueError("execution authorization is invalid")
     if any(event["event_type"] == "EXECUTION_STARTED" and event.get("attempt_id") == attempt_id for event in state["events"]):
         raise ValueError("execution already started")
+    if authorization.get("execution_review_required") is True:
+        # S3: the run was created with execution.review human — no build or test run before a person approved the exact files.
+        approvals = [event for event in state["events"] if event["event_type"] == "EXECUTION_APPROVED" and event.get("attempt_id") == attempt_id]
+        if len(approvals) != 1 or approvals[0].get("artifact_digest") != generated_tests_approval_digest(root, attempt_id):
+            raise ValueError("execution requires the approval of the generated tests")
     return _append_event(
         project,
         root,
@@ -1826,7 +1936,49 @@ def _model_request_target(root: Path, attempt_id: str, request_digest: str) -> P
     )
 
 
-def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, Any], inputs: Sequence[str]) -> list[dict[str, str]]:
+def _context_marker_batches(state: Mapping[str, Any], attempt_id: str) -> list[tuple[str, str, str | None]]:
+    """(stage instance, request digest, response digest) of the attempt's context-marker batches, in batch order."""
+    requests: dict[str, str] = {}
+    responses: dict[str, str] = {}
+    for event in state["events"]:
+        stage = str(event.get("stage_instance_id") or "")
+        if event.get("attempt_id") != attempt_id or not stage.startswith("context-marker:batch-"):
+            continue
+        if event["event_type"] == "MODEL_REQUESTED":
+            requests[stage] = str(event.get("artifact_digest"))
+        elif event["event_type"] == "MODEL_RESPONSE_RECEIVED":
+            responses[stage] = str(event.get("artifact_digest"))
+    return [(stage, requests[stage], responses.get(stage)) for stage in sorted(requests)]
+
+
+def _context_marker_receipt_digests(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str, inputs: Sequence[str],
+) -> list[str]:
+    """The context receipts a marker request binds after requirements and inventory.
+
+    A batch binds exactly one receipt.  The merged ``context-marker:baseline`` of a batched attempt (P1a) binds the
+    receipt of every batch in batch order, then the digest of every batch answer in the same order (an identical
+    answer once); without batches it binds the receipts only, as before.
+    """
+    if stage_instance_id.startswith("context-marker:batch-"):
+        if len(inputs) != 3:
+            raise ValueError("context-marker batch must bind exactly one context receipt")
+        return list(inputs[2:])
+    batches = _context_marker_batches(state, attempt_id)
+    if not batches:
+        return list(inputs[2:])
+    if any(response is None for _stage, _request, response in batches):
+        raise ValueError("merged context-marker request requires every batch response")
+    receipts = [_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"][2] for stage, request, _response in batches]
+    # Identical answers of two batches share one content digest: the request names it once (digests are unique).
+    if list(inputs[2:]) != [*receipts, *dict.fromkeys(str(response) for _stage, _request, response in batches)]:
+        raise ValueError("merged context-marker request must bind every batch receipt and answer in batch order")
+    return receipts
+
+
+def _context_marker_snapshots(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str],
+) -> list[dict[str, str]]:
     from tools.build_context import _OPENSPEC_PATH
     from tools.project_inventory import read_execution_baseline
 
@@ -1834,7 +1986,7 @@ def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, A
     if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < 3:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
     snapshots: dict[str, dict[str, str]] = {}
-    for digest in inputs[2:]:
+    for digest in _context_marker_receipt_digests(project, root, state, str(attempt["attempt_id"]), stage_instance_id, inputs):
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if receipt["inventory_digest"] != baseline["inventory_digest"]:
             raise ValueError("context-marker receipt must bind the attempt inventory")
@@ -1853,10 +2005,21 @@ def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, A
     return list(snapshots.values())
 
 
-def _validate_context_marker_sources(project: Path, root: Path, attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
+def _validate_context_marker_sources(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
+) -> None:
     from tools.build_context import openspec_diagnostics
+    from tools.context_marker_merge import merge_marker_artifacts
 
-    snapshots = _context_marker_snapshots(project, root, attempt, request["input_digests"])
+    stage_instance_id = str(request["stage_instance_id"])
+    snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"])
+    batches = _context_marker_batches(state, str(attempt["attempt_id"])) if stage_instance_id == "context-marker:baseline" else []
+    if batches:
+        # The merged marker is a pure function of the recorded batch answers: it is recomputed on every write and read.
+        answers = [_read_model_stage_artifact_with_state(project, root, state, str(attempt["attempt_id"]), stage, str(response))["artifact"]
+                   for stage, _request, response in batches]
+        if dict(value) != merge_marker_artifacts(answers):
+            raise ValueError("merged context-marker artifact differs from the merge of its batch answers")
     if snapshots:
         diagnostics = openspec_diagnostics(dict(value), snapshots)
         if diagnostics:
@@ -1934,8 +2097,12 @@ def publish_model_request(
         or any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs)
     ):
         raise ValueError("invalid model request")
+    _manifest, authorization = _run_boundary(project, root)
+    if authorization.get("context_confirm_required") is True and not _context_confirmed(root, state, attempt_id):
+        # S5: no project file goes to a model before a person confirmed the list.
+        raise ValueError("model request requires the confirmation of the selected context")
     if stage == "context-marker":
-        _context_marker_snapshots(project, root, attempt, inputs)
+        _context_marker_snapshots(project, root, state, attempt, stage_instance_id, inputs)
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs, model_id=model_id)
     if stage == "tc-to-autotest":
         binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
@@ -2051,7 +2218,7 @@ def read_model_request(
 def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     from tools.schema_validation import schema_diagnostics
 
-    if stage_instance_id == "context-marker:baseline":
+    if stage_instance_id.startswith("context-marker:"):
         schema_name = "context-marker-output.schema.json"
         if value.get("stage") != "context-marker":
             raise ValueError("invalid context-marker artifact")
@@ -2143,8 +2310,8 @@ def publish_model_stage_artifact(
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
-    if stage_instance_id == "context-marker:baseline":
-        _validate_context_marker_sources(project, root, attempt, request, value)
+    if stage_instance_id.startswith("context-marker:"):
+        _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)
@@ -2232,8 +2399,8 @@ def _read_model_stage_artifact_with_state(
         str(requests[0].get("artifact_digest", "")),
     )
     _validate_model_stage_artifact(stage_instance_id, value)
-    if stage_instance_id == "context-marker:baseline":
-        _validate_context_marker_sources(project, root, attempt, request, value)
+    if stage_instance_id.startswith("context-marker:"):
+        _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)

@@ -169,7 +169,7 @@ Linux и Windows используют один пайплайн и project-nativ
 исполнения и по `execution_launch.build_offline` в `driver-log.jsonl`.
 `build_profile: "default"` означает, что профиль не объявлен.
 Необязательный раздел `limits` задаёт лимиты в байтах: `context_batch_bytes`,
-`docs_file_bytes`, `docs_total_bytes`. В контекст модели не попадают обёртки сборки
+`docs_file_bytes`, `docs_total_bytes`, `task_input_bytes` (бюджет входа задачи, раздел 4). В контекст модели не попадают обёртки сборки
 (`mvnw`, `mvnw.cmd`, `gradlew`, `gradlew.bat`, `.mvn/wrapper/`, `gradle/wrapper/`),
 `.gitattributes`, `.gitignore` и скрипты запуска в корне проекта (`*.ps1`, `*.sh`,
 `*.bat`, `*.cmd`); в инвентаре и baseline запуска они остаются. Файлы, которые называет
@@ -239,9 +239,11 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--module <ID>`, `--target`, `--document-id`, `--model-id`, `--host-cli`,
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
-контекста модели в байтах, по умолчанию 500000), `--accept-self-review`,
-`--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
-(сколько независимых частей ревью `compact-v1` выдать сразу). Опции волн 2–3 — `--mutation`,
+контекста модели в байтах, по умолчанию 500000), `--task-input-bytes N` (бюджет входа задачи, ниже),
+`--execution-review human|none` (одобрение сгенерированных тестов перед запуском, раздел 8),
+`--confirm-context yes|no` (подтверждение отправки файлов в модель, ниже),
+`--accept-self-review`, `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
+(сколько независимых задач — частей ревью `compact-v1` или батчей разметки контекста — выдать сразу). Опции волн 2–3 — `--mutation`,
 `--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
 `--review-runner host|process` с `--review-runner-preset claude|codex` (по умолчанию — `.skillsrc`
 `review_runner.preset`, иначе `claude`), `--review-runner-command '<JSON-массив>'` (свой шаблон, только флагом
@@ -323,6 +325,23 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
 сколько прошло с первой выдачи задачи, у `task_reissued` — `since_first_issue_seconds`.
 Лог не входит ни в журнал, ни в дайджесты.
 
+**Подтверждение отправки в модель (`context.confirm`).** По умолчанию драйвер после `scan` и
+до первого вызова модели возвращает `ask_user` с меткой `confirm-context`: в вопросе —
+документы требований (`--docs`) и число файлов проекта с общим размером в байтах; в полях
+`documents` и `files` и в файле `<run>.driver/context-files.txt` — каждый файл с размером;
+в `confirmation_digest` — дайджест списка. Проверьте, что в нём нет персональных данных,
+секретов и лишнего кода, и ответьте `submit ... --answer <confirmation_digest>` (у
+`run --runner process` — `--answer confirm-context=<confirmation_digest>`). Ответ пишется в
+журнал событием `CONTEXT_CONFIRMED`; журнал не примет ни одного `MODEL_REQUESTED` без
+подтверждения именно этого списка (требование фиксируется в квитанции авторизации,
+`context_confirm_required`). Подтверждение — одно на run: доработка или регенерация с тем
+же списком не спрашивает снова, другой список — спросит. Лишнее исключается в `.skillsrc`
+(`paths`/`exclusions` модуля) или `--target` с новым запуском. Выключение — явно:
+`.skillsrc` `context: {confirm: false}` или `--confirm-context no` (флаг сильнее
+`.skillsrc`). В `suite-update-v1` — то же перед первой задачей модели со списком её входных
+файлов (подтверждение — в состоянии run и `driver-log.jsonl`). Ручной `run_pipeline scan`
+записывает требование только с `--confirm-context yes`.
+
 Источник истины остаётся в `.pilot-runs/<run_id>/` (журнал и квитанции). Не запускайте
 параллельно две команды драйвера для одного run и не удаляйте `.lock` вручную.
 
@@ -331,11 +350,23 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
 - драйвер продолжает только run, созданный его же `next`; run, начатый ручными
   командами, он не подхватывает;
 - один модуль на run;
-- context-marker, генератор кейсов и генератор автотестов получают весь выбранный
-  контекст проекта одним входом, даже если `scan` разбил его на несколько частей.
-  Поле `input_bytes` задачи показывает общий размер входов: если он больше возможностей
-  модели, вход не обрезается — запуск нужно остановить и сузить контекст (`--target`)
-  или взять модель с большим окном;
+- context-marker читает контекст батчами: если `scan` разбил выбранный контекст на
+  несколько частей (`limits.context_batch_bytes`, по умолчанию 256 КБ), драйвер выдаёт по
+  задаче `context-marker:batch-NNN` на часть (черновик требований + файлы только этой части,
+  до `--max-tasks` сразу) и сам детерминированно сливает ответы в `context-marker:baseline`:
+  порядок частей, повторы `sources`/`warnings`/`requirement_gaps` убираются, слитый артефакт
+  привязан в журнале к ответам всех частей. При одной части задача одна, как раньше.
+  Генератор кейсов и генератор автотестов по-прежнему получают весь выбранный контекст
+  одним входом;
+- бюджет входа задачи: для разметки, генератора кейсов и генератора автотестов драйвер
+  сравнивает `input_bytes` с порогом (`--task-input-bytes`, иначе `limits.task_input_bytes`
+  в `.skillsrc`, иначе 1 000 000 Б) до вызова модели. Если вход больше, модель не
+  вызывается и в журнал ничего не пишется: команда возвращает ошибку
+  `TASK_INPUT_TOO_LARGE` с `input_bytes`, `threshold` и подсказкой — сузить контекст
+  (`--target`, `paths`/`exclusions` модуля в `.skillsrc`) или уменьшить
+  `limits.context_batch_bytes`. Вход не обрезается. Ориентир для порога — 0,24 токена на
+  байт (замер на DeepSeek-V4.1-Flash через gigacode): окно 239 тыс. токенов ≈ 1 МБ входа;
+  для другой модели порог считайте от её окна с запасом на ответ;
 - драйвер не проверяет, что ревью действительно выполнено в свежем контексте: это
   сообщает хост (или, с `--review-runner process`, свежий процесс CLI на каждую часть);
 - драйвер покрыт тестами пакета, но не проверен на Windows и на живой модели.
@@ -479,9 +510,29 @@ verification    = NOT_APPLICABLE
 3. при correction допускает ровно одну полную revision 2 и второй review;
 4. формирует complete generated file set;
 5. материализует каждый pipeline-owned file и пишет receipt;
+5a. останавливается на одобрении человеком (по умолчанию, см. ниже);
 6. выполняет шлюз компиляции/сбора и запускает exact reviewed targets закрытым adapter;
 7. строит execution trace и disposition всего generated delta;
 8. выполняет finalization и terminal transition.
+
+**Одобрение сгенерированных тестов перед запуском (`execution.review`).** По умолчанию
+(`human`) драйвер после записи сгенерированных тестов в проект и до любого запуска сборки,
+тестов и мутаций возвращает `ask_user` с меткой `approve-generated-tests`: в вопросе и в
+поле `files` — каждый записанный файл с дайджестом содержимого, в `approval_digest` —
+дайджест этого списка. Прочитайте файлы и ответьте
+`submit ... --answer <approval_digest>` (у `run --runner process` —
+`--answer approve-generated-tests=<approval_digest>`); другой ответ отклоняется. Ответ
+пишется в журнал событием `EXECUTION_APPROVED`, и журнал не даст начать исполнение
+(`EXECUTION_STARTED`) без одобрения именно этих файлов; пока ответа нет, ничего не
+запускается (код выхода 3). Требование фиксируется при создании run в квитанции
+авторизации (`execution_review_required`). Выключение — явно: `.skillsrc`
+`execution: {review: none}` или флаг `next/run --execution-review none` (флаг сильнее
+`.skillsrc`), например для повторных прогонов на известном проекте. В `suite-update-v1`
+то же перед прогоном набора, если run записал обновлённые или новые методы
+(`approve-generated-tests-apply`), и перед повторным прогоном после починки
+(`approve-generated-tests-repair`); одобрение хранится в состоянии run и в
+`driver-log.jsonl`. Ручной `run_pipeline scan` записывает требование только с
+`--execution-review human`: ручной `exec` и так запускает человек.
 
 Все эти шаги ведёт драйвер. Модель получает задачи `tc-to-autotest:r1` (и `r2` при
 `AUTO_FIX_APPLIED`) и части статического ревью `autotest-reviewer:*`. Если ревью не
@@ -683,7 +734,7 @@ python -m tools.pipeline_driver next --project "$project" --profile local-pilot-
 **Ревью процессами драйвера:**
 
 ```yaml
-# .skillsrc — только пресет, модели по ролям, параллельность и таймаут
+# .skillsrc — только пресет, модели по ролям, параллельность, таймаут и интерпретатор обёртки .py
 review_runner:
   preset: claude            # или codex
   models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
@@ -698,7 +749,11 @@ python -m tools.pipeline_driver next --project "$project" --profile local-pilot-
 
 На `{"action": "wait"}` подождите `poll_seconds` и снова вызовите `next`. CLI должен быть
 залогинен (подписка или ключ самого CLI); пакет учётных данных не видит. Свой шаблон
-команды — только флагом `--review-runner-command '["…", "{model}"]'`.
+команды — только флагом `--review-runner-command '["…", "{model}"]'`. Если `--review-runner-cli`
+указывает на скрипт `.py` (обёртка над CLI), драйвер запускает его интерпретатором:
+`[<интерпретатор>, <скрипт>, …аргументы пресета]`, где интерпретатор — абсолютный путь из
+`.skillsrc` `review_runner.interpreter`, иначе Python самого драйвера. Запуск скрипта по
+shebang не нужен (в некоторых окружениях `execve` по shebang запрещён).
 
 **Без оркестратора:**
 

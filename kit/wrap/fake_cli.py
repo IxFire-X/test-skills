@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -29,7 +30,10 @@ def main() -> int:
     parser.add_argument("--envelope", action="store_true")
     parser.add_argument("--fence", action="store_true")
     parser.add_argument("--fail", action="store_true")
+    parser.add_argument("--dump-env", help="write the names of the environment variables it got (selftest of S6)")
     args = parser.parse_args()
+    if args.dump_env:
+        Path(args.dump_env).write_text(json.dumps(sorted(os.environ)), encoding="utf-8")
     if args.fail:
         print("Error: 429 Too Many Requests — rate limit exceeded", file=sys.stderr)
         return 3

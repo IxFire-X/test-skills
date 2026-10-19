@@ -15,12 +15,17 @@ file (or ``$WRAP_CONFIG``), without code changes:
      "answer_file": "{tmp}/answer.txt",        # with answer_from = file
      "timeout_seconds": 1700, "extra_env": {"NAME": "value"}, "version": "inhouse-cli 1.2",
      "tmp_dir": ".tmp",                        # where the per-call temp directory goes (relative: to wrap.json)
-     "sandbox_args": ["--no-tools"]}           # the CLI's own "no tools / read-only" flags, if it has them
+     "sandbox_args": ["--no-tools"],           # the CLI's own "no tools / read-only" flags, if it has them
+     "env_passthrough": ["GIGACODE_*", "HTTPS_PROXY"]}  # environment the CLI needs beyond the base list (S6)
 
 Placeholders: {model}, {prompt_file}, {prompt} (prompt_via = arg; Linux caps one argument at 128 KiB), {answer_file},
 {schema_file}, {tmp}.  ``sandbox_args`` replace an item "{sandbox_args}" of command, else go at its end.
 ``extra_env`` must not carry secrets (names with TOKEN, SECRET, PASSWORD, PASSWD, API_KEY, APIKEY, AWS_*, AZURE_*,
-GOOGLE_APPLICATION_CREDENTIALS): the CLI's credentials belong in the CLI's own config, not in wrap.json.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
+GOOGLE_APPLICATION_CREDENTIALS): the CLI's credentials belong in the CLI's own config, not in wrap.json.
+The CLI does not inherit the whole environment (S6): it gets PATH, HOME, JAVA_HOME, LANG, LANGUAGE, LC_*, TMP*, TEMP and
+the Windows minimum (SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT, USERPROFILE, APPDATA, LOCALAPPDATA, HOMEDRIVE,
+HOMEPATH), the names and prefixes of ``env_passthrough`` (a name, or a prefix ending in ``*``), then ``extra_env``.
+``wrap.py exec --verbose …`` prints the passed names (not values) to stderr in one line.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
 --output-last-message; stdout gets codex `--json` events (thread.started, item.completed, turn.completed with usage —
 the CLI's own when its stdout is JSON with `usage`, else an estimate by bytes, marked "estimated").  A CLI failure
 prints an `error` event (with its text, so rate limits are recognised) and exits non-zero.
@@ -42,6 +47,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ARG_LIMIT = 120_000  # Linux MAX_ARG_STRLEN is 128 KiB per argument
+BASE_ENV = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+            "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"}
+BASE_PREFIXES = ("LC_", "TMP")
+PASSTHROUGH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\*?$")
 SECRET_ENV = re.compile(r"(?i)TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
 
 
@@ -67,6 +76,9 @@ def load_config(path: Path | None = None) -> dict:
     if secrets:
         raise SystemExit(f"wrap.json: extra_env carries secret-like names ({', '.join(secrets)}) — secrets go to the CLI's own config, "
                          "not to wrap.json")
+    passthrough = value.setdefault("env_passthrough", [])
+    if not isinstance(passthrough, list) or not all(isinstance(item, str) and PASSTHROUGH.match(item) for item in passthrough):
+        raise SystemExit("wrap.json: env_passthrough is a list of variable names or prefixes ending in * (GIGACODE_*, HTTPS_PROXY)")
     sandbox = value.setdefault("sandbox_args", [])
     if not isinstance(sandbox, list) or not all(isinstance(item, str) for item in sandbox):
         raise SystemExit("wrap.json: sandbox_args must be a list of strings")
@@ -74,6 +86,16 @@ def load_config(path: Path | None = None) -> dict:
         tmp_dir = Path(os.path.expanduser(str(value["tmp_dir"])))
         value["tmp_dir"] = str(tmp_dir if tmp_dir.is_absolute() else (path.parent / tmp_dir).resolve())
     return value
+
+
+def child_env(config: dict, environ: dict | None = None) -> dict:
+    """The CLI's environment (S6): the base list, the env_passthrough names and prefixes, then extra_env."""
+    environ = dict(os.environ if environ is None else environ)
+    names = {item.upper() for item in config.get("env_passthrough") or [] if not item.endswith("*")}
+    prefixes = tuple(item[:-1].upper() for item in config.get("env_passthrough") or [] if item.endswith("*"))
+    env = {key: value for key, value in environ.items()
+           if key.upper() in BASE_ENV or key.upper() in names or key.upper().startswith(BASE_PREFIXES + prefixes)}
+    return {**env, **{str(key): str(value) for key, value in (config.get("extra_env") or {}).items()}}
 
 
 def build_command(config: dict, values: dict) -> list[str]:
@@ -161,7 +183,9 @@ def run_exec(argv: list[str], prompt: str, config: dict) -> int:
             event({"type": "error", "message": f"wrap: the task is {len(prompt.encode('utf-8'))} bytes, too long for one argument (prompt_via=arg); use stdin or file"})
             return 2
         command = build_command(config, values)
-        env = {**os.environ, **{str(key): str(value) for key, value in (config.get("extra_env") or {}).items()}}
+        env = child_env(config)
+        if "--verbose" in argv:
+            sys.stderr.write("wrap: environment passed to the CLI: " + ", ".join(sorted(env)) + "\n")
         try:
             done = subprocess.run(command, input=prompt.encode("utf-8") if config["prompt_via"] == "stdin" else None, capture_output=True, env=env,
                                   cwd=str(tmp), timeout=int(config["timeout_seconds"]), check=False)
