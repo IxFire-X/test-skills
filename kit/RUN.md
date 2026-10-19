@@ -1,7 +1,7 @@
 # Запуск test-skills на внутреннем проекте (Linux, свой CLI и модели)
 
-Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит b985f58 ветки `security-s3-s9`, до слияния в `main`; без `tests/`,
-`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-b985f58.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
+Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит c238f05 ветки `main`; без `tests/`,
+`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-c238f05.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
@@ -189,6 +189,16 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
   отвечает). Правка файла меняет дайджест — нужно новое одобрение. Для повторов на учебном проекте —
   `--execution-review none` (или `.skillsrc` `execution: {review: none}`). Пробный прогон (`--only 5a`) тестов не
   исполняет и этой остановки не даёт.
+- **Исполнение человеком (пакет с S9).** С `--execution-mode human` (или `.skillsrc` `execution: {mode: human}`) пакет
+  сам не запускает ни сборку, ни тесты, ни мутации. После записи тестов (и одобрения, если оно включено) драйвер отвечает
+  `human_exec`, и `operate.py` печатает команды по порядку — шлюз компиляции (`gate`) и тесты (`tests`): у каждой `cwd`
+  и готовая строка для своей оболочки (PowerShell на Windows, bash на Linux; другая — в `operate.log`), список
+  проверяемых тестов и куда команда пишет JUnit-отчёт. Выполнить команды самому, в своём окружении, и продолжить
+  готовой командой из вывода: `… --from-step 5 --run <run_id> --junit <отчёт>` (отчётов может быть несколько; код
+  выхода тестов — `--exit-code N`, шлюза — `--gate-exit-code N`, иначе — из отчёта). Отчёт должен быть новым файлом из
+  указанного каталога, иначе драйвер ответит `HUMAN_REPORT_INVALID` и будет ждать дальше. Мутации в этом режиме — не
+  применяются (`NOT_APPLICABLE`, `HUMAN_EXECUTION_MODE`). Сборка идёт в окружении человека: фильтр секретоподобных
+  переменных пакета к ней не применяется.
 - **Шаг 5.** На `ask_user` показывает вопрос и ждёт ответа. На `regenerate-after-gate` и `BUILD_FAILED_BEFORE_TESTS`
   печатает хвост `runner-output.txt` и останавливается. Прерванный прогон продолжается так:
   `--from-step 5 --run <run_id> [--answer метка=значение]`. Если в проекте несколько целей — `--target <цель>`
@@ -200,7 +210,7 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
-sha256sum -c --quiet test-skills-b985f58.files.sha256             # молчит = все файлы пакета совпадают
+sha256sum -c --quiet test-skills-c238f05.files.sha256             # молчит = все файлы пакета совпадают
 python3 --version                                                 # нужен 3.11+ (или test-skills/.venv/bin/python)
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid
@@ -334,6 +344,7 @@ python3 -m tools.pipeline_driver run --project <проект> --runner process \
 | --- | --- |
 | `"action": "ask_user"`, код 3 | прочитать `question`; ответить повтором с `--answer <метка>=<значение>` (метка — хвост `task_id` после `.ask.`) |
 | `ask.confirm-context` (пакет с S5) | открыть список `listing_path`; отправить — ответ `confirm-context=<confirmation_digest>` (в `operate.py` — ввод дайджеста или `--yes-send`); лишнее — исключить и начать новый прогон |
+| `human_exec` (пакет с S9, `--execution-mode human`) | выполнить напечатанные команды по порядку в указанных `cwd`; продолжить `… --from-step 5 --run <run_id> --junit <отчёт>`; `HUMAN_REPORT_INVALID` — отчёт не тот (не новый или не из указанного каталога) |
 | `ask.approve-generated-tests` (пакет с S3) | прочитать перечисленные файлы; одобрить — ответ `approve-generated-tests=<approval_digest>` (в `operate.py` — ввод дайджеста или `--yes-exec`); не одобрять — остановиться и поправить или удалить файлы |
 | `ask.regenerate-after-gate` / `GENERATED_TEST_INVALID` | **не перегенерировать сразу**: открыть `.pilot-runs/<run>/artifacts/<attempt>/runner-output.txt` — если там линтер/сборка проекта, а не ошибки тестов, исправить окружение (п. 1) и начать новый прогон; перегенерация — только при ошибках компиляции самих тестов |
 | `"action": "error"`, `code` | код и `message` — сюда (п. 7); `DRIVER_FAILURE` — дефект пакета |

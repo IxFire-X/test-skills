@@ -162,7 +162,7 @@ OPTIONAL_STAGE_ROWS = [
 ]
 EXPECTED_MODEL_RUNNER = {
     "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",
-    "skillsrc_fields": ["preset", "models", "max_parallel", "timeout_seconds", "interpreter"], "invocation": "fresh_process_temp_cwd_stdin_no_write_tools", "wait_action": "wait",
+    "skillsrc_fields": ["preset", "models", "max_parallel", "timeout_seconds", "interpreter", "env_passthrough"], "invocation": "fresh_process_temp_cwd_stdin_no_write_tools", "wait_action": "wait",
     "tries_per_part": 3, "evidence": ["command_digest", "cli_name_version", "model", "started_finished", "exit_code", "session_id", "stdout_digest", "tokens", "user_settings_loaded"],
     "evidence_axis": "isolation_evidence", "require_flag": "--require-driver-isolation", "require_reason_code": "REVIEW_ISOLATION_UNVERIFIED",
     "standalone_command": "run --runner process",

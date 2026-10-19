@@ -152,9 +152,13 @@ def launch_task(run_root: Path, task: Mapping[str, Any], runner: model_runner.Ru
     _private(directory)
     stdin = model_runner.compose_input(Path(task["skill_path"]), str(task["instructions"]), schema, [Path(path) for path in task["inputs"]])
     argv = model_runner.build_argv(runner, model=model, schema=schema, directory=directory)
-    model_runner.launch(directory, argv, stdin, timeout=runner.timeout_seconds, digest=model_runner.command_digest(runner, model=model, schema=schema))
+    model_runner.launch(directory, argv, stdin, timeout=runner.timeout_seconds, digest=model_runner.command_digest(runner, model=model, schema=schema),
+                        passthrough=runner.env_passthrough)
+    _env, env_names = model_runner.cli_environment(passthrough=runner.env_passthrough)
+    # S6: names only — what the CLI gets (allowlist and passthrough) and what it does not.
     _log(run_root, {"event": "runner_launched", "task_id": task["task_id"], "stage": task.get("stage"), "preset": runner.preset, "model": model,
-                    "input_bytes": len(stdin.encode("utf-8")), "directory": str(directory)})
+                    "input_bytes": len(stdin.encode("utf-8")), "directory": str(directory), "env_names": env_names,
+                    "env_withheld": model_runner.withheld_names(passthrough=runner.env_passthrough)})
 
 
 def _collect(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], task: Mapping[str, Any],

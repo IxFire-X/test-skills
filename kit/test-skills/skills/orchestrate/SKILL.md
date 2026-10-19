@@ -118,6 +118,11 @@ python -m tools.pipeline_driver next --project "$project" --profile cases-only-v
    запускай: подожди `poll_seconds` секунд и снова вызови `next --project ... --run ...`.
    Команда не ждёт модель и возвращается сразу; если сессия оборвалась, процессы
    продолжают работу, а следующий `next` соберёт их результаты.
+8. `human_exec` — режим `execution.mode: human`: пакет ничего не запускает. Покажи
+   пользователю `commands` (у каждой `argv`, `cwd`, строки `bash`/`powershell`) и
+   `report_path`; команды выполняет он сам. Когда он сообщит путь отчёта, вызови
+   `next --project ... --run ... --junit <отчёт>` (и `--exit-code`, если он его назвал).
+   Сам команды не запускай.
 
 Пачки. При `--review-mode compact-v1` части ревью независимы. `next ... --max-tasks K`
 возвращает до K задач: `{"action": "batch", "tasks": [...]}`. Запусти по одному свежему

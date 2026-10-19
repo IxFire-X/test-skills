@@ -89,7 +89,16 @@ JaCoCo для выбранного подмножества). С `--mutation` �
 секреты (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*PASSWD*`, `*API_KEY*`, `*APIKEY*`,
 `AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`); имена удалённых переменных (без
 значений) пишутся в `driver-log.jsonl` (`child_env_removed`). CLI модели получает
-окружение как есть: его учётные данные — его конфигурация.
+окружение по белому списку: `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`,
+`TEMP`, `PYTHONUTF8`, `PYTHONIOENCODING` (Python-CLI на Windows без них падает на кириллице) и минимум Windows, без которого процесс не стартует или CLI не найдёт свой профиль
+(`SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`; на Windows без учёта регистра). Всё остальное —
+ключи самого CLI (`ANTHROPIC_API_KEY`, `GIGACODE_*`), прокси (`HTTPS_PROXY`) — только если
+названо в `.skillsrc` `review_runner.env_passthrough`: точные имена или префиксы со `*` в
+конце (`["GIGACODE_*", "HTTPS_PROXY"]`; `*` в середине не допускается). Значения на диск не
+пишутся; имена переданных переменных — в `result.json` процесса и в `driver-log.jsonl`
+(`runner_launched.env_names`), имена не переданных — там же (`env_withheld`). То же
+применяется к `--version` CLI.
 
 **Сеть.** В коде пакета нет сетевых вызовов; сеть идёт только через процессы, которые он
 запускает:
@@ -135,8 +144,19 @@ git недоступен — обычный обход файлов). По ум�
 `generated` и `coverage` с исходным кодом остаются.
 
 По имени как секреты исключаются только `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`,
-`*.kdbx`, `id_*` и каталоги `secrets/`, `credentials/`. По содержимому — сигнатуры
-токенов, PEM-блок приватного ключа и присваивание строкового литерала от 16 символов.
+`*.kdbx`, `id_*` и каталоги `secrets/`, `credentials/`; а также хранилища учётных данных
+CLI, где бы они ни лежали в проекте: каталоги `.ssh`, `.aws`, `.kube`, `.gnupg`, `.docker`,
+`.azure`, `.gcloud`, `.config/gh`, `.config/gcloud`, `.config/hub` и файлы `.netrc`,
+`_netrc`, `.pgpass`, `.git-credentials`, `.npmrc`, `.pypirc`, `.dockercfg`, `kubeconfig`
+(`credential-directory-v1`, `credential-file-v1`). Это исключение из inventory — значит из
+контекста модели; на диске файлы остаются, и сборка их видит как обычно; хранилища
+учётных данных не считаются входом исполнения и не делают прогон `NOT_RUNNABLE`.
+Бинарные файлы (в том числе `*.jks`, `*.keystore` тестовых ресурсов) в контекст не
+попадают как `BINARY_OR_GENERATED` и тоже остаются входом сборки. Все пути, исключённые как
+секреты, с правилом перечислены в листинге подтверждения отправки (`context-files.txt`,
+строки `исключено`). По содержимому — сигнатуры
+токенов, PEM-блок приватного ключа, присваивание строкового литерала от 16 символов и
+`aws_secret_access_key` с 40-символьным значением без кавычек.
 Файл кода или настроек с совпадением исключается целиком; если он необходим, дайте
 sanitized source, safe fixture или opaque runtime handle. В документах и спецификациях
 совпавшие строки заменяются на `[REDACTED:<rule>]`, файл остаётся входом, а номера
@@ -242,6 +262,8 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 контекста модели в байтах, по умолчанию 500000), `--task-input-bytes N` (бюджет входа задачи, ниже),
 `--execution-review human|none` (одобрение сгенерированных тестов перед запуском, раздел 8),
 `--confirm-context yes|no` (подтверждение отправки файлов в модель, ниже),
+`--execution-mode auto|human` (исполнение человеком, раздел 8; продолжение — `next --run <id> --junit <отчёт>`
+с `--exit-code`/`--gate-exit-code`),
 `--accept-self-review`, `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
 (сколько независимых задач — частей ревью `compact-v1` или батчей разметки контекста — выдать сразу). Опции волн 2–3 — `--mutation`,
 `--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
@@ -366,7 +388,10 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
   (`--target`, `paths`/`exclusions` модуля в `.skillsrc`) или уменьшить
   `limits.context_batch_bytes`. Вход не обрезается. Ориентир для порога — 0,24 токена на
   байт (замер на DeepSeek-V4.1-Flash через gigacode): окно 239 тыс. токенов ≈ 1 МБ входа;
-  для другой модели порог считайте от её окна с запасом на ответ;
+  для другой модели порог считайте от её окна с запасом на ответ. Генератор автотестов
+  пока получает весь документ кейсов и контекст одной задачей: на большом наборе (Petclinic —
+  около 2,3 МБ) он упрётся в порог по умолчанию — для такого прогона поднимите порог
+  `--task-input-bytes` под окно своей модели (автоматизация частями — в планах);
 - драйвер не проверяет, что ревью действительно выполнено в свежем контексте: это
   сообщает хост (или, с `--review-runner process`, свежий процесс CLI на каждую часть);
 - драйвер покрыт тестами пакета, но не проверен на Windows и на живой модели.
@@ -533,6 +558,33 @@ verification    = NOT_APPLICABLE
 (`approve-generated-tests-repair`); одобрение хранится в состоянии run и в
 `driver-log.jsonl`. Ручной `run_pipeline scan` записывает требование только с
 `--execution-review human`: ручной `exec` и так запускает человек.
+
+**Исполнение человеком (`execution.mode: human`).** По умолчанию (`auto`) сборку и тесты
+запускает пакет. С `.skillsrc` `execution: {mode: human}` или флагом
+`next/run --execution-mode human` (фиксируется в квитанции авторизации,
+`execution_mode_human`) пакет не запускает ни сборку, ни тесты, ни мутации: после записи
+сгенерированных тестов (и одобрения, если включено `execution.review`) драйвер отвечает
+`{"action": "human_exec"}` (код выхода 3) с полями `commands` — шлюз компиляции/сбора
+(`gate`) и тесты (`tests`), у каждой команды `argv` списком, `cwd`, готовые строки `bash` и
+`powershell` с экранированием, — `selectors` (проверяемые тесты), `report_path`/`report_dir`
+(куда команда пишет JUnit-отчёт) и `continue`. В терминах протокола это команды
+generated-for-human-review, а их запуск — действие человека. Выполните команды по порядку
+сами и передайте отчёт: `next --run <id> --junit <отчёт> [--junit …] [--exit-code N]
+[--gate-exit-code N]`. Отчёт должен быть файлом закрытого места отчётов и новым относительно
+снимка, сделанного при выдаче команд; иное — ошибка `HUMAN_REPORT_INVALID`, прогон
+продолжает ждать. Без `--exit-code` код берётся из отчётов. `run --runner process`
+останавливается на этом шаге с `"stopped": "HUMAN_EXECUTION"` (код 3) и продолжается так же:
+`run --runner process --run <id> --junit <отчёт>`. Результат решают те же правила,
+что при запуске пакетом (сопоставление с проверенными тестами, нулевой сбор, изменение
+файлов, durable-копии отчётов); в квитанции исполнения — `executor: human`. Если человек
+прогнал больше, чем `selectors` (весь класс или модуль), лишние кейсы не мешают: они
+считаются в `extra_testcases`, а итог берётся по проверенным тестам. Событие
+`EXECUTION_STARTED` пишется, когда драйвер принимает отчёты в обработку (повторная выдача
+команд до этого ничего не начинает). Сборка в этом режиме идёт в окружении человека:
+фильтр секретоподобных переменных S1d к ней не применяется, это его ответственность.
+Мутации (`--mutation`) в этом режиме не запускаются: стадия помечается `NOT_APPLICABLE`
+с причиной `HUMAN_EXECUTION_MODE`. `suite-update-v1` пока исполняет сам (режим human для
+него — следующим шагом).
 
 Все эти шаги ведёт драйвер. Модель получает задачи `tc-to-autotest:r1` (и `r2` при
 `AUTO_FIX_APPLIED`) и части статического ревью `autotest-reviewer:*`. Если ревью не
@@ -734,12 +786,13 @@ python -m tools.pipeline_driver next --project "$project" --profile local-pilot-
 **Ревью процессами драйвера:**
 
 ```yaml
-# .skillsrc — только пресет, модели по ролям, параллельность, таймаут и интерпретатор обёртки .py
+# .skillsrc — только пресет, модели по ролям, параллельность, таймаут, интерпретатор обёртки .py и env_passthrough
 review_runner:
   preset: claude            # или codex
   models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
   max_parallel: 4
   timeout_seconds: 1800
+  env_passthrough: [ANTHROPIC_API_KEY, HTTPS_PROXY]   # сверх белого списка, только по имени или префиксу (GIGACODE_*)
 ```
 
 ```powershell

@@ -15,7 +15,7 @@ import json
 import os
 import re
 import uuid
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from tools.json_cli import JsonArgumentParser
 from tools.project_inventory import (
@@ -297,6 +297,11 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
     # S5: likewise the confirmation of the model input (the driver turns it on by default).
     if getattr(args, "confirm_context", None) in {True, "yes"}:
         authorization["context_confirm_required"] = True
+    # S9: in human execution mode the package starts no build, test or mutation process itself.
+    if getattr(args, "execution_mode", None) == "human":
+        if profile != "local-pilot-v1":
+            raise HostStop("EXECUTION_MODE_PROFILE", "--execution-mode human needs the local-pilot-v1 profile (cases-only runs nothing)")
+        authorization["execution_mode_human"] = True
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -973,6 +978,7 @@ def _execute(
     authorization_receipt: Mapping[str, Any],
     host_isolation_receipt: Mapping[str, Any],
     generated_delta_receipt: Mapping[str, Any],
+    human: Mapping[str, Any] | None = None,
 ) -> int:
     from tools.run_tests import (
         build_closed_execution_request,
@@ -1027,6 +1033,20 @@ def _execute(
             request=request, automation_artifact=automation, autotest_review=review,
         )
 
+    human_execution = None
+    if authorization_receipt.get("execution_mode_human") is True:
+        # S9: the package starts no process; a person runs the printed commands and hands the reports back.
+        handoff = _human_handoff(coordinates, request, gate_request)
+        if not (human or {}).get("reports"):
+            _print({"status": "human_exec", **{key: value for key, value in handoff.items() if key != "before"},
+                    "attempt_id": coordinates["attempt"]["attempt_id"]})
+            return 3
+        try:
+            human_execution = _human_reports(handoff, human)
+        except HostStop as error:
+            _print({"status": "error", "reason": error.code, "message": str(error), "attempt_id": coordinates["attempt"]["attempt_id"]})
+            return 2
+
     execution_claimed = False
 
     def on_execution_start(request_value: Any) -> None:
@@ -1069,6 +1089,7 @@ def _execute(
             on_execution_start=on_execution_start,
             post_execution_check=post_execution_check,
             gate_request=gate_request,
+            human_execution=human_execution,
         )
     except HostStop as error:
         if not execution_claimed:
@@ -1301,7 +1322,69 @@ def cmd_exec(args: Any) -> int:
     return _execute(
         project, coordinates, execution_root, language, getattr(args, "executor", "local"), document, automation, review,
         authorization, isolation, delta,
+        human={"reports": list(getattr(args, "junit", None) or []), "exit_code": getattr(args, "exit_code", None),
+               "gate_exit_code": getattr(args, "gate_exit_code", None)},
     )
+
+
+def _powershell_line(argv: Sequence[str]) -> str:
+    return "& " + " ".join("'" + item.replace("'", "''") + "'" for item in argv)
+
+
+def _human_handoff(coordinates: Mapping[str, Any], request: Any, gate_request: Any) -> dict[str, Any]:
+    """S9: the exact closed commands for a person, issued once per request (the report snapshot stays the first one)."""
+    import shlex
+
+    from tools.execution_adapters import request_digest
+    from tools.run_tests import _report_inventory, _request_report_path
+
+    run_root = Path(coordinates["run_root"])
+    path = run_root.with_name(run_root.name + ".driver") / "human-exec" / f"{coordinates['attempt']['attempt_id']}.json"
+    digest = request_digest(request)
+    if path.is_file():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if existing.get("request_digest") == digest:
+            return existing
+    report = _request_report_path(request)
+    if report is None:
+        raise HostStop("RUNNER_REQUEST", "the execution request has no closed report path")
+    commands = [{"kind": kind, "argv": list(item.argv), "cwd": str(item.cwd), "bash": shlex.join(list(item.argv)),
+                 "powershell": f"Set-Location -LiteralPath '{str(item.cwd)}'; " + _powershell_line(list(item.argv))}
+                for kind, item in (("gate", gate_request), ("tests", request)) if item is not None]
+    handoff = {"request_digest": digest, "commands": commands, "selectors": list(request.selectors),
+               "report_path": str(report), "report_dir": str(report if report.is_dir() or not report.suffix else report.parent),
+               "before": {str(key): list(value) for key, value in _report_inventory(report).items()},
+               "continue": f"next --run {run_root.name} --junit <report> [--junit <report>…] [--exit-code N] [--gate-exit-code N]"}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(handoff, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+    return handoff
+
+
+def _human_reports(handoff: Mapping[str, Any], human: Mapping[str, Any]) -> dict[str, Any]:
+    """S9: the reports a person hands back must be files of the closed report location; the exit code defaults to the reports."""
+    from tools.run_tests import parse_junit_bytes
+
+    report = Path(handoff["report_path"]).resolve()
+    paths: list[Path] = []
+    for raw in human["reports"]:
+        candidate = Path(raw).resolve()
+        inside = candidate == report or (report.is_dir() and candidate.is_relative_to(report))
+        if not inside or _is_reparse(candidate) or not candidate.is_file():
+            raise HostStop("HUMAN_REPORT_INVALID", f"a report must be an existing file of {handoff['report_path']}: {raw}")
+        paths.append(candidate)
+    exit_code = human.get("exit_code")
+    if exit_code is None:
+        failed = False
+        for candidate in paths:
+            try:
+                parsed = parse_junit_bytes(candidate.read_bytes())
+            except Exception:
+                failed = True
+                continue
+            failed = failed or any(case.status in {"FAILED", "ERROR"} for case in parsed.cases)
+        exit_code = 1 if failed else 0
+    return {"before": handoff["before"], "reports": [str(candidate) for candidate in paths], "exit_code": int(exit_code),
+            "gate_exit_code": human.get("gate_exit_code")}
 
 def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Rerun one accepted attempt's retained tests through its recorded native request."""
@@ -1708,6 +1791,8 @@ def build_parser() -> JsonArgumentParser:
                              help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
     scan_parser.add_argument("--execution-review", choices=("human", "none"),
                              help="human: exec starts only after EXECUTION_APPROVED of the exact generated files (S3); the driver sets it by default.")
+    scan_parser.add_argument("--execution-mode", choices=("auto", "human"),
+                             help="human: exec prints the closed commands instead of running them; a person runs them and passes the reports (S9).")
     scan_parser.add_argument("--confirm-context", choices=("yes", "no"),
                              help="yes: no model request before CONTEXT_CONFIRMED of the exact model input (S5); the driver sets it by default.")
     status_parser = sub.add_parser("status", parents=[shared])
@@ -1722,6 +1807,9 @@ def build_parser() -> JsonArgumentParser:
     exec_parser.add_argument("--authorization-receipt")
     exec_parser.add_argument("--host-isolation-receipt")
     exec_parser.add_argument("--generated-delta-receipt")
+    exec_parser.add_argument("--junit", action="append", default=[], help="execution.mode human (S9): a report the person's run wrote; repeatable.")
+    exec_parser.add_argument("--exit-code", type=int, help="execution.mode human: the exit code of the person's test command (default: from the reports).")
+    exec_parser.add_argument("--gate-exit-code", type=int, help="execution.mode human: the exit code of the person's compile/collect gate command.")
     rerun_parser = sub.add_parser("rerun-retained", parents=[shared])
     rerun_parser.add_argument("--run", required=True, help="Exact durable run ID")
     return parser

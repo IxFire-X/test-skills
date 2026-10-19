@@ -259,9 +259,12 @@ def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
         "host_isolation_receipt": driver._write_json(carriers / "host-isolation-receipt.json", boundary),
         "generated_delta_receipt": driver._write_json(carriers / "generated-delta-receipt.json", delta),
     }
+    human = dict(config.get("human_report") or {})
     arguments = SimpleNamespace(project=str(project), run=run_root.name, module=config.get("module_id"), language=None, target=config.get("target"),
-                                executor="local", docs=None, **{name: str(path) for name, path in paths.items()})
-    driver._log(driver._log_path(project, run_root.name), {"event": "execution_launch", "attempt_id": attempt_id, "build_offline": _build_offline(project, attempt)})
+                                executor="local", docs=None, junit=list(human.get("junit") or []), exit_code=human.get("exit_code"),
+                                gate_exit_code=human.get("gate_exit_code"), **{name: str(path) for name, path in paths.items()})
+    driver._log(driver._log_path(project, run_root.name), {"event": "execution_launch", "attempt_id": attempt_id, "build_offline": _build_offline(project, attempt),
+                                                           **({"execution_mode": "human", "reports": len(arguments.junit)} if human or config.get("execution_mode") == "human" else {})})
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = run_pipeline.cmd_exec(arguments)
@@ -269,6 +272,15 @@ def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
         output = json.loads(buffer.getvalue())
     except json.JSONDecodeError:
         output = {"status": "error", "raw": buffer.getvalue()[-2000:]}
+    if output.get("status") == "human_exec" or output.get("reason") == "HUMAN_REPORT_INVALID":
+        # S9: nothing ran or nothing was accepted yet; the attempt waits for the person's reports.
+        if human:
+            config = driver._config(run_root)
+            config.pop("human_report", None)
+            driver._save_config(run_root, config)
+        if output.get("reason") == "HUMAN_REPORT_INVALID":
+            raise DriverError("HUMAN_REPORT_INVALID", str(output.get("message")))
+        return {"exit_code": code, "output": output, "human_exec": True}
     driver._write_json(_execution_path(run_root, attempt_id), {"exit_code": code, "output": output})
     return {"exit_code": code, "output": output}
 
@@ -342,6 +354,12 @@ def advance_automation(project: Path, run_root: Path, attempt: Mapping[str, Any]
         if waiting is not None:
             return waiting
         execution = _execute(project, run_root, attempt, config, effective, automation, review, key)
+        if execution.get("human_exec"):
+            output = execution["output"]
+            return {"action": "human_exec", "run_id": run_root.name, "attempt_id": attempt_id,
+                    **{name: output[name] for name in ("commands", "selectors", "report_path", "report_dir", "continue") if name in output},
+                    "instructions": ("Выполните команды по порядку сами, в своём окружении (cwd указан у каждой); пакет их не запускает. "
+                                     "Затем передайте отчёт(ы): " + str(output.get("continue")))}
         return finish_execution(project, run_root, config, execution)
 
 

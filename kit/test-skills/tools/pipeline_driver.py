@@ -316,11 +316,13 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     # Launch options are checked before scan creates the run: a refused option leaves no empty run behind (S2b).
     runner = _runner_options(options, project)
     _review_mode(options.get("review_mode"))
-    options = {**dict(options), "execution_review": _execution_review(project, options), "context_confirm": _confirm_context(project, options)}
+    options = {**dict(options), "execution_review": _execution_review(project, options), "context_confirm": _confirm_context(project, options),
+               "execution_mode": _execution_mode(project, options, profile)}
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
                                 mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
                                 suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"),
-                                execution_review=options["execution_review"], confirm_context=options["context_confirm"])
+                                execution_review=options["execution_review"], confirm_context=options["context_confirm"],
+                                execution_mode=options["execution_mode"])
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -380,6 +382,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"task_input_bytes": int(options["task_input_bytes"])} if options.get("task_input_bytes") else {}),
         **({"execution_review": options["execution_review"]} if options.get("execution_review") else {}),
         **({"context_confirm": options["context_confirm"]} if "context_confirm" in options else {}),
+        **({"execution_mode": options["execution_mode"]} if options.get("execution_mode") == "human" else {}),
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
@@ -435,6 +438,17 @@ def _execution_review(project: Path, options: Mapping[str, Any]) -> str:
         raise DriverError(error.code, str(error)) from error
 
 
+def _execution_mode(project: Path, options: Mapping[str, Any], profile: str) -> str:
+    """S9: ``--execution-mode auto|human``, else ``.skillsrc`` ``execution.mode``, else ``auto``; cases-only runs nothing anyway."""
+    from tools.human_gates import GateError, execution_mode
+
+    try:
+        mode = execution_mode(project, options.get("execution_mode"))
+    except GateError as error:
+        raise DriverError(error.code, str(error)) from error
+    return mode if profile == "local-pilot-v1" else "auto"
+
+
 def _confirm_context(project: Path, options: Mapping[str, Any]) -> bool:
     """S5: ``--confirm-context yes|no``, else ``.skillsrc`` ``context.confirm``, else on."""
     from tools.human_gates import GateError, confirm_context
@@ -466,15 +480,22 @@ def _confirm_context_step(project: Path, run_root: Path, attempt: Mapping[str, A
         record_context_confirmation(run_root, attempt_id, digest)
         _log(_log_path(project, run_root.name), {"event": "context_confirmed", "attempt_id": attempt_id, "confirmation_digest": digest})
         return None
-    files = context_rows(_context_receipts(run_root, attempt_id))
     documents = [{"path": row["path"], "content_digest": row["sha256"], "size": len(row["content"].encode("utf-8"))}
                  for row in run_pipeline._docs_entries(project, list(config["docs"]))]
+    # A requirement document inside the project is listed once, as a document (the digest still binds every selected file).
+    files = [row for row in context_rows(_context_receipts(run_root, attempt_id)) if row["path"] not in {item["path"] for item in documents}]
     total = sum(row["size"] for row in [*files, *documents])
+    # S8: what the inventory kept out as secret material, by rule (the paths only; they never reach a task).
+    _baseline, inventory = _baseline_and_inventory(run_root, attempt)
+    withheld = sorted((str(item["project_path"]), str(item.get("scanner_rule_id"))) for item in inventory.get("exclusions", [])
+                      if item.get("reason_code") == "SECRET_SUSPECTED")
     listing = work_dir(run_root) / "context-files.txt"
     listing.parent.mkdir(parents=True, exist_ok=True)
     listing.write_text("\n".join([f"# В модель уйдут {len(documents)} документ(ов) требований и {len(files)} файл(ов) проекта, {total} байт",
                                   *[f"требования\t{row['size']}\t{row['path']}" for row in documents],
-                                  *[f"контекст\t{row['size']}\t{row['path']}" for row in files]]) + "\n", encoding="utf-8", newline="\n")
+                                  *[f"контекст\t{row['size']}\t{row['path']}" for row in files],
+                                  f"# Не уйдут как секреты: {len(withheld)}",
+                                  *[f"исключено\t{rule}\t{path}" for path, rule in withheld]]) + "\n", encoding="utf-8", newline="\n")
     names = ", ".join(row["path"] for row in documents)
     return _ask_task(
         run_root, attempt_id, "confirm-context",
@@ -1526,10 +1547,11 @@ def _attempt_lineage(run_root: Path, attempt: Mapping[str, Any]) -> list[str]:
 # the state machine
 # --------------------------------------------------------------------------------------
 
-def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, Any]:
+def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Run deterministic steps until a model or a person has to act, or the attempt is terminal.
 
     ``max_tasks`` > 1 lets a compact review return a batch of independent part tasks.
+    ``human`` (S9, execution.mode human): the reports and exit codes of the commands a person ran.
     """
     from tools import suite_update
 
@@ -1539,6 +1561,10 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, A
 
     project = Path(project).resolve()
     config = _config(run_root)
+    if human and human.get("junit"):
+        config["human_report"] = {"junit": [str(Path(path).resolve()) for path in human["junit"]], "exit_code": human.get("exit_code"),
+                                  "gate_exit_code": human.get("gate_exit_code")}
+        _save_config(run_root, config)
     limit = max(1, int(max_tasks or 1))
     config["_max_tasks"] = limit
     if config.get("scan_pending"):
@@ -1764,7 +1790,14 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--answers", type=Path, help="JSON file {label: value} with answers to ask_user questions.")
         if name in {"next", "run"}:
             command.add_argument("--profile", choices=(*PROFILES, SUITE_PROFILE), help="Required to start a run (suite-update-v1 updates the living suite).")
-            command.add_argument("--junit", action="append", default=[], help="suite-update-v1: JUnit XML report(s) of the project's own CI run for the impact analysis.")
+            command.add_argument("--junit", action="append", default=[],
+                                 help="suite-update-v1: JUnit XML report(s) of the project's own CI run for the impact analysis; "
+                                      "with --run and execution.mode human: the report(s) the person's run of the printed commands wrote.")
+            command.add_argument("--exit-code", type=int, help="execution.mode human: exit code of the person's test command (default: from the reports).")
+            command.add_argument("--gate-exit-code", type=int, help="execution.mode human: exit code of the person's compile/collect gate command.")
+            command.add_argument("--execution-mode", choices=("auto", "human"),
+                                 help="human (.skillsrc execution.mode): the package starts no build, test or mutation process; the driver answers "
+                                      "human_exec with the exact commands and continues with next --run <id> --junit <report> (local-pilot-v1).")
             command.add_argument("--docs", action="append", default=None, help="Requirement document inside the project; repeatable.")
             command.add_argument("--module", help="Exact module ID when the project has several.")
             command.add_argument("--target")
@@ -1826,7 +1859,7 @@ def _exit_code(payload: Mapping[str, Any]) -> int:
     if payload.get("action") == "done":
         result = payload.get("result", {})
         return int(result.get("exit_code", 0 if result.get("status") == "terminal" else 2))
-    if payload.get("action") in {"llm", "ask_user", "batch", "wait"}:
+    if payload.get("action") in {"llm", "ask_user", "batch", "wait", "human_exec"}:
         return 3  # waiting for a model or a person, same meaning as the pipeline's exit 3
     return 0
 
@@ -1899,7 +1932,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "accept_self_review", "review_mode",
+                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "execution_mode", "accept_self_review", "review_mode",
                   "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")
 
 
@@ -1915,10 +1948,16 @@ def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any],
         answers[label] = value
     options = {key: getattr(args, key, None) for key in _START_OPTIONS}
     try:
-        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run)
+        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run,
+                                           human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code} if args.run else None)
     except DriverError as error:
         payload = {"action": "error", "code": error.code, "message": str(error), **({"errors": error.diagnostics} if error.diagnostics else {})}
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 2
+    except Exception as error:  # a driver defect: JSON like `next`, the traceback goes to the service log
+        _log(_log_path(project, args.run), {"event": "error", "command": "run", "run_id": args.run, "code": "DRIVER_FAILURE",
+                                            "message": f"{type(error).__name__}: {error}", "traceback": traceback.format_exc()})
+        print(json.dumps({"action": "error", "code": "DRIVER_FAILURE", "message": f"{type(error).__name__}: {error}"}, ensure_ascii=False, sort_keys=True))
         return 2
     _log_command(project, payload.get("run_id"), entry, payload, started)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -1954,7 +1993,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "accept_self_review", "review_mode",
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "execution_mode", "accept_self_review", "review_mode",
                 "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")},
                                 max_tasks=args.max_tasks)
         else:
@@ -1967,7 +2006,8 @@ def main(argv: list[str] | None = None) -> int:
                 # One driver command is one operation: parallel submits of a batch run one after another.
                 with run_lock(run_root):
                     if args.command == "next":
-                        payload = advance(project, run_root, max_tasks=args.max_tasks)
+                        payload = advance(project, run_root, max_tasks=args.max_tasks,
+                                          human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code})
                     else:
                         payload = submit(project, run_root, args.task_id, output=args.output, answer=args.answer, failed=args.failed, reason=args.reason,
                                          transport_attempts=args.transport_attempts)
@@ -1981,4 +2021,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # `python -m tools.pipeline_driver` runs this file as __main__; the other modules import tools.pipeline_driver.
+    # One module, one DriverError class: otherwise `run` errors raised there escape as tracebacks (kit run, 2026-10-19).
+    from tools.pipeline_driver import main as _main
+
+    raise SystemExit(_main())

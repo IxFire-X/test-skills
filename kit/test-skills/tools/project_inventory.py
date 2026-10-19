@@ -39,6 +39,10 @@ _BUILD_OUTPUT_DIRS = frozenset({
 })
 _IDE_DIRS = frozenset({".idea", ".vscode"})
 _SECRET_DIRS = frozenset({".credentials", ".secrets", "credentials", "secrets"})
+# S8: credential stores of CLI tools, wherever they sit in a project (a copied home directory, a dev container).
+_CREDENTIAL_DIRS = frozenset({".ssh", ".aws", ".kube", ".gnupg", ".docker", ".azure", ".gcloud"})
+_CREDENTIAL_CONFIG_DIRS = frozenset({"gcloud", "gh", "hub"})  # under .config/
+_CREDENTIAL_FILES = frozenset({".netrc", "_netrc", ".pgpass", ".git-credentials", ".npmrc", ".pypirc", ".dockercfg", "kubeconfig"})
 _BINARY_SUFFIXES = frozenset({
     ".7z", ".a", ".bin", ".class", ".dll", ".dylib", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg",
     ".jpg", ".lock", ".mp3", ".mp4", ".o", ".pdf", ".png", ".pyc", ".so", ".tar", ".war", ".webp", ".zip",
@@ -89,6 +93,8 @@ _CONTENT_SIGNATURES = (
         rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|secret|token)"
         rb"[\"']?[ \t]*[:=][ \t]*(?:\"[A-Za-z0-9_./+=!@#%^&*~-]{16,}\"|'[A-Za-z0-9_./+=!@#%^&*~-]{16,}')"
     )),
+    # S8: the AWS credentials file format — an unquoted 40-character value (a reference such as os.environ[...] does not match).
+    ("aws-secret-assignment-v1", re.compile(rb"(?i)\baws_secret_access_key[ \t]*[:=][ \t]*[\"']?[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])")),
 )
 _CLOSED_MANIFESTS = frozenset({
     "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "pipfile", "pom.xml",
@@ -366,8 +372,13 @@ def _secret_name_rule(path: Path, relative_parts: Iterable[str] = ()) -> tuple[s
         return "filename-dotenv-v1", "dotenv"
     if path.suffix.casefold() in _PRIVATE_SUFFIXES or _PRIVATE_NAME.fullmatch(name):
         return "private-extension-v1", "private-material"
-    if _SECRET_DIRS & {part.casefold() for part in relative_parts}:
+    if name in _CREDENTIAL_FILES:
+        return "credential-file-v1", "credential-material"
+    parts = [part.casefold() for part in relative_parts]
+    if _SECRET_DIRS & set(parts):
         return "secret-directory-v1", "credential-material"
+    if _CREDENTIAL_DIRS & set(parts) or any(first == ".config" and second in _CREDENTIAL_CONFIG_DIRS for first, second in zip(parts, parts[1:])):
+        return "credential-directory-v1", "credential-material"
     return None
 
 
@@ -470,6 +481,10 @@ def _directory_reason(name: str, path: Path | None = None, project_root: Path | 
         return "BUILD_OUTPUT", "output-directory-v1"
     if folded in _SECRET_DIRS:
         return "SECRET_SUSPECTED", "secret-directory-v1"
+    if folded in _CREDENTIAL_DIRS:
+        return "SECRET_SUSPECTED", "credential-directory-v1"
+    if folded in _CREDENTIAL_CONFIG_DIRS and path is not None and path.parent.name.casefold() == ".config":
+        return "SECRET_SUSPECTED", "credential-directory-v1"
     return None
 
 
@@ -781,6 +796,9 @@ def _secret_exclusion_is_execution_significant(item: Mapping[str, Any], module: 
     """Recognize only the closed paths whose bytes can deterministically affect execution."""
     raw_path = item.get("project_path")
     if item.get("reason_code") != "SECRET_SUSPECTED" or not isinstance(raw_path, str):
+        return False
+    if item.get("scanner_rule_id") in {"credential-directory-v1", "credential-file-v1"}:
+        # S8: credential stores of CLI tools (.ssh, .aws, .docker, .netrc …) are no build input; the files stay on disk.
         return False
     path = Path(raw_path)
     name = path.name.casefold()

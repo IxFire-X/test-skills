@@ -727,12 +727,16 @@ def mutation_stage(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     execution = pilot_state.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]
     report = execution["payload"]
     settings, problem = _project_settings(project, run_root, attempt)
-    if settings is None:
-        status, code = ("NOT_RUNNABLE", problem) if problem else ("NOT_APPLICABLE", "MUTATION_NOT_ENABLED")
+    human = run["authorization"].get("execution_mode_human") is True
+    if settings is None or human:
+        # S9: in execution.mode human the package starts no PIT process; the stage is reported as not run.
+        status, code = ("NOT_APPLICABLE", "HUMAN_EXECUTION_MODE") if human else ("NOT_RUNNABLE", problem) if problem else ("NOT_APPLICABLE", "MUTATION_NOT_ENABLED")
+        message = ("execution.mode human: the package runs no mutations; a person can run PIT from the printed commands later" if human
+                   else "mutation.enabled is not true in .skillsrc" if problem is None else "the frozen .skillsrc is unavailable")
         before = project_snapshot(project)
         pins = load_pins()
         facts: dict[str, Any] = {
-            "status": status, "reason_code": code, "message": "mutation.enabled is not true in .skillsrc" if problem is None else "the frozen .skillsrc is unavailable",
+            "status": status, "reason_code": code, "message": message,
             "verification": report.get("verdict"),
             "tool": {"name": "pitest", "version": pins["java"]["pit_version"], "plugin_version": pins["java"]["plugin_version"], "pins_digest": pins_digest(), "jars": []},
             "settings": dict(DEFAULTS), "target_classes": [], "target_tests": [], "excluded_methods": [],

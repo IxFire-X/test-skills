@@ -334,7 +334,7 @@ class Operator:
 
     def command(self, step: str, *extra: str) -> str:
         """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
-        argv, skip = [], {"--from-step", "--only", "--run", "--answer"}
+        argv, skip = [], {"--from-step", "--only", "--run", "--answer", "--junit", "--exit-code", "--gate-exit-code"}
         items = iter(sys.argv[1:])
         for item in items:
             if item in skip:
@@ -775,7 +775,48 @@ class Operator:
                 *(["--module", self.args.module] if self.args.module else []), *(["--target", self.args.target] if self.args.target else []),
                 *(["--execution-review", self.args.execution_review] if self.args.execution_review else []),
                 *(["--task-input-bytes", str(self.task_input_bytes())] if self.driver_knows("--task-input-bytes") else []),
-                *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []), *extra]
+                *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []),
+                *(["--execution-mode", self.args.execution_mode] if self.args.execution_mode else []), *extra]
+
+    def junit_reports(self) -> list[str]:
+        """--junit: report files, or a report directory — every *.xml in it."""
+        reports: list[str] = []
+        for item in self.args.junit:
+            path = Path(item).expanduser().resolve()
+            found = sorted(path.glob("*.xml")) or sorted(path.rglob("*.xml")) if path.is_dir() else [path]
+            if not found:
+                raise Stop(f"--junit {path}: в каталоге нет *.xml", self.command(getattr(self, "current_step", "5")) + " --junit <отчёт JUnit или каталог отчётов>")
+            reports += [str(report) for report in found]
+        return reports
+
+    def human_argv(self, run_id: str) -> list[str]:
+        """S9: the person ran the printed commands — the reports go to the driver: ``run --runner process --run <id> --junit …``
+        (a driver that stops run on human_exec), else ``next --run <id> --junit …``."""
+        runner = self.pack / "tools" / "pipeline_driver_run.py"
+        by_run = runner.is_file() and "HUMAN_EXECUTION" in runner.read_text(encoding="utf-8", errors="replace")
+        head = ["run", "--project", str(self.project), "--runner", "process", "--run", run_id, "--max-tasks", str(self.args.max_tasks)] if by_run             else ["next", "--project", str(self.project), "--run", run_id]
+        return [self.py, "-m", "tools.pipeline_driver", *head, *[item for path in self.junit_reports() for item in ("--junit", path)],
+                *(["--exit-code", str(self.args.exit_code)] if self.args.exit_code is not None else []),
+                *(["--gate-exit-code", str(self.args.gate_exit_code)] if self.args.gate_exit_code is not None else [])]
+
+    def human_exec(self, payload: dict[str, Any], run_id: str, step: str) -> None:
+        """S9 human_exec: the package runs nothing — print the exact commands and stop with the ready continue command."""
+        shell = "powershell" if os.name == "nt" else "bash"
+        self.say("  исполнение человеком (execution.mode human): пакет сборку и тесты не запускает — выполните команды по порядку сами:")
+        for number, command in enumerate(payload.get("commands") or [], 1):
+            self.say(f"  {number}. [{command.get('kind')}] в {command.get('cwd')}:")
+            self.say(f"     {command.get(shell) or shlex.join(command.get('argv') or [])}")
+            other = "bash" if shell == "powershell" else "powershell"
+            if command.get(other):
+                self.log(f"     ({other}) {command[other]}")
+        selectors = payload.get("selectors") or []
+        if selectors:
+            self.say(f"  проверяемые тесты ({len(selectors)}): " + ", ".join(str(item) for item in selectors[:10]) + (" …" if len(selectors) > 10 else ""))
+        report = payload.get("report_path") or payload.get("report_dir")
+        self.say(f"  отчёт JUnit: {report}" + (f" (каталог отчётов {payload['report_dir']})" if payload.get("report_path") and payload.get("report_dir") else ""))
+        self.state[f"human_exec_{run_id}"] = {"report": report, "commands": len(payload.get("commands") or [])}
+        raise Stop("прогон ждёт отчёта человека: выполните команды выше; код выхода тестов — --exit-code, шлюза — --gate-exit-code (иначе из отчёта)",
+                   self.command(step, "--run", run_id, "--junit", str(payload.get("report_path") or payload.get("report_dir") or "<отчёт JUnit или каталог отчётов>")))
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
         return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
@@ -958,7 +999,7 @@ class Operator:
         run_id, self.args.run = self.args.run, None  # --run resumes the first driven step only
         starting = not run_id  # until the first model task is sized, the run goes by `next`/`submit` (no process launched)
         if run_id:
-            argv = self.resume_argv(run_id, self.args.answer)
+            argv = self.human_argv(run_id) if self.args.junit else self.resume_argv(run_id, self.args.answer)
         else:
             if not self.dry or self.pack.is_dir():
                 self.check_module()
@@ -981,6 +1022,11 @@ class Operator:
                 if action != "wait":
                     self.check_task_size(payload)
                 starting = False
+                argv = self.resume_argv(run_id, [])
+                continue
+            if action == "human_exec":
+                self.human_exec(payload, run_id, "5" if label == "run" else "5a")
+            if action in {"llm", "batch", "wait"} and run_id:  # after the person's reports (next --junit): the run goes on
                 argv = self.resume_argv(run_id, [])
                 continue
             if action == "done":
@@ -1759,6 +1805,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-passthrough", help="переменные окружения для CLI модели сверх базового списка wrap.py, через запятую "
                         "(имя или префикс со * в конце: GIGACODE_*,HTTPS_PROXY) → env_passthrough в wrap/wrap.json и, если пакет "
                         "это знает, в .skillsrc review_runner")
+    parser.add_argument("--execution-mode", choices=("auto", "human"), help="кто запускает сборку и тесты (pipeline_driver --execution-mode; "
+                        "пакет с S9): auto — пакет; human — пакет печатает команды (bash/PowerShell, cwd, куда пишется отчёт) и ждёт "
+                        "отчёт: продолжение — та же команда с --from-step 5 --run <id> --junit <отчёт>")
+    parser.add_argument("--junit", action="append", default=[], help="отчёт JUnit или каталог отчётов (все *.xml) после выполнения напечатанных "
+                                                                     "команд (режим human); можно несколько")
+    parser.add_argument("--exit-code", type=int, help="режим human: код выхода команды тестов (по умолчанию — из отчёта)")
+    parser.add_argument("--gate-exit-code", type=int, help="режим human: код выхода команды шлюза компиляции (по умолчанию — из отчёта)")
     parser.add_argument("--confirm-context", choices=("yes", "no"), help="подтверждение отправки файлов в модель (pipeline_driver "
                         "--confirm-context; пакет с S5): по умолчанию — как у пакета (yes, остановка confirm-context до первой задачи "
                         "модели); no — без остановки, для повторов на учебном проекте")

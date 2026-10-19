@@ -8,6 +8,9 @@ none``) turns the stop off, for example for repeated runs on a known project.
 S5 — ``context.confirm``: after scan and before the first model call the driver stops with ``ask_user
 confirm-context`` listing every selected project file and its size; the answer is the digest of that list.  On by
 default; ``context.confirm: false`` or ``--confirm-context no`` turns it off.
+
+S9 — ``execution.mode: human``: the package starts no build, test or mutation process; the driver prints the exact
+closed commands and a person runs them and hands the reports back (``next --junit``).  ``auto`` is the default.
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ EXECUTION_REVIEW = ("human", "none")
 DEFAULT_EXECUTION_REVIEW = "human"
 CONFIRM_CONTEXT = ("yes", "no")
 DEFAULT_CONFIRM_CONTEXT = True
+EXECUTION_MODE = ("auto", "human")
+DEFAULT_EXECUTION_MODE = "auto"
 
 
 class GateError(ValueError):
@@ -50,6 +55,17 @@ def execution_review(project: Path, flag: str | None = None) -> str:
     section = _skillsrc(project).get("execution")
     value = section.get("review") if isinstance(section, Mapping) else None
     return value if value in EXECUTION_REVIEW else DEFAULT_EXECUTION_REVIEW
+
+
+def execution_mode(project: Path, flag: str | None = None) -> str:
+    """S9: ``--execution-mode auto|human``, else ``.skillsrc`` ``execution.mode``, else ``auto``."""
+    if flag is not None:
+        if flag not in EXECUTION_MODE:
+            raise GateError("DRIVER_INPUT", f"--execution-mode must be one of: {', '.join(EXECUTION_MODE)}")
+        return flag
+    section = _skillsrc(project).get("execution")
+    value = section.get("mode") if isinstance(section, Mapping) else None
+    return value if value in EXECUTION_MODE else DEFAULT_EXECUTION_MODE
 
 
 def confirm_context(project: Path, flag: str | None = None) -> bool:
