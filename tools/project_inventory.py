@@ -1336,11 +1336,12 @@ def select_context_batches(
         raise ContextSelectionError("context inventory ownership failed")
     requested = list(opaque_file_ids)
     if include_closed_manifests:
+        # Build manifests travel with the code; .skillsrc does not: it is the package's own configuration (contract revision
+        # 2026-10-20) — the inventory and the baseline keep it, no model task reads it.
         requested.extend(
             item["opaque_id"]
             for item in index.values()
-            if Path(item["project_path"]).name.casefold() == ".skillsrc"
-            or Path(item["project_path"]).name.casefold() in _CLOSED_MANIFESTS
+            if Path(item["project_path"]).name.casefold() in _CLOSED_MANIFESTS
         )
     selected: list[Mapping[str, Any]] = []
     seen: set[str] = set()

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+from tests.helpers import model_context_ids as _model_context_ids
+
 
 def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
@@ -62,7 +64,7 @@ def _reviewer_protocol_inputs(
     context = publish_context_selection(
         run_root,
         attempt_id,
-        select_context_batches(inventory, Path(attempt["project"]), [], byte_budget=64 * 1024)[0]["receipt"],
+        select_context_batches(inventory, Path(attempt["project"]), _model_context_ids(inventory), byte_budget=64 * 1024)[0]["receipt"],
     )
 
     marker = {

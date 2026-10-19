@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
+from tests.helpers import model_context_ids as _model_context_ids
 from tools import pilot_state
 from tools import confined_output
 from tools.confined_output import OutputConfinementError, create_confined_bytes_exclusive
@@ -298,7 +299,7 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
     inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json"))
     context = pilot_state.publish_context_selection(
         root, attempt_id,
-        select_context_batches(inventory, tmp_path, [], byte_budget=64 * 1024)[0]["receipt"],
+        select_context_batches(inventory, tmp_path, _model_context_ids(inventory), byte_budget=64 * 1024)[0]["receipt"],
     )
     before = _snapshot(root)
     with pytest.raises(ValueError, match="publish_model_request"):

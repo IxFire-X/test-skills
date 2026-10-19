@@ -341,7 +341,8 @@ def _scan_skill_pack_root(project: Path) -> Path | None:
     return ROOT
 
 
-_WRAPPER_NAMES = {"mvnw", "mvnw.cmd", "gradlew", "gradlew.bat", ".gitattributes", ".gitignore"}
+# .skillsrc is the package's own configuration, not model context (contract revision 2026-10-20).
+_WRAPPER_NAMES = {"mvnw", "mvnw.cmd", "gradlew", "gradlew.bat", ".gitattributes", ".gitignore", ".skillsrc"}
 _WRAPPER_DIRECTORIES = (".mvn/wrapper/", "gradle/wrapper/")
 _LAUNCH_SCRIPT_SUFFIXES = (".ps1", ".sh", ".bat", ".cmd")
 
@@ -555,6 +556,12 @@ def _scan_run(project: Path, run_root: Path, run: Mapping[str, Any], args: Any) 
             selected_ids,
             byte_budget=_scan_context_budget(frozen_inventory, skillsrc_document),
         )
+        if not batches:
+            # Nothing for a model to read (no code, build manifest or document in the scope): say so now, not at the first task.
+            _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_EMPTY",
+                                   detail="в контексте модели нет ни одного файла кода, манифеста сборки или документа: проверьте paths модуля "
+                                          "в .skillsrc и --target", scope=scope))
+            return 2
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
     except ContextSelectionError as error:

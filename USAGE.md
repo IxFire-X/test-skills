@@ -191,8 +191,11 @@ Linux и Windows используют один пайплайн и project-nativ
 Необязательный раздел `limits` задаёт лимиты в байтах: `context_batch_bytes`,
 `docs_file_bytes`, `docs_total_bytes`, `task_input_bytes` (бюджет входа задачи, раздел 4). В контекст модели не попадают обёртки сборки
 (`mvnw`, `mvnw.cmd`, `gradlew`, `gradlew.bat`, `.mvn/wrapper/`, `gradle/wrapper/`),
-`.gitattributes`, `.gitignore` и скрипты запуска в корне проекта (`*.ps1`, `*.sh`,
-`*.bat`, `*.cmd`); в инвентаре и baseline запуска они остаются. Файлы, которые называет
+`.gitattributes`, `.gitignore`, сам `.skillsrc` (конфигурация пакета: модели она не нужна, и
+её правка не меняет подтверждённый список отправки) и скрипты запуска в корне проекта (`*.ps1`, `*.sh`,
+`*.bat`, `*.cmd`); в инвентаре и baseline запуска они остаются. Если для модели не осталось
+ни одного файла кода, манифеста сборки или документа, `scan` останавливается с `CONTEXT_EMPTY`
+(проверьте `paths` модуля и `--target`). Файлы, которые называет
 provenance capability, драйвер добавляет в срез ревью (`contexts`) в пределах четверти
 бюджета части. Linux venv может содержать
 стандартный interpreter symlink: baseline связывает `pyvenv.cfg`, целевой interpreter

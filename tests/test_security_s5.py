@@ -40,6 +40,7 @@ def test_the_run_asks_before_any_file_goes_to_the_model(tmp_path: Path) -> None:
     # A requirement document inside the project is listed once, as a document (kit run, 2026-10-19).
     assert {row["path"]: row["size"] for row in task["files"]} == {path: size for path, size in selected.items() if path not in documents}
     selected = {path: size for path, size in selected.items() if path not in documents}
+    assert ".skillsrc" not in selected  # the package's configuration never goes to the model (contract revision 2026-10-20)
     assert documents == {"docs/feature.md": len((project / "docs" / "feature.md").read_bytes())}  # the requirements go to the model too
     total = sum(selected.values()) + sum(documents.values())
     assert str(total) in task["question"] and str(len(selected)) in task["question"] and "docs/feature.md" in task["question"]

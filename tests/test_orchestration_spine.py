@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from tests.helpers import model_context_ids as _model_context_ids
 from tools import pilot_state
 from tools.run_pipeline import resume_phase_one_spine, run_phase_one_spine
 from helpers import build_phase_two_baseline, phase_two_baseline
@@ -60,7 +61,7 @@ def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_wr
     attempt = run["state"]["attempts"][0]
     baseline = read_execution_baseline(root / "baselines" / (attempt["baseline_digest"][7:] + ".json"))
     inventory = read_inventory_receipt(root / "inventories" / (baseline["inventory_digest"][7:] + ".json"))
-    context = pilot_state.publish_context_selection(root, attempt["attempt_id"], select_context_batches(inventory, tmp_path, [], byte_budget=65536)[0]["receipt"])
+    context = pilot_state.publish_context_selection(root, attempt["attempt_id"], select_context_batches(inventory, tmp_path, _model_context_ids(inventory), byte_budget=65536)[0]["receipt"])
     gap = "spec.md:3 — missing: refusal outcome; blocks: negative case; question: which result?"
     marker = {"schema_version": "5.0.0", "stage": "context-marker", "artifacts": {
         "analytics_documentation": {"requirements": canonical_fixture()["source_requirements"]},
@@ -76,7 +77,13 @@ def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_wr
     assert status["warning_evidence_path"] == str(root / published["path"])
     assert _tree(root) == before
 
+    # .skillsrc is no model context (contract revision 2026-10-20): its edit leaves the marker's evidence verified.
     (tmp_path / ".skillsrc").write_bytes((tmp_path / ".skillsrc").read_bytes() + b"\n")
+    assert _durable_status(tmp_path, root, stage="status").get("stop_reason") != "EVIDENCE_UNVERIFIED"
+    assert _tree(root) == before
+    # A file the model read changes: the evidence is stale.
+    read = tmp_path / context["files"][0]["project_path"]
+    read.write_bytes(read.read_bytes() + b"\n")
     before = _tree(root)
     status = _durable_status(tmp_path, root, stage="status")
     assert status["stop_reason"] == "EVIDENCE_UNVERIFIED"

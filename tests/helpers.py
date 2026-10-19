@@ -8,6 +8,13 @@ from pathlib import Path
 
 MODULE_PYTHON = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
 
+
+def model_context_ids(inventory):
+    """The inventory files a model may read, as scan selects them (no .skillsrc, wrappers or launch scripts)."""
+    from tools.run_pipeline import is_model_context_noise
+
+    return [item["opaque_id"] for item in inventory["files"] if not is_model_context_noise(item["project_path"])]
+
 def build_phase_two_baseline(
     project: Path,
     identity: dict,
