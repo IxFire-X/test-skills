@@ -71,7 +71,7 @@ CODEX_ARGV_CODE = "import json\nfrom tools.model_runner import PRESETS\nprint(js
 # assumed.  A flag answers only a stop with a single option; --yes never answers these.  Other questions are asked as is.
 ASK_STOPS: dict[str, tuple[str, str, str | None]] = {
     "confirm-context": ("отправка выбранных файлов проекта в модель", "payload", "yes-send"),
-    "approve-generated-tests": ("исполнение сгенерированных тестов сборкой проекта", "payload", "yes-exec"),
+    "approve-generated-tests": ("исполнение сгенерированных тестов сборкой проекта", "payload", "yes-exec"),  # also -apply/-repair
     "regenerate-after-gate": ("перегенерация тестов после гейта сборки", "runner-tail", None),
 }
 ASK_KNOWN_KEYS = {"action", "task_id", "question", "options", "run_id", "attempt_id", "stage", "skillsrc_question_id"}
@@ -745,7 +745,8 @@ class Operator:
                 "--host-cli-version", self.state.get("host_cli_version") or self.args.cli_version or "unknown", "--reviewer-isolation", "fresh",
                 "--review-runner-preset", "codex", "--review-runner-command", json.dumps(command, ensure_ascii=False),
                 "--runner-dir", str(self.runner_dir), "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
-                *(["--module", self.args.module] if self.args.module else []), *(["--target", self.args.target] if self.args.target else []), *extra]
+                *(["--module", self.args.module] if self.args.module else []), *(["--target", self.args.target] if self.args.target else []),
+                *(["--execution-review", self.args.execution_review] if self.args.execution_review else []), *extra]
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
         return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
@@ -852,7 +853,11 @@ class Operator:
             if isinstance(value, list):
                 self.say(f"  {key}: {len(value)}")
                 for item in value[:limit]:
-                    self.say("    " + (item if isinstance(item, str) else json.dumps(item, ensure_ascii=False))[:200])
+                    if isinstance(item, dict) and "path" in item:  # file rows (approve-generated-tests: path, content_digest)
+                        rest = {name: field for name, field in item.items() if name != "path"}
+                        self.say(f"    {item['path']}  " + "  ".join(str(field) for field in rest.values())[:160])
+                    else:
+                        self.say("    " + (item if isinstance(item, str) else json.dumps(item, ensure_ascii=False))[:200])
                 if len(value) > limit:
                     self.say(f"    … ещё {len(value) - limit} (полностью — {self.home / 'operate.log'})")
                     self.log(json.dumps(value[limit:], ensure_ascii=False))
@@ -864,7 +869,11 @@ class Operator:
         is one ready command."""
         kind = next((key for key in ASK_STOPS if key in name), None)
         what, show, flag = ASK_STOPS.get(kind, ("вопрос драйвера", "payload", None))
-        self.say(f"  остановка «{what}» ({name}): {payload.get('question')}")
+        question = str(payload.get("question") or "")
+        if any(isinstance(value, list) and value for key, value in payload.items() if key not in ASK_KNOWN_KEYS) and len(question) > 400:
+            question = question[:400] + " … (полностью — в operate.log)"  # the list is shown below, item by item
+            self.log(f"вопрос {name}: {payload.get('question')}")
+        self.say(f"  остановка «{what}» ({name}): {question}")
         options = [option for option in payload.get("options") or [] if isinstance(option, dict)]
         for option in options:
             self.say("    - " + (" — ".join(str(option[key]) for key in ("value", "label", "description") if option.get(key)) or json.dumps(option, ensure_ascii=False)))
@@ -875,7 +884,8 @@ class Operator:
                        self.command(step, "--run", run_id, "--answer", f"{name}=<значение из списка выше>"))
         self.show_payload(payload)
         if flag and (self.dry or getattr(self.args, flag.replace("-", "_"))):
-            if len(options) == 1 and options[0].get("value"):
+            digest = payload.get("approval_digest")  # S3: the flag answers exactly the digest of the shown files
+            if len(options) == 1 and options[0].get("value") and (digest is None or options[0]["value"] == digest):
                 self.say(f"  ответ {options[0]['value']} (--{flag})")
                 return str(options[0]["value"])
             self.say(f"  --{flag} отвечает только остановку с одним вариантом, здесь их {len(options)} — нужен ответ человека")
@@ -1633,6 +1643,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                            "правку .skillsrc и chmod +x файлов проекта не подтверждает)")
     parser.add_argument("--yes-skillsrc", action="store_true", help="записать .skillsrc проекта без вопроса (diff всё равно печатается)")
     parser.add_argument("--yes-chmod", action="store_true", help="chmod +x mvnw/gradlew проекта без вопроса")
+    parser.add_argument("--execution-review", choices=("human", "none"), help="одобрение сгенерированных тестов перед запуском "
+                        "(pipeline_driver --execution-review; пакет с S3): по умолчанию — как у пакета (human, остановка "
+                        "approve-generated-tests); none — без остановки, для повторов на учебном проекте")
     parser.add_argument("--yes-send", action="store_true", help="подтвердить остановку confirm-context (отправка показанных файлов "
                                                                 "в модель), если у неё один вариант; --yes её не подтверждает")
     parser.add_argument("--yes-exec", action="store_true", help="подтвердить остановку approve-generated-tests (исполнение показанных "

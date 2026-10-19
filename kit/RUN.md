@@ -159,6 +159,13 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
   задачу, модель не вызывается); `operate.py` печатает её вход в байтах и оценку в токенах (`--tokens-per-byte`, по
   умолчанию 0,24) против окна модели (`--model-context`, по умолчанию 239 144). Больше окна — стоп с подсказкой
   `--target`, модель не вызывалась; иначе тот же прогон продолжается `run --run <run_id>`.
+- **Одобрение сгенерированных тестов (пакет с S3).** После записи тестов в проект и до любой сборки драйвер
+  останавливается на `approve-generated-tests`: `operate.py` показывает файлы строками «путь  дайджест» (первые 30,
+  полный список — в `operate.log`) и `approval_digest`. Прочитать файлы и ответить в терминале дайджестом; без
+  терминала — готовая команда с `--yes-exec`: флаг отвечает только `approval_digest` показанных файлов (`--yes` не
+  отвечает). Правка файла меняет дайджест — нужно новое одобрение. Для повторов на учебном проекте —
+  `--execution-review none` (или `.skillsrc` `execution: {review: none}`). Пробный прогон (`--only 4,5a`) тестов не
+  исполняет и этой остановки не даёт.
 - **Шаг 5.** На `ask_user` показывает вопрос и ждёт ответа. На `regenerate-after-gate` и `BUILD_FAILED_BEFORE_TESTS`
   печатает хвост `runner-output.txt` и останавливается. Прерванный прогон продолжается так:
   `--from-step 5 --run <run_id> [--answer метка=значение]`. Если в проекте несколько целей — `--target <цель>`
@@ -301,6 +308,7 @@ python3 -m tools.pipeline_driver run --project <проект> --runner process \
 | Что в выводе | Что делать |
 | --- | --- |
 | `"action": "ask_user"`, код 3 | прочитать `question`; ответить повтором с `--answer <метка>=<значение>` (метка — хвост `task_id` после `.ask.`) |
+| `ask.approve-generated-tests` (пакет с S3) | прочитать перечисленные файлы; одобрить — ответ `approve-generated-tests=<approval_digest>` (в `operate.py` — ввод дайджеста или `--yes-exec`); не одобрять — остановиться и поправить или удалить файлы |
 | `ask.regenerate-after-gate` / `GENERATED_TEST_INVALID` | **не перегенерировать сразу**: открыть `.pilot-runs/<run>/artifacts/<attempt>/runner-output.txt` — если там линтер/сборка проекта, а не ошибки тестов, исправить окружение (п. 1) и начать новый прогон; перегенерация — только при ошибках компиляции самих тестов |
 | `"action": "error"`, `code` | код и `message` — сюда (п. 7); `DRIVER_FAILURE` — дефект пакета |
 | `RUNNER_*` в журнале (`RUNNER_TIMEOUT`, `RUNNER_EXIT_n`, `RUNNER_ANSWER_NOT_JSON`) | смотреть `~/ts/runner/<run>/runner/<задача>/stderr.txt` и `last-message.txt`; модель не держит схему → другая модель для роли или меньший `--review-input-bytes` |
