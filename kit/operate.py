@@ -787,20 +787,24 @@ class Operator:
                 *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []),
                 *(["--execution-mode", self.args.execution_mode] if self.args.execution_mode else []), *extra]
 
-    def junit_reports(self) -> list[str]:
-        """--junit: report files, or a report directory — every *.xml in it."""
+    def junit_reports(self, run_id: str | None = None) -> list[str]:
+        """--junit: report files, or a report directory — every *.xml in it.  No report at all (the build failed before the
+        tests: the package removes the report location before it issues the command) — one line with the ready command."""
         reports: list[str] = []
+        step = getattr(self, "current_step", "5")
         for item in self.args.junit:
             path = Path(item).expanduser().resolve()
-            found = sorted(path.glob("*.xml")) or sorted(path.rglob("*.xml")) if path.is_dir() else [path]
+            found = (sorted(path.glob("*.xml")) or sorted(path.rglob("*.xml"))) if path.is_dir() else [path] if path.is_file() else []
             if not found:
-                raise Stop(f"--junit {path}: в каталоге нет *.xml", self.command(getattr(self, "current_step", "5")) + " --junit <отчёт JUnit или каталог отчётов>")
+                raise Stop(f"--junit {path}: отчёта нет — если сборка упала до тестов, передайте код выхода и вывод сборки вместо отчёта",
+                           self.command(step, *(["--run", run_id] if run_id else []), "--exit-code", "<код выхода команды>",
+                                        "--build-log", "<файл с выводом сборки>"))
             reports += [str(report) for report in found]
         return reports
 
-    def human_flags(self) -> list[str]:
+    def human_flags(self, run_id: str | None = None) -> list[str]:
         """What the person hands back after a human_exec stop (reports, exit codes, a mutation step, the PIT report, a build log)."""
-        return [*[item for path in self.junit_reports() for item in ("--junit", path)],
+        return [*[item for path in self.junit_reports(run_id) for item in ("--junit", path)],
                 *(["--exit-code", str(self.args.exit_code)] if self.args.exit_code is not None else []),
                 *(["--gate-exit-code", str(self.args.gate_exit_code)] if self.args.gate_exit_code is not None else []),
                 *(["--mutation-step-done"] if self.args.mutation_step_done else []),
@@ -841,7 +845,7 @@ class Operator:
         by_run = runner.is_file() and "HUMAN_EXECUTION" in runner.read_text(encoding="utf-8", errors="replace")
         head = (["run", "--project", str(self.project), "--runner", "process", "--run", run_id, "--max-tasks", str(self.args.max_tasks)] if by_run
                 else ["next", "--project", str(self.project), "--run", run_id])
-        return [self.py, "-m", "tools.pipeline_driver", *head, *self.human_flags()]
+        return [self.py, "-m", "tools.pipeline_driver", *head, *self.human_flags(run_id)]
 
     def human_exec(self, payload: dict[str, Any], run_id: str, step: str) -> None:
         """S9 human_exec: the package runs nothing: print the exact command(s) and stop with the ready continue command.

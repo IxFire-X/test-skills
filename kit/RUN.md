@@ -217,9 +217,10 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
   `… --from-step 9 --run <run_id> --junit <отчёт или каталог отчётов> [--exit-code N]`; если сборка упала до отчёта —
   `--exit-code N --build-log <файл с выводом сборки>` вместо `--junit`. Повторы упавших методов в этом режиме не
   выполняются и метка FLAKY не ставится: упавший метод считается упавшим. Между прогонами возможно одобрение
-  отремонтированного метода (`approve-generated-tests-repair`, `--yes-exec`). Перед повторным `suite-run` убедиться,
-  что excludes линтера из preflight (nohttp, checkstyle …) применены к `.pilot-runs`, `.runner` и `.tmp`: иначе сборка
-  упадёт на линтере, прочитав записи прошлых прогонов.
+  отремонтированного метода (`approve-generated-tests-repair`, `--yes-exec`). Перед шагом 9 убедиться, что
+  excludes линтера из preflight (nohttp, checkstyle …) применены к `.pilot-runs`, `.runner` и `.tmp`: иначе `suite-run`
+  или `repair-run` упадёт на линтере, прочитав записи прогонов — в том числе текущего (вывод упавшей сборки, переданный
+  `--build-log`, сохраняется в `.pilot-runs`).
 
 ## 0. Проверка комплекта
 
