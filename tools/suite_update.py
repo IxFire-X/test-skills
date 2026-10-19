@@ -89,7 +89,7 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
               "host_cli_version": options.get("host_cli_version") or "unspecified", "reviewer_isolation": options.get("reviewer_isolation") or "fresh",
               "mutation": bool(options.get("mutation")), "repeats": 2, "suite_dir": suite_dir,
               "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES),
-              "execution_review": driver._execution_review(project, options)}
+              "execution_review": driver._execution_review(project, options), "context_confirm": driver._confirm_context(project, options)}
     driver._save_config(run_root, config)
     _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {}, "tries": {}})
     _snapshot_before(project, run_root, suite_dir)
@@ -207,8 +207,50 @@ def _scan(project: Path, run_root: Path, manifest: Mapping[str, Any]) -> tuple[l
 
 # ----------------------------------------------------------------------------------- tasks
 
+def _confirm_model_input(run_root: Path, inputs: Sequence[Path]) -> dict[str, Any] | None:
+    """S5 (minimal for suite-update): before the run's first model task a person confirms its input files.
+
+    The run has no attempt journal: the confirmation is kept in the run state and the driver-log.
+    """
+    from tools.human_gates import context_digest
+
+    if not driver._config(run_root).get("context_confirm", True):
+        return None
+    state = _state(run_root)
+    approvals = state["facts"].setdefault("approvals", {})
+    if approvals.get("context"):
+        return None
+    rows = [{"path": str(path), "content_digest": "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest(), "size": Path(path).stat().st_size}
+            for path in inputs if Path(path).is_file()]
+    digest = context_digest(rows, "suite-update")
+    task_id = driver._task_id(run_root.name, "ask.confirm-context")
+    asked = state["facts"].get("context_asked")
+    if asked is not None and (state["facts"].get("answers") or {}).get(task_id) == asked:
+        approvals["context"] = asked
+        _save(run_root, state)
+        _log(run_root.parents[1], run_root, {"event": "context_confirmed", "confirmation_digest": asked})
+        return None
+    state["facts"]["context_asked"] = digest
+    _save(run_root, state)
+    total = sum(row["size"] for row in rows)
+    listing = driver.work_dir(run_root) / "context-files.txt"
+    listing.write_text("\n".join([f"# В модель уйдут {len(rows)} файл(ов) входа, {total} байт", *[f"{row['size']}\t{row['path']}" for row in rows]]) + "\n",
+                       encoding="utf-8", newline="\n")
+    task = {"action": "ask_user", "task_id": task_id, "run_id": run_root.name, "attempt_id": None, "files": rows, "listing_path": str(listing),
+            "confirmation_digest": digest,
+            "question": (f"В модель уйдут {len(rows)} файл(ов) входа первой задачи (требования, кейсы и код тестов набора), всего {total} байт; "
+                         f"список — {listing}. Проверьте, что в них нет лишнего. Подтверждение разрешает отправку: ответ confirm-context={digest}. "
+                         "Пока ответа нет, модель не вызывается."),
+            "options": [{"value": digest, "label": f"Отправить в модель {len(rows)} файл(ов), {total} байт"}]}
+    driver._write_json(driver._task_path(run_root, task_id), task)
+    return task
+
+
 def _task(run_root: Path, label: str, *, stage: str, skill: str, inputs: Sequence[Path], schema: Mapping[str, Any], instructions: str,
           extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    waiting = _confirm_model_input(run_root, inputs)
+    if waiting is not None:
+        return waiting
     return driver._llm_task(run_root, run_root.name, label, stage=stage, skill=skill, inputs=inputs, schema=schema, instructions=instructions,
                             extra={"profile": PROFILE, "suite_label": label, **dict(extra or {})})
 

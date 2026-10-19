@@ -26,7 +26,7 @@ def _events(run_root: Path, kind: str) -> list[dict]:
 def _until_approval(tmp_path: Path, project: Path | None = None, **options) -> tuple[Path, Path, dict, SavedModel]:
     project = project or _project(tmp_path, local=True)
     model = SavedModel("local-pilot-v1")
-    task = _drive(project, _start(project, "local-pilot-v1", **options), model,
+    task = _drive(project, _start(project, "local-pilot-v1", confirm_context="no", **options), model,
                   until=lambda task: task["action"] == "ask_user" and task["task_id"].endswith("ask.approve-generated-tests"))
     return project, _run_root(project, task), task, model
 
@@ -77,7 +77,7 @@ def test_execution_review_none_runs_without_the_question(tmp_path: Path) -> None
     skillsrc["execution"] = {"review": "none"}
     (project / ".skillsrc").write_text(json.dumps(skillsrc, ensure_ascii=False) + "\n", encoding="utf-8")
     model = SavedModel("local-pilot-v1")
-    done = _drive(project, _start(project, "local-pilot-v1"), model)
+    done = _drive(project, _start(project, "local-pilot-v1", confirm_context="no"), model)
     run_root = _run_root(project, done)
     assert done["result"]["verification"] == "PASS" and not execution_review_required(run_root) and not _events(run_root, "EXECUTION_APPROVED")
 
@@ -90,7 +90,7 @@ def test_the_flag_overrides_skillsrc_and_cases_only_never_asks(tmp_path: Path) -
     _project_path, run_root, task, _model = _until_approval(tmp_path, project, execution_review="human")
     assert task["action"] == "ask_user" and execution_review_required(run_root)
     cases = _project(tmp_path / "cases", local=False)
-    done = _drive(cases, _start(cases, "cases-only-v1"), SavedModel("cases-only-v1"))
+    done = _drive(cases, _start(cases, "cases-only-v1", confirm_context="no"), SavedModel("cases-only-v1"))
     assert done["action"] == "done" and not execution_review_required(_run_root(cases, done))
     with pytest.raises(driver.DriverError):
         _start(_project(tmp_path / "bad", local=True), "local-pilot-v1", execution_review="maybe")

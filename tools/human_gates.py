@@ -4,6 +4,10 @@ S3 — ``execution.review``: after the generated tests are written into the proj
 mutation run, the driver stops with ``ask_user approve-generated-tests`` listing the exact files and their digests;
 the answer is the digest of that list.  ``human`` is the default; ``none`` (``.skillsrc`` or ``--execution-review
 none``) turns the stop off, for example for repeated runs on a known project.
+
+S5 — ``context.confirm``: after scan and before the first model call the driver stops with ``ask_user
+confirm-context`` listing every selected project file and its size; the answer is the digest of that list.  On by
+default; ``context.confirm: false`` or ``--confirm-context no`` turns it off.
 """
 from __future__ import annotations
 
@@ -14,6 +18,8 @@ from typing import Any, Mapping, Sequence
 
 EXECUTION_REVIEW = ("human", "none")
 DEFAULT_EXECUTION_REVIEW = "human"
+CONFIRM_CONTEXT = ("yes", "no")
+DEFAULT_CONFIRM_CONTEXT = True
 
 
 class GateError(ValueError):
@@ -44,6 +50,34 @@ def execution_review(project: Path, flag: str | None = None) -> str:
     section = _skillsrc(project).get("execution")
     value = section.get("review") if isinstance(section, Mapping) else None
     return value if value in EXECUTION_REVIEW else DEFAULT_EXECUTION_REVIEW
+
+
+def confirm_context(project: Path, flag: str | None = None) -> bool:
+    """S5: ``--confirm-context yes|no``, else ``.skillsrc`` ``context.confirm``, else on."""
+    if flag is not None:
+        if flag not in CONFIRM_CONTEXT:
+            raise GateError("DRIVER_INPUT", f"--confirm-context must be one of: {', '.join(CONFIRM_CONTEXT)}")
+        return flag == "yes"
+    section = _skillsrc(project).get("context")
+    value = section.get("confirm") if isinstance(section, Mapping) else None
+    return value if isinstance(value, bool) else DEFAULT_CONFIRM_CONTEXT
+
+
+def context_rows(receipts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every selected file once (path, content digest, size): what the model tasks may carry."""
+    rows: dict[str, dict[str, Any]] = {}
+    for receipt in receipts:
+        for item in receipt["files"]:
+            rows.setdefault(str(item["project_path"]), {"path": str(item["project_path"]), "content_digest": str(item["content_digest"]),
+                                                        "size": int(item["size"])})
+    return [rows[path] for path in sorted(rows)]
+
+
+def context_digest(rows: Sequence[Mapping[str, Any]], requirements_digest: str) -> str:
+    """Digest of what goes to the model: the requirement documents (by the digest of their snapshot) and every context file."""
+    value = {"requirements_digest": str(requirements_digest), "files": sorted((dict(row) for row in rows), key=lambda row: row["path"])}
+    data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def file_rows(files: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:

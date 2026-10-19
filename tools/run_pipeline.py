@@ -294,6 +294,9 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
     # S3: the driver resolves execution.review (human by default); the manual `scan` records it only when asked explicitly.
     if getattr(args, "execution_review", None) == "human" and profile == "local-pilot-v1":
         authorization["execution_review_required"] = True
+    # S5: likewise the confirmation of the model input (the driver turns it on by default).
+    if getattr(args, "confirm_context", None) in {True, "yes"}:
+        authorization["context_confirm_required"] = True
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -1705,6 +1708,8 @@ def build_parser() -> JsonArgumentParser:
                              help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
     scan_parser.add_argument("--execution-review", choices=("human", "none"),
                              help="human: exec starts only after EXECUTION_APPROVED of the exact generated files (S3); the driver sets it by default.")
+    scan_parser.add_argument("--confirm-context", choices=("yes", "no"),
+                             help="yes: no model request before CONTEXT_CONFIRMED of the exact model input (S5); the driver sets it by default.")
     status_parser = sub.add_parser("status", parents=[shared])
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])

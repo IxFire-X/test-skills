@@ -241,6 +241,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
 контекста модели в байтах, по умолчанию 500000), `--task-input-bytes N` (бюджет входа задачи, ниже),
 `--execution-review human|none` (одобрение сгенерированных тестов перед запуском, раздел 8),
+`--confirm-context yes|no` (подтверждение отправки файлов в модель, ниже),
 `--accept-self-review`, `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
 (сколько независимых задач — частей ревью `compact-v1` или батчей разметки контекста — выдать сразу). Опции волн 2–3 — `--mutation`,
 `--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
@@ -323,6 +324,23 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
 `driver-log.jsonl` отличает ожидание от работы: у `submit` есть `task_age_seconds` —
 сколько прошло с первой выдачи задачи, у `task_reissued` — `since_first_issue_seconds`.
 Лог не входит ни в журнал, ни в дайджесты.
+
+**Подтверждение отправки в модель (`context.confirm`).** По умолчанию драйвер после `scan` и
+до первого вызова модели возвращает `ask_user` с меткой `confirm-context`: в вопросе —
+документы требований (`--docs`) и число файлов проекта с общим размером в байтах; в полях
+`documents` и `files` и в файле `<run>.driver/context-files.txt` — каждый файл с размером;
+в `confirmation_digest` — дайджест списка. Проверьте, что в нём нет персональных данных,
+секретов и лишнего кода, и ответьте `submit ... --answer <confirmation_digest>` (у
+`run --runner process` — `--answer confirm-context=<confirmation_digest>`). Ответ пишется в
+журнал событием `CONTEXT_CONFIRMED`; журнал не примет ни одного `MODEL_REQUESTED` без
+подтверждения именно этого списка (требование фиксируется в квитанции авторизации,
+`context_confirm_required`). Подтверждение — одно на run: доработка или регенерация с тем
+же списком не спрашивает снова, другой список — спросит. Лишнее исключается в `.skillsrc`
+(`paths`/`exclusions` модуля) или `--target` с новым запуском. Выключение — явно:
+`.skillsrc` `context: {confirm: false}` или `--confirm-context no` (флаг сильнее
+`.skillsrc`). В `suite-update-v1` — то же перед первой задачей модели со списком её входных
+файлов (подтверждение — в состоянии run и `driver-log.jsonl`). Ручной `run_pipeline scan`
+записывает требование только с `--confirm-context yes`.
 
 Источник истины остаётся в `.pilot-runs/<run_id>/` (журнал и квитанции). Не запускайте
 параллельно две команды драйвера для одного run и не удаляйте `.lock` вручную.

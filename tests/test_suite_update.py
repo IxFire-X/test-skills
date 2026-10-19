@@ -227,7 +227,7 @@ def test_a_behaviour_change_without_a_requirement_goes_to_quarantine(suite_proje
 @needs_java
 @pytest.mark.human_gates
 def test_updated_methods_run_only_after_a_person_approved_their_bytes(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """S3: with execution.review human (the default) the suite run waits for the approval of the written files."""
+    """S3/S5: with the defaults the first model task waits for the confirmation of its input and the suite run for the approval of the written files."""
     replay = _copy(suite_project, tmp_path)
     project = replay.project
     monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
@@ -248,14 +248,18 @@ def test_updated_methods_run_only_after_a_person_approved_their_bytes(suite_proj
             asked.append(task)
             run_dir = project / ".pilot-runs" / task["run_id"]
             assert not (run_dir.with_name(task["run_id"] + ".driver") / "suite" / "suite-run.json").exists()  # nothing ran yet
-            assert code == 3 and [row["path"] for row in task["files"]] == [GENERATED]
-            code, task = replay.submit(task, "--answer", task["approval_digest"])
+            assert code == 3
+            if task["task_id"].endswith("ask.confirm-context"):  # S5: before the first model task
+                assert task["files"] and Path(task["listing_path"]).is_file()
+            else:
+                assert [row["path"] for row in task["files"]] == [GENERATED]
+            code, task = replay.submit(task, "--answer", task["options"][0]["value"])
             continue
         for item in task["tasks"] if task.get("action") == "batch" else [task]:
             Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
             code, task = replay.submit(item)
             assert task.get("status") != "rejected", task.get("errors")
-    assert [item["task_id"].rsplit(".", 1)[1] for item in asked] == ["approve-generated-tests-apply"]
+    assert [item["task_id"].rsplit(".", 1)[1] for item in asked] == ["confirm-context", "approve-generated-tests-apply"]
     assert task["result"]["outcome"] == "UPDATED", task["result"]
 
 

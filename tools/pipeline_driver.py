@@ -316,11 +316,11 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     # Launch options are checked before scan creates the run: a refused option leaves no empty run behind (S2b).
     runner = _runner_options(options, project)
     _review_mode(options.get("review_mode"))
-    options = {**dict(options), "execution_review": _execution_review(project, options)}
+    options = {**dict(options), "execution_review": _execution_review(project, options), "context_confirm": _confirm_context(project, options)}
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
                                 mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
                                 suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"),
-                                execution_review=options["execution_review"])
+                                execution_review=options["execution_review"], confirm_context=options["context_confirm"])
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -379,6 +379,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "review_context_bytes": int(options.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES),
         **({"task_input_bytes": int(options["task_input_bytes"])} if options.get("task_input_bytes") else {}),
         **({"execution_review": options["execution_review"]} if options.get("execution_review") else {}),
+        **({"context_confirm": options["context_confirm"]} if "context_confirm" in options else {}),
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
@@ -432,6 +433,57 @@ def _execution_review(project: Path, options: Mapping[str, Any]) -> str:
         return execution_review(project, options.get("execution_review"))
     except GateError as error:
         raise DriverError(error.code, str(error)) from error
+
+
+def _confirm_context(project: Path, options: Mapping[str, Any]) -> bool:
+    """S5: ``--confirm-context yes|no``, else ``.skillsrc`` ``context.confirm``, else on."""
+    from tools.human_gates import GateError, confirm_context
+
+    try:
+        return confirm_context(project, options.get("confirm_context"))
+    except GateError as error:
+        raise DriverError(error.code, str(error)) from error
+
+
+def _confirm_context_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """S5: before the first model call a person confirms the requirement documents and project files that go to the model.
+
+    The answer is the digest of the list; one confirmation covers every attempt of the run with the same list.
+    """
+    from tools import run_pipeline
+    from tools.human_gates import context_rows
+    from tools.pilot_state import context_confirm_required, context_confirmation_digest, derive_state, record_context_confirmation
+
+    attempt_id = str(attempt["attempt_id"])
+    if not context_confirm_required(run_root):
+        return None
+    digest = context_confirmation_digest(run_root, attempt_id)
+    events = derive_state(run_root)["events"]
+    if any(event["event_type"] == "CONTEXT_CONFIRMED" and event.get("artifact_digest") == digest for event in events):
+        return None
+    task_id = _task_id(attempt_id, "ask.confirm-context")
+    if config.get("answers", {}).get(task_id) == digest:
+        record_context_confirmation(run_root, attempt_id, digest)
+        _log(_log_path(project, run_root.name), {"event": "context_confirmed", "attempt_id": attempt_id, "confirmation_digest": digest})
+        return None
+    files = context_rows(_context_receipts(run_root, attempt_id))
+    documents = [{"path": row["path"], "content_digest": row["sha256"], "size": len(row["content"].encode("utf-8"))}
+                 for row in run_pipeline._docs_entries(project, list(config["docs"]))]
+    total = sum(row["size"] for row in [*files, *documents])
+    listing = work_dir(run_root) / "context-files.txt"
+    listing.parent.mkdir(parents=True, exist_ok=True)
+    listing.write_text("\n".join([f"# В модель уйдут {len(documents)} документ(ов) требований и {len(files)} файл(ов) проекта, {total} байт",
+                                  *[f"требования\t{row['size']}\t{row['path']}" for row in documents],
+                                  *[f"контекст\t{row['size']}\t{row['path']}" for row in files]]) + "\n", encoding="utf-8", newline="\n")
+    names = ", ".join(row["path"] for row in documents)
+    return _ask_task(
+        run_root, attempt_id, "confirm-context",
+        f"В модель уйдут документы требований ({names}) и {len(files)} файл(ов) проекта, всего {total} байт; полный список с размерами — "
+        f"{listing}. Проверьте, что в нём нет лишнего (персональные данные, секреты, чужой код). Подтверждение разрешает отправку именно "
+        f"этих файлов: ответ confirm-context={digest}. Пока ответа нет, модель не вызывается; лишние файлы исключите в .skillsrc "
+        "(paths/exclusions модуля) или --target и начните новый запуск.",
+        [{"value": digest, "label": f"Отправить в модель {len(documents) + len(files)} файл(ов), {total} байт"}],
+        extra={"files": files, "documents": documents, "listing_path": str(listing), "confirmation_digest": digest})
 
 
 def _review_mode(value: Any) -> str:
@@ -1506,6 +1558,9 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, A
 
     _generation_context(project, run_root, attempt)
     events = _events(run_root, attempt_id)
+    confirming = _confirm_context_step(project, run_root, attempt, config)
+    if confirming is not None:
+        return confirming
     if "MODEL_RESPONSE_RECEIVED" not in _stage_events(events, "context-marker:baseline"):
         waiting = _marker_step(project, run_root, attempt, config)
         if waiting is not None:
@@ -1725,6 +1780,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--execution-review", choices=("human", "none"),
                                  help="human (default; .skillsrc execution.review): stop after the generated tests are written, before any build or test run, "
                                       "until a person approves the exact files (ask_user approve-generated-tests); none: no stop.")
+            command.add_argument("--confirm-context", choices=("yes", "no"),
+                                 help="yes (default; .skillsrc context.confirm): stop after scan, before the first model call, until a person confirms "
+                                      "the requirement documents and project files that go to the model (ask_user confirm-context); no: no stop.")
             command.add_argument("--task-input-bytes", type=int,
                                  help="Largest input of a marker, generator or automation task; a larger one stops before the model call "
                                       "(default: .skillsrc limits.task_input_bytes, else 1000000; about 0.24 tokens per byte).")
@@ -1841,7 +1899,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "accept_self_review", "review_mode",
+                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "accept_self_review", "review_mode",
                   "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")
 
 
@@ -1896,7 +1954,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "accept_self_review", "review_mode",
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "confirm_context", "accept_self_review", "review_mode",
                 "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")},
                                 max_tasks=args.max_tasks)
         else:

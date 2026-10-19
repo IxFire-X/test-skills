@@ -4,7 +4,7 @@ import pytest
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", "human_gates: keep the package defaults of the human gates (S3) instead of turning them off")
+    config.addinivalue_line("markers", "human_gates: keep the package defaults of the human gates (S3, S5) instead of turning them off")
 
 
 @pytest.fixture(scope="session")
@@ -23,6 +23,7 @@ def _human_gates_off_for_recorded_runs():
 
     patch = pytest.MonkeyPatch()
     patch.setattr(human_gates, "DEFAULT_EXECUTION_REVIEW", "none")
+    patch.setattr(human_gates, "DEFAULT_CONFIRM_CONTEXT", False)
     yield
     patch.undo()
 
@@ -34,3 +35,4 @@ def _human_gates_defaults(request: pytest.FixtureRequest, monkeypatch: pytest.Mo
     from tools import human_gates
 
     monkeypatch.setattr(human_gates, "DEFAULT_EXECUTION_REVIEW", "human")
+    monkeypatch.setattr(human_gates, "DEFAULT_CONFIRM_CONTEXT", True)
