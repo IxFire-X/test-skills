@@ -84,7 +84,7 @@ def _run_one(project: Path, run_root: Path, task: Mapping[str, Any], config: Map
 
 
 def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str], max_tasks: int = 4, limit_seconds: float = 6 * 3600,
-        run_id: str | None = None) -> dict[str, Any]:
+        run_id: str | None = None, human: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Drive one run to ``done`` (or to an unanswered question) with the process runner for every model task.
 
     ``run_id`` continues an interrupted run (review 2.1 item 12): the driver state says what is next,
@@ -93,7 +93,8 @@ def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str]
     project = Path(project).resolve()
     if run_id:
         run_root = driver._run_root(project, str(run_id))
-        payload = _locked(project, run_root, lambda: driver.advance(project, run_root, max_tasks=max_tasks))
+        # `run --run <id> --junit <report>`: the reports of the commands a person ran (S9).
+        payload = _locked(project, run_root, lambda: driver.advance(project, run_root, max_tasks=max_tasks, human=human))
     else:
         options = {**dict(options), "review_runner": "process"}
         payload = driver.start_run(project, options, max_tasks=max_tasks)
@@ -108,6 +109,9 @@ def run(project: Path, options: Mapping[str, Any], *, answers: Mapping[str, str]
             time.sleep(max(1, min(int(payload.get("poll_seconds") or 5), 15)))
             payload = _locked(project, run_root, lambda: driver.advance(project, run_root, max_tasks=max_tasks))
             continue
+        if action == "human_exec":
+            # S9: the person runs the printed commands; the run continues with `run --run <id> --junit <report>`.
+            return {**payload, "stopped": "HUMAN_EXECUTION"}
         if action == "ask_user":
             value = _answer_for(payload, answers)
             if value is None:

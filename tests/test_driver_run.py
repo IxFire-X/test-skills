@@ -246,3 +246,40 @@ def test_a_bad_launch_option_is_a_json_refusal_before_the_run_exists(tmp_path: P
         assert (code, payload["action"], payload["code"]) == (2, "error", "DRIVER_INPUT"), (command, payload)
         after = sorted(path.name for path in (project / ".pilot-runs").iterdir()) if (project / ".pilot-runs").is_dir() else []
         assert after == before, (command, after)
+
+
+@pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven")
+def test_human_mode_runs_no_build_and_no_mutations_and_continues_with_the_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S9 on step5 (Java, --mutation): `run` stops on human_exec, the person runs Maven, `run --run --junit` finishes; PIT never starts."""
+    import subprocess
+
+    from tools import mutation, run_tests
+    from tools.pilot_state import read_mutation_receipt_if_present
+
+    monkeypatch.setenv("JAVA_HOME", str(JAVA_HOME))
+    monkeypatch.setenv("PATH", str(Path(JAVA_HOME) / "bin") + os.pathsep + os.environ.get("PATH", ""))
+    project = _project(tmp_path)
+    skillsrc = project / ".skillsrc"
+    skillsrc.write_text(skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.1.0", 1)
+                        + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("the package started a build, test or PIT process in human mode")
+
+    monkeypatch.setattr(run_tests, "run_subprocess", forbidden)
+    monkeypatch.setattr(mutation, "_run", forbidden)
+    code, stopped = _run(project, "--profile", "local-pilot-v1", "--mutation", "--execution-mode", "human")
+    assert stopped["action"] == "human_exec" and stopped.get("stopped") == "HUMAN_EXECUTION" and code == 3, stopped
+    run_id = stopped["run_id"]
+    for command in stopped["commands"]:  # the person runs the printed commands in their own environment
+        completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+        assert completed.returncode == 0, (command["kind"], completed.stdout[-2000:], completed.stderr[-2000:])
+    report = Path(stopped["report_path"])
+    reports = [str(report)] if report.is_file() else [str(path) for path in report.rglob("*.xml")]
+    assert reports
+    code, payload = _main("run", "--project", str(project), "--runner", "process", "--run", run_id, *[item for path in reports for item in ("--junit", path)])
+    assert payload["action"] == "done", payload
+    result = payload["result"]
+    assert (result["verification"], result["accepted"]) == ("PASS", True), result
+    receipt = read_mutation_receipt_if_present(project / ".pilot-runs" / run_id, result["attempt_id"])
+    assert receipt is not None and (receipt.get("status"), receipt.get("reason_code")) == ("NOT_APPLICABLE", "HUMAN_EXECUTION_MODE"), receipt

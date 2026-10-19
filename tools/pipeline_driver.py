@@ -1948,7 +1948,8 @@ def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any],
         answers[label] = value
     options = {key: getattr(args, key, None) for key in _START_OPTIONS}
     try:
-        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run)
+        payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run,
+                                           human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code} if args.run else None)
     except DriverError as error:
         payload = {"action": "error", "code": error.code, "message": str(error), **({"errors": error.diagnostics} if error.diagnostics else {})}
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
