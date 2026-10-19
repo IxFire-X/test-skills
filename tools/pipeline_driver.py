@@ -265,10 +265,11 @@ def _check_task_input(project: Path, config: Mapping[str, Any], stage: str, inpu
         {"code": "TASK_INPUT_TOO_LARGE", "stage": stage, "input_bytes": size, "threshold": threshold, "hint": hint}])
 
 
-def _ask_task(run_root: Path, attempt_id: str, label: str, question: str, options: Sequence[Mapping[str, str]]) -> dict[str, Any]:
+def _ask_task(run_root: Path, attempt_id: str, label: str, question: str, options: Sequence[Mapping[str, str]],
+              extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
     task_id = _task_id(attempt_id, "ask." + label)
     task = {"action": "ask_user", "task_id": task_id, "question": question, "options": [dict(option) for option in options],
-            "run_id": run_root.name, "attempt_id": attempt_id}
+            "run_id": run_root.name, "attempt_id": attempt_id, **dict(extra or {})}
     _write_json(_task_path(run_root, task_id), task)
     return task
 
@@ -315,9 +316,11 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     # Launch options are checked before scan creates the run: a refused option leaves no empty run behind (S2b).
     runner = _runner_options(options, project)
     _review_mode(options.get("review_mode"))
+    options = {**dict(options), "execution_review": _execution_review(project, options)}
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
                                 mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
-                                suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"))
+                                suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"),
+                                execution_review=options["execution_review"])
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
@@ -375,6 +378,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "review_reserve_bytes": int(options.get("review_reserve_bytes") or _DEFAULT_REVIEW_RESERVE_BYTES),
         "review_context_bytes": int(options.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES),
         **({"task_input_bytes": int(options["task_input_bytes"])} if options.get("task_input_bytes") else {}),
+        **({"execution_review": options["execution_review"]} if options.get("execution_review") else {}),
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
@@ -418,6 +422,16 @@ def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]
     return {"reviewer_isolation": "fresh", "review_runner": {"mode": "process", "preset": options.get("review_runner_preset"), "command": command,
                                                              "cli": options.get("review_runner_cli"), "dir": str(base),
                                                              **({"inside_project": True} if inside else {})}}
+
+
+def _execution_review(project: Path, options: Mapping[str, Any]) -> str:
+    """S3: ``--execution-review``, else ``.skillsrc`` ``execution.review``, else ``human``."""
+    from tools.human_gates import GateError, execution_review
+
+    try:
+        return execution_review(project, options.get("execution_review"))
+    except GateError as error:
+        raise DriverError(error.code, str(error)) from error
 
 
 def _review_mode(value: Any) -> str:
@@ -1563,7 +1577,7 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
     from tools import suite_update
 
     if suite_update.is_suite_run(run_root):
-        return suite_update.submit(project, run_root, task_id, output=output, failed=failed, reason=reason)
+        return suite_update.submit(project, run_root, task_id, output=output, failed=failed, reason=reason, answer=answer)
     path = _task_path(run_root, task_id)
     if not path.is_file():
         raise DriverError("DRIVER_INPUT", "unknown task id")
@@ -1708,6 +1722,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--reviewer-isolation", choices=("fresh", "none"))
             command.add_argument("--review-input-bytes", type=int)
             command.add_argument("--review-reserve-bytes", type=int)
+            command.add_argument("--execution-review", choices=("human", "none"),
+                                 help="human (default; .skillsrc execution.review): stop after the generated tests are written, before any build or test run, "
+                                      "until a person approves the exact files (ask_user approve-generated-tests); none: no stop.")
             command.add_argument("--task-input-bytes", type=int,
                                  help="Largest input of a marker, generator or automation task; a larger one stops before the model call "
                                       "(default: .skillsrc limits.task_input_bytes, else 1000000; about 0.24 tokens per byte).")
@@ -1824,7 +1841,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "accept_self_review", "review_mode",
+                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "accept_self_review", "review_mode",
                   "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")
 
 
@@ -1879,7 +1896,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "accept_self_review", "review_mode",
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "execution_review", "accept_self_review", "review_mode",
                 "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")},
                                 max_tasks=args.max_tasks)
         else:

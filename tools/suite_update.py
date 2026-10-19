@@ -88,7 +88,8 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
               "model_id": options.get("model_id"), "host_cli": options.get("host_cli") or "unspecified",
               "host_cli_version": options.get("host_cli_version") or "unspecified", "reviewer_isolation": options.get("reviewer_isolation") or "fresh",
               "mutation": bool(options.get("mutation")), "repeats": 2, "suite_dir": suite_dir,
-              "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES)}
+              "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES),
+              "execution_review": driver._execution_review(project, options)}
     driver._save_config(run_root, config)
     _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {}, "tries": {}})
     _snapshot_before(project, run_root, suite_dir)
@@ -218,11 +219,18 @@ def _answer(run_root: Path, label: str) -> Any | None:
 
 
 def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None = None, failed: str | None = None, reason: str | None = None,
-           **_ignored: Any) -> dict[str, Any]:
+           answer: str | None = None, **_ignored: Any) -> dict[str, Any]:
     """Check one answer against its step; a rejected answer is reissued with the errors (at most three tries)."""
     project = Path(project).resolve()
     task = json.loads(driver._task_path(run_root, task_id).read_text(encoding="utf-8"))
     state = _state(run_root)
+    if task.get("action") == "ask_user":
+        allowed = [option["value"] for option in task["options"]]
+        if answer not in allowed:
+            raise driver.DriverError("DRIVER_INPUT", f"--answer must be one of: {', '.join(allowed)}")
+        state["facts"].setdefault("answers", {})[task_id] = answer
+        _save(run_root, state)
+        return advance(project, run_root)
     label = str(task.get("suite_label"))
     accepted = state["facts"].setdefault("accepted", {})
     if label in accepted:
@@ -909,6 +917,7 @@ def _apply(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> N
         else:
             for path, content in sorted(contents.items()):
                 (Path(project) / path).write_bytes(content.encode("utf-8"))
+            state["facts"]["written"] = sorted(contents)
     state["facts"]["update_applied"] = applied
     state["facts"]["automation_applied"] = applied and bool(contents or facts.get("removed"))
     _goto(run_root, state, "SUITE_RUN")
@@ -945,12 +954,47 @@ def _effective_manifest(project: Path, run_root: Path, state: Mapping[str, Any])
     return manifest
 
 
-def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
+def _approval(project: Path, run_root: Path, state: dict[str, Any], key: str, paths: Sequence[str]) -> dict[str, Any] | None:
+    """S3: the test files this run wrote run only after a person approved their exact bytes (execution.review human).
+
+    The question lists every written file with the digest of its bytes on disk; the answer is the digest of the list.
+    The approval is kept in the run state and the driver-log (suite-update has no attempt journal).
+    """
+    from tools.human_gates import approval_digest, file_rows
+
+    if driver._config(run_root).get("execution_review", "human") != "human" or not paths:
+        return None
+    rows = file_rows([{"path": path, "content_digest": "sha256:" + hashlib.sha256((Path(project) / path).read_bytes()).hexdigest()} for path in paths])
+    digest = approval_digest(rows)
+    approvals = state["facts"].setdefault("approvals", {})
+    if approvals.get(key) == digest:
+        return None
+    task_id = driver._task_id(run_root.name, f"ask.approve-generated-tests-{key}")
+    if (state["facts"].get("answers") or {}).get(task_id) == digest:
+        approvals[key] = digest
+        _save(run_root, state)
+        _log(project, run_root, {"event": "execution_approved", "step": key, "approval_digest": digest})
+        return None
+    listing = "; ".join(f"{row['path']} ({row['content_digest']})" for row in rows)
+    what = "починенные методы" if key == "repair" else "обновлённые и новые методы"
+    task = {"action": "ask_user", "task_id": task_id, "run_id": run_root.name, "attempt_id": None, "files": rows, "approval_digest": digest,
+            "question": (f"В набор записаны {what}, тесты ещё не запускались: {listing}. Проверьте эти файлы. Одобрение запускает сборку и тесты "
+                         f"набора на этих байтах: ответ approve-generated-tests-{key}={digest}. Пока ответа нет, ничего не запускается."),
+            "options": [{"value": digest, "label": f"Одобрить запуск {len(rows)} файл(ов) с этими дайджестами"}]}
+    driver._write_json(driver._task_path(run_root, task_id), task)
+    return task
+
+
+def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
     from tools.suite_run import not_run_reason, run_suite
 
     if state["facts"].get("stop"):
         _goto(run_root, state, "SUMMARY")
         return None
+    if state["facts"].get("automation_applied"):
+        waiting = _approval(project, run_root, state, "apply", state["facts"].get("written") or [])
+        if waiting is not None:
+            return waiting
     manifest = _effective_manifest(project, run_root, state)
     result = run_suite(project, manifest, _module(project, manifest), repeats=int(driver._config(run_root)["repeats"]))
     _write(_work(run_root) / "suite-run.json", result)
@@ -1058,13 +1102,21 @@ def _repair_review(project: Path, run_root: Path, state: dict[str, Any], max_tas
                         blocked_step="TRIAGE")
 
 
-def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
+def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
     from tools.suite_run import not_run_reason, run_suite
 
     facts = state["facts"]["repair_automation"]
     _suite_dir, manifest, _document = _suite(project, run_root)
-    for path, content in sorted(_contents(facts, manifest).items()):
-        (Path(project) / path).write_bytes(content.encode("utf-8"))
+    contents = _contents(facts, manifest)
+    if not state["facts"].get("repair_written"):
+        # Written once: a later `next` while the approval is open never overwrites what a person reads or edits.
+        for path, content in sorted(contents.items()):
+            (Path(project) / path).write_bytes(content.encode("utf-8"))
+        state["facts"]["repair_written"] = True
+        _save(run_root, state)
+    waiting = _approval(project, run_root, state, "repair", sorted(contents))
+    if waiting is not None:
+        return waiting
     effective = _effective_manifest(project, run_root, state)
     locators = {row["locator"] for row in facts["methods"].values()}
     # The whole suite runs again: a build that did not compile ran none of its methods.

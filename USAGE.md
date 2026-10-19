@@ -240,6 +240,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 `--host-cli-version`, `--host-settings`, `--reviewer-isolation fresh|none`,
 `--review-input-bytes N`, `--review-reserve-bytes N`, `--review-context-bytes N` (одно окно
 контекста модели в байтах, по умолчанию 500000), `--task-input-bytes N` (бюджет входа задачи, ниже),
+`--execution-review human|none` (одобрение сгенерированных тестов перед запуском, раздел 8),
 `--accept-self-review`, `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
 (сколько независимых задач — частей ревью `compact-v1` или батчей разметки контекста — выдать сразу). Опции волн 2–3 — `--mutation`,
 `--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
@@ -491,9 +492,29 @@ verification    = NOT_APPLICABLE
 3. при correction допускает ровно одну полную revision 2 и второй review;
 4. формирует complete generated file set;
 5. материализует каждый pipeline-owned file и пишет receipt;
+5a. останавливается на одобрении человеком (по умолчанию, см. ниже);
 6. выполняет шлюз компиляции/сбора и запускает exact reviewed targets закрытым adapter;
 7. строит execution trace и disposition всего generated delta;
 8. выполняет finalization и terminal transition.
+
+**Одобрение сгенерированных тестов перед запуском (`execution.review`).** По умолчанию
+(`human`) драйвер после записи сгенерированных тестов в проект и до любого запуска сборки,
+тестов и мутаций возвращает `ask_user` с меткой `approve-generated-tests`: в вопросе и в
+поле `files` — каждый записанный файл с дайджестом содержимого, в `approval_digest` —
+дайджест этого списка. Прочитайте файлы и ответьте
+`submit ... --answer <approval_digest>` (у `run --runner process` —
+`--answer approve-generated-tests=<approval_digest>`); другой ответ отклоняется. Ответ
+пишется в журнал событием `EXECUTION_APPROVED`, и журнал не даст начать исполнение
+(`EXECUTION_STARTED`) без одобрения именно этих файлов; пока ответа нет, ничего не
+запускается (код выхода 3). Требование фиксируется при создании run в квитанции
+авторизации (`execution_review_required`). Выключение — явно: `.skillsrc`
+`execution: {review: none}` или флаг `next/run --execution-review none` (флаг сильнее
+`.skillsrc`), например для повторных прогонов на известном проекте. В `suite-update-v1`
+то же перед прогоном набора, если run записал обновлённые или новые методы
+(`approve-generated-tests-apply`), и перед повторным прогоном после починки
+(`approve-generated-tests-repair`); одобрение хранится в состоянии run и в
+`driver-log.jsonl`. Ручной `run_pipeline scan` записывает требование только с
+`--execution-review human`: ручной `exec` и так запускает человек.
 
 Все эти шаги ведёт драйвер. Модель получает задачи `tc-to-autotest:r1` (и `r2` при
 `AUTO_FIX_APPLIED`) и части статического ревью `autotest-reviewer:*`. Если ревью не

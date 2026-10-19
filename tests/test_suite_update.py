@@ -225,6 +225,41 @@ def test_a_behaviour_change_without_a_requirement_goes_to_quarantine(suite_proje
 
 
 @needs_java
+@pytest.mark.human_gates
+def test_updated_methods_run_only_after_a_person_approved_their_bytes(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S3: with execution.review human (the default) the suite run waits for the approval of the written files."""
+    replay = _copy(suite_project, tmp_path)
+    project = replay.project
+    monkeypatch.setenv("JAVA_HOME", os.environ["TEST_SKILLS_JAVA_HOME"])
+    _replace_in(project / DOCS, OLD, NEW)
+    _replace_in(project / CONTROLLER, OLD, NEW)
+    asked: list[dict] = []
+
+    def answer(item: dict) -> dict:
+        return _answer(item)
+
+    config = replay.config
+    code, task = replay.call("next", "--project", str(project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
+                             "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"])
+    for _ in range(60):
+        if task.get("action") == "done":
+            break
+        if task.get("action") == "ask_user":
+            asked.append(task)
+            run_dir = project / ".pilot-runs" / task["run_id"]
+            assert not (run_dir.with_name(task["run_id"] + ".driver") / "suite" / "suite-run.json").exists()  # nothing ran yet
+            assert code == 3 and [row["path"] for row in task["files"]] == [GENERATED]
+            code, task = replay.submit(task, "--answer", task["approval_digest"])
+            continue
+        for item in task["tasks"] if task.get("action") == "batch" else [task]:
+            Path(item["output_path"]).write_text(json.dumps(answer(item), ensure_ascii=False), encoding="utf-8")
+            code, task = replay.submit(item)
+            assert task.get("status") != "rejected", task.get("errors")
+    assert [item["task_id"].rsplit(".", 1)[1] for item in asked] == ["approve-generated-tests-apply"]
+    assert task["result"]["outcome"] == "UPDATED", task["result"]
+
+
+@needs_java
 def test_a_broken_owned_method_is_repaired_once_without_changing_expectations(suite_project, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools.pipeline_driver_suite import attempt_suite  # noqa: F401  (the suite module is importable)
     from tools.suite_manifest import canonical_bytes, method_digests

@@ -35,9 +35,10 @@ on_confined_write(_forget_validated_evidence)
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy",
+              "execution_review_required"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
-_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested")
+_AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -54,9 +55,9 @@ _MODEL_STAGE_REGISTRY = {
     "tc-to-autotest": ("automation-generator", "tc-to-autotest-v1"),
     "autotest-reviewer": ("automation-reviewer", "autotest-static-reviewer-v2"),
 }
-_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_EVENT_TYPES = {"MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND", "EXECUTION_BASELINE_FROZEN", "CONTEXT_SELECTED", "ATTEMPT_CREATED", *_MODEL_EVENT_TYPES, "ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK", "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_APPROVED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _ACTORS = {"controller"}
-_ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
+_ATTEMPT_EVENTS = {"ATTEMPT_CREATED", "CONTEXT_SELECTED", *_MODEL_EVENT_TYPES, "WAITING_FOR_INPUT", "WAITING_FOR_MODEL", "EXECUTION_APPROVED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "ATTEMPT_TERMINAL", "PROCESS_STOPPED", "TERMINAL_RETRY_OBSERVED", "RETAINED_NATIVE_RERUN"}
 _PROGRESS_EVENTS = {*_MODEL_EVENT_TYPES, "CONTEXT_SELECTED", "EXECUTION_STARTED", "EXECUTION_UNKNOWN", "PROCESS_STOPPED"}
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas"
 _PACK_ROOT = _SCHEMA_ROOT.parent
@@ -573,7 +574,8 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
         raise ValueError("unsafe authorization")
     if "disposition_policy" in authorization and authorization["disposition_policy"] != "quarantine":
         raise ValueError("unsafe authorization")
-    if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization) and policy_profile != "local-pilot-v1":
+    if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization
+            or "execution_review_required" in authorization) and policy_profile != "local-pilot-v1":
         raise ValueError("authorization policy mismatch")
     return dict(authorization)
 
@@ -602,6 +604,7 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
     unknown: set[str] = set()
     stopped: set[str] = set()
     execution_started: set[str] = set()
+    execution_approved: set[str] = set()
     terminal_retries: set[str] = set()
     retained_reruns: set[str] = set()
     model_requests: set[tuple[str, str]] = set()
@@ -659,7 +662,12 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                 continue
             elif states.get(attempt_id) == "TERMINAL":
                 raise ValueError("invalid event journal")
-            if event_type == "EXECUTION_STARTED":
+            if event_type == "EXECUTION_APPROVED":
+                # S3: a person approves the generated tests once, before the execution starts.
+                if attempt_id in execution_started or attempt_id in execution_approved:
+                    raise ValueError("invalid execution approval")
+                execution_approved.add(attempt_id)
+            elif event_type == "EXECUTION_STARTED":
                 if attempt_id in execution_started or any(
                     key[0] == attempt_id and key not in model_responses
                     for key in model_requests
@@ -1386,6 +1394,8 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
         raise ValueError("MODEL_REQUESTED requires publish_model_request")
     if event_type == "EXECUTION_STARTED":
         raise ValueError("EXECUTION_STARTED requires claim_execution_start")
+    if event_type == "EXECUTION_APPROVED":
+        raise ValueError("EXECUTION_APPROVED requires record_execution_approval")
     if event_type == "EXECUTION_UNKNOWN":
         raise ValueError("EXECUTION_UNKNOWN requires record_execution_unknown")
     if event_type == "PROCESS_STOPPED":
@@ -1396,6 +1406,42 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
         raise ValueError("RETAINED_NATIVE_RERUN requires the retained-rerun controller")
     project, root = _run_root(run_root)
     return _append_event(project, root, event_type, actor=actor, attempt_id=attempt_id, batch_id=batch_id, artifact_digest=artifact_digest, stage_instance_id=stage_instance_id, transport_attempts=transport_attempts)
+
+
+def generated_tests_approval_digest(run_root: Path, attempt_id: str) -> str:
+    """Digest of the materialized generated files (path and content digest) a person approves (S3)."""
+    from tools.human_gates import approval_digest
+
+    record = read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]
+    return approval_digest(record["delta"]["files"])
+
+
+def execution_review_required(run_root: Path) -> bool:
+    """Whether the run was created with ``execution.review: human`` (recorded in its authorization receipt)."""
+    project, root = _run_root(run_root)
+    _manifest, authorization = _run_boundary(project, root)
+    return authorization.get("execution_review_required") is True
+
+
+def record_execution_approval(run_root: Path, attempt_id: str, approval_digest: str) -> Mapping[str, Any]:
+    """Record that a person approved exactly the materialized generated tests of an attempt (S3)."""
+    project, root = _run_root(run_root)
+    if not isinstance(approval_digest, str) or not _DIGEST.fullmatch(approval_digest):
+        raise ValueError("invalid execution approval digest")
+    state = derive_state(root)
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None or attempt["state"] == "TERMINAL" or attempt["policy_profile"] != "local-pilot-v1":
+        raise ValueError("invalid execution approval attempt")
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+    if any(event["event_type"] in {"EXECUTION_STARTED", "EXECUTION_APPROVED"} for event in events):
+        raise ValueError("execution approval is already decided")
+    try:
+        expected = generated_tests_approval_digest(root, attempt_id)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("execution approval requires materialized generated tests") from error
+    if approval_digest != expected:
+        raise ValueError("execution approval names other files than the materialized generated tests")
+    return _append_event(project, root, "EXECUTION_APPROVED", actor="controller", attempt_id=attempt_id, batch_id=None, artifact_digest=approval_digest)
 
 
 def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) -> Mapping[str, Any]:
@@ -1412,6 +1458,11 @@ def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) 
         raise ValueError("execution authorization is invalid")
     if any(event["event_type"] == "EXECUTION_STARTED" and event.get("attempt_id") == attempt_id for event in state["events"]):
         raise ValueError("execution already started")
+    if authorization.get("execution_review_required") is True:
+        # S3: the run was created with execution.review human — no build or test run before a person approved the exact files.
+        approvals = [event for event in state["events"] if event["event_type"] == "EXECUTION_APPROVED" and event.get("attempt_id") == attempt_id]
+        if len(approvals) != 1 or approvals[0].get("artifact_digest") != generated_tests_approval_digest(root, attempt_id):
+            raise ValueError("execution requires the approval of the generated tests")
     return _append_event(
         project,
         root,

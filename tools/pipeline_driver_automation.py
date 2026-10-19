@@ -188,12 +188,11 @@ def _finalize_rejected_automation(project: Path, run_root: Path, attempt: Mappin
                      verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
 
 
-def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], effective: Mapping[str, Any],
-             automation: Mapping[str, Any], review: Mapping[str, Any], key: str) -> dict[str, Any]:
-    """Materialize the accepted files and run them once through the existing ``exec`` command."""
-    from tools import run_pipeline
+def _materialize(project: Path, run_root: Path, attempt: Mapping[str, Any], effective: Mapping[str, Any],
+                 automation: Mapping[str, Any], review: Mapping[str, Any], key: str) -> None:
+    """Write the accepted files into the project once; nothing runs yet."""
     from tools.generated_delta import materialize_delta
-    from tools.pilot_state import read_attempt_receipt, read_run
+    from tools.pilot_state import read_attempt_receipt
 
     attempt_id = str(attempt["attempt_id"])
     baseline, _inventory = driver._baseline_and_inventory(run_root, attempt)
@@ -201,13 +200,53 @@ def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: 
         read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
     except (KeyError, TypeError, ValueError):
         # Not materialized yet.  After an interrupted `next` the delta is already durable
-        # and `exec` below resumes the started execution instead of writing files again.
+        # and `exec` resumes the started execution instead of writing files again.
         history: dict[str, Any] = {}
         if key == "r2":
             history = {"automation_history": [_stage_artifact(run_root, attempt_id, "tc-to-autotest:r1")["artifact"]],
                        "review_history": [_review_output(run_root, attempt_id, "r1")]}
         materialize_delta(project, _module_root(project, attempt), baseline, automation, review, canonical_document=effective["document"],
                           run_root=run_root, attempt_id=attempt_id, **history)
+
+
+def _approval_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """S3: with execution.review human the build and the tests start only after a person approved the exact written files.
+
+    The question lists every generated file with its content digest; the one accepted answer is the digest of that list,
+    so an approval never covers other files or other bytes.  None when the run needs no approval or it is recorded.
+    """
+    from tools.human_gates import file_rows
+    from tools.pilot_state import execution_review_required, generated_tests_approval_digest, read_attempt_receipt, record_execution_approval
+
+    attempt_id = str(attempt["attempt_id"])
+    if not execution_review_required(run_root):
+        return None
+    if any(event["event_type"] in {"EXECUTION_APPROVED", "EXECUTION_STARTED"} for event in driver._events(run_root, attempt_id)):
+        return None
+    digest = generated_tests_approval_digest(run_root, attempt_id)
+    task_id = driver._task_id(attempt_id, "ask.approve-generated-tests")
+    if config.get("answers", {}).get(task_id) == digest:
+        record_execution_approval(run_root, attempt_id, digest)
+        driver._log(driver._log_path(project, run_root.name), {"event": "execution_approved", "attempt_id": attempt_id, "approval_digest": digest})
+        return None
+    files = file_rows(read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]["files"])
+    listing = "; ".join(f"{row['path']} ({row['content_digest']})" for row in files)
+    return driver._ask_task(
+        run_root, attempt_id, "approve-generated-tests",
+        f"Сгенерированные тесты записаны в проект и ещё не запускались: {listing}. Проверьте эти файлы. Одобрение запускает сборку, "
+        f"тесты{' и мутации' if config.get('mutation') else ''} проекта на этих байтах: ответ approve-generated-tests={digest}. "
+        "Пока ответа нет, ничего не запускается; правка файла меняет дайджест — тогда нужен новый ответ.",
+        [{"value": digest, "label": f"Одобрить запуск {len(files)} файл(ов) с этими дайджестами"}],
+        extra={"files": files, "approval_digest": digest})
+
+
+def _execute(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], effective: Mapping[str, Any],
+             automation: Mapping[str, Any], review: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """Run the materialized files once through the existing ``exec`` command."""
+    from tools import run_pipeline
+    from tools.pilot_state import read_attempt_receipt, read_run
+
+    attempt_id = str(attempt["attempt_id"])
     delta = read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")["record"]
     boundary = read_attempt_receipt(run_root, attempt_id, f"automation-review-boundary-{key}", "ARTIFACT_READ_BACK")["record"]
     authorization = dict(read_run(run_root)["authorization"])
@@ -298,6 +337,10 @@ def advance_automation(project: Path, run_root: Path, attempt: Mapping[str, Any]
                           "REVIEW_INCOMPLETE": "AUTOMATION_REVIEW_INCOMPLETE"}.get(aborted, reason)
             _finalize_rejected_automation(project, run_root, attempt, effective, reason)
             return driver._done(run_root, driver._result_summary(run_root, driver._attempt(run_root)))
+        _materialize(project, run_root, attempt, effective, automation, review, key)
+        waiting = _approval_step(project, run_root, attempt, config)
+        if waiting is not None:
+            return waiting
         execution = _execute(project, run_root, attempt, config, effective, automation, review, key)
         return finish_execution(project, run_root, config, execution)
 

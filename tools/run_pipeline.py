@@ -291,6 +291,9 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         if profile != "local-pilot-v1":
             raise HostStop("SUITE_PROFILE", "--suite needs the local-pilot-v1 profile (the suite records retained tests)")
         authorization["suite_requested"] = True
+    # S3: the driver resolves execution.review (human by default); the manual `scan` records it only when asked explicitly.
+    if getattr(args, "execution_review", None) == "human" and profile == "local-pilot-v1":
+        authorization["execution_review_required"] = True
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -1700,6 +1703,8 @@ def build_parser() -> JsonArgumentParser:
                              help="Consent to write the living suite with its manifest after the terminal result (local-pilot-v1).")
     scan_parser.add_argument("--require-driver-isolation", action="store_true",
                              help="Accept only review parts run by a driver-launched process (isolation_evidence DRIVER_PROCESS).")
+    scan_parser.add_argument("--execution-review", choices=("human", "none"),
+                             help="human: exec starts only after EXECUTION_APPROVED of the exact generated files (S3); the driver sets it by default.")
     status_parser = sub.add_parser("status", parents=[shared])
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])
