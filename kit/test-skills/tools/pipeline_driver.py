@@ -446,7 +446,7 @@ def _execution_mode(project: Path, options: Mapping[str, Any], profile: str) -> 
         mode = execution_mode(project, options.get("execution_mode"))
     except GateError as error:
         raise DriverError(error.code, str(error)) from error
-    return mode if profile == "local-pilot-v1" else "auto"
+    return mode if profile in {"local-pilot-v1", SUITE_PROFILE} else "auto"
 
 
 def _confirm_context(project: Path, options: Mapping[str, Any]) -> bool:
@@ -1556,7 +1556,7 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
     from tools import suite_update
 
     if suite_update.is_suite_run(run_root):
-        return suite_update.advance(project, run_root, max_tasks=max_tasks)
+        return suite_update.advance(project, run_root, max_tasks=max_tasks, human=human)
     from tools.pilot_state import finish_review, prepare_review, read_effective_canonical_if_present
 
     project = Path(project).resolve()
@@ -1565,6 +1565,14 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
         config["human_report"] = {"junit": [str(Path(path).resolve()) for path in human["junit"]], "exit_code": human.get("exit_code"),
                                   "gate_exit_code": human.get("gate_exit_code")}
         _save_config(run_root, config)
+    if human and (human.get("mutation_step_done") or human.get("pit_report")):
+        # S9: a mutation step is done only when its output exists; the stage then repeats up to the next command.
+        from tools.mutation import HumanStepIncomplete, human_continue, mutation_workdir
+
+        try:
+            human_continue(mutation_workdir(run_root, str(_attempt(run_root)["attempt_id"])), pit_report=human.get("pit_report"))
+        except HumanStepIncomplete as error:
+            raise DriverError(error.code, str(error)) from error
     limit = max(1, int(max_tasks or 1))
     config["_max_tasks"] = limit
     if config.get("scan_pending"):
@@ -1795,6 +1803,11 @@ def _parser() -> argparse.ArgumentParser:
                                       "with --run and execution.mode human: the report(s) the person's run of the printed commands wrote.")
             command.add_argument("--exit-code", type=int, help="execution.mode human: exit code of the person's test command (default: from the reports).")
             command.add_argument("--gate-exit-code", type=int, help="execution.mode human: exit code of the person's compile/collect gate command.")
+            command.add_argument("--mutation-step-done", action="store_true",
+                                 help="execution.mode human: the person ran the printed mutation resolver command (its expected_output must exist).")
+            command.add_argument("--build-log", help="execution.mode human, suite-update-v1: the output of the person's suite command when the build "
+                                                     "failed before writing a report (with a nonzero --exit-code); compile errors are found in it.")
+            command.add_argument("--pit-report", help="execution.mode human: the mutations.xml the person's PIT run wrote (exactly the printed expected_output).")
             command.add_argument("--execution-mode", choices=("auto", "human"),
                                  help="human (.skillsrc execution.mode): the package starts no build, test or mutation process; the driver answers "
                                       "human_exec with the exact commands and continues with next --run <id> --junit <report> (local-pilot-v1).")
@@ -1949,7 +1962,9 @@ def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any],
     options = {key: getattr(args, key, None) for key in _START_OPTIONS}
     try:
         payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run,
-                                           human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code} if args.run else None)
+                                           human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code,
+                                                  "mutation_step_done": args.mutation_step_done, "pit_report": args.pit_report,
+                                                  "build_log": args.build_log} if args.run else None)
     except DriverError as error:
         payload = {"action": "error", "code": error.code, "message": str(error), **({"errors": error.diagnostics} if error.diagnostics else {})}
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -2007,7 +2022,9 @@ def main(argv: list[str] | None = None) -> int:
                 with run_lock(run_root):
                     if args.command == "next":
                         payload = advance(project, run_root, max_tasks=args.max_tasks,
-                                          human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code})
+                                          human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code,
+                                                 "mutation_step_done": args.mutation_step_done, "pit_report": args.pit_report,
+                                                 "build_log": args.build_log})
                     else:
                         payload = submit(project, run_root, args.task_id, output=args.output, answer=args.answer, failed=args.failed, reason=args.reason,
                                          transport_attempts=args.transport_attempts)

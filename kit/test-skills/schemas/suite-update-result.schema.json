@@ -27,7 +27,7 @@
       "properties": {"eligible": {"type": "boolean"}, "parts": {"$ref": "#/$defs/count"}, "input_bytes": {"$ref": "#/$defs/count"}}}},
     "paths": {"type": "object", "additionalProperties": false, "required": ["pr_description", "patch", "result", "suite_dir"],
       "properties": {"pr_description": {"type": "string"}, "patch": {"type": "string"}, "result": {"type": "string"}, "suite_dir": {"type": "string"}}},
-    "accepted": {"type": "null"}
+    "accepted": {"type": "null"}, "executor": {"const": "human", "description": "S9b execution.mode human: a person ran the suite commands; repeats were not run (no FLAKY label)."}, "repeats": {"const": 0}
   },
   "$defs": {"count": {"type": "integer", "minimum": 0}}
 }

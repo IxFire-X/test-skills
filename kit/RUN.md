@@ -1,7 +1,7 @@
 # Запуск test-skills на внутреннем проекте (Linux, свой CLI и модели)
 
-Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит c238f05 ветки `main`; без `tests/`,
-`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-c238f05.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
+Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит 4a98253 ветки `main`; без `tests/`,
+`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-4a98253.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
@@ -182,6 +182,10 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 - **Порог входа задачи (пакет с P1).** `operate.py` передаёт драйверу `--task-input-bytes` = 0,8 окна модели в байтах
   (`--model-context` / `--tokens-per-byte`; свой порог — `--task-input-bytes`): задача больше — `TASK_INPUT_TOO_LARGE` до
   вызова модели и стоп с готовой командой нового прогона с `--target`.
+- **Автоматизация частями (пакет с P2).** Если кейсов больше `limits.automation_cases_per_part` в `.skillsrc` (по
+  умолчанию 12; `0` — без лимита по кейсам) или вход генератора автотестов больше порога, драйвер делит кейсы на части и
+  выдаёт задачи `tc-to-autotest:rN:part-NNN`; каждая часть пишет свои классы с маркером `PartNNN` в имени, ответы
+  частей драйвер сливает сам. Ревью, одобрение тестов (одно, по всем файлам) и исполнение идут по слитой ревизии.
 - **Одобрение сгенерированных тестов (пакет с S3).** После записи тестов в проект и до любой сборки драйвер
   останавливается на `approve-generated-tests`: `operate.py` показывает файлы строками «путь  дайджест» (первые 30,
   полный список — в `operate.log`) и `approval_digest`. Прочитать файлы и ответить в терминале дайджестом; без
@@ -226,7 +230,7 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
-sha256sum -c --quiet test-skills-c238f05.files.sha256             # молчит = все файлы пакета совпадают
+sha256sum -c --quiet test-skills-4a98253.files.sha256             # молчит = все файлы пакета совпадают
 python3 --version                                                 # нужен 3.11+ (или test-skills/.venv/bin/python)
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid

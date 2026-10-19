@@ -5,7 +5,7 @@ description: >-
   независимое ревью моделью, автотесты и прогон этих тестов сборкой проекта. Исполняемое приложение на Python
   (оркестратор operate.py и пакет tools/), а не текстовая инструкция для модели.
 metadata:
-  version: "0.5.0-pilot (пакет c238f05 ветки main; комплект — ветка demo-kit-20261015)"
+  version: "0.5.0-pilot (пакет 4a98253 ветки main; комплект — ветка demo-kit-20261015)"
   display_name: test-skills — комплект внутреннего прогона
   owner: IxFire-X
   skill_type: executable

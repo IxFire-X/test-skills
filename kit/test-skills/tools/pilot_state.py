@@ -46,9 +46,10 @@ _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:(?:baseline|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12]|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
+    r"^(?:context-marker:(?:baseline|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12](?::part-[0-9]{3})?|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
 )
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_AUTOMATION_PART = re.compile(r"^tc-to-autotest:(r[12]):(part-[0-9]{3})$")  # P2: one part of a split automation revision
 _MODEL_STAGE_REGISTRY = {
     "context-marker": ("generator", "context-marker-v1"),
     "tc-generator": ("generator", "tc-generator-v1"),
@@ -1721,6 +1722,7 @@ def _regeneration_budget_error(parent: Mapping[str, Any], parent_terminal: Mappi
         event.get("stage_instance_id") for event in events
         if event.get("attempt_id") == parent.get("attempt_id") and event.get("event_type") == "MODEL_REQUESTED"
         and str(event.get("stage_instance_id", "")).startswith("tc-to-autotest:")
+        and not _AUTOMATION_PART.fullmatch(str(event.get("stage_instance_id", "")))  # parts are not revisions (P2)
     }
     if parent.get("retry_reason") == _REGENERATION_RETRY_REASON or len(generated) >= _AUTOMATION_REVISION_BUDGET:
         return "automation revision budget is exhausted: no further corrected revision is allowed"
@@ -2068,6 +2070,125 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
         raise ValueError("generator fragment must match its request and stored context receipt")
 
 
+def _automation_key(stage_instance_id: str) -> str:
+    """``r1``/``r2`` of an automation stage, its parts included."""
+    return str(stage_instance_id).split(":")[1]
+
+
+def _automation_plan_target(root: Path, attempt_id: str, digest: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{32}", attempt_id) or not _DIGEST.fullmatch(str(digest)):
+        raise ValueError("invalid automation part plan identity")
+    return root / "artifacts" / attempt_id / "automation-parts" / (str(digest).removeprefix("sha256:") + ".json")
+
+
+def publish_automation_part_plan(run_root: Path, attempt_id: str, plan: Mapping[str, Any]) -> str:
+    """P2: keep the part plan of an automation revision content-addressed; part requests bind its digest."""
+    project, root = _run_root(run_root)
+    data = _canonical_bytes(dict(plan))
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    target = _automation_plan_target(root, attempt_id, digest)
+    if target.is_file() and read_confined_bytes(project, root, target) == data:
+        return digest
+    publish_run_artifact_bytes(root, attempt_id, f"automation-parts/{digest.removeprefix('sha256:')}.json", data)
+    return digest
+
+
+def _read_automation_part_plan(project: Path, root: Path, attempt_id: str, digest: str) -> dict[str, Any]:
+    target = _automation_plan_target(root, attempt_id, digest)
+    raw = read_confined_bytes(project, root, target)
+    if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("automation part plan is unreadable")
+    plan = _parse_json_bytes(raw, "automation part plan")
+    if not isinstance(plan, Mapping) or not isinstance(plan.get("rows"), list) or not plan["rows"]:
+        raise ValueError("automation part plan is invalid")
+    return dict(plan)
+
+
+def _automation_part_responses(state: Mapping[str, Any], attempt_id: str, key: str) -> dict[str, str]:
+    """part_id → response digest of the parts of one automation revision."""
+    rows: dict[str, str] = {}
+    for event in state["events"]:
+        match = _AUTOMATION_PART.fullmatch(str(event.get("stage_instance_id") or ""))
+        if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and match and match.group(1) == key:
+            rows[match.group(2)] = str(event.get("artifact_digest"))
+    return rows
+
+
+def _validate_automation_request(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+                                 inputs: Sequence[str], binding: Mapping[str, Any]) -> None:
+    """Inputs of an automation request: [document, bundle] for one task; a part binds the plan and its part document (P2);
+    the merged revision of a split binds the plan and the answer of every part, in plan order."""
+    from tools.automation_parts import part_document_bytes
+
+    base = [binding["document_digest"], binding["effective_bundle_receipt_digest"]]
+    key = _automation_key(stage_instance_id)
+    part = _AUTOMATION_PART.fullmatch(stage_instance_id)
+    if part is None and len(inputs) == 2:
+        if list(inputs) != base:
+            raise ValueError("automation generator inputs do not match effective selection")
+        if any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED"
+               and (match := _AUTOMATION_PART.fullmatch(str(event.get("stage_instance_id") or ""))) and match.group(1) == key
+               for event in state["events"]):
+            raise ValueError("a split automation revision closes only through the merge of its parts")
+        return
+    if len(inputs) < 4 or list(inputs[:2]) != base:
+        raise ValueError("automation generator inputs do not match effective selection")
+    plan = _read_automation_part_plan(project, root, attempt_id, inputs[2])
+    if plan.get("revision") != key:
+        raise ValueError("automation part plan belongs to another revision")
+    if part is not None:
+        if any(event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == f"tc-to-autotest:{key}"
+               for event in state["events"]):
+            raise ValueError("automation part request after the merged request")
+        row = next((item for item in plan["rows"] if item.get("part_id") == part.group(2)), None)
+        digest = None if row is None else "sha256:" + hashlib.sha256(part_document_bytes(binding["document"], row["case_ids"])).hexdigest()
+        if len(inputs) != 4 or row is None or row.get("document_digest") != inputs[3] or digest != inputs[3]:
+            raise ValueError("automation part request does not match its plan row")
+        return
+    responses = _automation_part_responses(state, attempt_id, key)
+    expected = [responses.get(str(row.get("part_id"))) for row in plan["rows"]]
+    if None in expected or list(inputs[3:]) != expected:
+        raise ValueError("merged automation request must bind the answer of every part in plan order")
+
+
+def _validate_automation_parts_artifact(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+                                        request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
+    """P2: a part answer keeps to its part; a carried r2 part equals its r1 part; a merged revision equals the merge of its parts."""
+    from tools import automation_parts as parts
+
+    inputs = request["input_digests"]
+    if not stage_instance_id.startswith("tc-to-autotest:") or len(inputs) == 2:
+        return
+    binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
+    plan = _read_automation_part_plan(project, root, attempt_id, inputs[2])
+    key = _automation_key(stage_instance_id)
+    part = _AUTOMATION_PART.fullmatch(stage_instance_id)
+    if part is not None:
+        row = next(item for item in plan["rows"] if item["part_id"] == part.group(2))
+        if parts.part_answer_problems(row["part_id"], row["case_ids"], parts.answer_of(value)):
+            raise ValueError("automation part answer leaves its part")
+        if str(request.get("invocation_id", "")).startswith("automation-carry-"):
+            # A part without r1 corrections is carried into r2 unchanged, without a model call.
+            previous = _automation_part_responses(state, attempt_id, "r1").get(row["part_id"])
+            carried = None if previous is None else _read_model_stage_artifact_with_state(
+                project, root, state, attempt_id, f"tc-to-autotest:r1:{row['part_id']}", previous)["artifact"]
+            if carried is None or parts.answer_of(carried) != parts.answer_of(value):
+                raise ValueError("a carried automation part differs from its r1 answer")
+        return
+    answers = [_read_model_stage_artifact_with_state(project, root, state, attempt_id, f"tc-to-autotest:{key}:{row['part_id']}", digest)["artifact"]
+               for row, digest in zip(plan["rows"], inputs[3:])]
+    predecessor = previous_review = None
+    if key == "r2":
+        response = next(event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                        and event.get("stage_instance_id") == "tc-to-autotest:r1")
+        predecessor = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "tc-to-autotest:r1", str(response["artifact_digest"]))["artifact"]
+        previous_review = read_review_aggregate(root, attempt_id, "r1")["output"]
+    expected = parts.merged_artifact(answers, binding["document"], revision=int(key[1]), effective=binding, predecessor=predecessor,
+                                     previous_review=previous_review)
+    if dict(value) != expected:
+        raise ValueError("merged automation artifact differs from the merge of its parts")
+
+
 def publish_model_request(
     run_root: Path,
     attempt_id: str,
@@ -2107,9 +2228,8 @@ def publish_model_request(
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs, model_id=model_id)
     if stage == "tc-to-autotest":
         binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
-        if inputs != [binding["document_digest"], binding["effective_bundle_receipt_digest"]]:
-            raise ValueError("automation generator inputs do not match effective selection")
-        if stage_instance_id.endswith(":r2"):
+        _validate_automation_request(project, root, state, attempt_id, stage_instance_id, inputs, binding)
+        if _automation_key(stage_instance_id) == "r2":
             if any(event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in state["events"]) or _receipt_target(root, attempt_id, "materialization-ownership").exists():
                 raise ValueError("automation revision two is forbidden after materialization")
             previous = read_review_aggregate(root, attempt_id, "r1")
@@ -2246,7 +2366,7 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
     elif stage_instance_id.startswith("tc-to-autotest:"):
         schema_name = "tc-to-autotest-output.schema.json"
         revision = value.get("artifacts", {}).get("automation_revision")
-        if stage_instance_id != f"tc-to-autotest:r{revision}":
+        if _automation_key(stage_instance_id) != f"r{revision}":
             raise ValueError("invalid automation generator artifact")
     else:
         raise ValueError("unsupported model stage artifact")
@@ -2314,6 +2434,7 @@ def publish_model_stage_artifact(
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
@@ -2331,7 +2452,8 @@ def publish_model_stage_artifact(
         batch_id=batch_id, stage_instance_id=stage_instance_id,
         artifact_digest=content_digest, transport_attempts=transport_attempts,
     )
-    if stage_instance_id.startswith(("tc-generator:", "tc-to-autotest:")):
+    # A part of a split automation revision is no candidate: only the merged revision is (P2).
+    if stage_instance_id.startswith(("tc-generator:", "tc-to-autotest:")) and not _AUTOMATION_PART.fullmatch(stage_instance_id):
         append_event(
             root, "CANDIDATE_PUBLISHED", actor="controller", attempt_id=attempt_id,
             batch_id=str(batch_id) if batch_id is not None else None,
@@ -2383,7 +2505,7 @@ def _read_model_stage_artifact_with_state(
         and requests[0]["seq"] < responses[0]["seq"]
         and (
             len(candidates) == 1 and responses[0]["seq"] < candidates[0]["seq"]
-            if stage_instance_id.startswith(("tc-generator:", "tc-to-autotest:"))
+            if stage_instance_id.startswith(("tc-generator:", "tc-to-autotest:")) and not _AUTOMATION_PART.fullmatch(stage_instance_id)
             else not candidates
         )
     )
@@ -2403,6 +2525,7 @@ def _read_model_stage_artifact_with_state(
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)
     return {

@@ -84,6 +84,9 @@ def pr_description(facts: Mapping[str, Any]) -> str:
     strength = facts.get("strength")
     if strength:
         lines.insert(-1, f"| Доля убитых мутантов: было → стало | {strength['before']} → {strength['after']} |")
+    if facts.get("executor") == "human":
+        lines += ["Набор запускал человек (`execution.mode: human`): повторы упавших методов не выполнялись, поэтому метка FLAKY не "
+                  "присваивается — упавший метод считается стабильно упавшим и прошёл triage как таковой.", ""]
     stop = facts.get("stop")
     if stop:
         lines += [f"## Остановка: `{stop['reason']}`", "",

@@ -76,7 +76,8 @@
         "context_batch_bytes": {"type": "integer", "minimum": 1024, "maximum": 67108864},
         "docs_file_bytes": {"type": "integer", "minimum": 1024, "maximum": 67108864},
         "docs_total_bytes": {"type": "integer", "minimum": 1024, "maximum": 268435456},
-        "task_input_bytes": {"type": "integer", "minimum": 1024, "maximum": 268435456, "description": "Largest input of a full-context model task (marker, generator, automation); a larger one stops before the model call. Default 1000000 (about 0.24 tokens per byte)."}
+        "task_input_bytes": {"type": "integer", "minimum": 1024, "maximum": 268435456, "description": "Largest input of a full-context model task (marker, generator, automation); a larger one stops before the model call. Default 1000000 (about 0.24 tokens per byte)."},
+        "automation_cases_per_part": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "P2: most test cases one automation task generates; more cases (or an input over task_input_bytes) split the automation into parts. Default 12; 0 = no case limit."}
       }
     },
     "v2_project": {
