@@ -52,6 +52,10 @@ _DEFAULT_REVIEW_RESERVE_BYTES = 20_000
 # One model context window in UTF-8 bytes (about 200k tokens of Russian text and JSON).
 # Without isolation every review part lands in the same context, so their sum is compared with it.
 _DEFAULT_REVIEW_CONTEXT_BYTES = 500_000
+# Largest input of a full-context task (marker, generator, automation); a guide of 0.24 tokens per byte was measured on
+# DeepSeek-V4.1-Flash through gigacode (internal run 2026-10-15): 1 MB ≈ 240k tokens.
+_DEFAULT_TASK_INPUT_BYTES = 1_000_000
+_TOKENS_PER_BYTE = 0.24
 _REVIEW_INSTRUCTIONS = {
     "canonical": "Проверь назначенные области этой части по исходным требованиям: полноту, корректность шагов и ожидаемых результатов, "
                  "согласованность между кейсами. Верни только coverage, findings, corrections и required_checks.",
@@ -230,6 +234,37 @@ def _llm_task(run_root: Path, attempt_id: str, label: str, *, stage: str, skill:
     return task
 
 
+def _task_input_budget(project: Path, config: Mapping[str, Any]) -> int:
+    """Largest input of a full-context model task: ``--task-input-bytes``, else ``.skillsrc`` ``limits.task_input_bytes``, else 1 000 000."""
+    if config.get("task_input_bytes"):
+        return int(config["task_input_bytes"])
+    path = Path(project) / ".skillsrc"
+    if path.is_file():
+        from tools.skillsrc_manifest import parse_skillsrc_bytes
+
+        try:
+            limits = parse_skillsrc_bytes(path.read_bytes()).get("limits")
+        except Exception:  # an unreadable .skillsrc is reported by scan; the default budget still applies
+            limits = None
+        value = limits.get("task_input_bytes") if isinstance(limits, Mapping) else None
+        if type(value) is int and value > 0:
+            return value
+    return _DEFAULT_TASK_INPUT_BYTES
+
+
+def _check_task_input(project: Path, config: Mapping[str, Any], stage: str, inputs: Sequence[Path]) -> None:
+    """Stop before the model call when a full-context task does not fit the budget (P1b): the input is never cut."""
+    size = sum(Path(path).stat().st_size for path in inputs if Path(path).is_file())
+    threshold = _task_input_budget(project, config)
+    if size <= threshold:
+        return
+    hint = (f"Вход задачи {stage} — {size} Б при пороге {threshold} Б (≈ {round(size * _TOKENS_PER_BYTE)} токенов при 0,24 токена на байт); "
+            "модель не вызывалась. Сузьте вход: --target <путь> (разбор части проекта), paths/exclusions модуля в .skillsrc, "
+            "меньше limits.context_batch_bytes (батчи разметки контекста). Порог — --task-input-bytes или limits.task_input_bytes в .skillsrc.")
+    raise DriverError("TASK_INPUT_TOO_LARGE", f"the input of {stage} is {size} bytes, over the task input budget of {threshold} bytes", [
+        {"code": "TASK_INPUT_TOO_LARGE", "stage": stage, "input_bytes": size, "threshold": threshold, "hint": hint}])
+
+
 def _ask_task(run_root: Path, attempt_id: str, label: str, question: str, options: Sequence[Mapping[str, str]]) -> dict[str, Any]:
     task_id = _task_id(attempt_id, "ask." + label)
     task = {"action": "ask_user", "task_id": task_id, "question": question, "options": [dict(option) for option in options],
@@ -293,7 +328,7 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
         if not isinstance(error, (run_pipeline.HostStop, SkillsrcError, RuntimeError, FileNotFoundError, ValueError)):
             raise
         return {"action": "done", "result": {"status": "error", "stage": "scan", "exit_code": 2, "reason": getattr(error, "code", None) or type(error).__name__,
-                                             "message": str(error), "errors": list(getattr(error, "diagnostics", None) or [])}}
+                                             "message": str(error), "errors": list(getattr(error, "diagnostics", None) or getattr(error, "details", None) or [])}}
     try:
         payload = json.loads(buffer.getvalue())
     except json.JSONDecodeError:
@@ -339,6 +374,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         "review_input_bytes": int(options.get("review_input_bytes") or _DEFAULT_REVIEW_INPUT_BYTES),
         "review_reserve_bytes": int(options.get("review_reserve_bytes") or _DEFAULT_REVIEW_RESERVE_BYTES),
         "review_context_bytes": int(options.get("review_context_bytes") or _DEFAULT_REVIEW_CONTEXT_BYTES),
+        **({"task_input_bytes": int(options["task_input_bytes"])} if options.get("task_input_bytes") else {}),
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
@@ -489,6 +525,43 @@ def _context_draft(project: Path, run_root: Path, config: Mapping[str, Any]) -> 
     return draft
 
 
+def _marker_receipts(run_root: Path, attempt_id: str) -> list[dict[str, Any]]:
+    """The context batches of the marker: the receipts of ``scan``, without the combined receipt of the generator."""
+    receipts = _context_receipts(run_root, attempt_id)
+    if len(receipts) <= 1:
+        return receipts
+    everything = {item["opaque_id"] for receipt in receipts for item in receipt["files"]}
+    return [receipt for receipt in receipts if {item["opaque_id"] for item in receipt["files"]} != everything]
+
+
+def _marker_draft_path(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any]) -> tuple[Path, Mapping[str, Any] | None]:
+    rework = _rework_of(config, attempt)
+    draft = _context_draft(project, run_root, config)
+    if rework is not None:
+        parent_marker = _marker_artifact(run_root, rework["parent_attempt_id"])
+        if parent_marker is not None:
+            draft = dict(parent_marker["artifact"])
+    return _write_json(work_dir(run_root) / "inputs" / "context-marker-draft.json", draft), rework
+
+
+def _marker_instructions(config: Mapping[str, Any], rework: Mapping[str, Any] | None, part: tuple[int, int] | None = None) -> str:
+    text = ("Первый файл — готовый черновик ответа: требования уже нормализованы кодом, их нельзя менять, удалять или переставлять. "
+            + ("Это доработка после отклонённого ревью: черновик — ответ прошлой попытки; если код и требования не менялись, сохрани его без изменений. "
+               if rework is not None else "")
+            + "Дополни `artifacts.source_code_and_diff.sources` наблюдениями по коду и `warnings` пробелами требований "
+            "(каждая строка в виде «источник — наблюдение») и сохрани весь объект в output_path."
+            + (" Каждый пробел требований запиши ещё и в `requirement_gaps` (requirement — SREQ-…; location — файл и раздел; missing — чего не хватает; "
+               "blocks — какие проверки это блокирует; question — вопрос аналитику до 300 символов) и поставь schema_version 5.1.0."
+               if config.get("analyst_report") else ""))
+    if part is None:
+        return text
+    number, count = part
+    # One batch sees part of the code: code missing here is not a gap of the requirement (else N batches give N false gaps).
+    return (text + f" Это часть {number} из {count} выбранного контекста: наблюдения — только по файлам этой части. "
+            f"Если код для требования в этой части не найден, не записывай пробел требования, а добавь в `warnings` строку "
+            f"«часть {number} — код для <требование> не найден»; пробел требования — только когда неполна сама спецификация.")
+
+
 def _context_marker_task(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
     from tools.pilot_state import publish_model_request
 
@@ -496,30 +569,89 @@ def _context_marker_task(project: Path, run_root: Path, attempt: Mapping[str, An
     stage = "context-marker:baseline"
     baseline, _inventory = _baseline_and_inventory(run_root, attempt)
     receipts = _context_receipts(run_root, attempt_id)
-    rework = _rework_of(config, attempt)
-    draft = _context_draft(project, run_root, config)
-    if rework is not None:
-        parent_marker = _marker_artifact(run_root, rework["parent_attempt_id"])
-        if parent_marker is not None:
-            draft = dict(parent_marker["artifact"])
-    draft_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-draft.json", draft)
+    draft_path, rework = _marker_draft_path(project, run_root, attempt, config)
     inputs = [draft_path, *_context_inputs(project, run_root, attempt)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
+        _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"context-{uuid.uuid4().hex[:16]}",
                               input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], *[receipt["digest"] for receipt in receipts]])
     schema = json.loads((ROOT / "schemas" / "context-marker-output.schema.json").read_text(encoding="utf-8"))
     return _llm_task(
         run_root, attempt_id, "context-marker", stage=stage, skill="context-marker", inputs=inputs, schema=schema,
-        instructions=("Первый файл — готовый черновик ответа: требования уже нормализованы кодом, их нельзя менять, удалять или переставлять. "
-                      + ("Это доработка после отклонённого ревью: черновик — ответ прошлой попытки; если код и требования не менялись, сохрани его без изменений. "
-                         if rework is not None else "")
-                      + "Дополни `artifacts.source_code_and_diff.sources` наблюдениями по коду и `warnings` пробелами требований "
-                      "(каждая строка в виде «источник — наблюдение») и сохрани весь объект в output_path."
-                      + (" Каждый пробел требований запиши ещё и в `requirement_gaps` (requirement — SREQ-…; location — файл и раздел; missing — чего не хватает; "
-                         "blocks — какие проверки это блокирует; question — вопрос аналитику до 300 символов) и поставь schema_version 5.1.0."
-                         if config.get("analyst_report") else "")),
+        instructions=_marker_instructions(config, rework),
         extra={"draft_path": str(draft_path), **({"rework": True} if rework is not None else {})},
     )
+
+
+def _context_marker_batch_task(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any],
+                               receipt: Mapping[str, Any], number: int, count: int) -> dict[str, Any]:
+    """One marker task per context batch (P1a): the draft plus the files of this batch only."""
+    from tools.pilot_state import publish_model_request
+
+    attempt_id = str(attempt["attempt_id"])
+    stage = f"context-marker:batch-{number:03d}"
+    baseline, _inventory = _baseline_and_inventory(run_root, attempt)
+    draft_path, rework = _marker_draft_path(project, run_root, attempt, config)
+    inputs = [draft_path, *_context_inputs(project, run_root, attempt, only=receipt)]
+    if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
+        _check_task_input(project, config, stage, inputs)
+        publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"context-{uuid.uuid4().hex[:16]}",
+                              input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipt["digest"]])
+    schema = json.loads((ROOT / "schemas" / "context-marker-output.schema.json").read_text(encoding="utf-8"))
+    return _llm_task(
+        run_root, attempt_id, f"context-marker.batch-{number:03d}", stage=stage, skill="context-marker", inputs=inputs, schema=schema,
+        instructions=_marker_instructions(config, rework, (number, count)),
+        extra={"draft_path": str(draft_path), "context_batch": number, "context_batch_count": count, **({"rework": True} if rework is not None else {})},
+    )
+
+
+def _merged_marker(run_root: Path, attempt_id: str, count: int) -> dict[str, Any]:
+    from tools.context_marker_merge import merge_marker_artifacts
+    from tools.pilot_state import read_model_stage_artifact
+
+    events = _events(run_root, attempt_id)
+    answers = []
+    for number in range(1, count + 1):
+        stage = f"context-marker:batch-{number:03d}"
+        answers.append(read_model_stage_artifact(run_root, attempt_id, stage, _stage_events(events, stage)["MODEL_RESPONSE_RECEIVED"]["artifact_digest"])["artifact"])
+    return merge_marker_artifacts(answers)
+
+
+def _marker_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The marker task(s), or None once the merged ``context-marker:baseline`` is published.
+
+    One scan receipt (Petclinic): the single baseline task, as before.  Several: one task per receipt, up to
+    ``--max-tasks`` at once like review parts; when every batch is answered the driver merges the answers itself.
+    """
+    from tools.pilot_state import publish_model_request, publish_model_stage_artifact
+
+    attempt_id = str(attempt["attempt_id"])
+    receipts = _marker_receipts(run_root, attempt_id)
+    if len(receipts) <= 1:
+        return _context_marker_task(project, run_root, attempt, config)
+    events = _events(run_root, attempt_id)
+    count = len(receipts)
+    open_numbers = [number for number in range(1, count + 1)
+                    if "MODEL_RESPONSE_RECEIVED" not in _stage_events(events, f"context-marker:batch-{number:03d}")]
+    if not open_numbers:
+        stage = "context-marker:baseline"
+        merged = _merged_marker(run_root, attempt_id, count)
+        if "MODEL_REQUESTED" not in _stage_events(events, stage):
+            baseline, _inventory = _baseline_and_inventory(run_root, attempt)
+            answers = [_stage_events(events, f"context-marker:batch-{number:03d}")["MODEL_RESPONSE_RECEIVED"]["artifact_digest"] for number in range(1, count + 1)]
+            publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"context-merge-{uuid.uuid4().hex[:16]}",
+                                  input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"],
+                                                 *[receipt["digest"] for receipt in receipts], *dict.fromkeys(answers)])
+        publish_model_stage_artifact(run_root, attempt_id, stage, merged)
+        _log(_log_path(run_root.parents[1], run_root.name), {"event": "context_marker_merged", "batches": count})
+        return None
+    limit = max(1, int(config.get("_max_tasks") or 1))
+    tasks = [_context_marker_batch_task(project, run_root, attempt, config, receipts[number - 1], number, count) for number in open_numbers[:limit]]
+    if len(tasks) == 1:
+        return tasks[0]
+    return {"action": "batch", "run_id": run_root.name, "attempt_id": attempt_id, "tasks": tasks,
+            "instructions": "Независимые части разметки контекста: выполни каждую задачу в отдельном свежем вызове, "
+                            "затем отправь ответы по одному: submit --task-id <task_id> каждой задачи."}
 
 
 def _submit_context_marker(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], task: Mapping[str, Any], value: Any) -> None:
@@ -534,7 +666,7 @@ def _submit_context_marker(project: Path, run_root: Path, attempt: Mapping[str, 
         raise DriverError("TASK_OUTPUT_INVALID", "normalized source requirements must stay exactly as in the draft", [
             {"path": "/artifacts/analytics_documentation/requirements", "code": "REQUIREMENTS_CHANGED",
              "message": "Copy the requirements array from the draft unchanged; report gaps in `warnings`."}])
-    publish_model_stage_artifact(run_root, str(attempt["attempt_id"]), "context-marker:baseline", value, transport_attempts=int(task.get("transport_attempts", 1)))
+    publish_model_stage_artifact(run_root, str(attempt["attempt_id"]), str(task["stage"]), value, transport_attempts=int(task.get("transport_attempts", 1)))
 
 
 def _marker_artifact(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
@@ -605,6 +737,7 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
     inputs = [brief_path, marker_path, *_context_inputs(project, run_root, attempt, only=context)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
+        _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"generator-{uuid.uuid4().hex[:16]}",
                               input_digests=[marker["content_digest"], context["digest"], plan["digest"], plan["header_digest"]])
     return _llm_task(
@@ -834,6 +967,7 @@ def _rework_task(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
     inputs = [brief_path, r1_path, marker_path, *_context_inputs(project, run_root, attempt, only=context)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
+        _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"rework-{uuid.uuid4().hex[:16]}",
                               input_digests=[marker["content_digest"], context["digest"], plan["digest"], plan["header_digest"]])  # r1 is bound through the r2 header
     schema = _subschema("candidate-fragment.schema.json", ["test_cases"])
@@ -1359,7 +1493,9 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1) -> dict[str, A
     _generation_context(project, run_root, attempt)
     events = _events(run_root, attempt_id)
     if "MODEL_RESPONSE_RECEIVED" not in _stage_events(events, "context-marker:baseline"):
-        return _context_marker_task(project, run_root, attempt, config)
+        waiting = _marker_step(project, run_root, attempt, config)
+        if waiting is not None:
+            return waiting
 
     marker = _marker_artifact(run_root, attempt_id)
     header, plan, context = _plan(project, run_root, attempt, config, marker)
@@ -1506,7 +1642,7 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
                 raise DriverError("TASK_OUTPUT_INVALID", f"task output is not strict UTF-8 JSON: {error}") from error
         if is_review:
             _submit_review(run_root, attempt, task, value, failed=failed, reason=reason)
-        elif task["stage"] == "context-marker:baseline":
+        elif task["stage"] == "context-marker:baseline" or task["stage"].startswith("context-marker:batch-"):
             _submit_context_marker(project, run_root, attempt, config, task, value)
         elif task["stage"].startswith("tc-generator:"):
             _submit_generator(project, run_root, attempt, config, task, value)
@@ -1572,6 +1708,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--reviewer-isolation", choices=("fresh", "none"))
             command.add_argument("--review-input-bytes", type=int)
             command.add_argument("--review-reserve-bytes", type=int)
+            command.add_argument("--task-input-bytes", type=int,
+                                 help="Largest input of a marker, generator or automation task; a larger one stops before the model call "
+                                      "(default: .skillsrc limits.task_input_bytes, else 1000000; about 0.24 tokens per byte).")
             command.add_argument("--review-context-bytes", type=int,
                                  help="One model context window in bytes; without reviewer isolation a larger review sum gets a warning (default 500000).")
             command.add_argument("--accept-self-review", action="store_true",
@@ -1579,7 +1718,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--review-mode", choices=("pairs", "compact-v1"),
                                  help="Review format of this run: compact-v1 (default: projection, whole cases per part) or pairs (legacy scopes and pair checks).")
             command.add_argument("--max-tasks", type=int, default=1,
-                                 help="Return up to K independent review part tasks at once (compact-v1); each still needs its own fresh call.")
+                                 help="Return up to K independent tasks at once (compact-v1 review parts, context-marker batches); each still needs its own fresh call.")
             command.add_argument("--mutation", action="store_true",
                                  help="Consent to the opt-in MUTATION stage (local-pilot-v1, mutation.enabled in .skillsrc): PIT on the passing generated tests.")
             command.add_argument("--disposition-policy", choices=("cleanup", "quarantine"),
@@ -1685,7 +1824,7 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
 
 
 _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
+                  "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "accept_self_review", "review_mode",
                   "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")
 
 
@@ -1703,7 +1842,7 @@ def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any],
     try:
         payload = run_without_orchestrator(project, options, answers=answers, max_tasks=max(1, int(args.max_tasks or 1)), run_id=args.run)
     except DriverError as error:
-        payload = {"action": "error", "code": error.code, "message": str(error)}
+        payload = {"action": "error", "code": error.code, "message": str(error), **({"errors": error.diagnostics} if error.diagnostics else {})}
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 2
     _log_command(project, payload.get("run_id"), entry, payload, started)
@@ -1740,7 +1879,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
                 "profile", "docs", "module", "target", "subject", "document_id", "model_id", "host_cli", "host_cli_version", "host_settings",
-                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "accept_self_review", "review_mode",
+                "reviewer_isolation", "review_input_bytes", "review_reserve_bytes", "review_context_bytes", "task_input_bytes", "accept_self_review", "review_mode",
                 "mutation", "require_driver_isolation", "analyst_report", "suite", "disposition_policy", "junit", "review_runner", "review_runner_preset", "review_runner_command", "review_runner_cli", "runner_dir")},
                                 max_tasks=args.max_tasks)
         else:

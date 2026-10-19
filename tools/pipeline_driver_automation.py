@@ -86,6 +86,7 @@ def _automation_task(project: Path, run_root: Path, attempt: Mapping[str, Any], 
     inputs.insert(0, driver._write_json(directory / "inputs" / f"automation-r{revision}-brief.json", brief))
     inputs.extend(driver._context_inputs(project, run_root, attempt))
     if "MODEL_REQUESTED" not in driver._stage_events(driver._events(run_root, attempt_id), stage):
+        driver._check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"automation-{uuid.uuid4().hex[:16]}",
                               input_digests=[effective["document_digest"], effective["effective_bundle_receipt_digest"]])
     return driver._llm_task(

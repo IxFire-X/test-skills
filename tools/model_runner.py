@@ -95,16 +95,24 @@ class RunnerConfig:
     timeout_seconds: int = DEFAULT_TIMEOUT
     command: tuple[str, ...] | None = None  # launch flag only
     cli: str | None = None                  # launch flag only: the CLI executable for the preset
+    interpreter: str | None = None          # starts a .py CLI: .skillsrc review_runner.interpreter, else this Python
 
     def to_json(self) -> dict[str, Any]:
         return {"preset": self.preset, "models": dict(self.models), "max_parallel": self.max_parallel, "timeout_seconds": self.timeout_seconds,
-                "command": None if self.command is None else list(self.command), "cli": self.cli}
+                "command": None if self.command is None else list(self.command), "cli": self.cli, "interpreter": self.interpreter}
 
     @classmethod
     def from_json(cls, value: Mapping[str, Any]) -> "RunnerConfig":
         return cls(preset=str(value["preset"]), models=dict(value.get("models") or {}), max_parallel=int(value.get("max_parallel") or DEFAULT_PARALLEL),
                    timeout_seconds=int(value.get("timeout_seconds") or DEFAULT_TIMEOUT),
-                   command=None if value.get("command") is None else tuple(str(item) for item in value["command"]), cli=value.get("cli"))
+                   command=None if value.get("command") is None else tuple(str(item) for item in value["command"]), cli=value.get("cli"),
+                   interpreter=value.get("interpreter"))
+
+    def cli_argv(self, executable: str) -> list[str]:
+        """The CLI as argv: a ``.py`` script starts through its interpreter (P1e; execve by shebang may be forbidden)."""
+        if executable.lower().endswith(".py"):
+            return [self.interpreter or sys.executable, executable]
+        return [executable]
 
     def model_for(self, role: str, default: str | None) -> str | None:
         return self.models.get(role) or default
@@ -115,9 +123,12 @@ def configure(skillsrc: Mapping[str, Any] | None, *, preset: str | None = None, 
     """The run's runner from ``.skillsrc`` ``review_runner`` and launch flags (a template only from a flag)."""
     section = skillsrc.get("review_runner") if isinstance(skillsrc, Mapping) else None
     section = dict(section) if isinstance(section, Mapping) else {}
-    unknown = set(section) - {"preset", "models", "max_parallel", "timeout_seconds"}
+    unknown = set(section) - {"preset", "models", "max_parallel", "timeout_seconds", "interpreter"}
     if unknown:
         raise RunnerError("RUNNER_CONFIG", f".skillsrc review_runner has fields a project file may not set: {', '.join(sorted(unknown))}")
+    interpreter = section.get("interpreter")
+    if interpreter is not None and (not isinstance(interpreter, str) or not Path(interpreter).is_absolute()):
+        raise RunnerError("RUNNER_CONFIG", ".skillsrc review_runner.interpreter is an absolute path of the interpreter")
     chosen = preset or section.get("preset") or "claude"
     if chosen not in PRESETS:
         raise RunnerError("RUNNER_CONFIG", f"unknown runner preset {chosen!r}: {', '.join(PRESETS)}")
@@ -127,7 +138,8 @@ def configure(skillsrc: Mapping[str, Any] | None, *, preset: str | None = None, 
     if command is not None and (not command or not all(isinstance(item, str) and item for item in command)):
         raise RunnerError("RUNNER_CONFIG", "--review-runner-command is a non-empty JSON array of strings")
     return RunnerConfig(preset=chosen, models=models, max_parallel=int(section.get("max_parallel") or DEFAULT_PARALLEL),
-                        timeout_seconds=int(section.get("timeout_seconds") or DEFAULT_TIMEOUT), command=None if command is None else tuple(command), cli=cli)
+                        timeout_seconds=int(section.get("timeout_seconds") or DEFAULT_TIMEOUT), command=None if command is None else tuple(command), cli=cli,
+                        interpreter=interpreter)
 
 
 # --------------------------------------------------------------------------------------
@@ -157,6 +169,8 @@ def build_argv(config: RunnerConfig, *, model: str | None, schema: Mapping[str, 
     values = {"cli": config.cli or shutil.which(preset["cli"]) or preset["cli"], "model": model or "", "schema_path": str(schema_path),
               "schema_json": json.dumps(schema, ensure_ascii=False, separators=(",", ":")), "last_message": str(directory / "last-message.txt")}
     argv = [item.format(**values) if "{" in item else item for item in template]
+    if template and template[0] == "{cli}":
+        argv[:1] = config.cli_argv(argv[0])
     if config.command is None and _self_contained(schema):
         argv += [item.format(**values) for item in preset["schema_argv"]]
     if not model and config.command is None:
@@ -456,7 +470,7 @@ def cli_version(config: RunnerConfig) -> str:
     if not executable:
         return f"{preset['cli']} unavailable"
     try:
-        completed = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=60, check=False)
+        completed = subprocess.run([*config.cli_argv(executable), "--version"], capture_output=True, text=True, timeout=60, check=False)
         return f"{preset['cli']} {(completed.stdout or completed.stderr).strip().splitlines()[0][:80]}"
     except (OSError, subprocess.SubprocessError, IndexError):
         return f"{preset['cli']} unknown"

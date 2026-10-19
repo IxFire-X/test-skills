@@ -78,8 +78,19 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 missing_integrity.append(f"invalid:{relative}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             missing_integrity.append(f"invalid:{relative}")
+    dependencies = {
+        name: {"required": True, "available": importlib.util.find_spec(name) is not None}
+        for name in ("jsonschema", "yaml")
+    }
+    missing_modules = [name for name, item in dependencies.items() if not item["available"]]
+    # The contract and manifest checks import jsonschema: without it they say nothing about the pack itself.
+    messages = [
+        f"модуль {name} не установлен в {sys.executable}: запустите через интерпретатор пакета (.venv) "
+        "или установите зависимости из requirements.txt; проверка контракта и манифеста пропущена"
+        for name in missing_modules
+    ]
     pipeline_path = root / "contracts" / "pipeline.json"
-    if pipeline_path.is_file():
+    if pipeline_path.is_file() and not missing_modules:
         try:
             if __package__:
                 from .contract_check import validate_pipeline_contract
@@ -91,7 +102,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError):
             missing_integrity.append("invalid:pipeline_contract")
     release_manifest_path = root / "release" / "manifest.json"
-    if release_manifest_path.is_file():
+    if release_manifest_path.is_file() and not missing_modules:
         try:
             if __package__:
                 from .release_manifest import load_release_manifest
@@ -101,10 +112,6 @@ def inspect_environment(root: Path) -> dict[str, object]:
             qualification = dict(manifest["qualification"])
         except (ImportError, TypeError, ValueError):
             missing_integrity.append("invalid:release/manifest.json")
-    dependencies = {
-        name: {"required": True, "available": importlib.util.find_spec(name) is not None}
-        for name in ("jsonschema", "yaml")
-    }
     python_supported = sys.version_info >= (3, 11)
     ready = not missing_integrity and python_supported and all(item["available"] for item in dependencies.values())
     return {
@@ -116,6 +123,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
             "version": platform.python_version(),
         },
         "dependencies": dependencies,
+        "messages": messages,
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
         "languages": {
             "java": {"execution": True, "verified": False},

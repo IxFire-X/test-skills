@@ -134,7 +134,9 @@ def select_module(normalized: Mapping[str, Any], module_id: str | None) -> dict[
     if module_id is None and len(modules) == 1:
         return modules[0]
     if module_id is None:
-        raise SkillsrcError("module_required", "module selection is required")
+        ids = [str(module.get("id")) for module in modules]
+        raise SkillsrcError("module_required", f"module selection is required: pass --module with one of {', '.join(ids)}",
+                            [{"path": "/modules", "ids": ids}])
     matches = [(index, module) for index, module in enumerate(modules) if module["id"] == module_id]
     if not matches:
         raise SkillsrcError("module_unknown", f"unknown module: {module_id}")

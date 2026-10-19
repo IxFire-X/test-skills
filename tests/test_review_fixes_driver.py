@@ -57,7 +57,7 @@ class SavedModel:
     def answer(self, task: dict[str, Any]) -> Any:
         stage = task["stage"]
         self.stages.append(stage)
-        if stage == "context-marker:baseline":
+        if stage == "context-marker:baseline" or stage.startswith("context-marker:batch-"):
             value = _load(task["draft_path"])
             additions = _saved("context-marker.additions.json", {})
             value["artifacts"]["source_code_and_diff"]["sources"] = additions["sources"]
