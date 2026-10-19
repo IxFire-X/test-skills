@@ -22,7 +22,8 @@ Placeholders: {model}, {prompt_file}, {prompt} (prompt_via = arg; Linux caps one
 {schema_file}, {tmp}.  ``sandbox_args`` replace an item "{sandbox_args}" of command, else go at its end.
 ``extra_env`` must not carry secrets (names with TOKEN, SECRET, PASSWORD, PASSWD, API_KEY, APIKEY, AWS_*, AZURE_*,
 GOOGLE_APPLICATION_CREDENTIALS): the CLI's credentials belong in the CLI's own config, not in wrap.json.
-The CLI does not inherit the whole environment (S6): it gets PATH, HOME, JAVA_HOME, LANG, LANGUAGE, LC_*, TMP*, TEMP and
+The CLI does not inherit the whole environment (S6): it gets PATH, HOME, JAVA_HOME, LANG, LANGUAGE, LC_*, TMP*, TEMP,
+PYTHONUTF8, PYTHONIOENCODING (a Python CLI on Windows needs them for UTF-8 output) and
 the Windows minimum (SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT, USERPROFILE, APPDATA, LOCALAPPDATA, HOMEDRIVE,
 HOMEPATH), the names and prefixes of ``env_passthrough`` (a name, or a prefix ending in ``*``), then ``extra_env``.
 ``wrap.py exec --verbose …`` prints the passed names (not values) to stderr in one line.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
@@ -47,7 +48,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ARG_LIMIT = 120_000  # Linux MAX_ARG_STRLEN is 128 KiB per argument
-BASE_ENV = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+BASE_ENV = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP", "PYTHONUTF8", "PYTHONIOENCODING", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
             "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"}
 BASE_PREFIXES = ("LC_", "TMP")
 PASSTHROUGH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\*?$")

@@ -57,8 +57,8 @@ python3 operate.py init --project <проект> --docs <спека в прое�
   `wrap.json`) на тот адрес, который настроен в самом CLI. Сам `wrap.py` в сеть не ходит. Секреты в `extra_env` обёртка
   не принимает: учётные данные модели — в конфиге CLI. Если у CLI есть режим «без инструментов / read-only», его флаги —
   в `sandbox_args` (`--sandbox-args` у `operate.py`), иначе модель внутри CLI может сама читать и менять файлы.
-  Окружение CLI — белый список (S6): `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`, `TEMP` и системный
-  минимум Windows; всё остальное (токены, прокси, переменные самого CLI) — только явно, через `env_passthrough` в
+  Окружение CLI — белый список (S6): `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`, `TEMP`,
+  `PYTHONUTF8`, `PYTHONIOENCODING` (вывод UTF-8 у CLI на Python) и системный минимум Windows; всё остальное (токены, прокси, переменные самого CLI) — только явно, через `env_passthrough` в
   `wrap.json` (`--env-passthrough 'GIGACODE_*,HTTPS_PROXY'` у `operate.py`; имя или префикс со `*` в конце). Какие
   имена дошли до CLI — `wrap/wrap.py exec --verbose …` (только имена, без значений).
 - **Сборка и тесты.** Пакет запускает сборку проекта (Maven/Gradle), сгенерированные моделью тесты и PIT. Шаг 4
