@@ -5,12 +5,13 @@ description: >-
   независимое ревью моделью, автотесты и прогон этих тестов сборкой проекта. Исполняемое приложение на Python
   (оркестратор operate.py и пакет tools/), а не текстовая инструкция для модели.
 metadata:
-  version: "0.5.0-pilot (пакет 4a98253 ветки main; комплект — ветка demo-kit-20261015)"
+  version: "0.5.0-pilot (пакет 54eb8b9 ветки main; комплект — ветка demo-kit-20261015)"
   display_name: test-skills — комплект внутреннего прогона
   owner: IxFire-X
   skill_type: executable
   read_paths:
-    - "<проект>: файлы выбранного модуля по inventory (git ls-files с учётом .gitignore), документы требований, .skillsrc"
+    - "<проект>: файлы выбранного модуля по inventory (git ls-files с учётом .gitignore), документы требований"
+    - "<проект>/.skillsrc: читается пакетом (конфигурация), модели не передаётся"
     - "<проект>: всё дерево текстовых файлов — только preflight.py (поиск ПДн/секретов, линтеров, сервисов), без передачи наружу"
     - "~/.m2/repository: jar PIT, плагина-резолвера и junit-platform-launcher для сверки SHA-256"
     - "переменная JAVA_HOME"
