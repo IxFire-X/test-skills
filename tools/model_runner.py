@@ -96,17 +96,19 @@ class RunnerConfig:
     command: tuple[str, ...] | None = None  # launch flag only
     cli: str | None = None                  # launch flag only: the CLI executable for the preset
     interpreter: str | None = None          # starts a .py CLI: .skillsrc review_runner.interpreter, else this Python
+    env_passthrough: tuple[str, ...] = ()   # S6: variables beyond the allowlist the CLI gets, by name (.skillsrc)
 
     def to_json(self) -> dict[str, Any]:
         return {"preset": self.preset, "models": dict(self.models), "max_parallel": self.max_parallel, "timeout_seconds": self.timeout_seconds,
-                "command": None if self.command is None else list(self.command), "cli": self.cli, "interpreter": self.interpreter}
+                "command": None if self.command is None else list(self.command), "cli": self.cli, "interpreter": self.interpreter,
+                "env_passthrough": list(self.env_passthrough)}
 
     @classmethod
     def from_json(cls, value: Mapping[str, Any]) -> "RunnerConfig":
         return cls(preset=str(value["preset"]), models=dict(value.get("models") or {}), max_parallel=int(value.get("max_parallel") or DEFAULT_PARALLEL),
                    timeout_seconds=int(value.get("timeout_seconds") or DEFAULT_TIMEOUT),
                    command=None if value.get("command") is None else tuple(str(item) for item in value["command"]), cli=value.get("cli"),
-                   interpreter=value.get("interpreter"))
+                   interpreter=value.get("interpreter"), env_passthrough=tuple(str(item) for item in value.get("env_passthrough") or ()))
 
     def cli_argv(self, executable: str) -> list[str]:
         """The CLI as argv: a ``.py`` script starts through its interpreter (P1e; execve by shebang may be forbidden)."""
@@ -123,12 +125,15 @@ def configure(skillsrc: Mapping[str, Any] | None, *, preset: str | None = None, 
     """The run's runner from ``.skillsrc`` ``review_runner`` and launch flags (a template only from a flag)."""
     section = skillsrc.get("review_runner") if isinstance(skillsrc, Mapping) else None
     section = dict(section) if isinstance(section, Mapping) else {}
-    unknown = set(section) - {"preset", "models", "max_parallel", "timeout_seconds", "interpreter"}
+    unknown = set(section) - {"preset", "models", "max_parallel", "timeout_seconds", "interpreter", "env_passthrough"}
     if unknown:
         raise RunnerError("RUNNER_CONFIG", f".skillsrc review_runner has fields a project file may not set: {', '.join(sorted(unknown))}")
     interpreter = section.get("interpreter")
     if interpreter is not None and (not isinstance(interpreter, str) or not Path(interpreter).is_absolute()):
         raise RunnerError("RUNNER_CONFIG", ".skillsrc review_runner.interpreter is an absolute path of the interpreter")
+    passthrough = section.get("env_passthrough") or []
+    if not isinstance(passthrough, list) or not all(isinstance(name, str) and _ENV_NAME.fullmatch(name) for name in passthrough):
+        raise RunnerError("RUNNER_CONFIG", ".skillsrc review_runner.env_passthrough is a list of environment variable names")
     chosen = preset or section.get("preset") or "claude"
     if chosen not in PRESETS:
         raise RunnerError("RUNNER_CONFIG", f"unknown runner preset {chosen!r}: {', '.join(PRESETS)}")
@@ -139,7 +144,7 @@ def configure(skillsrc: Mapping[str, Any] | None, *, preset: str | None = None, 
         raise RunnerError("RUNNER_CONFIG", "--review-runner-command is a non-empty JSON array of strings")
     return RunnerConfig(preset=chosen, models=models, max_parallel=int(section.get("max_parallel") or DEFAULT_PARALLEL),
                         timeout_seconds=int(section.get("timeout_seconds") or DEFAULT_TIMEOUT), command=None if command is None else tuple(command), cli=cli,
-                        interpreter=interpreter)
+                        interpreter=interpreter, env_passthrough=tuple(dict.fromkeys(passthrough)))
 
 
 # --------------------------------------------------------------------------------------
@@ -190,11 +195,42 @@ def command_digest(config: RunnerConfig, *, model: str | None, schema: Mapping[s
     return "sha256:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def launch(directory: Path, argv: Sequence[str], stdin_text: str, *, timeout: int, digest: str, environment: Mapping[str, str] | None = None) -> dict[str, Any]:
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}\*?$")  # a name, or a prefix pattern with `*` at the end (GIGACODE_*)
+# S6: what the model CLI gets by default — enough to start, find itself and its profile, keep the locale and a temp dir.
+_ENV_ALLOW = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP",
+              # the Windows minimum: without it a process does not start or the CLI does not find its profile
+              "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"}
+_ENV_ALLOW_PREFIXES = ("LC_", "TMP")
+
+
+def cli_environment(source: Mapping[str, str] | None = None, *, passthrough: Sequence[str] = ()) -> tuple[dict[str, str], list[str]]:
+    """The model CLI's environment from ``source`` (default: this process): the allowlist plus passthrough names and prefixes.
+
+    Names compare case-insensitively (Windows); the values are never written anywhere, the names are the evidence.
+    """
+    source = dict(os.environ if source is None else source)
+    names = {item.upper() for item in passthrough if not item.endswith("*")}
+    prefixes = tuple(item[:-1].upper() for item in passthrough if item.endswith("*"))
+    env = {name: value for name, value in source.items()
+           if name.upper() in _ENV_ALLOW or name.upper().startswith(_ENV_ALLOW_PREFIXES) or name.upper() in names
+           or (prefixes and name.upper().startswith(prefixes))}
+    return env, sorted(env)
+
+
+def withheld_names(source: Mapping[str, str] | None = None, *, passthrough: Sequence[str] = ()) -> list[str]:
+    """Names of the variables of ``source`` the CLI does not get (for the driver-log; names only)."""
+    source = dict(os.environ if source is None else source)
+    passed, _names = cli_environment(source, passthrough=passthrough)
+    return sorted(name for name in source if name not in passed and name != LAUNCH_ENV)
+
+
+def launch(directory: Path, argv: Sequence[str], stdin_text: str, *, timeout: int, digest: str, environment: Mapping[str, str] | None = None,
+           passthrough: Sequence[str] = ()) -> dict[str, Any]:
     """Start the detached shim for one invocation; it outlives the driver command."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "stdin.txt").write_text(stdin_text, encoding="utf-8", newline="\n")
-    spec = {"argv": list(argv), "timeout": int(timeout), "launched_at": time.time(), "command_digest": digest}
+    # The shim filters its own environment for the CLI (S6): only the passthrough names go to disk, never values.
+    spec = {"argv": list(argv), "timeout": int(timeout), "launched_at": time.time(), "command_digest": digest, "env_passthrough": list(passthrough)}
     (directory / "spec.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8", newline="\n")
     env = dict(os.environ if environment is None else environment)
     env["PYTHONPATH"] = str(ROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
@@ -273,6 +309,7 @@ def shim(directory: Path) -> int:
         return 2  # another shim owns this invocation
     spec = json.loads((directory / "spec.json").read_text(encoding="utf-8"))
     token = os.environ.pop(LAUNCH_ENV, None)  # never passed on to the CLI
+    cli_env, env_names = cli_environment(os.environ, passthrough=spec.get("env_passthrough") or ())
     workdir = Path(tempfile.mkdtemp(prefix="test-skills-model-"))  # outside the project: no project CLAUDE.md
     started = time.time()
     timed_out = False
@@ -280,7 +317,7 @@ def shim(directory: Path) -> int:
     error = None
     with open(directory / "stdin.txt", "rb") as stdin, open(directory / "stdout.txt", "wb") as stdout, open(directory / "stderr.txt", "wb") as stderr:
         try:
-            kwargs: dict[str, Any] = {"stdin": stdin, "stdout": stdout, "stderr": stderr, "cwd": str(workdir)}
+            kwargs: dict[str, Any] = {"stdin": stdin, "stdout": stdout, "stderr": stderr, "cwd": str(workdir), "env": cli_env}
             if os.name != "nt":
                 kwargs["start_new_session"] = True
             process = subprocess.Popen(spec["argv"], **kwargs)
@@ -296,7 +333,7 @@ def shim(directory: Path) -> int:
     data = (directory / "stdout.txt").read_bytes()
     _write_atomic(directory / "result.json", {"exit_code": exit_code, "timed_out": timed_out, "error": error, "started_at": started, "finished_at": time.time(),
                                               "stdout_sha256": "sha256:" + hashlib.sha256(data).hexdigest(), "stdout_bytes": len(data),
-                                              "launch_token": token})
+                                              "launch_token": token, "env_names": env_names})
     held.close()
     return 0
 
@@ -470,7 +507,8 @@ def cli_version(config: RunnerConfig) -> str:
     if not executable:
         return f"{preset['cli']} unavailable"
     try:
-        completed = subprocess.run([*config.cli_argv(executable), "--version"], capture_output=True, text=True, timeout=60, check=False)
+        completed = subprocess.run([*config.cli_argv(executable), "--version"], capture_output=True, text=True, timeout=60, check=False,
+                                   env=cli_environment(passthrough=config.env_passthrough)[0])
         return f"{preset['cli']} {(completed.stdout or completed.stderr).strip().splitlines()[0][:80]}"
     except (OSError, subprocess.SubprocessError, IndexError):
         return f"{preset['cli']} unknown"

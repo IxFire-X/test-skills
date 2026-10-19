@@ -89,7 +89,16 @@ JaCoCo для выбранного подмножества). С `--mutation` �
 секреты (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*PASSWD*`, `*API_KEY*`, `*APIKEY*`,
 `AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`); имена удалённых переменных (без
 значений) пишутся в `driver-log.jsonl` (`child_env_removed`). CLI модели получает
-окружение как есть: его учётные данные — его конфигурация.
+окружение по белому списку: `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`,
+`TEMP` и минимум Windows, без которого процесс не стартует или CLI не найдёт свой профиль
+(`SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
+`LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`; на Windows без учёта регистра). Всё остальное —
+ключи самого CLI (`ANTHROPIC_API_KEY`, `GIGACODE_*`), прокси (`HTTPS_PROXY`) — только если
+названо в `.skillsrc` `review_runner.env_passthrough`: точные имена или префиксы со `*` в
+конце (`["GIGACODE_*", "HTTPS_PROXY"]`; `*` в середине не допускается). Значения на диск не
+пишутся; имена переданных переменных — в `result.json` процесса и в `driver-log.jsonl`
+(`runner_launched.env_names`), имена не переданных — там же (`env_withheld`). То же
+применяется к `--version` CLI.
 
 **Сеть.** В коде пакета нет сетевых вызовов; сеть идёт только через процессы, которые он
 запускает:
@@ -734,12 +743,13 @@ python -m tools.pipeline_driver next --project "$project" --profile local-pilot-
 **Ревью процессами драйвера:**
 
 ```yaml
-# .skillsrc — только пресет, модели по ролям, параллельность, таймаут и интерпретатор обёртки .py
+# .skillsrc — только пресет, модели по ролям, параллельность, таймаут, интерпретатор обёртки .py и env_passthrough
 review_runner:
   preset: claude            # или codex
   models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
   max_parallel: 4
   timeout_seconds: 1800
+  env_passthrough: [ANTHROPIC_API_KEY, HTTPS_PROXY]   # сверх белого списка, только по имени или префиксу (GIGACODE_*)
 ```
 
 ```powershell
