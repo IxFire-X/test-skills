@@ -4,8 +4,13 @@
     python3 operate.py --home ~/ts --project <project> --docs <spec> [--docs …] --subject "<тема>"
         --models glm-5.3,… --cli-command '<CLI command with {model}>' --prompt-via stdin|file|arg
         --answer-from stdout|file [--answer-file …] [--sandbox-args '<CLI no-tools flags>'] [--runner-dir DIR]
-        [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--no-mutation] [--online] [--from-step N] [--only 0,2,3]
-        [--yes] [--yes-skillsrc] [--yes-chmod] [--no-pip] [--dry-run]
+        [--module ID] [--target T] [--review-input-bytes 100000] [--max-tasks 2] [--tokens-per-byte 0.24] [--model-context 239144]
+        [--no-mutation] [--online] [--from-step N] [--only 0,2,3] [--yes] [--yes-skillsrc] [--yes-chmod] [--no-pip] [--dry-run]
+
+preflight.py, wrap/ and bench/ are taken from beside operate.py itself; --home is only where the package (test-skills/ and
+its test-skills-*.files.sha256), the runner directory, the state and the report live.  The package runs under
+<home>/test-skills/.venv's Python when that venv exists, else under the Python that runs operate.py.  The model CLI
+wrapper is always launched by that interpreter ([python, wrap.py, …] — no script is executed by its shebang).
 
 Steps are the sections of RUN.md: 0 kit check (the test-skills folder against test-skills-*.files.sha256, doctor),
 1 preflight, 2 wrap.json + selftest + one live call, 3 model benchmark and models by role, 4 .skillsrc
@@ -50,8 +55,25 @@ ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "aut
 REVIEW_ROLES = ("tc-reviewer", "autotest-reviewer")
 PROBE = "test-skills-probe: проверка обёртки. Ответь только JSON-объектом {\"ok\": true} без пояснений.\n"
 STATUS_SECONDS = 60
-PY = sys.executable
-WINDOWS = os.name == "nt"
+HERE = Path(__file__).resolve().parent
+TOKENS_PER_BYTE = 0.24   # DeepSeek-V4.1-Flash through gigacode, internal run 2026-10-15: 0.2391
+MODEL_CONTEXT = 239_144  # its hard prompt limit, tokens
+# The package's own .skillsrc parser: the modules as the driver sees them (id, root, test).
+MODULES_CODE = ("import json, sys\nfrom pathlib import Path\nfrom tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc\n"
+                "try:\n    modules = normalize_skillsrc(load_skillsrc(Path(sys.argv[1])))['modules']\n"
+                "except SkillsrcError as error:\n"
+                "    sys.exit(f'{error.code}: {error} {json.dumps(error.details, ensure_ascii=False)[:400]}')\n"
+                "print(json.dumps([{'id': m['id'], 'root': m.get('root', '.'), 'test': m.get('test') or {}} for m in modules], ensure_ascii=False))")
+CODEX_ARGV_CODE = "import json\nfrom tools.model_runner import PRESETS\nprint(json.dumps(PRESETS['codex']['argv']))"
+WRAPPER_ADAPTER, SYSTEM_MAVEN = "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
+
+
+def pack_python(pack: Path) -> str:
+    """The package's venv interpreter if there is one (where jsonschema/pyyaml are), else the current one."""
+    for candidate in (pack / ".venv" / "Scripts" / "python.exe", pack / ".venv" / "bin" / "python"):
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
 
 
 class Stop(Exception):
@@ -171,6 +193,33 @@ def set_modules_test(lines: list[str], child: str, value: str, add: bool = True)
     return lines, notes
 
 
+def set_system_maven(lines: list[str], module_ids: list[str]) -> tuple[list[str], list[str]]:
+    """In the listed modules' ``test:`` blocks: ``adapter_id: maven-wrapper:…`` → ``maven:selected-symbols-v1`` and
+    ``wrapper: …`` → ``executable: mvn`` (system Maven from PATH).  Returns the lines and the ids it edited."""
+    found = _top_block(lines, "modules")
+    if found is None:
+        return lines, []
+    start, end = found
+    lines, edited = list(lines), []
+    dash = next((len(line) - len(line.lstrip(" ")) for line in lines[start + 1:end] if re.match(r"^\s*-(\s|$)", line)), None)
+    if dash is None:
+        return lines, []
+    heads = [index for index in range(start + 1, end) if re.match(rf"^ {{{dash}}}-(\s|$)", lines[index])]
+    for head, tail in zip(heads, [*heads[1:], end]):
+        ids = [match.group(1) for line in lines[head:tail] if (match := re.match(r"^\s*(?:-\s+)?id\s*:\s*['\"]?([^'\"\s#]+)", line))]
+        if not ids or ids[0] not in module_ids:
+            continue
+        for index in range(head, tail):
+            adapter = re.match(rf"^(\s*)adapter_id\s*:\s*['\"]?{re.escape(WRAPPER_ADAPTER)}['\"]?\s*$", lines[index])
+            if adapter:
+                lines[index] = f"{adapter.group(1)}adapter_id: {SYSTEM_MAVEN}"
+                edited.append(ids[0])
+            wrapper = re.match(r"^(\s*)wrapper\s*:", lines[index])
+            if wrapper:
+                lines[index] = f"{wrapper.group(1)}executable: mvn"
+    return lines, list(dict.fromkeys(edited))
+
+
 _ID_LINE = re.compile(r"^[ \t>*#-]*(?:\*\*)?([A-Za-zА-Яа-яЁё]{1,12})([-_]?)(\d{1,4})((?:[.-]\d{1,4})*)(\.?)(?=[\s*:)\]])", re.M)
 
 
@@ -205,7 +254,8 @@ class Operator:
         self.dry = args.dry_run
         self.home = Path(args.home).expanduser().resolve()
         self.pack = self.home / "test-skills"
-        self.wrap_dir = self.home / "wrap"
+        self.py = pack_python(self.pack)
+        self.wrap_dir = HERE / "wrap"
         self.report = self.home / "report"
         self.project = Path(args.project).expanduser().resolve()
         self.models = [item.strip() for item in args.models.split(",") if item.strip()]
@@ -290,6 +340,52 @@ class Operator:
         self.say(f"  код выхода: {done.code}")
         return done
 
+    def pack_json(self, code: str, *args: Any) -> Any:
+        """A read-only question to the package (its own parser or presets) under its interpreter; runs in --dry-run too."""
+        argv = [self.py, "-c", code, *[str(item) for item in args]]
+        self.log(f"$ {shlex.join(argv)}   (в {self.pack})")
+        try:
+            done = subprocess.run(argv, cwd=self.pack, capture_output=True, env=self.env, text=True, encoding="utf-8", errors="replace",
+                                  timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise Stop(f"пакет не ответил: {error}", "сначала шаг 0 (комплект и интерпретатор)")
+        self.log("stdout:\n" + done.stdout + "\nstderr:\n" + done.stderr)
+        if done.returncode != 0:
+            raise Stop(f"пакет не ответил (код {done.returncode}): {' | '.join(_main_lines(done.stderr, 2))}", "сначала шаг 0; ошибку — в отчёт (п. 7)")
+        return json.loads(done.stdout)
+
+    def runner_command(self) -> list[str]:
+        """The driver's --review-runner-command: the package's codex preset argv with [python, wrap.py] in place of {cli} —
+        the wrapper is never executed by its shebang (execve of scripts is forbidden on some hosts)."""
+        argv = self.pack_json(CODEX_ARGV_CODE)
+        return [self.py, str(self.wrap_dir / "wrap.py"), *[item for item in argv if item != "{cli}"]]
+
+    def skillsrc_modules(self) -> list[dict[str, Any]] | None:
+        """The modules of the project's .skillsrc by the package's parser; None without .skillsrc."""
+        skillsrc = self.project / ".skillsrc"
+        if not skillsrc.is_file():
+            return None
+        try:
+            return self.pack_json(MODULES_CODE, skillsrc)
+        except Stop as stop:
+            raise Stop(f".skillsrc проекта не читается пакетом: {stop.message}", "исправить .skillsrc (ошибка выше) и повторить шаг")
+
+    def check_module(self) -> None:
+        """--module against the .skillsrc modules: several modules need it (the driver stops with module_required otherwise)."""
+        modules = self.skillsrc_modules()
+        if modules is None:
+            if self.args.module:
+                self.say(f"  в проекте ещё нет .skillsrc — --module {self.args.module} проверит драйвер")
+            return
+        ids = [module["id"] for module in modules]
+        listed = ", ".join(f"{module['id']} ({module['root']})" for module in modules)
+        if self.args.module and self.args.module not in ids:
+            raise Stop(f"--module {self.args.module}: такого модуля в .skillsrc нет; есть: {listed}", "передать --module <id> из списка")
+        if not self.args.module and len(ids) > 1:
+            raise Stop(f"в .skillsrc модулей {len(ids)}, а --module не задан: {listed}", "передать --module <id> из списка (корень модуля — в скобках)")
+        if len(ids) > 1 and not self.args.target:
+            self.say("  внимание: модулей несколько, а --target не задан — разметка контекста получит весь модуль; RUN.md: --target обязателен")
+
     # -- step 0
     def step_0(self) -> None:
         if not self.pack.is_dir():
@@ -319,28 +415,22 @@ class Operator:
                 raise Stop(f"в пакете лишние .py, которых нет в {files.name} ({len(code)}): {', '.join(code[:5])}",
                            f"удалить {self.pack} и скопировать папку test-skills из комплекта заново")
             self.say(f"  файлы пакета: {len(rows)} совпадают" + (f"; лишних файлов {len(extra)}: {', '.join(extra[:5])}" if extra else ""))
-        if not WINDOWS:
-            for path in (self.wrap_dir / "wrap.py", self.home / "preflight.py", self.home / "bench" / "bench.py"):
-                self.action(f"chmod +x {path}")
-                if not self.dry and path.is_file():
-                    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        for path in (self.wrap_dir / "wrap.py", HERE / "preflight.py", HERE / "bench" / "bench.py"):
+            if not path.is_file():
+                raise Stop(f"рядом с operate.py нет {path.relative_to(HERE)}", f"скопировать комплект целиком: operate.py, preflight.py, wrap/, bench/ — в одну папку ({HERE})")
         if sys.version_info < (3, 11):
             raise Stop(f"Python {sys.version.split()[0]} < 3.11", "запускать operate.py через python3.11 или новее")
-        self.say(f"  Python {sys.version.split()[0]}: ок")
-        modules = self.run([PY, "-c", "import jsonschema, yaml"])
+        self.say(f"  Python {sys.version.split()[0]}: ок; интерпретатор пакета: {self.py}" + ("" if self.py != sys.executable else
+                 f" (venv {self.pack / '.venv'} нет — текущий)"))
+        modules = self.run([self.py, "-c", "import sys, jsonschema, yaml; sys.exit(sys.version_info < (3, 11))"])
         if modules.code != 0:
-            if self.args.no_pip:
-                raise Stop("нет модулей jsonschema/pyyaml", "поставить их средствами окружения (пакеты ОС python3-jsonschema и python3-yaml "
-                           "или как принято на машине) и запустить --from-step 0; operate.py pip не вызывает")
             requirements = self.pack / "requirements.txt"
-            hashed = "--hash=" in requirements.read_text(encoding="utf-8", errors="replace") if requirements.is_file() else False
-            self.say("  нет jsonschema/pyyaml; operate.py сам ничего не ставит. Команда установки:")
-            self.say("    " + shlex.join([PY, "-m", "pip", "install", *(["--require-hashes"] if hashed else []), "-r", str(requirements)]))
-            if not hashed:
-                self.say("    (в requirements.txt этой версии пакета нет хешей — --require-hashes появится с обновлением пакета; "
-                         "ставить только из доверенного зеркала: pip config list)")
-            raise Stop("нет зависимостей пакета", "выполнить команду выше и запустить --from-step 0")
-        doctor = self.run([PY, "-m", "tools.doctor", "--root", "."], cwd=self.pack)
+            install = shlex.join([self.py, "-m", "pip", "install", "--require-hashes", "-r", str(requirements)])
+            raise Stop(f"у интерпретатора {self.py} нет jsonschema/pyyaml (или он старше 3.11) — запустите через интерпретатор пакета "
+                       f"({self.pack / '.venv'}) или поставьте зависимости: "
+                       + ("пакетами ОС python3-jsonschema и python3-yaml (--no-pip)" if self.args.no_pip else install),
+                       "operate.py сам ничего не ставит; после установки — --from-step 0")
+        doctor = self.run([self.py, "-m", "tools.doctor", "--root", "."], cwd=self.pack)
         if self.dry:
             return
         report = _json_tail(doctor.stdout) or {}
@@ -359,7 +449,8 @@ class Operator:
         inside = [self.home.relative_to(self.project).as_posix()] if self.in_project else []
         inside += [self.runner_dir.relative_to(self.project).as_posix()] if self.runner_dir.is_relative_to(self.project) and not \
             self.runner_dir.is_relative_to(self.home) else []
-        done = self.run([PY, self.home / "preflight.py", "--pack", self.pack, "--project", self.project, *self._docs_args(),
+        inside += [HERE.relative_to(self.project).as_posix()] if HERE.is_relative_to(self.project) and not HERE.is_relative_to(self.home) else []
+        done = self.run([self.py, HERE / "preflight.py", "--pack", self.pack, "--project", self.project, *self._docs_args(),
                          *[item for path in inside for item in ("--exclude-dir", path)], "--json", report])
         if self.dry:
             self.say("  (при «стоп» только из-за неисполняемого mvnw/gradlew — chmod +x с подтверждением и повтор preflight)")
@@ -373,8 +464,11 @@ class Operator:
         warns = [row for row in rows if row["status"] == "внимание"]
         for line in _main_lines(done.stdout, 1):
             self.say("  " + line)
-        for row in [*stops, *warns][:8]:
+        sensitive = [row for row in [*stops, *warns] if row["check"].startswith("ПДн/секреты")]
+        for row in [*[row for row in [*stops, *warns] if row not in sensitive][:8], *sensitive]:
             self.say(f"  [{row['status']}] {row['check']}: {row['finding']}" + (f" → {row['hint']}" if row["hint"] else ""))
+        if sensitive:
+            self.say("  файлы выше уходят в модель вместе с кодом модуля: значения должны быть тестовыми, иначе — исключить до шага 5a")
         if stops:
             fixable = [re.match(r"chmod \+x (.+?)(?:\s{2}|$)", row["hint"]) for row in stops]
             if all(fixable) and not again:
@@ -410,9 +504,6 @@ class Operator:
             config["version"] = self.args.cli_version
         return config
 
-    def runner_cli(self) -> Path:
-        return self.wrap_dir / ("wrap.cmd" if WINDOWS else "wrap.py")
-
     def step_2(self) -> None:
         config = self.wrap_config()
         if not any("{model}" in item for item in config["command"]):
@@ -430,23 +521,23 @@ class Operator:
             if path.is_file() and not (self.wrap_dir / "wrap.json.orig").exists():
                 shutil.copy2(path, self.wrap_dir / "wrap.json.orig")
             path.write_text(json.dumps(config, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-            if WINDOWS:
-                self.runner_cli().write_text(f'@"{PY}" "%~dp0wrap.py" %*\r\n', encoding="utf-8")
-        version = self.run([PY, self.wrap_dir / "wrap.py", "--version"])
+        version = self.run([self.py, self.wrap_dir / "wrap.py", "--version"])
         if not self.dry:
             if version.code != 0:
                 raise Stop("wrap.py --version не прошёл", " ".join(_main_lines(version.stderr, 2)) or "проверить wrap.json")
             self.state["host_cli_version"] = version.stdout.strip() or "unknown"
             self.say(f"  версия CLI: {self.state['host_cli_version']}")
-        selftest = self.run([PY, self.wrap_dir / "wrap.py", "--selftest", "--pack", self.pack], cwd=self.wrap_dir)
+        selftest = self.run([self.py, self.wrap_dir / "wrap.py", "--selftest", "--pack", self.pack], cwd=self.wrap_dir)
         if not self.dry:
             for line in _main_lines(selftest.stdout, 3):
                 self.say("  " + line)
             if selftest.code != 0:
                 raise Stop("селфтест обёртки не прошёл", "смотреть строки «стоп» в operate.log; обёртка или Python окружения")
+        # the live call goes through the very command the driver will launch (the package's codex argv, interpreter first)
         answer = self.home / "probe-answer.txt"
-        probe = self.run([PY, self.wrap_dir / "wrap.py", "exec", "--skip-git-repo-check", "--json", "--model", self.default_model,
-                          "--output-last-message", answer, "-"], stdin=PROBE, timeout=int(self.args.cli_timeout) + 60)
+        values = {"model": self.default_model, "last_message": str(answer)}
+        probe = self.run([item.format(**values) if "{" in item else item for item in self.runner_command()], stdin=PROBE,
+                         timeout=int(self.args.cli_timeout) + 60)
         if self.dry:
             return
         events = [_json_tail(line) for line in probe.stdout.splitlines()]
@@ -465,7 +556,7 @@ class Operator:
     # -- step 3
     def step_3(self) -> None:
         out = self.home / f"bench-{datetime.date.today():%m%d}"
-        done = self.run([PY, self.home / "bench" / "bench.py", "--pack", self.pack, "--wrap-config", self.wrap_dir / "wrap.json",
+        done = self.run([self.py, HERE / "bench" / "bench.py", "--pack", self.pack, "--wrap-config", self.wrap_dir / "wrap.json",
                          "--models", ",".join(self.models), "--out", out], echo=True)
         proposal = {role: self.default_model for role in ROLES}
         if self.dry:
@@ -584,10 +675,20 @@ class Operator:
                 self.say(f"  внимание: test.offline: {note}")
             self.say("  сборка: " + ("онлайн (--online)" if self.args.online else
                                      "offline — только ~/.m2; нет артефакта → BUILD_FAILED_BEFORE_TESTS / MUTATION_TOOL_MISSING"))
+        # preflight «mvnw нет, есть mvn в PATH»: the wrapper adapter cannot run there — offer the system Maven adapter
+        modules = self.skillsrc_modules() if skillsrc.is_file() else None
+        if modules and shutil.which("mvn"):
+            no_wrapper = [module["id"] for module in modules if module["test"].get("adapter_id") == WRAPPER_ADAPTER and not any(
+                (base / str(module["test"].get("wrapper") or "mvnw")).is_file() for base in (self.project / module["root"], self.project))]
+            if no_wrapper:
+                lines, edited = set_system_maven(lines, no_wrapper)
+                self.say(f"  обёртки Maven нет, mvn есть в PATH ({shutil.which('mvn')}): модули {', '.join(edited or no_wrapper)} — "
+                         f"adapter_id {SYSTEM_MAVEN}, executable: mvn" + ("" if edited else " (не удалось найти строки — поправить руками)"))
         after = "\n".join(lines) + "\n"
         if after == before:
             self.say("  .skillsrc уже такой — без изменений")
             self.state.pop("skillsrc_deferred", None)
+            self.check_module()
             return
         for line in difflib.unified_diff(before.splitlines(), after.splitlines(), ".skillsrc", ".skillsrc (новый)", lineterm="", n=1):
             self.say("  " + line)
@@ -599,20 +700,49 @@ class Operator:
             shutil.copy2(skillsrc, self.home / f"skillsrc.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}")
             skillsrc.write_text(after, encoding="utf-8")
         self.state.pop("skillsrc_deferred", None)
+        if not self.dry:
+            self.check_module()
 
     # -- steps 5a and 5
     def driver_argv(self, profile: str, extra: list[str]) -> list[str]:
+        """The run's start as ``next --review-runner process``: the driver scans and returns the first task without
+        launching a model, so its size is checked first (``resume_argv`` then drives the same run with ``run --run``)."""
         host_cli = Path(shlex.split(self.args.cli_command)[0]).name
-        return [PY, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--profile", profile,
+        command = self.runner_command() if self.pack.is_dir() or not self.dry else [self.py, str(self.wrap_dir / "wrap.py"), "exec", "…"]
+        return [self.py, "-m", "tools.pipeline_driver", "next", "--project", str(self.project), "--review-runner", "process", "--profile", profile,
                 *self._docs_args(), "--subject", self.args.subject, "--model-id", self.default_model, "--host-cli", host_cli,
                 "--host-cli-version", self.state.get("host_cli_version") or self.args.cli_version or "unknown", "--reviewer-isolation", "fresh",
-                "--review-runner-preset", "codex", "--review-runner-cli", str(self.runner_cli()), "--runner-dir", str(self.runner_dir),
-                "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
-                *(["--target", self.args.target] if self.args.target else []), *extra]
+                "--review-runner-preset", "codex", "--review-runner-command", json.dumps(command, ensure_ascii=False),
+                "--runner-dir", str(self.runner_dir), "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
+                *(["--module", self.args.module] if self.args.module else []), *(["--target", self.args.target] if self.args.target else []), *extra]
 
     def resume_argv(self, run_id: str, answers: list[str]) -> list[str]:
-        return [PY, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
-                *[item for answer in answers for item in ("--answer", answer)]]
+        return [self.py, "-m", "tools.pipeline_driver", "run", "--project", str(self.project), "--runner", "process", "--run", run_id,
+                "--max-tasks", str(self.args.max_tasks), *[item for answer in answers for item in ("--answer", answer)]]
+
+    def check_task_size(self, payload: dict[str, Any]) -> None:
+        """Before the first model call: the task's input (its files, SKILL and schema — what goes to stdin) in tokens
+        against the model's context; over it — stop with the --target hint instead of sending it."""
+        tasks = payload.get("tasks") if payload.get("action") == "batch" else [payload]
+        rows = []
+        for task in tasks or []:
+            size = int(task.get("input_bytes") or 0) + sum(Path(task[key]).stat().st_size for key in ("skill_path", "schema_path")
+                                                           if task.get(key) and Path(task[key]).is_file())
+            rows.append((str(task.get("task_id")), size))
+        if not rows:
+            return
+        tpb, context = self.args.tokens_per_byte, self.args.model_context
+        budget = int(context / tpb)
+        for task_id, size in rows:
+            tokens = int(size * tpb)
+            self.say(f"  первая задача модели {task_id}: вход ≈ {size:,} Б ≈ {tokens:,} токенов ({tpb} ток/Б); окно {context:,} токенов "
+                     f"≈ {budget:,} Б".replace(",", " "))
+            if tokens > context:
+                raise Stop(f"задача {task_id} не влезет в окно модели: {tokens / context:.2f}× (≈ {tokens:,} > {context:,} токенов); модель не вызывалась"
+                           .replace(",", " "),
+                           "сузить вход: --target <каталог фичи> (обязателен для проектов больше одного модуля / 1 МБ), --module, paths модуля в "
+                           f".skillsrc; другая модель — --model-context/--tokens-per-byte. Заведённый прогон {payload.get('run_id')} не продолжать "
+                           f"(можно удалить из {self.project / '.pilot-runs'})")
 
     def _driver_dirs(self) -> set[Path]:
         return set((self.project / ".pilot-runs").glob("*.driver")) if (self.project / ".pilot-runs").is_dir() else set()
@@ -685,10 +815,18 @@ class Operator:
 
     def drive(self, profile: str, extra: list[str], label: str) -> tuple[int, dict[str, Any] | None]:
         run_id, self.args.run = self.args.run, None  # --run resumes the first driven step only
-        argv = self.resume_argv(run_id, self.args.answer) if run_id else self.driver_argv(profile, extra)
+        starting = not run_id  # until the first model task is sized, the run goes by `next`/`submit` (no process launched)
+        if run_id:
+            argv = self.resume_argv(run_id, self.args.answer)
+        else:
+            if not self.dry or self.pack.is_dir():
+                self.check_module()
+            argv = self.driver_argv(profile, extra)
         while True:
             code, payload = self.run_watched(argv, label, run_id)
             if self.dry:
+                self.say(f"  (первая задача модели: вход × {self.args.tokens_per_byte} ток/Б против окна {self.args.model_context} — больше → стоп "
+                         "с подсказкой --target; иначе тот же прогон: … run --project <проект> --runner process --run <run_id>)")
                 self.say("  (ask_user — показать вопрос, ждать ответа, повтор: … run --project <проект> --runner process --run <run_id> --answer <метка>=<значение>)")
                 self.say("  (ask regenerate-after-gate или BUILD_FAILED_BEFORE_TESTS — хвост runner-output.txt и стоп)")
                 return 0, None
@@ -696,7 +834,18 @@ class Operator:
             self.state[f"{label}_run_id"] = run_id
             self.save_state()
             action = payload.get("action")
+            if starting and action in {"llm", "batch", "wait"} and run_id:  # nothing launched yet
+                if action != "wait":
+                    self.check_task_size(payload)
+                starting = False
+                argv = self.resume_argv(run_id, [])
+                continue
             if action == "done":
+                if not run_id:
+                    result = payload.get("result") or {}
+                    raise Stop(f"прогон не заведён: {result.get('reason_code') or result.get('status') or 'нет run_id'} "
+                               f"{str(result.get('message') or result.get('reason') or '')[:300]}".rstrip(),
+                               f"смотреть {self.home / (label + '.stdout.json')}; reason_code — в отчёт (п. 7)")
                 return code, payload
             if action == "ask_user":
                 task_id = str(payload.get("task_id") or "")
@@ -712,8 +861,13 @@ class Operator:
                 value = self.ask("Ответ (значение; пусто — остановиться): ")
                 if not value:
                     raise Stop("прогон ждёт ответа", f"продолжить: operate.py … --from-step {'5' if label == 'run' else '5a'} --run {run_id} --answer {name}=<значение>")
-                argv = self.resume_argv(run_id, [f"{name}={value}"])
+                argv = [self.py, "-m", "tools.pipeline_driver", "submit", "--project", str(self.project), "--run", run_id, "--task-id", task_id,
+                        "--answer", value] if starting else self.resume_argv(run_id, [f"{name}={value}"])
                 continue
+            if action == "error" and "module_required" in json.dumps(payload, ensure_ascii=False):
+                modules = self.skillsrc_modules() or []
+                raise Stop("драйвер требует модуль: в .skillsrc их несколько, а --module не задан ("
+                           + ", ".join(f"{module['id']} ({module['root']})" for module in modules) + ")", "передать --module <id> из списка")
             if action == "error":
                 hint = "DRIVER_FAILURE — дефект пакета: код и message в отчёт (п. 7)" if payload.get("code") == "DRIVER_FAILURE" else \
                     "код и message — в отчёт (п. 7); RUNNER_* — смотреть stderr.txt и last-message.txt в каталоге раннера"
@@ -959,8 +1113,8 @@ def _figures(result: dict[str, Any], events: list[dict[str, Any]], run_root: Pat
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Внутренний прогон test-skills по RUN.md, шаг за шагом (шаги: " + ", ".join(STEPS) + ").")
-    parser.add_argument("--home", default="~/ts", help="каталог комплекта (там test-skills/, test-skills-*.files.sha256, wrap/, bench/, "
-                                                       "preflight.py); может лежать внутри проекта")
+    parser.add_argument("--home", default="~/ts", help="каталог пакета, раннера и отчёта (там test-skills/ и test-skills-*.files.sha256); "
+                                                       "preflight.py, wrap/, bench/ берутся рядом с operate.py; может лежать внутри проекта")
     parser.add_argument("--project", required=True, help="корень проекта")
     parser.add_argument("--docs", action="append", required=True, help="спека (путь внутри проекта); можно несколько")
     parser.add_argument("--subject", required=True, help="тема прогона по-русски")
@@ -977,7 +1131,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--id-pattern", help="шаблон ID требований (иначе — вывести из спеки и подтвердить)")
     parser.add_argument("--runner-dir", help="каталог процессов модели (по умолчанию <home>/runner, а при --home внутри проекта — "
                                              "<home>/.runner; драйвер пишет предупреждение RUNNER_DIR_INSIDE_PROJECT)")
-    parser.add_argument("--target", help="цель прогона для драйвера (pipeline_driver run --target), если в проекте их несколько")
+    parser.add_argument("--module", help="id модуля из .skillsrc (pipeline_driver --module); обязателен, если модулей несколько")
+    parser.add_argument("--target", help="цель прогона для драйвера (pipeline_driver --target): каталог фичи; обязателен для проектов "
+                                         "больше одного модуля / 1 МБ — иначе разметка получит весь модуль")
+    parser.add_argument("--tokens-per-byte", type=float, default=TOKENS_PER_BYTE, help="токенов на байт входа задачи (оценка перед "
+                                                                                       "первым вызовом модели; по умолчанию 0.24)")
+    parser.add_argument("--model-context", type=int, default=MODEL_CONTEXT, help="окно модели, токенов (по умолчанию 239144): "
+                                                                                 "первая задача больше — стоп до вызова модели")
     parser.add_argument("--review-input-bytes", type=int, default=100_000)
     parser.add_argument("--max-tasks", type=int, default=2)
     parser.add_argument("--max-parallel", type=int, default=2, help="review_runner.max_parallel в .skillsrc")

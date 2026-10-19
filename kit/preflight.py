@@ -326,8 +326,10 @@ def check_sensitive(project: Path, docs: list[str], extra: list[str]) -> None:
             add(OK, f"ПДн/секреты: {name}", "не найдено")
             continue
         severity = STOP if name == "секреты" and any(item in docs or item == ".skillsrc" for item in paths) else WARN
-        add(severity, f"ПДн/секреты: {name}", f"{len(paths)} файл(ов): {', '.join(paths[:5])}" + (" …" if len(paths) > 5 else ""),
-            "пакет передаёт выбранные файлы модели: проверить, что это тестовые/демо-значения; реальные — убрать или исключить в .skillsrc (limits / exclusions)")
+        add(severity, f"ПДн/секреты: {name}", f"{len(paths)} файл(ов): {', '.join(paths[:20])}" + (f" … (ещё {len(paths) - 20})" if len(paths) > 20 else ""),
+            "файлы модуля уходят в модель целиком: проверить, что значения тестовые/демо; реальные — убрать из файла или исключить: "
+            "в .skillsrc сузить modules[].paths (source/tests/resources) модуля, либо внести файл в .gitignore (сканер пакета "
+            "git-игнорируемые файлы не берёт); ключа exclusions в .skillsrc нет")
 
 
 def main() -> int:

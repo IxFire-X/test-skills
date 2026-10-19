@@ -5,6 +5,16 @@
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
+Раскладка «всё из `kit/` в `~/ts/`» — рекомендация, а не требование: `operate.py` берёт `preflight.py`, `wrap/` и
+`bench/` рядом с собой, а `--home` — только место пакета (`test-skills/` и `test-skills-*.files.sha256`), каталога
+раннера, состояния и отчёта. Например, `~/ts/kit/operate.py --home ~/ts` работает так же, как `~/ts/operate.py --home ~/ts`.
+
+**Интерпретатор.** Пакет запускается Python'ом из `~/ts/test-skills/.venv` (`bin/python`, на Windows
+`Scripts\python.exe`), если такой venv есть, иначе тем, которым запущен `operate.py`; у него должны быть `jsonschema` и
+`pyyaml` — иначе шаг 0 останавливается с командой установки. **Ни один скрипт комплекта не запускается по shebang**:
+обёртка CLI всегда идёт как `[python, wrap.py, exec, …]` (в некоторых окружениях `execve` скрипта по `#!` запрещён —
+код 126 / `Operation not permitted`), поэтому `chmod +x` для `wrap.py`, `preflight.py`, `bench.py` не нужен.
+
 ## Права и сеть
 
 Что пакет читает, пишет, какие процессы запускает и куда при этом может ходить сеть — раздел USAGE.md «Права, сеть и
@@ -58,25 +68,40 @@
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts
 python3 operate.py --home ~/ts --project <проект> --docs <спека в проекте> --subject "<тема по-русски>" \
   --models glm-5.3,deepseek-0731-flash,qwen3.6-27b,qwen3.8-27b \
-  --cli-command '/opt/llm/bin/cli chat --model {model}' --prompt-via stdin --answer-from stdout --cli-version '<cli> <версия>'
+  --cli-command '/opt/llm/bin/cli chat --model {model}' --prompt-via stdin --answer-from stdout --cli-version '<cli> <версия>' \
+  --module <id модуля из .skillsrc> --target <каталог фичи>
 ```
 
-- **Шаг 0.** Сверяет папку `test-skills/` с `test-skills-*.files.sha256` (лишние `.py` — тоже стоп), проверяет Python и
-  `jsonschema`/`pyyaml` (нет — печатает команду pip и останавливается; `--no-pip` — без команды, ставить средствами
-  окружения), запускает doctor.
+- **`--module` и `--target`.** Если в `.skillsrc` несколько модулей, `--module <id>` обязателен: без него (или с
+  неизвестным id) шаги 4 и 5a останавливаются с перечнем id и корней модулей из `.skillsrc`. `--target <каталог фичи>`
+  обязателен для проектов больше одного модуля или 1 МБ кода: без него разметка контекста получает весь модуль и не
+  влезает в окно модели (см. «Арифметика контекста»).
+- **Шаг 0.** Сверяет папку `test-skills/` с `test-skills-*.files.sha256` (лишние `.py` — тоже стоп), проверяет, что
+  `preflight.py`, `wrap/`, `bench/` лежат рядом с `operate.py`, что у интерпретатора пакета есть `jsonschema`/`pyyaml`
+  (нет — одна строка «запустите через интерпретатор пакета или поставьте: `… -m pip install --require-hashes -r …`» и стоп;
+  `--no-pip` — ставить пакетами ОС), запускает doctor.
+- **Шаг 1.** Preflight; файлы с секретами/ПДн печатаются всегда (до 20 на вид) с подсказкой, как их исключить, — они
+  уходят в модель вместе с кодом модуля.
 - **Шаг 2.** Записывает `wrap/wrap.json` из `--cli-command`/`--prompt-via`/`--answer-from`/`--answer-file`/`--sandbox-args`
   (плейсхолдеры — как в п. 2; `extra_env` прежнего `wrap.json` сохраняется), прогоняет селфтест и делает один живой вызов
-  первой модели с показом ответа.
+  первой модели с показом ответа — той же командой, которую потом получит драйвер (`--review-runner-command`: аргументы
+  пресета `codex` пакета, впереди `[python, wrap.py]`).
 - **Шаг 3.** После бенчмарка предлагает модели по ролям. Для ревью кейсов и автотестов — по правилу п. 3, для
   остальных ролей — первая из `--models` (или `--default-model`). Свои назначения — `--role-model роль=модель`.
 - **Шаг 4.** Пишет в `.skillsrc`:
   - `review_runner` и `requirements.id_pattern` (шаблон выводится из спеки или задаётся `--id-pattern`);
   - `mutation.enabled`, если мутации включены;
-  - `test.offline: true` в каждом модуле (`--online` — не писать; если ключ уже есть — `false`).
+  - `test.offline: true` в каждом модуле (`--online` — не писать; если ключ уже есть — `false`);
+  - если у модуля `adapter_id: maven-wrapper:selected-symbols-v1`, а `mvnw` нет и `mvn` есть в PATH (preflight: «mvnw нет,
+    есть mvn в PATH») — `adapter_id: maven:selected-symbols-v1` и `executable: mvn` вместо `wrapper` (системный Maven).
 
   Перед записью показывает diff и спрашивает (`--yes` не отвечает, без терминала — `--yes-skillsrc`). Прежний
   `.skillsrc` копирует в `~/ts/skillsrc.bak-*`.
 - **Мутации.** `--mutation` ставится, если preflight нашёл PIT в `~/.m2`; выключить — `--no-mutation`.
+- **Шаги 5a и 5: размер первой задачи.** Прогон заводится командой `next` (драйвер сканирует проект и выдаёт первую
+  задачу, модель не вызывается); `operate.py` печатает её вход в байтах и оценку в токенах (`--tokens-per-byte`, по
+  умолчанию 0,24) против окна модели (`--model-context`, по умолчанию 239 144). Больше окна — стоп с подсказкой
+  `--target`, модель не вызывалась; иначе тот же прогон продолжается `run --run <run_id>`.
 - **Шаг 5.** На `ask_user` показывает вопрос и ждёт ответа. На `regenerate-after-gate` и `BUILD_FAILED_BEFORE_TESTS`
   печатает хвост `runner-output.txt` и останавливается. Прерванный прогон продолжается так:
   `--from-step 5 --run <run_id> [--answer метка=значение]`. Если в проекте несколько целей — `--target <цель>`
@@ -89,8 +114,7 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
 sha256sum -c --quiet test-skills-6856f59.files.sha256             # молчит = все файлы пакета совпадают
-chmod +x wrap/wrap.py preflight.py bench/bench.py
-python3 --version                                                 # нужен 3.11+
+python3 --version                                                 # нужен 3.11+ (или test-skills/.venv/bin/python)
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid
 ```
@@ -134,7 +158,7 @@ API_KEY, `AWS_*`, `AZURE_*` обёртка отвергает — секреты
 
 ```bash
 python3 wrap/wrap.py --selftest --pack ~/ts/test-skills            # фальшивым CLI: «Итог: ок»
-echo '{"x":1}' | wrap/wrap.py exec --json --model <модель> --output-last-message /tmp/w.txt - && cat /tmp/w.txt   # живой CLI
+echo '{"x":1}' | python3 wrap/wrap.py exec --json --model <модель> --output-last-message /tmp/w.txt - && cat /tmp/w.txt   # живой CLI
 ```
 
 ## 3. Бенчмарк моделей
@@ -164,6 +188,19 @@ mutation: {enabled: true, threads: 2, timeout_seconds: 3600}   # для --mutati
 Бюджет части ревью: `--review-input-bytes` ≈ окно модели (токены) × «Б на токен» × 0,4; при окне 262k и ~3,5 Б/токен —
 порядка 100 000 (меньше, если модель слабеет после 64–128k).
 
+### Арифметика контекста
+
+Задачи разметки, генератора и автоматизации получают полный контекст (код модуля + черновик требований) и не режутся.
+Замер внутреннего прогона 2026-10-15 (DeepSeek-V4.1-Flash через gigacode): 0,24 токена на байт входа (≈ 4,2 Б/токен),
+жёсткий лимит 239 144 токена → бюджет одной задачи ≈ 239 144 / 0,24 ≈ 1 000 000 Б. Задача разметки модуля `main` (377
+файлов, 3 МБ инвентаря) дала 1 352 513 Б ≈ 323 000 токенов — в 1,32 раза больше лимита; код — 95,6 % входа, поэтому
+резать спеку бесполезно. Отсюда:
+
+- `--target <каталог фичи>` — обязателен для проектов больше одного модуля или 1 МБ кода; `--module` — при нескольких
+  модулях;
+- перед первой задачей модели `operate.py` печатает её `input_bytes` и оценку в токенах и останавливается, если она
+  больше окна; для другой модели — `--tokens-per-byte` (по `bench-*.md`: 1 / «Б на токен») и `--model-context`.
+
 ## 5a. Пробный прогон (сначала)
 
 Ранний сигнал по схеме и качеству за 30–60 мин: только разметка, генератор и ревью кейсов.
@@ -172,9 +209,13 @@ mutation: {enabled: true, threads: 2, timeout_seconds: 3600}   # для --mutati
 cd ~/ts/test-skills
 python3 -m tools.pipeline_driver run --project <проект> --runner process --profile cases-only-v1 \
   --docs <спека> --subject "<тема>" --model-id <модель> --host-cli <имя CLI> --host-cli-version <версия> \
-  --reviewer-isolation fresh --review-runner-preset codex --review-runner-cli ~/ts/wrap/wrap.py \
+  --reviewer-isolation fresh --module <id> --target <каталог фичи> --review-runner-preset codex \
+  --review-runner-command "[\"$HOME/ts/test-skills/.venv/bin/python\", \"$HOME/ts/wrap/wrap.py\", \"exec\", \"--skip-git-repo-check\", \"--sandbox\", \"read-only\", \"--ephemeral\", \"--json\", \"--model\", \"{model}\", \"--output-last-message\", \"{last_message}\", \"-\"]" \
   --runner-dir ~/ts/runner --review-input-bytes 100000 --max-tasks 2
 ```
+
+`--review-runner-command` — JSON-массив: интерпретатор пакета, `wrap.py` и аргументы пресета `codex` пакета без `{cli}`
+(`--review-runner-cli wrap.py` запускал бы обёртку по shebang). `operate.py` строит его сам из пресета пакета.
 
 Итог `completion: COMPLETE` и кейсы в `test-cases`-проекциях — можно идти в полный прогон (п. 5). Код выхода 1 у
 `cases-only-v1` — норма (черновик).
@@ -186,7 +227,7 @@ cd ~/ts/test-skills
 python3 -m tools.pipeline_driver run --project <проект> --runner process \
   --profile local-pilot-v1 --docs <спека> --subject "<тема по-русски>" --model-id <модель по умолчанию> \
   --host-cli <имя CLI> --host-cli-version <версия> --reviewer-isolation fresh \
-  --review-runner-preset codex --review-runner-cli ~/ts/wrap/wrap.py \
+  --module <id> --target <каталог фичи> --review-runner-preset codex --review-runner-command "<тот же JSON-массив, что в п. 5a>" \
   --runner-dir ~/ts/runner --review-input-bytes 100000 --max-tasks 2 \
   --mutation --analyst-report --suite
 ```
