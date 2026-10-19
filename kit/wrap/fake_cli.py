@@ -36,8 +36,12 @@ def main() -> int:
     prompt = {"stdin": lambda: sys.stdin.buffer.read().decode("utf-8"), "file": lambda: Path(args.prompt_file).read_text(encoding="utf-8"),
               "arg": lambda: args.prompt or ""}[args.mode]()
     found = re.search(r"review\.(canonical|r1)\.(part-\d{6})", prompt)
-    if not found and "test-skills-probe" in prompt:  # operate.py step 2: one live call
-        sys.stdout.write(json.dumps({"ok": True, "probe": "test-skills-probe", "model": args.model}))
+    if not found and "test-skills-probe" in prompt:  # operate.py step 2 and init: one live call
+        probe = json.dumps({"ok": True, "probe": "test-skills-probe", "model": args.model})
+        if args.answer_file:
+            Path(args.answer_file).write_text(probe, encoding="utf-8")
+        else:
+            sys.stdout.write(probe)
         return 0
     if not found:
         print("fake: no review part in the task", file=sys.stderr)

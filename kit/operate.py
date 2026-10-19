@@ -320,6 +320,12 @@ class Operator:
         self.log(f"{question}{answer}")
         return answer
 
+    def mark_first_call(self) -> None:
+        """The first answered model call (S10 KPI); later calls do not move it."""
+        log = self.home / "operate.log"
+        if FIRST_CALL not in log.read_text(encoding="utf-8", errors="replace"):
+            self.log(f"{FIRST_CALL} {datetime.datetime.now().isoformat(timespec='seconds')}")
+
     def command(self, step: str, *extra: str) -> str:
         """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
         argv, skip = [], {"--from-step", "--only", "--run", "--answer"}
@@ -573,6 +579,7 @@ class Operator:
         self.say(f"  ответ модели {self.default_model}: {text[:300]}")
         if not isinstance(_json_tail(text), dict):
             raise Stop("CLI ответил не JSON-объектом", "модель или обёртка теряет JSON: проверить --answer-from и формат вывода CLI")
+        self.mark_first_call()
         usage = next((event.get("usage") for event in events if isinstance(event, dict) and event.get("type") == "turn.completed"), None)
         if usage:
             self.say(f"  токены: {json.dumps(usage, ensure_ascii=False)}")
@@ -1034,6 +1041,10 @@ class Operator:
             shutil.copy2(strength_md, self.report / "test-strength.md")
             copied.append("test-strength.md")
         figures = _figures(result, events, run_root, self.project)
+        try:
+            figures += _first_call_figures((self.home / "operate.log").read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
         table = ["| Показатель | Значение |", "| --- | --- |", *[f"| {name} | {value} |" for name, value in figures]]
         (self.report / "summary.md").write_text(f"# Внутренний прогон {run_id}\n\n" + "\n".join(table) + "\n", encoding="utf-8")
         copied.append("summary.md")
@@ -1134,6 +1145,415 @@ def _count_cases(result: dict[str, Any], project: Path) -> tuple[int, int] | Non
     return None
 
 
+FIRST_CALL = "first_model_call"
+TEXT_SUFFIXES = {".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".js", ".ts", ".tsx", ".jsx", ".xml", ".yml", ".yaml", ".properties",
+                 ".json", ".sql", ".html", ".css", ".md", ".txt", ".csv", ".gradle", ".conf", ".jsp", ".ftl", ".vm"}
+CODE_SUFFIXES = {".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".js", ".ts", ".tsx", ".jsx"}
+GENERIC_DIRS = {"src", "main", "java", "kotlin", "scala", "groovy", "test", "tests", "resources", "org", "com", "net", "io", "app", "springframework",
+                "samples", "static", "templates", "python", "source", "sources", "spec", "docs", "requirements", "файл", "файлы", "требования"}
+SKIP_DIRS = {".git", ".pilot-runs", "target", "build", "node_modules", ".gradle", ".idea", ".vscode", ".mvn", "__pycache__"}
+
+
+# ---------------------------------------------------------------- init: the first launch (S10)
+
+class Init(Operator):
+    """``operate.py init``: steps 0–2 and the size of the first model task in one go, then one ready command.
+
+    Writes nothing to the project: the measuring run it starts (``next``, no model) is removed by its id afterwards.
+    Every problem is one line «что сделать» with a ready command; the first blocking one stops."""
+
+    def __init__(self, args: argparse.Namespace, init_argv: list[str]) -> None:
+        super().__init__(args)
+        self.init_argv = init_argv
+        self.started = time.time()
+        self.decisions: list[str] = []
+        self.later: list[str] = []
+        self.facts: dict[str, Any] = {}
+
+    def init_command(self, **changes: str | None) -> str:
+        """``operate.py init`` with this call's arguments, ``changes`` replacing (or, None, dropping) options."""
+        argv, items = [], iter(self.init_argv)
+        for item in items:
+            key = item.split("=", 1)[0]
+            if key[2:].replace("-", "_") in changes:
+                if "=" not in item:
+                    next(items, None)
+                continue
+            argv.append(item)
+        for key, value in changes.items():
+            if value is not None:
+                argv += [f"--{key.replace('_', '-')}", value]
+        return shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), "init", *argv])
+
+    def run_init(self) -> int:
+        self.log(f"\n===== operate.py {datetime.datetime.now().isoformat(timespec='seconds')} init {shlex.join(self.init_argv)}")
+        self.say(f"init: проект {self.project}, спека {', '.join(self.args.docs)}, тема: {self.args.subject}")
+        for title, part in (("комплект и интерпретатор", self.step_0), ("модуль и сборка", self.init_module), ("CLI модели", self.init_cli),
+                            ("цель контекста (--target)", self.init_target), ("размер первой задачи", self.init_measure),
+                            ("проверки проекта", self.init_preflight)):
+            self.say(f"\n=== init: {title} ===")
+            try:
+                part()
+            except Stop as stop:
+                self.say(f"СТОП на шаге init: {stop.message}")
+                self.say(f"Что делать: {stop.hint}")
+                self.save_init()
+                return 1
+        self.finish()
+        return 0
+
+    def save_init(self) -> None:
+        self.facts.update({"decisions": self.decisions, "later": self.later, "seconds": int(time.time() - self.started)})
+        (self.home / "init.json").write_text(json.dumps(self.facts, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    # -- module and build
+    def init_module(self) -> None:
+        modules = self.skillsrc_modules()
+        if modules is None:
+            done = subprocess.run([self.py, "-m", "tools.init_skillsrc", "--project", str(self.project)], cwd=self.pack, capture_output=True,
+                                  env=self.env, text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
+            self.log("init_skillsrc (без записи):\n" + done.stdout + done.stderr)
+            proposal = _json_tail(done.stdout) or {}
+            ids = [str(item) for item in proposal.get("module_ids") or []]
+            questions = [str(item.get("field") or item.get("id")) for item in proposal.get("questions") or [] if isinstance(item, dict)]
+            self.say(f"  .skillsrc нет — его создаст пакет при первом прогоне; модули по разбору пакета: {', '.join(ids) or '—'}")
+            if questions:
+                self.decisions.append("ответ на вопросы пакета при создании .skillsrc: " + ", ".join(questions))
+                self.facts["skillsrc_questions"] = questions
+            modules = [{"id": item, "root": ".", "test": {}} for item in ids] or [{"id": "root", "root": ".", "test": {}}]
+            self.facts["skillsrc"] = "будет создан"
+        ids = [module["id"] for module in modules]
+        if self.args.module:
+            if self.args.module not in ids:
+                raise Stop(f"модуля {self.args.module} нет; есть: {', '.join(ids)}", self.init_command(module="<id из списка>"))
+            module = next(item for item in modules if item["id"] == self.args.module)
+        elif len(modules) == 1:
+            module = modules[0]
+        else:
+            docs = [(Path(doc) if Path(doc).is_absolute() else self.project / doc).resolve() for doc in self.args.docs]
+            owning = [item for item in modules if item["root"] not in (".", "") and
+                      any(doc.is_relative_to((self.project / item["root"]).resolve()) for doc in docs)]
+            if len(owning) != 1:
+                raise Stop("модулей несколько, спека ни в одном из них: " + ", ".join(f"{item['id']} ({item['root']})" for item in modules),
+                           self.init_command(module="<id из списка>"))
+            module = owning[0]
+            self.say(f"  модуль по месту спеки: {module['id']}")
+        self.args.module = module["id"] if len(modules) > 1 else self.args.module
+        self.module = module
+        root = self.project / str(module.get("root") or ".")
+        wrapper = next((name for name in ("mvnw", "gradlew") if (root / name).is_file() or (self.project / name).is_file()), None)
+        build = wrapper or ("mvn в PATH" if shutil.which("mvn") else None)
+        self.say(f"  модуль {module['id']} ({module.get('root') or '.'}); сборка: {build or 'не найдена'}")
+        if not build:
+            self.later.append("сборка: нет mvnw/gradlew и mvn в PATH — нужна до полного прогона (шаг 5)")
+        m2 = Path.home() / ".m2" / "repository"
+        if not m2.is_dir():
+            self.later.append(f"нет {m2}: сборка пойдёт online (--online) или собрать проект один раз с доступом к репозиторию")
+        self.facts.update({"module": module["id"], "module_root": module.get("root") or ".", "build": build})
+
+    # -- CLI
+    def init_cli(self) -> None:
+        command = shlex.split(self.args.cli_command)
+        if not any("{model}" in item for item in command):
+            raise Stop("в --cli-command нет {model}", "добавьте {model} в --cli-command: " + self.init_command(cli_command=self.args.cli_command + " --model {model}"))
+        if any(mark in item for item in command for mark in ("{prompt_file}", "{answer_file}")):
+            forms = [("file" if any("{prompt_file}" in item for item in command) else "stdin",
+                      "file" if any("{answer_file}" in item for item in command) else "stdout", command)]
+        elif any("{prompt}" in item for item in command):
+            forms = [("arg", "stdout", command)]
+        else:
+            forms = [("stdin", "stdout", command), ("arg", "stdout", [*command, "{prompt}"])]
+        last = ""
+        for prompt_via, answer_from, argv in forms:
+            self.args.prompt_via, self.args.answer_from = prompt_via, answer_from
+            config = {**self.wrap_config(), "command": argv}
+            ok, last = self._probe(config)
+            self.say(f"  форма {prompt_via} → {answer_from}: {'ответ JSON' if ok else last[:200]}")
+            if ok:
+                path = self.wrap_dir / "wrap.json"
+                if path.is_file() and not (self.wrap_dir / "wrap.json.orig").exists():
+                    shutil.copy2(path, self.wrap_dir / "wrap.json.orig")
+                path.write_text(json.dumps(config, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+                self.mark_first_call()
+                if argv is not command:  # the arg form appended {prompt}
+                    self.args.cli_command += " {prompt}"
+                self.facts["cli_form"] = f"{prompt_via}/{answer_from}"
+                self.facts["first_model_call_seconds"] = int(time.time() - self.started)
+                if prompt_via == "arg":
+                    self.later.append("CLI принимает задачу только аргументом: задачи больше 128 КиБ не пройдут — нужен stdin или файл")
+                if not config["sandbox_args"]:
+                    self.later.append("--sandbox-args не задан: если у CLI есть режим «без инструментов / read-only» — передать его")
+                return
+        raise Stop(f"CLI не ответил JSON ни в одной форме ({len(forms)}): {last[:300]}",
+                   "проверьте вызов руками: echo '{\"ok\": true}' | " + shlex.join([self.py, str(self.wrap_dir / "wrap.py"), "exec", "--json", "--model",
+                                                                                  self.default_model, "--output-last-message", str(self.home / "w.txt"), "-"]))
+
+    def _probe(self, config: dict[str, Any]) -> tuple[bool, str]:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="init-cli-") as temp:
+            path, answer = Path(temp) / "wrap.json", Path(temp) / "answer.txt"
+            path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+            values = {"model": self.default_model, "last_message": str(answer)}
+            argv = [item.format(**values) if "{" in item else item for item in self.runner_command()]
+            self.log(f"$ WRAP_CONFIG={path} {shlex.join(argv)}")
+            try:
+                done = subprocess.run(argv, input=PROBE, capture_output=True, env={**self.env, "WRAP_CONFIG": str(path)}, text=True,
+                                      encoding="utf-8", errors="replace", timeout=int(self.args.cli_timeout) + 60, check=False)
+            except subprocess.TimeoutExpired:
+                return False, f"нет ответа за {self.args.cli_timeout} с"
+            self.log("stdout:\n" + done.stdout + "\nstderr:\n" + done.stderr)
+            text = answer.read_text(encoding="utf-8") if answer.is_file() else ""
+            if done.returncode == 0 and isinstance(_json_tail(text), dict):
+                self.say(f"  ответ модели {self.default_model}: {text.strip()[:200]}")
+                return True, ""
+            errors = [event.get("message") for event in (_json_tail(line) for line in done.stdout.splitlines())
+                      if isinstance(event, dict) and event.get("type") == "error"]
+            return False, f"код {done.returncode}: " + (errors[0] if errors else (text.strip() or done.stderr.strip())[:300] or "пустой ответ")
+
+    # -- target
+    def _module_files(self) -> list[tuple[str, int]]:
+        """(path relative to the module root, bytes) of the module's text files — git's list when there is one."""
+        root = self.project / str(self.module.get("root") or ".")
+        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"], capture_output=True, check=False)
+        names = [name for name in listed.stdout.decode("utf-8", "replace").split("\0") if name] if listed.returncode == 0 else \
+            [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+        rows = []
+        for name in names:
+            parts = name.split("/")
+            if any(part in SKIP_DIRS for part in parts[:-1]) or Path(name).suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            path = root / name
+            if self.home.resolve() in path.resolve().parents or not path.is_file():
+                continue
+            size = path.stat().st_size
+            if size < 1_000_000:
+                rows.append((name, size))
+        return rows
+
+    def init_target(self) -> None:
+        budget = int(self.args.model_context / self.args.tokens_per_byte)
+        if self.args.target:
+            self.say(f"  --target {self.args.target} (задан)")
+            self.facts["target"] = self.args.target
+            return
+        paths = self.module.get("paths") or {}
+        sources = [str(item).rstrip("/") for item in (paths.get("source") or ["src/main", "src"])]
+        tests = [str(item).rstrip("/") for item in (paths.get("tests") or ["src/test"])]
+        inside = lambda name, roots: any(name == root or name.startswith(root + "/") for root in roots)  # noqa: E731
+        files = [(name, size) for name, size in self._module_files()
+                 if inside(name, [*sources, *(paths.get("resources") or [])]) and not inside(name, tests)]
+        total = sum(size for _name, size in files)
+        self.say(f"  текстовых файлов модуля {len(files)}, {total:,} Б ≈ {int(total * self.args.tokens_per_byte):,} токенов; окно ≈ {budget:,} Б"
+                 .replace(",", " "))
+        if total <= budget * 0.8:
+            self.say("  весь модуль влезает — --target не нужен")
+            return
+        sizes: dict[str, int] = {}
+        resources = [str(item).rstrip("/") for item in (paths.get("resources") or ["src/main/resources"])]
+        code: set[str] = set()  # a --target must hold code; its size is everything under it (what the scan would take)
+        for name, size in files:
+            parts = name.split("/")[:-1]
+            for depth in range(1, len(parts) + 1):
+                key = "/".join(parts[:depth])
+                sizes[key] = sizes.get(key, 0) + size
+                if Path(name).suffix.lower() in CODE_SUFFIXES:
+                    code.add(key)
+        limit = int(budget * 0.6)
+        fitting = [key for key, size in sizes.items() if key in code and inside(key, sources) and not inside(key, resources) and size <= limit
+                   and sizes.get(key.rsplit("/", 1)[0] if "/" in key else "", limit + 1) > limit]
+        words = set()
+        for doc in self.args.docs:
+            path = Path(doc) if Path(doc).is_absolute() else self.project / doc
+            text = (path.read_text(encoding="utf-8", errors="replace") if path.is_file() else "") + " " + doc
+            words |= {word.lower() for word in re.findall(r"[A-Za-zА-Яа-яЁё]{4,}", text)}
+        words -= GENERIC_DIRS
+
+        def score(key: str) -> int:
+            parts = [part for part in key.lower().split("/")[-2:] if part not in GENERIC_DIRS and len(part) >= 3]
+            return sum(1 for part in parts for word in words if part.startswith(word[:5]) or word.startswith(part[:5]))
+        ranked = sorted(fitting, key=lambda key: (-score(key), -sizes[key]))[:5]
+        if not ranked:
+            raise Stop(f"модуль {total:,} Б больше окна модели, а каталога исходников меньше {limit:,} Б не нашлось".replace(",", " "),
+                       self.init_command(target="<каталог фичи внутри модуля>"))
+        best = [key for key in ranked if score(key) == score(ranked[0])]
+        if score(ranked[0]) > 0 and len(best) == 1:
+            self.args.target = ranked[0]
+            self.say(f"  --target угадан по словам спеки: {ranked[0]} ({sizes[ranked[0]]:,} Б); другой — {self.init_command(target='<каталог>')}"
+                     .replace(",", " "))
+            self.facts["target"] = self.args.target
+            return
+        for key in ranked:
+            self.say(f"    {key}  ({sizes[key]:,} Б ≈ {int(sizes[key] * self.args.tokens_per_byte):,} токенов)".replace(",", " "))
+        self.decisions.append("--target")
+        raise Stop(f"модуль ({total:,} Б) не влезет в окно модели целиком — выберите каталог фичи из списка выше".replace(",", " "),
+                   self.init_command(target=ranked[0]))
+
+    # -- the first task, measured without a model
+    def _git_status(self) -> str:
+        done = subprocess.run(["git", "-C", str(self.project), "status", "--porcelain", "--untracked-files=all"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", check=False)
+        return done.stdout if done.returncode == 0 else ""
+
+    def init_measure(self) -> None:
+        before, skillsrc_existed = self._git_status(), (self.project / ".skillsrc").is_file()
+        runs_existed = (self.project / ".pilot-runs").is_dir()
+        code, payload = self.run_watched(self.driver_argv("cases-only-v1", []), "init-measure", None)
+        run_id = payload.get("run_id")
+        try:
+            action = payload.get("action")
+            if action in {"llm", "batch"}:
+                try:
+                    self.check_task_size(payload)
+                except Stop as stop:
+                    self.decisions.append("--target")
+                    raise Stop(stop.message, self.init_command(target="<каталог фичи внутри модуля, уже чем сейчас>")) from None
+            elif action == "ask_user":
+                name = str(payload.get("task_id") or "").split(".ask.", 1)[-1]
+                self.say(f"  драйвер до первой задачи спрашивает «{name}»: {payload.get('question')}")
+                self.show_payload(payload)
+                if not (name.startswith("skillsrc.") and self.facts.get("skillsrc_questions")):  # the same question init_skillsrc listed
+                    self.decisions.append(f"ответ на вопрос драйвера «{name}» (спросит пробный прогон)")
+                self.facts["first_stop"] = name
+            elif action == "error" or (action == "done" and not run_id):
+                result = payload.get("result") or {}
+                raise Stop(f"драйвер не завёл прогон: {payload.get('code') or result.get('reason') or result.get('reason_code')}: "
+                           f"{str(payload.get('message') or result.get('message') or '')[:300]}",
+                           self.init_command(target="<каталог фичи>") if "TARGET" in json.dumps(payload) else f"смотреть {self.home / 'init-measure.stdout.json'}")
+            else:
+                self.say(f"  драйвер ответил {action} — размер замерит шаг 5a до вызова модели")
+            self.facts["first_task"] = {key: payload.get(key) for key in ("task_id", "input_bytes") if payload.get(key)}
+        finally:
+            self._remove_measuring_run(run_id, runs_existed, skillsrc_existed, before)
+
+    def _remove_measuring_run(self, run_id: str | None, runs_existed: bool, skillsrc_existed: bool, before: str) -> None:
+        runs = self.project / ".pilot-runs"
+        if run_id and re.fullmatch(r"[0-9a-f]{32}", str(run_id)):
+            for path in (runs / run_id, runs / f"{run_id}.driver", self.runner_dir / run_id):
+                if path.is_dir():
+                    shutil.rmtree(path)
+        if not runs_existed and runs.is_dir() and not any(runs.iterdir()):
+            runs.rmdir()
+        if not skillsrc_existed and (self.project / ".skillsrc").is_file():
+            (self.project / ".skillsrc").unlink()
+        after = self._git_status()
+        self.say("  замерный прогон удалён; git status проекта " + ("как был" if after == before else "ИЗМЕНИЛСЯ:"))
+        if after != before:
+            for line in sorted(set(after.splitlines()) ^ set(before.splitlines()))[:10]:
+                self.say("    " + line)
+
+    # -- quiet preflight
+    def init_preflight(self) -> None:
+        report = self.home / "preflight.json"
+        argv = [self.py, HERE / "preflight.py", "--pack", self.pack, "--project", self.project, *self._docs_args(), "--json", report]
+        if self.in_project:
+            argv += ["--exclude-dir", self.home.relative_to(self.project).as_posix()]
+        done = subprocess.run([str(item) for item in argv], capture_output=True, env=self.env, text=True, encoding="utf-8", errors="replace",
+                              timeout=900, check=False)
+        self.log("preflight:\n" + done.stdout + done.stderr)
+        try:
+            rows = json.loads(report.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.later.append(f"preflight не записал отчёт (код {done.returncode}) — запустить шаг 1")
+            return
+        sensitive = [row for row in rows if row["check"].startswith("ПДн/секреты") and row["status"] != "ок"]
+        for row in sensitive:
+            self.say(f"  [{row['status']}] {row['check']}: {row['finding']}")
+        if sensitive:
+            self.decisions.append("отправка в модель файлов с ПДн/секретами из списка выше (или исключить их: .gitignore / paths модуля)")
+        rest = [row for row in rows if row["status"] in {"стоп", "внимание"} and row not in sensitive]
+        for row in rest:
+            self.later.append(f"{row['check']}: {row['finding'][:120]}")
+        self.say(f"  до первого прогона мешает: {'ПДн/секреты — решение ниже' if sensitive else 'ничего'}; до полного прогона — {len(rest)} пунктов (ниже)")
+
+    # -- the result
+    def finish(self) -> None:
+        self.state["host_cli_version"] = self.args.cli_version or "unknown"
+        self.save_state()
+        argv = ["--home", str(self.home), "--project", str(self.project), *self._docs_args(), "--subject", self.args.subject,
+                "--models", self.default_model, "--cli-command", self.args.cli_command, "--prompt-via", self.args.prompt_via,
+                "--answer-from", self.args.answer_from, *(["--module", self.args.module] if self.args.module else []),
+                *(["--target", self.args.target] if self.args.target else []),
+                *(["--cli-version", self.args.cli_version] if self.args.cli_version else []), "--only", "4,5a"]
+        command = shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), *argv])
+        self.facts["command"] = command
+        self.save_init()
+        kpi = dict(_first_call_figures((self.home / "operate.log").read_text(encoding="utf-8", errors="replace")))
+        self.say("\n=== init: готово ===")
+        self.say(f"Запуск (шаги 0–2 init уже сделал): {command}")
+        asks = ["запись .skillsrc проекта — покажет diff (без терминала: --yes-skillsrc)",
+                "отправка файлов модуля в модель — покажет список и размер (подтверждение отправки: --yes-send, когда его выдаёт драйвер)"]
+        self.say("Что ещё спросит прогон: " + "; ".join(f"№{index} {text}" for index, text in enumerate([*self.decisions, *asks], 1)))
+        if self.later:
+            self.say("До полного прогона (шаг 5), не сейчас:")
+            for line in self.later:
+                self.say(f"  - {line}")
+        self.say(f"init: {int(time.time() - self.started) // 60} мин {int(time.time() - self.started) % 60} с; до первого вызова модели — "
+                 f"{kpi.get('Время до первого вызова модели', '—')}, остановок до него — {kpi.get('Остановок до первого вызова модели', '—')}; "
+                 f"решений впереди — {len(self.decisions) + len(asks)}")
+
+
+def _subject(docs: list[str], project: Path) -> str:
+    """The first heading of the first specification (or its file name)."""
+    path = Path(docs[0]) if Path(docs[0]).is_absolute() else project / docs[0]
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            heading = re.match(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", line)
+            if heading:
+                return heading.group(1)[:120]
+    except OSError:
+        pass
+    return path.stem
+
+
+def build_init_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="operate.py init", description="Первый запуск: комплект, модуль, CLI модели, цель контекста и размер "
+                                                                         "первой задачи — и одна готовая команда прогона.")
+    parser.add_argument("--project", required=True, help="корень проекта")
+    parser.add_argument("--docs", action="append", required=True, help="спека (путь внутри проекта); можно несколько")
+    parser.add_argument("--cli-command", required=True, help="команда CLI модели одной строкой, с {model}")
+    parser.add_argument("--model", required=True, help="модель, как её называет CLI (одна; список — у --models шага 3)")
+    parser.add_argument("--home", help="каталог пакета (там test-skills/); по умолчанию — папка operate.py или её родитель, где лежит test-skills/")
+    parser.add_argument("--subject", help="тема прогона (по умолчанию — первый заголовок спеки)")
+    parser.add_argument("--module", help="id модуля, если init не выбрал его сам")
+    parser.add_argument("--target", help="каталог фичи внутри модуля, если init не угадал его сам")
+    parser.add_argument("--cli-version", help="строка версии CLI для квитанций")
+    parser.add_argument("--sandbox-args", help="флаги CLI «без инструментов / read-only»")
+    parser.add_argument("--runner-dir", help="каталог процессов модели")
+    parser.add_argument("--tokens-per-byte", type=float, default=TOKENS_PER_BYTE)
+    parser.add_argument("--model-context", type=int, default=MODEL_CONTEXT)
+    return parser
+
+
+def init_main(argv: list[str]) -> int:
+    options = build_init_parser().parse_args(argv)
+    home = options.home or next((str(path) for path in (HERE, HERE.parent) if (path / "test-skills").is_dir()), "~/ts")
+    project = Path(options.project).expanduser().resolve()
+    subject = options.subject or _subject(options.docs, project)
+    main_argv = ["--home", home, "--project", str(project), *[item for doc in options.docs for item in ("--docs", doc)], "--subject", subject,
+                 "--models", options.model, "--cli-command", options.cli_command, "--tokens-per-byte", str(options.tokens_per_byte),
+                 "--model-context", str(options.model_context)]
+    for key in ("module", "target", "cli_version", "sandbox_args", "runner_dir"):
+        if getattr(options, key) is not None:
+            main_argv += [f"--{key.replace('_', '-')}", getattr(options, key)]
+    return Init(build_parser().parse_args(main_argv), argv).run_init()
+
+
+def _first_call_figures(log: str) -> list[tuple[str, str]]:
+    """S10 KPI from operate.log: time from the first operate.py start (init or step 0) to the first answered model call,
+    and the stops before it."""
+    started = re.search(r"^===== operate\.py (\S+)", log, re.M)
+    call = re.search(rf"^{FIRST_CALL} (\S+)", log, re.M)
+    if not started:
+        return []
+    if not call:
+        return [("Время до первого вызова модели", "— (вызова не было)"),
+                ("Остановок до первого вызова модели", str(len(re.findall(r"^СТОП на шаге", log, re.M))))]
+    seconds = int((datetime.datetime.fromisoformat(call.group(1)) - datetime.datetime.fromisoformat(started.group(1))).total_seconds())
+    stops = len(re.findall(r"^СТОП на шаге", log[started.start():call.start()], re.M))
+    return [("Время до первого вызова модели", f"{seconds // 60} мин {seconds % 60} с"), ("Остановок до первого вызова модели", str(stops))]
+
+
 def _figures(result: dict[str, Any], events: list[dict[str, Any]], run_root: Path, project: Path) -> list[tuple[str, str]]:
     cases = _count_cases(result, project)
     collected = {str(event.get("task_id")) for event in events if event.get("event") == "runner_collected"}
@@ -1226,6 +1646,9 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["init"]:
+        return init_main(argv[1:])
     args = build_parser().parse_args(argv)
     return Operator(args).main()
 
