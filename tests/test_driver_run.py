@@ -249,8 +249,10 @@ def test_a_bad_launch_option_is_a_json_refusal_before_the_run_exists(tmp_path: P
 
 
 @pytest.mark.skipif(not JAVA_HOME, reason="set TEST_SKILLS_JAVA_HOME to a JDK 17+ to run Maven")
-def test_human_mode_runs_no_build_and_no_mutations_and_continues_with_the_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """S9 on step5 (Java, --mutation): `run` stops on human_exec, the person runs Maven, `run --run --junit` finishes; PIT never starts."""
+def test_human_mode_runs_no_process_itself_and_measures_the_persons_pit_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S9 on step5 (Java, --mutation): `run` stops on human_exec, the person runs Maven and then each mutation command
+    (project classpath, PIT tool resolution, PIT), the run continues with --junit, --mutation-step-done and --pit-report;
+    the package starts no process, the mutation receipt is MEASURED with executor human."""
     import subprocess
 
     from tools import mutation, run_tests
@@ -267,19 +269,34 @@ def test_human_mode_runs_no_build_and_no_mutations_and_continues_with_the_report
         raise AssertionError("the package started a build, test or PIT process in human mode")
 
     monkeypatch.setattr(run_tests, "run_subprocess", forbidden)
-    monkeypatch.setattr(mutation, "_run", forbidden)
+    monkeypatch.setattr(mutation, "_RUNNER", forbidden)
+
+    def person(command: dict) -> None:  # the person runs a printed command in their own environment
+        completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+        assert completed.returncode == 0, (command["kind"], completed.stdout[-2000:], completed.stderr[-2000:])
+
     code, stopped = _run(project, "--profile", "local-pilot-v1", "--mutation", "--execution-mode", "human")
     assert stopped["action"] == "human_exec" and stopped.get("stopped") == "HUMAN_EXECUTION" and code == 3, stopped
     run_id = stopped["run_id"]
-    for command in stopped["commands"]:  # the person runs the printed commands in their own environment
-        completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
-        assert completed.returncode == 0, (command["kind"], completed.stdout[-2000:], completed.stderr[-2000:])
+    for command in stopped["commands"]:
+        person(command)
     report = Path(stopped["report_path"])
     reports = [str(report)] if report.is_file() else [str(path) for path in report.rglob("*.xml")]
     assert reports
     code, payload = _main("run", "--project", str(project), "--runner", "process", "--run", run_id, *[item for path in reports for item in ("--junit", path)])
+    steps = []
+    for _ in range(6):
+        if payload["action"] != "human_exec":
+            break
+        assert payload["kind"] == "mutation" and len(payload["commands"]) == 1 and code == 3, payload
+        steps.append(payload["step"])
+        person(payload["commands"][0])
+        follow = ["--pit-report", payload["report_path"]] if payload["step"] == "pit" else ["--mutation-step-done"]
+        code, payload = _main("run", "--project", str(project), "--runner", "process", "--run", run_id, *follow)
+    assert steps and steps[-1] == "pit" and "resolve-project" in steps, steps
     assert payload["action"] == "done", payload
     result = payload["result"]
     assert (result["verification"], result["accepted"]) == ("PASS", True), result
     receipt = read_mutation_receipt_if_present(project / ".pilot-runs" / run_id, result["attempt_id"])
-    assert receipt is not None and (receipt.get("status"), receipt.get("reason_code")) == ("NOT_APPLICABLE", "HUMAN_EXECUTION_MODE"), receipt
+    assert receipt is not None and receipt["status"] == "MEASURED" and receipt["executor"] == "human", receipt
+    assert receipt["report"]["mutations"] > 0 and receipt["project_inventory"]["unchanged"] is True

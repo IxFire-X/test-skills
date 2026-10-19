@@ -20,6 +20,8 @@
     "message": {"oneOf": [{"type": "null"}, {"type": "string", "maxLength": 600}]},
     "verification": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE"]},
     "argv_digest": {"$ref": "#/$defs/digest"},
+    "executor": {"const": "human", "description": "S9 execution.mode human: a person ran the printed resolver and PIT commands; absent when the package ran them."},
+    "commands_digest": {"$ref": "#/$defs/digest", "description": "S9: digest of the commands the person was given, in order."},
     "tool": {
       "type": "object", "additionalProperties": false, "required": ["name", "version", "plugin_version", "pins_digest", "jars"],
       "properties": {

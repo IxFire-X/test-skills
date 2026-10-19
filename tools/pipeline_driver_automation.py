@@ -357,7 +357,8 @@ def advance_automation(project: Path, run_root: Path, attempt: Mapping[str, Any]
         if execution.get("human_exec"):
             output = execution["output"]
             return {"action": "human_exec", "run_id": run_root.name, "attempt_id": attempt_id,
-                    **{name: output[name] for name in ("commands", "selectors", "report_path", "report_dir", "continue") if name in output},
+                    **{name: output[name] for name in ("kind", "step", "step_index", "steps_total", "commands", "selectors", "report_path", "report_dir", "continue")
+                       if name in output},
                     "instructions": ("Выполните команды по порядку сами, в своём окружении (cwd указан у каждой); пакет их не запускает. "
                                      "Затем передайте отчёт(ы): " + str(output.get("continue")))}
         return finish_execution(project, run_root, config, execution)

@@ -134,3 +134,49 @@ def test_the_run_command_reports_a_driver_error_as_json(tmp_path: Path) -> None:
     assert completed.returncode == 2 and "Traceback" not in completed.stderr, completed.stderr[-2000:]
     payload = json.loads(completed.stdout)
     assert payload["action"] == "error" and payload["code"] == "TASK_INPUT_TOO_LARGE" and payload["errors"][0]["threshold"] == 100
+
+
+def test_a_mutation_step_is_done_only_when_its_output_exists(tmp_path: Path) -> None:
+    """S9, PIT in human mode: the runner starts nothing, removes the expected output first and accepts it only when it exists."""
+    from tools import mutation
+
+    workdir = tmp_path / "mutation"
+    output = workdir / "project-classpath.txt"
+    output.parent.mkdir(parents=True)
+    output.write_text("stale\n", encoding="utf-8")
+    runner = mutation.human_runner(workdir)
+    argv = ["mvn", "-q", "dependency:build-classpath", f"-Dmdep.outputFile={output}"]
+    with pytest.raises(mutation.HumanMutationPending) as pending:
+        runner(argv, tmp_path, None, timeout=10)
+    command = pending.value.command
+    assert (command["step"], command["step_index"], command["steps_total"], command["expected_output"]) == ("resolve-project", 1, 3, str(output))
+    assert not output.exists()  # a stale output can never prove the person's run
+    with pytest.raises(mutation.HumanStepIncomplete):
+        mutation.human_continue(workdir)
+    output.write_text("", encoding="utf-8")
+    with pytest.raises(mutation.HumanStepIncomplete):  # empty is not done
+        mutation.human_continue(workdir)
+    output.write_text("a.jar\n", encoding="utf-8")
+    with pytest.raises(mutation.HumanStepIncomplete):  # a resolver step is not answered with a PIT report
+        mutation.human_continue(workdir, pit_report=str(output))
+    mutation.human_continue(workdir)
+    assert runner(argv, tmp_path, None, timeout=10).exit_code == 0  # the stage repeats past the step without a process
+    output.unlink()  # the output disappears after the step was done: the step is issued again, no dead end
+    with pytest.raises(mutation.HumanMutationPending):
+        runner(argv, tmp_path, None, timeout=10)
+    output.write_text("a.jar\n", encoding="utf-8")
+    mutation.human_continue(workdir)
+    assert runner(argv, tmp_path, None, timeout=10).exit_code == 0
+    report_dir = workdir / "report"
+    pit = ["java", "-cp", "x", "org.pitest.mutationtest.commandline.MutationCoverageReport", "--reportDir", str(report_dir)]
+    with pytest.raises(mutation.HumanMutationPending) as pending:
+        runner(pit, tmp_path, None, timeout=10)
+    assert pending.value.command["step"] == "pit"
+    report_dir.mkdir()
+    (report_dir / "mutations.xml").write_text("<mutations/>", encoding="utf-8")
+    with pytest.raises(mutation.HumanStepIncomplete):
+        mutation.human_continue(workdir, pit_report=str(tmp_path / "elsewhere.xml"))
+    with pytest.raises(mutation.HumanStepIncomplete):
+        mutation.human_continue(workdir)
+    mutation.human_continue(workdir, pit_report=str(report_dir / "mutations.xml"))
+    assert runner(pit, tmp_path, None, timeout=10).exit_code == 0

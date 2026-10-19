@@ -305,6 +305,98 @@ def junit_platform_version(entries: Iterable[str]) -> str:
 Runner = Callable[..., Any]
 
 
+class HumanMutationPending(BaseException):
+    """S9 human mode: the stage needs a person to run one command first.
+
+    A BaseException on purpose: like an interruption it passes the stage's and the finalizer's error handling, and the
+    run continues through the existing recovery of an interrupted finalization once the person reports back.
+    """
+
+    def __init__(self, command: Mapping[str, Any]) -> None:
+        self.command = dict(command)
+        super().__init__(f"human mutation step {command.get('step')}")
+
+
+class HumanStepIncomplete(ValueError):
+    def __init__(self, message: str) -> None:
+        self.code = "HUMAN_STEP_INCOMPLETE"
+        super().__init__(message)
+
+
+HUMAN_STEPS = ("resolve-project", "resolve-tool", "pit")
+
+
+def _expected_output(argv: Sequence[str]) -> tuple[str, Path]:
+    """The step and the file a stage command writes (what proves that a person ran it)."""
+    for item in argv:
+        if item.startswith(("-Dmdep.outputFile=", "-DtestSkills.classpathFile=")):
+            output = Path(item.split("=", 1)[1])
+            return ("resolve-tool" if output.parent.name == "resolver" else "resolve-project"), output
+    if "--reportDir" in argv:
+        return "pit", Path(argv[list(argv).index("--reportDir") + 1]) / "mutations.xml"
+    raise MutationStop("NOT_RUNNABLE", "MUTATION_STAGE_ERROR", "a mutation command has no known output")
+
+
+def _human_state_path(workdir: Path) -> Path:
+    return workdir / "human.json"
+
+
+def _human_state(workdir: Path) -> dict[str, Any]:
+    path = _human_state_path(workdir)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"issued": [], "done": []}
+
+
+def _save_human_state(workdir: Path, state: Mapping[str, Any]) -> None:
+    workdir.mkdir(parents=True, exist_ok=True)
+    _human_state_path(workdir).write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+
+
+def human_runner(workdir: Path) -> Runner:
+    """A runner that starts no process: a command a person ran (and whose output exists) succeeds, any other stops the stage."""
+
+    def run(argv: Sequence[str], cwd: Path, _environment: Any = None, *, timeout: int = 0) -> Any:
+        from tools.run_tests import ProcessOutcome
+
+        step, output = _expected_output(argv)
+        digest = _canonical_digest(list(argv))
+        state = _human_state(workdir)
+        if digest in state["done"] and output.is_file() and output.stat().st_size > 0:
+            return ProcessOutcome(0, "human-executed", "")
+        if digest in state["done"]:
+            # Done once, but its output is gone or empty now: the step is issued again (never a dead end).
+            state["done"] = [item for item in state["done"] if item != digest]
+            state["issued"] = [row for row in state["issued"] if row["digest"] != digest]
+        if digest not in {row["digest"] for row in state["issued"]}:
+            # The output a person must produce is removed first, so its presence later proves the run.
+            if output.is_file():
+                output.unlink()
+            state["issued"].append({"digest": digest, "step": step, "expected_output": str(output)})
+            _save_human_state(workdir, state)
+        raise HumanMutationPending({"step": step, "step_index": HUMAN_STEPS.index(step) + 1, "steps_total": len(HUMAN_STEPS),
+                                    "argv": [str(item) for item in argv], "cwd": str(cwd), "expected_output": str(output)})
+
+    return run
+
+
+def human_continue(workdir: Path, *, pit_report: str | None = None) -> None:
+    """Mark the issued commands done after checking their outputs (S9): never by the person's word alone."""
+    state = _human_state(workdir)
+    pending = [row for row in state["issued"] if row["digest"] not in state["done"]]
+    if not pending:
+        raise HumanStepIncomplete("no mutation command is waiting for its result")
+    for row in pending:
+        output = Path(row["expected_output"])
+        if row["step"] == "pit":
+            if pit_report is None or Path(pit_report).resolve() != output.resolve():
+                raise HumanStepIncomplete(f"--pit-report must be {output}")
+        elif pit_report is not None:
+            raise HumanStepIncomplete("--pit-report answers the PIT step; this step needs --mutation-step-done")
+        if not output.is_file() or output.stat().st_size == 0:
+            raise HumanStepIncomplete(f"the command did not write its output: {output}")
+        state["done"].append(row["digest"])
+    _save_human_state(workdir, state)
+
+
 def _run(run: Runner, argv: Sequence[str], cwd: Path, timeout: int) -> Any:
     from tools.run_tests import run_subprocess
 
@@ -576,6 +668,7 @@ class StageInputs:
     pins_path: Path | None = None
     timings: dict[str, float] = field(default_factory=dict)
     local_repository: Path | None = None  # S2c: where the resolver plugin and the launcher are checked (default ~/.m2/repository)
+    human: bool = False  # S9: a person runs the commands; the stage repeats after each step and keeps their outputs
 
 
 def measure(inputs: StageInputs) -> dict[str, Any]:
@@ -629,7 +722,7 @@ def measure(inputs: StageInputs) -> dict[str, Any]:
         classpath_file = inputs.workdir / "pit-classpath.txt"
         classpath_file.write_text("\n".join(classpath) + "\n", encoding="utf-8", newline="\n")
         report_dir = inputs.workdir / "report"
-        if report_dir.exists():
+        if report_dir.exists() and not inputs.human:  # human mode: the runner clears the report when it issues the PIT command
             shutil.rmtree(report_dir)
         java = java_executable(inputs.environment)
         source_dirs = [path for path in (build.module_root / "src" / "main" / "java",) if path.is_dir()]
@@ -712,6 +805,10 @@ def _project_settings(project: Path, run_root: Path, attempt: Mapping[str, Any])
     return settings_of(parse_skillsrc_bytes(data)), None
 
 
+def mutation_workdir(run_root: Path, attempt_id: str) -> Path:
+    return Path(run_root).with_name(Path(run_root).name + ".driver") / "mutation" / attempt_id[:8]
+
+
 def mutation_stage(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     """Run (or read back) the MUTATION stage of a local attempt; None when the run did not consent."""
     from tools import pilot_state
@@ -728,11 +825,9 @@ def mutation_stage(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     report = execution["payload"]
     settings, problem = _project_settings(project, run_root, attempt)
     human = run["authorization"].get("execution_mode_human") is True
-    if settings is None or human:
-        # S9: in execution.mode human the package starts no PIT process; the stage is reported as not run.
-        status, code = ("NOT_APPLICABLE", "HUMAN_EXECUTION_MODE") if human else ("NOT_RUNNABLE", problem) if problem else ("NOT_APPLICABLE", "MUTATION_NOT_ENABLED")
-        message = ("execution.mode human: the package runs no mutations; a person can run PIT from the printed commands later" if human
-                   else "mutation.enabled is not true in .skillsrc" if problem is None else "the frozen .skillsrc is unavailable")
+    if settings is None:
+        status, code = ("NOT_RUNNABLE", problem) if problem else ("NOT_APPLICABLE", "MUTATION_NOT_ENABLED")
+        message = "mutation.enabled is not true in .skillsrc" if problem is None else "the frozen .skillsrc is unavailable"
         before = project_snapshot(project)
         pins = load_pins()
         facts: dict[str, Any] = {
@@ -746,9 +841,14 @@ def mutation_stage(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     else:
         inputs = pilot_state.read_execution_inputs(run_root, attempt_id)
         effective = pilot_state.read_effective_canonical(run_root, attempt_id)
-        workdir = Path(run_root).with_name(Path(run_root).name + ".driver") / "mutation" / attempt_id[:8]
+        workdir = mutation_workdir(run_root, attempt_id)
+        # S9 human mode: a person runs every command; HumanMutationPending stops the stage until they report back.
         facts = measure(StageInputs(project=project, workdir=workdir, report=report, automation=inputs["automation_artifact"],
-                                    document=effective["document"], settings=settings, run=_RUNNER))
+                                    document=effective["document"], settings=settings, run=human_runner(workdir) if human else _RUNNER, human=human))
+        if human:
+            state = _human_state(workdir)
+            facts["executor"] = "human"
+            facts["commands_digest"] = _canonical_digest([row["digest"] for row in state["issued"]])
         if facts["status"] == "MEASURED":
             try:
                 data = (workdir / "report" / "mutations.xml").read_bytes()

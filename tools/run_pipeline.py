@@ -1152,6 +1152,27 @@ def _not_runnable_guidance(result: Mapping[str, Any], automation: Mapping[str, A
 
 
 def cmd_exec(args: Any) -> int:
+    """``exec``; in execution.mode human a mutation step a person must run first is answered as human_exec (S9)."""
+    import shlex
+
+    from tools.mutation import HumanMutationPending
+
+    try:
+        return _cmd_exec(args)
+    except HumanMutationPending as pending:
+        command = pending.command
+        argv = list(command["argv"])
+        run_id = str(args.run)
+        follow = f"--pit-report {command['expected_output']}" if command["step"] == "pit" else "--mutation-step-done"
+        _print({"status": "human_exec", "kind": "mutation", "step": command["step"], "step_index": command["step_index"],
+                "steps_total": command["steps_total"], "report_path": command["expected_output"],
+                "commands": [{"kind": command["step"], "argv": argv, "cwd": command["cwd"], "expected_output": command["expected_output"],
+                              "bash": shlex.join(argv), "powershell": f"Set-Location -LiteralPath '{command['cwd']}'; " + _powershell_line(argv)}],
+                "continue": f"next --run {run_id} {follow}"})
+        return 3
+
+
+def _cmd_exec(args: Any) -> int:
     project = Path(args.project).resolve()
     try:
         coordinates = _validated_execution_coordinates(project, args.run)
