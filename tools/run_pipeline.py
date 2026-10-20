@@ -251,6 +251,11 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
         if _is_reparse(confined) or not confined.is_file():
             raise HostStop("SNAPSHOT_DOCS", f"docs path is missing or a reparse point: {raw}")
         rel = confined.relative_to(project.resolve()).as_posix()
+        from tools.project_inventory import _secret_name_rule
+
+        # S11 A1: a secret container (.env*, keys, .netrc, credential stores) is no requirement document.
+        if _secret_name_rule(Path(rel), Path(rel).parts[:-1]) is not None:
+            raise HostStop("SNAPSHOT_DOCS", f"docs path is a secret file, not a requirement document: {raw}")
         if rel in seen:
             continue
         seen.add(rel)

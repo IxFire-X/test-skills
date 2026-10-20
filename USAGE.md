@@ -85,17 +85,23 @@ JaCoCo для выбранного подмножества). С `--mutation` �
 с PIT. Локальный `git` (`ls-files`, `diff` диапазона `suite impact --git-range`; проверка
 владельца репозитория `safe.directory` не отключается). CLI модели — только с
 `--review-runner process` или `run --runner process`. Все процессы — списком аргументов,
-без оболочки. Сборка, тесты и PIT стартуют без переменных окружения, похожих на
+без оболочки. Сборка, тесты, прогон живого набора и PIT стартуют без переменных окружения, похожих на
 секреты (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*PASSWD*`, `*API_KEY*`, `*APIKEY*`,
-`AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`); имена удалённых переменных (без
-значений) пишутся в `driver-log.jsonl` (`child_env_removed`). CLI модели получает
+`AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`) — даже если имя похоже на переменную
+сборки (`GRADLE_PUBLISH_TOKEN`), — и без прокси-переменных, в значении которых есть учётные
+данные (`user:pass@host`); имена удалённых переменных (без значений) пишутся в
+`driver-log.jsonl` (`child_env_removed`, у прокси — причина `proxy-credentials` в
+`child_env_removed_reasons`). CLI модели получает
 окружение по белому списку: `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`,
 `TEMP`, `PYTHONUTF8`, `PYTHONIOENCODING` (Python-CLI на Windows без них падает на кириллице) и минимум Windows, без которого процесс не стартует или CLI не найдёт свой профиль
 (`SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
 `LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`; на Windows без учёта регистра). Всё остальное —
-ключи самого CLI (`ANTHROPIC_API_KEY`, `GIGACODE_*`), прокси (`HTTPS_PROXY`) — только если
-названо в `.skillsrc` `review_runner.env_passthrough`: точные имена или префиксы со `*` в
-конце (`["GIGACODE_*", "HTTPS_PROXY"]`; `*` в середине не допускается). Значения на диск не
+настройки самого CLI (`GIGACODE_*`), прокси (`HTTPS_PROXY`) — только если названо в
+`.skillsrc` `review_runner.env_passthrough`: точные имена или префиксы со `*` в конце
+(`["GIGACODE_*", "HTTPS_PROXY"]`; `*` в середине не допускается). Учётные данные пакет не
+передаёт ни по имени, ни по префиксу: имя или префикс, похожие на секрет (те же шаблоны, что
+выше: `ANTHROPIC_API_KEY`, `AWS_*`…), и префиксы короче трёх символов — ошибка конфигурации;
+ключи и токены CLI держите в его собственном конфиге. Значения на диск не
 пишутся; имена переданных переменных — в `result.json` процесса и в `driver-log.jsonl`
 (`runner_launched.env_names`), имена не переданных — там же (`env_withheld`). То же
 применяется к `--version` CLI.
@@ -160,7 +166,12 @@ CLI, где бы они ни лежали в проекте: каталоги `.
 Файл кода или настроек с совпадением исключается целиком; если он необходим, дайте
 sanitized source, safe fixture или opaque runtime handle. В документах и спецификациях
 совпавшие строки заменяются на `[REDACTED:<rule>]`, файл остаётся входом, а номера
-замаскированных строк записываются в inventory в поле `redactions`.
+замаскированных строк записываются в inventory в поле `redactions`. Документы требований
+(`--docs`) так же замаскированы для всех ролей — разметки, генератора и ревьюеров; дайджест
+источника в снимке ревью остаётся дайджестом исходного файла, а у замаскированного источника
+есть `redactions`, и журнал проверяет маску по исходнику. Файл с именем секрета (`.env*`,
+`*.pem`, `*.key`, `.netrc`, хранилища учётных данных) документом требований быть не может:
+`scan` отказывает `SNAPSHOT_DOCS`.
 
 Файл, который не помещается в бюджет контекста, пропускается явно: он попадает в `gaps`
 квитанции выбора контекста и в `context_gaps` ответа `scan`.
@@ -824,7 +835,7 @@ review_runner:
   models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
   max_parallel: 4
   timeout_seconds: 1800
-  env_passthrough: [ANTHROPIC_API_KEY, HTTPS_PROXY]   # сверх белого списка, только по имени или префиксу (GIGACODE_*)
+  env_passthrough: [HTTPS_PROXY, "GIGACODE_*"]   # сверх белого списка: настройки CLI и прокси, не ключи (ключи — в конфиге CLI)
 ```
 
 ```powershell

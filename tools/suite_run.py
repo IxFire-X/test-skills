@@ -225,7 +225,10 @@ def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str],
             shutil.rmtree(report_dir, ignore_errors=True)
         elif report_dir.is_file():
             report_dir.unlink()
-        completed = RUNNER(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False)
+        from tools.child_environment import build_environment
+
+        # S11 A3: the suite runs the project's code — it starts without secret-like variables, like run_tests and PIT.
+        completed = RUNNER(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False, env=build_environment())
     output = (completed.stdout or "") + (completed.stderr or "")
     rows = _report_rows(report_dir)
     compile_lines = compile_lines_of(output)

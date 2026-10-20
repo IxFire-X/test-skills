@@ -51,10 +51,11 @@ def _launch(directory: Path, config: model_runner.RunnerConfig) -> list[str]:
 
 def test_a_token_in_the_environment_does_not_reach_the_cli_without_passthrough(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TS_S6_API_TOKEN", SECRET)
+    monkeypatch.setenv("TS_S6_ENDPOINT_REGION", "eu")  # a CLI setting, no credential: what passthrough is for (S11 A3)
     seen = _launch(tmp_path / "plain", model_runner.configure({}, preset="claude"))
-    assert "TS_S6_API_TOKEN" not in seen and "TEST_SKILLS_RUNNER_LAUNCH" not in seen
-    passed = _launch(tmp_path / "passed", model_runner.configure({"review_runner": {"preset": "claude", "env_passthrough": ["TS_S6_API_TOKEN"]}}))
-    assert "TS_S6_API_TOKEN" in passed
+    assert "TS_S6_API_TOKEN" not in seen and "TS_S6_ENDPOINT_REGION" not in seen and "TEST_SKILLS_RUNNER_LAUNCH" not in seen
+    passed = _launch(tmp_path / "passed", model_runner.configure({"review_runner": {"preset": "claude", "env_passthrough": ["TS_S6_ENDPOINT_REGION"]}}))
+    assert "TS_S6_ENDPOINT_REGION" in passed and "TS_S6_API_TOKEN" not in passed
 
 
 def test_passthrough_names_are_checked(tmp_path: Path) -> None:

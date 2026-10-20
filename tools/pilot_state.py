@@ -1900,6 +1900,42 @@ def freeze_phase_two_inputs(run_root: Path, project_root: Path, module_root: Pat
     return {"inventory": frozen_inventory, "exclusions": frozen_exclusions, "baseline": frozen_baseline}
 
 
+def _check_review_source(project: Path, root: Path, source: Any, *, publishing: bool = False) -> None:
+    """A review source is the original document, or its mask (S11 A1): ``sha256`` is always the original's.
+
+    A masked source carries its redactions and ``content_sha256`` (the digest of the masked text).  When the snapshot
+    is written, the original is re-read from the project, its digest checked and the mask recomputed; when it is read
+    later, only the masked text against ``content_sha256`` — the journal stays self-contained after the spec changes.
+    """
+    from tools.project_inventory import redact_text
+
+    if not isinstance(source, dict) or not isinstance(source.get("content"), str) or not source["content"] or not isinstance(source.get("path"), str):
+        raise ValueError("original review source bytes differ")
+    if set(source) == {"path", "sha256", "content"}:
+        if "sha256:" + hashlib.sha256(source["content"].encode("utf-8")).hexdigest() != source["sha256"]:
+            raise ValueError("original review source bytes differ")
+        return
+    if (set(source) != {"path", "sha256", "content", "content_sha256", "redactions"} or not source["redactions"]
+            or "sha256:" + hashlib.sha256(source["content"].encode("utf-8")).hexdigest() != source["content_sha256"]):
+        raise ValueError("original review source bytes differ")
+    if not publishing:
+        return
+    try:
+        # The document is a project file (scan snapshotted it): read it in place, inside the project, never through a link.
+        original = (Path(project) / source["path"]).resolve(strict=True)
+        original.relative_to(Path(project).resolve(strict=True))
+        if any(part.is_symlink() for part in [Path(project) / source["path"], *(Path(project) / source["path"]).parents][:len(Path(source["path"]).parts)]):
+            raise ValueError("a review source is a link")
+        raw = original.read_bytes() if original.is_file() else None
+    except (ValueError, OSError) as error:
+        raise ValueError("the original of a masked review source is unreadable") from error
+    if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != source["sha256"]:
+        raise ValueError("the original of a masked review source changed")
+    masked, redactions = redact_text(raw.decode("utf-8"))
+    if masked != source["content"] or redactions != source["redactions"]:
+        raise ValueError("a masked review source is not the mask of its original")
+
+
 def _frozen_inventory(project: Path, root: Path, inventory_digest: str, events: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     from tools.project_inventory import read_inventory_receipt
 
@@ -3184,6 +3220,8 @@ def _validate_factual_receipt(
     kind: str,
     receipt: Mapping[str, Any],
     state: Mapping[str, Any],
+    *,
+    publishing: bool = False,
 ) -> None:
     common = {"schema_version", "kind", "run_id", "attempt_id", "policy_profile", "digest"}
     identity_matches = (
@@ -3207,7 +3245,7 @@ def _validate_factual_receipt(
     elif kind.startswith(("review-snapshot-", "review-plan-", "review-part-boundary-", "review-part-process-", "review-aggregate-")):
         if not identity_matches:
             raise ValueError("foreign review receipt")
-        _validate_review_receipt(project, root, state, attempt, kind, receipt, common)
+        _validate_review_receipt(project, root, state, attempt, kind, receipt, common, publishing=publishing)
     elif kind == "mutation-receipt":
         # Opt-in MUTATION stage (contract amendments 2026-10-07): bound to the attempt's execution receipt,
         # published before the retain/cleanup decision.
@@ -3774,7 +3812,7 @@ def publish_attempt_receipt(
             "schema_version": "1.0.0", "kind": kind, "run_id": attempt["run_id"],
             "attempt_id": attempt_id, "policy_profile": attempt["policy_profile"], **dict(facts),
         }
-        _validate_factual_receipt(project, root, attempt, kind, _sealed(value), state)
+        _validate_factual_receipt(project, root, attempt, kind, _sealed(value), state, publishing=True)
         receipt, created, installed_identity = _publish(project, root, target, value, kind, return_created=True)
     data = _canonical_bytes(receipt)
     return {"path": str(target.relative_to(root)).replace("\\", "/"), "bytes": data, "digest": receipt["digest"], "record": receipt, "created": created, "installed_identity": installed_identity}
@@ -4274,7 +4312,8 @@ def recover_execution_receipt_events(run_root: Path, attempt_id: str) -> Mapping
     return _recover_attempt_receipt_events(run_root, attempt_id, "execution-receipt")
 
 
-def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], common: set[str]) -> None:
+def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], common: set[str],
+                             *, publishing: bool = False) -> None:
     from tools.review_parts import (aggregate_review_parts, build_review_plan, part_input,
                                     review_digest, review_output, review_scopes, validate_scope_inputs)
     from tools.project_inventory import read_execution_baseline
@@ -4300,7 +4339,9 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
             raise ValueError("original requirements do not match the frozen baseline")
         inventory = _frozen_inventory(project, root, baseline["inventory_digest"], state["events"])
         files = {item["project_path"]: item for item in inventory["files"]}
-        for source in [*payload["sources"], *payload["contexts"]]:
+        for source in payload["sources"]:
+            _check_review_source(project, root, source, publishing=publishing)
+        for source in payload["contexts"]:
             if (not isinstance(source, dict) or set(source) != {"path", "sha256", "content"}
                     or not isinstance(source["content"], str) or not source["content"]
                     or "sha256:" + hashlib.sha256(source["content"].encode("utf-8")).hexdigest() != source["sha256"]):

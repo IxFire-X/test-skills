@@ -3,10 +3,10 @@
 The build tools, the generated tests and the mutation tool run the project's code; they never need
 an access token of the operator's shell.  A variable is removed when its name looks like a secret
 (``*TOKEN*``, ``*SECRET*``, ``*PASSWORD*``, ``*PASSWD*``, ``*API_KEY*``, ``*APIKEY*``, ``AWS_*``,
-``AZURE_*``, ``GOOGLE_APPLICATION_CREDENTIALS``); the variables a build needs — ``PATH``, ``HOME``,
-``JAVA_HOME``, ``TMP*``/``TEMP``, ``LANG``/``LC_*``, ``MAVEN_OPTS``, ``M2_HOME``, ``GRADLE_*`` and the
-proxy variables — always stay.  The model CLI is not started with this environment: its credentials
-are its own configuration.  Only names are ever logged, never values.
+``AZURE_*``, ``GOOGLE_APPLICATION_CREDENTIALS``) — even when it starts like a build variable
+(``GRADLE_PUBLISH_TOKEN``) — and a proxy variable whose value carries credentials (``user:pass@host``);
+the other variables stay.  The model CLI gets its own allowlist (model_runner).  Only names and reasons
+are ever logged, never values.
 """
 from __future__ import annotations
 
@@ -14,20 +14,32 @@ import os
 import re
 from typing import Mapping
 
-_SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
-_KEPT_NAME = re.compile(r"PATH|HOME|JAVA_HOME|TMP\w*|TEMP|LANG|LC_\w+|MAVEN_OPTS|M2_HOME|GRADLE_\w+|(?:HTTP|HTTPS|FTP|ALL|NO)_PROXY")
+SECRET_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
+_SECRET_NAME = SECRET_NAME
+_PROXY_NAME = re.compile(r"(?:HTTP|HTTPS|FTP|ALL|NO)_PROXY")
 
 
-def _removed(name: str) -> bool:
+def _reason(name: str, value: str) -> str | None:
+    """Why a variable stays out of the build, or None.  A secret-like name wins over every build name (S11 A3:
+    ``GRADLE_PUBLISH_TOKEN``, ``TMP_TOKEN``); a proxy keeps its place unless its value carries credentials (``user:pass@``)."""
     upper = name.upper()
-    return _KEPT_NAME.fullmatch(upper) is None and _SECRET_NAME.search(upper) is not None
+    if SECRET_NAME.search(upper) is not None:
+        return "secret-name"
+    if _PROXY_NAME.fullmatch(upper) is not None and "@" in str(value):
+        return "proxy-credentials"
+    return None
+
+
+def removal_reasons(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """name → reason of every variable the build environment leaves out (never a value)."""
+    return {name: reason for name, value in sorted((os.environ if source is None else source).items()) if (reason := _reason(name, value))}
 
 
 def removed_names(source: Mapping[str, str] | None = None) -> list[str]:
     """Names of the variables the build environment leaves out, sorted."""
-    return sorted(name for name in (os.environ if source is None else source) if _removed(name))
+    return sorted(removal_reasons(source))
 
 
 def build_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
     """A copy of ``source`` (default: this process's environment) without secret-like variables."""
-    return {name: value for name, value in (os.environ if source is None else source).items() if not _removed(name)}
+    return {name: value for name, value in (os.environ if source is None else source).items() if _reason(name, value) is None}

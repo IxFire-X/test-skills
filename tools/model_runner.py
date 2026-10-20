@@ -134,6 +134,12 @@ def configure(skillsrc: Mapping[str, Any] | None, *, preset: str | None = None, 
     passthrough = section.get("env_passthrough") or []
     if not isinstance(passthrough, list) or not all(isinstance(name, str) and _ENV_NAME.fullmatch(name) for name in passthrough):
         raise RunnerError("RUNNER_CONFIG", ".skillsrc review_runner.env_passthrough is a list of environment variable names")
+    for name in passthrough:
+        stem = name.rstrip("*").upper()
+        # S11 A3: the package never hands a credential to the CLI, by name or by a prefix; the CLI's keys belong to its own config.
+        if _CREDENTIAL_NAME.search(stem) or _CREDENTIAL_NAME.search(stem + "_") or (name.endswith("*") and len(stem) < 3):
+            raise RunnerError("RUNNER_CONFIG", f"review_runner.env_passthrough may not pass {name!r}: credentials and short prefixes are refused — "
+                                               "ключи и токены CLI держите в его собственном конфиге, а не в окружении")
     chosen = preset or section.get("preset") or "claude"
     if chosen not in PRESETS:
         raise RunnerError("RUNNER_CONFIG", f"unknown runner preset {chosen!r}: {', '.join(PRESETS)}")
@@ -195,6 +201,8 @@ def command_digest(config: RunnerConfig, *, model: str | None, schema: Mapping[s
     return "sha256:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+# The credential name patterns of the build environment filter, kept here: the CLI's environment is its own allowlist.
+_CREDENTIAL_NAME = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}\*?$")  # a name, or a prefix pattern with `*` at the end (GIGACODE_*)
 # S6: what the model CLI gets by default — enough to start, find itself and its profile, keep the locale and a temp dir.
 _ENV_ALLOW = {"PATH", "HOME", "JAVA_HOME", "LANG", "LANGUAGE", "TEMP",
