@@ -80,6 +80,22 @@ SECRET_NAME = re.compile(r"(?i)TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_
 WRAPPER_ADAPTER, SYSTEM_MAVEN = "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
 
 
+GIT_TIMEOUT = 30
+
+
+def run_git(args: list[str], cwd: Path, *, text: bool = False) -> subprocess.CompletedProcess:
+    """git on the project without its hooks into this process (C9): no fsmonitor, no GIT_* from the environment, no prompt,
+    no optional locks, no stdin, a timeout.  A failure to start or a timeout is an ordinary non-zero result."""
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"})
+    argv = ["git", "-c", "core.fsmonitor=false", "-C", str(cwd), *args]
+    try:
+        return subprocess.run(argv, capture_output=True, stdin=subprocess.DEVNULL, env=env, timeout=GIT_TIMEOUT, check=False,
+                              **({"text": True, "encoding": "utf-8", "errors": "replace"} if text else {}))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return subprocess.CompletedProcess(argv, 1, "" if text else b"", str(error) if text else str(error).encode())
+
+
 def pack_python(pack: Path) -> str:
     """The package's venv interpreter if there is one (where jsonschema/pyyaml are), else the current one."""
     for candidate in (pack / ".venv" / "Scripts" / "python.exe", pack / ".venv" / "bin" / "python"):
@@ -1165,6 +1181,17 @@ class Operator:
         if result.get("completion") != "COMPLETE":
             raise Stop(f"пробный прогон не завершён: {result.get('completion')} {result.get('reason_code')}", "reason_code — в отчёт; RUN.md п. 6")
 
+    def gates_warning(self, payload: dict[str, Any]) -> str | None:
+        """B6: the driver records gates_disabled_by / gates_disabled when .skillsrc turned a person's gate off."""
+        result = payload.get("result") or {}
+        by = result.get("gates_disabled_by") or payload.get("gates_disabled_by")
+        if not by:
+            return None
+        gates = result.get("gates_disabled") or payload.get("gates_disabled") or []
+        line = f"гейты выключены конфигом проекта ({by}): {', '.join(str(item) for item in gates) or '—'}"
+        self.say(f"  ВНИМАНИЕ: {line}")
+        return line
+
     def step_5(self) -> None:
         extra = ["--analyst-report", "--suite", *(["--mutation"] if self.state.get("mutation", not self.args.no_mutation) else [])]
         code, payload = self.drive("local-pilot-v1", extra, "run")
@@ -1178,6 +1205,7 @@ class Operator:
         self.say(f"  итог: completion {result.get('completion')}, verification {result.get('verification')}, accepted {result.get('accepted')}, "
                  f"reason {result.get('reason_code')}, код {code}")
         self.say(f"  набор: {json.dumps(result.get('suite'), ensure_ascii=False)}; мутации: {strength.get('status')} {strength.get('score')}")
+        self.gates_warning(payload)
         if result.get("reason_code") == "BUILD_FAILED_BEFORE_TESTS":
             failure = result.get("build_failure") or {}
             self.say("  " + str(failure.get("message")))
@@ -1198,6 +1226,7 @@ class Operator:
         result = payload.get("result") or {}
         self.say(f"  итог: {result.get('outcome') or result.get('status')}, исполнитель {result.get('executor') or '—'}, "
                  f"счётчики {json.dumps(result.get('counts') or {}, ensure_ascii=False)}, код {code}")
+        self.gates_warning(payload)
         if result.get("status") == "error" or result.get("reason"):
             raise Stop(f"обновление набора: {result.get('reason') or result.get('status')}: {str(result.get('message') or '')[:300]}",
                        "SUITE_MISSING — сначала полный прогон с набором (шаг 5); иначе код и message — в отчёт (п. 7)")
@@ -1256,6 +1285,10 @@ class Operator:
             mode = json.loads((driver / "config.json").read_text(encoding="utf-8")).get("execution_mode") or "auto"
         except (OSError, ValueError):
             mode = "—"
+        gates = payload.get("result", {}).get("gates_disabled_by") or payload.get("gates_disabled_by")
+        if gates:
+            figures.append(("Гейты", "выключены конфигом проекта (" + str(gates) + "): " + ", ".join(
+                str(item) for item in (payload.get("result", {}).get("gates_disabled") or payload.get("gates_disabled") or [])) + " — ВНИМАНИЕ"))
         figures.append(("Режим исполнения (execution_mode)", f"{mode} — " + ("сборку и тесты выполнял человек по напечатанным командам"
                                                                              if mode == "human" else "сборку и тесты запускал пакет")))
         try:
@@ -1551,7 +1584,7 @@ class Init(Operator):
     def _module_files(self) -> list[tuple[str, int]]:
         """(path relative to the module root, bytes) of the module's text files — git's list when there is one."""
         root = self.project / str(self.module.get("root") or ".")
-        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"], capture_output=True, check=False)
+        listed = run_git(["ls-files", "-co", "--exclude-standard", "-z"], root)
         names = [name for name in listed.stdout.decode("utf-8", "replace").split("\0") if name] if listed.returncode == 0 else \
             [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
         rows = []
@@ -1636,8 +1669,7 @@ class Init(Operator):
 
     # -- the first task, measured without a model
     def _git_status(self) -> str:
-        done = subprocess.run(["git", "-C", str(self.project), "status", "--porcelain", "--untracked-files=all"], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", check=False)
+        done = run_git(["status", "--porcelain", "--untracked-files=all"], self.project, text=True)
         return done.stdout if done.returncode == 0 else ""
 
     def init_measure(self) -> None:
