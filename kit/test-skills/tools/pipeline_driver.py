@@ -316,8 +316,12 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     # Launch options are checked before scan creates the run: a refused option leaves no empty run behind (S2b).
     runner = _runner_options(options, project)
     _review_mode(options.get("review_mode"))
+    from tools.human_gates import disabled_by_skillsrc
+
+    gates_disabled = disabled_by_skillsrc(project, review_flag=options.get("execution_review"), confirm_flag=options.get("confirm_context"),
+                                          executes=profile == "local-pilot-v1")
     options = {**dict(options), "execution_review": _execution_review(project, options), "context_confirm": _confirm_context(project, options),
-               "execution_mode": _execution_mode(project, options, profile)}
+               "execution_mode": _execution_mode(project, options, profile), "gates_disabled": gates_disabled}
     arguments = SimpleNamespace(project=str(project), profile=profile, docs=docs, module=options.get("module"), target=options.get("target"),
                                 mutation=bool(options.get("mutation")), require_driver_isolation=bool(options.get("require_driver_isolation")),
                                 suite=bool(options.get("suite")), disposition_policy=options.get("disposition_policy"),
@@ -344,6 +348,7 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
         run_root = Path(payload["run_root"])
         _save_config(run_root, {**_start_config(project, run_root, options, payload, runner), "scan_pending": True})
         _warn_runner_inside(run_root, runner)
+        _warn_gates_disabled(run_root, options.get("gates_disabled"))
         return advance(project, run_root, max_tasks=max_tasks)
     if code != 0 or payload.get("status") != "ok":
         return {"action": "done", "result": {"status": "stopped" if code == 3 else "error", "stage": "scan", "exit_code": code if code else 2,
@@ -351,6 +356,7 @@ def start_run(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) 
     run_root = Path(payload["run_root"])
     _save_config(run_root, _start_config(project, run_root, options, payload, runner))
     _warn_runner_inside(run_root, runner)
+    _warn_gates_disabled(run_root, options.get("gates_disabled"))
     return advance(project, run_root, max_tasks=max_tasks)
 
 
@@ -361,6 +367,20 @@ def _warn_runner_inside(run_root: Path, runner: Mapping[str, Any]) -> None:
             "event": "warning", "code": "RUNNER_DIR_INSIDE_PROJECT", "directory": settings["dir"],
             "message": ("Каталог раннера внутри проекта: входы задач (копии файлов проекта) и вывод CLI лежат в дереве проекта. "
                         "Исключите его в линтерах, которые читают всё дерево (nohttp, spotless, apache-rat, license-плагины).")})
+
+
+def _warn_gates_disabled(run_root: Path, gates: Sequence[str] | None) -> None:
+    """S11 B6: the human gates .skillsrc turned off are a line of the driver log (and of the result)."""
+    if gates:
+        _log(_log_path(run_root.parents[1], run_root.name), {
+            "event": "gates_disabled", "gates_disabled_by": "skillsrc", "gates": list(gates),
+            "message": "Предохранители выключены в .skillsrc: " + ", ".join(gates) + " — пакет не спрашивает человека перед этими шагами."})
+
+
+def gates_disabled_fields(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The result fields of S11 B6 (empty when no gate was turned off by .skillsrc)."""
+    gates = list(config.get("gates_disabled") or [])
+    return {"gates_disabled_by": "skillsrc", "gates_disabled": gates} if gates else {}
 
 
 def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], payload: Mapping[str, Any], runner: Mapping[str, Any]) -> dict[str, Any]:
@@ -383,6 +403,7 @@ def _start_config(project: Path, run_root: Path, options: Mapping[str, Any], pay
         **({"execution_review": options["execution_review"]} if options.get("execution_review") else {}),
         **({"context_confirm": options["context_confirm"]} if "context_confirm" in options else {}),
         **({"execution_mode": options["execution_mode"]} if options.get("execution_mode") == "human" else {}),
+        **({"gates_disabled": list(options["gates_disabled"])} if options.get("gates_disabled") else {}),
         "accept_self_review": bool(options.get("accept_self_review")),
         "review_mode": _review_mode(options.get("review_mode")),
         "context_gaps": payload.get("context_gaps", []),
@@ -1127,8 +1148,13 @@ def _review_payload(project: Path, run_root: Path, attempt: Mapping[str, Any], c
     from tools.project_inventory import redact_text
 
     snapshot = run_pipeline._docs_entries(project, list(config["docs"]))
-    sources = [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in snapshot]
-    del redact_text
+    sources = []
+    for row in snapshot:
+        # S11 A1: the reviewers read the documents masked, like the marker and the generator; the digest stays the one
+        # of the original file (it binds the frozen requirements), and the journal re-checks the mask against it.
+        content, redactions = redact_text(row["content"])
+        masked = {"content_sha256": "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest(), "redactions": redactions} if redactions else {}
+        sources.append({"path": row["path"], "sha256": row["sha256"], "content": content, **masked})
     # Only the case reviewer verifies capability provenance; automation parts stay as they were.
     contexts = [] if automation is not None else _provenance_contexts(
         project, run_root, attempt, document, exclude={row["path"] for row in sources},
@@ -1494,6 +1520,7 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         **({"isolation_evidence": terminal["isolation_evidence"], "schema_version": "1.1.0"} if "isolation_evidence" in terminal else {}),
         "warnings": [dict(item) for item in _config(run_root).get("warnings", []) if item.get("attempt_id") in {attempt_id, *_attempt_lineage(run_root, attempt)}],
         "effective_document_digest": None if effective is None else effective.get("document_digest"), "paths": paths,
+        **gates_disabled_fields(_config(run_root)),
     }
     if terminal.get("reason_code") == "BUILD_FAILED_BEFORE_TESTS":
         summary["build_failure"] = _build_failure(run_root, attempt)
@@ -1927,11 +1954,14 @@ def _log_command(project: Path, run_id: Any, entry: dict[str, Any], payload: Map
     if payload.get("action") == "done":
         result.update({key: payload.get("result", {}).get(key) for key in ("status", "reason_code", "stop_reason", "build_failure") if payload.get("result", {}).get(key) is not None})
     entry["result"] = result
-    from tools.child_environment import removed_names
+    from tools.child_environment import removal_reasons
 
-    removed = removed_names()
-    if removed:
-        entry["child_env_removed"] = removed  # names only: the build, the tests and PIT of this command start without them
+    reasons = removal_reasons()
+    if reasons:
+        entry["child_env_removed"] = sorted(reasons)  # names only: the build, the tests and PIT of this command start without them
+        proxies = sorted(name for name, reason in reasons.items() if reason == "proxy-credentials")
+        if proxies:
+            entry["child_env_removed_reasons"] = {name: "proxy-credentials" for name in proxies}  # never the value
     _log(path, entry)
     for task in payload.get("tasks", [payload]) if payload.get("action") == "batch" else [payload]:
         if task.get("action") not in {"llm", "ask_user"}:

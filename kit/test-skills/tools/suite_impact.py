@@ -149,8 +149,11 @@ def changed_files(project: Path, git_range: str) -> list[str]:
     try:
         # Git's ownership check (safe.directory) stays in force, as in pilot_state; the range is passed
         # after --end-of-options, and the closing -- keeps it from being read as a path.
-        completed = subprocess.run(["git", "-C", str(project), "diff", "--name-only", "--end-of-options", git_range, "--"],
-                                   capture_output=True, text=True, timeout=60, check=False)
+        from tools.git_command import run_git
+
+        # S11 C9: no external diff or textconv driver of the repository runs for a list of names.
+        completed = run_git(["-C", str(project), "diff", "--no-ext-diff", "--no-textconv", "--name-only", "--end-of-options", git_range, "--"],
+                            timeout=60, text=True)
     except (OSError, subprocess.SubprocessError) as error:
         raise SuiteError("IMPACT_GIT_RANGE", f"git diff {git_range}: {error}") from error
     if completed.returncode != 0:

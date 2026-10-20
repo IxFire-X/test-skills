@@ -1,7 +1,7 @@
 # Запуск test-skills на внутреннем проекте (Linux, свой CLI и модели)
 
-Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит 54eb8b9 ветки `main`; без `tests/`,
-`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-54eb8b9.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
+Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит 605d1e2 ветки `main`; без `tests/`,
+`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-605d1e2.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
@@ -245,7 +245,7 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
 
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
-sha256sum -c --quiet test-skills-54eb8b9.files.sha256             # молчит = все файлы пакета совпадают
+sha256sum -c --quiet test-skills-605d1e2.files.sha256             # молчит = все файлы пакета совпадают
 python3 --version                                                 # нужен 3.11+ (или test-skills/.venv/bin/python)
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid

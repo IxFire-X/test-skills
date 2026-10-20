@@ -27,7 +27,9 @@
       "properties": {"eligible": {"type": "boolean"}, "parts": {"$ref": "#/$defs/count"}, "input_bytes": {"$ref": "#/$defs/count"}}}},
     "paths": {"type": "object", "additionalProperties": false, "required": ["pr_description", "patch", "result", "suite_dir"],
       "properties": {"pr_description": {"type": "string"}, "patch": {"type": "string"}, "result": {"type": "string"}, "suite_dir": {"type": "string"}}},
-    "accepted": {"type": "null"}, "executor": {"const": "human", "description": "S9b execution.mode human: a person ran the suite commands; repeats were not run (no FLAKY label)."}, "repeats": {"const": 0}
+    "accepted": {"type": "null"}, "executor": {"const": "human", "description": "S9b execution.mode human: a person ran the suite commands; repeats were not run (no FLAKY label)."}, "repeats": {"const": 0},
+    "gates_disabled_by": {"const": "skillsrc", "description": "S11 B6: .skillsrc (not a flag) turned off the human gates named in gates_disabled."},
+    "gates_disabled": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["context.confirm", "execution.review"]}}
   },
   "$defs": {"count": {"type": "integer", "minimum": 0}}
 }
