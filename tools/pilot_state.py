@@ -2152,6 +2152,28 @@ def _validate_test_design_artifact(project: Path, root: Path, state: Mapping[str
         raise ValueError("test design artifact fails the design checks: " + ", ".join(sorted({row["code"] for row in rows})))
 
 
+def _validate_generator_design(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, request: Mapping[str, Any],
+                               value: Mapping[str, Any]) -> None:
+    """D1: a fragment of a design run covers the design slice its request binds and carries the code priorities."""
+    if request["stage"] != "tc-generator" or len(request["input_digests"]) != 5:
+        return
+    from tools.test_design import assign_priorities, design_slice, digest, fragment_design_problems
+
+    designs = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == "test-design:baseline"
+               and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    if len(designs) != 1:
+        raise ValueError("generator fragment of a design run has no test design")
+    design = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "test-design:baseline", str(designs[0]["artifact_digest"]))["artifact"]
+    sliced = design_slice(design, value.get("owned_source_requirement_ids") or [])
+    cases = value.get("test_cases") or []
+    if (
+        digest(sliced) != request["input_digests"][4]
+        or fragment_design_problems(sliced, cases, value.get("design_uncovered") or [], value.get("source_to_canonical_mappings") or [])
+        or [case.get("priority") for case in cases] != assign_priorities(sliced, cases)
+    ):
+        raise ValueError("generator fragment fails the test design checks of its batch")
+
+
 def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
     if request["stage"] != "tc-generator":
         return
@@ -2531,6 +2553,7 @@ def publish_model_stage_artifact(
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_test_design_artifact(project, root, state, attempt_id, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_generator_design(project, root, state, attempt_id, request, value)
     _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)
@@ -2623,6 +2646,7 @@ def _read_model_stage_artifact_with_state(
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_test_design_artifact(project, root, state, attempt_id, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_generator_design(project, root, state, attempt_id, request, value)
     _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)

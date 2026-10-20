@@ -1,0 +1,1046 @@
+{
+ "schema_version": "1.0.0",
+ "stage": "test-design",
+ "artifacts": {
+  "parameters": [
+   {
+    "id": "P-001",
+    "name": "значение обязательного атрибута владельца (имя, фамилия, адрес, город, телефон)",
+    "requirement_ids": [
+     "SREQ-0003",
+     "SREQ-0004"
+    ],
+    "kind": "text",
+    "notes": "проверяется для каждого из пяти полей"
+   },
+   {
+    "id": "P-002",
+    "name": "длина имени владельца",
+    "requirement_ids": [
+     "SREQ-0005"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-003",
+    "name": "длина фамилии владельца",
+    "requirement_ids": [
+     "SREQ-0005"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-004",
+    "name": "состав телефона",
+    "requirement_ids": [
+     "SREQ-0006",
+     "SREQ-0008"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-005",
+    "name": "длина телефона в цифрах",
+    "requirement_ids": [
+     "SREQ-0006"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-006",
+    "name": "значение фамилии в поиске",
+    "requirement_ids": [
+     "SREQ-0009"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-007",
+    "name": "номер страницы результата",
+    "requirement_ids": [
+     "SREQ-0010"
+    ],
+    "kind": "ordered",
+    "notes": "",
+    "single_class_reason": "требование задаёт только страницы 1 и 2 из двух; страница вне диапазона не описана"
+   },
+   {
+    "id": "P-008",
+    "name": "имя питомца",
+    "requirement_ids": [
+     "SREQ-0013"
+    ],
+    "kind": "text",
+    "notes": ""
+   },
+   {
+    "id": "P-009",
+    "name": "длина имени питомца",
+    "requirement_ids": [
+     "SREQ-0013"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-010",
+    "name": "дата рождения питомца относительно D",
+    "requirement_ids": [
+     "SREQ-0014",
+     "SREQ-0019"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-011",
+    "name": "значение поля даты рождения",
+    "requirement_ids": [
+     "SREQ-0014"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-012",
+    "name": "тип питомца",
+    "requirement_ids": [
+     "SREQ-0015"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-013",
+    "name": "имя питомца среди питомцев владельца",
+    "requirement_ids": [
+     "SREQ-0016",
+     "SREQ-0017",
+     "SREQ-0018"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-014",
+    "name": "дата визита относительно D",
+    "requirement_ids": [
+     "SREQ-0022"
+    ],
+    "kind": "ordered",
+    "notes": ""
+   },
+   {
+    "id": "P-015",
+    "name": "значение поля даты визита",
+    "requirement_ids": [
+     "SREQ-0022",
+     "SREQ-0024"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-016",
+    "name": "описание визита",
+    "requirement_ids": [
+     "SREQ-0023"
+    ],
+    "kind": "text",
+    "notes": ""
+   },
+   {
+    "id": "P-017",
+    "name": "питомец в пути формы визита",
+    "requirement_ids": [
+     "SREQ-0025"
+    ],
+    "kind": "enum",
+    "notes": ""
+   },
+   {
+    "id": "P-018",
+    "name": "id в отправленной форме редактирования",
+    "requirement_ids": [
+     "SREQ-0028"
+    ],
+    "kind": "enum",
+    "notes": ""
+   }
+  ],
+  "partitions": [
+   {
+    "id": "EQ-001",
+    "parameter_id": "P-001",
+    "valid": true,
+    "condition": "непустое значение",
+    "requirement_ids": [
+     "SREQ-0003",
+     "SREQ-0004"
+    ]
+   },
+   {
+    "id": "EQ-002",
+    "parameter_id": "P-001",
+    "valid": false,
+    "condition": "пустая строка",
+    "requirement_ids": [
+     "SREQ-0004"
+    ]
+   },
+   {
+    "id": "EQ-003",
+    "parameter_id": "P-001",
+    "valid": false,
+    "condition": "строка из трёх пробелов",
+    "requirement_ids": [
+     "SREQ-0004"
+    ]
+   },
+   {
+    "id": "EQ-004",
+    "parameter_id": "P-002",
+    "valid": true,
+    "condition": "от 1 до 30 символов",
+    "requirement_ids": [
+     "SREQ-0005"
+    ]
+   },
+   {
+    "id": "EQ-005",
+    "parameter_id": "P-002",
+    "valid": false,
+    "condition": "31 символ и больше",
+    "requirement_ids": [
+     "SREQ-0005"
+    ]
+   },
+   {
+    "id": "EQ-006",
+    "parameter_id": "P-003",
+    "valid": true,
+    "condition": "от 1 до 30 символов",
+    "requirement_ids": [
+     "SREQ-0005"
+    ]
+   },
+   {
+    "id": "EQ-007",
+    "parameter_id": "P-003",
+    "valid": false,
+    "condition": "31 символ и больше",
+    "requirement_ids": [
+     "SREQ-0005"
+    ]
+   },
+   {
+    "id": "EQ-008",
+    "parameter_id": "P-004",
+    "valid": true,
+    "condition": "только цифры, начальный ноль сохраняется",
+    "requirement_ids": [
+     "SREQ-0006"
+    ]
+   },
+   {
+    "id": "EQ-009",
+    "parameter_id": "P-004",
+    "valid": false,
+    "condition": "есть нецифровой символ (12345A7890)",
+    "requirement_ids": [
+     "SREQ-0006",
+     "SREQ-0008"
+    ]
+   },
+   {
+    "id": "EQ-010",
+    "parameter_id": "P-005",
+    "valid": true,
+    "condition": "ровно 10 цифр (0123456789)",
+    "requirement_ids": [
+     "SREQ-0006"
+    ]
+   },
+   {
+    "id": "EQ-011",
+    "parameter_id": "P-005",
+    "valid": false,
+    "condition": "9 цифр и меньше",
+    "requirement_ids": [
+     "SREQ-0006"
+    ]
+   },
+   {
+    "id": "EQ-012",
+    "parameter_id": "P-005",
+    "valid": false,
+    "condition": "11 цифр и больше",
+    "requirement_ids": [
+     "SREQ-0006"
+    ]
+   },
+   {
+    "id": "EQ-013",
+    "parameter_id": "P-006",
+    "valid": true,
+    "condition": "уникальный префикс PilotLife",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "EQ-014",
+    "parameter_id": "P-006",
+    "valid": true,
+    "condition": "префикс с пробелами вокруг «  PilotLife  »",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "EQ-015",
+    "parameter_id": "P-006",
+    "valid": true,
+    "condition": "параметр отсутствует, пустая строка или три пробела",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "EQ-016",
+    "parameter_id": "P-006",
+    "valid": false,
+    "condition": "несуществующий префикс NoSuchLifecycle",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "EQ-017",
+    "parameter_id": "P-007",
+    "valid": true,
+    "condition": "от 1 до totalPages",
+    "requirement_ids": [
+     "SREQ-0010"
+    ]
+   },
+   {
+    "id": "EQ-018",
+    "parameter_id": "P-008",
+    "valid": true,
+    "condition": "непустое имя",
+    "requirement_ids": [
+     "SREQ-0013"
+    ]
+   },
+   {
+    "id": "EQ-019",
+    "parameter_id": "P-008",
+    "valid": false,
+    "condition": "пустая строка",
+    "requirement_ids": [
+     "SREQ-0013"
+    ]
+   },
+   {
+    "id": "EQ-020",
+    "parameter_id": "P-008",
+    "valid": false,
+    "condition": "три пробела",
+    "requirement_ids": [
+     "SREQ-0013"
+    ]
+   },
+   {
+    "id": "EQ-021",
+    "parameter_id": "P-009",
+    "valid": true,
+    "condition": "от 1 до 30 символов",
+    "requirement_ids": [
+     "SREQ-0013"
+    ]
+   },
+   {
+    "id": "EQ-022",
+    "parameter_id": "P-009",
+    "valid": false,
+    "condition": "31 символ и больше (name/size)",
+    "requirement_ids": [
+     "SREQ-0013"
+    ]
+   },
+   {
+    "id": "EQ-023",
+    "parameter_id": "P-010",
+    "valid": true,
+    "condition": "не позже D",
+    "requirement_ids": [
+     "SREQ-0014"
+    ]
+   },
+   {
+    "id": "EQ-024",
+    "parameter_id": "P-010",
+    "valid": false,
+    "condition": "позже D (birthDate/typeMismatch.birthDate)",
+    "requirement_ids": [
+     "SREQ-0014",
+     "SREQ-0019"
+    ]
+   },
+   {
+    "id": "EQ-025",
+    "parameter_id": "P-011",
+    "valid": true,
+    "condition": "дата в формате yyyy-MM-dd",
+    "requirement_ids": [
+     "SREQ-0014"
+    ]
+   },
+   {
+    "id": "EQ-026",
+    "parameter_id": "P-011",
+    "valid": false,
+    "condition": "пусто (birthDate/required)",
+    "requirement_ids": [
+     "SREQ-0014"
+    ]
+   },
+   {
+    "id": "EQ-027",
+    "parameter_id": "P-011",
+    "valid": false,
+    "condition": "not-a-date (ошибка связывания поля)",
+    "requirement_ids": [
+     "SREQ-0014"
+    ]
+   },
+   {
+    "id": "EQ-028",
+    "parameter_id": "P-012",
+    "valid": true,
+    "condition": "dog из справочника",
+    "requirement_ids": [
+     "SREQ-0015"
+    ]
+   },
+   {
+    "id": "EQ-029",
+    "parameter_id": "P-012",
+    "valid": false,
+    "condition": "тип не передан (type/required)",
+    "requirement_ids": [
+     "SREQ-0015"
+    ]
+   },
+   {
+    "id": "EQ-030",
+    "parameter_id": "P-012",
+    "valid": false,
+    "condition": "несуществующий тип dragon",
+    "requirement_ids": [
+     "SREQ-0015"
+    ]
+   },
+   {
+    "id": "EQ-031",
+    "parameter_id": "P-013",
+    "valid": true,
+    "condition": "имя не совпадает с другими питомцами этого владельца",
+    "requirement_ids": [
+     "SREQ-0016"
+    ]
+   },
+   {
+    "id": "EQ-032",
+    "parameter_id": "P-013",
+    "valid": true,
+    "condition": "тот же Rex у другого владельца",
+    "requirement_ids": [
+     "SREQ-0016"
+    ]
+   },
+   {
+    "id": "EQ-033",
+    "parameter_id": "P-013",
+    "valid": false,
+    "condition": "совпадает с другим питомцем владельца без учёта регистра (Rex, rEx, Luna, lUnA)",
+    "requirement_ids": [
+     "SREQ-0016",
+     "SREQ-0018"
+    ]
+   },
+   {
+    "id": "EQ-034",
+    "parameter_id": "P-014",
+    "valid": true,
+    "condition": "позже D",
+    "requirement_ids": [
+     "SREQ-0022"
+    ]
+   },
+   {
+    "id": "EQ-035",
+    "parameter_id": "P-014",
+    "valid": false,
+    "condition": "D или раньше (date/typeMismatch.visitDate)",
+    "requirement_ids": [
+     "SREQ-0022"
+    ]
+   },
+   {
+    "id": "EQ-036",
+    "parameter_id": "P-015",
+    "valid": true,
+    "condition": "дата в формате yyyy-MM-dd",
+    "requirement_ids": [
+     "SREQ-0022"
+    ]
+   },
+   {
+    "id": "EQ-037",
+    "parameter_id": "P-015",
+    "valid": false,
+    "condition": "not-a-date (ошибка поля date)",
+    "requirement_ids": [
+     "SREQ-0022"
+    ]
+   },
+   {
+    "id": "EQ-038",
+    "parameter_id": "P-015",
+    "valid": false,
+    "condition": "явно пустое поле при непустом описании",
+    "requirement_ids": [
+     "SREQ-0024"
+    ]
+   },
+   {
+    "id": "EQ-039",
+    "parameter_id": "P-016",
+    "valid": true,
+    "condition": "непустой текст",
+    "requirement_ids": [
+     "SREQ-0023"
+    ]
+   },
+   {
+    "id": "EQ-040",
+    "parameter_id": "P-016",
+    "valid": false,
+    "condition": "пустая строка",
+    "requirement_ids": [
+     "SREQ-0023"
+    ]
+   },
+   {
+    "id": "EQ-041",
+    "parameter_id": "P-016",
+    "valid": false,
+    "condition": "три пробела",
+    "requirement_ids": [
+     "SREQ-0023"
+    ]
+   },
+   {
+    "id": "EQ-042",
+    "parameter_id": "P-017",
+    "valid": true,
+    "condition": "питомец указанного владельца",
+    "requirement_ids": [
+     "SREQ-0025"
+    ]
+   },
+   {
+    "id": "EQ-043",
+    "parameter_id": "P-017",
+    "valid": false,
+    "condition": "питомец другого владельца",
+    "requirement_ids": [
+     "SREQ-0025"
+    ]
+   },
+   {
+    "id": "EQ-044",
+    "parameter_id": "P-017",
+    "valid": false,
+    "condition": "несуществующий ID питомца",
+    "requirement_ids": [
+     "SREQ-0025"
+    ]
+   },
+   {
+    "id": "EQ-045",
+    "parameter_id": "P-018",
+    "valid": true,
+    "condition": "совпадает с записью из пути или отсутствует",
+    "requirement_ids": [
+     "SREQ-0028"
+    ]
+   },
+   {
+    "id": "EQ-046",
+    "parameter_id": "P-018",
+    "valid": false,
+    "condition": "id чужой записи",
+    "requirement_ids": [
+     "SREQ-0028"
+    ]
+   }
+  ],
+  "boundaries": [
+   {
+    "id": "BV-001",
+    "partition_id": "EQ-004",
+    "value": "30 латинских A",
+    "side": "max"
+   },
+   {
+    "id": "BV-002",
+    "partition_id": "EQ-005",
+    "value": "31 латинская A",
+    "side": "min"
+   },
+   {
+    "id": "BV-003",
+    "partition_id": "EQ-006",
+    "value": "30 латинских A",
+    "side": "max"
+   },
+   {
+    "id": "BV-004",
+    "partition_id": "EQ-007",
+    "value": "31 латинская A",
+    "side": "min"
+   },
+   {
+    "id": "BV-005",
+    "partition_id": "EQ-010",
+    "value": "0123456789",
+    "side": "min"
+   },
+   {
+    "id": "BV-006",
+    "partition_id": "EQ-011",
+    "value": "123456789",
+    "side": "max"
+   },
+   {
+    "id": "BV-007",
+    "partition_id": "EQ-012",
+    "value": "12345678901",
+    "side": "min"
+   },
+   {
+    "id": "BV-008",
+    "partition_id": "EQ-017",
+    "value": "1",
+    "side": "min"
+   },
+   {
+    "id": "BV-009",
+    "partition_id": "EQ-017",
+    "value": "2",
+    "side": "max"
+   },
+   {
+    "id": "BV-010",
+    "partition_id": "EQ-021",
+    "value": "30 латинских A",
+    "side": "max"
+   },
+   {
+    "id": "BV-011",
+    "partition_id": "EQ-022",
+    "value": "31 латинская A",
+    "side": "min"
+   },
+   {
+    "id": "BV-012",
+    "partition_id": "EQ-023",
+    "value": "D-1",
+    "side": "just_inside"
+   },
+   {
+    "id": "BV-013",
+    "partition_id": "EQ-023",
+    "value": "D",
+    "side": "max"
+   },
+   {
+    "id": "BV-014",
+    "partition_id": "EQ-024",
+    "value": "D+1",
+    "side": "min"
+   },
+   {
+    "id": "BV-015",
+    "partition_id": "EQ-034",
+    "value": "D+1",
+    "side": "min"
+   },
+   {
+    "id": "BV-016",
+    "partition_id": "EQ-035",
+    "value": "D",
+    "side": "max"
+   },
+   {
+    "id": "BV-017",
+    "partition_id": "EQ-035",
+    "value": "D-1",
+    "side": "just_inside"
+   }
+  ],
+  "rules": [
+   {
+    "id": "DR-001",
+    "kind": "decision",
+    "conditions": [
+     {
+      "ref": "EQ-001"
+     },
+     {
+      "ref": "EQ-010"
+     },
+     {
+      "text": "открыта форма создания"
+     }
+    ],
+    "expected": "создан ровно один владелец с выданным ID, переход на его карточку, все пять полей сохранены, питомцев нет",
+    "requirement_ids": [
+     "SREQ-0003"
+    ]
+   },
+   {
+    "id": "DR-002",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-002"
+     },
+     {
+      "text": "остальные поля корректны"
+     }
+    ],
+    "expected": "форма создания с ошибкой именно этого поля, новой записи нет",
+    "requirement_ids": [
+     "SREQ-0004"
+    ]
+   },
+   {
+    "id": "DR-003",
+    "kind": "state",
+    "conditions": [
+     {
+      "text": "существующий владелец"
+     },
+     {
+      "text": "адрес 11 Updated Street, телефон 1112223344"
+     }
+    ],
+    "expected": "та же запись с прежним ID обновлена; имя, фамилия, город, питомцы и визиты сохранены; число владельцев не растёт",
+    "requirement_ids": [
+     "SREQ-0007"
+    ]
+   },
+   {
+    "id": "DR-004",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-009"
+     },
+     {
+      "text": "редактирование существующего владельца"
+     },
+     {
+      "text": "одновременно новый адрес"
+     }
+    ],
+    "expected": "форма с ошибкой телефона; ни телефон, ни адрес не сохранены, связи прежние",
+    "requirement_ids": [
+     "SREQ-0008"
+    ]
+   },
+   {
+    "id": "DR-005",
+    "kind": "decision",
+    "conditions": [
+     {
+      "ref": "EQ-013"
+     }
+    ],
+    "expected": "найден основной владелец, переход на его карточку; пробелы вокруг не меняют результат",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "DR-006",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-016"
+     }
+    ],
+    "expected": "форма поиска с ошибкой lastName/notFound",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "DR-007",
+    "kind": "decision",
+    "conditions": [
+     {
+      "ref": "EQ-015"
+     }
+    ],
+    "expected": "поиск всех владельцев",
+    "requirement_ids": [
+     "SREQ-0009"
+    ]
+   },
+   {
+    "id": "DR-008",
+    "kind": "decision",
+    "conditions": [
+     {
+      "text": "шесть владельцев с префиксом BatchLifecycle"
+     }
+    ],
+    "expected": "страница 1 — пять записей, страница 2 — одна; totalItems=6, totalPages=2, currentPage как в запросе; все шесть ID ровно один раз",
+    "requirement_ids": [
+     "SREQ-0010"
+    ]
+   },
+   {
+    "id": "DR-009",
+    "kind": "error",
+    "conditions": [
+     {
+      "text": "карточка несуществующего владельца"
+     }
+    ],
+    "expected": "ошибка отсутствия владельца, чужие данные не показаны, данные не изменены",
+    "requirement_ids": [
+     "SREQ-0011"
+    ]
+   },
+   {
+    "id": "DR-010",
+    "kind": "decision",
+    "conditions": [
+     {
+      "text": "форма добавления питомца выбранного владельца"
+     },
+     {
+      "text": "Rex с корректными данными"
+     }
+    ],
+    "expected": "ровно один питомец только у этого владельца; ID, имя, дата и тип читаются повторно; второй владелец не меняется",
+    "requirement_ids": [
+     "SREQ-0012"
+    ]
+   },
+   {
+    "id": "DR-011",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-033"
+     },
+     {
+      "text": "создание питомца"
+     }
+    ],
+    "expected": "ошибка name/duplicate; исходный питомец и число записей не меняются",
+    "requirement_ids": [
+     "SREQ-0016"
+    ]
+   },
+   {
+    "id": "DR-012",
+    "kind": "state",
+    "conditions": [
+     {
+      "text": "Rex"
+     },
+     {
+      "text": "новое имя Buddy, тип cat, дата 2019-03-04"
+     }
+    ],
+    "expected": "тот же питомец изменён, новый не создан, владелец и визиты сохранены",
+    "requirement_ids": [
+     "SREQ-0017"
+    ]
+   },
+   {
+    "id": "DR-013",
+    "kind": "decision",
+    "conditions": [
+     {
+      "text": "редактирование без изменения имени"
+     }
+    ],
+    "expected": "сохранение допустимо и не считается дубликатом",
+    "requirement_ids": [
+     "SREQ-0017"
+    ]
+   },
+   {
+    "id": "DR-014",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-033"
+     },
+     {
+      "text": "переименование Rex в имя другого питомца"
+     }
+    ],
+    "expected": "name/duplicate; имена, ID и визиты обоих питомцев прежние",
+    "requirement_ids": [
+     "SREQ-0018"
+    ]
+   },
+   {
+    "id": "DR-015",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "BV-014"
+     },
+     {
+      "text": "редактирование питомца"
+     },
+     {
+      "text": "одновременно новое имя"
+     }
+    ],
+    "expected": "ошибка birthDate; ни дата, ни имя не сохранены, число питомцев и визиты прежние",
+    "requirement_ids": [
+     "SREQ-0019"
+    ]
+   },
+   {
+    "id": "DR-016",
+    "kind": "decision",
+    "conditions": [
+     {
+      "text": "открыта форма нового визита"
+     }
+    ],
+    "expected": "видны питомец и владелец; исходная и минимальная дата — D+1; визит не сохранён",
+    "requirement_ids": [
+     "SREQ-0020"
+    ]
+   },
+   {
+    "id": "DR-017",
+    "kind": "decision",
+    "conditions": [
+     {
+      "text": "дата D+1"
+     },
+     {
+      "text": "описание «Первичный осмотр»"
+     }
+    ],
+    "expected": "ровно один визит выбранному питомцу, переход на карточку; у остальных визитов нет",
+    "requirement_ids": [
+     "SREQ-0021"
+    ]
+   },
+   {
+    "id": "DR-018",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-038"
+     }
+    ],
+    "expected": "ошибка date, визит не сохранён — даже если текущий сервер пропускает null",
+    "requirement_ids": [
+     "SREQ-0024"
+    ]
+   },
+   {
+    "id": "DR-019",
+    "kind": "error",
+    "conditions": [
+     {
+      "ref": "EQ-043"
+     }
+    ],
+    "expected": "ошибка «питомец не найден у указанного владельца»; визит не создан и не изменён ни у кого",
+    "requirement_ids": [
+     "SREQ-0025"
+    ]
+   },
+   {
+    "id": "DR-020",
+    "kind": "state",
+    "conditions": [
+     {
+      "text": "визит D+2/«Повторный осмотр», затем D+1/«Первичный осмотр»"
+     }
+    ],
+    "expected": "оба визита по одному, история по дате по возрастанию; несохранённая форма не добавляет строку",
+    "requirement_ids": [
+     "SREQ-0026"
+    ]
+   },
+   {
+    "id": "DR-021",
+    "kind": "state",
+    "conditions": [
+     {
+      "text": "создать владельца → найти → два питомца → визит → исправить контакты → изменить питомца → открыть карточку"
+     }
+    ],
+    "expected": "тот же владелец, оба питомца с прежними ID, изменения сохранены, визит неизменен; второй владелец не меняется",
+    "requirement_ids": [
+     "SREQ-0027"
+    ]
+   },
+   {
+    "id": "DR-022",
+    "kind": "decision",
+    "conditions": [
+     {
+      "ref": "EQ-046"
+     },
+     {
+      "text": "owner edit и pet edit"
+     }
+    ],
+    "expected": "меняется только запись из пути; чужая запись и связи прежние",
+    "requirement_ids": [
+     "SREQ-0028"
+    ]
+   }
+  ],
+  "not_designed": [
+   {
+    "requirement_id": "SREQ-0001",
+    "reason": "назначение и границы фичи: без входов и исходов"
+   },
+   {
+    "requirement_id": "SREQ-0002",
+    "reason": "тестовые данные и обозначения дат, используются условиями других требований"
+   },
+   {
+    "requirement_id": "SREQ-0029",
+    "reason": "условия работы над тестами, не пользовательский сценарий"
+   }
+  ]
+ },
+ "warnings": []
+}

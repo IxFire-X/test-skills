@@ -913,12 +913,27 @@ def _plan(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Map
     return header, plan, context
 
 
-def _generator_schema() -> dict[str, Any]:
+def _generator_schema(design: bool = False) -> dict[str, Any]:
     schema = _subschema("candidate-fragment.schema.json", ["requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics"])
     for name in ("requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases"):
         items = schema["properties"][name].get("items")
         if isinstance(items, dict) and str(items.get("$ref", "")).startswith("canonical-test-document.schema.json"):
             schema["properties"][name] = {"type": "array", "items": {"$ref": str(ROOT / "schemas" / items["$ref"])}}
+    if design:
+        # D1: the driver assigns the priority from the design; a case names its design elements.
+        canonical = ROOT / "schemas" / "canonical-test-document.schema.json"
+        case = deepcopy(json.loads(canonical.read_text(encoding="utf-8"))["$defs"]["test_case"])
+        case["properties"].pop("priority")
+        case["required"] = [name for name in case["required"] if name != "priority"]
+
+        def absolute(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: (f"{canonical}{item}" if key == "$ref" and isinstance(item, str) and item.startswith("#") else absolute(item)) for key, item in value.items()}
+            return [absolute(item) for item in value] if isinstance(value, list) else value
+
+        schema["properties"]["test_cases"] = {"type": "array", "items": absolute(case)}
+        fragment = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
+        schema["properties"]["design_uncovered"] = fragment["properties"]["design_uncovered"]
     return schema
 
 
@@ -926,10 +941,14 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
                     header: Mapping[str, Any], plan: Mapping[str, Any], context: Mapping[str, Any], batch: Mapping[str, Any]) -> dict[str, Any]:
     from tools.pilot_state import publish_model_request
 
+    from tools.test_design import GENERATOR_RULES
+
     attempt_id = str(attempt["attempt_id"])
     stage = f"tc-generator:{batch['batch_id']}"
     owned = set(batch["owned_source_requirement_ids"])
     namespace = batch["namespace"]
+    batch_design = _batch_design(run_root, attempt_id, batch)
+    design_name = f"test-design-{batch['batch_id']}.json"
     brief = {
         "batch_id": batch["batch_id"], "namespace": namespace,
         "owned_source_requirements": [row for row in plan["source_requirements"] if row["source_requirement_id"] in owned],
@@ -940,20 +959,24 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
         "filled_by_driver": ["batch_id", "namespace", "plan_digest", "header_digest", "context_receipt_digest", "context_receipt", "owned_source_requirement_ids",
                              "status", "schema_version", "digest", "display_order", "ordering of capabilities, arguments, results, blockers and categories"],
     }
+    if batch_design is not None:
+        brief.update(design_file=design_name, design_rules=list(GENERATOR_RULES))
+        brief["filled_by_driver"].append("priority")
     brief_path = _write_json(work_dir(run_root) / "inputs" / f"generator-{batch['batch_id']}.json", brief)
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
-    batch_design = _batch_design(run_root, attempt_id, batch)
-    design_inputs = [] if batch_design is None else [_write_json(work_dir(run_root) / "inputs" / f"test-design-{batch['batch_id']}.json", batch_design)]
+    design_inputs = [] if batch_design is None else [_write_json(work_dir(run_root) / "inputs" / design_name, batch_design)]
     inputs = [brief_path, marker_path, *design_inputs, *_context_inputs(project, run_root, attempt, only=context)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
         _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"generator-{uuid.uuid4().hex[:16]}",
                               input_digests=_generator_input_digests(marker, context, plan, batch_design))
     return _llm_task(
-        run_root, attempt_id, f"tc-generator.{batch['batch_id']}", stage=stage, skill="tc-generator", inputs=inputs, schema=_generator_schema(),
+        run_root, attempt_id, f"tc-generator.{batch['batch_id']}", stage=stage, skill="tc-generator", inputs=inputs, schema=_generator_schema(batch_design is not None),
         instructions=("Первый файл — задание батча: какие исходные требования покрыть и какие префиксы идентификаторов использовать. "
                       "Верни только содержательную часть фрагмента: requirements, source_to_canonical_mappings, operation_capabilities, test_cases, diagnostics. "
-                      "Служебные поля, дайджесты, display_order и порядок массивов заполнит драйвер."),
+                      "Служебные поля, дайджесты, display_order и порядок массивов заполнит драйвер."
+                      + ("" if batch_design is None else " Тест-дизайн батча — файл design_file из задания; покрой его по правилам design_rules (design_refs в кейсах, "
+                                                         "design_uncovered с причиной), priority не заполняй.")),
         extra={"batch_id": batch["batch_id"]},
     )
 
@@ -1025,6 +1048,7 @@ def _build_fragment(content: Mapping[str, Any], plan: Mapping[str, Any], context
         "plan_digest": plan["digest"], "header_digest": plan["header_digest"], "context_receipt_digest": context["digest"],
         "context_receipt": dict(context), "owned_source_requirement_ids": list(batch["owned_source_requirement_ids"]),
         **normalized,
+        **({"design_uncovered": deepcopy(content["design_uncovered"])} if "design_uncovered" in content else {}),
     }
     fragment["digest"] = _sha(fragment)
     return fragment
@@ -1044,6 +1068,9 @@ def _submit_generator(project: Path, run_root: Path, attempt: Mapping[str, Any],
         raise DriverError("DRIVER_STATE", "the task batch is not in the current plan")
     rework = _rework_of(config, attempt)
     allowed = {"test_cases", "diagnostics"} if rework is not None else {"requirements", "source_to_canonical_mappings", "operation_capabilities", "test_cases", "diagnostics"}
+    batch_design = _batch_design(run_root, attempt_id, batch)
+    if batch_design is not None:
+        allowed |= {"design_uncovered"}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise DriverError("TASK_OUTPUT_INVALID", "generator output has fields the driver owns", [
@@ -1051,6 +1078,8 @@ def _submit_generator(project: Path, run_root: Path, attempt: Mapping[str, Any],
              + (" A rework answer carries only the changed test_cases (and optional diagnostics)." if rework is not None else "")} for name in unknown])
     if rework is not None:
         value = _merge_rework(run_root, rework, batch, value)
+    if batch_design is not None:
+        value = _apply_design(batch_design, value)
     fragment = _build_fragment(value, plan, context, batch)
     try:
         validate_fragment(fragment, plan, header, context)
@@ -1127,6 +1156,41 @@ def _parent_fragment(run_root: Path, parent_attempt_id: str, namespace: str) -> 
     raise DriverError("DRIVER_STATE", f"the rejected attempt has no fragment for namespace {namespace}")
 
 
+def _apply_design(batch_design: Mapping[str, Any], value: Mapping[str, Any]) -> dict[str, Any]:
+    """D1: the cases cover the design slice of their batch, and their priorities come from it, not from the model."""
+    from tools.test_design import assign_priorities, fragment_design_problems
+
+    cases, uncovered = value.get("test_cases"), value.get("design_uncovered", [])
+    if not isinstance(cases, list) or not all(isinstance(case, dict) for case in cases) or not isinstance(uncovered, list):
+        return dict(value)  # the fragment validation reports the shape
+    mappings = value.get("source_to_canonical_mappings")
+    rows = fragment_design_problems(batch_design, cases, [row for row in uncovered if isinstance(row, dict)],
+                                    [row for row in mappings if isinstance(row, dict)] if isinstance(mappings, list) else [])
+    if rows:
+        raise DriverError("TASK_OUTPUT_INVALID", "the cases do not cover the test design of the batch", rows)
+    result = deepcopy(dict(value))
+    for case, level in zip(result["test_cases"], assign_priorities(batch_design, result["test_cases"])):
+        case["priority"] = level
+    return result
+
+
+def design_coverage(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """D1: coverage of the attempt's design by its effective cases (None without a design or an effective document)."""
+    from tools.pilot_state import read_effective_canonical_if_present, read_model_stage_artifact
+    from tools.test_design import coverage, priority_counts
+
+    attempt_id = str(attempt["attempt_id"])
+    design = _design_artifact(run_root, attempt_id)
+    effective = read_effective_canonical_if_present(run_root, attempt_id) if design is not None else None
+    if design is None or effective is None:
+        return None
+    cases = effective["document"]["test_cases"]
+    uncovered = [row for event in _events(run_root, attempt_id)
+                 if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and str(event.get("stage_instance_id") or "").startswith("tc-generator:")
+                 for row in read_model_stage_artifact(run_root, attempt_id, event["stage_instance_id"], event["artifact_digest"])["artifact"].get("design_uncovered", [])]
+    return {**coverage(design["artifact"], cases, uncovered), "priorities": priority_counts(cases)}
+
+
 def _merge_rework(run_root: Path, rework: Mapping[str, Any], batch: Mapping[str, Any], value: Mapping[str, Any]) -> dict[str, Any]:
     """r1 content of the batch with the returned cases replaced (same case_id) or appended (new ID of the batch)."""
     parent = _parent_fragment(run_root, rework["parent_attempt_id"], batch["namespace"])
@@ -1150,6 +1214,9 @@ def _merge_rework(run_root: Path, rework: Mapping[str, Any], batch: Mapping[str,
                 {"path": "/test_cases", "code": "REWORK_CASE_FOREIGN", "message": f"Keep an r1 case_id or use the prefix TC-{batch['namespace']}- for a new case."}])
     if "diagnostics" in value:
         merged["diagnostics"] = deepcopy(value["diagnostics"])
+    for source in (parent, value):  # D1: the r1 reasons stay unless the rework answer gives new ones
+        if "design_uncovered" in source:
+            merged["design_uncovered"] = deepcopy(source["design_uncovered"])
     return merged
 
 
@@ -1172,6 +1239,11 @@ def _rework_task(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
         "filled_by_driver": ["requirements", "source_to_canonical_mappings", "operation_capabilities", "unchanged cases", "revision", "parent_sha256",
                              "digests", "display_order", "ordering"],
     }
+    if _batch_design(run_root, attempt_id, batch) is not None:
+        from tools.test_design import GENERATOR_RULES
+
+        brief.update(design_rules=list(GENERATOR_RULES))
+        brief["filled_by_driver"].append("priority")
     brief_path = _write_json(work_dir(run_root) / "inputs" / f"rework-{batch['batch_id']}.json", brief)
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
     batch_design = _batch_design(run_root, attempt_id, batch)
@@ -1638,6 +1710,14 @@ def _result_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
         from tools.pipeline_driver_suite import suite_summary
 
         suite_summary(run_root, attempt, summary)  # opt-in --suite: the living suite (summary 1.2.0)
+    covered = design_coverage(run_root, attempt)
+    if covered is not None:  # D1: summary 1.3.0
+        from tools.test_design import priority_warning
+
+        summary.update(schema_version="1.3.0", design_coverage=covered)
+        warning = priority_warning(covered["priorities"])
+        if warning is not None:
+            summary["warnings"].append({"code": "PRIORITY_DEGENERATE", "attempt_id": attempt_id, "message": warning})
     return summary
 
 

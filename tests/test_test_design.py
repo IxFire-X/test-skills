@@ -378,6 +378,11 @@ def test_a_degenerate_distribution_warns_with_the_counts() -> None:
     assert design_tools.priority_warning({"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}) is None
 
 
+def test_fewer_than_ten_cases_never_warn_about_the_spread() -> None:
+    assert design_tools.priority_warning({"CRITICAL": 0, "HIGH": 9, "MEDIUM": 0, "LOW": 0}) is None
+    assert "HIGH — 10 из 10" in design_tools.priority_warning({"CRITICAL": 0, "HIGH": 10, "MEDIUM": 0, "LOW": 0})
+
+
 def test_priority_counts_cover_every_level() -> None:
     assert design_tools.priority_counts([{"priority": "HIGH"}, {"priority": "LOW"}, {"priority": "HIGH"}]) == {
         "CRITICAL": 0, "HIGH": 2, "MEDIUM": 0, "LOW": 1}

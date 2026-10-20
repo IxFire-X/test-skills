@@ -32,14 +32,35 @@ def _design_setting(project: Path, enabled: bool | None) -> None:
     path.write_text(json.dumps(skillsrc, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def design_refs_of(case: dict[str, Any], answer: dict[str, Any], slice_value: dict[str, Any]) -> list[str]:
+    """The design elements of the case's source requirements (through the answer's mappings), in design order."""
+    sources = {row["source_requirement_id"] for row in answer.get("source_to_canonical_mappings", [])
+               if set(row["canonical_requirement_ids"]) & set(case["requirement_ids"])}
+    artifacts = slice_value["artifacts"]
+    partitions = [row["id"] for row in artifacts["partitions"] if sources & set(row["requirement_ids"])]
+    boundaries = [row["id"] for row in artifacts["boundaries"] if row["partition_id"] in partitions]
+    rules = [row["id"] for row in artifacts["rules"] if sources & set(row["requirement_ids"])]
+    return [*rules, *partitions, *boundaries]
+
+
 class DesignModel(SavedModel):
-    """The saved answers plus the saved design (two decision rules, one per source requirement)."""
+    """The saved answers plus the saved design (two decision rules, one per source requirement); the generator answer
+    names the design elements of each case's requirements and leaves a model priority the driver must replace."""
 
     def __init__(self, profile: str, **options: Any) -> None:
         super().__init__(profile, **options)
         self.design_tasks: list[dict[str, Any]] = []
 
     def answer(self, task: dict[str, Any]) -> Any:
+        if task["stage"].startswith("tc-generator:") and not task.get("rework"):
+            value = super().answer(task)
+            design = next((path for path in task["inputs"] if Path(path).name.startswith("test-design-BATCH-")), None)
+            for case in value["test_cases"] if design is not None else []:
+                refs = design_refs_of(case, value, _load(design))
+                if refs:
+                    case["design_refs"] = refs
+                case["priority"] = "CRITICAL"
+            return value
         if task["stage"] != DESIGN:
             return super().answer(task)
         self.stages.append(task["stage"])

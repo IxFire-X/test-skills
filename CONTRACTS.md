@@ -190,7 +190,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.2.0` | `True` | `-` |
+| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.3.0` | `True` | `-` |
 | `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

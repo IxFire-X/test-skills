@@ -22,6 +22,7 @@ SCHEMA_NAME = "test-design.schema.json"
 DESIGN_FIELDS = ("parameters", "partitions", "boundaries", "rules", "not_designed")
 LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 DEGENERATE_SHARE = 0.7
+DEGENERATE_MIN_CASES = 10  # fewer cases are too few to call a spread degenerate
 ID_FORMATS = {"parameter": "P-NNN", "partition": "EQ-NNN", "boundary": "BV-NNN", "rule": "DR-NNN"}
 _PREFIX = {"parameters": "P-", "partitions": "EQ-", "boundaries": "BV-", "rules": "DR-"}
 
@@ -196,16 +197,27 @@ def element_ids(design: Mapping[str, Any]) -> dict[str, str]:
 
 
 def fragment_design_problems(design_slice_value: Mapping[str, Any], cases: Sequence[Mapping[str, Any]],
-                             uncovered: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    """The design references of one generator answer against its slice; any row refuses the answer."""
+                             uncovered: Sequence[Mapping[str, Any]], mappings: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, str]]:
+    """The design references of one generator answer against its slice; any row refuses the answer.
+
+    A case needs references unless every source requirement it covers (through ``mappings``, the answer's
+    ``source_to_canonical_mappings``) is declared not designed.
+    """
     elements = element_ids(design_slice_value)
+    not_designed = {row.get("requirement_id") for row in _rows(design_slice_value, "not_designed")}
+    sources_of: dict[Any, set[Any]] = {}
+    for mapping in mappings:
+        for canonical in mapping.get("canonical_requirement_ids") or []:
+            sources_of.setdefault(canonical, set()).add(mapping.get("source_requirement_id"))
     rows: list[dict[str, str]] = []
     covered: set[str] = set()
     negative: set[str] = set()
     for index, case in enumerate(cases):
         refs = case.get("design_refs")
         if not isinstance(refs, list) or not refs:
-            rows.append(_row(f"/test_cases/{index}/design_refs", "DESIGN_REFS_MISSING", f"{case.get('case_id')} names no design element"))
+            sources = set().union(*(sources_of.get(item, set()) for item in case.get("requirement_ids") or []))
+            if not (sources and sources <= not_designed):
+                rows.append(_row(f"/test_cases/{index}/design_refs", "DESIGN_REFS_MISSING", f"{case.get('case_id')} names no design element"))
             continue
         for position, ref in enumerate(refs):
             if ref not in elements:
@@ -296,6 +308,15 @@ def assign_priorities(design: Mapping[str, Any], cases: Sequence[Mapping[str, An
     return levels
 
 
+GENERATOR_RULES = (
+    "Каждый кейс перечисляет в design_refs ID элементов дизайна из файла design_file, которые он проверяет: разбиения EQ-, границы BV-, правила DR-.",
+    "Кейс на границу указывает и границу BV-, и разбиение EQ-, в котором лежит проверяемое значение; для just_outside — соседнее невалидное разбиение.",
+    "Каждое разбиение, граница и правило файла покрыты хотя бы одним кейсом; элемент, который покрыть нельзя, внеси в design_uncovered с причиной.",
+    "Разбиение с valid: false покрывается негативным кейсом (категория negative); ожидаемый результат кейса по правилу совпадает с expected правила.",
+    "Кейс по требованию из not_designed может не иметь design_refs. Поле priority не заполняй: приоритет назначает драйвер по дизайну.",
+)
+
+
 def priority_counts(cases: Iterable[Mapping[str, Any]]) -> dict[str, int]:
     counts = dict.fromkeys(LEVELS, 0)
     for case in cases:
@@ -305,9 +326,9 @@ def priority_counts(cases: Iterable[Mapping[str, Any]]) -> dict[str, int]:
 
 
 def priority_warning(counts: Mapping[str, int]) -> str | None:
-    """A warning when one level holds more than 70 % of the cases."""
+    """A warning when one level holds more than 70 % of at least 10 cases."""
     total = sum(counts.get(level, 0) for level in LEVELS)
-    if not total:
+    if total < DEGENERATE_MIN_CASES:
         return None
     level = max(LEVELS, key=lambda name: counts.get(name, 0))
     if counts.get(level, 0) / total <= DEGENERATE_SHARE:
