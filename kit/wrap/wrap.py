@@ -25,7 +25,8 @@ GOOGLE_APPLICATION_CREDENTIALS): the CLI's credentials belong in the CLI's own c
 The CLI does not inherit the whole environment (S6): it gets PATH, HOME, JAVA_HOME, LANG, LANGUAGE, LC_*, TMP*, TEMP,
 PYTHONUTF8, PYTHONIOENCODING (a Python CLI on Windows needs them for UTF-8 output) and
 the Windows minimum (SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT, USERPROFILE, APPDATA, LOCALAPPDATA, HOMEDRIVE,
-HOMEPATH), the names and prefixes of ``env_passthrough`` (a name, or a prefix ending in ``*``), then ``extra_env``.
+HOMEPATH), the names and prefixes of ``env_passthrough`` (a name, or a prefix of 3+ characters ending in ``*``; secret-like
+names are refused as in ``extra_env``), then ``extra_env``.
 ``wrap.py exec --verbose …`` prints the passed names (not values) to stderr in one line.  The answer's JSON object (the whole text, a ```json block or the outer braces) goes to
 --output-last-message; stdout gets codex `--json` events (thread.started, item.completed, turn.completed with usage —
 the CLI's own when its stdout is JSON with `usage`, else an estimate by bytes, marked "estimated").  A CLI failure
@@ -80,6 +81,10 @@ def load_config(path: Path | None = None) -> dict:
     passthrough = value.setdefault("env_passthrough", [])
     if not isinstance(passthrough, list) or not all(isinstance(item, str) and PASSTHROUGH.match(item) for item in passthrough):
         raise SystemExit("wrap.json: env_passthrough is a list of variable names or prefixes ending in * (GIGACODE_*, HTTPS_PROXY)")
+    refused = sorted(item for item in passthrough if SECRET_ENV.search(item.rstrip("*")) or (item.endswith("*") and len(item) - 1 < 3))
+    if refused:
+        raise SystemExit(f"wrap.json: env_passthrough refuses secret-like names and prefixes shorter than 3 characters ({', '.join(refused)}) — "
+                         "keys and tokens belong in the CLI's own config, not in the environment wrap.py passes")
     sandbox = value.setdefault("sandbox_args", [])
     if not isinstance(sandbox, list) or not all(isinstance(item, str) for item in sandbox):
         raise SystemExit("wrap.json: sandbox_args must be a list of strings")

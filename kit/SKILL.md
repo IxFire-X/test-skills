@@ -21,7 +21,9 @@ metadata:
     - "<проект>: сгенерированные тесты — только в тестовом корне модуля и только *Test.java, *Tests.java, *IT.java, test_*.py, *_test.py"
     - "<проект>/test-cases/: проекции кейсов, экспорт Zephyr, манифест набора"
     - "<проект>/.skillsrc: создаётся, если его нет; правка существующего — после показа diff и подтверждения (--yes-skillsrc)"
-    - "<home>: wrap/wrap.json, runner/ (вход и выход процессов модели), operate.log, operate-state.json, report/, skillsrc.bak-*"
+    - "<home>: wrap/wrap.json, runner/ (вход и выход процессов модели), operate-state.json, report/, skillsrc.bak-*"
+    - "<home>/operate.log: команды и хвост их вывода (200 строк на команду, значения, похожие на секреты, замаскированы)"
+    - "<проект>: chmod +x mvnw/gradlew — только с подтверждением (--yes-chmod; --yes его не даёт)"
     - "сборка проекта: target/, build/, ~/.m2, кэш Gradle — как обычная сборка"
   network_requirement: >-
     В коде комплекта и пакета сетевых вызовов нет. Сеть идёт только через запускаемые процессы: CLI модели компании

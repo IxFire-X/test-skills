@@ -76,7 +76,8 @@ ASK_STOPS: dict[str, tuple[str, str, str | None]] = {
     "regenerate-after-gate": ("перегенерация тестов после гейта сборки", "runner-tail", None),
 }
 ASK_KNOWN_KEYS = {"action", "task_id", "question", "options", "run_id", "attempt_id", "stage", "skillsrc_question_id"}
-WRAPPER_ADAPTER, SYSTEM_MAVEN ="maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
+SECRET_NAME = re.compile(r"(?i)TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|^AWS_|^AZURE_|^GOOGLE_APPLICATION_CREDENTIALS$")
+WRAPPER_ADAPTER, SYSTEM_MAVEN = "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
 
 
 def pack_python(pack: Path) -> str:
@@ -373,7 +374,7 @@ class Operator:
             raise Stop(f"команда не запустилась: {error}", "проверить путь к программе и PATH")
         except subprocess.TimeoutExpired:
             raise Stop(f"команда не уложилась в {timeout} с", "смотреть operate.log")
-        self.log("stdout:\n" + done.stdout + "\nstderr:\n" + done.stderr)
+        self.log("stdout:\n" + log_tail(done.stdout) + "\nstderr:\n" + log_tail(done.stderr))
         self.say(f"  код выхода: {done.code}")
         return done
 
@@ -386,7 +387,7 @@ class Operator:
                                   timeout=120, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise Stop(f"пакет не ответил: {error}", "сначала шаг 0 (комплект и интерпретатор)")
-        self.log("stdout:\n" + done.stdout + "\nstderr:\n" + done.stderr)
+        self.log("stdout:\n" + log_tail(done.stdout) + "\nstderr:\n" + log_tail(done.stderr))
         if done.returncode != 0:
             raise Stop(f"пакет не ответил (код {done.returncode}): {' | '.join(_main_lines(done.stderr, 2))}", "сначала шаг 0; ошибку — в отчёт (п. 7)")
         return json.loads(done.stdout)
@@ -526,9 +527,11 @@ class Operator:
     def passthrough(self) -> list[str]:
         """--env-passthrough: the variables the model CLI needs beyond wrap.py's base list (names, or prefixes ending in *)."""
         items = [item.strip() for item in (self.args.env_passthrough or "").split(",") if item.strip()]
-        bad = [item for item in items if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\*?", item)]
+        bad = [item for item in items if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\*?", item) or SECRET_NAME.search(item.rstrip("*"))
+               or (item.endswith("*") and len(item) - 1 < 3)]
         if bad:
-            raise Stop(f"--env-passthrough: не имя и не префикс со * в конце: {', '.join(bad)}", self.command(getattr(self, "current_step", "2")) +
+            raise Stop(f"--env-passthrough: не имя и не префикс со * в конце, имя похоже на секрет или префикс короче 3 символов: {', '.join(bad)} "
+                       "(ключи и токены — в конфиге самого CLI)", self.command(getattr(self, "current_step", "2")) +
                        " --env-passthrough 'GIGACODE_*,HTTPS_PROXY'")
         return items
 
@@ -773,7 +776,7 @@ class Operator:
                     self.state.get("host_cli_version") or self.args.cli_version or "unknown", "--reviewer-isolation", "fresh",
                     "--review-runner-preset", "codex", "--review-runner-command", json.dumps(self.runner_command(), ensure_ascii=False),
                     "--runner-dir", str(self.runner_dir), "--review-input-bytes", str(self.args.review_input_bytes), "--max-tasks", str(self.args.max_tasks),
-                    *(["--execution-mode", self.args.execution_mode] if self.args.execution_mode else []),
+                    *self.execution_mode_args(profile),
                     *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []), *extra]
         command = self.runner_command() if self.pack.is_dir() or not self.dry else [self.py, str(self.wrap_dir / "wrap.py"), "exec", "…"]
         return [self.py, "-m", "tools.pipeline_driver", "next", "--project", str(self.project), "--review-runner", "process", "--profile", profile,
@@ -785,7 +788,13 @@ class Operator:
                 *(["--execution-review", self.args.execution_review] if self.args.execution_review else []),
                 *(["--task-input-bytes", str(self.task_input_bytes())] if self.driver_knows("--task-input-bytes") else []),
                 *(["--confirm-context", self.args.confirm_context] if self.args.confirm_context else []),
-                *(["--execution-mode", self.args.execution_mode] if self.args.execution_mode else []), *extra]
+                *self.execution_mode_args(profile), *extra]
+
+    def execution_mode_args(self, profile: str) -> list[str]:
+        """B7: the kit runs no project process by default — human, unless --execution-mode auto.  cases-only executes nothing."""
+        if profile == "cases-only-v1" or not self.driver_knows("--execution-mode"):
+            return []
+        return ["--execution-mode", self.args.execution_mode]
 
     def junit_reports(self, run_id: str | None = None) -> list[str]:
         """--junit: report files, or a report directory — every *.xml in it.  No report at all (the build failed before the
@@ -966,7 +975,7 @@ class Operator:
                 raise Stop("прогон прерван (Ctrl+C)", "продолжить тот же прогон: operate.py … --from-step <шаг> --run <run_id> (run_id — в "
                            f"{self.project}/.pilot-runs); каталог {self.runner_dir} не трогать")
         text = out.read_text(encoding="utf-8", errors="replace")
-        self.log(f"stdout ({out}):\n{text}\nstderr:\n{err.read_text(encoding='utf-8', errors='replace')[-20000:]}")
+        self.log(f"stdout ({out}):\n{log_tail(text)}\nstderr:\n{log_tail(err.read_text(encoding='utf-8', errors='replace'))}")
         self.say(f"  код выхода: {process.returncode}; время {int(time.time() - started) // 60} мин")
         payload = _json_tail(text)
         if isinstance(payload, dict) and payload.get("action") == "error" and payload.get("code") == "DRIVER_INPUT":
@@ -1244,6 +1253,12 @@ class Operator:
             copied.append("test-strength.md")
         figures = _figures(result, events, run_root, self.project)
         try:
+            mode = json.loads((driver / "config.json").read_text(encoding="utf-8")).get("execution_mode") or "auto"
+        except (OSError, ValueError):
+            mode = "—"
+        figures.append(("Режим исполнения (execution_mode)", f"{mode} — " + ("сборку и тесты выполнял человек по напечатанным командам"
+                                                                             if mode == "human" else "сборку и тесты запускал пакет")))
+        try:
             figures += _first_call_figures((self.home / "operate.log").read_text(encoding="utf-8", errors="replace"))
         except OSError:
             pass
@@ -1352,6 +1367,19 @@ def _count_cases(result: dict[str, Any], project: Path) -> tuple[int, int] | Non
 
 
 FIRST_CALL = "first_model_call"
+# C10: what operate.log keeps of a command's output — the last lines, secret-looking values masked.
+LOG_TAIL_LINES = 200
+SECRET_IN_TEXT = re.compile(r"(?i)(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
+                            r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+                            r"|(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"
+                            r"|(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|token|secret|password|passwd)[\"']?\s*[=:]\s*[\"']?[^\s\"',;]{6,})")
+
+
+def log_tail(text: str, lines: int = LOG_TAIL_LINES) -> str:
+    """The last ``lines`` lines of a command's output with secret-looking values masked (C10)."""
+    rows = (text or "").splitlines()
+    head = f"[… {len(rows) - lines} строк выше опущено]\n" if len(rows) > lines else ""
+    return head + SECRET_IN_TEXT.sub("***", "\n".join(rows[-lines:]))
 TEXT_SUFFIXES = {".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".js", ".ts", ".tsx", ".jsx", ".xml", ".yml", ".yaml", ".properties",
                  ".json", ".sql", ".html", ".css", ".md", ".txt", ".csv", ".gradle", ".conf", ".jsp", ".ftl", ".vm"}
 CODE_SUFFIXES = {".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".js", ".ts", ".tsx", ".jsx"}
@@ -1510,7 +1538,7 @@ class Init(Operator):
                                       encoding="utf-8", errors="replace", timeout=int(self.args.cli_timeout) + 60, check=False)
             except subprocess.TimeoutExpired:
                 return False, f"нет ответа за {self.args.cli_timeout} с"
-            self.log("stdout:\n" + done.stdout + "\nstderr:\n" + done.stderr)
+            self.log("stdout:\n" + log_tail(done.stdout) + "\nstderr:\n" + log_tail(done.stderr))
             text = answer.read_text(encoding="utf-8") if answer.is_file() else ""
             if done.returncode == 0 and isinstance(_json_tail(text), dict):
                 self.say(f"  ответ модели {self.default_model}: {text.strip()[:200]}")
@@ -1727,6 +1755,8 @@ class Init(Operator):
         kpi = dict(_first_call_figures((self.home / "operate.log").read_text(encoding="utf-8", errors="replace")))
         self.say("\n=== init: готово ===")
         self.say(f"Запуск (шаги 0–2 и 4 init уже сделал): {command}")
+        self.say("По умолчанию пакет не запускает ни одного процесса проекта: сборку, тесты, мутации и прогон набора выполняет человек "
+                 "по напечатанным командам (--execution-mode auto — пусть запускает пакет).")
         asks = [] if self.facts.get("confirmation_digest") else [
             "отправка в модель — остановка confirm-context покажет документы и файлы с размерами (список — context-files.txt); "
             "подтверждение — ввод дайджеста или --yes-send"]
@@ -1894,9 +1924,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-passthrough", help="переменные окружения для CLI модели сверх базового списка wrap.py, через запятую "
                         "(имя или префикс со * в конце: GIGACODE_*,HTTPS_PROXY) → env_passthrough в wrap/wrap.json и, если пакет "
                         "это знает, в .skillsrc review_runner")
-    parser.add_argument("--execution-mode", choices=("auto", "human"), help="кто запускает сборку и тесты (pipeline_driver --execution-mode; "
-                        "пакет с S9): auto — пакет; human — пакет печатает команды (bash/PowerShell, cwd, куда пишется отчёт) и ждёт "
-                        "отчёт: продолжение — та же команда с --from-step 5 --run <id> --junit <отчёт>")
+    parser.add_argument("--execution-mode", choices=("auto", "human"), default="human",
+                        help="кто запускает процессы проекта (pipeline_driver --execution-mode; пакет с S9): по умолчанию human — пакет "
+                        "не запускает ни сборку, ни тесты, ни мутации, ни прогон набора, а печатает команды (bash/PowerShell, cwd, куда "
+                        "пишется отчёт) и ждёт результат: продолжение — готовая команда из вывода; auto — запускает пакет")
     parser.add_argument("--junit", action="append", default=[], help="отчёт JUnit или каталог отчётов (все *.xml) после выполнения напечатанных "
                                                                      "команд (режим human); можно несколько")
     parser.add_argument("--mutation-step-done", action="store_true", help="режим human, мутации: напечатанная команда резолвера выполнена "

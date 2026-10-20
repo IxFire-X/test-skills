@@ -124,6 +124,11 @@ def selftest(here: Path, pack: str | None) -> int:
             bad["env_passthrough"] = ["FOO*BAR"]
             code, _events, last, stderr = call(here, bad, prompt, work, "env-bad")
             note(code != 0 and last is None and "env_passthrough" in stderr, "env_passthrough с * не в конце → отказ конфигурации", f"код {code}")
+            secret = local(here, json.loads((here / "examples" / "stdin-stdout.json").read_text(encoding="utf-8")))
+            secret["env_passthrough"] = ["FOO_TOKEN", "AW*"]
+            code, _events, last, stderr = call(here, secret, prompt, work, "env-secret")
+            note(code != 0 and last is None and "FOO_TOKEN" in stderr and "AW*" in stderr,
+                 "env_passthrough с секретоподобным именем или префиксом короче 3 символов → отказ", f"код {code}")
         finally:
             os.environ.pop("FOO_TOKEN", None)
             os.environ.pop("UNLISTED_VAR", None)

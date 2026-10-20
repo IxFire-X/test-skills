@@ -65,11 +65,13 @@ python3 -m tools.pipeline_driver run --project <проект> --runner process \
 - Каждый вызов — **новый процесс** без истории, рабочий каталог — свежий временный вне проекта
   (`/tmp/test-skills-model-XXXX`), удаляется после вызова. Это и есть `--reviewer-isolation fresh` через процессы:
   в S2 у всех 41 части ревью `isolation_evidence: DRIVER_PROCESS` и квитанция `review-part-process-…`.
-- Окружение — окружение драйвера (учётные данные, прокси, переменные внутреннего CLI доходят до обёртки);
-  одноразовый токен запуска обёртка не видит (в S2 — `TEST_SKILLS_RUNNER_LAUNCH` отсутствует).
+- Окружение — белый список (S6): обёртка и CLI получают `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`,
+  `TEMP`, `PYTHONUTF8`, `PYTHONIOENCODING`, системный минимум Windows и только явно названные в `env_passthrough`
+  (`wrap.json`; секретоподобные имена и префиксы короче 3 символов отвергаются) плюс `extra_env`; учётные данные модели —
+  в конфиге самого CLI. Одноразовый токен запуска обёртка не видит (`TEST_SKILLS_RUNNER_LAUNCH` отсутствует).
 - Процесс запускает шим `python -m tools.model_runner shim <runner-dir>`: stdin из `stdin.txt`, stdout/stderr — в
-  `stdout.txt`/`stderr.txt`, итог — `result.json`. Каталог вызова:
-  `<проект>/.pilot-runs/<run>.driver/runner/<task>[-runN]/` (`spec.json`, `schema.json`, `stdin.txt`, `stdout.txt`,
+  `stdout.txt`/`stderr.txt`, итог — `result.json`. Каталог вызова — в каталоге раннера вне `.pilot-runs`
+  (`--runner-dir`: `<home>/runner`, при `--home` внутри проекта — `<home>/.runner`): `<runner-dir>/<run>/runner/<task>[-runN]/` (`spec.json`, `schema.json`, `stdin.txt`, `stdout.txt`,
   `stderr.txt`, `last-message.txt`, `result.json`, `launch.json`, `lock`).
 
 ## 5. Тайм-аут, повторы, параллельность, лимиты
