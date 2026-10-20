@@ -152,3 +152,77 @@ def test_env_passthrough_keeps_proxies_and_cli_settings() -> None:
 
     config = model_runner.configure({"review_runner": {"preset": "claude", "env_passthrough": ["HTTPS_PROXY", "GIGACODE_*", "NO_PROXY"]}})
     assert config.env_passthrough == ("HTTPS_PROXY", "GIGACODE_*", "NO_PROXY")
+
+
+# --------------------------------------------------------------------------------------
+# A4: the manual scan turns the human gates on like the driver
+# --------------------------------------------------------------------------------------
+
+def _manual_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **flags) -> tuple[Path, str, dict]:
+    from types import SimpleNamespace
+
+    from tests.test_phase2_scan import _project as _python_project
+    from tools import pilot_state, run_pipeline
+
+    project, _module = _python_project(tmp_path)
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+    assert run_pipeline.cmd_scan(SimpleNamespace(project=str(project), module="nested", target=None, docs=None, **flags)) == 0
+    run_root = Path(payloads[-1]["run_root"])
+    _manifest, authorization = pilot_state._run_boundary(project.resolve(), run_root)
+    return run_root, payloads[-1]["attempt_id"], authorization
+
+
+@pytest.mark.human_gates
+def test_a_manual_scan_without_flags_needs_the_approval_before_exec(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state
+
+    run_root, attempt_id, authorization = _manual_scan(tmp_path, monkeypatch)
+    assert authorization.get("execution_review_required") is True and authorization.get("context_confirm_required") is True, authorization
+    with pytest.raises(ValueError):  # what exec claims first: no build or test run without EXECUTION_APPROVED
+        pilot_state.claim_execution_start(run_root, attempt_id, "sha256:" + "0" * 64)
+
+
+@pytest.mark.human_gates
+def test_the_scan_flags_turn_the_gates_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _run_root, _attempt, authorization = _manual_scan(tmp_path, monkeypatch, execution_review="none", confirm_context="no")
+    assert "execution_review_required" not in authorization and "context_confirm_required" not in authorization, authorization
+
+
+# --------------------------------------------------------------------------------------
+# A5: the suite never removes a report directory through a link
+# --------------------------------------------------------------------------------------
+
+def _link(link: Path, target: Path) -> None:
+    import os
+
+    if os.name == "nt":
+        from tests.helpers import make_junction
+
+        make_junction(link, target)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("where", ["module-root", "report-parent"])
+def test_the_suite_refuses_a_linked_module_or_report_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    from tests.test_offline_build import MAVEN, _executable, _host
+    from tools import execution_adapters as adapters, suite_run
+
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    keep = outside / "target" / "surefire-reports" / "keep.xml" if where == "module-root" else outside / "surefire-reports" / "keep.xml"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("<keep/>", encoding="utf-8")
+    project.mkdir()
+    if where == "module-root":
+        _link(project / "api", outside)
+        root = "api"
+    else:
+        _link(project / "target", outside)
+        root = "."
+    _executable(project / root / _host("mvnw", "mvnw.cmd")) if where == "report-parent" else _executable(outside / _host("mvnw", "mvnw.cmd"))
+    monkeypatch.setattr(suite_run, "RUNNER", lambda *_args, **_kwargs: pytest.fail("the suite started a process through a linked directory"))
+    module = {"id": "root", "root": root, "test": {"framework": "junit5", "adapter_id": MAVEN, "wrapper": "mvnw", "build_profile": "default", "adapter_parameters": {}}}
+    with pytest.raises(adapters.AdapterRequestError):
+        suite_run.run_once(project, module, ["pkg.ATest#a"], explicit=False, timeout=60)
+    assert keep.is_file()  # the directory outside the project is untouched

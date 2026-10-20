@@ -296,14 +296,23 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         if profile != "local-pilot-v1":
             raise HostStop("SUITE_PROFILE", "--suite needs the local-pilot-v1 profile (the suite records retained tests)")
         authorization["suite_requested"] = True
-    # S3: the driver resolves execution.review (human by default); the manual `scan` records it only when asked explicitly.
-    if getattr(args, "execution_review", None) == "human" and profile == "local-pilot-v1":
+    # S11 A4: the manual `scan` resolves the human gates like the driver — the flag, else .skillsrc, else the package
+    # default (S3 review and S5 confirmation on); `--execution-review none` / `--confirm-context no` turn them off.
+    from tools.human_gates import GateError, confirm_context, execution_mode, execution_review
+
+    try:
+        review = execution_review(project, getattr(args, "execution_review", None))
+        confirm = getattr(args, "confirm_context", None)
+        confirm = confirm if isinstance(confirm, bool) else confirm_context(project, confirm)
+        mode = getattr(args, "execution_mode", None) or (execution_mode(project) if profile == "local-pilot-v1" else "auto")
+    except GateError as error:
+        raise HostStop(error.code, str(error)) from error
+    if review == "human" and profile == "local-pilot-v1":
         authorization["execution_review_required"] = True
-    # S5: likewise the confirmation of the model input (the driver turns it on by default).
-    if getattr(args, "confirm_context", None) in {True, "yes"}:
+    if confirm:
         authorization["context_confirm_required"] = True
     # S9: in human execution mode the package starts no build, test or mutation process itself.
-    if getattr(args, "execution_mode", None) == "human":
+    if mode == "human":
         if profile != "local-pilot-v1":
             raise HostStop("EXECUTION_MODE_PROFILE", "--execution-mode human needs the local-pilot-v1 profile (cases-only runs nothing)")
         authorization["execution_mode_human"] = True

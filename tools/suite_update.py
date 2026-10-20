@@ -130,6 +130,14 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
             human_continue(_work(run_root) / "human", list(human.get("junit") or []), human.get("exit_code"), human.get("build_log"))
         except HumanStepIncomplete as error:
             raise driver.DriverError(error.code, str(error)) from error
+    if human and (human.get("mutation_step_done") or human.get("pit_report")):
+        # S11 A2: a mutation command a person ran; done only when its output exists, then the stage repeats.
+        from tools.mutation import HumanStepIncomplete as MutationStepIncomplete, human_continue as mutation_continue
+
+        try:
+            mutation_continue(_work(run_root) / "mutation", pit_report=human.get("pit_report"))
+        except MutationStepIncomplete as error:
+            raise driver.DriverError(error.code, str(error)) from error
     for _ in range(64):
         state = _state(run_root)
         step = state["step"]
@@ -1065,6 +1073,24 @@ def _human_exec(run_root: Path, pending: Any) -> dict[str, Any]:
             "instructions": "Выполните команду сами, в своём окружении; пакет её не запускает. Повторы упавших методов в этом режиме не выполняются."}
 
 
+def _human_mutation_exec(run_root: Path, pending: Any) -> dict[str, Any]:
+    """S11 A2: the mutation command a person runs next, in the form of the local pilot's human_exec (run_pipeline.cmd_exec)."""
+    import shlex
+
+    from tools.run_pipeline import _powershell_line
+
+    command = pending.command
+    argv = list(command["argv"])
+    follow = f"--pit-report {command['expected_output']}" if command["step"] == "pit" else "--mutation-step-done"
+    _log(run_root.parents[1], run_root, {"event": "human_exec", "step": command["step"], "expected_output": command["expected_output"]})
+    return {"action": "human_exec", "kind": "mutation", "step": command["step"], "step_index": command["step_index"], "steps_total": command["steps_total"],
+            "run_id": run_root.name, "attempt_id": None, "report_path": command["expected_output"],
+            "commands": [{"kind": command["step"], "argv": argv, "cwd": command["cwd"], "expected_output": command["expected_output"],
+                          "bash": shlex.join(argv), "powershell": f"Set-Location -LiteralPath '{command['cwd']}'; " + _powershell_line(argv)}],
+            "continue": f"next --run {run_root.name} {follow}",
+            "instructions": "Выполните команду сами, в своём окружении; пакет её не запускает."}
+
+
 def _suite_run(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
     from tools.suite_run import not_run_reason, run_suite
 
@@ -1222,12 +1248,13 @@ def _repair_run(project: Path, run_root: Path, state: dict[str, Any], _max: int)
 
 # ----------------------------------------------------------------------------------- 10. mutations (opt-in), 11. manifest, 12. summary
 
-def _mutation(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
+def _mutation(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
     config = driver._config(run_root)
     if not config.get("mutation"):
         _goto(run_root, state, "MANIFEST")
         return None
-    from tools.mutation import StageInputs, measure, settings_of
+    from tools import mutation
+    from tools.mutation import HumanMutationPending, StageInputs, human_runner, measure, settings_of
     from tools.pipeline_driver_suite import _skillsrc
 
     settings = settings_of(_skillsrc(project))
@@ -1251,8 +1278,14 @@ def _mutation(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
     run = json.loads((_work(run_root) / ("repair-run.json" if (_work(run_root) / "repair-run.json").is_file() else "suite-run.json")).read_text(encoding="utf-8"))
     language = manifest["files"][0]["language"] if manifest["files"] else None
     report = {"verdict": verdict, "evidence_authoritative": True, "execution_evidence": evidence, "target": {"language": language}, "execution": run.get("execution") or {}}
-    facts = measure(StageInputs(project=project, workdir=_work(run_root) / "mutation", report=report,
-                                automation=automation, document=document, settings=settings))
+    workdir = _work(run_root) / "mutation"
+    human = config.get("execution_mode") == "human"
+    try:
+        # S11 A2: in human mode a person runs the three commands (resolve-project, resolve-tool, pit) like in local-pilot-v1.
+        facts = measure(StageInputs(project=project, workdir=workdir, report=report, automation=automation, document=document,
+                                    settings=settings, run=human_runner(workdir) if human else mutation._RUNNER, human=human))
+    except HumanMutationPending as pending:
+        return _human_mutation_exec(run_root, pending)
     per_case = {row["case_id"]: row for row in facts.get("cases") or []}
     if facts["status"] == "MEASURED":
         _write(history / f"{run_root.name}.json", {"run_id": run_root.name, "totals": facts.get("totals"), "cases": facts.get("cases"),
@@ -1263,7 +1296,8 @@ def _mutation(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         if before and after and before["covered"] and after["covered"] and after["killed"] * before["covered"] < before["killed"] * after["covered"]:
             drops.append({"case_id": case["case_id"], "before": f"{before['killed']}/{before['covered']}", "after": f"{after['killed']}/{after['covered']}"})
     _block_weaker_repairs(project, run_root, state, drops)
-    _goto(run_root, state, "MANIFEST", strength={"status": facts["status"], "reason": facts.get("reason_code"), "message": facts.get("message"), "cases": per_case, "totals": facts.get("totals")},
+    _goto(run_root, state, "MANIFEST", strength={"status": facts["status"], "reason": facts.get("reason_code"), "message": facts.get("message"), "cases": per_case, "totals": facts.get("totals"),
+                                                 **({"executor": "human"} if human else {})},
           strength_drops=drops)
     return None
 

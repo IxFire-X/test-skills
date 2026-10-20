@@ -199,9 +199,35 @@ def human_continue(workdir: Path, reports: Sequence[str], exit_code: int | None,
     _save_human_state(workdir, state)
 
 
+def _module_root(project: Path, module: Mapping[str, Any]) -> Path:
+    """S11 A5: the module root as run_tests resolves it — inside the project, no symlink or junction on the way."""
+    from tools.skillsrc_manifest import SkillsrcError, resolve_module_root
+
+    try:
+        return resolve_module_root(Path(project), {**module, "root": str(module.get("root") or ".")})
+    except SkillsrcError as error:
+        raise adapters.AdapterRequestError(f"unsafe module root {module.get('root')!r}: {error}") from error
+
+
+def _report_dir(project: Path, module_root: Path, relative: str) -> Path:
+    """S11 A5: the report location the run removes first; never reached through a link, never outside the project."""
+    from tools.skillsrc_manifest import _is_reparse
+
+    probe = module_root
+    for part in Path(relative).parts:
+        probe = probe / part
+        if _is_reparse(probe):
+            raise adapters.AdapterRequestError(f"the report directory is reached through a link: {probe}")
+    try:
+        probe.resolve().relative_to(Path(project).resolve())
+    except ValueError as error:
+        raise adapters.AdapterRequestError(f"the report directory is outside the project: {probe}") from error
+    return probe
+
+
 def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str], *, explicit: bool, timeout: int,
              human: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    module_root = (Path(project) / str(module.get("root") or ".")).resolve()
+    module_root = _module_root(project, module)
     request_module = {**module, "module_root": str(module_root)}
     adapter_id = request_module["test"]["adapter_id"]
     layout = adapters.launch_layout(request_module)
@@ -217,7 +243,7 @@ def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str],
         elif adapter_id == adapters.PYTEST:
             argv.append(EXPLICIT_RUN["pytest"])
             explicit_applied = True
-    report_dir = module_root / reports[0]
+    report_dir = _report_dir(project, module_root, reports[0])
     if human is not None:
         completed = _human_run(Path(human["workdir"]), argv, str(layout.build_root), report_dir, str(human["step"]))
     else:

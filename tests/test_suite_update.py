@@ -486,6 +486,67 @@ def test_a_weakened_check_stays_green_and_the_strength_drop_reaches_the_pr(tmp_p
 
 
 @needs_java
+def test_in_human_mode_the_suite_mutations_are_run_by_the_person(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """S11 A2: suite-update --mutation in human mode starts no Maven or PIT process; the person runs the suite and the
+    three mutation commands, and the strength drop of a weakened check still reaches the PR."""
+    import subprocess
+
+    from tests.test_mutation_java import _triage_answer
+    from tools import mutation, suite_run
+
+    replay = _local(tmp_path, monkeypatch)
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else         _triage_answer(task) if task["stage"].startswith("mutation-triage:") else None
+    skillsrc = replay.project / ".skillsrc"
+    text = skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.2.0", 1)
+    skillsrc.write_text(text + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+    replay.drive(replay.start_with("--suite", "--mutation")[1])
+    source = (replay.project / GENERATED).read_text(encoding="utf-8")
+    weakened = source.replace('.as("ASSERT-B1-001-01-1-3").isEqualTo(student(1, "Ramseh", "Mishra"))', '.as("ASSERT-B1-001-01-1-3").isNotNull()')
+    weakened = weakened.replace('.as("ASSERT-B1-001-01-1-2").isEqualTo(APPLICATION_JSON)', '.as("ASSERT-B1-001-01-1-2").isNotEqualTo("text/xml")')
+    weakened = weakened.replace('.as("ASSERT-B1-001-01-1-4")\n                .isEqualTo("{\\"id\\":1,\\"firstName\\":\\"Ramseh\\",\\"lastName\\":\\"Mishra\\"}")', '.as("ASSERT-B1-001-01-1-4").isNotNull()')
+    assert weakened != source
+    (replay.project / GENERATED).write_text(weakened, encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("the package started a build, test or PIT process in human mode")
+
+    monkeypatch.setattr(suite_run, "RUNNER", forbidden)
+    monkeypatch.setattr(mutation, "_RUNNER", forbidden)
+    config = replay.config
+    code, task = replay.call("next", "--project", str(replay.project), "--profile", "suite-update-v1", "--model-id", config["model_id"],
+                             "--reviewer-isolation", "fresh", "--host-cli", config["host_cli"], "--host-cli-version", config["host_cli_version"],
+                             "--execution-mode", "human", "--mutation")
+    stops = []
+    for _ in range(60):
+        if task.get("action") == "done":
+            break
+        if task.get("action") == "human_exec":
+            assert len(task["commands"]) == 1 and code == 3, task
+            stops.append(f"{task['kind']}:{task['step']}")
+            command = task["commands"][0]
+            completed = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, check=False)
+            if task["kind"] == "mutation":
+                assert completed.returncode == 0, (completed.stdout[-2000:], completed.stderr[-2000:])
+                follow = ("--pit-report", command["expected_output"]) if task["step"] == "pit" else ("--mutation-step-done",)
+            else:
+                expected = Path(command["expected_output"])
+                reports = [str(expected)] if expected.is_file() else [str(path) for path in expected.rglob("*.xml")]
+                assert reports, (completed.stdout[-2000:], completed.stderr[-2000:])
+                follow = (*[item for path in reports for item in ("--junit", path)], "--exit-code", str(completed.returncode))
+            code, task = replay.call("next", "--project", str(replay.project), "--run", task["run_id"], *follow)
+            continue
+        for item in task["tasks"] if task.get("action") == "batch" else [task]:
+            Path(item["output_path"]).write_text(json.dumps(replay.override(item) or _answer(item), ensure_ascii=False), encoding="utf-8")
+            code, task = replay.submit(item)
+            assert task.get("status") != "rejected", task.get("errors")
+    assert stops == ["suite:suite-run", "mutation:resolve-project", "mutation:resolve-tool", "mutation:pit"], stops
+    result = task["result"]
+    assert result["executor"] == "human", result
+    description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
+    assert "## Сила тестов упала" in description and "TC-B1-001" in description.split("## Сила тестов упала", 1)[1]
+
+
+@needs_java
 def test_a_repair_that_lowers_the_kill_ratio_is_not_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Review 2.1 item 10 (A5.4): with --mutation a repair whose case kills fewer mutants than before is blocked."""
     from tests.test_mutation_java import _triage_answer

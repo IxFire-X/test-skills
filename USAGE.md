@@ -376,7 +376,7 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
 `.skillsrc` `context: {confirm: false}` или `--confirm-context no` (флаг сильнее
 `.skillsrc`). В `suite-update-v1` — то же перед первой задачей модели со списком её входных
 файлов (подтверждение — в состоянии run и `driver-log.jsonl`). Ручной `run_pipeline scan`
-записывает требование только с `--confirm-context yes`.
+решает так же (флаг, иначе `.skillsrc`, иначе включено); снимает `--confirm-context no`.
 
 Источник истины остаётся в `.pilot-runs/<run_id>/` (журнал и квитанции). Не запускайте
 параллельно две команды драйвера для одного run и не удаляйте `.lock` вручную.
@@ -582,8 +582,9 @@ verification    = NOT_APPLICABLE
 то же перед прогоном набора, если run записал обновлённые или новые методы
 (`approve-generated-tests-apply`), и перед повторным прогоном после починки
 (`approve-generated-tests-repair`); одобрение хранится в состоянии run и в
-`driver-log.jsonl`. Ручной `run_pipeline scan` записывает требование только с
-`--execution-review human`: ручной `exec` и так запускает человек.
+`driver-log.jsonl`. Ручной `run_pipeline scan` решает так же (флаг, иначе `.skillsrc`,
+иначе `human`): ручной `exec` без одобрения не начнётся; снимает `--execution-review none`.
+`execution.mode` из `.skillsrc` ручной `scan` тоже учитывает.
 
 **Исполнение человеком (`execution.mode: human`).** По умолчанию (`auto`) сборку и тесты
 запускает пакет. С `.skillsrc` `execution: {mode: human}` или флагом
