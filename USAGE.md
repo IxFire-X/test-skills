@@ -578,7 +578,10 @@ verification    = NOT_APPLICABLE
 запускается (код выхода 3). Требование фиксируется при создании run в квитанции
 авторизации (`execution_review_required`). Выключение — явно: `.skillsrc`
 `execution: {review: none}` или флаг `next/run --execution-review none` (флаг сильнее
-`.skillsrc`), например для повторных прогонов на известном проекте. В `suite-update-v1`
+`.skillsrc`), например для повторных прогонов на известном проекте. Если предохранитель
+выключил сам `.skillsrc` (не флаг запуска), результат (`result`, `suite-update-result.json`)
+несёт `gates_disabled_by: skillsrc` и список `gates_disabled` (`context.confirm`,
+`execution.review`), а `driver-log.jsonl` — событие `gates_disabled`. В `suite-update-v1`
 то же перед прогоном набора, если run записал обновлённые или новые методы
 (`approve-generated-tests-apply`), и перед повторным прогоном после починки
 (`approve-generated-tests-repair`); одобрение хранится в состоянии run и в

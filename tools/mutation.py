@@ -226,14 +226,26 @@ def check_resolver_plugin(pins: Mapping[str, Any], repository: Path) -> dict[str
     return {"file": row["file"], "sha256": digest, "pinned": True}
 
 
+def launcher_pinned(pins: Mapping[str, Any], launcher_version: str) -> bool:
+    """S11 C11: whether the launcher version has a known SHA-256 (``launcher_sha256``); an unknown one is ``launcher_unpinned``."""
+    return launcher_version in (pins["java"].get("launcher_sha256") or {})
+
+
 def check_launcher(pins: Mapping[str, Any], launcher_version: str, repository: Path) -> str:
-    """S2c: the project's JUnit Platform launcher is in the local repository before the resolver runs; its SHA-256."""
+    """S2c: the project's JUnit Platform launcher is in the local repository before the resolver runs; its SHA-256.
+
+    S11 C11: a version with a known SHA-256 must be that very jar; another version runs and is marked unpinned.
+    """
     path = _repository_jar(repository, f"{pins['java']['launcher']}:{launcher_version}")
     if not path.is_file():
         raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_MISSING",
                            f"{path.name} (JUnit Platform проекта) нет в локальном репозитории {repository}: положите его туда заранее "
                            f"(mvn dependency:get -Dartifact={pins['java']['launcher']}:{launcher_version}) и запустите этап снова")
-    return _sha256_file(path)
+    digest = _sha256_file(path)
+    known = (pins["java"].get("launcher_sha256") or {}).get(launcher_version)
+    if known is not None and digest != known:
+        raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_DIGEST_MISMATCH", f"{path.name}: SHA-256 {digest} differs from the pinned {known}")
+    return digest
 
 
 def resolver_pom(pins: Mapping[str, Any], launcher_version: str) -> str:
@@ -283,7 +295,11 @@ def verify_tool_jars(entries: Sequence[str], pins: Mapping[str, Any], launcher_v
             if launcher_sha256 and name == f"junit-platform-launcher-{launcher_version}.jar" and digest != launcher_sha256:
                 raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_DIGEST_MISMATCH",
                                    f"{name}: SHA-256 {digest} differs from the local repository's {launcher_sha256}")
-            rows.append({"file": name, "sha256": digest, "pinned": False})
+            known = (java.get("launcher_sha256") or {}).get(launcher_version or "")
+            launcher = name == f"junit-platform-launcher-{launcher_version}.jar"
+            if launcher and known is not None and digest != known:
+                raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_DIGEST_MISMATCH", f"{name}: SHA-256 {digest} differs from the pinned {known}")
+            rows.append({"file": name, "sha256": digest, "pinned": launcher and known is not None})
         else:
             raise MutationStop("NOT_RUNNABLE", "MUTATION_TOOL_UNPINNED", f"the resolved closure has an unpinned jar: {name}")
     missing = sorted(set(pinned) - seen)
@@ -717,6 +733,8 @@ def measure(inputs: StageInputs) -> dict[str, Any]:
         lap("tool_resolution", step)
         facts["tool"]["jars"] = [plugin, *jars]
         facts["tool"]["launcher_version"] = launcher
+        if not launcher_pinned(pins, launcher):
+            facts["tool"]["launcher_unpinned"] = True  # S11 C11: no known SHA-256 for this version; its digest is in jars
         classes = target_classes(inputs.settings, inputs.document, build.module_root, tests)
         facts["target_classes"] = classes
         classpath_file = inputs.workdir / "pit-classpath.txt"

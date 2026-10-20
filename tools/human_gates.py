@@ -79,6 +79,23 @@ def confirm_context(project: Path, flag: str | None = None) -> bool:
     return value if isinstance(value, bool) else DEFAULT_CONFIRM_CONTEXT
 
 
+def disabled_by_skillsrc(project: Path, *, review_flag: Any = None, confirm_flag: Any = None, executes: bool = True) -> list[str]:
+    """S11 B6: the gates ``.skillsrc`` itself turned off (no flag decided them); named in the result and the driver log.
+
+    A flag is the person's explicit decision for this run and is not reported; ``execution.review`` is a gate only
+    where the package runs the generated tests (local-pilot-v1, suite-update-v1).
+    """
+    data = _skillsrc(project)
+    gates = []
+    context = data.get("context")
+    if confirm_flag is None and isinstance(context, Mapping) and context.get("confirm") is False:
+        gates.append("context.confirm")
+    execution = data.get("execution")
+    if executes and review_flag is None and isinstance(execution, Mapping) and execution.get("review") == "none":
+        gates.append("execution.review")
+    return sorted(gates)
+
+
 def context_rows(receipts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Every selected file once (path, content digest, size): what the model tasks may carry."""
     rows: dict[str, dict[str, Any]] = {}

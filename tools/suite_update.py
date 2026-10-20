@@ -94,6 +94,11 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
               "review_input_bytes": int(options.get("review_input_bytes") or driver._DEFAULT_REVIEW_INPUT_BYTES),
               "execution_review": driver._execution_review(project, options), "context_confirm": driver._confirm_context(project, options),
               "execution_mode": driver._execution_mode(project, options, PROFILE), **runner}
+    from tools.human_gates import disabled_by_skillsrc
+
+    gates_disabled = disabled_by_skillsrc(project, review_flag=options.get("execution_review"), confirm_flag=options.get("confirm_context"))
+    if gates_disabled:
+        config["gates_disabled"] = gates_disabled
     if config["execution_mode"] == "human":
         # S9b: a person runs every suite command; repeats are not run, so no method can be labelled FLAKY.
         config["repeats"] = 0
@@ -101,6 +106,7 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
     _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {}, "tries": {}})
     _snapshot_before(project, run_root, suite_dir)
     _log(project, run_root, {"event": "suite_update_started", "run_id": run_id})
+    driver._warn_gates_disabled(run_root, gates_disabled)
     return advance(project, run_root, max_tasks=max_tasks)
 
 
@@ -1490,7 +1496,8 @@ def _summary(project: Path, run_root: Path, state: dict[str, Any], _max: int) ->
               "reviews": {key: {name: value[name] for name in ("eligible", "parts", "input_bytes")} for key, value in (state["facts"].get("reviews") or {}).items()},
               "paths": {"pr_description": str(work / "pr-description.md"), "patch": str(work / "suite.patch"), "result": str(work / "suite-update-result.json"),
                         "suite_dir": str(Path(project) / facts["suite_dir"])},
-              "accepted": None, **({"executor": "human", "repeats": 0} if facts.get("executor") == "human" else {})}
+              "accepted": None, **({"executor": "human", "repeats": 0} if facts.get("executor") == "human" else {}),
+              **driver.gates_disabled_fields(driver._config(run_root))}
     from tools.schema_validation import schema_diagnostics
 
     problems = schema_diagnostics(result, Path(driver.ROOT) / "schemas" / "suite-update-result.schema.json", Path(driver.ROOT))

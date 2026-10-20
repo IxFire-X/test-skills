@@ -497,15 +497,10 @@ def _git_listing(project_root: Path, module_root: Path) -> tuple[set[str], set[s
     """
     if not (project_root / ".git").exists():
         return None
-    environment = {key: value for key, value in os.environ.items() if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_NAMESPACE"}}
-    environment["GIT_OPTIONAL_LOCKS"] = "0"
-    environment["GIT_TERMINAL_PROMPT"] = "0"
+    from tools.git_command import run_git
+
     try:
-        completed = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "-co", "--exclude-standard"],
-            cwd=str(module_root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=_GIT_TIMEOUT_SECONDS, env=environment, check=False,
-        )
+        completed = run_git(["-c", "core.quotepath=off", "ls-files", "-z", "-co", "--exclude-standard"], cwd=module_root, timeout=_GIT_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     if completed.returncode != 0 or not isinstance(completed.stdout, bytes):

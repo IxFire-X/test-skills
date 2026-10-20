@@ -226,3 +226,128 @@ def test_the_suite_refuses_a_linked_module_or_report_directory(tmp_path: Path, m
     with pytest.raises(adapters.AdapterRequestError):
         suite_run.run_once(project, module, ["pkg.ATest#a"], explicit=False, timeout=60)
     assert keep.is_file()  # the directory outside the project is untouched
+
+
+# --------------------------------------------------------------------------------------
+# B6: a gate .skillsrc turned off is said in the result and the driver log
+# --------------------------------------------------------------------------------------
+
+def _gates_off_in_skillsrc(project: Path) -> None:
+    skillsrc = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
+    skillsrc["execution"] = {"review": "none"}
+    skillsrc["context"] = {"confirm": False}
+    (project / ".skillsrc").write_text(json.dumps(skillsrc, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _driver_log(project: Path, run_id: str) -> list[dict]:
+    path = driver._log_path(project, run_id)
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+@pytest.mark.human_gates
+def test_gates_turned_off_by_skillsrc_are_named_in_the_result_and_the_log(tmp_path: Path) -> None:
+    project = _project(tmp_path, local=True)
+    _gates_off_in_skillsrc(project)
+    done = _drive(project, _start(project, "local-pilot-v1"), SavedModel("local-pilot-v1"))
+    result = done["result"]
+    assert result["gates_disabled_by"] == "skillsrc" and result["gates_disabled"] == ["context.confirm", "execution.review"], result
+    [event] = [row for row in _driver_log(project, done["run_id"]) if row.get("event") == "gates_disabled"]
+    assert event["gates_disabled_by"] == "skillsrc" and event["gates"] == ["context.confirm", "execution.review"]
+
+
+@pytest.mark.human_gates
+def test_gates_turned_off_by_a_flag_are_no_skillsrc_warning(tmp_path: Path) -> None:
+    project = _project(tmp_path, local=True)
+    _gates_off_in_skillsrc(project)
+    done = _drive(project, _start(project, "local-pilot-v1", execution_review="none", confirm_context="no"), SavedModel("local-pilot-v1"))
+    assert "gates_disabled_by" not in done["result"], done["result"]
+    cases = _project(tmp_path / "cases", local=False)
+    _gates_off_in_skillsrc(cases)
+    result = _drive(cases, _start(cases, "cases-only-v1"), SavedModel("cases-only-v1"))["result"]
+    assert result["gates_disabled"] == ["context.confirm"]  # cases-only runs nothing: execution.review is no gate there
+
+
+# --------------------------------------------------------------------------------------
+# C9: every git the package starts runs without the repository's fsmonitor and the caller's GIT_*
+# --------------------------------------------------------------------------------------
+
+def _git_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[list, dict]]:
+    import subprocess
+    from types import SimpleNamespace
+
+    from tools import pilot_state, project_inventory, suite_impact
+
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.fsmonitor=calc.exe'")
+    monkeypatch.setenv("GIT_EXTERNAL_DIFF", "calc.exe")
+    calls: list[tuple[list, dict]] = []
+
+    def fake(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"" if kwargs.get("text") is not True else "", stderr=b"" if kwargs.get("text") is not True else "")
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    project_inventory._git_listing(project, project)
+    pilot_state._project_state_snapshot(project)
+    suite_impact.changed_files(project, "main..HEAD")
+    return calls
+
+
+def test_the_package_runs_git_without_fsmonitor_and_inherited_git_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _git_calls(tmp_path, monkeypatch)
+    assert len(calls) == 3
+    for argv, kwargs in calls:
+        assert argv[:3] == ["git", "-c", "core.fsmonitor=false"], argv
+        env = kwargs["env"]
+        assert {name for name in env if name.startswith("GIT_")} == {"GIT_TERMINAL_PROMPT", "GIT_OPTIONAL_LOCKS"}, argv
+        assert env["GIT_TERMINAL_PROMPT"] == "0" and kwargs["timeout"] and kwargs["stdin"] is not None, argv
+    diff = next(argv for argv, _kwargs in calls if "diff" in argv)
+    assert "--no-ext-diff" in diff and "--no-textconv" in diff
+
+
+# --------------------------------------------------------------------------------------
+# C11: the JUnit Platform launcher of known versions is pinned by SHA-256
+# --------------------------------------------------------------------------------------
+
+def _repository_with_launcher(tmp_path: Path, version: str, data: bytes) -> Path:
+    repository = tmp_path / "m2"
+    jar = repository / "org" / "junit" / "platform" / "junit-platform-launcher" / version / f"junit-platform-launcher-{version}.jar"
+    jar.parent.mkdir(parents=True)
+    jar.write_bytes(data)
+    return repository
+
+
+LOCAL_LAUNCHER = Path.home() / ".m2" / "repository" / "org" / "junit" / "platform" / "junit-platform-launcher" / "1.12.2" / "junit-platform-launcher-1.12.2.jar"
+
+
+@pytest.mark.skipif(not LOCAL_LAUNCHER.is_file(), reason="needs junit-platform-launcher 1.12.2 in the local Maven repository")
+def test_a_known_launcher_version_is_pinned(tmp_path: Path) -> None:
+    from tools import mutation
+
+    pins = mutation.load_pins()
+    repository = _repository_with_launcher(tmp_path, "1.12.2", LOCAL_LAUNCHER.read_bytes())
+    digest = mutation.check_launcher(pins, "1.12.2", repository)
+    assert mutation.launcher_pinned(pins, "1.12.2")
+    entries = [str(repository / "org" / "junit" / "platform" / "junit-platform-launcher" / "1.12.2" / "junit-platform-launcher-1.12.2.jar")]
+    rows = mutation.verify_tool_jars(entries, {**pins, "java": {**pins["java"], "jars": []}}, "1.12.2", digest)
+    assert rows == [{"file": "junit-platform-launcher-1.12.2.jar", "sha256": digest, "pinned": True}]
+
+
+def test_a_known_launcher_version_with_other_bytes_stops_the_stage(tmp_path: Path) -> None:
+    from tools import mutation
+
+    repository = _repository_with_launcher(tmp_path, "1.12.2", b"not the published jar")
+    with pytest.raises(mutation.MutationStop) as raised:
+        mutation.check_launcher(mutation.load_pins(), "1.12.2", repository)
+    assert raised.value.code == "MUTATION_TOOL_DIGEST_MISMATCH"
+
+
+def test_an_unknown_launcher_version_runs_and_is_marked_unpinned(tmp_path: Path) -> None:
+    from tools import mutation
+
+    pins = mutation.load_pins()
+    repository = _repository_with_launcher(tmp_path, "1.99.0", b"some launcher")
+    assert mutation.check_launcher(pins, "1.99.0", repository)
+    assert not mutation.launcher_pinned(pins, "1.99.0")

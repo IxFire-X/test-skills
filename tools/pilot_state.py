@@ -6060,14 +6060,10 @@ def _project_state_snapshot(
 
     # Git's own ownership check (safe.directory) is deliberately left in force: a repository
     # owned by someone else is reported as unavailable instead of being trusted.
+    from tools.git_command import run_git
+
     try:
-        completed = subprocess.run(
-            ["git", "-C", str(project), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=_GIT_STATUS_TIMEOUT_SECONDS,
-        )
+        completed = run_git(["-C", str(project), "status", "--porcelain=v1", "-z", "--untracked-files=all"], timeout=_GIT_STATUS_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError("project Git state is unavailable: git could not be run") from error
     if completed.returncode != 0:

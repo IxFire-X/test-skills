@@ -495,10 +495,12 @@ def test_in_human_mode_the_suite_mutations_are_run_by_the_person(tmp_path: Path,
     from tools import mutation, suite_run
 
     replay = _local(tmp_path, monkeypatch)
-    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else         _triage_answer(task) if task["stage"].startswith("mutation-triage:") else None
+    replay.override = lambda task: clean_compact_answer(part_text(task)) if task.get("review_mode") == "compact-v1" else \
+        _triage_answer(task) if task["stage"].startswith("mutation-triage:") else None
     skillsrc = replay.project / ".skillsrc"
     text = skillsrc.read_text(encoding="utf-8").replace("schema_version: 5.0.0", "schema_version: 5.2.0", 1)
-    skillsrc.write_text(text + "mutation:\n  enabled: true\n  threads: 2\n", encoding="utf-8")
+    # S11 B6: the suite approval turned off by .skillsrc itself is named in the result.
+    skillsrc.write_text(text + "mutation:\n  enabled: true\n  threads: 2\nexecution:\n  review: none\n", encoding="utf-8")
     replay.drive(replay.start_with("--suite", "--mutation")[1])
     source = (replay.project / GENERATED).read_text(encoding="utf-8")
     weakened = source.replace('.as("ASSERT-B1-001-01-1-3").isEqualTo(student(1, "Ramseh", "Mishra"))', '.as("ASSERT-B1-001-01-1-3").isNotNull()')
@@ -541,7 +543,7 @@ def test_in_human_mode_the_suite_mutations_are_run_by_the_person(tmp_path: Path,
             assert task.get("status") != "rejected", task.get("errors")
     assert stops == ["suite:suite-run", "mutation:resolve-project", "mutation:resolve-tool", "mutation:pit"], stops
     result = task["result"]
-    assert result["executor"] == "human", result
+    assert result["executor"] == "human" and result["gates_disabled_by"] == "skillsrc" and result["gates_disabled"] == ["execution.review"], result
     description = Path(result["paths"]["pr_description"]).read_text(encoding="utf-8")
     assert "## Сила тестов упала" in description and "TC-B1-001" in description.split("## Сила тестов упала", 1)[1]
 
