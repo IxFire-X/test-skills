@@ -468,9 +468,9 @@ def test_a_driver_call_checks_the_review_plan_and_snapshot_once(tmp_path: Path, 
         counts["plan"] += 1
         return validate_plan(plan)
 
-    def counted_receipt(project, root, state, attempt, kind, receipt, common):
+    def counted_receipt(project, root, state, attempt, kind, receipt, common, **options):
         counts[kind.rsplit("-", 1)[0] if kind.startswith("review-part-") else kind] += 1
-        return validate_receipt(project, root, state, attempt, kind, receipt, common)
+        return validate_receipt(project, root, state, attempt, kind, receipt, common, **options)
 
     monkeypatch.setattr(review_compact, "validate_compact_plan", counted_plan)
     monkeypatch.setattr(review_compact, "aggregate", counted_aggregate)
