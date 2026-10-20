@@ -15,6 +15,7 @@ the pipeline reads (the specification, .skillsrc, config, the source tree).
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -214,7 +215,7 @@ def check_launcher(project: Path, m2: Path, extra: list[str]) -> None:
     """The project's JUnit Platform launcher must lie in ~/.m2 before the PIT resolver runs (S2c).  The version: declared
     in the build files, else from the Spring Boot BOM in ~/.m2, else the junit-platform-engine versions in ~/.m2."""
     texts = [path.read_text(encoding="utf-8", errors="replace") for pattern in ("pom.xml", "*.gradle", "*.gradle.kts", "gradle.properties", "libs.versions.toml")
-             for path in project.rglob(pattern) if not _excluded(path, project, extra)]
+             for path in project_files(project, pattern) if not _excluded(path, project, extra)]
     versions = _platform_versions(texts)
     source = "из сборки проекта"
     if not versions:
@@ -263,6 +264,21 @@ def _exclude_line(name: str, path: Path, text: str, dirs: list[str]) -> str:
     return "<excludes>" + "".join(f"<exclude>{item}/**</exclude>" for item in dirs) + "</excludes> в <configuration> плагина"
 
 
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+
+
+def project_files(project: Path, pattern: str = "*") -> list[Path]:
+    """The project's files matching ``pattern`` (a file-name glob); symlinks and junctions are neither entered nor listed,
+    so the walk never leaves the project tree."""
+    found = []
+    for directory, dirnames, filenames in os.walk(project):
+        base = Path(directory)
+        dirnames[:] = [name for name in dirnames if not _is_link(base / name)]
+        found += [base / name for name in filenames if fnmatch.fnmatch(name, pattern) and not _is_link(base / name)]
+    return sorted(found)
+
+
 def _excluded(path: Path, project: Path, extra: list[str]) -> bool:
     relative = path.relative_to(project)
     return bool(set(relative.parts) & SKIP_DIRS) or any(relative.as_posix() == item or relative.as_posix().startswith(item + "/") for item in extra)
@@ -271,7 +287,7 @@ def _excluded(path: Path, project: Path, extra: list[str]) -> bool:
 def check_linters(project: Path, build: str | None, extra: list[str]) -> None:
     """Only the build files of the build the pipeline runs (a Maven project's build.gradle never runs)."""
     patterns = ("pom.xml",) if build == "maven" else ("*.gradle", "*.gradle.kts") if build == "gradle" else ("pom.xml", "*.gradle", "*.gradle.kts")
-    builds = [path for pattern in patterns for path in project.rglob(pattern) if not _excluded(path, project, extra)]
+    builds = [path for pattern in patterns for path in project_files(project, pattern) if not _excluded(path, project, extra)]
     dirs = [".pilot-runs", *extra]
     where = " и ".join(dirs)
     found = False
@@ -296,8 +312,8 @@ def check_linters(project: Path, build: str | None, extra: list[str]) -> None:
 
 def check_services(project: Path, extra: list[str]) -> None:
     composes = [path for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml") for path in [project / name] if path.is_file()]
-    poms = " ".join(path.read_text(encoding="utf-8", errors="replace") for path in project.rglob("pom.xml") if not _excluded(path, project, extra))
-    configs = [path for path in project.rglob("application*.*") if path.suffix in {".properties", ".yml", ".yaml"} and not _excluded(path, project, extra)]
+    poms = " ".join(path.read_text(encoding="utf-8", errors="replace") for path in project_files(project, "pom.xml") if not _excluded(path, project, extra))
+    configs = [path for path in project_files(project, "application*.*") if path.suffix in {".properties", ".yml", ".yaml"} and not _excluded(path, project, extra)]
     urls = sorted({match for path in configs for match in re.findall(r"jdbc:([a-z0-9]+):", path.read_text(encoding="utf-8", errors="replace"))})
     if composes:
         add(WARN, "docker-compose", ", ".join(path.name for path in composes), "тестам фичи не должен нужен внешний сервис; если нужен — поднять до прогона (docker на машине?)")
@@ -308,9 +324,29 @@ def check_services(project: Path, extra: list[str]) -> None:
         add(WARN if external else OK, "БД в конфигурации", ", ".join(urls), "внешняя БД — тесты пакета должны работать на тестовом профиле со встроенной БД" if external else "")
 
 
+def doc_inside(project: Path, doc: str) -> Path | None:
+    """The document of --docs when it lies inside the project (absolute, or relative to the project) with no symlink or
+    junction on its way; None otherwise — it is never read."""
+    root = Path(project).resolve()
+    raw = Path(doc).expanduser()
+    target = raw if raw.is_absolute() else root / raw
+    try:
+        relative = Path(os.path.abspath(target)).relative_to(root)
+        resolved = target.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(current)):
+            return None
+    return resolved
+
+
 def check_sensitive(project: Path, docs: list[str], extra: list[str]) -> None:
-    files = [project / item for item in docs] + [project / ".skillsrc"]
-    files += [path for path in project.rglob("*") if path.is_file() and path.suffix in TEXT_SUFFIXES and not _excluded(path, project, extra)
+    files = [path for path in (doc_inside(project, item) for item in docs) if path is not None] + [project / ".skillsrc"]
+    files += [path for path in project_files(project) if path.is_file() and path.suffix in TEXT_SUFFIXES and not _excluded(path, project, extra)
               and path.stat().st_size < 1_000_000]
     hits: dict[str, list[str]] = {"секреты": [], "email": [], "телефоны": [], "СНИЛС/ИНН": []}
     for path in dict.fromkeys(files):
@@ -356,7 +392,11 @@ def main() -> int:
     check_linters(project, build, extra)
     check_services(project, extra)
     for doc in args.docs:
-        add(OK if (project / doc).is_file() else STOP, "спецификация", doc, "" if (project / doc).is_file() else "путь --docs — внутри проекта")
+        inside = doc_inside(project, doc)
+        if inside is None:
+            add(STOP, "спецификация", doc, "--docs — только внутри проекта (без ссылок на пути); файл вне проекта не читается")
+        else:
+            add(OK if inside.is_file() else STOP, "спецификация", doc, "" if inside.is_file() else "файла --docs нет в проекте")
     if not (project / ".skillsrc").is_file():
         add(WARN, ".skillsrc", "нет", "первый next создаст по разметке; для внутреннего проекта лучше положить свой (review_runner, requirements.id_pattern)")
     check_sensitive(project, args.docs, extra)

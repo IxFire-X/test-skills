@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import difflib
+import fnmatch
 import hashlib
 import json
 import os
@@ -94,6 +95,41 @@ def run_git(args: list[str], cwd: Path, *, text: bool = False) -> subprocess.Com
                               **({"text": True, "encoding": "utf-8", "errors": "replace"} if text else {}))
     except (OSError, subprocess.TimeoutExpired) as error:
         return subprocess.CompletedProcess(argv, 1, "" if text else b"", str(error) if text else str(error).encode())
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(path))
+
+
+def project_files(project: Path, pattern: str = "*") -> list[Path]:
+    """The project's files matching ``pattern`` (a file-name glob); symlinks and junctions are neither entered nor listed,
+    so the walk never leaves the project tree."""
+    found = []
+    for directory, dirnames, filenames in os.walk(project):
+        base = Path(directory)
+        dirnames[:] = [name for name in dirnames if not _is_link(base / name)]
+        found += [base / name for name in filenames if fnmatch.fnmatch(name, pattern) and not _is_link(base / name)]
+    return sorted(found)
+
+
+def doc_inside(project: Path, doc: str) -> Path | None:
+    """The document of --docs when it lies inside the project (absolute, or relative to the project) with no symlink or
+    junction on its way; None otherwise — it is never read."""
+    root = Path(project).resolve()
+    raw = Path(doc).expanduser()
+    target = raw if raw.is_absolute() else root / raw
+    try:
+        relative = Path(os.path.abspath(target)).relative_to(root)
+        resolved = target.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink() or (hasattr(os.path, "isjunction") and os.path.isjunction(current)):
+            return None
+    return resolved
 
 
 def pack_python(pack: Path) -> str:
@@ -350,9 +386,11 @@ class Operator:
         if epochs:
             self.mark_first_call(datetime.datetime.fromtimestamp(min(epochs)))
 
-    def command(self, step: str, *extra: str) -> str:
-        """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run."""
-        argv, skip = [], {"--from-step", "--only", "--run", "--answer", "--junit", "--exit-code", "--gate-exit-code", "--pit-report", "--build-log"}
+    def command(self, step: str, *extra: str, drop: tuple[str, ...] = ()) -> str:
+        """The ready command to continue from ``step``: this run's own arguments without --from-step/--only/--run/--answer/--dry-run
+        (and without the options in ``drop``)."""
+        argv, skip = [], {"--from-step", "--only", "--run", "--answer", "--junit", "--exit-code", "--gate-exit-code", "--pit-report", "--build-log",
+                          *drop}
         items = iter(sys.argv[1:])
         for item in items:
             if item in skip:
@@ -1330,6 +1368,12 @@ class Operator:
     # -- loop
     def main(self) -> int:
         self.log(f"\n===== operate.py {datetime.datetime.now().isoformat(timespec='seconds')} {shlex.join(sys.argv[1:])}")
+        outside = [doc for doc in self.args.docs if doc_inside(self.project, doc) is None]
+        if outside:
+            self.say(f"СТОП на шаге {self.args.from_step}: --docs — только внутри проекта {self.project} (без ссылок на пути): {', '.join(outside)}")
+            self.log(f"stop_at {datetime.datetime.now().isoformat(timespec='milliseconds')}")
+            self.say("Что делать: " + self.command(self.args.from_step, "--docs", "<спека внутри проекта>", drop=("--docs",)))
+            return 1
         steps = STEPS[STEPS.index(self.args.from_step):]
         if self.args.from_step != "9":  # the living suite update runs only on request (--only 9 or --from-step 9)
             steps = tuple(step for step in steps if step != "9")
@@ -1586,7 +1630,7 @@ class Init(Operator):
         root = self.project / str(self.module.get("root") or ".")
         listed = run_git(["ls-files", "-co", "--exclude-standard", "-z"], root)
         names = [name for name in listed.stdout.decode("utf-8", "replace").split("\0") if name] if listed.returncode == 0 else \
-            [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+            [path.relative_to(root).as_posix() for path in project_files(root) if path.is_file()]
         rows = []
         for name in names:
             parts = name.split("/")
@@ -1843,6 +1887,18 @@ def init_main(argv: list[str]) -> int:
     options = build_init_parser().parse_args(argv)
     home = options.home or next((str(path) for path in (HERE, HERE.parent) if (path / "test-skills").is_dir()), "~/ts")
     project = Path(options.project).expanduser().resolve()
+    outside = [doc for doc in options.docs if doc_inside(project, doc) is None]
+    if outside:
+        kept, items = [], iter(argv)
+        for item in items:
+            if item == "--docs" or item.startswith("--docs="):
+                if item == "--docs":
+                    next(items, None)
+                continue
+            kept.append(item)
+        print(f"СТОП на шаге init: --docs — только внутри проекта {project} (без ссылок на пути): {', '.join(outside)}", flush=True)
+        print("Что делать: " + shlex.join([sys.executable, str(Path(sys.argv[0]).resolve()), "init", *kept, "--docs", "<спека внутри проекта>"]), flush=True)
+        return 1
     subject = options.subject or _subject(options.docs, project)
     main_argv = ["--home", home, "--project", str(project), *[item for doc in options.docs for item in ("--docs", doc)], "--subject", subject,
                  "--models", options.model, "--cli-command", options.cli_command, "--tokens-per-byte", str(options.tokens_per_byte),
