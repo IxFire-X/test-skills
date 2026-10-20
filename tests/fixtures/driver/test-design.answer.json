@@ -1,0 +1,25 @@
+{
+  "artifacts": {
+    "parameters": [],
+    "partitions": [],
+    "boundaries": [],
+    "rules": [
+      {
+        "id": "DR-001",
+        "kind": "decision",
+        "conditions": [{"text": "в каталоге есть товары"}],
+        "expected": "открыт список товаров",
+        "requirement_ids": ["${source:1}"]
+      },
+      {
+        "id": "DR-002",
+        "kind": "decision",
+        "conditions": [{"text": "пользователь выбрал товар в списке"}],
+        "expected": "показана карточка выбранного товара",
+        "requirement_ids": ["${source:2}"]
+      }
+    ],
+    "not_designed": []
+  },
+  "warnings": []
+}

@@ -149,16 +149,21 @@ EXPECTED_MUTATION_TOOLING = {
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
 OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("mutation-triage-output.schema.json", 6, "IMPLEMENTED", "1.0.0"),
-                        ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0")]
+                        ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0"),
+                        ("test-design.schema.json", 8, "IMPLEMENTED", "1.0.0")]
 # Role answers without a version field: their version is the role policy (``mutation-triage-v1``).
 VERSIONLESS_ANSWER_SCHEMAS = {"mutation-triage-output.schema.json"}
 OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED"),
                           ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED"), ("suite_update_result", 7, "IMPLEMENTED")]
-OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
+OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md", "test-design": "skills/test-design/SKILL.md"}
 OPTIONAL_STAGE_ROWS = [
     {"stage": "mutation-triage", "role": "strength-analyst", "role_policy": "mutation-triage-v1", "cardinality": "post_terminal_per_task",
      "profiles": ["local-pilot-v1"], "answer_schema": "mutation-triage-output.schema.json", "decisions": ["TEST_GAP", "SPEC_GAP", "EQUIVALENT", "OUT_OF_SCOPE"],
      "changes": "nothing_in_the_attempt"},
+    # D1: off with .skillsrc design.enabled false; on, it runs between the marker and the generator.
+    {"stage": "test-design", "role": "generator", "role_policy": "test-design-v1", "cardinality": "once_before_generation",
+     "profiles": ["cases-only-v1", "local-pilot-v1"], "answer_schema": "test-design.schema.json", "decisions": ["DESIGNED", "NOT_DESIGNED"],
+     "changes": "design_refs_required_in_cases"},
 ]
 EXPECTED_MODEL_RUNNER = {
     "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",

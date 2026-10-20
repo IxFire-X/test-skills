@@ -381,3 +381,26 @@ def test_a_degenerate_distribution_warns_with_the_counts() -> None:
 def test_priority_counts_cover_every_level() -> None:
     assert design_tools.priority_counts([{"priority": "HIGH"}, {"priority": "LOW"}, {"priority": "HIGH"}]) == {
         "CRITICAL": 0, "HIGH": 2, "MEDIUM": 0, "LOW": 1}
+
+
+# --- .skillsrc ----------------------------------------------------------------------------------------------------
+
+
+def test_design_is_on_unless_skillsrc_turns_it_off() -> None:
+    assert design_tools.design_enabled({}) is True
+    assert design_tools.design_enabled({"design": {"full_factorial_max": 8}}) is True
+    assert design_tools.design_enabled({"design": {"enabled": True}}) is True
+    assert design_tools.design_enabled({"design": {"enabled": False}}) is False
+
+
+def test_the_skillsrc_design_section_is_closed() -> None:
+    import json
+
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+
+    base = json.loads((ROOT / "tests" / "fixtures" / "projects" / "python-pytest" / ".skillsrc").read_text(encoding="utf-8"))
+    for section in ({"enabled": False}, {"enabled": True, "full_factorial_max": 16}):
+        assert parse_skillsrc_bytes(json.dumps({**base, "design": section}).encode("utf-8"))["design"] == section
+    for section in ({"enabled": "no"}, {"full_factorial_max": 0}, {"pairwise": True}):
+        with pytest.raises(Exception):
+            parse_skillsrc_bytes(json.dumps({**base, "design": section}).encode("utf-8"))

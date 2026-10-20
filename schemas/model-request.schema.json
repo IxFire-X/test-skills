@@ -20,10 +20,10 @@
     "schema_version": {"const": "2.0.0"},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
-    "stage_instance_id": {"type": "string", "pattern": "^(?:context-marker:(?:baseline|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12](?::part-[0-9]{3})?|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"},
-    "stage": {"enum": ["context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer"]},
+    "stage_instance_id": {"type": "string", "pattern": "^(?:context-marker:(?:baseline|batch-[0-9]{3})|test-design:baseline|tc-generator:BATCH-[a-z0-9-]+|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12](?::part-[0-9]{3})?|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"},
+    "stage": {"enum": ["context-marker", "test-design", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer"]},
     "role": {"enum": ["generator", "canonical-reviewer", "automation-generator", "automation-reviewer"]},
-    "role_policy": {"enum": ["context-marker-v1", "tc-generator-v1", "canonical-reviewer-v2", "tc-to-autotest-v1", "autotest-static-reviewer-v2"]},
+    "role_policy": {"enum": ["context-marker-v1", "test-design-v1", "tc-generator-v1", "canonical-reviewer-v2", "tc-to-autotest-v1", "autotest-static-reviewer-v2"]},
     "model_id": {
       "anyOf": [
         {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},

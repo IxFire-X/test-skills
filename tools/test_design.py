@@ -26,6 +26,12 @@ ID_FORMATS = {"parameter": "P-NNN", "partition": "EQ-NNN", "boundary": "BV-NNN",
 _PREFIX = {"parameters": "P-", "partitions": "EQ-", "boundaries": "BV-", "rules": "DR-"}
 
 
+def design_enabled(skillsrc: Mapping[str, Any]) -> bool:
+    """``.skillsrc`` ``design.enabled``; the stage runs unless it is explicitly false."""
+    section = skillsrc.get("design") if isinstance(skillsrc, Mapping) else None
+    return not (isinstance(section, Mapping) and section.get("enabled") is False)
+
+
 def canonical_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 

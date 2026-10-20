@@ -22,7 +22,7 @@ from tools import pipeline_driver_runner as runner
 from tools.pipeline_driver import DriverError
 
 TRIES = 3
-ROLE_OF_STAGE = {"context-marker": "context-marker", "tc-generator": "tc-generator", "tc-to-autotest": "tc-to-autotest",
+ROLE_OF_STAGE = {"context-marker": "context-marker", "test-design": "test-design", "tc-generator": "tc-generator", "tc-to-autotest": "tc-to-autotest",
                  "mutation-triage": "mutation-triage", "tc-reviewer": "tc-reviewer", "autotest-reviewer": "autotest-reviewer"}
 
 

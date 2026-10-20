@@ -28,3 +28,5 @@ modules:
     wrapper: mvnw
     build_profile: default
     adapter_parameters: {}
+design:
+  enabled: false

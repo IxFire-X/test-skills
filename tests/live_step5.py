@@ -131,6 +131,13 @@ class Replay:
         stage = task["stage"]
         if stage == "context-marker:baseline":
             return self.recorded["context-marker"]
+        if stage == "test-design:baseline":
+            # The recorded runs predate the design stage (D1): a project without .skillsrc gets it by default, and the
+            # answer declares every requirement not designed, so the recorded cases need no design references.
+            brief = json.loads(Path(task["inputs"][0]).read_text(encoding="utf-8"))
+            return {"artifacts": {"parameters": [], "partitions": [], "boundaries": [], "rules": [], "not_designed": [
+                {"requirement_id": row["source_requirement_id"], "reason": "запись прогона до стадии дизайна"} for row in brief["requirements"]]},
+                "warnings": []}
         if stage.startswith("tc-generator:"):
             return next(value for label, value in self.recorded.items() if label.startswith("tc-generator."))
         if stage.startswith(("tc-reviewer:", "autotest-reviewer:")):

@@ -316,6 +316,12 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         if profile != "local-pilot-v1":
             raise HostStop("EXECUTION_MODE_PROFILE", "--execution-mode human needs the local-pilot-v1 profile (cases-only runs nothing)")
         authorization["execution_mode_human"] = True
+    # D1: the test design stage (``.skillsrc`` design.enabled, on by default) is bound to the run like a gate.
+    from tools.human_gates import _skillsrc
+    from tools.test_design import design_enabled
+
+    if design_enabled(_skillsrc(project)):
+        authorization["design_required"] = True
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")

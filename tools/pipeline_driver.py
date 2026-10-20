@@ -787,6 +787,105 @@ def _marker_artifact(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
 
 
 # --------------------------------------------------------------------------------------
+# test design (D1): parameters, partitions, boundaries and rules of the source requirements
+# --------------------------------------------------------------------------------------
+
+_DESIGN_STAGE = "test-design:baseline"
+
+
+def _design_artifact(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
+    from tools.pilot_state import read_model_stage_artifact
+
+    response = _stage_events(_events(run_root, attempt_id), _DESIGN_STAGE).get("MODEL_RESPONSE_RECEIVED")
+    if response is None:
+        return None
+    return dict(read_model_stage_artifact(run_root, attempt_id, _DESIGN_STAGE, response["artifact_digest"]))
+
+
+def _design_input_digests(marker: Mapping[str, Any], brief: Mapping[str, Any]) -> list[str]:
+    from tools.test_design import digest
+
+    return [str(marker["content_digest"]), digest(brief)]
+
+
+def _design_schema() -> dict[str, Any]:
+    return _subschema("test-design.schema.json", ["artifacts", "warnings"])
+
+
+def _test_design_step(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], marker: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The design task, or None once ``test-design:baseline`` is published.
+
+    The input is the requirement text only (no marker sources, no project files).  A rework attempt has the same
+    requirements: it carries the design of the rejected attempt without a model call.
+    """
+    from tools.pilot_state import publish_model_request, publish_model_stage_artifact
+    from tools.test_design import design_brief
+
+    attempt_id = str(attempt["attempt_id"])
+    brief = design_brief(marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"])
+    requested = "MODEL_REQUESTED" in _stage_events(_events(run_root, attempt_id), _DESIGN_STAGE)
+    rework = _rework_of(config, attempt)
+    parent = _design_artifact(run_root, str(rework["parent_attempt_id"])) if rework is not None else None
+    if parent is not None:
+        if not requested:
+            publish_model_request(run_root, attempt_id, _DESIGN_STAGE, model_id=config.get("model_id"), invocation_id=f"design-carry-{uuid.uuid4().hex[:16]}",
+                                  input_digests=_design_input_digests(marker, brief))
+        publish_model_stage_artifact(run_root, attempt_id, _DESIGN_STAGE, parent["artifact"])
+        _log(_log_path(run_root.parents[1], run_root.name), {"event": "test_design_carried", "from_attempt_id": str(rework["parent_attempt_id"])})
+        return None
+    brief_path = _write_json(work_dir(run_root) / "inputs" / f"test-design-{attempt_id[:8]}-brief.json", brief)
+    if not requested:
+        _check_task_input(project, config, _DESIGN_STAGE, [brief_path])
+        publish_model_request(run_root, attempt_id, _DESIGN_STAGE, model_id=config.get("model_id"), invocation_id=f"design-{uuid.uuid4().hex[:16]}",
+                              input_digests=_design_input_digests(marker, brief))
+    return _llm_task(
+        run_root, attempt_id, "test-design", stage=_DESIGN_STAGE, skill="test-design", inputs=[brief_path], schema=_design_schema(),
+        instructions=("Файл — исходные требования (SREQ). Построй тест-дизайн по роли: параметры, классы эквивалентности, граничные значения, "
+                      "правила (решения, состояния, ошибки); требование, которое не разбивается, внеси в not_designed с причиной. "
+                      "Верни только artifacts и warnings: schema_version и stage заполнит драйвер."),
+    )
+
+
+def _submit_test_design(run_root: Path, attempt: Mapping[str, Any], task: Mapping[str, Any], value: Any) -> None:
+    from tools.pilot_state import publish_model_stage_artifact
+    from tools.schema_validation import schema_diagnostics
+    from tools.test_design import SCHEMA_VERSION, design_warnings, validate_design
+
+    if not isinstance(value, dict):
+        raise DriverError("TASK_OUTPUT_INVALID", "test design output must be a JSON object")
+    unknown = sorted(set(value) - {"artifacts", "warnings"})
+    if unknown:
+        raise DriverError("TASK_OUTPUT_INVALID", "test design output has fields the driver owns", [
+            {"path": "/" + name, "code": "DRIVER_OWNED_FIELD", "message": "Remove this field: return only artifacts and warnings."} for name in unknown])
+    attempt_id = str(attempt["attempt_id"])
+    artifact = {"schema_version": SCHEMA_VERSION, "stage": "test-design", "artifacts": value.get("artifacts"), "warnings": value.get("warnings", [])}
+    rows = schema_diagnostics(artifact, ROOT / "schemas" / "test-design.schema.json", ROOT)
+    if not rows:
+        marker = _marker_artifact(run_root, attempt_id)
+        rows = validate_design(artifact, [row["source_requirement_id"] for row in marker["artifact"]["artifacts"]["analytics_documentation"]["requirements"]])
+    if rows:
+        raise DriverError("TASK_OUTPUT_INVALID", "test design is invalid", rows)
+    artifact["warnings"] = [*artifact["warnings"], *(line for line in design_warnings(artifact) if line not in artifact["warnings"])]
+    publish_model_stage_artifact(run_root, attempt_id, _DESIGN_STAGE, artifact, transport_attempts=int(task.get("transport_attempts", 1)))
+
+
+def _batch_design(run_root: Path, attempt_id: str, batch: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The design slice of one generator batch, or None in a run without the design stage."""
+    from tools.test_design import design_slice
+
+    design = _design_artifact(run_root, attempt_id)
+    return None if design is None else design_slice(design["artifact"], batch["owned_source_requirement_ids"])
+
+
+def _generator_input_digests(marker: Mapping[str, Any], context: Mapping[str, Any], plan: Mapping[str, Any], batch_design: Mapping[str, Any] | None) -> list[str]:
+    """Marker, context, plan and header; with a test design also the design slice of the batch (D1)."""
+    from tools.test_design import digest
+
+    digests = [str(marker["content_digest"]), str(context["digest"]), str(plan["digest"]), str(plan["header_digest"])]
+    return digests if batch_design is None else [*digests, digest(batch_design)]
+
+
+# --------------------------------------------------------------------------------------
 # batches and generation
 # --------------------------------------------------------------------------------------
 
@@ -843,11 +942,13 @@ def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], c
     }
     brief_path = _write_json(work_dir(run_root) / "inputs" / f"generator-{batch['batch_id']}.json", brief)
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
-    inputs = [brief_path, marker_path, *_context_inputs(project, run_root, attempt, only=context)]
+    batch_design = _batch_design(run_root, attempt_id, batch)
+    design_inputs = [] if batch_design is None else [_write_json(work_dir(run_root) / "inputs" / f"test-design-{batch['batch_id']}.json", batch_design)]
+    inputs = [brief_path, marker_path, *design_inputs, *_context_inputs(project, run_root, attempt, only=context)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
         _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"generator-{uuid.uuid4().hex[:16]}",
-                              input_digests=[marker["content_digest"], context["digest"], plan["digest"], plan["header_digest"]])
+                              input_digests=_generator_input_digests(marker, context, plan, batch_design))
     return _llm_task(
         run_root, attempt_id, f"tc-generator.{batch['batch_id']}", stage=stage, skill="tc-generator", inputs=inputs, schema=_generator_schema(),
         instructions=("Первый файл — задание батча: какие исходные требования покрыть и какие префиксы идентификаторов использовать. "
@@ -1073,11 +1174,13 @@ def _rework_task(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     }
     brief_path = _write_json(work_dir(run_root) / "inputs" / f"rework-{batch['batch_id']}.json", brief)
     marker_path = _write_json(work_dir(run_root) / "inputs" / "context-marker-output.json", marker["artifact"])
-    inputs = [brief_path, r1_path, marker_path, *_context_inputs(project, run_root, attempt, only=context)]
+    batch_design = _batch_design(run_root, attempt_id, batch)
+    design_inputs = [] if batch_design is None else [_write_json(work_dir(run_root) / "inputs" / f"test-design-{attempt_id[:8]}-{batch['batch_id']}.json", batch_design)]
+    inputs = [brief_path, r1_path, marker_path, *design_inputs, *_context_inputs(project, run_root, attempt, only=context)]
     if "MODEL_REQUESTED" not in _stage_events(_events(run_root, attempt_id), stage):
         _check_task_input(project, config, stage, inputs)
         publish_model_request(run_root, attempt_id, stage, model_id=config.get("model_id"), invocation_id=f"rework-{uuid.uuid4().hex[:16]}",
-                              input_digests=[marker["content_digest"], context["digest"], plan["digest"], plan["header_digest"]])  # r1 is bound through the r2 header
+                              input_digests=_generator_input_digests(marker, context, plan, batch_design))  # r1 is bound through the r2 header
     schema = _subschema("candidate-fragment.schema.json", ["test_cases"])
     items = schema["properties"]["test_cases"].get("items")
     if isinstance(items, dict) and str(items.get("$ref", "")).startswith("canonical-test-document.schema.json"):
@@ -1584,7 +1687,7 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
 
     if suite_update.is_suite_run(run_root):
         return suite_update.advance(project, run_root, max_tasks=max_tasks, human=human)
-    from tools.pilot_state import finish_review, prepare_review, read_effective_canonical_if_present
+    from tools.pilot_state import design_required, finish_review, prepare_review, read_effective_canonical_if_present
 
     project = Path(project).resolve()
     config = _config(run_root)
@@ -1628,6 +1731,10 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
             return waiting
 
     marker = _marker_artifact(run_root, attempt_id)
+    if design_required(run_root) and "MODEL_RESPONSE_RECEIVED" not in _stage_events(_events(run_root, attempt_id), _DESIGN_STAGE):
+        waiting = _test_design_step(project, run_root, attempt, config, marker)
+        if waiting is not None:
+            return waiting
     header, plan, context = _plan(project, run_root, attempt, config, marker)
     fragments = _fragments(run_root, attempt_id, plan)
     for batch in plan["batches"]:
@@ -1774,6 +1881,8 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
             _submit_review(run_root, attempt, task, value, failed=failed, reason=reason)
         elif task["stage"] == "context-marker:baseline" or task["stage"].startswith("context-marker:batch-"):
             _submit_context_marker(project, run_root, attempt, config, task, value)
+        elif task["stage"] == _DESIGN_STAGE:
+            _submit_test_design(run_root, attempt, task, value)
         elif task["stage"].startswith("tc-generator:"):
             _submit_generator(project, run_root, attempt, config, task, value)
         elif task["stage"].startswith("tc-to-autotest:"):

@@ -2,6 +2,7 @@
   "schema_version": "5.0.0",
   "version": "3.0",
   "project": {"name": "python-pytest"},
+  "design": {"enabled": false},
   "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
   "modules": [
     {
