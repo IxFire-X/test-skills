@@ -1264,10 +1264,23 @@ class Operator:
         result = payload.get("result") or {}
         self.say(f"  итог: {result.get('outcome') or result.get('status')}, исполнитель {result.get('executor') or '—'}, "
                  f"счётчики {json.dumps(result.get('counts') or {}, ensure_ascii=False)}, код {code}")
+        covered = result.get("design_coverage") or self._suite_design_coverage(result)
+        if isinstance(covered, dict):  # D1c: the suite keeps its design; coverage over the whole suite
+            self.say(f"  покрытие дизайна набора: {_coverage_text(covered)}; приоритеты: {_priority_text(covered)}")
         self.gates_warning(payload)
         if result.get("status") == "error" or result.get("reason"):
             raise Stop(f"обновление набора: {result.get('reason') or result.get('status')}: {str(result.get('message') or '')[:300]}",
                        "SUITE_MISSING — сначала полный прогон с набором (шаг 5); иначе код и message — в отчёт (п. 7)")
+
+    @staticmethod
+    def _suite_design_coverage(result: dict[str, Any]) -> dict[str, Any] | None:
+        """D1c: ``design_coverage`` of the suite manifest the update wrote (None for a suite without a design)."""
+        suite_dir = (result.get("paths") or {}).get("suite_dir")
+        try:
+            manifest = json.loads((Path(suite_dir) / "suite-manifest.json").read_text(encoding="utf-8")) if suite_dir else {}
+        except (OSError, ValueError):
+            return None
+        return manifest.get("design_coverage") if isinstance(manifest, dict) else None
 
     # -- step 7
     def _run_payload(self) -> dict[str, Any]:
@@ -1463,25 +1476,32 @@ def _design_figures(result: dict[str, Any], project: Path) -> list[tuple[str, st
         spread = (", ".join(f"{level} {sum(case.get('priority') == level for case in cases)}" for level in PRIORITY_LEVELS)
                   + " (выбраны моделью)") if cases else "—"
         return [("Покрытие дизайна", "— (стадии тест-дизайна в прогоне не было: .skillsrc design.enabled: false)"), ("Приоритеты", spread)]
+    spread = _priority_text(covered) + " (назначены кодом по дизайну)"
+    degenerate = [row.get("message") for row in result.get("warnings") or [] if isinstance(row, dict) and row.get("code") == "PRIORITY_DEGENERATE"]
+    if degenerate:
+        spread += " — ВНИМАНИЕ: один уровень больше 70 % кейсов"
+    return [("Покрытие дизайна", _coverage_text(covered)), ("Приоритеты", spread)]
 
+
+def _coverage_text(covered: dict[str, Any]) -> str:
+    """One line of a ``design_coverage`` (run result or suite manifest): covered/total per element kind, the uncovered."""
     def share(name: str, label: str) -> str:
         row = covered.get(name) or {}
         ratio = row.get("ratio")
         return f"{label} {row.get('covered', '—')}/{row.get('total', '—')}" + (f" ({ratio:.0%})" if isinstance(ratio, (int, float)) else "")
 
     uncovered = covered.get("uncovered") or []
-    coverage = ", ".join(share(name, label) for name, label in (("partitions", "разбиения"), ("boundaries", "границы"), ("rules", "правила"),
-                                                                 ("combinations", "комбинации CB"),
-                                                                 ("negative_partitions", "невалидные разбиения негативными кейсами"))
-                         if name in covered)  # combinations: package with D1b
-    coverage += f"; не покрыто с причиной: {len(uncovered)}" + (" (" + ", ".join(str(row.get("ref")) for row in uncovered[:10])
-                                                               + (", …" if len(uncovered) > 10 else "") + ")" if uncovered else "")
+    text = ", ".join(share(name, label) for name, label in (("partitions", "разбиения"), ("boundaries", "границы"), ("rules", "правила"),
+                                                             ("combinations", "комбинации CB"),
+                                                             ("negative_partitions", "невалидные разбиения негативными кейсами"))
+                     if name in covered)  # combinations: package with D1b
+    return text + f"; не покрыто с причиной: {len(uncovered)}" + (" (" + ", ".join(str(row.get("ref")) for row in uncovered[:10])
+                                                                  + (", …" if len(uncovered) > 10 else "") + ")" if uncovered else "")
+
+
+def _priority_text(covered: dict[str, Any]) -> str:
     priorities = covered.get("priorities") or {}
-    spread = ", ".join(f"{level} {priorities.get(level, 0)}" for level in PRIORITY_LEVELS) + " (назначены кодом по дизайну)"
-    degenerate = [row.get("message") for row in result.get("warnings") or [] if isinstance(row, dict) and row.get("code") == "PRIORITY_DEGENERATE"]
-    if degenerate:
-        spread += " — ВНИМАНИЕ: один уровень больше 70 % кейсов"
-    return [("Покрытие дизайна", coverage), ("Приоритеты", spread)]
+    return ", ".join(f"{level} {priorities.get(level, 0)}" for level in PRIORITY_LEVELS)
 
 
 FIRST_CALL = "first_model_call"

@@ -103,7 +103,13 @@ def start(project: Path, options: Mapping[str, Any], *, max_tasks: int = 1) -> d
         # S9b: a person runs every suite command; repeats are not run, so no method can be labelled FLAKY.
         config["repeats"] = 0
     driver._save_config(run_root, config)
-    _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {}, "tries": {}})
+    from tools.pipeline_driver_suite import _skillsrc as _suite_skillsrc
+    from tools.test_design import design_enabled, design_factorial_max
+
+    # D1c: the design decision and its threshold are facts of the run, like the authorization of a pilot run.
+    skillsrc = _suite_skillsrc(project)
+    design = {"enabled": design_enabled(skillsrc), "full_factorial_max": design_factorial_max(skillsrc)}
+    _save(run_root, {"schema_version": "1.0.0", "run_id": run_id, "profile": PROFILE, "step": "MIGRATION", "facts": {"design": design}, "tries": {}})
     _snapshot_before(project, run_root, suite_dir)
     _log(project, run_root, {"event": "suite_update_started", "run_id": run_id})
     driver._warn_gates_disabled(run_root, gates_disabled)
@@ -205,7 +211,7 @@ def _impact(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
     needs_update = bool(result["requirements"]["added"] or result["requirements"]["changed"] or result["requirements"]["removed"])
     # New endpoints without a requirement are questions for the analysts; test cases do not change for them.
     questions = [row["question"] for row in result.get("analyst_questions") or []]
-    _goto(run_root, state, "UPDATE" if needs_update else "SUITE_RUN", impact=result, needs_update=needs_update, questions=questions)
+    _goto(run_root, state, "DESIGN" if needs_update else "SUITE_RUN", impact=result, needs_update=needs_update, questions=questions)
     return None
 
 
@@ -330,6 +336,110 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
     return advance(project, run_root)
 
 
+# ----------------------------------------------------------------------------------- 3a. test design (D1c)
+
+_DESIGN_INSTRUCTIONS = (
+    "Режим update набора: файл — изменённые и добавленные исходные требования (SREQ, новые номера). Построй тест-дизайн только для них по роли: "
+    "параметры, классы эквивалентности, границы, правила; требование без разбиения — в not_designed с причиной. Нумеруй с 001: "
+    "драйвер сам продолжит нумерацию набора. Верни только artifacts и warnings.")
+
+
+def _stored_design(project: Path, manifest: Mapping[str, Any]) -> dict[str, Any] | None:
+    row = manifest["suite_files"].get("design")
+    return None if row is None else json.loads((Path(project) / row["path"]).read_text(encoding="utf-8"))
+
+
+def _design(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> dict[str, Any] | None:
+    """Design the changed and added requirements again (all of them for a suite without a design); unchanged
+    requirements keep their elements and IDs."""
+    from tools.test_design import design_brief, merge_design, sreq_design
+
+    setting = state["facts"].get("design") or {}
+    if not setting.get("enabled") or state["facts"].get("accepted", {}).get("design"):
+        _goto(run_root, state, "UPDATE")
+        return None
+    _suite_dir, manifest, _document = _suite(project, run_root)
+    scan, envelope = _scan(project, run_root, manifest)
+    stored = _stored_design(project, manifest)
+    keys = {row["key"]: row["source_requirement_id"] for row in scan}
+    requirements = state["facts"]["impact"]["requirements"]
+    redesign = sorted(keys) if stored is None else sorted((set(requirements["changed"]) | set(requirements["added"])) & set(keys))
+    if not redesign:
+        # Only removed requirements: the design loses their elements, no model call.
+        merged = merge_design(sreq_design(stored, scan), {"artifacts": {"parameters": [], "partitions": [], "boundaries": [], "rules": [], "not_designed": []}},
+                              [], setting.get("full_factorial_max") if stored.get("full_factorial_max") is not None else None)
+        _merged_design(project, run_root, state, manifest, stored, merged, [])
+        _goto(run_root, state, "UPDATE")
+        return None
+    sources = [row for row in envelope["artifacts"]["analytics_documentation"]["requirements"] if row["source_requirement_id"] in {keys[key] for key in redesign}]
+    inputs = [_write(_work(run_root) / "design-brief.json", design_brief(sources))]
+    state["facts"]["design_redesign"] = redesign
+    _save(run_root, state)
+    return _task(run_root, "design", stage="test-design:update", skill="test-design", inputs=inputs, schema=driver._design_schema(),
+                 instructions=_DESIGN_INSTRUCTIONS, extra={"mode": "update"})
+
+
+def _check_design(project: Path, run_root: Path, state: dict[str, Any], _label: str, value: Any) -> list[dict[str, str]]:
+    from tools.schema_validation import schema_diagnostics
+    from tools.test_design import SCHEMA_VERSION, merge_design, plain_design, sreq_design, validate_design
+
+    if not isinstance(value, dict) or set(value) - {"artifacts", "warnings"}:
+        return [{"path": "", "code": "TASK_OUTPUT_INVALID", "message": "return only artifacts and warnings"}]
+    artifact = {"schema_version": SCHEMA_VERSION, "stage": "test-design", "artifacts": value.get("artifacts"), "warnings": value.get("warnings", [])}
+    rows = schema_diagnostics(artifact, Path(driver.ROOT) / "schemas" / "test-design.schema.json", Path(driver.ROOT))
+    _suite_dir, manifest, _document = _suite(project, run_root)
+    scan, _envelope = _scan(project, run_root, manifest)
+    keys = {row["key"]: row["source_requirement_id"] for row in scan}
+    redesigned = [keys[key] for key in state["facts"].get("design_redesign") or [] if key in keys]
+    if not rows:
+        rows = validate_design(artifact, redesigned)
+    if rows:
+        return rows
+    stored = _stored_design(project, manifest)
+    setting = state["facts"].get("design") or {}
+    threshold = setting.get("full_factorial_max") if stored is None or stored.get("full_factorial_max") is not None else None
+    merged = merge_design(None if stored is None else sreq_design(stored, scan), artifact, redesigned, threshold)
+    rows = validate_design(plain_design(merged), [row["source_requirement_id"] for row in scan])
+    if rows:
+        return rows
+    _merged_design(project, run_root, _state(run_root), manifest, stored, merged, redesigned)
+    return []
+
+
+def _merged_design(project: Path, run_root: Path, state: dict[str, Any], manifest: Mapping[str, Any], stored: Mapping[str, Any] | None,
+                   merged: Mapping[str, Any], redesigned: Sequence[str]) -> None:
+    """Keep the merged design for the update and add the cases that named a removed or rebuilt element to it."""
+    from tools.test_design import all_element_ids
+
+    _write(_work(run_root) / "design.json", merged)
+    gone = sorted(all_element_ids(stored["design"]) - all_element_ids(merged)) if stored is not None else []
+    _suite_dir, _manifest, document = _suite(project, run_root)
+    impact = state["facts"]["impact"]
+    edited = set(impact["edited"]["cases"])
+    retire = set(impact["cases"]["to_retire"])
+    relinked = sorted(case["case_id"] for case in document.get("test_cases") or []
+                      if set(case.get("design_refs") or []) & set(gone) and case["case_id"] not in edited | retire)
+    impact["cases"]["to_update"] = sorted(set(impact["cases"]["to_update"]) | set(relinked))
+    state["facts"]["design_update"] = {"redesigned": list(redesigned), "gone": gone, "relinked": relinked}
+    _save(run_root, state)
+
+
+def _update_design(project: Path, run_root: Path, manifest: Mapping[str, Any], scan: Sequence[Mapping[str, Any]],
+                   brief: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The design slice of the update: the redesigned requirements and the requirements of the affected cases."""
+    path = _work(run_root) / "design.json"
+    if not path.is_file():
+        return None
+    from tools.test_design import design_slice, plain_design
+
+    merged = json.loads(path.read_text(encoding="utf-8"))
+    keys = {row["key"]: row["source_requirement_id"] for row in scan}
+    affected = {case["case_id"] for case in brief["affected_cases"]}
+    owned = {keys[key] for case in manifest["cases"] if case["case_id"] in affected for key in case["requirement_keys"] if key in keys}
+    owned |= {row["new_source_requirement_id"] for row in brief["changed_requirements"]} | {row["new_source_requirement_id"] for row in brief["added_requirements"]}
+    return design_slice(plain_design(merged), sorted(owned), merged["artifacts"].get("combinations"))
+
+
 # ----------------------------------------------------------------------------------- 3. update
 
 _UPDATE_INSTRUCTIONS = (
@@ -343,8 +453,13 @@ _UPDATE_INSTRUCTIONS = (
     "с изменениями. Неизменённые кейсы, требования, связи, нумерацию SREQ, порядок и ревизию драйвер возьмёт сам.")
 
 
-def _update_schema() -> dict[str, Any]:
+def _update_schema(design: bool = False) -> dict[str, Any]:
     canonical = Path(driver.ROOT) / "schemas" / "canonical-test-document.schema.json"
+    if design:  # D1c: no priority (code assigns it), design references and the uncovered elements
+        schema = _update_schema()
+        schema["properties"]["test_cases"] = {"type": "array", "items": driver.design_case_schema()}
+        schema["properties"]["design_uncovered"] = driver.design_uncovered_schema()
+        return schema
     return {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": False, "required": ["test_cases"],
             "properties": {
                 "test_cases": {"type": "array", "items": {"$ref": f"{canonical}#/$defs/test_case"}},
@@ -373,11 +488,20 @@ def _update(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> 
         _goto(run_root, state, "SUITE_RUN", update={"status": "NOT_NEEDED"})
         return None
     work = _work(run_root)
+    sliced = _update_design(project, run_root, manifest, scan, brief)
+    if sliced is not None:
+        from tools.test_design import GENERATOR_RULES
+
+        brief = {**brief, "design_file": "test-design-update.json", "design_rules": list(GENERATOR_RULES),
+                 "filled_by_driver": [*brief["filled_by_driver"], "priority"]}
     inputs = [_write(work / "update-brief.json", brief), _write(work / "suite-document.json", document),
               _write(work / "scan.json", {"source_requirements": envelope["artifacts"]["analytics_documentation"]["requirements"],
-                                          "keys": [{"source_requirement_id": row["source_requirement_id"], "key": row["key"]} for row in scan]})]
-    return _task(run_root, "update", stage="tc-generator:update", skill="tc-generator", inputs=inputs, schema=_update_schema(),
-                 instructions=_UPDATE_INSTRUCTIONS, extra={"mode": "update"})
+                                          "keys": [{"source_requirement_id": row["source_requirement_id"], "key": row["key"]} for row in scan]}),
+              *([] if sliced is None else [_write(work / "test-design-update.json", sliced)])]
+    instructions = _UPDATE_INSTRUCTIONS + ("" if sliced is None else " Тест-дизайн изменённых требований — файл design_file; покрой его по design_rules "
+                                                                     "(design_refs в обновлённых и новых кейсах, design_uncovered с причиной), priority не заполняй.")
+    return _task(run_root, "update", stage="tc-generator:update", skill="tc-generator", inputs=inputs, schema=_update_schema(sliced is not None),
+                 instructions=instructions, extra={"mode": "update"})
 
 
 def _test_gap_proposals(project: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -402,11 +526,34 @@ def _check_update(project: Path, run_root: Path, state: dict[str, Any], _label: 
     _suite_dir, manifest, document = _suite(project, run_root)
     scan, envelope = _scan(project, run_root, manifest)
     impact = state["facts"]["impact"]
+    sliced_path = _work(run_root) / "test-design-update.json"
+    sliced = json.loads(sliced_path.read_text(encoding="utf-8")) if sliced_path.is_file() and (_work(run_root) / "design.json").is_file() else None
+    uncovered: list[dict[str, Any]] = []
+    if sliced is not None and isinstance(value, dict):
+        # D1c: the model's uncovered elements stay with the design; the priority of every returned case comes from it.
+        from tools.test_design import assign_priorities
+
+        value = copy.deepcopy(value)
+        uncovered = [row for row in value.pop("design_uncovered", []) or [] if isinstance(row, dict)]
+        cases = value.get("test_cases")
+        if isinstance(cases, list) and all(isinstance(case, dict) for case in cases):
+            for case, level in zip(cases, assign_priorities(sliced, cases)):
+                case["priority"] = level
     try:
         merged, report = merge_update(document=document, manifest=manifest, envelope=envelope, scan=scan, impact=impact, answer=value,
                                       edited_cases=impact["edited"]["cases"])
     except MergeError as error:
         return error.diagnostics
+    if sliced is not None:
+        from tools.test_design import fragment_design_problems
+
+        returned = set(report["changed_cases"]) | set(report["new_cases"])
+        cases = [case for case in merged["test_cases"] if case["case_id"] in returned]
+        elsewhere = {ref for case in merged["test_cases"] if case["case_id"] not in returned for ref in case.get("design_refs") or []}
+        rows = fragment_design_problems(sliced, cases, uncovered, merged["source_to_canonical_mappings"], covered_elsewhere=elsewhere)
+        if rows:
+            return rows
+        state["facts"]["design_uncovered"] = uncovered
     work = _work(run_root)
     _write(work / "document.json", merged)
     state = _state(run_root)
@@ -472,10 +619,14 @@ def _review_snapshot(project: Path, run_root: Path, document: Mapping[str, Any],
     config = driver._config(run_root)
     _suite_dir, manifest, _document = _suite(project, run_root)
     entries = _docs_entries(project, config["docs"] or [row["path"] for row in manifest["documents"]])
-    return {"document": copy.deepcopy(dict(document)), "automation": None if automation is None else copy.deepcopy(dict(automation)), "package_binding": None,
-            "sources": [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in entries],
-            "contexts": product_contexts(project, manifest, document, code),
-            "requirements_binding": {"module_id": manifest["module_id"], "selected_target": None, "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in entries]}}
+    snapshot = {"document": copy.deepcopy(dict(document)), "automation": None if automation is None else copy.deepcopy(dict(automation)), "package_binding": None,
+                "sources": [{"path": row["path"], "sha256": row["sha256"], "content": row["content"]} for row in entries],
+                "contexts": product_contexts(project, manifest, document, code),
+                "requirements_binding": {"module_id": manifest["module_id"], "selected_target": None, "docs": [{"path": row["path"], "sha256": row["sha256"]} for row in entries]}}
+    design = _work(run_root) / "design.json"
+    if automation is None and design.is_file():  # D1c: the case reviewer checks the updated cases against the design
+        snapshot["design"] = json.loads(design.read_text(encoding="utf-8"))
+    return snapshot
 
 
 def subset_document(document: Mapping[str, Any], case_ids: Sequence[str]) -> dict[str, Any]:
@@ -1340,6 +1491,39 @@ def _block_weaker_repairs(project: Path, run_root: Path, state: dict[str, Any], 
     state["facts"]["repaired"] = sorted(repaired - set(blocked))
 
 
+def _carried_design(project: Path, manifest: Mapping[str, Any], scan: Sequence[Mapping[str, Any]], document: Mapping[str, Any]) -> dict[str, Any]:
+    """D1c: the suite's stored design stays as it is; its coverage is recounted over the updated cases."""
+    row = manifest["suite_files"].get("design")
+    if row is None:
+        return {}
+    from tools.test_design import coverage, priority_counts, sreq_design
+
+    stored = json.loads((Path(project) / row["path"]).read_text(encoding="utf-8"))
+    cases = document.get("test_cases") or []
+    return {"design_digest": row["sha256"],
+            "design_coverage": {**coverage(sreq_design(stored, scan), cases, stored.get("uncovered") or []), "priorities": priority_counts(cases)}}
+
+
+def _new_design(project: Path, run_root: Path, state: Mapping[str, Any], manifest: Mapping[str, Any], scan: Sequence[Mapping[str, Any]],
+                document: Mapping[str, Any]) -> tuple[dict[str, Any], bytes | None]:
+    """D1c: the merged design of an applied update as the suite stores it, with its coverage; else the carried one."""
+    path = _work(run_root) / "design.json"
+    if not state["facts"].get("update_applied") or not path.is_file():
+        return _carried_design(project, manifest, scan, document), None
+    from tools.test_design import all_element_ids, coverage, keyed_design, priority_counts
+
+    merged = json.loads(path.read_text(encoding="utf-8"))
+    stored = _stored_design(project, manifest)
+    known = all_element_ids(merged)
+    uncovered = [row for row in (stored or {}).get("uncovered") or [] if row.get("ref") in known]
+    uncovered += [row for row in state["facts"].get("design_uncovered") or [] if row.get("ref") in known and row not in uncovered]
+    cases = document.get("test_cases") or []
+    covered = coverage(merged, cases, uncovered)
+    threshold = (state["facts"].get("design") or {}).get("full_factorial_max") if "combinations" in merged["artifacts"] else None
+    data = canonical_bytes(keyed_design(merged, scan, full_factorial_max=threshold, uncovered=covered["uncovered"]))
+    return {"design_digest": sha256_bytes(data), "design_coverage": {**covered, "priorities": priority_counts(cases)}}, data
+
+
 def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
     from tools.pipeline_driver_suite import _skillsrc, package_version
     from tools.code_surface import surface
@@ -1380,6 +1564,7 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
             strength[case_id] = row["strength"]
     test_files = {row["file_id"]: {"path": row["path"], "content": row["content"]} for row in automation["artifacts"]["generated_files"]}
     rendered = projections(document)
+    design_fields, design_data = _new_design(project, run_root, state, manifest, scan, document)
     module = _module(project, manifest)
     sources = list(((module.get("paths") or {}).get("source")) or ["src/main/java", "src", "app"])
     stop = state["facts"].get("stop")
@@ -1390,7 +1575,8 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         strength=strength, surface=surface(project / str(module.get("root") or "."), sources), suite_dir=suite_dir,
         suite_digests={name: sha256_bytes(data) for name, data in rendered.items()}, source_run=manifest["source_run"],
         last_run={"run_id": run_root.name, "attempt_id": None, "profile": PROFILE, "verification": None if stop else _verdict(decisions), "accepted": None},
-        history=[*manifest["history"], {"run_id": run_root.name, "profile": PROFILE, "action": "UPDATED"}])
+        history=[*manifest["history"], {"run_id": run_root.name, "profile": PROFILE, "action": "UPDATED"}],
+        **design_fields)
     # People's edits stay flagged: their cases and methods keep the digests the package last wrote.
     edited = state["facts"]["impact"]["edited"]
     for row in new["cases"]:
@@ -1415,6 +1601,8 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         payloads[name] = data
     current = {name: sha256_bytes((Path(project) / row["path"]).read_bytes()) for name, row in manifest["suite_files"].items() if (Path(project) / row["path"]).is_file()}
     replace.update(current)
+    if design_data is not None:  # D1c: the merged design (a new file when the suite had none)
+        payloads["design"] = design_data
     payloads["manifest"] = canonical_bytes(new)
     replace["manifest"] = sha256_bytes((Path(project) / suite_dir / MANIFEST).read_bytes())
     write_suite(project, suite_dir, payloads, replace=replace)
@@ -1514,8 +1702,8 @@ def status(project: Path, run_root: Path) -> dict[str, Any]:
             "result": state["facts"].get("result")}
 
 
-_STEPS = {"MIGRATION": _migration, "IMPACT": _impact, "UPDATE": _update, "REVIEW": _review, "AUTOMATION": _automation,
+_STEPS = {"MIGRATION": _migration, "IMPACT": _impact, "DESIGN": _design, "UPDATE": _update, "REVIEW": _review, "AUTOMATION": _automation,
           "STATIC_REVIEW": _static_review, "APPLY": _apply, "SUITE_RUN": _suite_run, "TRIAGE": _triage, "REPAIR": _repair,
           "REPAIR_REVIEW": _repair_review, "REPAIR_RUN": _repair_run, "MUTATION": _mutation, "MANIFEST": _manifest, "SUMMARY": _summary}
-_CHECKS = {"update": _check_update, "review-canonical": _check_review, "review-static": _check_review, "review-repair": _check_review,
+_CHECKS = {"design": _check_design, "update": _check_update, "review-canonical": _check_review, "review-static": _check_review, "review-repair": _check_review,
            "automation": _check_automation, "repair": _check_automation}

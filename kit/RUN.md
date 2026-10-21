@@ -1,7 +1,7 @@
 # Запуск test-skills на внутреннем проекте (Linux, свой CLI и модели)
 
-Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит 9be8769 ветки `main`; без `tests/`,
-`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-9be8769.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
+Комплект — папка `kit/` ветки `demo-kit-20261015`, без архивов: `test-skills/` (пакет, коммит 7d54c88 ветки `main`; без `tests/`,
+`docs/*.pptx`, `CLAUDE.md`, `.github/`), `test-skills-7d54c88.files.sha256` (суммы его файлов), `wrap/`, `bench/`,
 `preflight.py`, `operate.py`, этот файл. Ниже `~/ts` — каталог комплекта; он может лежать и внутри проекта (раздел
 «Размещение внутри проекта»). Из проекта сюда не возвращается ничего — только тексты ошибок и служебные логи (п. 7).
 
@@ -245,12 +245,13 @@ python3 operate.py --home ~/ts --project <проект> --docs <спека в п
   excludes линтера из preflight (nohttp, checkstyle …) применены к `.pilot-runs`, `.runner` и `.tmp`: иначе `suite-run`
   или `repair-run` упадёт на линтере, прочитав записи прогонов — в том числе текущего (вывод упавшей сборки, переданный
   `--build-log`, сохраняется в `.pilot-runs`).
+  С D1c: обновление набора с дизайном: перепроектируются только изменённые/добавленные требования (`test-design:update`), покрытие по всему набору — в манифесте и summary (в выводе шага 9 — строка «покрытие дизайна набора»).
 
 ## 0. Проверка комплекта
 
 ```bash
 mkdir -p ~/ts && cp -r <комплект>/. ~/ts/ && cd ~/ts               # пакет уже папкой: ~/ts/test-skills
-sha256sum -c --quiet test-skills-9be8769.files.sha256             # молчит = все файлы пакета совпадают
+sha256sum -c --quiet test-skills-7d54c88.files.sha256             # молчит = все файлы пакета совпадают
 python3 --version                                                 # нужен 3.11+ (или test-skills/.venv/bin/python)
 python3 -c 'import jsonschema, yaml'                              # ошибка → поставить зависимости (ниже)
 cd test-skills && python3 -m tools.doctor --root . && cd ..       # status PASS, integrity valid
