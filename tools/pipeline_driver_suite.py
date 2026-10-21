@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from tools import pipeline_driver as driver
 from tools.suite_manifest import SuiteError, build_manifest, canonical_bytes, projections, read_suite, sha256_bytes, suite_directory, write_suite
@@ -142,15 +142,32 @@ def attempt_suite(project: Path, run_root: Path, attempt: Mapping[str, Any], *, 
     rendered = projections(document)
     source_run = {"run_id": run_id, "attempt_id": attempt_id, "profile": "local-pilot-v1",
                   "verification": terminal.get("verification"), "accepted": terminal.get("accepted")}
+    design_payload, coverage = _suite_design(run_root, attempt, identities)
     manifest = build_manifest(
         suite_id=f"SUITE-{_label(project.name)}-{_label(str(module.get('id') or 'root'))}", module_id=str(module.get("id") or "root"),
         package_version=package_version(), document=document, identities=identities,
         documents=documents, id_pattern=id_pattern, automation=automation,
         test_files=test_files, case_state=_case_state(run_id, report, automation, dispositions, plan), strength=_strength(run_root, attempt_id, run_id),
         surface=surface(module_root, sources), suite_dir=suite_dir, suite_digests={name: sha256_bytes(data) for name, data in rendered.items()},
-        source_run=source_run, history=[{"run_id": run_id, "profile": "local-pilot-v1", "action": "CREATED"}])
+        source_run=source_run, history=[{"run_id": run_id, "profile": "local-pilot-v1", "action": "CREATED"}],
+        design_digest=None if design_payload is None else sha256_bytes(design_payload), design_coverage=coverage)
     _ask_about_quarantine(run_root, attempt_id, manifest, document)
-    return suite_dir, manifest, {**rendered, "manifest": canonical_bytes(manifest)}
+    return suite_dir, manifest, {**rendered, **({} if design_payload is None else {"design": design_payload}), "manifest": canonical_bytes(manifest)}
+
+
+def _suite_design(run_root: Path, attempt: Mapping[str, Any], identities: Sequence[Mapping[str, Any]]) -> tuple[bytes | None, dict[str, Any] | None]:
+    """D1c: the attempt's design as the suite stores it (by requirement key) and its coverage; (None, None) without one."""
+    from tools.pilot_state import design_combinations, run_authorization
+    from tools.test_design import keyed_design, with_combinations
+
+    design = driver._design_artifact(run_root, str(attempt["attempt_id"]))
+    coverage = driver.design_coverage(run_root, attempt) if design is not None else None
+    if design is None or coverage is None:
+        return None, None
+    authorization = run_authorization(run_root)
+    combined = with_combinations(design["artifact"], design_combinations(authorization, design["artifact"]))
+    stored = keyed_design(combined, identities, full_factorial_max=authorization.get("design_full_factorial_max"), uncovered=coverage["uncovered"])
+    return canonical_bytes(stored), coverage
 
 
 def _left_bytes(project: Path, run_id: str, rows: list[Mapping[str, Any]], plan: Mapping[str, Mapping[str, Any]], automation: Mapping[str, Any],

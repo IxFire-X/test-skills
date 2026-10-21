@@ -234,6 +234,53 @@ def design_slice(design: Mapping[str, Any], owned_requirement_ids: Iterable[str]
     return {"schema_version": SCHEMA_VERSION, "stage": "test-design", "artifacts": json.loads(canonical_bytes(value)), "warnings": []}
 
 
+def map_requirements(design: Mapping[str, Any], mapping: Mapping[str, str]) -> dict[str, Any]:
+    """The design with every requirement ID mapped through ``mapping`` (SREQ <-> requirement key, D1c).
+
+    A requirement without a mapping is removed: an element left with no requirement goes (a parameter with its
+    partitions and boundaries), a rule loses a condition naming a removed partition or boundary and goes when none is
+    left, a combination goes with any of its partitions.
+    """
+    value = json.loads(canonical_bytes(design))
+    artifacts = value["artifacts"]
+
+    def mapped(ids: Iterable[str]) -> list[str]:
+        return list(dict.fromkeys(mapping[item] for item in ids if item in mapping))
+
+    for name in ("parameters", "partitions", "rules"):
+        for row in artifacts[name]:
+            row["requirement_ids"] = mapped(row["requirement_ids"])
+    artifacts["parameters"] = [row for row in artifacts["parameters"] if row["requirement_ids"]]
+    parameters = {row["id"] for row in artifacts["parameters"]}
+    artifacts["partitions"] = [row for row in artifacts["partitions"] if row["requirement_ids"] and row["parameter_id"] in parameters]
+    partitions = {row["id"] for row in artifacts["partitions"]}
+    artifacts["boundaries"] = [row for row in artifacts["boundaries"] if row["partition_id"] in partitions]
+    named = partitions | {row["id"] for row in artifacts["boundaries"]}
+    for row in artifacts["rules"]:
+        row["conditions"] = [item for item in row["conditions"] if "ref" not in item or item["ref"] in named]
+    artifacts["rules"] = [row for row in artifacts["rules"] if row["requirement_ids"] and row["conditions"]]
+    artifacts["not_designed"] = [{**row, "requirement_id": mapping[row["requirement_id"]]} for row in artifacts["not_designed"] if row["requirement_id"] in mapping]
+    if "combinations" in artifacts:
+        for row in artifacts["combinations"]:
+            row["requirement_ids"] = mapped(row["requirement_ids"])
+        artifacts["combinations"] = [row for row in artifacts["combinations"] if row["requirement_ids"] and set(row["partition_ids"]) <= partitions]
+    return value
+
+
+def keyed_design(design: Mapping[str, Any], identities: Sequence[Mapping[str, Any]], *, full_factorial_max: int | None,
+                 uncovered: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """The design as a living suite stores it (D1c): requirements named by key, the run's threshold and the
+    elements left uncovered with their reasons."""
+    keys = {row["source_requirement_id"]: row["key"] for row in identities}
+    return {"format_version": "1.0.0", "full_factorial_max": full_factorial_max, "uncovered": [dict(row) for row in uncovered],
+            "design": map_requirements(design, keys)}
+
+
+def sreq_design(stored: Mapping[str, Any], identities: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """A stored suite design with the current source requirement numbers; removed requirements drop out."""
+    return map_requirements(stored["design"], {row["key"]: row["source_requirement_id"] for row in identities})
+
+
 def element_ids(design: Mapping[str, Any]) -> dict[str, str]:
     """Design element ID -> its kind (``partitions``, ``boundaries``, ``rules``, ``combinations``): the elements a case can name."""
     return {row.get("id"): name for name in ("partitions", "boundaries", "rules", "combinations") for row in _rows(design, name)}

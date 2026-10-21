@@ -1340,6 +1340,19 @@ def _block_weaker_repairs(project: Path, run_root: Path, state: dict[str, Any], 
     state["facts"]["repaired"] = sorted(repaired - set(blocked))
 
 
+def _carried_design(project: Path, manifest: Mapping[str, Any], scan: Sequence[Mapping[str, Any]], document: Mapping[str, Any]) -> dict[str, Any]:
+    """D1c c1: the suite's stored design stays as it is; its coverage is recounted over the updated cases."""
+    row = manifest["suite_files"].get("design")
+    if row is None:
+        return {}
+    from tools.test_design import coverage, priority_counts, sreq_design
+
+    stored = json.loads((Path(project) / row["path"]).read_text(encoding="utf-8"))
+    cases = document.get("test_cases") or []
+    return {"design_digest": row["sha256"],
+            "design_coverage": {**coverage(sreq_design(stored, scan), cases, stored.get("uncovered") or []), "priorities": priority_counts(cases)}}
+
+
 def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -> None:
     from tools.pipeline_driver_suite import _skillsrc, package_version
     from tools.code_surface import surface
@@ -1390,7 +1403,8 @@ def _manifest(project: Path, run_root: Path, state: dict[str, Any], _max: int) -
         strength=strength, surface=surface(project / str(module.get("root") or "."), sources), suite_dir=suite_dir,
         suite_digests={name: sha256_bytes(data) for name, data in rendered.items()}, source_run=manifest["source_run"],
         last_run={"run_id": run_root.name, "attempt_id": None, "profile": PROFILE, "verification": None if stop else _verdict(decisions), "accepted": None},
-        history=[*manifest["history"], {"run_id": run_root.name, "profile": PROFILE, "action": "UPDATED"}])
+        history=[*manifest["history"], {"run_id": run_root.name, "profile": PROFILE, "action": "UPDATED"}],
+        **_carried_design(project, manifest, scan, document))
     # People's edits stay flagged: their cases and methods keep the digests the package last wrote.
     edited = state["facts"]["impact"]["edited"]
     for row in new["cases"]:

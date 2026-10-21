@@ -27,6 +27,7 @@ FORMAT_VERSION = "1.0.0"
 DEFAULT_PATH = "test-cases/"
 MANIFEST = "suite-manifest.json"
 SUITE_FILES = {"canonical": "test-cases.json", "markdown": "test-cases.md", "html": "test-cases.html", "csv": "test-cases.zephyr-scale.csv"}
+DESIGN_FILE = "test-design.json"  # D1c: the suite's test design by requirement key, only for a design run
 _ROOT = Path(__file__).resolve().parents[1]
 _SCHEMA = _ROOT / "schemas" / "suite-manifest.schema.json"
 QUARANTINE_REASONS = ("ASSERTION_FAILED", "BEHAVIOR_CHANGED_WITHOUT_SPEC", "FLAKY", "ENVIRONMENT", "REPAIR_FAILED")
@@ -125,7 +126,8 @@ def build_manifest(*, suite_id: str, module_id: str, package_version: str, docum
                    test_files: Mapping[str, Mapping[str, str]], case_state: Mapping[str, Mapping[str, Any]] | None = None,
                    strength: Mapping[str, Mapping[str, Any]] | None = None, surface: Mapping[str, Any] | None,
                    suite_dir: str, suite_digests: Mapping[str, str], source_run: Mapping[str, Any], last_run: Mapping[str, Any] | None = None,
-                   history: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+                   history: Sequence[Mapping[str, Any]], design_digest: str | None = None,
+                   design_coverage: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The manifest of one suite.
 
     ``test_files`` maps ``file_id`` to ``{"path": project path, "content": current text}``;
@@ -189,6 +191,10 @@ def build_manifest(*, suite_id: str, module_id: str, package_version: str, docum
         "suite_files": {name: {"path": suite_dir + SUITE_FILES[name], "sha256": suite_digests[name]} for name in SUITE_FILES},
         "history": [dict(row) for row in history],
     }
+    if design_digest is not None:  # D1c
+        manifest["suite_files"]["design"] = {"path": suite_dir + DESIGN_FILE, "sha256": design_digest}
+    if design_coverage is not None:
+        manifest["design_coverage"] = json.loads(json.dumps(design_coverage))
     problems = validate(manifest)
     if problems:
         raise SuiteError("SUITE_MANIFEST_INVALID", "; ".join(problems[:5]))
@@ -219,7 +225,7 @@ def write_suite(project: Path, suite_dir: str, payloads: Mapping[str, bytes], *,
     project = Path(project).resolve()
     directory = (project / suite_dir).resolve()
     directory.relative_to(project)
-    names = {**{name: SUITE_FILES[name] for name in SUITE_FILES}, "manifest": MANIFEST}
+    names = {**{name: SUITE_FILES[name] for name in SUITE_FILES}, "design": DESIGN_FILE, "manifest": MANIFEST}
     plan = []
     for name, data in payloads.items():
         target = directory / names[name]
