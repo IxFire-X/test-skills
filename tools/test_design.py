@@ -281,6 +281,79 @@ def sreq_design(stored: Mapping[str, Any], identities: Sequence[Mapping[str, Any
     return map_requirements(stored["design"], {row["key"]: row["source_requirement_id"] for row in identities})
 
 
+_KIND_PREFIX = {"parameters": "P", "partitions": "EQ", "boundaries": "BV", "rules": "DR", "combinations": "CB"}
+
+
+def _number(identifier: Any) -> int:
+    try:
+        return int(str(identifier).split("-", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def all_element_ids(design: Mapping[str, Any]) -> set[str]:
+    """Every element ID of a design (parameters and combinations included)."""
+    return {str(row.get("id")) for name in _KIND_PREFIX for row in _rows(design, name)}
+
+
+def merge_design(previous: Mapping[str, Any] | None, answer: Mapping[str, Any], redesigned: Iterable[str],
+                 full_factorial_max: int | None) -> dict[str, Any]:
+    """D1c: the suite design after an update.
+
+    ``previous`` is the suite design in the current SREQ numbers (with its combinations), ``answer`` the model's
+    design of the ``redesigned`` requirements.  Elements of other requirements keep their IDs; what only a redesigned
+    requirement named goes (its IDs are never reused); the answer's elements are numbered after the highest ID of each
+    kind; combinations are recomputed and a combination of the same partitions keeps its ID.
+    """
+    redesigned = set(redesigned)
+    empty = {"parameters": [], "partitions": [], "boundaries": [], "rules": [], "not_designed": []}
+    before = json.loads(canonical_bytes(previous)) if previous is not None else {"schema_version": SCHEMA_VERSION, "stage": "test-design",
+                                                                                   "artifacts": dict(empty), "warnings": []}
+    named = {item for name in ("parameters", "partitions", "rules") for row in _rows(before, name) for item in row.get("requirement_ids") or []}
+    named |= {row.get("requirement_id") for row in _rows(before, "not_designed")}
+    base = map_requirements(before, {item: item for item in named - redesigned})
+    highest = {prefix: max([_number(row.get("id")) for row in _rows(before, name)] or [0]) for name, prefix in _KIND_PREFIX.items()}
+    new = json.loads(canonical_bytes(answer["artifacts"]))
+    renames: dict[str, str] = {}
+    for name in ("parameters", "partitions", "boundaries", "rules"):
+        prefix = _KIND_PREFIX[name]
+        for row in new[name]:
+            highest[prefix] += 1
+            renames[row["id"]] = f"{prefix}-{highest[prefix]:03d}"
+    for name in ("parameters", "partitions", "boundaries", "rules"):
+        for row in new[name]:
+            row["id"] = renames[row["id"]]
+    for row in new["partitions"]:
+        row["parameter_id"] = renames.get(row["parameter_id"], row["parameter_id"])
+    for row in new["boundaries"]:
+        row["partition_id"] = renames.get(row["partition_id"], row["partition_id"])
+    for row in new["rules"]:
+        row["conditions"] = [{"ref": renames.get(item["ref"], item["ref"])} if "ref" in item else item for item in row["conditions"]]
+    artifacts = {name: [*base["artifacts"][name], *new[name]] for name in ("parameters", "partitions", "boundaries", "rules")}
+    designed = {row["requirement_id"] for row in new["not_designed"]}
+    artifacts["not_designed"] = [*(row for row in base["artifacts"]["not_designed"] if row["requirement_id"] not in designed), *new["not_designed"]]
+    merged = {"schema_version": SCHEMA_VERSION, "stage": "test-design", "artifacts": artifacts, "warnings": list(answer.get("warnings") or [])}
+    if full_factorial_max is not None:
+        old = {tuple(row["partition_ids"]): row["id"] for row in _rows(before, "combinations")}
+        rows = combinations(merged, full_factorial_max)
+        for row in rows:
+            key = tuple(row["partition_ids"])
+            if key in old:
+                row["id"] = old[key]
+            else:
+                highest["CB"] += 1
+                row["id"] = f"CB-{highest['CB']:03d}"
+        merged["artifacts"]["combinations"] = rows
+    return merged
+
+
+def plain_design(design: Mapping[str, Any]) -> dict[str, Any]:
+    """The design without its combinations (the shape of the stage's artifact)."""
+    value = json.loads(canonical_bytes(design))
+    value["artifacts"].pop("combinations", None)
+    return value
+
+
 def element_ids(design: Mapping[str, Any]) -> dict[str, str]:
     """Design element ID -> its kind (``partitions``, ``boundaries``, ``rules``, ``combinations``): the elements a case can name."""
     return {row.get("id"): name for name in ("partitions", "boundaries", "rules", "combinations") for row in _rows(design, name)}
@@ -290,11 +363,13 @@ def element_ids(design: Mapping[str, Any]) -> dict[str, str]:
 
 
 def fragment_design_problems(design_slice_value: Mapping[str, Any], cases: Sequence[Mapping[str, Any]],
-                             uncovered: Sequence[Mapping[str, Any]], mappings: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, str]]:
+                             uncovered: Sequence[Mapping[str, Any]], mappings: Sequence[Mapping[str, Any]] = (),
+                             covered_elsewhere: Iterable[str] = ()) -> list[dict[str, str]]:
     """The design references of one generator answer against its slice; any row refuses the answer.
 
     A case needs references unless every source requirement it covers (through ``mappings``, the answer's
-    ``source_to_canonical_mappings``) is declared not designed.
+    ``source_to_canonical_mappings``) is declared not designed.  ``covered_elsewhere`` (D1c: references of the
+    suite's unchanged cases) counts as covered.
     """
     elements = element_ids(design_slice_value)
     not_designed = {row.get("requirement_id") for row in _rows(design_slice_value, "not_designed")}
@@ -327,7 +402,7 @@ def fragment_design_problems(design_slice_value: Mapping[str, Any], cases: Seque
         elif ref in covered:
             rows.append(_row(f"/design_uncovered/{index}/ref", "DESIGN_UNCOVERED_CONFLICT", f"{ref} is covered by a case and declared uncovered"))
         declared.add(ref)
-    for ref in sorted(set(elements) - covered - declared):
+    for ref in sorted(set(elements) - covered - declared - set(covered_elsewhere)):
         rows.append(_row("/design_uncovered", "DESIGN_ELEMENT_UNCOVERED", f"{ref} is covered by no case and not declared uncovered"))
     for row in _rows(design_slice_value, "partitions"):
         ref = row.get("id")

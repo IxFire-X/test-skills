@@ -930,20 +930,29 @@ def _generator_schema(design: bool = False) -> dict[str, Any]:
             schema["properties"][name] = {"type": "array", "items": {"$ref": str(ROOT / "schemas" / items["$ref"])}}
     if design:
         # D1: the driver assigns the priority from the design; a case names its design elements.
-        canonical = ROOT / "schemas" / "canonical-test-document.schema.json"
-        case = deepcopy(json.loads(canonical.read_text(encoding="utf-8"))["$defs"]["test_case"])
-        case["properties"].pop("priority")
-        case["required"] = [name for name in case["required"] if name != "priority"]
-
-        def absolute(value: Any) -> Any:
-            if isinstance(value, dict):
-                return {key: (f"{canonical}{item}" if key == "$ref" and isinstance(item, str) and item.startswith("#") else absolute(item)) for key, item in value.items()}
-            return [absolute(item) for item in value] if isinstance(value, list) else value
-
-        schema["properties"]["test_cases"] = {"type": "array", "items": absolute(case)}
-        fragment = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
-        schema["properties"]["design_uncovered"] = fragment["properties"]["design_uncovered"]
+        schema["properties"]["test_cases"] = {"type": "array", "items": design_case_schema()}
+        schema["properties"]["design_uncovered"] = design_uncovered_schema()
     return schema
+
+
+def design_case_schema() -> dict[str, Any]:
+    """The canonical test case a model writes in a design run: no priority (code assigns it), refs resolved absolutely."""
+    canonical = ROOT / "schemas" / "canonical-test-document.schema.json"
+    case = deepcopy(json.loads(canonical.read_text(encoding="utf-8"))["$defs"]["test_case"])
+    case["properties"].pop("priority")
+    case["required"] = [name for name in case["required"] if name != "priority"]
+
+    def absolute(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: (f"{canonical}{item}" if key == "$ref" and isinstance(item, str) and item.startswith("#") else absolute(item)) for key, item in value.items()}
+        return [absolute(item) for item in value] if isinstance(value, list) else value
+
+    return absolute(case)
+
+
+def design_uncovered_schema() -> dict[str, Any]:
+    fragment = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
+    return fragment["properties"]["design_uncovered"]
 
 
 def _generator_task(project: Path, run_root: Path, attempt: Mapping[str, Any], config: Mapping[str, Any], marker: Mapping[str, Any],
