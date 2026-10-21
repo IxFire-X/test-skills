@@ -628,7 +628,9 @@ verification    = NOT_APPLICABLE
 `execution.mode` из `.skillsrc` ручной `scan` тоже учитывает.
 
 **Исполнение человеком (`execution.mode: human`).** По умолчанию (`auto`) сборку и тесты
-запускает пакет. С `.skillsrc` `execution: {mode: human}` или флагом
+запускает пакет. В хост-сборке (`python -m tools.release_manifest --list host`: без
+`tools/process_launch.py` и раннера модели) умолчание — `human`, а `auto` и `--review-runner process`
+дают ошибку `EXECUTION_MODE_UNAVAILABLE` / `RUNNER_UNAVAILABLE`. С `.skillsrc` `execution: {mode: human}` или флагом
 `next/run --execution-mode human` (фиксируется в квитанции авторизации,
 `execution_mode_human`) пакет не запускает ни сборку, ни тесты, ни мутации: после записи
 сгенерированных тестов (и одобрения, если включено `execution.review`) драйвер отвечает

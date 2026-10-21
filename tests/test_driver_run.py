@@ -255,7 +255,7 @@ def test_human_mode_runs_no_process_itself_and_measures_the_persons_pit_report(t
     the package starts no process, the mutation receipt is MEASURED with executor human."""
     import subprocess
 
-    from tools import mutation, run_tests
+    from tools import mutation, process_launch
     from tools.pilot_state import read_mutation_receipt_if_present
 
     monkeypatch.setenv("JAVA_HOME", str(JAVA_HOME))
@@ -268,7 +268,7 @@ def test_human_mode_runs_no_process_itself_and_measures_the_persons_pit_report(t
     def forbidden(*_args, **_kwargs):
         raise AssertionError("the package started a build, test or PIT process in human mode")
 
-    monkeypatch.setattr(run_tests, "run_subprocess", forbidden)
+    monkeypatch.setattr(process_launch, "run_subprocess", forbidden)
     monkeypatch.setattr(mutation, "_RUNNER", forbidden)
 
     def person(command: dict) -> None:  # the person runs a printed command in their own environment

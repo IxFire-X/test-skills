@@ -43,7 +43,7 @@ def _child_names(run) -> list[str]:
 
 
 def test_the_build_process_never_sees_a_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     monkeypatch.setenv("TS_DEMO_API_TOKEN", SECRET)
     monkeypatch.setenv("MAVEN_OPTS", "-Xmx512m")

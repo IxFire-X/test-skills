@@ -304,7 +304,9 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         review = execution_review(project, getattr(args, "execution_review", None))
         confirm = getattr(args, "confirm_context", None)
         confirm = confirm if isinstance(confirm, bool) else confirm_context(project, confirm)
-        mode = getattr(args, "execution_mode", None) or (execution_mode(project) if profile == "local-pilot-v1" else "auto")
+        # H1: the flag of a local-pilot run is checked too (auto is unavailable in the host delivery); cases-only runs nothing.
+        flag = getattr(args, "execution_mode", None)
+        mode = execution_mode(project, flag) if profile == "local-pilot-v1" else flag or "auto"
     except GateError as error:
         raise HostStop(error.code, str(error)) from error
     if review == "human" and profile == "local-pilot-v1":

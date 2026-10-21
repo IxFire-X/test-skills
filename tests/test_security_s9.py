@@ -14,14 +14,14 @@ import pytest
 
 from tests.test_review_fixes_driver import SavedModel, _drive, _project, _run_root, _start
 from tools import pipeline_driver as driver
-from tools import run_tests
+from tools import process_launch
 
 
 def _until_human(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **options) -> tuple[Path, Path, dict, SavedModel]:
     def forbidden(*_args, **_kwargs):
         raise AssertionError("the driver started a build or test process in human mode")
 
-    monkeypatch.setattr(run_tests, "run_subprocess", forbidden)
+    monkeypatch.setattr(process_launch, "run_subprocess", forbidden)
     project = _project(tmp_path, local=True)
     model = SavedModel("local-pilot-v1")
     task = _drive(project, _start(project, "local-pilot-v1", execution_mode="human", **options), model,

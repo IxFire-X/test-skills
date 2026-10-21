@@ -111,7 +111,8 @@ def test_controller_proved_timeout_allows_explicit_child_after_unknown(tmp_path:
     from tests.test_execution_receipt import _execution_facts
     from tools.execution_adapters import request_digest
     from tools.run_pipeline import _publish_execution_receipt
-    from tools.run_tests import _process_row, run_subprocess
+    from tools.run_tests import _process_row
+    from tools.process_launch import run_subprocess
 
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     timeout = _unknown_report(root, attempt_id, durable, request)

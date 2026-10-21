@@ -173,9 +173,9 @@ def test_request_digest_binds_every_closed_launch_fact(tmp_path: Path):
 
 def test_legacy_v3_entrypoint_is_process_free(tmp_path: Path, monkeypatch):
     """The unbound legacy API cannot bypass V5's run authorization gate."""
-    from tools import run_tests
+    from tools import process_launch, run_tests
 
-    monkeypatch.setattr(run_tests, "run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy process launch")))
+    monkeypatch.setattr(process_launch, "run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy process launch")))
     result = run_tests.run_tests_v3(
         tmp_path, "python",
         {"document_id": "TCDOC-legacy", "revision": 1},

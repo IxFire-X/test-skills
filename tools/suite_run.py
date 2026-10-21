@@ -12,7 +12,6 @@ import hashlib
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
@@ -21,7 +20,7 @@ from tools import execution_adapters as adapters
 from tools.quarantine import EXPLICIT_RUN
 from tools.suite_impact import junit_outcomes
 
-RUNNER: Callable[..., Any] = subprocess.run
+RUNNER: Callable[..., Any] | None = None  # None: tools.process_launch.run_completed (absent in the host delivery)
 _COMPILE_ERROR = re.compile(r"\[ERROR\]\s+(?:/)?([A-Za-z]:)?([^\s\[]+\.java):\[(\d+)")
 # javac through Gradle (and plain javac): ``path/File.java:42: error: …``
 _JAVAC_ERROR = re.compile(r"^(?:/)?([A-Za-z]:)?(\S[^\n:]*?\.java):(\d+): error:", re.M)
@@ -254,7 +253,14 @@ def run_once(project: Path, module: Mapping[str, Any], selectors: Sequence[str],
         from tools.child_environment import build_environment
 
         # S11 A3: the suite runs the project's code — it starts without secret-like variables, like run_tests and PIT.
-        completed = RUNNER(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False, env=build_environment())
+        runner = RUNNER
+        if runner is None:
+            from tools.delivery_profile import EXECUTION_MODE_UNAVAILABLE, needs
+
+            with needs(EXECUTION_MODE_UNAVAILABLE):
+                from tools.process_launch import run_completed
+            runner = run_completed
+        completed = runner(argv, cwd=str(layout.build_root), capture_output=True, text=True, timeout=timeout, check=False, env=build_environment())
     output = (completed.stdout or "") + (completed.stderr or "")
     rows = _report_rows(report_dir)
     compile_lines = compile_lines_of(output)

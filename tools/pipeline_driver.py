@@ -44,6 +44,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
+from tools.delivery_profile import EXECUTION_MODE_UNAVAILABLE, RUNNER_UNAVAILABLE
+
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("cases-only-v1", "local-pilot-v1")
 SUITE_PROFILE = "suite-update-v1"  # optional profile (contract amendment A5): tools.suite_update
@@ -425,6 +427,8 @@ def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]
     An explicit ``--runner-dir`` inside the project is the operator's choice (S2b: a policy that keeps everything in the
     project); the run then warns about such linters in the driver-log.
     """
+    if options.get("review_runner") == "process" or options.get("require_driver_isolation"):
+        _require_part(RUNNER_UNAVAILABLE)
     if options.get("review_runner") != "process":
         if options.get("review_runner_command") or options.get("review_runner_preset") or options.get("review_runner_cli") or options.get("runner_dir"):
             raise DriverError("DRIVER_INPUT", "--review-runner-preset/-command/-cli and --runner-dir need --review-runner process")
@@ -447,6 +451,24 @@ def _runner_options(options: Mapping[str, Any], project: Path) -> dict[str, Any]
     return {"reviewer_isolation": "fresh", "review_runner": {"mode": "process", "preset": options.get("review_runner_preset"), "command": command,
                                                              "cli": options.get("review_runner_cli"), "dir": str(base),
                                                              **({"inside_project": True} if inside else {})}}
+
+
+def _require_part(code: str) -> None:
+    """H1: a part the host delivery leaves out (process launch, the model process runner) is a driver error, not a traceback."""
+    from tools.delivery_profile import ProfileUnavailable, require
+
+    try:
+        require(code)
+    except ProfileUnavailable as error:
+        raise DriverError(error.code, str(error)) from error
+
+
+def _require_saved_parts(config: Mapping[str, Any]) -> None:
+    """A run started by a build with these parts (its settings are saved) stops before any step of a copy without them."""
+    if (config.get("review_runner") or {}).get("mode") == "process" or config.get("require_driver_isolation"):
+        _require_part(RUNNER_UNAVAILABLE)
+    if config.get("profile") in {"local-pilot-v1", SUITE_PROFILE} and config.get("execution_mode", "auto") != "human":
+        _require_part(EXECUTION_MODE_UNAVAILABLE)
 
 
 def _execution_review(project: Path, options: Mapping[str, Any]) -> str:
@@ -1482,11 +1504,13 @@ def _review_step(project: Path, run_root: Path, attempt: Mapping[str, Any], conf
     """
     from tools.pilot_state import available_review_parts, sequential_review_part_ids
 
-    from tools import pipeline_driver_runner as runner
-
-    if runner.enabled(config):
+    if (config.get("review_runner") or {}).get("mode") == "process":
         # Opt-in process runner: the driver runs the parts itself and answers with `wait`.
-        return runner.review_step(project, run_root, attempt, dict(config), review_key)
+        from tools.delivery_profile import needs
+
+        with needs(RUNNER_UNAVAILABLE):
+            from tools.pipeline_driver_runner import review_step
+        return review_step(project, run_root, attempt, dict(config), review_key)
     attempt_id = str(attempt["attempt_id"])
     limit = max(1, int(config.get("_max_tasks") or 1))
     tasks = [{**task, "warnings": _self_review_warnings(run_root, attempt_id, review_key)} if task.get("warnings") is not None else task
@@ -1789,6 +1813,7 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
     """
     from tools import suite_update
 
+    _require_saved_parts(_config(run_root))
     if suite_update.is_suite_run(run_root):
         return suite_update.advance(project, run_root, max_tasks=max_tasks, human=human)
     from tools.pilot_state import design_required, finish_review, prepare_review, read_effective_canonical_if_present
@@ -1903,6 +1928,7 @@ def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None =
     project = Path(project).resolve()
     from tools import suite_update
 
+    _require_saved_parts(_config(run_root))
     if suite_update.is_suite_run(run_root):
         return suite_update.submit(project, run_root, task_id, output=output, failed=failed, reason=reason, answer=answer)
     path = _task_path(run_root, task_id)
@@ -2194,7 +2220,14 @@ _START_OPTIONS = ("profile", "docs", "module", "target", "subject", "document_id
 
 def _run_command(args: argparse.Namespace, project: Path, entry: dict[str, Any], started: float) -> int:
     """``run --runner process``: the whole run without an orchestrating session."""
-    from tools.pipeline_driver_run import run as run_without_orchestrator
+    from tools.delivery_profile import ProfileUnavailable, needs
+
+    try:
+        with needs(RUNNER_UNAVAILABLE):
+            from tools.pipeline_driver_run import run as run_without_orchestrator
+    except ProfileUnavailable as error:
+        print(json.dumps({"action": "error", "code": error.code, "message": str(error)}, ensure_ascii=False, sort_keys=True))
+        return 2
 
     answers: dict[str, str] = {}
     if args.answers:
@@ -2247,6 +2280,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         return _run_command(args, project, entry, started)
+    from tools.delivery_profile import ProfileUnavailable
+
     try:
         if args.command == "next" and not args.run:
             payload = start_run(project, {key: getattr(args, key) for key in (
@@ -2273,6 +2308,8 @@ def main(argv: list[str] | None = None) -> int:
                                          transport_attempts=args.transport_attempts)
     except DriverError as error:
         return failure(error.code, str(error), error.diagnostics)
+    except ProfileUnavailable as error:  # a lazy import of a part this copy leaves out (tools.delivery_profile.needs)
+        return failure(error.code, str(error))
     except Exception as error:  # every other failure is a driver defect; its traceback goes to the service log
         return failure("DRIVER_FAILURE", f"{type(error).__name__}: {error}")
     _log_command(project, args.run or payload.get("run_id"), entry, payload, started)

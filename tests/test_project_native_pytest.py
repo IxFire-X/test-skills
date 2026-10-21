@@ -396,7 +396,7 @@ def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_p
     shutil.copytree(fixture, project)
     _module_python(project)
     document, artifact, static_review, evidence, run_root, attempt_id, _authorization, delta = _reviewed_inputs(project)
-    monkeypatch.setattr("tools.run_tests.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
+    monkeypatch.setattr("tools.process_launch.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
 
     denied = run_tests_v5(
         _request(project, document, artifact), _sealed_authorization(profile="cases-only-v1", execution_requested=False),
@@ -441,7 +441,7 @@ def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp
         report_paths=("test-results/pytest.xml",),
         environment_labels=("PROJECT_NATIVE_ENV",),
     )
-    monkeypatch.setattr("tools.run_tests.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
+    monkeypatch.setattr("tools.process_launch.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
 
     result = run_tests_v5(
         forged, authorization, document, artifact, static_review,

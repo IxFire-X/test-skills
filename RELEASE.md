@@ -10,6 +10,11 @@
 compatibility contract `portable-cli-v1`, execution profile `v1`, policies, adapters,
 model-stage registry and `pilot-critical-v1` release-eval suite. The manifest is
 persisted but excluded from its own runtime registry to avoid a self-digest cycle.
+`evals/` is in `maintainer_registry`, outside the runtime registry. `delivery_profiles`
+names the `host` delivery (H1): the runtime registry without process launch, the model
+process runner, the CI gate and the maintainer files; `python -m tools.release_manifest
+--list host` prints its files and `python -m tools.doctor --root <copy>` reports the profile
+of a copy (`delivery_profile`) by its exact runtime file set.
 
 `implemented_unverified` is deliberate: a green local implementation gate does not
 prove a CLI/host/model/project tuple. This release must not claim broad Python, Java,

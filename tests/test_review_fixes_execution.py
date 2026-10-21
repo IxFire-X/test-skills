@@ -126,7 +126,8 @@ def _classify(**overrides):
 
 def test_m12_launch_oserror_is_not_runnable_launch_failed_and_cleans_up(tmp_path, monkeypatch):
     """A process that cannot be launched never ran the tests: NOT_RUNNABLE, not UNKNOWN."""
-    from tools.run_tests import ProcessOutcome, run_subprocess
+    from tools.run_tests import ProcessOutcome
+    from tools.process_launch import run_subprocess
 
     missing = run_subprocess([str(tmp_path / "no-such-launcher")], tmp_path, timeout=5)
     assert (missing.kind, missing.exit_code) == ("OS_ERROR", 127)
@@ -600,7 +601,7 @@ def _pid_alive(pid: int) -> bool:
 @pytest.mark.skipif(not Path("/proc/self/stat").is_file(), reason="needs a Linux process table")
 def test_r13_posix_proof_covers_a_daemon_that_left_the_process_group(tmp_path):
     """A setsid daemon (the Gradle daemon pattern) used to survive behind a 'proved' stop."""
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     pid_file = tmp_path / "daemon.pid"
     daemon = (
@@ -648,7 +649,7 @@ def _windows_pid_alive(pid: int) -> bool:
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object stop path")
 def test_r13_windows_job_stop_covers_a_detached_grandchild(tmp_path):
     """A detached grandchild (the Gradle daemon pattern on Windows) dies with the job."""
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     pid_file = tmp_path / "grandchild.pid"
     grandchild = tmp_path / "grandchild.py"
@@ -683,24 +684,24 @@ def test_r13_windows_job_stop_covers_a_detached_grandchild(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX stop path")
 def test_r13_posix_proof_is_withheld_when_the_scope_cannot_be_verified(tmp_path, monkeypatch):
-    from tools import run_tests
+    from tools import process_launch
 
-    monkeypatch.setattr(run_tests, "_STOP_WAIT_SECONDS", 0.3)
+    monkeypatch.setattr(process_launch, "_STOP_WAIT_SECONDS", 0.3)
     sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
 
-    monkeypatch.setattr(run_tests, "_posix_process_table", lambda _marker=None: None)
-    unknown = run_tests.run_subprocess(sleeper, tmp_path, timeout=1)
+    monkeypatch.setattr(process_launch, "_posix_process_table", lambda _marker=None: None)
+    unknown = process_launch.run_subprocess(sleeper, tmp_path, timeout=1)
     assert (unknown.kind, unknown.process_scope_stopped, unknown.stop_proof) == ("TIMEOUT", False, None)
 
     # A marked process that stays alive (it ignores the kill in this fake table) blocks the proof.
     survivor = 2 ** 22 + 7
-    monkeypatch.setattr(run_tests, "_posix_process_table", lambda _marker=None: [(survivor, 1, survivor, True)])
-    escaped = run_tests.run_subprocess(sleeper, tmp_path, timeout=1)
+    monkeypatch.setattr(process_launch, "_posix_process_table", lambda _marker=None: [(survivor, 1, survivor, True)])
+    escaped = process_launch.run_subprocess(sleeper, tmp_path, timeout=1)
     assert (escaped.kind, escaped.process_scope_stopped, escaped.stop_proof) == ("TIMEOUT", False, None)
 
 
 def test_r13_posix_scope_contains_group_marked_and_descendant_processes():
-    from tools.run_tests import _posix_scope_pids
+    from tools.process_launch import _posix_scope_pids
 
     table = [
         (100, 1, 100, False),    # the launched group leader
@@ -731,7 +732,7 @@ class _FakeProcess:
 
 def _fake_windows_api(monkeypatch, *, assign=True, resume=True, terminate=True, active=(0,)):
     """Replace every kernel call; return the ordered call log."""
-    from tools import run_tests
+    from tools import process_launch
 
     log: list[object] = []
     remaining = list(active)
@@ -740,73 +741,73 @@ def _fake_windows_api(monkeypatch, *, assign=True, resume=True, terminate=True, 
         log.append(("popen", kwargs.get("creationflags")))
         return _FakeProcess()
 
-    monkeypatch.setattr(run_tests.subprocess, "Popen", popen)
-    monkeypatch.setattr(run_tests, "_windows_create_kill_job", lambda: log.append("create") or 900)
-    monkeypatch.setattr(run_tests, "_windows_assign_job", lambda job, process: log.append("assign") or assign)
-    monkeypatch.setattr(run_tests, "_windows_resume_process", lambda process: log.append("resume") or resume)
-    monkeypatch.setattr(run_tests, "_windows_terminate_job", lambda job: log.append("terminate") or terminate)
-    monkeypatch.setattr(run_tests, "_windows_wait_process", lambda process, milliseconds: log.append("wait") or True)
-    monkeypatch.setattr(run_tests, "_windows_job_active_processes", lambda job: (log.append("query"), remaining.pop(0) if len(remaining) > 1 else remaining[0])[1])
-    monkeypatch.setattr(run_tests, "_close_windows_handle", lambda handle: log.append(("close", handle)) or True)
-    monkeypatch.setattr(run_tests, "_terminate_process_tree", lambda process: log.append("taskkill"))
-    monkeypatch.setattr(run_tests, "_STOP_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(process_launch.subprocess, "Popen", popen)
+    monkeypatch.setattr(process_launch, "_windows_create_kill_job", lambda: log.append("create") or 900)
+    monkeypatch.setattr(process_launch, "_windows_assign_job", lambda job, process: log.append("assign") or assign)
+    monkeypatch.setattr(process_launch, "_windows_resume_process", lambda process: log.append("resume") or resume)
+    monkeypatch.setattr(process_launch, "_windows_terminate_job", lambda job: log.append("terminate") or terminate)
+    monkeypatch.setattr(process_launch, "_windows_wait_process", lambda process, milliseconds: log.append("wait") or True)
+    monkeypatch.setattr(process_launch, "_windows_job_active_processes", lambda job: (log.append("query"), remaining.pop(0) if len(remaining) > 1 else remaining[0])[1])
+    monkeypatch.setattr(process_launch, "_close_windows_handle", lambda handle: log.append(("close", handle)) or True)
+    monkeypatch.setattr(process_launch, "_terminate_process_tree", lambda process: log.append("taskkill"))
+    monkeypatch.setattr(process_launch, "_STOP_WAIT_SECONDS", 0.2)
     return log
 
 
 def test_r13_windows_process_is_assigned_to_the_job_before_it_is_resumed(monkeypatch):
     """Windows branch on fakes (the real kernel32 calls cannot run on this host)."""
-    from tools import run_tests
+    from tools import process_launch
 
     log = _fake_windows_api(monkeypatch)
-    process, job = run_tests._start_windows_scoped_process(["tool"], {"cwd": "."})
+    process, job = process_launch._start_windows_scoped_process(["tool"], {"cwd": "."})
 
     assert job == 900
     creationflags = log[0][1]
     assert creationflags & 0x00000004, "CREATE_SUSPENDED: no child may exist before the job assignment"
     assert log[1:] == ["create", "assign", "resume"]
 
-    assert run_tests._stop_windows_scope(process, job) == "WINDOWS_JOB_TERMINATED"
+    assert process_launch._stop_windows_scope(process, job) == "WINDOWS_JOB_TERMINATED"
     assert log[4:] == ["terminate", "wait", "query", ("close", 900)]
 
 
 def test_r13_windows_proof_requires_assignment_termination_and_an_empty_job(monkeypatch):
-    from tools import run_tests
+    from tools import process_launch
 
     # Assignment failed: the process still runs, but no proof can ever be issued.
     log = _fake_windows_api(monkeypatch, assign=False)
-    process, job = run_tests._start_windows_scoped_process(["tool"], {})
+    process, job = process_launch._start_windows_scoped_process(["tool"], {})
     assert job is None and ("close", 900) in log and "resume" in log
-    assert run_tests._stop_windows_scope(process, job) is None
+    assert process_launch._stop_windows_scope(process, job) is None
     assert log[-1] == "taskkill"
 
     # TerminateJobObject failed.
     log = _fake_windows_api(monkeypatch, terminate=False)
-    process, job = run_tests._start_windows_scoped_process(["tool"], {})
-    assert run_tests._stop_windows_scope(process, job) is None
+    process, job = process_launch._start_windows_scoped_process(["tool"], {})
+    assert process_launch._stop_windows_scope(process, job) is None
     assert ("close", 900) in log
 
     # The job still reports a live process after the wait.
     log = _fake_windows_api(monkeypatch, active=(2,))
-    process, job = run_tests._start_windows_scoped_process(["tool"], {})
-    assert run_tests._stop_windows_scope(process, job) is None
+    process, job = process_launch._start_windows_scoped_process(["tool"], {})
+    assert process_launch._stop_windows_scope(process, job) is None
 
     # The accounting query is unavailable.
     log = _fake_windows_api(monkeypatch, active=(None,))
-    process, job = run_tests._start_windows_scoped_process(["tool"], {})
-    assert run_tests._stop_windows_scope(process, job) is None
+    process, job = process_launch._start_windows_scoped_process(["tool"], {})
+    assert process_launch._stop_windows_scope(process, job) is None
 
     # Processes drain from the job shortly after termination.
     log = _fake_windows_api(monkeypatch, active=(1, 0))
-    process, job = run_tests._start_windows_scoped_process(["tool"], {})
-    assert run_tests._stop_windows_scope(process, job) == "WINDOWS_JOB_TERMINATED"
+    process, job = process_launch._start_windows_scoped_process(["tool"], {})
+    assert process_launch._stop_windows_scope(process, job) == "WINDOWS_JOB_TERMINATED"
 
 
 def test_r13_windows_process_that_cannot_be_resumed_is_a_launch_failure(monkeypatch):
-    from tools import run_tests
+    from tools import process_launch
 
     log = _fake_windows_api(monkeypatch, resume=False)
     with pytest.raises(OSError):
-        run_tests._start_windows_scoped_process(["tool"], {})
+        process_launch._start_windows_scoped_process(["tool"], {})
     assert "terminate" in log and ("close", 900) in log
 
 
@@ -843,7 +844,7 @@ HOST_STOP_PROOF = "WINDOWS_JOB_TERMINATED" if os.name == "nt" else "POSIX_PROCES
 
 def test_r13_unknown_with_valid_proof_finalizes_and_allows_a_child_attempt(tmp_path, monkeypatch):
     from tools.pilot_state import derive_state
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     run = _LightRun(tmp_path)
 
@@ -869,7 +870,8 @@ def test_r13_unknown_with_valid_proof_finalizes_and_allows_a_child_attempt(tmp_p
 
 def test_m15_output_tail_keeps_64_kib_and_decodes_the_windows_console_code_page(tmp_path):
     from tools.pilot_state import _canonical_runner_output
-    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES, _decode_process_output, run_subprocess
+    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES
+    from tools.process_launch import _decode_process_output, run_subprocess
 
     assert PROCESS_OUTPUT_TAIL_BYTES == 64 * 1024
     text = "Ошибка компиляции: не найден символ"
@@ -933,7 +935,7 @@ def test_m16_launch_environment_records_names_and_digests_never_values(tmp_path,
 
 
 def test_m16_child_process_inherits_path_and_launch_variables_unchanged(tmp_path, monkeypatch):
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     monkeypatch.setenv("MAVEN_OPTS", "-Xmx64m")
     outcome = run_subprocess(

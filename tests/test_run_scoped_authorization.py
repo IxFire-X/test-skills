@@ -108,7 +108,8 @@ def test_runner_v5_unknown_preserves_non_authoritative_timeout_receipt() -> None
 def test_subprocess_preserves_non_locale_output_with_bounded_memory_tail(tmp_path: Path) -> None:
     import os
     import sys
-    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES, run_subprocess
+    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES
+    from tools.process_launch import run_subprocess
 
     outcome = run_subprocess(
         [sys.executable, "-c", "import os; os.write(1, b'x' * 70000 + b'\\n\\x98done\\n'); os.write(2, 'Привет'.encode('utf-8'))"],
@@ -128,7 +129,7 @@ def test_controller_timeout_records_os_process_scope_stop(tmp_path: Path) -> Non
     import os
     import sys
 
-    from tools.run_tests import run_subprocess
+    from tools.process_launch import run_subprocess
 
     outcome = run_subprocess(
         [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -148,10 +149,10 @@ def test_controller_timeout_records_os_process_scope_stop(tmp_path: Path) -> Non
 def test_windows_job_assignment_failure_is_not_process_stop_proof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    from tools import run_tests
+    from tools import process_launch
 
-    monkeypatch.setattr(run_tests, "_assign_windows_kill_job", lambda _process: None)
-    outcome = run_tests.run_subprocess(
+    monkeypatch.setattr(process_launch, "_assign_windows_kill_job", lambda _process: None)
+    outcome = process_launch.run_subprocess(
         [sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, timeout=1,
     )
 
