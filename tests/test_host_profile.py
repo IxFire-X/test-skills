@@ -111,7 +111,7 @@ def test_the_host_list_leaves_out_process_parts_maintainer_files_and_archives() 
     manifest = json.loads((ROOT / "release" / "manifest.json").read_text(encoding="utf-8"))
     excluded = {row["id"]: row for row in manifest["delivery_profiles"]}["host"]["excluded"]
     assert "schemas/company-execution-receipt.schema.json" in excluded  # read only by company_runner
-    assert {row["path"] for row in manifest["registry"]} - set(excluded) == {path for path in host if path.startswith(("contracts/", "schemas/", "skills/", "tools/")) and Path(path).suffix in {".json", ".md", ".py", ".gradle"}}
+    assert {row["path"] for row in manifest["registry"]} - set(excluded) == {path for path in host if path == "ts.py" or path.startswith(("contracts/", "schemas/", "skills/", "tools/")) and Path(path).suffix in {".json", ".md", ".py", ".gradle"}}
 
 
 def test_the_list_command_prints_one_path_per_line() -> None:

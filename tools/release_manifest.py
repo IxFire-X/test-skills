@@ -25,6 +25,7 @@ PACKAGE_VERSION = "0.5.0-pilot"
 COMPATIBILITY_VERSION = "portable-cli-v1"
 EXECUTION_PROFILE_VERSION = "v1"
 RUNTIME_ROOTS = ("contracts", "schemas", "skills", "tools")
+RUNTIME_FILES = ("ts.py",)  # the launcher at the pack root (H1 B7)
 MAINTAINER_ROOTS = ("evals",)
 RUNTIME_SUFFIXES = {".json", ".md", ".py", ".gradle"}
 PROFILES = ("universal", "host")
@@ -54,7 +55,7 @@ def _manifest_digest(value: Mapping[str, Any]) -> str:
 
 
 def _runtime_paths(root: Path, roots: tuple[str, ...] = RUNTIME_ROOTS) -> list[Path]:
-    paths: list[Path] = []
+    paths: list[Path] = [root / name for name in RUNTIME_FILES if roots == RUNTIME_ROOTS and (root / name).is_file()]
     for directory in roots:
         base = root / directory
         if not base.is_dir():
