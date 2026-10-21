@@ -5,7 +5,7 @@ description: >-
   независимое ревью моделью, автотесты и прогон этих тестов сборкой проекта. Исполняемое приложение на Python
   (оркестратор operate.py и пакет tools/), а не текстовая инструкция для модели.
 metadata:
-  version: "0.5.0-pilot (пакет 2042d46 ветки main; комплект — ветка demo-kit-20261015)"
+  version: "0.5.0-pilot (пакет 9be8769 ветки main; комплект — ветка demo-kit-20261015)"
   display_name: test-skills — комплект внутреннего прогона
   owner: IxFire-X
   skill_type: executable
@@ -63,5 +63,5 @@ metadata:
   (approve-generated-tests); с `--execution-mode human` пакет их не запускает вовсе, а печатает точные команды, которые
   выполняет человек (RUN.md, «Исполнение человеком»).
 - Стадия тест-дизайна: +1 вызов модели, выключение `.skillsrc` `design.enabled: false`; покрытие дизайна и приоритеты —
-  в сводке `report/summary.md` (RUN.md, «Стадия тест-дизайна»).
+  в сводке `report/summary.md` (RUN.md, «Стадия тест-дизайна»); комбинации CB-: полный перебор до `design.full_factorial_max` (16), иначе попарно; ревьюер проверяет кейсы по дизайну — находки `DESIGN_*`.
 - Запуск: `python3 operate.py …` (RUN.md, «Запуск одним скриптом»); ни один скрипт не исполняется по shebang.

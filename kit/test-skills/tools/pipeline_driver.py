@@ -869,12 +869,21 @@ def _submit_test_design(run_root: Path, attempt: Mapping[str, Any], task: Mappin
     publish_model_stage_artifact(run_root, attempt_id, _DESIGN_STAGE, artifact, transport_attempts=int(task.get("transport_attempts", 1)))
 
 
+def _run_combinations(run_root: Path, design: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+    """D1b: the combinations of the design from the run's recorded threshold (None for a run before D1b)."""
+    from tools.pilot_state import design_combinations, run_authorization
+
+    return design_combinations(run_authorization(run_root), design)
+
+
 def _batch_design(run_root: Path, attempt_id: str, batch: Mapping[str, Any]) -> dict[str, Any] | None:
     """The design slice of one generator batch, or None in a run without the design stage."""
     from tools.test_design import design_slice
 
     design = _design_artifact(run_root, attempt_id)
-    return None if design is None else design_slice(design["artifact"], batch["owned_source_requirement_ids"])
+    if design is None:
+        return None
+    return design_slice(design["artifact"], batch["owned_source_requirement_ids"], _run_combinations(run_root, design["artifact"]))
 
 
 def _generator_input_digests(marker: Mapping[str, Any], context: Mapping[str, Any], plan: Mapping[str, Any], batch_design: Mapping[str, Any] | None) -> list[str]:
@@ -1177,7 +1186,7 @@ def _apply_design(batch_design: Mapping[str, Any], value: Mapping[str, Any]) -> 
 def design_coverage(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     """D1: coverage of the attempt's design by its effective cases (None without a design or an effective document)."""
     from tools.pilot_state import read_effective_canonical_if_present, read_model_stage_artifact
-    from tools.test_design import coverage, priority_counts
+    from tools.test_design import coverage, priority_counts, with_combinations
 
     attempt_id = str(attempt["attempt_id"])
     design = _design_artifact(run_root, attempt_id)
@@ -1188,7 +1197,8 @@ def design_coverage(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
     uncovered = [row for event in _events(run_root, attempt_id)
                  if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and str(event.get("stage_instance_id") or "").startswith("tc-generator:")
                  for row in read_model_stage_artifact(run_root, attempt_id, event["stage_instance_id"], event["artifact_digest"])["artifact"].get("design_uncovered", [])]
-    return {**coverage(design["artifact"], cases, uncovered), "priorities": priority_counts(cases)}
+    combined = with_combinations(design["artifact"], _run_combinations(run_root, design["artifact"]))
+    return {**coverage(combined, cases, uncovered), "priorities": priority_counts(cases)}
 
 
 def _merge_rework(run_root: Path, rework: Mapping[str, Any], batch: Mapping[str, Any], value: Mapping[str, Any]) -> dict[str, Any]:
@@ -1343,6 +1353,11 @@ def _review_payload(project: Path, run_root: Path, attempt: Mapping[str, Any], c
 
         kind, key = ("tc-reviewer", "canonical") if automation is None else ("autotest-reviewer", "automation")
         payload = compact_payload(payload, review_policy(kind, instructions=_REVIEW_INSTRUCTIONS[key], model_id=config.get("model_id")))
+        design = _design_artifact(run_root, str(attempt["attempt_id"])) if automation is None else None
+        if design is not None:  # D1b: the case reviewer checks the cases against the design
+            from tools.test_design import with_combinations
+
+            payload["design"] = with_combinations(design["artifact"], _run_combinations(run_root, design["artifact"]))
     return payload
 
 

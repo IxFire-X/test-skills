@@ -116,6 +116,7 @@ def _durable(
             "read_execution_inputs": read_execution_inputs,
             "read_model_request": read_model_request,
             "read_model_stage_artifact": read_model_stage_artifact,
+            "authorization": run["authorization"],
         }, context
     except (KeyError, OSError, TypeError, ValueError):
         _error(errors, "DURABLE_CONTEXT_INVALID")
@@ -276,13 +277,15 @@ def _model_event_errors(
 
 
 
-def _design_slice_digests(design: Mapping[str, Any] | None, fragment: Mapping[str, Any]) -> list[str]:
-    """D1: the design slice a generator request of a design run binds as its fifth input."""
+def _design_slice_digests(design: Mapping[str, Any] | None, fragment: Mapping[str, Any], authorization: Mapping[str, Any]) -> list[str]:
+    """D1: the design slice a generator request of a design run binds as its fifth input (D1b: with the combinations
+    of the threshold the run recorded)."""
     if design is None:
         return []
+    from tools.pilot_state import design_combinations
     from tools.test_design import design_slice, digest
 
-    return [digest(design_slice(design, fragment.get("owned_source_requirement_ids") or []))]
+    return [digest(design_slice(design, fragment.get("owned_source_requirement_ids") or [], design_combinations(authorization, design)))]
 
 
 def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledger: Mapping[str, Any], durable: Mapping[str, Any], errors: list[str]) -> str:
@@ -494,7 +497,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             or row.get("input_digests") != [
                 context_marker_digest, batch["context_receipt_digest"],
                 fragment.get("plan_digest"), fragment.get("header_digest"),
-                *_design_slice_digests(design_artifact, fragment),
+                *_design_slice_digests(design_artifact, fragment, durable["authorization"]),
             ]
             or row.get("output_digests") != [batch["digest"]]
             or not _label(row.get("model_id"))

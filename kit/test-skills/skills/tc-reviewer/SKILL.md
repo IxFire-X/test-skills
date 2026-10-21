@@ -87,6 +87,17 @@ Answer with exactly `coverage`, `findings`, `corrections`, `lint_dispositions` a
   and write the finding yourself.
 - `required_checks`: `case_ids`/`requirement_ids` and `reason` for evidence outside the part.
 
+In a run with the test design stage, a part also shows «Тест-дизайн кейсов этой части»: the
+parameters, equivalence partitions, boundaries, rules and combinations of its cases'
+requirements, each with its anchor (`[EQ-003]`, `[DR-002]`, `[CB-001]`), and every case lists
+its `design_refs`. Code has already counted that every element is covered or declared
+uncovered; do not derive the completeness of the requirements again. Check the meaning:
+a case really exercises each partition, boundary or combination it names
+(`DESIGN_REF_WRONG`); a case on a rule expects the rule's `expected` outcome
+(`DESIGN_EXPECTED_MISMATCH`); an invalid partition is tested by a negative case that expects a
+rejection, not a success (`DESIGN_NEGATIVE_WRONG`). Name the case and the design ID in
+`related_ids`; a wrong expectation is BLOCKING.
+
 The controller rejects an answer whose refs are not anchors of the part, whose case area
 cites no anchor of its own case, that leaves a suspicion unanswered, has more than 5 INFO
 findings or names unknown IDs. Fix the answer and submit again.

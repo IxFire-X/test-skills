@@ -1471,7 +1471,9 @@ def _design_figures(result: dict[str, Any], project: Path) -> list[tuple[str, st
 
     uncovered = covered.get("uncovered") or []
     coverage = ", ".join(share(name, label) for name, label in (("partitions", "разбиения"), ("boundaries", "границы"), ("rules", "правила"),
-                                                                 ("negative_partitions", "невалидные разбиения негативными кейсами")))
+                                                                 ("combinations", "комбинации CB"),
+                                                                 ("negative_partitions", "невалидные разбиения негативными кейсами"))
+                         if name in covered)  # combinations: package with D1b
     coverage += f"; не покрыто с причиной: {len(uncovered)}" + (" (" + ", ".join(str(row.get("ref")) for row in uncovered[:10])
                                                                + (", …" if len(uncovered) > 10 else "") + ")" if uncovered else "")
     priorities = covered.get("priorities") or {}

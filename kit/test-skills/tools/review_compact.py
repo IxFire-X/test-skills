@@ -268,6 +268,29 @@ class _Context:
         self.index = "\n".join(f"{case_id} · {', '.join(self.case_requirements[case_id])} · {self.case_titles[case_id]}" for case_id in self.case_order)
         self.source_docs = [(f"SRC-{number}", source) for number, source in enumerate(payload["sources"], start=1)]
         self.context_docs = [(f"CTX-{number}", source) for number, source in enumerate(payload.get("contexts") or [], start=1)]
+        # D1b: the test design of a design run (with its combinations); None keeps every text and fingerprint as before.
+        self.design = payload.get("design")
+        self.case_sources: dict[str, list[str]] = {}
+        if self.design is not None:
+            sources: dict[str, set[str]] = {}
+            for row in document["source_to_canonical_mappings"]:
+                for creq in row["canonical_requirement_ids"]:
+                    sources.setdefault(creq, set()).add(row["source_requirement_id"])
+            self.case_sources = {case["case_id"]: sorted({item for creq in case["requirement_ids"] for item in sources.get(creq, ())})
+                                 for case in document["test_cases"]}
+
+    def design_for(self, case_ids: Sequence[str]) -> dict[str, Any] | None:
+        """The design slice of the source requirements of ``case_ids`` (None without a design)."""
+        if self.design is None:
+            return None
+        from tools.test_design import design_slice
+
+        owned = sorted({item for case_id in case_ids for item in self.case_sources.get(case_id, [])})
+        return design_slice(self.design, owned, self.design["artifacts"].get("combinations"))
+
+    def design_text(self, case_ids: Sequence[str]) -> str:
+        sliced = self.design_for(case_ids)
+        return "" if sliced is None else "\n".join(design_lines(sliced))
 
     def source_items(self) -> list[dict[str, Any]]:
         """Everything the source area compares, as packable items in a fixed order."""
@@ -289,11 +312,31 @@ class _Context:
         return [requirement["requirement_id"] for requirement in self.document["requirements"] if requirement["requirement_id"] in linked]
 
     def case_fingerprint(self, case_id: str) -> str:
-        """Everything the case area of ``case_id`` is answered from."""
-        return review_digest({"case": self.cases[case_id],
-                              "requirements": [self.requirements[item] for item in self.requirement_ids_for([case_id])],
-                              "capabilities": [self.capabilities[item] for item in self.case_capabilities[case_id] if item in self.capabilities],
-                              "lint": [row for row in self.lint if case_id in row["case_ids"]]})
+        """Everything the case area of ``case_id`` is answered from (D1b: and the design of its requirements)."""
+        inputs = {"case": self.cases[case_id],
+                  "requirements": [self.requirements[item] for item in self.requirement_ids_for([case_id])],
+                  "capabilities": [self.capabilities[item] for item in self.case_capabilities[case_id] if item in self.capabilities],
+                  "lint": [row for row in self.lint if case_id in row["case_ids"]]}
+        if self.design is not None:
+            inputs["design"] = self.design_for([case_id])
+        return review_digest(inputs)
+
+
+_DESIGN_ID = re.compile(r"^(?:P|EQ|BV|DR|CB)-[0-9]{3,}$")
+
+
+def design_lines(sliced: Mapping[str, Any]) -> list[str]:
+    """One anchored line per design element of a slice: parameters, partitions, boundaries, rules, combinations."""
+    artifacts = sliced["artifacts"]
+    lines = [f"[{row['id']}] параметр «{row['name']}» ({row['kind']}) · {', '.join(row['requirement_ids'])}" for row in artifacts["parameters"]]
+    lines += [f"[{row['id']}] класс {row['parameter_id']}, {'валидный' if row['valid'] else 'НЕВАЛИДНЫЙ'}: {row['condition']}" for row in artifacts["partitions"]]
+    lines += [f"[{row['id']}] граница {row['partition_id']}, {row['side']}: {row['value']}" for row in artifacts["boundaries"]]
+    for row in artifacts["rules"]:
+        conditions = "; ".join(item.get("ref") or f"«{item.get('text')}»" for item in row["conditions"])
+        lines.append(f"[{row['id']}] правило {row['kind']}: {conditions} → ожидается: {row['expected']} · {', '.join(row['requirement_ids'])}")
+    lines += [f"[{row['id']}] комбинация: {' × '.join(row['partition_ids'])}" for row in artifacts.get("combinations", [])]
+    lines += [f"- {row['requirement_id']} без дизайна: {row['reason']}" for row in artifacts["not_designed"]]
+    return lines
 
 
 def _area_line(area: Mapping[str, Any]) -> str:
@@ -360,6 +403,11 @@ def _part_text(context: _Context, *, part_id: str, title: str, areas: Sequence[M
         texts = [item["text"] for item in source_items or [] if item["group"] == group]
         if texts:
             out += ["", heading, *texts]
+    design = context.design_text(case_ids) if case_ids else ""
+    if design:
+        out += ["", "## Тест-дизайн кейсов этой части (ссылки design_refs кейсов; кейс по правилу ожидает его результат, "
+                "невалидный класс проверяет негативный кейс; находки — коды DESIGN_REF_WRONG, DESIGN_EXPECTED_MISMATCH, "
+                "DESIGN_NEGATIVE_WRONG с ID дизайна в related_ids)", design]
     if case_ids:
         out += ["", "## Кейсы", *(context.cases[case_id] + "\n" for case_id in case_ids)]
     return "\n".join(out).rstrip("\n") + "\n"
@@ -478,7 +526,7 @@ def build_compact_plan(specification: Mapping[str, Any], payload: Mapping[str, A
         cap = max(1, (usable - overhead) // 2)
         # Case text plus its line in the area list (an upper bound: only home cases have one).
         sizes = {case_id: len(context.cases[case_id].encode("utf-8")) + 2 + len(_area_line(_local_area(context, case_id)).encode("utf-8"))
-                 for case_id in order}
+                 + len(context.design_text([case_id]).encode("utf-8")) for case_id in order}
         items = [(case_id, sizes[case_id], frozenset(context.case_requirements[case_id]) - common) for case_id in order]
         blocks = content_blocks(items, cap, extra)
         pairs = block_pairs(len(blocks))
@@ -646,6 +694,8 @@ def _ref_ok(ref: str, defined: set, lines: Mapping[str, set], ranges: Sequence[t
 
 def known_ids(plan: Mapping[str, Any], document: Mapping[str, Any], automation: Mapping[str, Any] | None = None) -> set:
     ids = set(canonical_ids(document)) | {row["lint_id"] for row in plan.get("lint", [])}
+    # D1b: the design elements a part shows are anchors of its text.
+    ids |= {anchor for part in [*plan.get("parts", []), *plan.get("additions", [])] for anchor in anchors(part["text"]) if _DESIGN_ID.fullmatch(anchor)}
     if automation is not None:
         generated = automation["artifacts"]
         ids |= {row["file_id"] for row in generated["generated_files"]} | {row["symbol_id"] for row in generated["generated_symbols"]}
