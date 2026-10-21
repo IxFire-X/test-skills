@@ -5,16 +5,26 @@
 ## 1. Подключите пакет
 
 Поместите папку пакета в обычный рабочий проект, сохранив `contracts/`, `schemas/`,
-`skills/`, `tools/`, `evals/` и `release/`. Проект уже должен иметь рабочие JDK/Maven,
+`skills/`, `tools/`, `release/` и `ts.py`. Проект уже должен иметь рабочие JDK/Maven,
 Gradle или Python/pytest environment. Пакет сам не ставит ни Python-пакеты, ни JDK, ни
-сборщики, но сборка проекта, которую он запускает, может скачивать зависимости и плагины
-в `~/.m2` / кэш Gradle, а с `--mutation` Maven скачивает PIT — см. раздел
-«Права, сеть и исполнение».
+сборщики. Сборку и тесты проекта по командам драйвера запускает человек (раздел 8); она
+может скачивать зависимости и плагины в `~/.m2` / кэш Gradle, а с `--mutation` Maven
+скачивает PIT — см. раздел «Права, сеть и исполнение».
 
-Удобное место — `<project>/.tools/test-skills/`. Все пути пакета разрешаются от этой
-папки. Команды `python -m tools...` выполняйте с cwd пакета и передавайте абсолютный
-`--project`; так модуль `tools` целевого проекта не подменит инструменты пакета.
-Сами автотесты запускаются из выбранного module root.
+Пакет поставляется хост-сборкой: список её файлов печатает
+`python -m tools.release_manifest --list host --commit <коммит>` (комплект делает
+`git archive` этого списка), `python -m tools.doctor --root <пакет>` сообщает профиль копии
+(`delivery_profile: host`). В ней нет запуска сборки и тестов пакетом и запуска CLI модели
+драйвером; универсальная сборка (репозиторий пакета) с ними описана в `docs/process-mode.md`
+этого репозитория.
+
+Удобное место — `<project>/.tools/test-skills/` (или каталог навыков CLI, например
+`<project>/.gigacode/skills/test-skills/`: каталоги агентов CLI пакет не считает кодом
+проекта). Все пути пакета разрешаются от этой папки. Команды драйвера запускайте
+пускателем `<python> <пакет>/ts.py next|submit|status|answer|doctor …` из любого каталога,
+с абсолютным `--project`; остальные `python -m tools...` — с cwd пакета, так модуль `tools`
+целевого проекта не подменит инструменты пакета. Сами автотесты запускаются из выбранного
+module root.
 
 Копия внутри дерева проекта попадает под проверки его сборки: Petclinic проверяет
 `nohttp` на фазе `validate` и находил `http://` в фикстурах `tests/` пакета и в
@@ -40,12 +50,10 @@ Windows, и шаблон молча перестаёт исключать кат
 
 Нормативная точка входа — явный запрос model-enabled CLI выполнить
 `skills/orchestrate/SKILL.md`. Ход запуска ведёт драйвер `tools.pipeline_driver`
-(раздел 4): он выполняет детерминированные шаги и выдаёт модели по одной задаче. В
-основном режиме задачи решает сессия CLI, которая ведёт запуск. С `--review-runner process`
-(ревью) и в `run --runner process` (весь прогон) драйвер сам запускает CLI модели
-дочерним процессом и передаёт ему на stdin задачу с файлами проекта (разделы 12 и
-«Права, сеть и исполнение»). Учётных данных модели пакет не хранит и не читает: CLI
-пользуется своей конфигурацией.
+(раздел 4): он выполняет детерминированные шаги и выдаёт модели по одной задаче. Задачи
+решает сессия CLI, которая ведёт запуск (каждую — свежим субагентом); пакет CLI модели не
+запускает. Учётных данных модели пакет не хранит и не читает: CLI пользуется своей
+конфигурацией.
 
 Пример запроса CLI:
 
@@ -74,46 +82,31 @@ Windows, и шаблон молча перестаёт исключать кат
 тестовый корень выбранного модуля и только файлы с именем теста (`*Test.java`,
 `*Tests.java`, `*IT.java`, `test_*.py`, `*_test.py`), `test-cases/` (проекции и манифест
 набора), `.skillsrc` (создаётся при первом запуске, если его нет; замена существующего —
-только с подтверждением), каталог процессного раннера (`--runner-dir`, по умолчанию
-временный каталог ОС; только с `--review-runner process` или `run --runner process`).
-Сборка проекта пишет туда же, куда обычно: `target/`/`build/`, `~/.m2`, кэш Gradle.
+только с подтверждением). Сборка проекта, которую запускает человек, пишет туда же, куда
+обычно: `target/`/`build/`, `~/.m2`, кэш Gradle.
 
-**Запускает.** Обёртку сборки проекта (`mvnw`/`gradlew`), системный `mvn` или Python
-модуля с pytest — компиляция, гейт и прогон тестов; с Gradle добавляется init-скрипт
-пакета (`tools/gradle/selected-symbols.init.gradle`, отключает только проверку покрытия
-JaCoCo для выбранного подмножества). С `--mutation` — Maven (резолвер classpath) и `java`
-с PIT. Локальный `git` (`ls-files`, `diff` диапазона `suite impact --git-range`; проверка
-владельца репозитория `safe.directory` не отключается). CLI модели — только с
-`--review-runner process` или `run --runner process`. Все процессы — списком аргументов,
-без оболочки. Сборка, тесты, прогон живого набора и PIT стартуют без переменных окружения, похожих на
-секреты (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*PASSWD*`, `*API_KEY*`, `*APIKEY*`,
-`AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`) — даже если имя похоже на переменную
-сборки (`GRADLE_PUBLISH_TOKEN`), — и без прокси-переменных, в значении которых есть учётные
-данные (`user:pass@host`); имена удалённых переменных (без значений) пишутся в
-`driver-log.jsonl` (`child_env_removed`, у прокси — причина `proxy-credentials` в
-`child_env_removed_reasons`). CLI модели получает
-окружение по белому списку: `PATH`, `HOME`, `JAVA_HOME`, `LANG`, `LANGUAGE`, `LC_*`, `TMP*`,
-`TEMP`, `PYTHONUTF8`, `PYTHONIOENCODING` (Python-CLI на Windows без них падает на кириллице) и минимум Windows, без которого процесс не стартует или CLI не найдёт свой профиль
-(`SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `APPDATA`,
-`LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`; на Windows без учёта регистра). Всё остальное —
-настройки самого CLI (`GIGACODE_*`), прокси (`HTTPS_PROXY`) — только если названо в
-`.skillsrc` `review_runner.env_passthrough`: точные имена или префиксы со `*` в конце
-(`["GIGACODE_*", "HTTPS_PROXY"]`; `*` в середине не допускается). Учётные данные пакет не
-передаёт ни по имени, ни по префиксу: имя или префикс, похожие на секрет (те же шаблоны, что
-выше: `ANTHROPIC_API_KEY`, `AWS_*`…), и префиксы короче трёх символов — ошибка конфигурации;
-ключи и токены CLI держите в его собственном конфиге. Значения на диск не
-пишутся; имена переданных переменных — в `result.json` процесса и в `driver-log.jsonl`
-(`runner_launched.env_names`), имена не переданных — там же (`env_withheld`). То же
-применяется к `--version` CLI.
+**Запускает.** Только локальный `git` (`ls-files`, `status`, `diff` диапазона
+`suite impact --git-range`; проверка владельца репозитория `safe.directory` не отключается),
+списком аргументов, без оболочки. Сборку, компиляцию, гейт и прогон тестов, мутации и прогон
+живого набора пакет не запускает (`execution.mode: human`, раздел 8): драйвер печатает
+закрытые команды — обёртку сборки проекта (`mvnw`/`gradlew`), системный `mvn` или Python
+модуля с pytest; с Gradle — init-скрипт пакета `tools/gradle/selected-symbols.init.gradle`
+(отключает только проверку покрытия JaCoCo для выбранного подмножества); с `--mutation` —
+Maven (резолвер classpath) и `java` с PIT, — а выполняет их человек в своём окружении. CLI
+модели пакет не запускает: модель вызывает ведущая сессия CLI по команде человека.
+Драйвер запускает агент этой сессии командой `<python> <пакет>/ts.py …`, которую человек
+подтверждает в CLI.
 
-**Сеть.** В коде пакета нет сетевых вызовов; сеть идёт только через процессы, которые он
-запускает:
+**Сеть.** В коде пакета нет сетевых вызовов, и пакет не запускает процессов, которые ходят в
+сеть (только локальный git). Сеть возможна только в действиях человека и ведущей сессии CLI:
 
-- сборка проекта — Maven/Gradle разрешают зависимости и плагины из репозиториев
-  `~/.m2/settings.xml` / настроек Gradle, если их нет в локальном кэше; с `test.offline: true`
-  модуля (раздел 3) — только из локального кэша (`-o` / `--offline`), сеть не используется;
-- `--mutation` — Maven скачивает PIT и его зависимости (SHA-256 закреплены в
-  `tools/mutation_tools.json` и сверяются после разрешения); плагин-резолвер
+- сборка проекта — её запускает человек по командам драйвера; Maven/Gradle разрешают
+  зависимости и плагины из репозиториев `~/.m2/settings.xml` / настроек Gradle, если их нет в
+  локальном кэше; с `test.offline: true` модуля (раздел 3) — только из локального кэша
+  (`-o` / `--offline`), сеть не используется;
+- `--mutation` — команды резолвера и PIT запускает человек; Maven скачивает PIT и его
+  зависимости (SHA-256 закреплены в `tools/mutation_tools.json`, пакет сверяет их после
+  разрешения); плагин-резолвер
   `maven-dependency-plugin` и `junit-platform-launcher` версии проекта должны уже лежать в
   `~/.m2/repository` (плагин сверяется по закреплённому SHA-256) — иначе этап
   останавливается до запуска Maven; с `test.offline: true` и PIT разрешается offline.
@@ -121,11 +114,12 @@ JaCoCo для выбранного подмножества). С `--mutation` �
   только `~/.m2/repository`;
 - установка зависимостей пакета — только командой человека
   `pip install --require-hashes -r requirements.txt` (хеши всех файлов в `requirements.txt`);
-- CLI модели (`--review-runner process`, `run --runner process`, а в основном режиме —
-  сама ведущая сессия CLI) — провайдер модели из конфигурации CLI; уходит текст задачи
-  с выбранными файлами проекта, требованиями, кейсами и тестами (маскирование секретов —
-  раздел 2, по шаблонам, не гарантия);
-- сгенерированные тесты исполняют то, что в них написано, в окружении сборки проекта.
+- ведущая сессия CLI — её агент читает входы задач (подтверждённые человеком файлы:
+  `confirm-context`, раздел 4) и обращается к модели из конфигурации CLI; пакет ничего не
+  отправляет. В модель уходят выбранные файлы проекта, требования, кейсы и тесты
+  (маскирование секретов — раздел 2, по шаблонам, не гарантия);
+- сгенерированные тесты запускает человек; они исполняют то, что в них написано, в
+  окружении сборки проекта.
 
 Экспорт в Zephyr и OpenSpec — локальные файлы и stdout; переносит их человек.
 
@@ -243,29 +237,38 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 
 Основной путь — детерминированный драйвер `tools.pipeline_driver`. Он выполняет все
 шаги, где не нужна модель (scan, inventory, baseline, attempt, батчи, сборку,
-публикацию, ведение ревью, выбор редакции, материализацию, запуск тестов, закрытие), и
-останавливается, только когда должен ответить человек или модель. В основном режиме
-задачу модели выполняет ведущая сессия CLI по `skills/orchestrate/SKILL.md`; с
-`--review-runner process` и в `run --runner process` драйвер сам запускает CLI модели
-процессом (раздел 12).
+публикацию, ведение ревью, выбор редакции, материализацию, закрытие), и останавливается,
+только когда должен ответить человек или модель. Задачу модели выполняет ведущая сессия
+CLI по `skills/orchestrate/SKILL.md` — свежим субагентом на каждую задачу.
 
-Цикл: `next` → выполнить задачу по её Skill → `submit` → повторять до `done` или
-`ask_user`. Ответ `submit` — уже следующая задача, отдельный `next` между ними не нужен.
+Цикл: `next` → выполнить задачу по её Skill → `submit` → повторять до `done`,
+`ask_user` или `human_exec`. Ответ `submit` — уже следующая задача, отдельный `next`
+между ними не нужен.
 
-Команды (cwd — корень пакета, `--project` — абсолютный путь проекта):
+Команды (пускатель `ts.py` пакета из любого каталога, `--project` — абсолютный путь
+проекта, `<python>` — интерпретатор с зависимостями пакета):
 
 ```powershell
 # первый вызов: создаёт run (внутри вызывает scan) и доходит до первой задачи
-python -m tools.pipeline_driver next --project "$project" --profile cases-only-v1 `
-  --docs docs/feature.md --subject "Название документа"
+<python> <пакет>/ts.py next --project "$project" --profile cases-only-v1 `
+  --docs docs/feature.md --subject "Название документа" --compact
 
 # ответ на задачу
-python -m tools.pipeline_driver submit --project "$project" --run "$runId" --task-id "$taskId"
+<python> <пакет>/ts.py submit --project "$project" --run "$runId" --task-id "$taskId" --compact
 
-# продолжение после перерыва и чтение состояния
-python -m tools.pipeline_driver next --project "$project" --run "$runId"
-python -m tools.pipeline_driver status --project "$project" --run "$runId"
+# ответ человека на гейт (confirm-context, approve-generated-tests*)
+<python> <пакет>/ts.py answer --project "$project" --run "$runId" --task-id "$taskId" --value <дайджест>
+
+# продолжение после перерыва и чтение состояния (у завершённого run — и result)
+<python> <пакет>/ts.py next --project "$project" --run "$runId" --compact
+<python> <пакет>/ts.py status --project "$project" --run "$runId"
 ```
+
+`--compact` печатает только то, что нужно ведущей сессии: у `llm` — `task_id`, `stage`,
+`task_path` (полная задача в файле), `output_path`, `input_bytes`,
+`requires_fresh_context`; у отклонённого ответа — первые пять ошибок и `errors_total`; у
+гейта — `summary` (документы, файлы, байты), `listing_path` и готовая `answer_command`; у
+`done` — главное из `result` и `result_path`.
 
 Первый `next` требует `--profile cases-only-v1|local-pilot-v1|suite-update-v1` и для первых двух хотя бы
 один `--docs` (путь внутри проекта, флаг можно повторять; `suite-update-v1` берёт документы набора, если
@@ -280,11 +283,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 с `--exit-code`/`--gate-exit-code`),
 `--accept-self-review`, `--review-mode pairs|compact-v1` (формат ревью, по умолчанию `compact-v1`), `--max-tasks K`
 (сколько независимых задач — частей ревью `compact-v1` или батчей разметки контекста — выдать сразу). Опции волн 2–3 — `--mutation`,
-`--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine`, `--require-driver-isolation`,
-`--review-runner host|process` с `--review-runner-preset claude|codex` (по умолчанию — `.skillsrc`
-`review_runner.preset`, иначе `claude`), `--review-runner-command '<JSON-массив>'` (свой шаблон, только флагом
-запуска; хранится в `.pilot-runs/<run>.driver/config.json` для возобновления — секретов в шаблон не класть) и `--review-runner-cli <путь>` — разделы 11–13. `run --runner process [--run <run_id>]` проводит прогон
-без оркестратора (`--run` продолжает прерванный). Миграцию набора без записи показывает
+`--analyst-report`, `--suite`, `--disposition-policy cleanup|quarantine` — разделы 11–13. Миграцию набора без записи показывает
 `python -m tools.suite migrate --project "$project"` (запись — только с `--write`). `run_id` берётся
 из первого ответа.
 
@@ -293,8 +292,9 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
 | `action` | Основные поля | Что делать |
 |---|---|---|
 | `llm` | `task_id`, `stage`, `skill_path`, `inputs`, `output_path`, `schema_path`, `instructions` | Прочитать `skill_path` и все файлы из `inputs`, записать ответ в `output_path` по `schema_path`, вызвать `submit` |
-| `ask_user` | `task_id`, `question`, `options` (`value`, `label`) | Задать вопрос пользователю и вызвать `submit ... --answer <value>` |
+| `ask_user` | `task_id`, `question`, `options` (`value`, `label`) | Задать вопрос пользователю; гейт — `answer ... --value <value>` после его явного решения, прочие вопросы — `submit ... --answer <value>` |
 | `batch` | `tasks` (каждая — как `llm`) | Только `compact-v1` с `--max-tasks K`: выполнить каждую задачу отдельным свежим вызовом (параллельно), затем `submit` по каждой |
+| `human_exec` | `commands`, `report_path`, `continue` | Показать команды человеку; он выполняет их сам и называет отчёт; продолжить `next --run ... --junit <отчёт>` (раздел 8) |
 | `done` | `result` | Остановиться и передать результат пользователю |
 | `error` | `code`, `message` | Прочитать причину; не обходить ошибку ручными вызовами |
 
@@ -324,8 +324,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
   ответа драйвер пишет `.skillsrc` и продолжает тот же `run_id`. Если `free_text: true`
   (вопрос о каталоге исходников), ответом может быть путь каталога внутри модуля;
 - `reviewer-isolation` — может ли хост выполнить каждую часть ревью в отдельном вызове
-  без истории генерации: субагентом или новым процессом CLI (`claude -p`, `codex exec`
-  и т. п.). При ответе `none` ревью не останавливается: части проверяются тем же порядком и в
+  без истории генерации (свежим субагентом). При ответе `none` ревью не останавливается: части проверяются тем же порядком и в
   том же формате в текущей сессии, результат получает `review_independence: SELF` и
   `accepted=false` с `reason_code: REVIEW_NOT_INDEPENDENT` (кейсы публикуются, в
   `local-pilot-v1` автотесты проходят ревью и запускаются). Флаг `--accept-self-review`
@@ -337,7 +336,7 @@ python -m tools.pipeline_driver status --project "$project" --run "$runId"
   создаёт одну дочернюю попытку, `stop` завершает с текущим результатом. Вопрос
   задаётся один раз.
 
-Коды завершения команды: `3` — драйвер ждёт модель или человека (`llm`, `ask_user`);
+Коды завершения команды: `3` — драйвер ждёт модель или человека (`llm`, `ask_user`, `human_exec`);
 при `done` — код результата (`0`, `1` или `2`, см. раздел 10); `2` — ошибка (`error`).
 `status` только читает состояние и завершается с кодом `0`.
 
@@ -366,8 +365,8 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
 документы требований (`--docs`) и число файлов проекта с общим размером в байтах; в полях
 `documents` и `files` и в файле `<run>.driver/context-files.txt` — каждый файл с размером;
 в `confirmation_digest` — дайджест списка. Проверьте, что в нём нет персональных данных,
-секретов и лишнего кода, и ответьте `submit ... --answer <confirmation_digest>` (у
-`run --runner process` — `--answer confirm-context=<confirmation_digest>`). Ответ пишется в
+секретов и лишнего кода, и ответьте `answer ... --value <confirmation_digest>` (`submit
+--answer` гейт в хост-сборке не принимает: `GATE_ANSWER_COMMAND`). Ответ пишется в
 журнал событием `CONTEXT_CONFIRMED`; журнал не примет ни одного `MODEL_REQUESTED` без
 подтверждения именно этого списка (требование фиксируется в квитанции авторизации,
 `context_confirm_required`). Подтверждение — одно на run: доработка или регенерация с тем
@@ -457,18 +456,14 @@ driver-log.jsonl   служебный лог: каждый next/submit/status с
   часть. Если контекст, бриф и шапка документа сами не влезают в порог — `TASK_INPUT_TOO_LARGE`
   с подсказкой сузить контекст (`--target`, `paths`). При одной части — одна задача, как раньше;
 - драйвер не проверяет, что ревью действительно выполнено в свежем контексте: это
-  сообщает хост (или, с `--review-runner process`, свежий процесс CLI на каждую часть);
+  сообщает хост;
 - драйвер покрыт тестами пакета, но не проверен на Windows и на живой модели.
   Состояние релиза остаётся `implemented_unverified`, ready tuple — `null`.
 
-Прежние команды остаются рабочими и нужны для диагностики и ручного хода:
-`tools.run_pipeline` (`scan`, `status`, `exec`, `rerun-retained`),
-`tools.orchestrate_test_case_revision` (`prepare-review`, `open-part`, `submit-part`,
-`fail-part`, `finish-review` и другие), `tools.review_budget`. Ручная
-последовательность описана в
-[skills/orchestrate/references/manual-sequence.md](skills/orchestrate/references/manual-sequence.md).
-В разделах ниже эти команды упоминаются как внутренние шаги, которые при обычном
-запуске вызывает драйвер.
+Внутренние шаги драйвера — `tools.run_pipeline` (`scan`, `status`, `exec`),
+`tools.orchestrate_test_case_revision`, `tools.review_budget`; в разделах ниже они
+упоминаются как шаги, которые вызывает драйвер. Ручной ход ими — только в универсальной
+сборке.
 
 ## 5. Durable run
 
@@ -497,7 +492,7 @@ child attempts. Одновременно разрешён максимум од�
 
 `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages можно
 продолжить из новой CLI session после snapshot/config validation: вызовите
-`python -m tools.pipeline_driver next --project <abs> --run <run_id>`. Драйвер вернёт
+`<python> <пакет>/ts.py next --project <abs> --run <run_id>`. Драйвер вернёт
 ту же незакрытую задачу или продолжит с последнего подтверждённого шага. Изменение
 requirements, module или policy создаёт child attempt. Terminal attempt не меняется.
 После `WAITING_FOR_INPUT`/`WAITING_FOR_MODEL` attempt снова становится `ACTIVE`, как
@@ -609,13 +604,12 @@ verification    = NOT_APPLICABLE
 тестов и мутаций возвращает `ask_user` с меткой `approve-generated-tests`: в вопросе и в
 поле `files` — каждый записанный файл с дайджестом содержимого, в `approval_digest` —
 дайджест этого списка. Прочитайте файлы и ответьте
-`submit ... --answer <approval_digest>` (у `run --runner process` —
-`--answer approve-generated-tests=<approval_digest>`); другой ответ отклоняется. Ответ
+`answer ... --value <approval_digest>`; другой ответ отклоняется. Ответ
 пишется в журнал событием `EXECUTION_APPROVED`, и журнал не даст начать исполнение
 (`EXECUTION_STARTED`) без одобрения именно этих файлов; пока ответа нет, ничего не
 запускается (код выхода 3). Требование фиксируется при создании run в квитанции
 авторизации (`execution_review_required`). Выключение — явно: `.skillsrc`
-`execution: {review: none}` или флаг `next/run --execution-review none` (флаг сильнее
+`execution: {review: none}` или флаг `next --execution-review none` (флаг сильнее
 `.skillsrc`), например для повторных прогонов на известном проекте. Если предохранитель
 выключил сам `.skillsrc` (не флаг запуска), результат (`result`, `suite-update-result.json`)
 несёт `gates_disabled_by: skillsrc` и список `gates_disabled` (`context.confirm`,
@@ -627,12 +621,10 @@ verification    = NOT_APPLICABLE
 иначе `human`): ручной `exec` без одобрения не начнётся; снимает `--execution-review none`.
 `execution.mode` из `.skillsrc` ручной `scan` тоже учитывает.
 
-**Исполнение человеком (`execution.mode: human`).** По умолчанию (`auto`) сборку и тесты
-запускает пакет. В хост-сборке (`python -m tools.release_manifest --list host`: без
-`tools/process_launch.py` и раннера модели) умолчание — `human`, а `auto` и `--review-runner process`
-дают ошибку `EXECUTION_MODE_UNAVAILABLE` / `RUNNER_UNAVAILABLE`. С `.skillsrc` `execution: {mode: human}` или флагом
-`next/run --execution-mode human` (фиксируется в квитанции авторизации,
-`execution_mode_human`) пакет не запускает ни сборку, ни тесты, ни мутации: после записи
+**Исполнение человеком (`execution.mode: human`).** В хост-сборке это единственный режим и
+умолчание: `auto` (флагом или в `.skillsrc`) — ошибка `EXECUTION_MODE_UNAVAILABLE` до начала
+работы. Режим фиксируется в квитанции авторизации (`execution_mode_human`): пакет не
+запускает ни сборку, ни тесты, ни мутации: после записи
 сгенерированных тестов (и одобрения, если включено `execution.review`) драйвер отвечает
 `{"action": "human_exec"}` (код выхода 3) с полями `commands` — шлюз компиляции/сбора
 (`gate`) и тесты (`tests`), у каждой команды `argv` списком, `cwd`, готовые строки `bash` и
@@ -642,9 +634,7 @@ generated-for-human-review, а их запуск — действие челов
 сами и передайте отчёт: `next --run <id> --junit <отчёт> [--junit …] [--exit-code N]
 [--gate-exit-code N]`. Отчёт должен быть файлом закрытого места отчётов и новым относительно
 снимка, сделанного при выдаче команд; иное — ошибка `HUMAN_REPORT_INVALID`, прогон
-продолжает ждать. Без `--exit-code` код берётся из отчётов. `run --runner process`
-останавливается на этом шаге с `"stopped": "HUMAN_EXECUTION"` (код 3) и продолжается так же:
-`run --runner process --run <id> --junit <отчёт>`. Результат решают те же правила,
+продолжает ждать. Без `--exit-code` код берётся из отчётов. Результат решают те же правила,
 что при запуске пакетом (сопоставление с проверенными тестами, нулевой сбор, изменение
 файлов, durable-копии отчётов); в квитанции исполнения — `executor: human`. Если человек
 прогнал больше, чем `selectors` (весь класс или модуль), лишние кейсы не мешают: они
@@ -846,7 +836,7 @@ Company runner, production rollback и реальный Zephyr tenant round-trip
 
 ## 12. Опции волны 2
 
-Все три опции независимы и по умолчанию выключены.
+Обе опции независимы и по умолчанию выключены.
 
 **Мутации** (`local-pilot-v1`, Java/Maven или Gradle):
 
@@ -863,60 +853,14 @@ mutation:
 ```
 
 ```powershell
-python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --mutation
+<python> <пакет>/ts.py next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --mutation --compact
 ```
 
 После терминального результата драйвер выдаёт задачи `mutation-triage:triage-NN`
 (их можно получать пачкой через `--max-tasks`). Итог — `test_strength` и
 `strength_triage` в сводке, `test-strength.md` рядом с проекциями.
 
-**Ревью процессами драйвера:**
-
-```yaml
-# .skillsrc — только пресет, модели по ролям, параллельность, таймаут, интерпретатор обёртки .py и env_passthrough
-review_runner:
-  preset: claude            # или codex
-  models: {tc-reviewer: claude-sonnet-5-5, autotest-reviewer: claude-sonnet-5-5}
-  max_parallel: 4
-  timeout_seconds: 1800
-  env_passthrough: [HTTPS_PROXY, "GIGACODE_*"]   # сверх белого списка: настройки CLI и прокси, не ключи (ключи — в конфиге CLI)
-```
-
-```powershell
-python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md `
-  --review-runner process --review-runner-cli "C:\path\to\claude.exe" --require-driver-isolation
-```
-
-На `{"action": "wait"}` подождите `poll_seconds` и снова вызовите `next`. CLI должен быть
-залогинен (подписка или ключ самого CLI); пакет учётных данных не видит. Свой шаблон
-команды — только флагом `--review-runner-command '["…", "{model}"]'`. Если `--review-runner-cli`
-указывает на скрипт `.py` (обёртка над CLI), драйвер запускает его интерпретатором:
-`[<интерпретатор>, <скрипт>, …аргументы пресета]`, где интерпретатор — абсолютный путь из
-`.skillsrc` `review_runner.interpreter`, иначе Python самого драйвера. Запуск скрипта по
-shebang не нужен (в некоторых окружениях `execve` по shebang запрещён).
-
-**Без оркестратора:**
-
-```powershell
-python -m tools.pipeline_driver run --project "$project" --runner process --profile local-pilot-v1 `
-  --docs docs/feature.md --answer reviewer-isolation=fresh
-```
-
-**Каталог процессов — по умолчанию вне проекта.** Файлы процессного раннера (вход задачи `stdin.txt` — копии
-файлов проекта, вывод CLI, результат) лежат в `<--runner-dir>/<run_id>/runner/<задача>/`; по
-умолчанию `--runner-dir` — `<временный каталог ОС>/test-skills`, путь — в `config.json` прогона и в
-`driver-log.jsonl` (`runner_launched.directory`). Явный `--runner-dir` внутри проекта допускается
-(например, `<проект>/.runner`, если политика требует держать всё в проекте) — тогда в
-`driver-log.jsonl` пишется предупреждение `RUNNER_DIR_INSIDE_PROJECT`: исключите этот каталог в
-линтерах, читающих всё дерево (ниже). Корень проекта, `.pilot-runs` и `.git` не принимаются; неверные
-опции запуска отклоняются JSON-ответом `DRIVER_INPUT` до создания прогона. Каталоги
-`<run_id>` и `runner` создаются только для владельца (0o700); общий родитель (`<temp>/test-skills`)
-— с правами по умолчанию, его защищают права на `<run_id>` и непредсказуемый `run_id`. Для
-долгого прогона задайте долговечный путь вне дерева проекта (не `/tmp`): очистка временного
-каталога между прерыванием и `run --run` превращает запущенные процессы в потерянные, и задачи
-запускаются заново.
-
-**Линтеры, читающие всё дерево.** Сборку проекта пакет запускает в самом проекте, а журнал прогона
+**Линтеры, читающие всё дерево.** Сборку проекта запускают в самом проекте, а журнал прогона
 лежит в `.pilot-runs/`. Линтер, который проверяет каждый файл от `${basedir}` (Petclinic: `nohttp` в
 `maven-checkstyle-plugin`; также spotless, apache-rat, license-плагины с такой областью), читает и
 `.pilot-runs`. Что журнал его проходит — лишь свойство данных: вывод упавшей сборки Maven со
@@ -931,7 +875,6 @@ python -m tools.pipeline_driver run --project "$project" --runner process --prof
 
 Всё включается явно, кроме одного: с гейта волны 3 карантин (A4) — политика `local-pilot-v1` по
 умолчанию (`--disposition-policy cleanup` возвращает прежнюю очистку). Остальное без флагов прежнее.
-Поправки к контракту A4 и A5 — `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`.
 
 **Шаблон ID требований** (`.skillsrc` 5.2.0). Строка, начинающаяся с ID, открывает
 требование так же, как встроенные `REQ-…`/`AC-…`; без шаблона разбиение прежнее:
@@ -949,7 +892,7 @@ suite:
 статусы, доли мутантов, снимок эндпоинтов). Сводка — версия 1.2.0 с полем `suite`.
 
 ```powershell
-python -m tools.pipeline_driver next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --suite
+<python> <пакет>/ts.py next --project "$project" --profile local-pilot-v1 --docs docs/feature.md --suite --compact
 ```
 
 **Карантин вместо очистки** (`local-pilot-v1`; по умолчанию с гейта волны 3, прежняя очистка —
@@ -974,7 +917,7 @@ python -m tools.suite migrate --project "$project" --write   # запись (с�
 **Обновление набора** — профиль `suite-update-v1`:
 
 ```powershell
-python -m tools.pipeline_driver next --project "$project" --profile suite-update-v1 --reviewer-isolation fresh [--mutation] [--junit report.xml]
+<python> <пакет>/ts.py next --project "$project" --profile suite-update-v1 --reviewer-isolation fresh [--mutation] [--junit report.xml] --compact
 ```
 
 Шаги: миграция → анализ влияния → обновление затронутых кейсов (задача

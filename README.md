@@ -5,17 +5,15 @@
 ## Презентация и обзор
 
 - [Настоящие тест-кейсы Spring Petclinic: 64 кейса, 290 шагов](docs/examples/petclinic-owner-lifecycle/cases.md) — [HTML, исходный JSON и пояснение к результатам](docs/examples/petclinic-owner-lifecycle/README.md).
-- [Подробный справочник всех файлов и схемы взаимодействия модулей](docs/pipeline-file-guide-ru.md).
-- [Презентация на русском: 16 слайдов, около 20 минут](docs/portable-testing-pipeline-ru.pptx).
-- [Заметки докладчика](docs/presentation-notes-ru.md).
+- [Заметки докладчика к презентации](docs/presentation-notes-ru.md).
 - [Что сделано, структура пакета и причины попробовать](docs/portable-pipeline-overview-ru.md).
 - [Результаты большого пилота и границы подтверждённого](docs/pilot-evidence.md).
 
 Оговорка к примеру Petclinic. Прогон 64 автотестов (63 PASS, 1 FAIL) выполнен на более
 старом manifest пакета, до перехода на ревью по частям; опубликованная редакция кейсов
 после этого автотестами не исполнялась. Нынешняя схема ревью по частям на живой модели,
-по данным [ревью от 2026-10-05](docs/review/2026-10-05-pipeline-review.md), проверялась
-только на синтетических контролях из 3–4 частей. Пример показывает формат результата и
+по данным ревью от 2026-10-05, проверялась только на синтетических контролях из 3–4
+частей. Пример показывает формат результата и
 не доказывает работу текущей версии пакета на большом наборе.
 
 В этом репозитории опубликован переносимый пакет тестирования. Старые версии
@@ -44,8 +42,8 @@ Skill → `submit` → повторять, пока драйвер не верн
 проекта. Первый вызов создаёт run и доходит до первой задачи:
 
 ```powershell
-python -m tools.pipeline_driver next --project "$project" --profile cases-only-v1 `
-  --docs docs/feature.md --subject "Название документа"
+<python> <пакет>/ts.py next --project "$project" --profile cases-only-v1 `
+  --docs docs/feature.md --subject "Название документа" --compact
 ```
 
 Обычно эти команды выполняет сама CLI по `skills/orchestrate/SKILL.md`; вручную их
@@ -233,5 +231,4 @@ Release eval запускается только отдельной явной �
 Company runner, production rollback и реальный Zephyr tenant round-trip не входят в
 core pilot readiness и остаются `N/A`, пока не появится отдельное evidence.
 
-Подробнее: [USAGE.md](USAGE.md), [HOW-IT-WORKS.md](HOW-IT-WORKS.md) и
-[RELEASE.md](RELEASE.md).
+Подробнее: [USAGE.md](USAGE.md) и [HOW-IT-WORKS.md](HOW-IT-WORKS.md).

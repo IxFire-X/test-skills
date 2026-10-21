@@ -54,11 +54,11 @@ def test_accept_self_review_flag_accepts_and_keeps_the_mark(tmp_path: Path) -> N
     assert terminal["review_independence"] == "SELF" and terminal["evidence"]["self_review_accepted"] is True
 
 
-def test_isolation_question_names_subagents_and_separate_cli_processes(tmp_path: Path) -> None:
+def test_isolation_question_names_a_fresh_subagent(tmp_path: Path) -> None:
     project = _project(tmp_path, local=False)
     question = _drive(project, _start(project, "cases-only-v1", reviewer_isolation=None), SavedModel("cases-only-v1"),
                       until=lambda task: task["action"] == "ask_user")
-    assert "субагентом или новым процессом CLI" in question["question"] and "claude -p" in question["question"]
+    assert "свежим субагентом" in question["question"] and "claude" not in question["question"]
     following = driver.submit(project, _run_root(project, question), question["task_id"], answer="none")
     assert following["action"] == "llm" and following["stage"].startswith("tc-reviewer:")
 

@@ -10,7 +10,8 @@
 compatibility contract `portable-cli-v1`, execution profile `v1`, policies, adapters,
 model-stage registry and `pilot-critical-v1` release-eval suite. The manifest is
 persisted but excluded from its own runtime registry to avoid a self-digest cycle.
-`evals/` is in `maintainer_registry`, outside the runtime registry. `delivery_profiles`
+`evals/` is in `maintainer_registry`, outside the runtime registry. This file, `evals/`,
+`docs/process-mode.md` and the maintainer documents below are not in the host delivery. `delivery_profiles`
 names the `host` delivery (H1): the runtime registry without process launch, the model
 process runner, the CI gate and the maintainer files; `python -m tools.release_manifest
 --list host` prints its files and `python -m tools.doctor --root <copy>` reports the profile
@@ -92,3 +93,13 @@ receipt. Do not invent a rollback SHA or infer it from local Git state.
 
 These may receive independent evidence later. Their absence does not change the honest
 current state: package implementation exists, but no exact tuple is yet verified.
+
+## Maintainer documents
+
+- [Process mode and auto execution (universal build only)](docs/process-mode.md).
+- [Reference of every file of the repository and how the modules interact](docs/pipeline-file-guide-ru.md).
+- [Presentation in Russian: 16 slides, about 20 minutes](docs/portable-testing-pipeline-ru.pptx) (not in any delivery).
+- [Pipeline review of 2026-10-05](docs/review/2026-10-05-pipeline-review.md): the part-wise review on a live model was
+  checked only on synthetic controls of 3–4 parts.
+- Contract amendments A4 and A5: `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`; the pilot
+  contract, its erratum and the delivery plan are under `docs/superpowers/`.

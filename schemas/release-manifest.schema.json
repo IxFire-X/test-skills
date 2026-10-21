@@ -29,11 +29,13 @@
     "delivery_profiles": {
       "type": "array", "minItems": 1, "maxItems": 1, "description": "H1: a delivery is the universal registry or the host subset of it; a copy is one by its exact runtime file set.",
       "items": {
-        "type": "object", "additionalProperties": false, "required": ["id", "excluded", "excluded_prefixes", "skill_pack_digest"],
+        "type": "object", "additionalProperties": false, "required": ["id", "excluded", "excluded_prefixes", "excluded_files", "docs", "skill_pack_digest"],
         "properties": {
           "id": {"const": "host"},
           "excluded": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:tools/[a-z0-9_]+[.]py|schemas/[a-z0-9-]+[.]schema[.]json|skills/[a-z0-9-]+/references/[a-z0-9-]+[.]md)$"}},
           "excluded_prefixes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_-]+/(?:[a-z0-9_-]+/)?$"}},
+          "excluded_files": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}},
+          "docs": {"type": "array", "uniqueItems": true, "description": "The only docs/ paths (prefixes) the host delivery carries.", "items": {"type": "string", "pattern": "^docs/[A-Za-z0-9._/-]+$"}},
           "skill_pack_digest": {"$ref": "#/$defs/digest"}
         }
       }

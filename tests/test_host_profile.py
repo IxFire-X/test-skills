@@ -323,3 +323,92 @@ def test_the_host_skill_leads_the_run_through_the_launcher_only() -> None:
     for forbidden in ("python -m tools.", "run_pipeline", "claude -p", "codex exec", "--runner process", "--review-runner",
                       "--require-driver-isolation", "manual-sequence", "process-mode"):
         assert forbidden not in text, forbidden
+
+
+UNIVERSAL_ONLY = "только универсальная сборка; в хост-сборке не используется"
+
+
+def test_no_host_file_tells_to_launch_a_model_cli() -> None:
+    """B6: the host delivery names no CLI launch; the contract keeps the runner as data, its rendering marks it."""
+    from tools.release_manifest import delivery_files
+
+    everywhere = ("claude -p", "codex exec")
+    in_documents = ("--runner process", "--review-runner process")
+    found = []
+    for relative in delivery_files(ROOT, "host"):
+        if relative == "contracts/pipeline.json" or relative == "tools/contract_check.py":  # the contract and its expectations: data
+            continue
+        path = ROOT / relative
+        if path.suffix not in {".md", ".py", ".json", ".example", ".txt", ".yaml", ".yml"} and path.name != ".skillsrc.example":
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            words = everywhere + (in_documents if path.suffix != ".py" and UNIVERSAL_ONLY not in line else ())
+            found.extend(f"{relative}:{number}: {word}" for word in words if word in line)
+    assert not found, found
+
+
+def test_the_rendered_contract_marks_the_runner_universal_only() -> None:
+    for name in ("CONTRACTS.md", "PIPELINE.md"):
+        lines = [line for line in (ROOT / name).read_text(encoding="utf-8").splitlines() if "--review-runner" in line or "require-driver-isolation" in line]
+        assert lines and all(UNIVERSAL_ONLY in line for line in lines), (name, lines)
+
+
+def test_the_host_docs_are_the_linked_ones_and_every_link_stays_inside() -> None:
+    import re
+
+    from tools.release_manifest import HOST_DOCS, delivery_files
+
+    host = set(delivery_files(ROOT, "host"))
+    assert not {"RELEASE.md", "pytest.ini", "requirements-dev.txt", "docs/process-mode.md", "docs/pipeline-file-guide-ru.md",
+                "skills/orchestrate/references/process-mode.md"} & host
+    assert all(path.startswith(HOST_DOCS) for path in host if path.startswith("docs/"))
+    broken = []
+    for relative in sorted(path for path in host if path.endswith(".md")):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", text):
+            if re.match(r"[a-z]+:", target):
+                continue
+            resolved = (ROOT / relative).parent.joinpath(target).resolve()
+            try:
+                inside = resolved.relative_to(ROOT).as_posix()
+            except ValueError:
+                broken.append(f"{relative} -> {target}")
+                continue
+            if inside not in host and not any(path.startswith(inside + "/") for path in host):
+                broken.append(f"{relative} -> {target}")
+    assert not broken, broken
+
+
+def test_the_isolation_question_of_the_host_copy_names_only_a_subagent(host_copy: Path, tmp_path: Path) -> None:
+    project = _project(tmp_path, local=False)
+    start = ["--profile", "cases-only-v1", "--docs", "docs/feature.md", "--subject", "Каталог товаров", "--model-id", "model-test",
+             "--review-mode", "pairs", "--confirm-context", "no"]
+    model = SavedModel("cases-only-v1")
+    code, task = _driver(host_copy, tmp_path, "next", "--project", str(project), *start)
+    for _ in range(30):
+        if task["action"] != "llm":
+            break
+        Path(task["output_path"]).write_text(json.dumps(model.answer(task), ensure_ascii=False), encoding="utf-8")
+        code, task = _driver(host_copy, tmp_path, "submit", "--project", str(project), "--run", task["run_id"], "--task-id", task["task_id"])
+    assert task["action"] == "ask_user" and task["task_id"].endswith("ask.reviewer-isolation"), task
+    text = task["question"] + " ".join(option["label"] for option in task["options"])
+    assert "субагент" in text and "claude" not in text and "codex" not in text and "процесс" not in text, text
+    _no_violations(tmp_path)
+
+
+def test_no_file_of_the_repository_names_a_model_cli_command() -> None:
+    """No instruction anywhere to start `claude -p` or `codex exec`; the presets of model_runner keep argv lists.
+
+    History and fixtures (tests/, docs/review/, docs/superpowers/, evals/) are left as they are.
+    """
+    completed = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z", "--cached"], cwd=ROOT, capture_output=True, check=True)
+    found = []
+    for relative in completed.stdout.decode("utf-8").split("\0"):
+        if not relative or relative.startswith(("tests/", "docs/review/", "docs/superpowers/", "evals/")):
+            continue
+        try:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, FileNotFoundError):
+            continue
+        found.extend(f"{relative}: {word}" for word in ("claude -p", "codex exec") if word in text)
+    assert not found, found

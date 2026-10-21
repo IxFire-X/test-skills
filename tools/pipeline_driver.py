@@ -496,6 +496,9 @@ def _require_part(code: str) -> None:
         raise DriverError(error.code, str(error)) from error
 
 
+_FRESH_CALL = "свежим субагентом — отдельным вызовом без истории генерации"
+
+
 def _require_saved_parts(config: Mapping[str, Any]) -> None:
     """A run started by a build with these parts (its settings are saved) stops before any step of a copy without them."""
     if (config.get("review_runner") or {}).get("mode") == "process" or config.get("require_driver_isolation"):
@@ -1657,8 +1660,7 @@ def _self_review_warnings(run_root: Path, attempt_id: str, review_key: str) -> l
             warning = {"code": "SELF_REVIEW_CONTEXT_OVERFLOW", "attempt_id": attempt_id, "review_key": review_key,
                        "review_input_bytes": total, "context_bytes": limit,
                        "message": (f"Без изоляции все части ревью попадут в один контекст: их входы уже {total} байт при окне {limit} байт. "
-                                   "Запускайте каждую часть отдельным вызовом — субагентом или новым процессом CLI (claude -p, codex exec) — "
-                                   "и начните run с --reviewer-isolation fresh.")}
+                                   f"Запускайте каждую часть отдельным вызовом — {_FRESH_CALL} — и начните run с --reviewer-isolation fresh.")}
             config.setdefault("warnings", []).append(warning)
             _log(_log_path(run_root.parents[1], run_root.name), {"event": "warning", **warning})
         measured.append(f"{attempt_id}:{review_key}")
@@ -1911,9 +1913,8 @@ def advance(project: Path, run_root: Path, *, max_tasks: int = 1, human: Mapping
     if ledger is None:
         if config.get("reviewer_isolation") not in {"fresh", "none"}:
             return _ask_task(run_root, attempt_id, "reviewer-isolation",
-                             "Может ли хост выполнить каждую часть ревью в отдельном вызове без истории генерации — субагентом или новым "
-                             "процессом CLI (`claude -p`, `codex exec` и т. п.)?",
-                             [{"value": "fresh", "label": "Да: каждая часть пойдёт отдельным вызовом (субагент или новый процесс CLI)"},
+                             f"Может ли хост выполнить каждую часть ревью в отдельном вызове без истории генерации — {_FRESH_CALL}?",
+                             [{"value": "fresh", "label": "Да: каждая часть пойдёт отдельным вызовом (свежий субагент)"},
                               {"value": "none", "label": "Нет: ревью пройдёт в этой же сессии; результат будет помечен review_independence: SELF и не принят без --accept-self-review"}])
         package = _package(run_root, attempt_id, assembled)
         prepare_review(run_root, attempt_id, _review_payload(project, run_root, attempt, config, assembled["document"], package=package, automation=None),

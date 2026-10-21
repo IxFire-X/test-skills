@@ -21,9 +21,15 @@ def test_usage_has_the_permissions_section_of_the_package() -> None:
     match = re.search(r"^## Права, сеть и исполнение\n(.*?)(?=^## )", USAGE, flags=re.S | re.M)
     assert match, "USAGE.md has no section «Права, сеть и исполнение»"
     section = match.group(1)
-    for needle in ("Читает", "Пишет", "Запускает", "Сеть", "--mutation", "--review-runner process", "run --runner process", ".skillsrc",
-                   "~/.m2", "git", "переменных окружения"):
+    for needle in ("Читает", "Пишет", "Запускает", "Сеть", "--mutation", ".skillsrc", "~/.m2", "git", "execution.mode: human", "ts.py",
+                   "пакет не запускает"):
         assert needle in section, needle
+    network = re.search(r"\*\*Сеть\.\*\*(.*?)(?=\n\nЭкспорт|\n\n\*\*|\Z)", section, flags=re.S).group(1)
+    assert "пакет не запускает процессов, которые ходят в" in network and "запускает человек" in network
+    assert "пакет ничего не" in network and "только через процессы, которые он" not in network
+    # H1: the host delivery launches no model CLI; the process mode is described for the universal build only.
+    for absent in ("--review-runner process", "run --runner process", "claude -p", "codex exec"):
+        assert absent not in section, absent
 
 
 def test_the_sparse_copy_for_a_project_leaves_agent_and_ci_files_out() -> None:

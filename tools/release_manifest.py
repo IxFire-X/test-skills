@@ -38,6 +38,9 @@ HOST_EXCLUDED = (
     "skills/orchestrate/references/process-mode.md",
 )
 HOST_EXCLUDED_PREFIXES = ("evals/", "docs/research/", "docs/review/", "docs/superpowers/")
+# Development and maintainer files of the repository root, and of docs/ everything USAGE and README do not link.
+HOST_EXCLUDED_FILES = ("RELEASE.md", "pytest.ini", "requirements-dev.txt")
+HOST_DOCS = ("docs/examples/", "docs/pilot-evidence.md", "docs/portable-pipeline-overview-ru.md", "docs/presentation-notes-ru.md")
 # No delivery carries them (the sparse list of USAGE.md): the package's own tests and development files, slides.
 DELIVERY_EXCLUDED_PREFIXES = (".claude/", ".github/", "tests/")
 DELIVERY_EXCLUDED_FILES = ("CLAUDE.md",)
@@ -142,7 +145,8 @@ def delivery_files(root: Path, profile: str, commit: str | None = None) -> list[
             continue
         if path.startswith("docs/") and path.lower().endswith(DELIVERY_EXCLUDED_DOC_SUFFIXES):
             continue
-        if profile == "host" and (path in HOST_EXCLUDED or path.startswith(HOST_EXCLUDED_PREFIXES)):
+        if profile == "host" and (path in HOST_EXCLUDED or path in HOST_EXCLUDED_FILES or path.startswith(HOST_EXCLUDED_PREFIXES)
+                                  or path.startswith("docs/") and not path.startswith(HOST_DOCS)):
             continue
         files.append(path)
     files = sorted(set(files))
@@ -187,6 +191,7 @@ def build_release_manifest(root: Path) -> dict[str, Any]:
         "maintainer_registry": _runtime_registry(root, MAINTAINER_ROOTS),
         "delivery_profiles": [{
             "id": "host", "excluded": [path for path in HOST_EXCLUDED if path in by_path], "excluded_prefixes": list(HOST_EXCLUDED_PREFIXES),
+            "excluded_files": list(HOST_EXCLUDED_FILES), "docs": list(HOST_DOCS),
             "skill_pack_digest": _digest_bytes(_canonical(_host_rows(registry))),
         }],
         "qualification": {"state": "implemented_unverified", "ready_tuple": None},
