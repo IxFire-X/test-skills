@@ -289,3 +289,16 @@ def test_the_universal_build_keeps_auto_and_the_runner() -> None:
 
     assert process_launch_available() and process_runner_available()
     assert execution_mode(ROOT / "tests" / "fixtures" / "projects" / "python-pytest") == "auto"
+
+
+def test_a_gate_is_answered_only_by_the_answer_command_in_the_host_copy(host_copy: Path, tmp_path: Path) -> None:
+    project = _project(tmp_path, local=True)
+    start = [item if item != "no" else "yes" for item in START]  # --confirm-context yes
+    code, task = _driver(host_copy, tmp_path, "next", "--project", str(project), *start)
+    assert task["action"] == "ask_user" and task["task_id"].endswith("ask.confirm-context"), task
+    digest = task["confirmation_digest"]
+    code, refused = _driver(host_copy, tmp_path, "submit", "--project", str(project), "--run", task["run_id"], "--task-id", task["task_id"], "--answer", digest)
+    assert code == 2 and refused["code"] == "GATE_ANSWER_COMMAND" and " answer " in refused["message"], refused
+    code, after = _driver(host_copy, tmp_path, "answer", "--project", str(project), "--run", task["run_id"], "--task-id", task["task_id"], "--value", digest)
+    assert code == 3 and after["action"] == "llm", after
+    _no_violations(tmp_path)

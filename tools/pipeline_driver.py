@@ -280,7 +280,40 @@ def _done(run_root: Path | None, result: Mapping[str, Any]) -> dict[str, Any]:
     payload = {"action": "done", "result": dict(result)}
     if run_root is not None:
         payload["run_id"] = run_root.name
+        if work_dir(run_root).is_dir():
+            # H1 B8: `status` returns it without advancing the run (a kit report never calls `next`).
+            _write_json(_result_path(run_root), payload["result"])
     return payload
+
+
+def _result_path(run_root: Path) -> Path:
+    return work_dir(run_root) / "result.json"
+
+
+def _saved_result(run_root: Path, attempt_id: str | None) -> dict[str, Any] | None:
+    """The result ``done`` printed for this attempt, if the run is finished; never computed here (status only reads)."""
+    path = _result_path(run_root)
+    if not path.is_file():
+        return None
+    result = dict(_read_json(path))
+    return result if result.get("attempt_id") in {None, attempt_id} else None
+
+
+# H1 B2: the human gates are answered by `answer` — a command the person confirms in the CLI, apart from next/submit.
+_GATE_TASK = re.compile(r"\.ask\.(?:confirm-context|approve-generated-tests(?:-[A-Za-z0-9._-]+)?)$")
+
+
+def is_gate_task(task_id: str) -> bool:
+    return bool(_GATE_TASK.search(task_id or ""))
+
+
+def driver_command(*arguments: str) -> str:
+    """A driver command line for a person or the orchestrating session: the launcher ts.py when the pack has it."""
+    import shlex
+
+    launcher = ROOT / "ts.py"
+    head = [sys.executable, str(launcher)] if launcher.is_file() else [sys.executable, "-m", "tools.pipeline_driver"]
+    return shlex.join([*head, *arguments])
 
 
 def _subschema(schema_name: str, keep: Sequence[str]) -> dict[str, Any]:
@@ -1924,11 +1957,17 @@ def _select(project: Path, run_root: Path, attempt: Mapping[str, Any], assembled
 # --------------------------------------------------------------------------------------
 
 def submit(project: Path, run_root: Path, task_id: str, *, output: Path | None = None, answer: str | None = None,
-           failed: str | None = None, reason: str | None = None, transport_attempts: int = 1) -> dict[str, Any]:
+           failed: str | None = None, reason: str | None = None, transport_attempts: int = 1, gate_command: bool = False) -> dict[str, Any]:
     project = Path(project).resolve()
     from tools import suite_update
 
     _require_saved_parts(_config(run_root))
+    if answer is not None and is_gate_task(task_id) and not gate_command:
+        from tools.delivery_profile import process_launch_available
+
+        if not process_launch_available():
+            raise DriverError("GATE_ANSWER_COMMAND", "a human gate is answered by its own command, which the person confirms: "
+                              + driver_command("answer", "--project", str(project), "--run", run_root.name, "--task-id", task_id, "--value", answer))
     if suite_update.is_suite_run(run_root):
         return suite_update.submit(project, run_root, task_id, output=output, failed=failed, reason=reason, answer=answer)
     path = _task_path(run_root, task_id)
@@ -2032,7 +2071,7 @@ def status(project: Path, run_root: Path) -> dict[str, Any]:
     from tools import suite_update
 
     if suite_update.is_suite_run(run_root):
-        return suite_update.status(project, run_root)
+        return suite_update.status(project, run_root)  # it returns its result already
     from tools.pilot_state import derive_state
 
     state = derive_state(run_root)
@@ -2041,8 +2080,12 @@ def status(project: Path, run_root: Path) -> dict[str, Any]:
     for event in state["events"]:
         if attempt is not None and event.get("attempt_id") == attempt["attempt_id"] and event.get("stage_instance_id"):
             stages[event["stage_instance_id"]] = event["event_type"]
-    return {"action": "status", "run_id": run_root.name, "attempt_id": None if attempt is None else attempt["attempt_id"],
-            "attempt_state": None if attempt is None else attempt["state"], "event_count": len(state["events"]), "stages": stages}
+    payload = {"action": "status", "run_id": run_root.name, "attempt_id": None if attempt is None else attempt["attempt_id"],
+               "attempt_state": None if attempt is None else attempt["state"], "event_count": len(state["events"]), "stages": stages}
+    result = _saved_result(run_root, None if attempt is None else str(attempt["attempt_id"]))
+    if result is not None and (attempt is None or attempt["state"] == "TERMINAL"):
+        payload["result"] = result
+    return payload
 
 
 # --------------------------------------------------------------------------------------
@@ -2052,11 +2095,16 @@ def status(project: Path, run_root: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deterministic pipeline driver: next / submit / status.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("next", "submit", "status", "run"):
+    for name in ("next", "submit", "status", "run", "answer"):
         command = commands.add_parser(name)
         command.add_argument("--project", required=True, help="Absolute path of the target project.")
         if name != "run":
             command.add_argument("--run", required=name != "next", help="Run id printed by the first `next`.")
+        if name in {"next", "submit", "answer"}:
+            command.add_argument("--compact", action="store_true", help="Print only what the orchestrating session needs; the full task is in task_path.")
+        if name == "answer":
+            command.add_argument("--task-id", required=True, help="The ask_user task of a human gate (confirm-context, approve-generated-tests).")
+            command.add_argument("--value", required=True, help="The digest the person approves.")
         if name == "run":
             command.add_argument("--runner", choices=("process",), required=True, help="Every model task goes to a driver-launched CLI process.")
             command.add_argument("--run", help="Run id of an interrupted `run` to continue (processes already launched are collected).")
@@ -2132,6 +2180,65 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--reason")
             command.add_argument("--transport-attempts", type=int, choices=(1, 2, 3), default=1)
     return parser
+
+
+_COMPACT_LLM = ("action", "run_id", "task_id", "stage", "task_path", "output_path", "input_bytes", "requires_fresh_context")
+_COMPACT_RESULT = ("status", "completion", "verification", "accepted", "reason_code", "reason", "stop_reason", "exit_code", "paths")
+_COMPACT_ERRORS = 5
+
+
+def _compact_errors(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """A submit that was not accepted: its status and the first errors, each cut short (all of them are in the driver log)."""
+    errors = [dict(item) for item in payload.get("errors") or [] if isinstance(item, Mapping)]
+    row = {key: payload[key] for key in ("status", "code", "message") if key in payload}
+    if "message" in row:
+        row["message"] = str(row["message"])[:200]
+    row["errors"] = [{key: str(item[key])[:200] for key in ("code", "path", "message") if key in item} for item in errors[:_COMPACT_ERRORS]]
+    row["errors_total"] = len(errors)
+    return row
+
+
+def _compact_task(run_root: Path | None, task: Mapping[str, Any]) -> dict[str, Any]:
+    row = {key: task[key] for key in _COMPACT_LLM if key in task}
+    if run_root is not None and task.get("task_id"):
+        row["task_path"] = str(_task_path(run_root, str(task["task_id"])))
+    if "status" in task or "errors" in task:
+        row.update(_compact_errors(task))
+    return row
+
+
+def compact(project: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """H1 B1: what the orchestrating session reads; the full task is in its file (``task_path``), the result in ``status``."""
+    action = payload.get("action")
+    run_id = payload.get("run_id")
+    run_root = Path(project).resolve() / ".pilot-runs" / run_id if isinstance(run_id, str) and run_id else None
+    if action == "llm":
+        return _compact_task(run_root, payload)
+    if action == "batch":
+        return {"action": "batch", "run_id": run_id, "tasks": [_compact_task(run_root, {"run_id": run_id, **task}) for task in payload.get("tasks", [])]}
+    if action == "ask_user":
+        row = {key: payload[key] for key in ("action", "run_id", "task_id", "question", "options", "listing_path") if key in payload}
+        if run_root is not None:
+            row["task_path"] = str(_task_path(run_root, str(payload["task_id"])))
+        if "files" in payload or "documents" in payload:
+            rows = [*payload.get("files", []), *payload.get("documents", [])]
+            row["summary"] = {"documents": len(payload.get("documents", [])), "files": len(payload.get("files", [])),
+                              "bytes": sum(int(item.get("size") or 0) for item in rows)}
+        if is_gate_task(str(payload.get("task_id"))) and run_root is not None and payload.get("options"):
+            row["answer_command"] = driver_command("answer", "--project", str(Path(project).resolve()), "--run", str(run_id),
+                                                   "--task-id", str(payload["task_id"]), "--value", str(payload["options"][0]["value"]))
+        return row
+    if action == "human_exec":
+        return {key: value for key, value in payload.items() if key not in {"selectors"}}
+    if action == "done":
+        result = payload.get("result") or {}
+        row = {"action": "done", "run_id": run_id, "result": {key: result[key] for key in _COMPACT_RESULT if key in result}}
+        if run_root is not None and _result_path(run_root).is_file():
+            row["result_path"] = str(_result_path(run_root))
+        return row
+    if "status" in payload or "errors" in payload:
+        return {**{key: payload[key] for key in ("action", "run_id", "task_id") if key in payload}, **_compact_errors(payload)}
+    return dict(payload)
 
 
 def _exit_code(payload: Mapping[str, Any]) -> int:
@@ -2266,6 +2373,8 @@ def main(argv: list[str] | None = None) -> int:
         first = _first_issue(_log_rows(_log_path(project, args.run)), args.task_id)
         entry.update({"task_id": args.task_id, "failed": args.failed, "reason": args.reason, "transport_attempts": args.transport_attempts,
                       "answer": args.answer, "task_age_seconds": None if first is None else round(max(time.time() - first, 0.0), 3)})
+    elif args.command == "answer":
+        entry.update({"task_id": args.task_id, "answer": args.value})
 
     def failure(code: str, message: str, diagnostics: Sequence[Mapping[str, Any]] | None = None) -> int:
         payload = {"action": "error", "code": code, "message": message}
@@ -2298,7 +2407,12 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 # One driver command is one operation: parallel submits of a batch run one after another.
                 with run_lock(run_root):
-                    if args.command == "next":
+                    if args.command == "answer":
+                        if not is_gate_task(args.task_id):
+                            raise DriverError("ANSWER_NOT_A_GATE", "answer takes only a human gate (confirm-context, approve-generated-tests); "
+                                              "other tasks are answered by submit")
+                        payload = submit(project, run_root, args.task_id, answer=args.value, gate_command=True)
+                    elif args.command == "next":
                         payload = advance(project, run_root, max_tasks=args.max_tasks,
                                           human={"junit": args.junit, "exit_code": args.exit_code, "gate_exit_code": args.gate_exit_code,
                                                  "mutation_step_done": args.mutation_step_done, "pit_report": args.pit_report,
@@ -2313,7 +2427,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # every other failure is a driver defect; its traceback goes to the service log
         return failure("DRIVER_FAILURE", f"{type(error).__name__}: {error}")
     _log_command(project, args.run or payload.get("run_id"), entry, payload, started)
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(compact(project, payload) if getattr(args, "compact", False) else payload, ensure_ascii=False, sort_keys=True))
     return _exit_code(payload)
 
 
