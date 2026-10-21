@@ -1,8 +1,0 @@
-{
-  "comment": "The CLI takes the task as an argument (only for tasks under 120 KB: Linux caps one argument at 128 KiB; review parts are larger — prefer stdin or file).",
-  "command": ["python3", "fake_cli.py", "--mode", "arg", "--prompt", "{prompt}", "--model", "{model}"],
-  "prompt_via": "arg",
-  "answer_from": "stdout",
-  "timeout_seconds": 1700,
-  "extra_env": {}
-}

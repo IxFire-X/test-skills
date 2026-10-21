@@ -299,11 +299,13 @@ def check_linters(project: Path, build: str | None, extra: list[str]) -> None:
                 continue
             whole_tree = bool(re.search(r"<sourceDirector(?:y|ies)>\s*\$\{(?:basedir|project\.basedir)\}|<includes?>\s*\*\*/\*\s*<|target\s*=?\s*fileTree\(['\"]?\.", text))
             found = True
-            if whole_tree or name in {"nohttp", "apache-rat", "license"}:
+            if all(f"{item}/**" in text for item in dirs):  # the excludes line printed earlier is already in this build file
+                add(OK, f"линтер {name}", f"{path.relative_to(project)}: читает всё дерево, {where} исключены")
+            elif whole_tree or name in {"nohttp", "apache-rat", "license"}:
                 add(STOP if name == "nohttp" else WARN, f"линтер {name}", f"{path.relative_to(project)}: читает всё дерево — и {where} (находка № 1)",
                     f"на ветке прогона исключить {where}: " + _exclude_line(name, path, text, dirs) +
-                    ". Иначе --runner process гарантированно не дойдёт до тестов (stdin.txt раннера — копии файлов проекта), "
-                    "а оркестрованный прогон ломается после первой упавшей сборки (вывод Maven с http:// в .pilot-runs)")
+                    ". Иначе сборка прогона падает на линтере: он читает записи прогона в .pilot-runs (вывод Maven с http://) "
+                    "и файлы комплекта")
             else:
                 add(OK, f"линтер {name}", f"{path.relative_to(project)}: область — исходники")
     if not found:
@@ -398,7 +400,7 @@ def main() -> int:
         else:
             add(OK if inside.is_file() else STOP, "спецификация", doc, "" if inside.is_file() else "файла --docs нет в проекте")
     if not (project / ".skillsrc").is_file():
-        add(WARN, ".skillsrc", "нет", "первый next создаст по разметке; для внутреннего проекта лучше положить свой (review_runner, requirements.id_pattern)")
+        add(WARN, ".skillsrc", "нет", "первый next создаст по разметке; для внутреннего проекта лучше положить свой (operate.py init предложит и покажет diff)")
     check_sensitive(project, args.docs, extra)
     width = max(len(row[1]) for row in rows)
     for status, check, finding, hint in rows:
