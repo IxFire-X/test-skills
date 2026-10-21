@@ -318,10 +318,11 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         authorization["execution_mode_human"] = True
     # D1: the test design stage (``.skillsrc`` design.enabled, on by default) is bound to the run like a gate.
     from tools.human_gates import _skillsrc
-    from tools.test_design import design_enabled
+    from tools.test_design import design_enabled, design_factorial_max
 
     if design_enabled(_skillsrc(project)):
         authorization["design_required"] = True
+        authorization["design_full_factorial_max"] = design_factorial_max(_skillsrc(project))
     run = create_run(project, profile, authorization)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")

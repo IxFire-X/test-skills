@@ -203,10 +203,13 @@ def _design_lines(report: Mapping[str, Any]) -> list[str]:
     covered = report.get("design_coverage")
     if not isinstance(covered, Mapping):
         return []
-    names = (("partitions", "классы эквивалентности"), ("boundaries", "граничные значения"), ("rules", "правила"), ("negative_partitions", "невалидные классы негативными кейсами"))
+    names = (("partitions", "классы эквивалентности"), ("boundaries", "граничные значения"), ("rules", "правила"), ("combinations", "комбинации"),
+             ("negative_partitions", "невалидные классы негативными кейсами"))
     lines = ["## Покрытие дизайна", ""]
     for key, name in names:
-        share = covered[key]
+        share = covered.get(key)
+        if share is None:
+            continue
         ratio = "—" if share["ratio"] is None else f"{round(100 * share['ratio'])} %"
         lines.append(f"- {name}: {share['covered']} из {share['total']} ({ratio})" + (f", без покрытия с причиной: {share['uncovered']}" if share["uncovered"] else ""))
     lines += [f"- `{row['ref']}` не покрыт: {row['reason']}" for row in covered["uncovered"]]

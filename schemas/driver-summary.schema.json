@@ -58,6 +58,7 @@
         "boundaries": {"$ref": "#/$defs/design_share"},
         "rules": {"$ref": "#/$defs/design_share"},
         "negative_partitions": {"$ref": "#/$defs/design_share"},
+        "combinations": {"$ref": "#/$defs/design_share"},
         "uncovered": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["ref", "reason"],
                                                  "properties": {"ref": {"type": "string", "pattern": "^(?:EQ|BV|DR|CB)-[0-9]{3,}$"}, "reason": {"type": "string", "minLength": 1}}}},
         "priorities": {"type": "object", "additionalProperties": false, "required": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],

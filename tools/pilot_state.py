@@ -36,7 +36,7 @@ on_confined_write(_forget_validated_evidence)
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
 _AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy",
-              "execution_review_required", "context_confirm_required", "execution_mode_human", "design_required"}
+              "execution_review_required", "context_confirm_required", "execution_mode_human", "design_required", "design_full_factorial_max"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
 _AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required", "context_confirm_required",
                      "execution_mode_human", "design_required")
@@ -577,6 +577,12 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
         raise ValueError("unsafe authorization")
     if "disposition_policy" in authorization and authorization["disposition_policy"] != "quarantine":
         raise ValueError("unsafe authorization")
+    # D1b: the combination threshold belongs to a design run and is an integer 1..4096.
+    if "design_full_factorial_max" in authorization and (
+        authorization.get("design_required") is not True or type(authorization["design_full_factorial_max"]) is not int
+        or not 1 <= authorization["design_full_factorial_max"] <= 4096
+    ):
+        raise ValueError("unsafe authorization")
     if ("mutation_requested" in authorization or "suite_requested" in authorization or "disposition_policy" in authorization
             or "execution_review_required" in authorization or "execution_mode_human" in authorization) and policy_profile != "local-pilot-v1":
         raise ValueError("authorization policy mismatch")
@@ -1036,6 +1042,8 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
         receipt_data.update({key: True for key in _AUTH_OPT_IN_KEYS if key in safe_auth})
         if "disposition_policy" in safe_auth:
             receipt_data["disposition_policy"] = safe_auth["disposition_policy"]
+        if "design_full_factorial_max" in safe_auth:
+            receipt_data["design_full_factorial_max"] = safe_auth["design_full_factorial_max"]
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest = _publish(root_project, root, root / "run-manifest.json", {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
@@ -1452,6 +1460,21 @@ def context_confirm_required(run_root: Path) -> bool:
     project, root = _run_root(run_root)
     _manifest, authorization = _run_boundary(project, root)
     return authorization.get("context_confirm_required") is True
+
+
+def design_combinations(authorization: Mapping[str, Any], design: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+    """D1b: the combinations of a design run, from the threshold its authorization records; None for a run before
+    D1b (no threshold), whose slices have no combinations."""
+    from tools.test_design import combinations
+
+    value = authorization.get("design_full_factorial_max")
+    return combinations(design, value) if type(value) is int else None
+
+
+def run_authorization(run_root: Path) -> Mapping[str, Any]:
+    """The authorization receipt fields of the run (``design_combinations`` reads its threshold)."""
+    project, root = _run_root(run_root)
+    return _run_boundary(project, root)[1]
 
 
 def design_required(run_root: Path) -> bool:
@@ -2135,7 +2158,8 @@ def _validate_generator_design_slice(project: Path, root: Path, state: Mapping[s
     marker = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])["artifact"]
     plan = plan_batches(marker["artifacts"]["analytics_documentation"]["requirements"], {"header_digest": inputs[3], "context_receipt_digest": inputs[1]})
     batch = next((item for item in plan["batches"] if item["batch_id"] == stage_instance_id.split(":", 1)[1]), None)
-    if plan["digest"] != inputs[2] or batch is None or inputs[4] != digest(design_slice(design, batch["owned_source_requirement_ids"])):
+    combined = design_combinations(_run_boundary(project, root)[1], design)
+    if plan["digest"] != inputs[2] or batch is None or inputs[4] != digest(design_slice(design, batch["owned_source_requirement_ids"], combined)):
         raise ValueError("tc-generator input digests must bind the design slice of its batch")
 
 
@@ -2164,7 +2188,7 @@ def _validate_generator_design(project: Path, root: Path, state: Mapping[str, An
     if len(designs) != 1:
         raise ValueError("generator fragment of a design run has no test design")
     design = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "test-design:baseline", str(designs[0]["artifact_digest"]))["artifact"]
-    sliced = design_slice(design, value.get("owned_source_requirement_ids") or [])
+    sliced = design_slice(design, value.get("owned_source_requirement_ids") or [], design_combinations(_run_boundary(project, root)[1], design))
     cases = value.get("test_cases") or []
     if (
         digest(sliced) != request["input_digests"][4]

@@ -40,7 +40,8 @@ def design_refs_of(case: dict[str, Any], answer: dict[str, Any], slice_value: di
     partitions = [row["id"] for row in artifacts["partitions"] if sources & set(row["requirement_ids"])]
     boundaries = [row["id"] for row in artifacts["boundaries"] if row["partition_id"] in partitions]
     rules = [row["id"] for row in artifacts["rules"] if sources & set(row["requirement_ids"])]
-    return [*rules, *partitions, *boundaries]
+    combinations = [row["id"] for row in artifacts.get("combinations", []) if sources & set(row["requirement_ids"])]
+    return [*rules, *partitions, *boundaries, *combinations]
 
 
 class DesignModel(SavedModel):
@@ -172,7 +173,8 @@ def test_the_design_stage_runs_between_the_marker_and_the_generator(tmp_path: Pa
     design = driver._design_artifact(run_root, attempt_id)
     assert design["content_digest"] == response["artifact_digest"]
     owned = [row["source_requirement_id"] for row in brief["requirements"]]
-    assert generator["input_digests"][4] == design_tools.digest(design_tools.design_slice(design["artifact"], owned))
+    combinations = design_tools.combinations(design["artifact"], _authorization(run_root)["design_full_factorial_max"])
+    assert generator["input_digests"][4] == design_tools.digest(design_tools.design_slice(design["artifact"], owned, combinations))
 
 
 def test_an_invalid_design_answer_is_rejected_and_the_corrected_one_accepted(tmp_path: Path) -> None:

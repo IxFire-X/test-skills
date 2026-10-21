@@ -23,6 +23,7 @@ DESIGN_FIELDS = ("parameters", "partitions", "boundaries", "rules", "not_designe
 LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 DEGENERATE_SHARE = 0.7
 DEGENERATE_MIN_CASES = 10  # fewer cases are too few to call a spread degenerate
+DEFAULT_FULL_FACTORIAL_MAX = 16
 ID_FORMATS = {"parameter": "P-NNN", "partition": "EQ-NNN", "boundary": "BV-NNN", "rule": "DR-NNN"}
 _PREFIX = {"parameters": "P-", "partitions": "EQ-", "boundaries": "BV-", "rules": "DR-"}
 
@@ -31,6 +32,13 @@ def design_enabled(skillsrc: Mapping[str, Any]) -> bool:
     """``.skillsrc`` ``design.enabled``; the stage runs unless it is explicitly false."""
     section = skillsrc.get("design") if isinstance(skillsrc, Mapping) else None
     return not (isinstance(section, Mapping) and section.get("enabled") is False)
+
+
+def design_factorial_max(skillsrc: Mapping[str, Any]) -> int:
+    """``.skillsrc`` ``design.full_factorial_max``: most combinations generated in full before pairwise; default 16."""
+    section = skillsrc.get("design") if isinstance(skillsrc, Mapping) else None
+    value = section.get("full_factorial_max") if isinstance(section, Mapping) else None
+    return value if type(value) is int and 1 <= value <= 4096 else DEFAULT_FULL_FACTORIAL_MAX
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -157,9 +165,45 @@ def design_brief(requirements: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "requirements": rows, "id_formats": dict(ID_FORMATS)}
 
 
-def design_slice(design: Mapping[str, Any], owned_requirement_ids: Iterable[str]) -> dict[str, Any]:
+def combinations(design: Mapping[str, Any], full_factorial_max: int) -> list[dict[str, Any]]:
+    """D1b: combinations ``CB-NNN`` of the valid partitions of parameters that share a source requirement.
+
+    A group is the set of parameters (with a valid partition) of one requirement; an identical set of several
+    requirements is one group naming all of them.  Invalid partitions are never combined: negative cases test them
+    one at a time.  A group gets the full product of its valid partitions when it has at most ``full_factorial_max``
+    rows, else a pairwise covering array.  Parameters and partitions are sorted by ID first, so the combinations and
+    their IDs do not depend on the order of the design's arrays.
+    """
+    from tools.pairwise import covering_rows
+
+    parameters = sorted(_rows(design, "parameters"), key=lambda row: str(row.get("id")))
+    valid = {row.get("id"): sorted(str(item.get("id")) for item in _rows(design, "partitions") if item.get("parameter_id") == row.get("id") and item.get("valid") is True)
+             for row in parameters}
+    groups: dict[tuple[str, ...], set[str]] = {}
+    for requirement in sorted({item for row in parameters for item in row.get("requirement_ids") or []}):
+        members = tuple(str(row["id"]) for row in parameters if requirement in (row.get("requirement_ids") or []) and valid[row.get("id")])
+        if len(members) >= 2:
+            groups.setdefault(members, set()).add(requirement)
+    result: list[dict[str, Any]] = []
+    for members in sorted(groups):
+        for row in covering_rows([valid[member] for member in members], full_max=full_factorial_max):
+            result.append({"id": f"CB-{len(result) + 1:03d}", "partition_ids": list(row), "requirement_ids": sorted(groups[members])})
+    return result
+
+
+def with_combinations(design: Mapping[str, Any], rows: Sequence[Mapping[str, Any]] | None) -> dict[str, Any]:
+    """The design with its combinations among the artifacts (unchanged without them: a run before D1b)."""
+    value = json.loads(canonical_bytes(design))
+    if rows is not None:
+        value["artifacts"]["combinations"] = [dict(row) for row in rows]
+    return value
+
+
+def design_slice(design: Mapping[str, Any], owned_requirement_ids: Iterable[str],
+                 combination_rows: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """The design a generator batch receives: the elements naming one of its requirements, every parameter they touch
-    with all its partitions and boundaries, and the partitions and boundaries its rules name."""
+    with all its partitions and boundaries, the partitions and boundaries its rules name, and (D1b) the combinations
+    of its requirements.  Without ``combination_rows`` the slice is the D1a slice."""
     owned = set(owned_requirement_ids)
     partitions = {row.get("id"): row for row in _rows(design, "partitions")}
     boundaries = {row.get("id"): row for row in _rows(design, "boundaries")}
@@ -185,12 +229,14 @@ def design_slice(design: Mapping[str, Any], owned_requirement_ids: Iterable[str]
         "rules": rules,
         "not_designed": [row for row in _rows(design, "not_designed") if row.get("requirement_id") in owned],
     }
+    if combination_rows is not None:
+        value["combinations"] = [dict(row) for row in combination_rows if mine(row)]
     return {"schema_version": SCHEMA_VERSION, "stage": "test-design", "artifacts": json.loads(canonical_bytes(value)), "warnings": []}
 
 
 def element_ids(design: Mapping[str, Any]) -> dict[str, str]:
-    """Design element ID -> its kind (``partitions``, ``boundaries``, ``rules``): the elements a case can name."""
-    return {row.get("id"): name for name in ("partitions", "boundaries", "rules") for row in _rows(design, name)}
+    """Design element ID -> its kind (``partitions``, ``boundaries``, ``rules``, ``combinations``): the elements a case can name."""
+    return {row.get("id"): name for name in ("partitions", "boundaries", "rules", "combinations") for row in _rows(design, name)}
 
 
 # --- the generator's references -----------------------------------------------------------------------------------
@@ -260,7 +306,7 @@ def coverage(design: Mapping[str, Any], cases: Sequence[Mapping[str, Any]], unco
         if row.get("ref") not in covered:
             reasons.setdefault(row.get("ref"), row.get("reason"))
     result: dict[str, Any] = {}
-    for name in ("partitions", "boundaries", "rules"):
+    for name in ("partitions", "boundaries", "rules", "combinations"):
         ids = [row.get("id") for row in _rows(design, name)]
         hit = sum(ref in covered for ref in ids)
         result[name] = {"total": len(ids), "covered": hit, "uncovered": sum(ref in reasons for ref in ids), "ratio": _ratio(hit, len(ids))}
@@ -281,17 +327,18 @@ def assign_priorities(design: Mapping[str, Any], cases: Sequence[Mapping[str, An
 
     1. an ``error`` rule or an invalid partition -> HIGH;
     2. a boundary just outside, or of an invalid partition -> HIGH; another boundary -> MEDIUM;
-    3. the first case naming a not yet named valid partition or decision/state rule -> MEDIUM (the main scenario);
+    3. the first case naming a not yet named valid partition, decision/state rule or combination -> MEDIUM (the main scenario);
     4. otherwise -> LOW (an alternative or auxiliary case).
     """
     partitions = {row.get("id"): row for row in _rows(design, "partitions")}
     boundaries = {row.get("id"): row for row in _rows(design, "boundaries")}
     rules = {row.get("id"): row for row in _rows(design, "rules")}
+    combined = {row.get("id") for row in _rows(design, "combinations")}
     seen: set[str] = set()
     levels: list[str] = []
     for case in cases:
         refs = [ref for ref in case.get("design_refs") or [] if isinstance(ref, str)]
-        main = {ref for ref in refs if (ref in rules and rules[ref].get("kind") != "error") or partitions.get(ref, {}).get("valid") is True}
+        main = {ref for ref in refs if (ref in rules and rules[ref].get("kind") != "error") or partitions.get(ref, {}).get("valid") is True or ref in combined}
         named = [boundaries[ref] for ref in refs if ref in boundaries]
         if any(rules.get(ref, {}).get("kind") == "error" or partitions.get(ref, {}).get("valid") is False for ref in refs):
             level = "HIGH"
@@ -314,6 +361,7 @@ GENERATOR_RULES = (
     "Каждое разбиение, граница и правило файла покрыты хотя бы одним кейсом; элемент, который покрыть нельзя, внеси в design_uncovered с причиной.",
     "Разбиение с valid: false покрывается негативным кейсом (категория negative); ожидаемый результат кейса по правилу совпадает с expected правила.",
     "Кейс по требованию из not_designed может не иметь design_refs. Поле priority не заполняй: приоритет назначает драйвер по дизайну.",
+    "Комбинации CB- файла: каждую покрывает кейс, который называет CB- и все её разбиения EQ-; комбинацию, которую покрыть нельзя, внеси в design_uncovered с причиной.",
 )
 
 
