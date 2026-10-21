@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
+ROLES = ("context-marker", "test-design", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
 PRESETS: dict[str, dict[str, Any]] = {
     "claude": {
         "cli": "claude",

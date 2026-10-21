@@ -7,7 +7,7 @@
   "required": ["schema_version", "status", "run_id", "attempt_id", "policy_profile", "completion", "verification", "coverage", "accepted", "reason_code", "exit_code",
                "review_independence", "warnings", "effective_document_digest", "paths"],
   "properties": {
-    "schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0"]},
+    "schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0", "1.3.0"]},
     "status": {"const": "terminal"},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
@@ -21,18 +21,48 @@
     "review_independence": {"enum": ["ISOLATED", "SELF", null]},
     "warnings": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["code", "attempt_id", "review_key", "review_input_bytes", "context_bytes", "message"],
-        "properties": {
-          "code": {"const": "SELF_REVIEW_CONTEXT_OVERFLOW"},
-          "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
-          "review_key": {"enum": ["canonical", "r1", "r2"]},
-          "review_input_bytes": {"type": "integer", "minimum": 1},
-          "context_bytes": {"type": "integer", "minimum": 1},
-          "message": {"type": "string", "minLength": 1}
+      "items": {"oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "attempt_id", "review_key", "review_input_bytes", "context_bytes", "message"],
+          "properties": {
+            "code": {"const": "SELF_REVIEW_CONTEXT_OVERFLOW"},
+            "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+            "review_key": {"enum": ["canonical", "r1", "r2"]},
+            "review_input_bytes": {"type": "integer", "minimum": 1},
+            "context_bytes": {"type": "integer", "minimum": 1},
+            "message": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "attempt_id", "message"],
+          "description": "D1: one priority level holds more than 70 % of the cases (summary 1.3.0).",
+          "properties": {
+            "code": {"const": "PRIORITY_DEGENERATE"},
+            "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+            "message": {"type": "string", "minLength": 1}
+          }
         }
+      ]}
+    },
+    "design_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "D1 (summary 1.3.0): design elements the effective cases cover, the uncovered ones with reasons, and the spread of the code-assigned priorities.",
+      "required": ["partitions", "boundaries", "rules", "negative_partitions", "uncovered", "priorities"],
+      "properties": {
+        "partitions": {"$ref": "#/$defs/design_share"},
+        "boundaries": {"$ref": "#/$defs/design_share"},
+        "rules": {"$ref": "#/$defs/design_share"},
+        "negative_partitions": {"$ref": "#/$defs/design_share"},
+        "uncovered": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["ref", "reason"],
+                                                 "properties": {"ref": {"type": "string", "pattern": "^(?:EQ|BV|DR|CB)-[0-9]{3,}$"}, "reason": {"type": "string", "minLength": 1}}}},
+        "priorities": {"type": "object", "additionalProperties": false, "required": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                       "properties": {"CRITICAL": {"type": "integer", "minimum": 0}, "HIGH": {"type": "integer", "minimum": 0},
+                                      "MEDIUM": {"type": "integer", "minimum": 0}, "LOW": {"type": "integer", "minimum": 0}}}
       }
     },
     "effective_document_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
@@ -87,6 +117,13 @@
     {"if": {"properties": {"schema_version": {"const": "1.0.0"}}, "required": ["schema_version"]},
      "then": {"not": {"anyOf": [{"required": ["test_strength"]}, {"required": ["isolation_evidence"]}, {"required": ["strength_triage"]}, {"required": ["analyst_questions"]}, {"required": ["suite"]}]}}},
     {"if": {"properties": {"schema_version": {"const": "1.1.0"}}, "required": ["schema_version"]},
-     "then": {"not": {"required": ["suite"]}}}
-  ]
+     "then": {"not": {"required": ["suite"]}}},
+    {"if": {"properties": {"schema_version": {"enum": ["1.0.0", "1.1.0", "1.2.0"]}}, "required": ["schema_version"]},
+     "then": {"not": {"required": ["design_coverage"]}}}
+  ],
+  "$defs": {
+    "design_share": {"type": "object", "additionalProperties": false, "required": ["total", "covered", "uncovered", "ratio"],
+                     "properties": {"total": {"type": "integer", "minimum": 0}, "covered": {"type": "integer", "minimum": 0},
+                                    "uncovered": {"type": "integer", "minimum": 0}, "ratio": {"type": ["number", "null"], "minimum": 0, "maximum": 1}}}
+  }
 }

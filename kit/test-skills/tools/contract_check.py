@@ -29,7 +29,7 @@ SCHEMA_ROWS = [
     ("context-marker-output.schema.json",3,"IMPLEMENTED","5.1.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
     ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","6.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","2.0.0"),("review-plan.schema.json",4,"IMPLEMENTED","1.0.0"),("review-part-output.schema.json",4,"IMPLEMENTED","1.0.0"),("review-plan-compact.schema.json",4,"IMPLEMENTED","2.0.0"),("review-part-output-compact.schema.json",4,"IMPLEMENTED","2.1.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","6.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
-    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.2.0"),
+    ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("driver-summary.schema.json",7,"IMPLEMENTED","1.3.0"),
     ("compatibility-evidence.schema.json",8,"IMPLEMENTED","2.0.0"),("retained-native-rerun-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("scenario-observation-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-run.schema.json",8,"IMPLEMENTED","1.0.0"),("release-eval-receipt.schema.json",8,"IMPLEMENTED","1.0.0"),("release-manifest.schema.json",8,"IMPLEMENTED","1.0.0"),
 ]
 ARTIFACT_ROWS = [
@@ -149,16 +149,21 @@ EXPECTED_MUTATION_TOOLING = {
 }
 # New schemas and artifacts of the opt-in features: registered next to the frozen registries.
 OPTIONAL_SCHEMA_ROWS = [("mutation-receipt.schema.json", 6, "IMPLEMENTED", "1.0.0"), ("mutation-triage-output.schema.json", 6, "IMPLEMENTED", "1.0.0"),
-                        ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0")]
+                        ("suite-manifest.schema.json", 7, "IMPLEMENTED", "1.0.0"), ("suite-update-result.schema.json", 7, "IMPLEMENTED", "1.0.0"),
+                        ("test-design.schema.json", 8, "IMPLEMENTED", "1.0.0")]
 # Role answers without a version field: their version is the role policy (``mutation-triage-v1``).
 VERSIONLESS_ANSWER_SCHEMAS = {"mutation-triage-output.schema.json"}
 OPTIONAL_ARTIFACT_ROWS = [("mutation_receipt", 6, "IMPLEMENTED"), ("mutation_triage", 6, "IMPLEMENTED"), ("analyst_report", 7, "IMPLEMENTED"),
                           ("runner_process_evidence", 4, "IMPLEMENTED"), ("suite_manifest", 7, "IMPLEMENTED"), ("suite_update_result", 7, "IMPLEMENTED")]
-OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md"}
+OPTIONAL_SKILLS = {"mutation-triage": "skills/mutation-triage/SKILL.md", "test-design": "skills/test-design/SKILL.md"}
 OPTIONAL_STAGE_ROWS = [
     {"stage": "mutation-triage", "role": "strength-analyst", "role_policy": "mutation-triage-v1", "cardinality": "post_terminal_per_task",
      "profiles": ["local-pilot-v1"], "answer_schema": "mutation-triage-output.schema.json", "decisions": ["TEST_GAP", "SPEC_GAP", "EQUIVALENT", "OUT_OF_SCOPE"],
      "changes": "nothing_in_the_attempt"},
+    # D1: off with .skillsrc design.enabled false; on, it runs between the marker and the generator.
+    {"stage": "test-design", "role": "generator", "role_policy": "test-design-v1", "cardinality": "once_before_generation",
+     "profiles": ["cases-only-v1", "local-pilot-v1"], "answer_schema": "test-design.schema.json", "decisions": ["DESIGNED", "NOT_DESIGNED"],
+     "changes": "design_refs_required_in_cases"},
 ]
 EXPECTED_MODEL_RUNNER = {
     "setting": "--review-runner", "values": ["host", "process"], "default": "host", "presets": ["claude", "codex"], "custom_template": "launch_flag_only",

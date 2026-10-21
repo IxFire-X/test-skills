@@ -54,7 +54,7 @@ STEPS = ("0", "1", "2", "3", "4", "5a", "5", "7", "8", "9")
 TITLES = {"0": "Проверка комплекта", "1": "Preflight проекта", "2": "Обёртка CLI", "3": "Бенчмарк моделей", "4": ".skillsrc проекта",
           "5a": "Пробный прогон (cases-only-v1)", "5": "Полный прогон (local-pilot-v1)", "7": "Что принести (<home>/report)", "8": "Экспорт Zephyr",
           "9": "Обновление живого набора (suite-update-v1)"}
-ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
+ROLES = ("context-marker", "test-design", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer", "mutation-triage")
 REVIEW_ROLES = ("tc-reviewer", "autotest-reviewer")
 PROBE = "test-skills-probe: проверка обёртки. Ответь только JSON-объектом {\"ok\": true} без пояснений.\n"
 STATUS_SECONDS = 60
@@ -771,7 +771,7 @@ class Operator:
         before = skillsrc.read_text(encoding="utf-8") if skillsrc.is_file() else ""
         lines = before.splitlines()
         lines = set_block(lines, "review_runner", ["review_runner:", "  preset: codex", "  models:",
-                                                   *[f"    {role}: {_q(models[role])}" for role in ROLES],
+                                                   *[f"    {role}: {_q(models.get(role) or self.default_model)}" for role in ROLES],
                                                    f"  max_parallel: {self.args.max_parallel}", f"  timeout_seconds: {self.args.runner_timeout}",
                                                    *self._skillsrc_passthrough()])
         if pattern:
@@ -1425,6 +1425,16 @@ def _redact(value: Any, key: str = "") -> Any:
 
 def _count_cases(result: dict[str, Any], project: Path) -> tuple[int, int] | None:
     """(cases, checks) of the run's suite or newest candidate document."""
+    cases = _case_list(result, project)
+    if cases is None:
+        return None
+    checks = sum(len(expectation.get("assertions") or []) for case in cases for step in case.get("steps") or []
+                 for expectation in step.get("expectations") or [])
+    return len(cases), checks
+
+
+def _case_list(result: dict[str, Any], project: Path) -> list[dict[str, Any]] | None:
+    """The cases of the run's suite or newest candidate document."""
     paths = result.get("paths") or {}
     candidates = [Path(paths["suite_dir"]) / "test-cases.json"] if paths.get("suite_dir") else []
     if paths.get("candidate_bundle"):
@@ -1437,10 +1447,39 @@ def _count_cases(result: dict[str, Any], project: Path) -> tuple[int, int] | Non
             continue
         cases = document.get("test_cases") if isinstance(document, dict) else None
         if isinstance(cases, list):
-            checks = sum(len(expectation.get("assertions") or []) for case in cases for step in case.get("steps") or []
-                         for expectation in step.get("expectations") or [])
-            return len(cases), checks
+            return [case for case in cases if isinstance(case, dict)]
     return None
+
+
+PRIORITY_LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+
+
+def _design_figures(result: dict[str, Any], project: Path) -> list[tuple[str, str]]:
+    """D1: design coverage and the priority spread from the run result (``design_coverage``); a run without the
+    design stage has no coverage, and its priorities were chosen by the model — counted from the case document."""
+    covered = result.get("design_coverage")
+    if not isinstance(covered, dict):
+        cases = _case_list(result, project)
+        spread = (", ".join(f"{level} {sum(case.get('priority') == level for case in cases)}" for level in PRIORITY_LEVELS)
+                  + " (выбраны моделью)") if cases else "—"
+        return [("Покрытие дизайна", "— (стадии тест-дизайна в прогоне не было: .skillsrc design.enabled: false)"), ("Приоритеты", spread)]
+
+    def share(name: str, label: str) -> str:
+        row = covered.get(name) or {}
+        ratio = row.get("ratio")
+        return f"{label} {row.get('covered', '—')}/{row.get('total', '—')}" + (f" ({ratio:.0%})" if isinstance(ratio, (int, float)) else "")
+
+    uncovered = covered.get("uncovered") or []
+    coverage = ", ".join(share(name, label) for name, label in (("partitions", "разбиения"), ("boundaries", "границы"), ("rules", "правила"),
+                                                                 ("negative_partitions", "невалидные разбиения негативными кейсами")))
+    coverage += f"; не покрыто с причиной: {len(uncovered)}" + (" (" + ", ".join(str(row.get("ref")) for row in uncovered[:10])
+                                                               + (", …" if len(uncovered) > 10 else "") + ")" if uncovered else "")
+    priorities = covered.get("priorities") or {}
+    spread = ", ".join(f"{level} {priorities.get(level, 0)}" for level in PRIORITY_LEVELS) + " (назначены кодом по дизайну)"
+    degenerate = [row.get("message") for row in result.get("warnings") or [] if isinstance(row, dict) and row.get("code") == "PRIORITY_DEGENERATE"]
+    if degenerate:
+        spread += " — ВНИМАНИЕ: один уровень больше 70 % кейсов"
+    return [("Покрытие дизайна", coverage), ("Приоритеты", spread)]
 
 
 FIRST_CALL = "first_model_call"
@@ -1950,6 +1989,7 @@ def _figures(result: dict[str, Any], events: list[dict[str, Any]], run_root: Pat
         ("Итог", f"completion {result.get('completion')}, verification {result.get('verification')}, accepted {result.get('accepted')}"
                  + (f", reason {result['reason_code']}" if result.get("reason_code") else "")),
         ("Кейсов", str(cases[0]) if cases else "—"),
+        *_design_figures(result, project),
         ("Проверок (assertions)", str(cases[1]) if cases else "—"),
         ("Частей ревью кейсов", str(len(canonical))),
         ("Частей ревью автотестов", str(len(automation))),

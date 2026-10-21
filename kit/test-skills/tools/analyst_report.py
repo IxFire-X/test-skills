@@ -198,10 +198,26 @@ def _plural(count: int, one: str, few: str, many: str) -> str:
     return one if count % 10 == 1 and count % 100 != 11 else few if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14) else many
 
 
+def _design_lines(report: Mapping[str, Any]) -> list[str]:
+    """D1: the design coverage section, and every uncovered design element with its reason."""
+    covered = report.get("design_coverage")
+    if not isinstance(covered, Mapping):
+        return []
+    names = (("partitions", "классы эквивалентности"), ("boundaries", "граничные значения"), ("rules", "правила"), ("negative_partitions", "невалидные классы негативными кейсами"))
+    lines = ["## Покрытие дизайна", ""]
+    for key, name in names:
+        share = covered[key]
+        ratio = "—" if share["ratio"] is None else f"{round(100 * share['ratio'])} %"
+        lines.append(f"- {name}: {share['covered']} из {share['total']} ({ratio})" + (f", без покрытия с причиной: {share['uncovered']}" if share["uncovered"] else ""))
+    lines += [f"- `{row['ref']}` не покрыт: {row['reason']}" for row in covered["uncovered"]]
+    lines.append("- приоритеты: " + ", ".join(f"{level} {count}" for level, count in covered["priorities"].items()))
+    return [*lines, ""]
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     lines = ["# Вопросы аналитикам", "", f"Прогон `{report['run_id']}`, попытка `{report['attempt_id']}`. Требований с вопросами: {len(report['items'])}.", ""]
     if not report["items"]:
-        lines += ["Вопросов нет.", ""]
+        lines += ["Вопросов нет.", "", *_design_lines(report)]
         return "\n".join(lines)
     names = {"context-marker": "разметка требований", "tc-reviewer": "ревью кейсов", "autotest-reviewer": "ревью автотестов", "mutation-triage": "разбор мутантов"}
     for row in report["items"]:
@@ -225,7 +241,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.append("**Источники.** " + "; ".join(f"{names.get(source['kind'], source['kind'])} `{source['ref']}`" + (f" ({source['location']})" if source.get("location") else "")
                                                 for source in row["sources"]))
         lines.append("")
-    return "\n".join(lines)
+    return "\n".join([*lines, *_design_lines(report)])
 
 
 def write_report(directory: Path, report: Mapping[str, Any]) -> dict[str, str]:

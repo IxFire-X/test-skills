@@ -9,7 +9,7 @@
     "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
     "discovery": {}, "modules": {}, "limits": {}, "mutation": {}, "review_runner": {},
-    "requirements": {}, "suite": {}, "execution": {}, "context": {}
+    "requirements": {}, "suite": {}, "execution": {}, "context": {}, "design": {}
   },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
@@ -19,9 +19,10 @@
     "requirements": {"type": "object", "description": "Requirement identity (wave 3): id_pattern marks an explicit requirement ID at the start of a line, like the built-in REQ-/AC- IDs; without it the split is unchanged.", "additionalProperties": false, "properties": {"id_pattern": {"type": "string", "minLength": 1, "maxLength": 200}}},
     "execution": {"type": "object", "description": "Human gates of execution (S3): review human (the default) stops the driver after the generated tests are written and before any build or test run until a person approves the exact files; none turns the stop off.", "additionalProperties": false, "properties": {"review": {"enum": ["human", "none"]}, "mode": {"enum": ["auto", "human"], "description": "S9: human — the package starts no build, test or mutation process; the driver prints the exact commands and a person runs them and returns the reports (next --junit). Default auto."}}},
     "context": {"type": "object", "description": "Human gate of the model input (S5): confirm true (the default) stops the driver after scan and before the first model call until a person confirms the exact requirement documents and project files that go to the model; false turns the stop off.", "additionalProperties": false, "properties": {"confirm": {"type": "boolean"}}},
+    "design": {"type": "object", "description": "Test design stage (D1): enabled true (the default) runs test-design between the context marker and the case generator, and every case then names the design elements it covers (design_refs); false keeps the run without the stage. full_factorial_max: most combinations generated in full before pairwise is used (D1b), default 16.", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}, "full_factorial_max": {"type": "integer", "minimum": 1, "maximum": 4096}}},
     "suite": {"type": "object", "description": "Living suite directory (wave 3), relative to the project root; default test-cases/.", "additionalProperties": false, "properties": {"path": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*/?$", "not": {"pattern": "(?:^|/)\\.\\.(?:/|$)"}}}},
     "mutation": {"type": "object", "description": "Opt-in mutation stage (contract amendments 2026-10-07); runs only with run-scoped consent (next --mutation).", "additionalProperties": false, "required": ["enabled"], "properties": {"enabled": {"type": "boolean"}, "threads": {"type": "integer", "minimum": 1, "maximum": 16}, "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 86400}, "timeout_const_ms": {"type": "integer", "minimum": 1000, "maximum": 600000}, "mutators": {"const": "DEFAULTS"}, "target_classes": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*(?:\\.\\*)?$"}}, "triage_limit": {"type": "integer", "minimum": 0, "maximum": 200}}},
-    "review_runner": {"type": "object", "description": "Opt-in model process runner; only a package preset is selectable here, a custom command template is a launch flag only.", "additionalProperties": false, "required": ["preset"], "properties": {"preset": {"enum": ["claude", "codex"]}, "models": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"context-marker": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-generator": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-reviewer": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-to-autotest": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "autotest-reviewer": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "mutation-triage": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}}}, "max_parallel": {"type": "integer", "minimum": 1, "maximum": 16}, "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 7200}, "interpreter": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the interpreter that starts a .py --review-runner-cli (default: the driver's own Python)."}, "env_passthrough": {"type": "array", "maxItems": 64, "uniqueItems": true, "description": "S6: environment variables the model CLI gets beyond the allowlist (PATH, HOME, LANG/LC_*, TMP*/TEMP, JAVA_HOME and the Windows minimum): exact names or prefixes with * at the end (GIGACODE_*).", "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}\\*?$"}}}},
+    "review_runner": {"type": "object", "description": "Opt-in model process runner; only a package preset is selectable here, a custom command template is a launch flag only.", "additionalProperties": false, "required": ["preset"], "properties": {"preset": {"enum": ["claude", "codex"]}, "models": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"context-marker": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-generator": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-reviewer": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "tc-to-autotest": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "autotest-reviewer": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "mutation-triage": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}, "test-design": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}}}, "max_parallel": {"type": "integer", "minimum": 1, "maximum": 16}, "timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 7200}, "interpreter": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "Absolute path of the interpreter that starts a .py --review-runner-cli (default: the driver's own Python)."}, "env_passthrough": {"type": "array", "maxItems": 64, "uniqueItems": true, "description": "S6: environment variables the model CLI gets beyond the allowlist (PATH, HOME, LANG/LC_*, TMP*/TEMP, JAVA_HOME and the Windows minimum): exact names or prefixes with * at the end (GIGACODE_*).", "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}\\*?$"}}}},
     "v2": {
       "type": "object",
       "required": ["project"],
@@ -43,7 +44,8 @@
         "requirements": {"$ref": "#/$defs/requirements"},
         "suite": {"$ref": "#/$defs/suite"},
         "execution": {"$ref": "#/$defs/execution"},
-        "context": {"$ref": "#/$defs/context"}
+        "context": {"$ref": "#/$defs/context"},
+        "design": {"$ref": "#/$defs/design"}
       }
     },
     "v3": {
@@ -65,7 +67,8 @@
         "requirements": {"$ref": "#/$defs/requirements"},
         "suite": {"$ref": "#/$defs/suite"},
         "execution": {"$ref": "#/$defs/execution"},
-        "context": {"$ref": "#/$defs/context"}
+        "context": {"$ref": "#/$defs/context"},
+        "design": {"$ref": "#/$defs/design"}
       }
     },
     "limits": {

@@ -53,7 +53,11 @@ def report_for(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
     marker = driver._marker_artifact(run_root, attempt_id)
     items = [*marker_items(None if marker is None else marker["artifact"]), *review_items(_review_parts(run_root, attempt)), *_too_broad(run_root, attempt),
              *triage_items(decision_rows(answers(run_root, attempt)))]
-    return build_report(items, run_id=run_root.name, attempt_id=attempt_id, sources_of=_sources_of(run_root, attempt_id))
+    report = build_report(items, run_id=run_root.name, attempt_id=attempt_id, sources_of=_sources_of(run_root, attempt_id))
+    covered = driver.design_coverage(run_root, attempt)
+    if covered is not None:  # D1
+        report["design_coverage"] = covered
+    return report
 
 
 def _sources_of(run_root: Path, attempt_id: str) -> dict[str, list[str]]:

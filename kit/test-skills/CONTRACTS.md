@@ -64,11 +64,14 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 - model runner `--review-runner`: `host, process`; default `host`; presets `claude, codex`; custom template `launch_flag_only`; `.skillsrc` fields `preset, models, max_parallel, timeout_seconds, interpreter, env_passthrough`; invocation `fresh_process_temp_cwd_stdin_no_write_tools`; wait action `wait`; tries per part `3`; standalone `run --runner process`
 - runner evidence `command_digest, cli_name_version, model, started_finished, exit_code, session_id, stdout_digest, tokens, user_settings_loaded` → axis `isolation_evidence`; `--require-driver-isolation` rejects lower levels with `REVIEW_ISOLATION_UNVERIFIED`
 - optional skill `mutation-triage` — `skills/mutation-triage/SKILL.md`
+- optional skill `test-design` — `skills/test-design/SKILL.md`
 - optional stage `mutation-triage`: role `strength-analyst`, policy `mutation-triage-v1`, cardinality `post_terminal_per_task`, profiles `local-pilot-v1`, answer `mutation-triage-output.schema.json`, decisions `TEST_GAP, SPEC_GAP, EQUIVALENT, OUT_OF_SCOPE`, changes `nothing_in_the_attempt`
+- optional stage `test-design`: role `generator`, policy `test-design-v1`, cardinality `once_before_generation`, profiles `cases-only-v1, local-pilot-v1`, answer `test-design.schema.json`, decisions `DESIGNED, NOT_DESIGNED`, changes `design_refs_required_in_cases`
 - optional schema `mutation-receipt.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
 - optional schema `mutation-triage-output.schema.json` (phase 6, `IMPLEMENTED`, `1.0.0`)
 - optional schema `suite-manifest.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
 - optional schema `suite-update-result.schema.json` (phase 7, `IMPLEMENTED`, `1.0.0`)
+- optional schema `test-design.schema.json` (phase 8, `IMPLEMENTED`, `1.0.0`)
 - optional artifact `mutation_receipt` (phase 6, `IMPLEMENTED`)
 - optional artifact `mutation_triage` (phase 6, `IMPLEMENTED`)
 - optional artifact `analyst_report` (phase 7, `IMPLEMENTED`)
@@ -187,7 +190,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `trace-audit-output.schema.json` | `7` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `pre-finalization-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `derived-terminal-trace.schema.json` | `7` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.2.0` | `True` | `-` |
+| `driver-summary.schema.json` | `7` | `IMPLEMENTED` | `1.3.0` | `True` | `-` |
 | `compatibility-evidence.schema.json` | `8` | `IMPLEMENTED` | `2.0.0` | `True` | `-` |
 | `retained-native-rerun-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `scenario-observation-receipt.schema.json` | `8` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

@@ -36,22 +36,23 @@ on_confined_write(_forget_validated_evidence)
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
 _REVIEW_READBACKS: ContextVar[dict | None] = ContextVar("bounded_review_readbacks", default=None)
 _AUTH_KEYS = {"request_id", "execution_requested", "host_id", "mutation_requested", "require_driver_isolation", "suite_requested", "disposition_policy",
-              "execution_review_required", "context_confirm_required", "execution_mode_human"}
+              "execution_review_required", "context_confirm_required", "execution_mode_human", "design_required"}
 # Opt-in consents (contract amendments 2026-10-07): additive optional keys, present only when set.
 _AUTH_OPT_IN_KEYS = ("mutation_requested", "require_driver_isolation", "suite_requested", "execution_review_required", "context_confirm_required",
-                     "execution_mode_human")
+                     "execution_mode_human", "design_required")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:(?:baseline|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12](?::part-[0-9]{3})?|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
+    r"^(?:context-marker:(?:baseline|batch-[0-9]{3})|test-design:baseline|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical:part-[0-9]{6}(?:-try[23])?|tc-to-autotest:r[12](?::part-[0-9]{3})?|autotest-reviewer:r[12]:part-[0-9]{6}(?:-try[23])?)$"
 )
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _AUTOMATION_PART = re.compile(r"^tc-to-autotest:(r[12]):(part-[0-9]{3})$")  # P2: one part of a split automation revision
 _MODEL_STAGE_REGISTRY = {
     "context-marker": ("generator", "context-marker-v1"),
+    "test-design": ("generator", "test-design-v1"),
     "tc-generator": ("generator", "tc-generator-v1"),
     "tc-reviewer": ("canonical-reviewer", "canonical-reviewer-v2"),
     "tc-to-autotest": ("automation-generator", "tc-to-autotest-v1"),
@@ -706,6 +707,12 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                         for request_attempt, request_stage in model_requests
                     ):
                         raise ValueError("merged context-marker request requires every batch response")
+                    # D1: the test design follows the marker and precedes every generator request of its attempt.
+                    if stage.startswith("test-design:") and (
+                        (attempt_id, "context-marker:baseline") not in model_responses
+                        or any(request_attempt == attempt_id and request_stage.startswith("tc-generator:") for request_attempt, request_stage in model_requests)
+                    ):
+                        raise ValueError("test design request is outside its lifecycle")
                     if stage.startswith("tc-generator:BATCH-") and attempt_id not in context_selected:
                         raise ValueError("model request requires selected context")
                     if stage.startswith("tc-generator:") and (
@@ -1447,6 +1454,13 @@ def context_confirm_required(run_root: Path) -> bool:
     return authorization.get("context_confirm_required") is True
 
 
+def design_required(run_root: Path) -> bool:
+    """Whether the run was created with the test design stage (``.skillsrc`` design.enabled; D1)."""
+    project, root = _run_root(run_root)
+    _manifest, authorization = _run_boundary(project, root)
+    return authorization.get("design_required") is True
+
+
 def _context_confirmed(root: Path, state: Mapping[str, Any], attempt_id: str) -> bool:
     """One confirmation per run: any attempt's CONTEXT_CONFIRMED of the same files covers this attempt."""
     confirmed = {event.get("artifact_digest") for event in state["events"] if event["event_type"] == "CONTEXT_CONFIRMED"}
@@ -2073,16 +2087,28 @@ def _validate_model_request_predecessors(
 ) -> None:
     """Bind generator/reviewer requests to their exact durable predecessors."""
     stage = stage_instance_id.split(":", 1)[0]
-    if stage not in {"tc-generator", "tc-reviewer", "autotest-reviewer"}:
+    if stage not in {"test-design", "tc-generator", "tc-reviewer", "autotest-reviewer"}:
         return
     attempt_id = str(attempt["attempt_id"])
     events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
     cutoff = request_seq if request_seq is not None else state["events"][-1]["seq"] + 1
-    if stage == "tc-generator":
+    markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    designed = stage in {"test-design", "tc-generator"} and _run_boundary(project, root)[1].get("design_required") is True
+    if stage == "test-design":
+        # D1: only a run created with design_required has the stage; its brief is the marker requirements.
+        from tools.test_design import design_brief, digest
+
+        if not designed:
+            raise ValueError("test design request in a run without design_required")
+        if len(inputs) != 2 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
+            raise ValueError("test design input digests must bind its prior marker and brief")
+        marker = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])["artifact"]
+        if inputs[1] != digest(design_brief(marker["artifacts"]["analytics_documentation"]["requirements"])):
+            raise ValueError("test design input digests must bind its prior marker and brief")
+    elif stage == "tc-generator":
         from tools.project_inventory import read_execution_baseline
 
-        markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-        if len(inputs) != 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
+        if len(inputs) != (5 if designed else 4) or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
         _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
         context = read_context_selection(root, attempt_id, inputs[1])
@@ -2090,8 +2116,62 @@ def _validate_model_request_predecessors(
         selected = [event for event in events if event["event_type"] == "CONTEXT_SELECTED" and event.get("artifact_digest") == inputs[1] and event["seq"] < cutoff]
         if baseline["digest"] != attempt["baseline_digest"] or context["inventory_digest"] != baseline["inventory_digest"] or not selected:
             raise ValueError("tc-generator context must bind its prior attempt inventory selection")
+        if designed:
+            _validate_generator_design_slice(project, root, state, attempt_id, stage_instance_id, inputs, events, cutoff)
     else:
         _validate_review_request(project, root, state, attempt_id, stage_instance_id, invocation_id, inputs, cutoff, model_id=model_id)
+
+
+def _validate_generator_design_slice(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+                                     inputs: Sequence[str], events: Sequence[Mapping[str, Any]], cutoff: int) -> None:
+    """D1: the fifth generator input is the design slice of its batch, recomputed from the design and the batch plan."""
+    from tools.batch_assembly import plan_batches
+    from tools.test_design import design_slice, digest
+
+    designs = [event for event in events if event.get("stage_instance_id") == "test-design:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    if len(designs) != 1 or designs[0]["seq"] >= cutoff:
+        raise ValueError("tc-generator input digests must bind its prior test design")
+    design = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "test-design:baseline", str(designs[0]["artifact_digest"]))["artifact"]
+    marker = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])["artifact"]
+    plan = plan_batches(marker["artifacts"]["analytics_documentation"]["requirements"], {"header_digest": inputs[3], "context_receipt_digest": inputs[1]})
+    batch = next((item for item in plan["batches"] if item["batch_id"] == stage_instance_id.split(":", 1)[1]), None)
+    if plan["digest"] != inputs[2] or batch is None or inputs[4] != digest(design_slice(design, batch["owned_source_requirement_ids"])):
+        raise ValueError("tc-generator input digests must bind the design slice of its batch")
+
+
+def _validate_test_design_artifact(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, request: Mapping[str, Any],
+                                   value: Mapping[str, Any]) -> None:
+    """D1: the design passes every design check against the requirements of the marker its request binds."""
+    if request["stage"] != "test-design":
+        return
+    from tools.test_design import validate_design
+
+    marker = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", request["input_digests"][0])["artifact"]
+    rows = validate_design(value, [row["source_requirement_id"] for row in marker["artifacts"]["analytics_documentation"]["requirements"]])
+    if rows:
+        raise ValueError("test design artifact fails the design checks: " + ", ".join(sorted({row["code"] for row in rows})))
+
+
+def _validate_generator_design(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, request: Mapping[str, Any],
+                               value: Mapping[str, Any]) -> None:
+    """D1: a fragment of a design run covers the design slice its request binds and carries the code priorities."""
+    if request["stage"] != "tc-generator" or len(request["input_digests"]) != 5:
+        return
+    from tools.test_design import assign_priorities, design_slice, digest, fragment_design_problems
+
+    designs = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == "test-design:baseline"
+               and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    if len(designs) != 1:
+        raise ValueError("generator fragment of a design run has no test design")
+    design = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "test-design:baseline", str(designs[0]["artifact_digest"]))["artifact"]
+    sliced = design_slice(design, value.get("owned_source_requirement_ids") or [])
+    cases = value.get("test_cases") or []
+    if (
+        digest(sliced) != request["input_digests"][4]
+        or fragment_design_problems(sliced, cases, value.get("design_uncovered") or [], value.get("source_to_canonical_mappings") or [])
+        or [case.get("priority") for case in cases] != assign_priorities(sliced, cases)
+    ):
+        raise ValueError("generator fragment fails the test design checks of its batch")
 
 
 def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
@@ -2100,7 +2180,7 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
     inputs = request["input_digests"]
     context = read_context_selection(root, attempt_id, inputs[1])
     if (
-        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:]
+        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:4]
         or value.get("context_receipt") != context
     ):
         raise ValueError("generator fragment must match its request and stored context receipt")
@@ -2379,6 +2459,8 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
         schema_name = "context-marker-output.schema.json"
         if value.get("stage") != "context-marker":
             raise ValueError("invalid context-marker artifact")
+    elif stage_instance_id.startswith("test-design:"):
+        schema_name = "test-design.schema.json"
     elif stage_instance_id.startswith("tc-generator:"):
         schema_name = "candidate-fragment.schema.json"
         batch_id = stage_instance_id.split(":", 1)[1]
@@ -2469,7 +2551,9 @@ def publish_model_stage_artifact(
     )
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
+    _validate_test_design_artifact(project, root, state, attempt_id, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_generator_design(project, root, state, attempt_id, request, value)
     _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)
@@ -2560,7 +2644,9 @@ def _read_model_stage_artifact_with_state(
     _validate_model_stage_artifact(stage_instance_id, value)
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
+    _validate_test_design_artifact(project, root, state, attempt_id, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    _validate_generator_design(project, root, state, attempt_id, request, value)
     _validate_automation_parts_artifact(project, root, state, attempt_id, stage_instance_id, request, value)
     if stage_instance_id.startswith(("tc-reviewer:", "autotest-reviewer:")) and "invocation_failure" not in value:
         _validate_review_response(root, state, attempt_id, stage_instance_id, value)

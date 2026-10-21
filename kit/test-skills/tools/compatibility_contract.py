@@ -29,6 +29,8 @@ _STAGES = (
     ("autotest-reviewer", "automation-reviewer", "autotest-static-reviewer-v2"),
 )
 _STAGE_REGISTRY = {stage: (role, policy) for stage, role, policy in _STAGES}
+# D1: present only in a run created with design_required; then exactly one row, bound like the marker.
+_OPTIONAL_STAGE_REGISTRY = {"test-design": ("generator", "test-design-v1")}
 
 
 def _canonical(value: Any) -> bytes:
@@ -274,6 +276,15 @@ def _model_event_errors(
 
 
 
+def _design_slice_digests(design: Mapping[str, Any] | None, fragment: Mapping[str, Any]) -> list[str]:
+    """D1: the design slice a generator request of a design run binds as its fifth input."""
+    if design is None:
+        return []
+    from tools.test_design import design_slice, digest
+
+    return [digest(design_slice(design, fragment.get("owned_source_requirement_ids") or []))]
+
+
 def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledger: Mapping[str, Any], durable: Mapping[str, Any], errors: list[str]) -> str:
     branch, stages = evidence.get("branch"), evidence.get("stages")
     if not isinstance(branch, Mapping) or not isinstance(stages, list):
@@ -296,7 +307,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
     ):
         _error(errors, "BRANCH_EVIDENCE_INVALID")
         return "independence_unverified"
-    grouped: dict[str, list[Mapping[str, Any]]] = {name: [] for name in _STAGE_REGISTRY}
+    grouped: dict[str, list[Mapping[str, Any]]] = {name: [] for name in [*_STAGE_REGISTRY, *_OPTIONAL_STAGE_REGISTRY]}
     instances: set[str] = set()
     for row in stages:
         if not isinstance(row, Mapping) or not _label(row.get("stage_instance_id")) or row["stage_instance_id"] in instances:
@@ -308,7 +319,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             _error(errors, "STAGE_EVIDENCE_INVALID")
             continue
         grouped[stage].append(row)
-        role, policy = _STAGE_REGISTRY[stage]
+        role, policy = {**_STAGE_REGISTRY, **_OPTIONAL_STAGE_REGISTRY}[stage]
         if row.get("status") == "EXECUTED" and (row.get("role") != role or row.get("role_policy") != policy):
             _error(errors, "STAGE_REGISTRY_MISMATCH")
     if any(len(grouped[stage]) != 1 for stage in ("orchestrate", "context-marker")) or any(not grouped[stage] for stage in _STAGE_REGISTRY):
@@ -357,6 +368,25 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
     except (KeyError, TypeError, ValueError):
         _error(errors, "STAGE_READBACK_INVALID")
         return "independence_unverified"
+    design_stage = durable["model_lifecycle"]["stages"].get("test-design:baseline")
+    design_artifact: Mapping[str, Any] | None = None
+    if design_stage is None:
+        if grouped["test-design"]:
+            _error(errors, "STAGE_EVIDENCE_INVALID")
+            return "independence_unverified"
+    else:
+        try:
+            design_digest = str(design_stage["MODEL_RESPONSE_RECEIVED"]["artifact_digest"])
+            design_publication = durable["read_model_stage_artifact"](durable["root"], str(attempt["attempt_id"]), "test-design:baseline", design_digest)
+            design_request = durable["read_model_request"](durable["root"], str(attempt["attempt_id"]), "test-design:baseline",
+                                                           design_stage["MODEL_REQUESTED"]["artifact_digest"])
+        except (KeyError, TypeError, ValueError):
+            _error(errors, "STAGE_READBACK_INVALID")
+            return "independence_unverified"
+        if len(grouped["test-design"]) != 1:
+            _error(errors, "STAGE_EVIDENCE_INVALID")
+            return "independence_unverified"
+        design_artifact = design_publication.get("artifact")
     marker_artifact = context_marker.get("artifact")
     effective_document = effective.get("document")
     if (
@@ -422,6 +452,11 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             marker_request["input_digests"], [context_marker_digest],
         ),
     }
+    if design_stage is not None:
+        expected["test-design"] = (
+            "test-design:baseline", "model-stage-artifact", design_digest, None,
+            design_request["input_digests"], [design_digest],
+        )
     exact_keys = {"stage_instance_id", "stage", "status", "role", "role_policy", "model_id", "invocation_id", "input_digests", "output_digests", "artifact_ref"}
     model_invocations: list[str] = []
     for stage, (instance, kind, digest, invocation, input_digests, output_digests) in expected.items():
@@ -459,6 +494,7 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
             or row.get("input_digests") != [
                 context_marker_digest, batch["context_receipt_digest"],
                 fragment.get("plan_digest"), fragment.get("header_digest"),
+                *_design_slice_digests(design_artifact, fragment),
             ]
             or row.get("output_digests") != [batch["digest"]]
             or not _label(row.get("model_id"))
