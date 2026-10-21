@@ -28,7 +28,7 @@ sha256sum -c --quiet test-skills-20c8cd4.files.sha256    # молчит — вс
 `.py`, которого нет в списке, и `doctor` пакета (целостность `release/manifest.json` и профиль поставки: набор runtime-файлов
 копии совпадает с профилем `host` в точности).
 
-Собственные файлы комплекта (`operate.py`, `preflight.py`, документы — всё в `kit/` вне `test-skills/`, кроме самого
+Собственные файлы комплекта (`operate.py`, `preflight.py`, `pack_query.py`, документы — всё в `kit/` вне `test-skills/`, кроме самого
 списка) — по `kit-files.sha256`:
 
 ```bash
@@ -49,6 +49,7 @@ sha256sum -c --quiet kit-files.sha256                    # молчит — вс
 | `test-skills/*.md`, `docs/examples/`, `docs/pilot-evidence.md`, `docs/portable-pipeline-overview-ru.md`, `docs/presentation-notes-ru.md`, `LICENSE`, `.skillsrc.example` | документация и примеры | нет |
 | `operate.py` | инструмент человека: `init` до сессии агента (сверка, preflight, `.skillsrc`, замер без модели, первое сообщение агенту) и `report` после прогона; CLI и сборку не запускает | да — человек |
 | `preflight.py` | проверка проекта до прогона (только чтение) | да — человек, через `init` |
+| `pack_query.py` | вопрос `operate.py` к пакету только на чтение: модули `.skillsrc` пакетным парсером (`modules <.skillsrc>`, JSON на stdout); одна фиксированная подкоманда | да — человек, через `init` |
 | `SKILL.md` | вход агента CLI: ссылка на `test-skills/skills/orchestrate/SKILL.md` и правила | нет — читает агент |
 | `RUN.md`, этот файл | документация | нет |
 

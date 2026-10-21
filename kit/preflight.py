@@ -49,12 +49,16 @@ def check_python() -> None:
         add(OK, "Python", f"{version.major}.{version.minor}.{version.micro}")
     else:
         add(STOP, "Python", f"{version.major}.{version.minor} < 3.11", "запускать пакет python3.11+ (python3 --version)")
-    for module in ("jsonschema", "yaml"):
-        try:
-            __import__(module)
-            add(OK, f"модуль {module}", "установлен")
-        except ImportError:
-            add(STOP, f"модуль {module}", "нет", f"pip install -r <пакет>/requirements.txt (локальное зеркало pip), нужен {module}")
+    try:
+        import jsonschema  # noqa: F401
+        add(OK, "модуль jsonschema", "установлен")
+    except ImportError:
+        add(STOP, "модуль jsonschema", "нет", "pip install -r <пакет>/requirements.txt (локальное зеркало pip), нужен jsonschema")
+    try:
+        import yaml  # noqa: F401
+        add(OK, "модуль yaml", "установлен")
+    except ImportError:
+        add(STOP, "модуль yaml", "нет", "pip install -r <пакет>/requirements.txt (локальное зеркало pip), нужен yaml")
 
 
 def check_pack(pack: Path) -> None:

@@ -48,12 +48,6 @@ HOST_TASK_INPUT_BYTES = 700_000  # a subagent's window also holds the CLI's syst
 PROFILES = ("local-pilot-v1", "cases-only-v1")
 HOST_CLI = "gigacode"
 LAUNCHER = "ts.py"  # the package's launcher of next|submit|status|answer|doctor (H1)
-# The package's own .skillsrc parser: the modules as the driver sees them (id, root, test).
-MODULES_CODE = ("import json, sys\nfrom pathlib import Path\nfrom tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc\n"
-                "try:\n    modules = normalize_skillsrc(load_skillsrc(Path(sys.argv[1])))['modules']\n"
-                "except SkillsrcError as error:\n"
-                "    sys.exit(f'{error.code}: {error} {json.dumps(error.details, ensure_ascii=False)[:400]}')\n"
-                "print(json.dumps([{'id': m['id'], 'root': m.get('root', '.'), 'test': m.get('test') or {}} for m in modules], ensure_ascii=False))")
 ASK_KNOWN_KEYS = {"action", "task_id", "question", "options", "run_id", "attempt_id", "stage", "skillsrc_question_id"}
 WRAPPER_ADAPTER, SYSTEM_MAVEN = "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1"
 RUN_ID = re.compile(r"[0-9a-f]{32}")
@@ -411,9 +405,9 @@ class Operator:
         self.say(f"  код выхода: {done.code}")
         return done
 
-    def pack_json(self, code: str, *args: Any) -> Any:
-        """A read-only question to the package (its own parser) under its interpreter; runs in --dry-run too."""
-        argv = [self.py, "-c", code, *[str(item) for item in args]]
+    def pack_json(self, *args: Any) -> Any:
+        """A read-only question to the package (pack_query.py beside operate.py) under its interpreter; runs in --dry-run too."""
+        argv = [self.py, str(HERE / "pack_query.py"), *[str(item) for item in args]]
         self.log(f"$ {shlex.join(argv)}   (в {self.pack})")
         try:
             done = subprocess.run(argv, cwd=self.pack, capture_output=True, env=self.env, text=True, encoding="utf-8", errors="replace",
@@ -564,24 +558,26 @@ class Init(Operator):
                 raise Stop(f"в пакете лишние .py, которых нет в {files.name} ({len(code)}): {', '.join(code[:5])}",
                            f"удалить {self.pack} и скопировать папку test-skills из комплекта заново")
             self.say(f"  файлы пакета: {len(rows)} совпадают" + (f"; лишних файлов {len(extra)}: {', '.join(extra[:5])}" if extra else ""))
-        if not (HERE / "preflight.py").is_file():
-            raise Stop("рядом с operate.py нет preflight.py", f"скопировать комплект целиком в одну папку ({HERE})")
+        for name in ("preflight.py", "pack_query.py"):
+            if not (HERE / name).is_file():
+                raise Stop(f"рядом с operate.py нет {name}", f"скопировать комплект целиком в одну папку ({HERE})")
         if sys.version_info < (3, 11):
             raise Stop(f"Python {sys.version.split()[0]} < 3.11", "запускать operate.py через python3.11 или новее")
         self.say(f"  Python {sys.version.split()[0]}: ок; интерпретатор пакета: {self.py}" + ("" if self.py != sys.executable else
                  f" (venv {self.pack / '.venv'} нет — текущий)"))
-        modules = self.run([self.py, "-c", "import sys, jsonschema, yaml; sys.exit(sys.version_info < (3, 11))"])
-        if modules.code != 0:
-            requirements = self.pack / "requirements.txt"
-            install = shlex.join([self.py, "-m", "pip", "install", "--require-hashes", "-r", str(requirements)])
-            raise Stop(f"у интерпретатора {self.py} нет jsonschema/pyyaml (или он старше 3.11) — запустите через интерпретатор пакета "
-                       f"({self.pack / '.venv'}) или поставьте зависимости: "
-                       + ("пакетами ОС python3-jsonschema и python3-yaml (--no-pip)" if self.args.no_pip else install),
-                       "operate.py сам ничего не ставит; после установки — повторить init")
         doctor = self.run([self.py, "-m", "tools.doctor", "--root", "."], cwd=self.pack)
         if self.dry:
             return
         report = _json_tail(doctor.stdout) or {}
+        # the interpreter and the dependencies from doctor's own report: no separate probe of the interpreter
+        missing = [name for name, row in (report.get("dependencies") or {}).items() if isinstance(row, dict) and not row.get("available")]
+        if missing or not (report.get("python") or {}).get("supported", True):
+            requirements = self.pack / "requirements.txt"
+            install = shlex.join([self.py, "-m", "pip", "install", "--require-hashes", "-r", str(requirements)])
+            raise Stop(f"у интерпретатора {self.py} нет {', '.join(missing) or 'нужной версии Python'} (нужен Python 3.11+ с jsonschema и pyyaml) — "
+                       f"запустите через интерпретатор пакета ({self.pack / '.venv'}) или поставьте зависимости: "
+                       + ("пакетами ОС python3-jsonschema и python3-yaml (--no-pip)" if self.args.no_pip else install),
+                       "operate.py сам ничего не ставит; после установки — повторить init")
         self.say(f"  doctor: {report.get('status')}" + (f", профиль поставки {report['delivery_profile']}" if report.get("delivery_profile") else ""))
         if doctor.code != 0 or report.get("status") != "PASS":
             raise Stop(f"doctor пакета: {report.get('status') or 'нет JSON'} (код {doctor.code})", "скопировать test-skills из комплекта заново и повторить init; ошибку — в отчёт")
@@ -643,7 +639,7 @@ class Init(Operator):
         if not skillsrc.is_file():
             return None
         try:
-            return self.pack_json(MODULES_CODE, skillsrc)
+            return self.pack_json("modules", skillsrc)
         except Stop as stop:
             raise Stop(f".skillsrc проекта не читается пакетом: {stop.message}", "исправить .skillsrc (ошибка выше) и повторить init")
 
