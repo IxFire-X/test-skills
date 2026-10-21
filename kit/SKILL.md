@@ -7,7 +7,7 @@ description: >-
   выполняет в своём окне; сборку, тесты и мутации запускает человек по напечатанным командам. operate.py,
   preflight.py и pack_query.py — инструменты человека до и после прогона, агент их не вызывает.
 metadata:
-  version: "0.5.0-pilot (пакет 20c8cd4 ветки main, профиль поставки host; комплект — ветка kit-host)"
+  version: "0.5.0-pilot (пакет 7a06c1d ветки main, профиль поставки host; комплект — ветка kit-host)"
   display_name: test-skills — хост-сборка для внутреннего прогона
   owner: IxFire-X
   skill_type: executable
