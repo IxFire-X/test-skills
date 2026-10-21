@@ -32,7 +32,7 @@
         "type": "object", "additionalProperties": false, "required": ["id", "excluded", "excluded_prefixes", "skill_pack_digest"],
         "properties": {
           "id": {"const": "host"},
-          "excluded": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:tools/[a-z0-9_]+[.]py|schemas/[a-z0-9-]+[.]schema[.]json)$"}},
+          "excluded": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:tools/[a-z0-9_]+[.]py|schemas/[a-z0-9-]+[.]schema[.]json|skills/[a-z0-9-]+/references/[a-z0-9-]+[.]md)$"}},
           "excluded_prefixes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_-]+/(?:[a-z0-9_-]+/)?$"}},
           "skill_pack_digest": {"$ref": "#/$defs/digest"}
         }

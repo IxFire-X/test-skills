@@ -33,6 +33,9 @@ HOST_EXCLUDED = (
     "tools/ci_gate.py", "tools/company_runner.py", "tools/model_runner.py", "tools/pipeline_driver_run.py",
     "tools/pipeline_driver_runner.py", "tools/process_launch.py",
     "schemas/company-execution-receipt.schema.json",  # read only by company_runner
+    # The process mode and the manual run_pipeline sequence (exec starts the tests itself): universal build only.
+    "skills/orchestrate/references/manual-sequence.md", "skills/orchestrate/references/orchestration-contract.md",
+    "skills/orchestrate/references/process-mode.md",
 )
 HOST_EXCLUDED_PREFIXES = ("evals/", "docs/research/", "docs/review/", "docs/superpowers/")
 # No delivery carries them (the sparse list of USAGE.md): the package's own tests and development files, slides.
