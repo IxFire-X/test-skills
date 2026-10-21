@@ -10,7 +10,9 @@ confirm-context`` listing every selected project file and its size; the answer i
 default; ``context.confirm: false`` or ``--confirm-context no`` turns it off.
 
 S9 — ``execution.mode: human``: the package starts no build, test or mutation process; the driver prints the exact
-closed commands and a person runs them and hands the reports back (``next --junit``).  ``auto`` is the default.
+closed commands and a person runs them and hands the reports back (``next --junit``).  ``auto`` is the default where the
+package carries its process launch (``tools/process_launch.py``); the host delivery leaves it out, so there ``human`` is
+the default and ``auto`` is refused with ``EXECUTION_MODE_UNAVAILABLE``.
 """
 from __future__ import annotations
 
@@ -58,13 +60,24 @@ def execution_review(project: Path, flag: str | None = None) -> str:
 
 
 def execution_mode(project: Path, flag: str | None = None) -> str:
-    """S9: ``--execution-mode auto|human``, else ``.skillsrc`` ``execution.mode``, else ``auto``."""
+    """S9: ``--execution-mode auto|human``, else ``.skillsrc`` ``execution.mode``, else ``auto`` (``human`` in the host delivery)."""
+    from tools.delivery_profile import EXECUTION_MODE_UNAVAILABLE, ProfileUnavailable, require
+
     if flag is not None:
         if flag not in EXECUTION_MODE:
             raise GateError("DRIVER_INPUT", f"--execution-mode must be one of: {', '.join(EXECUTION_MODE)}")
-        return flag
-    section = _skillsrc(project).get("execution")
-    value = section.get("mode") if isinstance(section, Mapping) else None
+        value = flag
+    else:
+        section = _skillsrc(project).get("execution")
+        value = section.get("mode") if isinstance(section, Mapping) else None
+    if value == "human":
+        return value
+    try:
+        require(EXECUTION_MODE_UNAVAILABLE)
+    except ProfileUnavailable as error:
+        if value == "auto":  # asked for explicitly: refused, never quietly turned into human
+            raise GateError(error.code, str(error)) from error
+        return "human"
     return value if value in EXECUTION_MODE else DEFAULT_EXECUTION_MODE
 
 

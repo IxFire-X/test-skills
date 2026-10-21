@@ -304,7 +304,9 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         review = execution_review(project, getattr(args, "execution_review", None))
         confirm = getattr(args, "confirm_context", None)
         confirm = confirm if isinstance(confirm, bool) else confirm_context(project, confirm)
-        mode = getattr(args, "execution_mode", None) or (execution_mode(project) if profile == "local-pilot-v1" else "auto")
+        # H1: the flag of a local-pilot run is checked too (auto is unavailable in the host delivery); cases-only runs nothing.
+        flag = getattr(args, "execution_mode", None)
+        mode = execution_mode(project, flag) if profile == "local-pilot-v1" else flag or "auto"
     except GateError as error:
         raise HostStop(error.code, str(error)) from error
     if review == "human" and profile == "local-pilot-v1":
@@ -1220,6 +1222,9 @@ def _cmd_exec(args: Any) -> int:
             "accepted": terminal.get("accepted"), "executor": "local", "finalization": "complete",
         })
         return exit_code(terminal)
+    if coordinates["authorization"].get("execution_mode_human") is not True:
+        # H1: an auto run (scanned by a build with process launch) cannot run on a copy without it.
+        _require_process_launch()
     execution_receipt_path = (
         Path(coordinates["run_root"]) / "execution-receipts" / f"{coordinates['attempt']['attempt_id']}.json"
     )
@@ -1641,7 +1646,17 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     }
 
 
+def _require_process_launch() -> None:
+    from tools.delivery_profile import EXECUTION_MODE_UNAVAILABLE, ProfileUnavailable, require
+
+    try:
+        require(EXECUTION_MODE_UNAVAILABLE)
+    except ProfileUnavailable as error:
+        raise HostStop(error.code, str(error)) from error
+
+
 def cmd_rerun_retained(args: Any) -> int:
+    _require_process_launch()  # the retained tests are rerun by the package itself, never by a person
     project = Path(args.project).resolve()
     root, run, state = _read_run_coordinate(project, args.run)
     from tools.pilot_state import read_terminal_result
@@ -1890,7 +1905,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         from tools.skillsrc_manifest import SkillsrcError
 
-        if isinstance(error, HostStop):
+        from tools.delivery_profile import ProfileUnavailable
+
+        if isinstance(error, (HostStop, ProfileUnavailable)):  # ProfileUnavailable: a part the host delivery leaves out
             _print({"status": "error", "reason": error.code, "message": str(error)})
             return 2
         if isinstance(error, SkillsrcError):

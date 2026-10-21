@@ -306,27 +306,6 @@ def set_system_maven(lines: list[str], module_ids: list[str]) -> tuple[list[str]
     return lines, list(dict.fromkeys(edited))
 
 
-def drop_modules(lines: list[str], module_ids: list[str]) -> tuple[list[str], list[str]]:
-    """Remove the listed items of the top-level ``modules:`` list.  Returns the lines and the ids it removed."""
-    found = _top_block(lines, "modules")
-    if found is None:
-        return lines, []
-    start, end = found
-    dash = next((len(line) - len(line.lstrip(" ")) for line in lines[start + 1:end] if re.match(r"^\s*-(\s|$)", line)), None)
-    if dash is None:
-        return lines, []
-    heads = [index for index in range(start + 1, end) if re.match(rf"^ {{{dash}}}-(\s|$)", lines[index])]
-    keep, removed = list(lines[:start + 1]), []
-    keep += lines[start + 1:heads[0]] if heads else lines[start + 1:end]
-    for head, tail in zip(heads, [*heads[1:], end]):
-        ids = [match.group(1) for line in lines[head:tail] if (match := re.match(r"^\s*(?:-\s+)?id\s*:\s*['\"]?([^'\"\s#]+)", line))]
-        if ids and ids[0] in module_ids:
-            removed.append(ids[0])
-            continue
-        keep += lines[head:tail]
-    return [*keep, *lines[end:]], removed
-
-
 _ID_LINE = re.compile(r"^[ \t>*#-]*(?:\*\*)?([A-Za-zА-Яа-яЁё]{1,12})([-_]?)(\d{1,4})((?:[.-]\d{1,4})*)(\.?)(?=[\s*:)\]])", re.M)
 
 
@@ -603,7 +582,7 @@ class Init(Operator):
         if self.dry:
             return
         report = _json_tail(doctor.stdout) or {}
-        self.say(f"  doctor: {report.get('status')}")
+        self.say(f"  doctor: {report.get('status')}" + (f", профиль поставки {report['delivery_profile']}" if report.get("delivery_profile") else ""))
         if doctor.code != 0 or report.get("status") != "PASS":
             raise Stop(f"doctor пакета: {report.get('status') or 'нет JSON'} (код {doctor.code})", "скопировать test-skills из комплекта заново и повторить init; ошибку — в отчёт")
 
@@ -700,10 +679,6 @@ class Init(Operator):
     # -- module and build
     def init_module(self) -> None:
         modules = self.skillsrc_modules() or [{"id": self.args.module or "root", "root": ".", "test": {}}]  # none: dry-run only
-        kit = [module for module in modules if self.kit_module(module)]
-        if kit:  # the package's discovery walks the disk: the kit folder itself looks like a Python module to it
-            self.say(f"  модуль {', '.join(module['id'] for module in kit)} — это папка комплекта, не код проекта: шаг 4 уберёт его из .skillsrc")
-            modules = [module for module in modules if module not in kit] or modules
         ids = [module["id"] for module in modules]
         if self.args.module:
             if self.args.module not in ids:
@@ -720,7 +695,7 @@ class Init(Operator):
                            self.init_command(module="<id из списка>"))
             module = owning[0]
             self.say(f"  модуль по месту спеки: {module['id']}")
-        self.args.module = module["id"] if len(modules) > 1 or kit else self.args.module
+        self.args.module = module["id"] if len(modules) > 1 else self.args.module
         self.module = module
         root = self.project / str(module.get("root") or ".")
         wrapper = next((name for name in ("mvnw", "gradlew") if (root / name).is_file() or (self.project / name).is_file()), None)
@@ -732,10 +707,6 @@ class Init(Operator):
         if not m2.is_dir():
             self.later.append(f"нет {m2}: сборка пойдёт online (--online) или собрать проект один раз с доступом к репозиторию")
         self.facts.update({"module": module["id"], "module_root": module.get("root") or ".", "build": build})
-
-    def kit_module(self, module: dict[str, Any]) -> bool:
-        root = (self.project / str(module.get("root") or ".")).resolve()
-        return root == self.home or self.home in root.parents
 
     # -- target
     def _module_files(self) -> list[tuple[str, int]]:
@@ -868,10 +839,6 @@ class Init(Operator):
         if _top_block(lines, "review_runner") is not None:
             lines = remove_block(lines, "review_runner")
             self.say("  review_runner убирается: в хост-сборке процессного раннера нет (с ним драйвер ответит RUNNER_UNAVAILABLE)")
-        kit = [module["id"] for module in (self.skillsrc_modules() if skillsrc.is_file() else None) or [] if self.kit_module(module)]
-        if kit:
-            lines, removed = drop_modules(lines, kit)
-            self.say(f"  модуль папки комплекта убирается: {', '.join(removed or kit)}" + ("" if removed else " (не удалось найти строки — поправить руками)"))
         if pattern:
             lines = set_child(lines, "requirements", "id_pattern", _q(pattern))
         if self.mutation:
@@ -1041,7 +1008,7 @@ class Init(Operator):
             "Правила:",
             "- human_exec: сборку, тесты и мутации сам не запускай — покажи мне команды по порядку и жди путь к отчёту;",
             "- ask_user (confirm-context, approve-generated-tests и другие, кроме reviewer-isolation): покажи вопрос и список, "
-            "отвечай только тем, что напишу я;",
+            "отвечай только тем, что напишу я; гейт с answer_command выполняй этой командой только после моего явного «да»;",
             "- задачу модели выполняй по SKILL.md: при субагентах входы задач читает субагент (свежий на задачу), сам их не читай; "
             "без субагентов — запасной путь SKILL.md;",
             "- reviewer-isolation отвечаешь сам: fresh — только если задачи выполняют субагенты, иначе none;",
@@ -1122,7 +1089,7 @@ class Report(Operator):
         if payload.get("action") == "error":
             raise Stop(f"драйвер: {payload.get('code')}: {str(payload.get('message'))[:300]}", "проверить --project и --run")
         if not isinstance(payload.get("result"), dict):
-            raise Stop(f"прогон {run_id} не закончен (attempt_state {payload.get('attempt_state') or '—'}) или пакет не отдаёт итог в status",
+            raise Stop(f"прогон {run_id} не закончен (attempt_state {payload.get('attempt_state') or '—'})",
                        "дождаться конца прогона в сессии агента (done) и повторить report")
         self.payload = {"action": "done", "run_id": run_id, "result": payload["result"]}
         (self.home / "run-result.json").write_text(json.dumps(self.payload, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -414,9 +414,13 @@ def human_continue(workdir: Path, *, pit_report: str | None = None) -> None:
 
 
 def _run(run: Runner, argv: Sequence[str], cwd: Path, timeout: int) -> Any:
-    from tools.run_tests import run_subprocess
+    if run is None:
+        from tools.delivery_profile import EXECUTION_MODE_UNAVAILABLE, needs
 
-    return (run or run_subprocess)(list(argv), cwd, None, timeout=max(1, int(timeout)))
+        with needs(EXECUTION_MODE_UNAVAILABLE):
+            from tools.process_launch import run_subprocess
+        run = run_subprocess
+    return run(list(argv), cwd, None, timeout=max(1, int(timeout)))
 
 
 def _tail(outcome: Any) -> str:

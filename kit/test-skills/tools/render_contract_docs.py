@@ -15,6 +15,8 @@ RESULT_AXIS_ORDER = ("attempt_state", "completion", "verification", "coverage", 
 POLICY_ORDER = ("cases-only-v1", "local-pilot-v1")
 ADAPTER_ORDER = ("pytest:selected-symbols-v1", "maven-wrapper:selected-symbols-v1", "maven:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1")
 STAGE_ORDER = ("orchestrate", "context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
+# H1: the model process runner is data of the contract; the host delivery has no runner modules.
+UNIVERSAL_ONLY = "только универсальная сборка; в хост-сборке не используется"
 
 
 def _table(rows: list[Mapping[str, Any]], columns: list[tuple[str, str]]) -> list[str]:
@@ -79,10 +81,10 @@ def _amendment_lines(contract: Mapping[str, Any]) -> list[str]:
                      f"mutators `{java['mutators']}`, report `{java['report']}`; Python: `{contract['mutation_tooling']['python']}`")
     runner = contract.get("model_runner")
     if runner:
-        lines.append(f"- model runner `{runner['setting']}`: `{', '.join(runner['values'])}`; default `{runner['default']}`; presets `{', '.join(runner['presets'])}`; "
+        lines.append(f"- {UNIVERSAL_ONLY}: model runner `{runner['setting']}`: `{', '.join(runner['values'])}`; default `{runner['default']}`; presets `{', '.join(runner['presets'])}`; "
                      f"custom template `{runner['custom_template']}`; `.skillsrc` fields `{', '.join(runner['skillsrc_fields'])}`; invocation `{runner['invocation']}`; "
                      f"wait action `{runner['wait_action']}`; tries per part `{runner['tries_per_part']}`; standalone `{runner['standalone_command']}`")
-        lines.append(f"- runner evidence `{', '.join(runner['evidence'])}` → axis `{runner['evidence_axis']}`; `{runner['require_flag']}` rejects lower levels with `{runner['require_reason_code']}`")
+        lines.append(f"- {UNIVERSAL_ONLY}: runner evidence `{', '.join(runner['evidence'])}` → axis `{runner['evidence_axis']}`; `{runner['require_flag']}` rejects lower levels with `{runner['require_reason_code']}`")
     for name, path in (contract.get("optional_skills") or {}).items():
         lines.append(f"- optional skill `{name}` — `{path}`")
     for row in contract.get("optional_stage_registry") or []:

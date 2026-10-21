@@ -12,6 +12,8 @@ IGNORED_DIR_NAMES = frozenset({
     "coverage", "site-packages", "to_do", "vendor",
     ".secrets", "secrets", ".credentials", "credentials",
     ".gradle", ".kotlin",
+    # Directories of CLI agents: skills and settings, never project code (the kit lies in .gigacode/skills/test-skills).
+    ".claude", ".codex", ".gemini", ".gigacode", ".qwen",
 })
 _IGNORED_DIR_NAMES_CASEFOLDED = frozenset(name.casefold() for name in IGNORED_DIR_NAMES)
 
