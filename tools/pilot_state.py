@@ -4422,6 +4422,23 @@ def recover_execution_receipt_events(run_root: Path, attempt_id: str) -> Mapping
     return _recover_attempt_receipt_events(run_root, attempt_id, "execution-receipt")
 
 
+def _validate_review_design(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, key: str, payload: Mapping[str, Any]) -> None:
+    """D1b: the compact case review of a design run carries exactly the attempt's design with its combinations; no
+    other review snapshot carries one."""
+    from tools.test_design import with_combinations
+
+    designs = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == "test-design:baseline"
+               and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    if key != "canonical" or "review_mode" not in payload or not designs:
+        if "design" in payload:
+            raise ValueError("review snapshot carries a design outside a compact case review of a design run")
+        return
+    design = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "test-design:baseline", str(designs[0]["artifact_digest"]))["artifact"]
+    expected = with_combinations(design, design_combinations(_run_boundary(project, root)[1], design))
+    if payload.get("design") != expected:
+        raise ValueError("review snapshot of a design run must carry the attempt's test design")
+
+
 def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], kind: str, receipt: Mapping[str, Any], common: set[str],
                              *, publishing: bool = False) -> None:
     from tools.review_parts import (aggregate_review_parts, build_review_plan, part_input,
@@ -4434,8 +4451,10 @@ def _validate_review_receipt(project: Path, root: Path, state: Mapping[str, Any]
         payload = receipt.get("payload")
         base_keys = {"document", "automation", "sources", "contexts", "requirements_binding", "package_binding"}
         if (set(receipt) != common | {"payload"} or not isinstance(payload, dict)
-                or set(payload) not in (base_keys, base_keys | {"review_mode", "projection", "review_policy"})):
+                or set(payload) not in (base_keys, base_keys | {"review_mode", "projection", "review_policy"},
+                                        base_keys | {"review_mode", "projection", "review_policy", "design"})):
             raise ValueError("invalid review snapshot")
+        _validate_review_design(project, root, state, attempt_id, key, payload)
         require_valid_canonical_document(payload["document"])
         if "review_mode" in payload:
             from tools.review_compact import validate_compact_payload

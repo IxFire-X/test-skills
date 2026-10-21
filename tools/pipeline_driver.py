@@ -1353,6 +1353,11 @@ def _review_payload(project: Path, run_root: Path, attempt: Mapping[str, Any], c
 
         kind, key = ("tc-reviewer", "canonical") if automation is None else ("autotest-reviewer", "automation")
         payload = compact_payload(payload, review_policy(kind, instructions=_REVIEW_INSTRUCTIONS[key], model_id=config.get("model_id")))
+        design = _design_artifact(run_root, str(attempt["attempt_id"])) if automation is None else None
+        if design is not None:  # D1b: the case reviewer checks the cases against the design
+            from tools.test_design import with_combinations
+
+            payload["design"] = with_combinations(design["artifact"], _run_combinations(run_root, design["artifact"]))
     return payload
 
 
