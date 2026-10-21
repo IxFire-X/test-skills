@@ -412,3 +412,23 @@ def test_no_file_of_the_repository_names_a_model_cli_command() -> None:
             continue
         found.extend(f"{relative}: {word}" for word in ("claude -p", "codex exec") if word in text)
     assert not found, found
+
+
+def test_no_host_document_installs_over_the_network() -> None:
+    """Protocol: an install instruction that performs network interaction is red; installing from the repository is in RELEASE.md."""
+    import re
+
+    from tools.release_manifest import delivery_files
+
+    found = []
+    for relative in delivery_files(ROOT, "host"):
+        if not relative.endswith(".md"):
+            continue
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for word in ("git clone", "sparse-checkout", "archive/refs", "curl ", "wget "):
+            if word in text:
+                found.append(f"{relative}: {word}")
+        found.extend(f"{relative}: {link}" for link in re.findall(r"\]\(([^)]*\.zip)\)", text))
+    assert not found, found
+    release = (ROOT / "RELEASE.md").read_text(encoding="utf-8")
+    assert "git sparse-checkout set" in release and "git clone" in release

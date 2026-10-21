@@ -103,3 +103,32 @@ current state: package implementation exists, but no exact tuple is yet verified
   checked only on synthetic controls of 3–4 parts.
 - Contract amendments A4 and A5: `docs/superpowers/specs/2026-10-07-pilot-contract-amendments.md`; the pilot
   contract, its erratum and the delivery plan are under `docs/superpowers/`.
+
+## Installing from the repository (maintainers)
+
+The host delivery comes as a folder in the kit; these commands are for the universal build and for maintainers.
+From the root of a working project:
+
+```text
+git clone --branch main --single-branch https://github.com/IxFire-X/test-skills.git .tools/test-skills
+python -m venv .tools/test-skills/.venv
+```
+
+A copy inside a project tree falls under its build checks (Petclinic runs `nohttp` in `validate` and found
+`http://` in the pack's `tests/` fixtures and `docs/*.pptx`, live run 2026-10-08). Check out such a copy sparse:
+
+```bash
+git clone --no-checkout <url пакета> .tools/test-skills
+cd .tools/test-skills
+printf '%s\n' '/*' '!/tests/' '!/docs/*.pptx' '!/CLAUDE.md' '!/.github/' '!/.claude/' | MSYS_NO_PATHCONV=1 git sparse-checkout set --no-cone --stdin
+git checkout <коммит>
+```
+
+In Git Bash on Windows the patterns go through `--stdin` with `MSYS_NO_PATHCONV=1` only: MSYS turns a command-line
+`/tests/` into a Windows path and the pattern silently stops excluding the directory. Check: `git sparse-checkout list`
+shows the six patterns as they are and the copy has no `tests/` (`git ls-files` still lists it — the files are only not
+in the working tree). `CLAUDE.md`, `.github/` and `.claude/` are development files of the pack (agent instructions, CI of
+the pack repository): inside a project tree an agent could take them for instructions of the project.
+
+The host build itself is `python -m tools.release_manifest --list host --commit <commit>` (the kit makes a `git archive`
+of that list).

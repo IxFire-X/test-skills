@@ -33,6 +33,7 @@ def test_usage_has_the_permissions_section_of_the_package() -> None:
 
 
 def test_the_sparse_copy_for_a_project_leaves_agent_and_ci_files_out() -> None:
-    line = next(line for line in USAGE.splitlines() if "git sparse-checkout set" in line)
+    release = (ROOT / "RELEASE.md").read_text(encoding="utf-8")  # maintainers install from the repository
+    line = next(line for line in release.splitlines() if "git sparse-checkout set" in line)
     for pattern in ("'!/tests/'", "'!/docs/*.pptx'", "'!/CLAUDE.md'", "'!/.github/'", "'!/.claude/'"):
         assert pattern in line, pattern
