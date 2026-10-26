@@ -291,6 +291,13 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     return {"ready": False, "reason": "; ".join(reason for reason, _fix in problems), "fix": "; ".join(fix for _reason, fix in problems)}
 
 
+def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None) -> str:
+    """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim."""
+    parts = [f'python -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
+             f"--profile {profile}", *([f'--module "{module}"'] if module else []), "--accept-self-review"]
+    return " ".join(parts)
+
+
 def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", module: str | None = None) -> dict[str, Any]:
     project = Path(project).resolve()
     rows: list[dict[str, Any]] = [check_python()]
@@ -325,6 +332,10 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 rows.append(_row("execution:build", EXECUTION, "OK" if facts["ready"] else "WARN",
                                  "сборка и тесты модуля готовы" if facts["ready"] else
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
+    # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
+    rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
+                     "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
+                     _self_review_scan(project, docs, profile, module)))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": profile, "checks": rows}
 

@@ -421,8 +421,11 @@ def _review_binding_rows(review: Any, artifact: Any, document: dict[str, Any], h
         or not isinstance(receipt, Mapping)
         or dict(receipt) != dict(boundary)
         or any(boundary.get(key) != value for key, value in expected.items())
-        or boundary.get("host_isolation", {}).get("fresh_context") is not True
-        or boundary.get("host_isolation", {}).get("distinct_invocations") is not True
+        or not (
+            boundary.get("host_isolation", {}).get("fresh_context") is True
+            and boundary.get("host_isolation", {}).get("distinct_invocations") is True
+            or run_root is not None and _self_review_accepted(run_root)
+        )
         or reviewed["host_isolation_sha256"] != boundary.get("digest")
         or boundary.get("effective_canonical_digest") != document_sha256(document)
         or boundary.get("effective_bundle_receipt_digest") != expected_source.get("effective_bundle_receipt_digest")
@@ -498,3 +501,12 @@ def validate_automation_revision_chain(versions: Sequence[Any], reviews: Sequenc
             if previous_review["artifacts"]["autotest_review"]["verdict"] != "AUTO_FIX_APPLIED":
                 rows.append(_diagnostic("AUTOMATION_CORRECTION_VERDICT", _pointer("reviews", 0, "artifacts", "autotest_review", "verdict")))
     return sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
+
+
+def _self_review_accepted(run_root: Path) -> bool:
+    from tools.pilot_state import self_review_accepted
+
+    try:
+        return self_review_accepted(Path(run_root))
+    except (KeyError, TypeError, ValueError):
+        return False

@@ -18,7 +18,7 @@ from tools.confined_output import OutputConfinementError, atomic_write_confined_
 
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "accept_self_review"}
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -272,6 +272,8 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
         raise ValueError("unsafe authorization")
     if "host_id" in authorization and not _safe_label(authorization["host_id"]):
         raise ValueError("unsafe authorization")
+    if "accept_self_review" in authorization and authorization["accept_self_review"] is not True:
+        raise ValueError("unsafe authorization")
     requested = authorization["execution_requested"]
     if (policy_profile == "cases-only-v1" and requested) or (policy_profile == "local-pilot-v1" and not requested):
         raise ValueError("authorization policy mismatch")
@@ -289,6 +291,16 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
     if _validate_authorization(receipt["policy_profile"], auth) != auth:
         raise ValueError("invalid run boundary")
     return manifest, receipt
+
+
+def _self_review_accepted_at(project: Path, root: Path) -> bool:
+    return _run_boundary(project, root)[1].get("accept_self_review") is True
+
+
+def self_review_accepted(run_root: Path) -> bool:
+    """FaT-4b: the run admits a review without a fresh context (`scan --accept-self-review`)."""
+    project, root = _run_root(run_root)
+    return _self_review_accepted_at(project, root)
 
 
 def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
@@ -670,6 +682,9 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         receipt_data = {"schema_version": "1.0.0", "run_id": run_id, "request_id": safe_auth["request_id"], "policy_profile": policy_profile, "execution_requested": safe_auth["execution_requested"]}
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
+        if safe_auth.get("accept_self_review") is True:
+            # FaT-4b: the human's choice before any review, under the same digest; absent means the prior rules.
+            receipt_data["accept_self_review"] = True
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest_data = {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}
         if downgrade is not None:
@@ -2269,7 +2284,7 @@ def _terminal_reviewer_evidence_with_state(
         and isolation.get("distinct_invocations") is True
         and isolation.get("role_policy") == "canonical-reviewer-v1"
     )
-    return {
+    evidence = {
         "canonical_digest": boundary["canonical_branch_digest"],
         "digest": ledger["digest"],
         **{key: lifecycle[key] for key in (
@@ -2278,6 +2293,9 @@ def _terminal_reviewer_evidence_with_state(
         )},
         "isolation": "verified" if verified else "independence_unverified",
     }
+    if not verified and _self_review_accepted_at(project, root):
+        evidence["self_accepted"] = True
+    return evidence
 
 
 def terminal_reviewer_evidence(
@@ -2744,8 +2762,11 @@ def _validate_factual_receipt(
                 and terminal_reviewer.get("digest") == reviewer_digest
                 and terminal_reviewer.get("authoritative_verdict") == "ACCEPTED"
                 and isinstance(ledger.get("host_isolation"), Mapping)
-                and ledger["host_isolation"].get("fresh_context") is True
-                and ledger["host_isolation"].get("distinct_invocations") is True
+                and (
+                    ledger["host_isolation"].get("fresh_context") is True
+                    and ledger["host_isolation"].get("distinct_invocations") is True
+                    or _self_review_accepted_at(project, root)
+                )
                 and ledger["host_isolation"].get("role_policy") == "canonical-reviewer-v1"
                 and isinstance(ledger.get("events"), list)
                 and sum(event.get("event_type") == "AUTHORITATIVE_VERDICT" for event in ledger["events"] if isinstance(event, Mapping)) == 1
@@ -2809,8 +2830,9 @@ def _validate_factual_receipt(
             or receipt.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest")
             or not isinstance(isolation, Mapping)
             or set(isolation) != {"fresh_context", "distinct_invocations", "evidence_digest"}
-            or isolation.get("fresh_context") is not True
-            or isolation.get("distinct_invocations") is not True
+            or not isinstance(isolation.get("fresh_context"), bool)
+            or not isinstance(isolation.get("distinct_invocations"), bool)
+            or not (isolation["fresh_context"] and isolation["distinct_invocations"] or _self_review_accepted_at(project, root))
             or not _DIGEST.fullmatch(isolation.get("evidence_digest", ""))
             or isolation.get("evidence_digest") != isolation_digest
         ):
@@ -3779,7 +3801,7 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
             "completion": None, "verification": None, "coverage": None,
         }, False
     allowed = _RESULT_BASE_KEYS | _RESULT_EVIDENCE_KEYS | {"prior_stage_cause"}
-    if set(facts) != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
+    if set(facts) - {"review_independence"} != allowed or facts.get("attempt_state") != "TERMINAL" or not isinstance(facts.get("run_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["run_id"]) or not isinstance(facts.get("attempt_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", facts["attempt_id"]):
         raise ValueError("invalid result facts")
     if facts["completion"] not in {"COMPLETE", "PARTIAL", "FATAL"} or facts["verification"] not in {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE", None} or facts["coverage"] not in {"FULL", "MIXED", "MANUAL_ONLY", None} or facts["reason_code"] is not None and not _safe_label(facts["reason_code"]) or not _safe_label(facts["prior_stage_cause"]):
         raise ValueError("invalid result facts")
@@ -3885,7 +3907,11 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
             raise ValueError("invalid pre-verdict abort reason")
     if facts["verification"] == "UNKNOWN" and not closure_invalid and reason != "EXECUTION_UNKNOWN":
         raise ValueError("invalid unknown result tuple")
-    common = all(e[key] is True for key in ("canonical_schema_valid", "canonical_semantics_valid", "canonical_provenance_valid", "reviewer_session_complete", "trace_valid", "finalization_completed", "finalization_read_back", "finalization_valid", "operational_reliable")) and e["authoritative_verdict"] == "ACCEPTED" and e["authoritative_verdict_count"] == 1 and e["reviewer_isolation_state"] == "verified" and e["blocker_count"] == 0
+    # FaT-4b: SELF marks a review admitted by `scan --accept-self-review`; it never stands next to a verified isolation.
+    self_review = "review_independence" in facts
+    if self_review and (facts["review_independence"] != "SELF" or e["reviewer_isolation_state"] == "verified"):
+        raise ValueError("invalid review independence")
+    common = all(e[key] is True for key in ("canonical_schema_valid", "canonical_semantics_valid", "canonical_provenance_valid", "reviewer_session_complete", "trace_valid", "finalization_completed", "finalization_read_back", "finalization_valid", "operational_reliable")) and e["authoritative_verdict"] == "ACCEPTED" and e["authoritative_verdict_count"] == 1 and (e["reviewer_isolation_state"] == "verified" or self_review) and e["blocker_count"] == 0
     if policy_profile == "cases-only-v1":
         # Draft/artifact-only: never full-pipeline accepted. Live PASS belongs to local-pilot-v1.
         accepted = False
@@ -3907,6 +3933,8 @@ def _terminal_result(facts: Mapping[str, Any], policy_profile: str, *, external_
         result["finalization_valid"] = facts["finalization_valid"]
         result["operational_reliable"] = facts["operational_reliable"]
         result["evidence"] = {key: facts[key] for key in _RESULT_EVIDENCE_KEYS}
+        if "review_independence" in facts:
+            result["review_independence"] = facts["review_independence"]
     return _sealed(result)
 
 
@@ -3922,6 +3950,8 @@ def _validate_result_record(result: Mapping[str, Any]) -> bool:
             return result.get("completion") is None and result.get("verification") is None and result.get("coverage") is None and "accepted" not in result and "reason_code" not in result
         evidence = result["evidence"]
         facts = {"run_id": result["run_id"], "attempt_id": result["attempt_id"], "attempt_state": result["attempt_state"], "completion": result["completion"], "verification": result["verification"], "coverage": result["coverage"], "reason_code": result.get("reason_code"), "prior_stage_cause": "EXTERNAL", **evidence}
+        if "review_independence" in result:
+            facts["review_independence"] = result["review_independence"]
         return dict(_terminal_result(facts, result["policy_profile"], external_cause_available=False)) == dict(result)
     except (KeyError, TypeError, ValueError):
         return False
@@ -4004,11 +4034,13 @@ def publish_closure_artifact(
             key: terminal_reviewer[key]
             for key in (
                 "digest", "session_complete", "authoritative_verdict",
-                "authoritative_verdict_count", "pre_verdict_abort", "isolation",
+                "authoritative_verdict_count", "pre_verdict_abort", "isolation", "self_accepted",
             )
+            if key in terminal_reviewer
         }
         expected_effective = effective.get("document_digest") if effective is not None else None
-        if terminal_reviewer["authoritative_verdict"] == "ACCEPTED" and terminal_reviewer["isolation"] == "verified" and effective is None:
+        admitted = terminal_reviewer["isolation"] == "verified" or terminal_reviewer.get("self_accepted") is True
+        if terminal_reviewer["authoritative_verdict"] == "ACCEPTED" and admitted and effective is None:
             raise ValueError("pre-finalization effective canonical is unavailable")
         if (
             value.get("effective_canonical_digest") != expected_effective
@@ -4357,7 +4389,9 @@ def _validate_accepted_terminal_closure(
         "reviewer_pre_verdict_abort": reviewer.get("pre_verdict_abort"),
         "reviewer_isolation_state": reviewer.get("isolation"),
     }
-    if any(evidence.get(key) != value for key, value in reviewer_bindings.items()):
+    if any(evidence.get(key) != value for key, value in reviewer_bindings.items()) or result.get("review_independence") != (
+        "SELF" if reviewer.get("self_accepted") is True else None
+    ):
         raise ValueError("accepted terminal result contradicts pre-finalization reviewer evidence")
     try:
         effective = read_effective_canonical(root, attempt_id)

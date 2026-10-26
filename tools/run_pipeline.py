@@ -148,6 +148,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         "evidence_path": str(root / "run-manifest.json"),
         "policy_profile": run["manifest"]["policy_profile"],
         **{key: run["manifest"][key] for key in ("requested_policy_profile", "execution_skipped") if key in run["manifest"]},
+        **({"self_review_accepted": True} if run["authorization"].get("accept_self_review") is True else {}),
         "warnings": [], "warning_evidence_path": None, "evidence_errors": [],
         **extra,
     }
@@ -359,6 +360,8 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         profile = "cases-only-v1"
         args.profile = profile
     authorization = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
+    if getattr(args, "accept_self_review", False):
+        authorization["accept_self_review"] = True
     run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -1556,6 +1559,10 @@ def cmd_finish(args: Any) -> int:
         **{key: result.get(key) for key in ("completion", "verification", "coverage", "accepted", "reason_code")},
         "exit_code": int(closed["exit_code"]), "policy_profile": manifest["policy_profile"],
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
+        **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
+        **({"fix": "повтори scan с теми же --module, --docs и --profile, что у этого прогона, и добавь --accept-self-review"
+                   " — только если человек согласен на ревью в той же сессии"}
+           if result.get("reason_code") == "INDEPENDENCE_UNVERIFIED" else {}),
     })
     return int(closed["exit_code"])
 
@@ -1718,6 +1725,8 @@ def build_parser() -> JsonArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     scan_parser = sub.add_parser("scan", parents=[shared])
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
+    scan_parser.add_argument("--accept-self-review", action="store_true",
+                             help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
     status_parser = sub.add_parser("status", parents=[shared])
     finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
     finish_parser.add_argument("--run", required=True)

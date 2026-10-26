@@ -158,6 +158,21 @@ def disposition_receipt(delta: Mapping[str, Any] | None, *, verification: str) -
     })
 
 
+def effective_canonical_required(reviewer: Mapping[str, Any]) -> bool:
+    """A completed ACCEPTED review selects an effective canonical when it is isolated or self-accepted (FaT-4b)."""
+    return (
+        reviewer.get("session_complete") is True
+        and reviewer.get("authoritative_verdict") == "ACCEPTED"
+        and reviewer.get("authoritative_verdict_count") == 1
+        and reviewer.get("pre_verdict_abort") in {False, None}
+        and (reviewer.get("isolation") == "verified" or reviewer.get("self_accepted") is True)
+    )
+
+
+def _review_independence(reviewer: Mapping[str, Any]) -> dict[str, str]:
+    return {"review_independence": "SELF"} if reviewer.get("self_accepted") is True else {}
+
+
 def build_pre_finalization_trace(branch: Mapping[str, Any], dispositions: Mapping[str, Any]) -> Mapping[str, Any]:
     """Build the immutable trace consumed by finalization (never its result)."""
     if not _valid_digest(dispositions) or dispositions.get("stage") != "dispositions":
@@ -177,9 +192,9 @@ def build_pre_finalization_trace(branch: Mapping[str, Any], dispositions: Mappin
         "digest", "session_complete", "authoritative_verdict",
         "authoritative_verdict_count", "isolation",
     }
-    if not isinstance(reviewer, Mapping) or frozenset(reviewer) not in {
+    if not isinstance(reviewer, Mapping) or frozenset(set(reviewer) - {"self_accepted"}) not in {
         frozenset(reviewer_keys), frozenset(reviewer_keys | {"pre_verdict_abort"}),
-    }:
+    } or reviewer.get("self_accepted", True) is not True:
         raise FinalizationError("reviewer session evidence is incomplete")
     normalized_reviewer = dict(reviewer)
     normalized_reviewer.setdefault("pre_verdict_abort", False)
@@ -197,11 +212,7 @@ def build_pre_finalization_trace(branch: Mapping[str, Any], dispositions: Mappin
     )
     if not isinstance(normalized_reviewer.get("digest"), str) or not (complete_reviewer or aborted_reviewer) or normalized_reviewer.get("isolation") not in {"verified", "independence_unverified"}:
         raise FinalizationError("reviewer session evidence is invalid")
-    effective_required = (
-        complete_reviewer
-        and normalized_reviewer.get("authoritative_verdict") == "ACCEPTED"
-        and normalized_reviewer.get("isolation") == "verified"
-    )
+    effective_required = complete_reviewer and effective_canonical_required(normalized_reviewer)
     if (effective is not None) != effective_required:
         raise FinalizationError("effective canonical does not match reviewer branch")
     execution = dict(branch.get("execution", {}))
@@ -362,11 +373,7 @@ def verify_finalization(inputs: Mapping[str, Any], pre_trace: Mapping[str, Any])
         if not (complete_reviewer or aborted_reviewer) or reviewer.get("isolation") not in {"verified", "independence_unverified"}:
             errors.append("REVIEWER_SESSION_INVALID")
         else:
-            effective_required = (
-                complete_reviewer
-                and reviewer.get("authoritative_verdict") == "ACCEPTED"
-                and reviewer.get("isolation") == "verified"
-            )
+            effective_required = complete_reviewer and effective_canonical_required(reviewer)
             if not isinstance(pre_trace.get("canonical_digest"), str) or (
                 (pre_trace.get("effective_canonical_digest") is not None) != effective_required
             ):
@@ -514,8 +521,10 @@ def _durable_branch(
     if effective is not None:
         if verdict != "ACCEPTED" or effective.get("reviewer_session_digest") != reviewer["digest"]:
             raise FinalizationError("effective canonical does not bind the reviewer verdict")
-    elif verdict == "ACCEPTED" and reviewer["isolation"] == "verified":
+    elif effective_canonical_required(reviewer):
         raise FinalizationError("accepted verified reviewer branch lacks effective canonical")
+    if facts.get("review_independence") != _review_independence(reviewer).get("review_independence"):
+        raise FinalizationError("terminal review independence does not bind the durable ledger")
     branch_cause = "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason")
     if branch_cause is not None and (
         facts.get("prior_stage_cause") != branch_cause
@@ -657,8 +666,9 @@ def _durable_branch(
             key: reviewer[key]
             for key in (
                 "digest", "session_complete", "authoritative_verdict",
-                "authoritative_verdict_count", "pre_verdict_abort", "isolation",
+                "authoritative_verdict_count", "pre_verdict_abort", "isolation", "self_accepted",
             )
+            if key in reviewer
         },
         "execution_trace": execution_trace,
         "execution": execution,
@@ -1062,7 +1072,7 @@ def finalize_durable_execution_attempt(
         "authoritative_verdict": reviewer["authoritative_verdict"],
         "authoritative_verdict_count": reviewer["authoritative_verdict_count"],
         "reviewer_pre_verdict_abort": reviewer["pre_verdict_abort"],
-        "reviewer_isolation_state": reviewer["isolation"], "blocker_count": blocker_count,
+        "reviewer_isolation_state": reviewer["isolation"], "blocker_count": blocker_count, **_review_independence(reviewer),
         "trace_valid": trace_valid, "finalization_completed": True,
         "finalization_read_back": True, "finalization_valid": True,
         "materialization_applicability": "REQUIRED", "execution_applicability": "REQUIRED",
@@ -1172,6 +1182,7 @@ def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[
         "reviewer_session_complete": reviewer["session_complete"], "authoritative_verdict": verdict,
         "authoritative_verdict_count": reviewer["authoritative_verdict_count"],
         "reviewer_pre_verdict_abort": reviewer["pre_verdict_abort"], "reviewer_isolation_state": reviewer["isolation"],
+        **_review_independence(reviewer),
         "trace_valid": True, "finalization_completed": True, "finalization_read_back": True, "finalization_valid": True,
         "materialization_applicability": "NOT_APPLICABLE", "execution_applicability": "NOT_APPLICABLE",
         "automation_accepted": False, "generated_required_count": 0, "generated_materialized_count": 0,
@@ -1192,6 +1203,9 @@ def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[
                   "canonical_document": dict(effective["document"]), "stage_causes": causes, "evidence": {}}
     else:
         cause = "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason")
+        if cause is None and verdict == "ACCEPTED" and not effective_canonical_required(reviewer):
+            # FaT-4b: selection refused an unisolated review and the run did not admit SELF.
+            cause = "INDEPENDENCE_UNVERIFIED"
         if cause is None:
             raise FinalizationError("FINISH_FACT_UNDETERMINED: the review neither selected an effective canonical nor ended in rework "
                                     f"or an abort (verdict {verdict}, isolation {reviewer['isolation']})")

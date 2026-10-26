@@ -19,6 +19,7 @@
     "finalization_valid": {"type": "boolean"},
     "operational_reliable": {"type": "boolean"},
     "evidence": {"$ref": "#/$defs/evidence"},
+    "review_independence": {"const": "SELF"},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
   },
   "$defs": {
@@ -58,7 +59,7 @@
       "then": {"required": ["completion", "verification", "coverage", "accepted", "trace_valid", "finalization_valid", "operational_reliable", "evidence"], "properties": {"evidence": {"properties": {"finalization_completed": {"const": true}, "finalization_read_back": {"const": true}}}}},
       "else": {
         "properties": {"completion": {"const": null}, "verification": {"const": null}, "coverage": {"const": null}},
-        "not": {"anyOf": [{"required": ["accepted"]}, {"required": ["reason_code"]}, {"required": ["trace_valid"]}, {"required": ["finalization_valid"]}, {"required": ["operational_reliable"]}, {"required": ["evidence"]}]}
+        "not": {"anyOf": [{"required": ["accepted"]}, {"required": ["reason_code"]}, {"required": ["trace_valid"]}, {"required": ["finalization_valid"]}, {"required": ["operational_reliable"]}, {"required": ["evidence"]}, {"required": ["review_independence"]}]}
       }
     },
     {
@@ -155,7 +156,15 @@
     },
     {
       "if": {"properties": {"accepted": {"const": true}, "policy_profile": {"const": "local-pilot-v1"}}, "required": ["accepted", "policy_profile"]},
-      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "COMPLETE"}, "verification": {"const": "PASS"}, "coverage": {"enum": ["FULL", "MIXED"]}, "trace_valid": {"const": true}, "finalization_valid": {"const": true}, "operational_reliable": {"const": true}, "evidence": {"properties": {"canonical_schema_valid": {"const": true}, "canonical_semantics_valid": {"const": true}, "canonical_provenance_valid": {"const": true}, "reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}, "reviewer_isolation_state": {"const": "verified"}, "blocker_count": {"const": 0}, "trace_valid": {"const": true}, "finalization_completed": {"const": true}, "finalization_read_back": {"const": true}, "finalization_valid": {"const": true}, "materialization_applicability": {"const": "REQUIRED"}, "execution_applicability": {"const": "REQUIRED"}, "automation_accepted": {"const": true}, "generated_required_count": {"minimum": 1}, "exact_target_pass": {"const": true}, "operational_reliable": {"const": true}}}}}
+      "then": {"properties": {"attempt_state": {"const": "TERMINAL"}, "completion": {"const": "COMPLETE"}, "verification": {"const": "PASS"}, "coverage": {"enum": ["FULL", "MIXED"]}, "trace_valid": {"const": true}, "finalization_valid": {"const": true}, "operational_reliable": {"const": true}, "evidence": {"properties": {"canonical_schema_valid": {"const": true}, "canonical_semantics_valid": {"const": true}, "canonical_provenance_valid": {"const": true}, "reviewer_session_complete": {"const": true}, "authoritative_verdict": {"const": "ACCEPTED"}, "authoritative_verdict_count": {"const": 1}, "reviewer_pre_verdict_abort": {"const": false}, "blocker_count": {"const": 0}, "trace_valid": {"const": true}, "finalization_completed": {"const": true}, "finalization_read_back": {"const": true}, "finalization_valid": {"const": true}, "materialization_applicability": {"const": "REQUIRED"}, "execution_applicability": {"const": "REQUIRED"}, "automation_accepted": {"const": true}, "generated_required_count": {"minimum": 1}, "exact_target_pass": {"const": true}, "operational_reliable": {"const": true}}}}}
+    },
+    {
+      "if": {"properties": {"accepted": {"const": true}}, "required": ["accepted"], "not": {"required": ["review_independence"]}},
+      "then": {"properties": {"evidence": {"properties": {"reviewer_isolation_state": {"const": "verified"}}}}}
+    },
+    {
+      "if": {"required": ["review_independence"]},
+      "then": {"properties": {"evidence": {"properties": {"reviewer_isolation_state": {"const": "independence_unverified"}}}}}
     }
   ]
 }

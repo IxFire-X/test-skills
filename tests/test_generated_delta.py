@@ -31,6 +31,7 @@ def _reviewer_protocol_inputs(
     *,
     bind_boundary: bool = True,
     bundle_root: Path | None = None,
+    fresh_context: bool = True,
 ):
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import (
@@ -126,7 +127,7 @@ def _reviewer_protocol_inputs(
         document, bundle_root or run_root / "candidate-bundle",
         run_root=run_root, attempt_id=attempt_id,
     )
-    isolation = {"fresh_context": True, "distinct_invocations": True, "role_policy": "canonical-reviewer-v1"}
+    isolation = {"fresh_context": fresh_context, "distinct_invocations": True, "role_policy": "canonical-reviewer-v1"}
     isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     start = {
         "session_id": "phase5-effective", "generator_role": "generator", "reviewer_role": "canonical-reviewer",

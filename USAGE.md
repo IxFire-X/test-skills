@@ -188,6 +188,11 @@ Candidate revision 1 немедленно публикуется как `UNREVIE
 После этого открывается одна fresh role-isolated reviewer session для полного canonical
 branch. Внутри неё допустимы bounded C-lite evidence requests, но:
 
+- ревью без свежего контекста принимается только в прогоне, созданном с
+  `scan --accept-self-review` (явное согласие человека); итог помечается
+  `review_independence: "SELF"`, и local-pilot `PASS` с ним может быть `accepted=true`.
+  Отсутствие поля значит «не принято через SELF», а не доказательство изоляции: факт изоляции —
+  `evidence.reviewer_isolation_state`. Без флага такое ревью закрывается `INDEPENDENCE_UNVERIFIED`;
 - per-batch/hierarchical/multiple-authoritative reviewers запрещены;
 - successful session содержит ровно один authoritative verdict;
 - terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT`, содержит ноль;

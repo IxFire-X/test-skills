@@ -97,6 +97,14 @@ Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сб�
 Для `local-pilot-v1` execution разрешён только явным пользовательским запросом полного
 pipeline в этом run. Наличие папки, scan или запрос test cases не разрешают execution.
 
+`ready` показывает строку `review:isolation`. Если твой CLI не открывает ревьюера в свежем
+контексте (отдельный subagent), спроси сейчас, до scan: позже новый прогон выбросит
+сгенерированное. Флаг сам не ставь. Спроси человека дословно: «Ревьюер будет работать в той же
+сессии, без свежего контекста. Принять такой прогон с пометкой SELF?». Только после явного «да»
+в этом разговоре выполни scan с теми же `--project`, `--docs`, `--profile` и `--module`, что
+и без флага, добавив `--accept-self-review` (готовая команда — в fix строки `review:isolation`).
+Без флага ревью без изоляции не принимается, и `finish` закрывает попытку с `INDEPENDENCE_UNVERIFIED`.
+
 До scan и первого model call вызови durable Phase 1 boundary: создай
 `run-authorization-receipt.json`, `run-manifest.json`, readback-проверь оба и запиши
 `RUN_CREATED`. State хранится под `<project>/.pilot-runs/<run_id>/`. Не создавай clone,
@@ -211,6 +219,8 @@ candidate; сам вызов окружи stage-bound `MODEL_REQUESTED` и
 Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
 boundary.package_digest]` из прочитанного `reviewer-session-boundary` и его exact
 `reviewer_invocation_id`. Request проверяет существующие boundary/ledger и порядок.
+
+Ревью без свежего контекста допускается только по флагу из §1 (вопрос задаётся до scan).
 
 Эти события ограничивают одну logical stage invocation. Поле
 `MODEL_RESPONSE_RECEIVED.transport_attempts` равно `1` без retry или `2` после

@@ -420,7 +420,11 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
         raise ValueError("REVIEWER_PROTOCOL: verdict is not bound to review report")
     ledger_digest = _publish_reviewer_ledger(Path(run_root), attempt_id, value)
     verdict_count = lifecycle["authoritative_verdict_count"]
-    return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": verified and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
+    from tools.pilot_state import self_review_accepted
+
+    # FaT-4b: an unisolated review is eligible only in a run started with `scan --accept-self-review`.
+    admitted = verified or self_review_accepted(Path(run_root))
+    return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": admitted and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
 
 
 def publish_unreviewed_candidate(

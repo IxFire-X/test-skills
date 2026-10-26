@@ -579,8 +579,14 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
         _error(errors, "AUTOMATION_REVIEW_BINDING_INVALID")
     if all(isinstance(row, Mapping) for row in stages):
         _model_event_errors(stages, attempt, durable, baseline, package, errors)
-    isolation = durable["reviewer"].get("isolation")
-    return "verified" if isolation == "verified" else "independence_unverified"
+    return reviewer_independence(durable["reviewer"])
+
+
+def reviewer_independence(reviewer: Mapping[str, Any]) -> str:
+    """FaT-4b: a review admitted by `scan --accept-self-review` is named, never promoted to verified."""
+    if reviewer.get("isolation") == "verified":
+        return "verified"
+    return "self_accepted" if reviewer.get("self_accepted") is True else "independence_unverified"
 
 
 def validate_compatibility_evidence(
