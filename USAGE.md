@@ -45,6 +45,39 @@ build outputs, binaries, generated artifacts и потенциальные secre
 модели. Файл с потенциальным secret исключается целиком; если он необходим, дайте
 sanitized source, safe fixture или opaque runtime handle.
 
+Что исключается по каталогу (`tools/scan_rules.py`):
+
+- везде — VCS (`.git`), кэши (`__pycache__`, `.pytest_cache`…), зависимости
+  (`node_modules`, `.venv`, `venv`, `site-packages`, `.tox`), инструменты и каталоги агентов
+  CLI (`.idea`, `.vscode`, `.tools`, `.worktrees`, `.gigacode`, `.claude`, `.codex`, `.qwen`,
+  `.gemini`);
+- только вне дерева `src/` — имена сборки и зависимостей, которые бывают и именами пакетов
+  (`build`, `target`, `dist`, `out`, `coverage`, `htmlcov`, `generated`, `generated-sources`,
+  `test-results`, `vendor`), и каталоги `secrets`/`credentials`; внутри `src/…` это код, и
+  секреты в нём ищут правила по содержимому.
+
+Секретное имя файла (`token`, `secret`, `password`, `api-key`…) исключает только
+не-исходники (конфиги, ключи, текст); исходник (`.java`, `.kt`, `.py`, `.ts`, `.js`, `.go`,
+`.cs`…) проверяется по содержимому, и файл с ключом или паролем выпадает целиком.
+
+Вывод `scan` и `status` несёт `exclusion_summary`: число исключений по причинам и правилам,
+до 10 путей на причину и `suspicious` — то, что стоит проверить. Лишнее исключение по имени
+каталога возвращает `.skillsrc` модуля:
+
+```yaml
+modules:
+  - id: api
+    paths:
+      include: ["build/generated-api/**"]   # glob от корня проекта, без .. и абсолютных путей
+```
+
+`include` не возвращает VCS, инструменты и каталоги агентов и не обходит правила по
+файлу: бинарные файлы и файлы с секретным именем или содержимым остаются исключёнными.
+Каталог, в который glob только ведёт (`build/` для `build/generated-api/**`), — проход:
+соседние каталоги и файлы в нём (`build/reports`, `build/tmp`) остаются исключёнными.
+Путь до исключённого каталога пишется в glob буквально от корня проекта: glob, начинающийся
+с `*` или `**`, внутрь исключённого каталога не ведёт.
+
 ## 3. `.skillsrc`
 
 Linux и Windows используют один пайплайн и project-native адаптеры:

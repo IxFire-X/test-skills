@@ -313,4 +313,4 @@ def _portable_path_problem(value: str) -> str | None:
 
 
 def _array_values(values: Mapping[str, Any]) -> dict[str, list[Any]]:
-    return {key: [deepcopy(value)] for key, value in values.items()}
+    return {key: deepcopy(value) if isinstance(value, list) else [deepcopy(value)] for key, value in values.items()}

@@ -140,7 +140,8 @@
         "source": {"type": "string"},
         "tests": {"type": "string"},
         "resources": {"type": "string"},
-        "docs": {"type": "string"}
+        "docs": {"type": "string"},
+        "include": {"$ref": "#/$defs/include_globs"}
       }
     },
     "module_paths": {
@@ -149,8 +150,16 @@
       "properties": {
         "source": {"$ref": "#/$defs/unique_nonempty_strings"},
         "tests": {"$ref": "#/$defs/unique_nonempty_strings"},
-        "resources": {"$ref": "#/$defs/unique_nonempty_strings"}
+        "resources": {"$ref": "#/$defs/unique_nonempty_strings"},
+        "include": {"$ref": "#/$defs/include_globs"}
       }
+    },
+    "include_globs": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "description": "FaT-2: globs relative to the project root that bring back a directory the scan leaves out by its name (build output, dependencies, secret directories); files inside still pass the binary and secret rules.",
+      "items": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"}
     },
     "v2_test": {
       "type": "object",

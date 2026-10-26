@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from tools.scan_rules import INCLUDABLE_RULES, directory_reason, include_mode, is_source, path_reason
 from tools.stack_catalog import MANIFEST_LANGUAGES
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
@@ -30,13 +31,6 @@ class ContextSelectionError(ValueError):
     """A requested context batch is not safely selectable."""
 
 
-_VCS_DIRS = frozenset({".git", ".hg", ".svn"})
-_DEPENDENCY_DIRS = frozenset({".tox", ".venv", "node_modules", "site-packages", "vendor", "venv"})
-_BUILD_OUTPUT_DIRS = frozenset({
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__", "build", "coverage", "dist",
-    "generated", "generated-sources", "htmlcov", "target", "test-results",
-})
-_SECRET_DIRS = frozenset({".credentials", ".secrets", "credentials", "secrets"})
 _BINARY_SUFFIXES = frozenset({
     ".7z", ".a", ".bin", ".class", ".dll", ".dylib", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg",
     ".jpg", ".lock", ".mp3", ".mp4", ".o", ".pdf", ".png", ".pyc", ".so", ".tar", ".war", ".webp", ".zip",
@@ -267,12 +261,13 @@ def token_signature_rule(contents: bytes) -> str | None:
 
 def _secret_rule(path: Path, contents: bytes) -> tuple[str, str] | None:
     name = path.name.casefold()
-    parts = {part.casefold() for part in path.parts}
     if name == ".env" or name.startswith(".env."):
         return "filename-dotenv-v1", "dotenv"
     if path.suffix.casefold() in _PRIVATE_SUFFIXES or name in _PRIVATE_NAMES:
         return "private-extension-v1", "private-material"
-    if {".secrets", "secrets", ".credentials", "credentials"} & parts or _SECRET_NAME.search(path.stem):
+    # FaT-2: a secret-looking name is a rule for non-source files; a source file is judged by its content.
+    # Secret directories are left out by place (scan_rules.directory_reason), not here.
+    if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
     rule_id = token_signature_rule(contents)
     if rule_id is not None:
@@ -288,17 +283,26 @@ def _is_binary_or_generated(path: Path) -> bool:
     )
 
 
-def _directory_reason(name: str) -> tuple[str, str] | None:
-    folded = name.casefold()
-    if folded in _VCS_DIRS:
-        return "VCS", "vcs-directory-v1"
-    if folded in _DEPENDENCY_DIRS:
-        return "DEPENDENCY", "dependency-directory-v1"
-    if folded in _BUILD_OUTPUT_DIRS:
-        return "BUILD_OUTPUT", "output-directory-v1"
-    if folded in _SECRET_DIRS:
-        return "SECRET_SUSPECTED", "secret-directory-v1"
-    return None
+def skillsrc_include(project_root: Path, module_root: Path) -> tuple[str, ...]:
+    """``paths.include`` of the module at ``module_root`` in the project's ``.skillsrc`` (every inventory of a run reads it)."""
+    path = Path(project_root) / ".skillsrc"
+    if not path.is_file():
+        return ()
+    from tools.skillsrc_manifest import SkillsrcError, normalize_skillsrc, parse_skillsrc_bytes
+
+    try:
+        document = normalize_skillsrc(parse_skillsrc_bytes(path.read_bytes()))
+    except (OSError, SkillsrcError, StrictJsonError, ValueError):  # an invalid .skillsrc is reported by scan itself
+        return ()
+    try:
+        relative = Path(module_root).resolve().relative_to(Path(project_root).resolve()).as_posix() or "."
+    except ValueError:
+        return ()
+    for module in document.get("modules") or []:
+        if isinstance(module, Mapping) and str(module.get("root") or ".").strip("/") in {relative, relative + "/"}:
+            paths = module.get("paths") if isinstance(module.get("paths"), Mapping) else {}
+            return tuple(str(item) for item in paths.get("include") or [])
+    return ()
 
 
 def _exclusion(project_path: str, reason_code: str, scanner_rule_id: str, safe_label: str) -> dict[str, str]:
@@ -317,8 +321,14 @@ def build_inventory(
     skill_pack_root: Path | None = None,
     generated_roots: Iterable[Path] = (),
     proved_dependency_files: Iterable[Path] = (),
+    include: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """Return a complete metadata-only inventory for one controller-selected module."""
+    """Return a complete metadata-only inventory for one controller-selected module.
+
+    ``include`` (``.skillsrc`` ``paths.include`` of the module): globs relative to the project that bring back a
+    directory left out by its name; every file inside still passes the binary and secret rules.
+    """
+    include = tuple(skillsrc_include(Path(project_root), Path(module_root)) if include is None else include)
     declared_project = Path(project_root).absolute()
     declared_module = Path(module_root).absolute()
     if not declared_project.is_dir() or not declared_module.is_dir():
@@ -354,8 +364,11 @@ def build_inventory(
         relative = _lexical_rel(project_root, Path(error.filename)) if error.filename else None
         raise InventoryError(f"inventory directory is unreadable: {relative or module}") from error
 
+    # Directories left out by name that a glob of `include` only leads through: (reason, rule) of the passage.
+    passages: dict[Path, tuple[str, str]] = {}
     for current, dir_names, file_names in os.walk(module_root, topdown=True, followlinks=False, onerror=walk_error):
         current_path = Path(current)
+        passage = passages.get(current_path)
         admitted_dirs: list[str] = []
         for name in sorted(dir_names):
             candidate = current_path / name
@@ -369,7 +382,16 @@ def build_inventory(
             if root_exclusion is not None:
                 exclusions.append(_exclusion(project_path, *root_exclusion))
                 continue
-            excluded = _directory_reason(name)
+            excluded = directory_reason(tuple(project_path.split("/")[:-1]), name)
+            mode = include_mode(project_path, include) if include else None
+            if passage is not None and excluded is None and mode is None:
+                excluded = passage  # off the way of the glob inside a passage: left out as the passage was
+            if excluded is not None and excluded[1] in INCLUDABLE_RULES and mode is not None:
+                if mode == "through":
+                    passages[candidate] = excluded
+                excluded = None
+            elif passage is not None and mode == "through":
+                passages[candidate] = passage
             if excluded is not None:
                 reason_code, rule = excluded
                 exclusions.append(_exclusion(project_path, reason_code, rule, "excluded-directory"))
@@ -387,6 +409,9 @@ def build_inventory(
             root_exclusion = excluded_root(path)
             if root_exclusion is not None:
                 exclusions.append(_exclusion(project_path, *root_exclusion))
+                continue
+            if passage is not None and include_mode(project_path, include) != "full":
+                exclusions.append(_exclusion(project_path, passage[0], passage[1], "excluded-directory"))
                 continue
             suffix = path.suffix.casefold()
             if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
@@ -431,7 +456,7 @@ def build_inventory(
             probe /= part
             if _is_reparse(probe):
                 raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is a reparse path")
-        if not candidate.is_file() or excluded_root(candidate) is not None or any(_directory_reason(part) for part in Path(lexical_path).parts[:-1]):
+        if not candidate.is_file() or excluded_root(candidate) is not None or path_reason(Path(lexical_path).parts[:-1]) is not None:
             raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: local dependency is not eligible")
         try:
             candidate.resolve(strict=True).relative_to(module_root)

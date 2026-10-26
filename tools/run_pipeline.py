@@ -68,6 +68,20 @@ def _confined(project: Path, candidate: Path) -> Path:
     return resolved
 
 
+def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
+    """FaT-2: what the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
+    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
+    from tools.scan_rules import exclusion_summary
+
+    root = Path(run_root)
+    try:
+        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    except (KeyError, OSError, ValueError):
+        return None
+    return exclusion_summary(inventory["exclusions"], str(attempt.get("module") or "."))
+
+
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -95,6 +109,9 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     if attempt is None:
         result["stop_detail"] = "No attempt yet; an early scan failure may have no persisted cause."
         return result
+    summary = _exclusion_summary(root, attempt)
+    if summary is not None:
+        result["exclusion_summary"] = summary
     attempt_id = attempt["attempt_id"]
     events = [row for row in state["events"] if row.get("attempt_id") == attempt_id]
     confirmed: list[tuple[int, dict[str, Any]]] = []

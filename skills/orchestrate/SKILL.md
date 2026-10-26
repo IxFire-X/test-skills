@@ -108,6 +108,11 @@ reviewer. Это техническое доказательство, не но�
    обязательного source/config/docs останавливает scan без `INVENTORY_READY`.
 2. Исключи `.git`, dependencies, build outputs, binaries, generated artifacts и файлы
    с потенциальными secrets из model context.
+   После `scan` покажи человеку `exclusion_summary` из его вывода (то же — в `status`):
+   сколько исключено по причинам и пути из `suspicious` — двойные имена вне корня модуля,
+   секретные имена файлов, исходники с секретом в содержимом. Это информация, не
+   остановка: продолжай без ответа и передай подсказку `hint` — лишнее исключение
+   возвращает `.skillsrc` `paths.include` модуля.
 3. Выбери ровно один exact module. Автоматически выбирай только единственный module
    или module, доказанно содержащий exact user path. При неоднозначности покажи один
    вопрос и перейди в `WAITING_FOR_INPUT`.

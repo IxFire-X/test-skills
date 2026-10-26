@@ -5,18 +5,29 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-IGNORED_DIR_NAMES = frozenset({
-    ".git", ".hg", ".svn", ".idea", ".vscode", ".tools", ".venv", "venv", "__pycache__",
-    "node_modules", "target", "build", "dist", "generated", "generated-sources",
-    ".pytest_cache", ".ruff_cache", ".mypy_cache", ".worktrees", ".tox", "htmlcov",
-    "coverage", "site-packages", "to_do", "vendor",
-    ".secrets", "secrets", ".credentials", "credentials",
-})
-_IGNORED_DIR_NAMES_CASEFOLDED = frozenset(name.casefold() for name in IGNORED_DIR_NAMES)
+if __package__:
+    from .scan_rules import directory_reason, path_reason
+else:  # direct CLI execution of discover_project / init_skillsrc
+    from scan_rules import directory_reason, path_reason
+
+
+# The module search and the explicit paths of .skillsrc also skip task drafts; the inventory keeps them (a task's
+# requirements live in docs/to_do/<task>/ and reach the model only through the inventory).
+SEARCH_ONLY_DIRS = frozenset({"to_do"})
 
 
 def is_ignored_dir_name(name: str) -> bool:
-    return name.casefold() in _IGNORED_DIR_NAMES_CASEFOLDED
+    """The name alone, judged as outside a src tree (FaT-2: inside src/ use is_ignored_dir)."""
+    return is_ignored_dir((), name)
+
+
+def is_ignored_dir(parents: tuple[str, ...], name: str) -> bool:
+    return name.casefold() in SEARCH_ONLY_DIRS or directory_reason(parents, name) is not None
+
+
+def is_ignored_path(parts: tuple[str, ...]) -> bool:
+    """Any directory of ``parts`` left out in its place (the inventory rules plus the search-only ones)."""
+    return any(part.casefold() in SEARCH_ONLY_DIRS for part in parts) or path_reason(parts) is not None
 
 
 def _is_reparse(path: Path) -> bool:
@@ -36,7 +47,7 @@ WORKSPACE_MANIFEST_NAMES = frozenset({"settings.gradle", "settings.gradle.kts", 
 
 
 def confined_files(root: Path) -> list[Path]:
-    """Walk root without following links, skipping IGNORED_DIR_NAMES."""
+    """Walk root without following links, skipping directories left out in their place (tools.scan_rules)."""
     root = Path(root)
     try:
         resolved_root = root.resolve()
@@ -45,7 +56,11 @@ def confined_files(root: Path) -> list[Path]:
     found: list[Path] = []
     for current, dirs, files in os.walk(root, followlinks=False):
         base = Path(current)
-        dirs[:] = sorted(name for name in dirs if not is_ignored_dir_name(name) and not _is_reparse(base / name))
+        try:
+            parents = base.relative_to(root).parts
+        except ValueError:
+            parents = ()
+        dirs[:] = sorted(name for name in dirs if not is_ignored_dir(parents, name) and not _is_reparse(base / name))
         for name in sorted(files):
             path = base / name
             if _is_reparse(path):

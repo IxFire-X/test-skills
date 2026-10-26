@@ -19,7 +19,7 @@ if __package__:
         PYTHON_FRAMEWORK_MARKERS,
         PYTHON_TEST_MARKERS,
         confined_files,
-        is_ignored_dir_name,
+        is_ignored_dir,
         manifest_language,
     )
     from .schema_validation import StrictJsonError, load_json_strict
@@ -36,7 +36,7 @@ else:
         PYTHON_FRAMEWORK_MARKERS,
         PYTHON_TEST_MARKERS,
         confined_files,
-        is_ignored_dir_name,
+        is_ignored_dir,
         manifest_language,
     )
     from schema_validation import StrictJsonError, load_json_strict
@@ -44,6 +44,11 @@ else:
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
 SOURCE_SUFFIXES = {"python": frozenset({".py"}), "java": frozenset({".java"}), "typescript": frozenset({".ts", ".tsx", ".js", ".jsx"}), "go": frozenset({".go"})}
+def _parts(root: Path, path: Path) -> tuple[str, ...]:
+    try:
+        return path.relative_to(root).parts
+    except ValueError:
+        return ()
 def _rel(root: Path, p: Path) -> str: return p.relative_to(root).as_posix() or "."
 def _ok(root: Path, p: Path) -> bool:
     try: p.resolve().relative_to(root); return True
@@ -119,7 +124,7 @@ def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
 def _source_dir_has_code(root: Path, directory: Path, suffixes: frozenset[str]) -> bool:
     for current, directories, files in os.walk(directory, followlinks=False):
         parent = Path(current)
-        directories[:] = sorted(name for name in directories if not is_ignored_dir_name(name) and _usable_dir(root, parent / name))
+        directories[:] = sorted(name for name in directories if not is_ignored_dir(_parts(root, parent), name) and _usable_dir(root, parent / name))
         for name in sorted(files):
             path = parent / name
             if path.suffix in suffixes and not _is_reparse(path) and _ok(root, path) and path.is_file():

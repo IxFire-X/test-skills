@@ -19,13 +19,13 @@ if __package__:
     from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
     from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from .schema_validation import StrictJsonError, load_json_strict
-    from .stack_catalog import is_ignored_dir_name
+    from .stack_catalog import is_ignored_path
     from .skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 else:
     from confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
     from discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
     from schema_validation import StrictJsonError, load_json_strict
-    from stack_catalog import is_ignored_dir_name
+    from stack_catalog import is_ignored_path
     from skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
 
 
@@ -516,7 +516,8 @@ def _resolve_explicit_target(root: Path, value: str | None) -> Path | None:
         or raw.is_absolute()
         or windows.is_absolute()
         or windows.drive
-        or any(part in {"", ".", ".."} or ":" in part or is_ignored_dir_name(part) for part in portable.split("/"))
+        or any(part in {"", ".", ".."} or ":" in part for part in portable.split("/"))
+        or is_ignored_path(tuple(portable.split("/")))
     ):
         return None
     candidate = root / raw
@@ -552,7 +553,7 @@ def _valid_explicit_target(root: Path, modules: list[dict[str, Any]], value: str
                 source_parts = source_root.relative_to(root).parts
             except ValueError:
                 continue
-            if any(is_ignored_dir_name(part) for part in source_parts) or _is_reparse(source_root):
+            if is_ignored_path(source_parts) or _is_reparse(source_root):
                 continue
             try:
                 resolved.relative_to(source_root.resolve(strict=True))
