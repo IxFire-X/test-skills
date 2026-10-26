@@ -1094,3 +1094,110 @@ def finalize_durable_execution_attempt(
     )
     result = closed["result"]
     return {**closed, "exit_code": pilot_state.exit_code(result)}
+
+
+def _coverage_and_blockers(document: Mapping[str, Any]) -> tuple[str, int]:
+    steps = [
+        step
+        for case in document.get("test_cases", [])
+        if isinstance(case, Mapping)
+        for step in case.get("steps", [])
+        if isinstance(step, Mapping)
+    ]
+    manual_count = sum(step.get("manual_only") is True for step in steps)
+    coverage = "MANUAL_ONLY" if steps and manual_count == len(steps) else "MIXED" if manual_count else "FULL"
+    blockers = sum(len(step.get("automation_blockers", [])) for step in steps if isinstance(step.get("automation_blockers"), list))
+    return coverage, blockers
+
+
+def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int) -> str:
+    """FaT-4: the final automation outcome of a local-pilot attempt, read from the r1/r2 model stages.
+
+    Returns AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
+    BLOCKED is final only with blockers in the canonical (every revision must then be BLOCKED); without them it is an
+    invalid answer that the review may still send to a correction.
+    """
+    stages = pilot_state.model_lifecycle_projection(run_root, attempt_id)["stages"]
+    for revision in (1, 2):
+        generator = stages.get(f"tc-to-autotest:r{revision}", {})
+        if "MODEL_RESPONSE_RECEIVED" not in generator:
+            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: следующая ревизия r{revision} (tc-to-autotest)")
+        generated = pilot_state.read_model_stage_artifact(
+            run_root, attempt_id, f"tc-to-autotest:r{revision}", str(generator["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
+        status_blocked = generated["artifacts"].get("automation_status") == "BLOCKED"
+        if status_blocked and canonical_blockers:
+            return "AUTOMATION_BLOCKED"
+        reviewer = stages.get(f"autotest-reviewer:r{revision}", {})
+        if "MODEL_RESPONSE_RECEIVED" not in reviewer:
+            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: ревью ревизии r{revision} (autotest-reviewer)")
+        reviewed = pilot_state.read_model_stage_artifact(
+            run_root, attempt_id, f"autotest-reviewer:r{revision}", str(reviewer["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
+        verdict = reviewed["artifacts"]["autotest_review"]["verdict"]
+        if verdict == "ПРИНЯТО":
+            if status_blocked or canonical_blockers:
+                # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
+                return "AUTOMATION_BLOCKED"
+            raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec")
+        if verdict != "AUTO_FIX_APPLIED":
+            return "AUTOMATION_REJECTED"
+    return "AUTOMATION_REJECTED"
+
+
+def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+    """FaT-4: close an attempt that ran no tests, from durable evidence only — the facts the agent used to assemble.
+
+    Branches: an accepted cases-only canonical, and an early negative outcome of the canonical review (rework or a
+    reviewer abort).  Any other state is not a closing point yet, and the error names the missing fact instead of a guess.
+    """
+    try:
+        existing = pilot_state.read_terminal_result(run_root, attempt_id)
+    except KeyError:
+        existing = None
+    if existing is not None:
+        closed = finalize_attempt({"attempt_id": attempt_id}, None, project=Path(run_root), verification=str(existing.get("verification")),
+                                  facts={}, run_root=run_root)
+        return {**closed, "exit_code": pilot_state.exit_code(existing)}
+    try:
+        state = pilot_state.derive_state(run_root)
+        attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
+        reviewer = pilot_state.terminal_reviewer_evidence(run_root, attempt_id)
+        effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
+    except (KeyError, StopIteration, TypeError, ValueError) as error:
+        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})") from error
+    profile = str(attempt["policy_profile"])
+    verdict = reviewer["authoritative_verdict"]
+    base = {
+        "run_id": attempt["run_id"], "attempt_id": attempt_id, "attempt_state": "TERMINAL", "policy_profile": profile,
+        "canonical_schema_valid": True, "canonical_semantics_valid": True, "canonical_provenance_valid": True,
+        "reviewer_session_complete": reviewer["session_complete"], "authoritative_verdict": verdict,
+        "authoritative_verdict_count": reviewer["authoritative_verdict_count"],
+        "reviewer_pre_verdict_abort": reviewer["pre_verdict_abort"], "reviewer_isolation_state": reviewer["isolation"],
+        "trace_valid": True, "finalization_completed": True, "finalization_read_back": True, "finalization_valid": True,
+        "materialization_applicability": "NOT_APPLICABLE", "execution_applicability": "NOT_APPLICABLE",
+        "automation_accepted": False, "generated_required_count": 0, "generated_materialized_count": 0,
+        "generated_retained_count": 0, "exact_target_pass": False, "operational_reliable": True,
+    }
+    if effective is not None:
+        coverage, blockers = _coverage_and_blockers(effective["document"])
+        if profile == "cases-only-v1":
+            facts = {**base, "completion": "COMPLETE", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": None,
+                     "blocker_count": blockers, "mixed_manual_traceable": coverage == "MIXED", "prior_stage_cause": "CANONICAL_COMPLETE"}
+            causes = ["CANONICAL_COMPLETE"]
+        else:
+            refusal = _automation_refusal(run_root, attempt_id, blockers)
+            facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": refusal,
+                     "blocker_count": blockers, "mixed_manual_traceable": False, "prior_stage_cause": refusal}
+            causes = [refusal]
+        branch = {"run_id": attempt["run_id"], "attempt_id": attempt_id, "policy_profile": profile,
+                  "canonical_document": dict(effective["document"]), "stage_causes": causes, "evidence": {}}
+    else:
+        cause = "REWORK" if verdict == "REJECTED" else reviewer.get("abort_reason")
+        if cause is None:
+            raise FinalizationError("FINISH_FACT_UNDETERMINED: the review neither selected an effective canonical nor ended in rework "
+                                    f"or an abort (verdict {verdict}, isolation {reviewer['isolation']})")
+        facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": cause,
+                 "blocker_count": 0, "mixed_manual_traceable": False, "prior_stage_cause": cause}
+        branch = {"attempt_id": attempt_id, "evidence": {}, "stage_causes": [cause]}
+    closed = finalize_attempt(branch, None, project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
+    return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
+

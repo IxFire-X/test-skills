@@ -1237,22 +1237,13 @@ def cmd_exec(args: Any) -> int:
         from tools.run_tests import load_automation_artifact, load_autotest_review_artifact
         from tools.schema_validation import load_json_strict
 
-        missing = [
-            "--" + name.replace("_", "-")
-            for name in (
-                "canonical_document", "automation_artifact", "autotest_review",
-                "authorization_receipt", "host_isolation_receipt", "generated_delta_receipt",
-            )
-            if not getattr(args, name, None)
-        ]
-        if missing:
-            raise ValueError("initial execution requires: " + ", ".join(missing))
-        supplied_document = load_canonical_document(Path(args.canonical_document))
-        supplied_automation = load_automation_artifact(Path(args.automation_artifact))
-        supplied_review = load_autotest_review_artifact(Path(args.autotest_review))
-        supplied_authorization = load_json_strict(Path(args.authorization_receipt))
-        supplied_isolation = load_json_strict(Path(args.host_isolation_receipt))
-        supplied_delta = load_json_strict(Path(args.generated_delta_receipt))
+        # FaT-4: the six carriers come from the attempt's durable evidence; a path given is a check of the same bytes.
+        loaders = {
+            "canonical_document": load_canonical_document, "automation_artifact": load_automation_artifact,
+            "autotest_review": load_autotest_review_artifact, "authorization_receipt": load_json_strict,
+            "host_isolation_receipt": load_json_strict, "generated_delta_receipt": load_json_strict,
+        }
+        supplied = {name: loader(Path(getattr(args, name))) for name, loader in loaders.items() if getattr(args, name, None)}
         effective = read_effective_canonical(
             Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"]),
         )
@@ -1268,15 +1259,14 @@ def cmd_exec(args: Any) -> int:
             Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"]),
             f"automation-review-boundary-r{review_revision}", "ARTIFACT_READ_BACK",
         )["record"]
-        if (
-            supplied_document != effective["document"]
-            or supplied_automation != execution_inputs["automation_artifact"]
-            or supplied_review != execution_inputs["autotest_review"]
-            or supplied_authorization != coordinates["authorization"]
-            or supplied_isolation != durable_isolation
-            or supplied_delta != durable_delta
-        ):
-            raise ValueError("execution carrier differs from durable attempt evidence")
+        durable = {
+            "canonical_document": effective["document"], "automation_artifact": execution_inputs["automation_artifact"],
+            "autotest_review": execution_inputs["autotest_review"], "authorization_receipt": coordinates["authorization"],
+            "host_isolation_receipt": durable_isolation, "generated_delta_receipt": durable_delta,
+        }
+        differing = [name for name, value in supplied.items() if value != durable[name]]
+        if differing:
+            raise ValueError("execution carrier differs from durable attempt evidence: " + ", ".join("--" + name.replace("_", "-") for name in differing))
         document = effective["document"]
         automation = execution_inputs["automation_artifact"]
         review = execution_inputs["autotest_review"]
@@ -1540,6 +1530,36 @@ def cmd_rerun_retained(args: Any) -> int:
     return 0
 
 
+def cmd_finish(args: Any) -> int:
+    """FaT-4: close the current attempt in one command — the same order and checks as the manual sequence."""
+    from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
+    from tools.pilot_state import derive_state
+
+    project = Path(args.project).resolve()
+    root, run, state = _read_run_coordinate(project, args.run)
+    if not state["attempts"]:
+        raise HostStop("FINISH_FACT_UNDETERMINED", "the run has no attempt yet")
+    attempt = state["attempts"][-1]
+    attempt_id = str(attempt["attempt_id"])
+    executed = (root / "execution-receipts" / f"{attempt_id}.json").exists() or any(
+        event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in derive_state(root)["events"])
+    try:
+        closed = finalize_durable_execution_attempt(root, attempt_id) if executed else finalize_durable_branch_attempt(root, attempt_id)
+    except FinalizationError as error:
+        code = str(error).split(":", 1)[0] if str(error).startswith("FINISH_") else "FINALIZATION"
+        raise HostStop(code, str(error)) from error
+    result = closed["result"]
+    manifest = run["manifest"]
+    _print({
+        "status": "ok", "stage": "finish", "run_id": manifest["run_id"], "attempt_id": attempt_id,
+        "branch": "execution" if executed else "no-execution", "idempotent": bool(closed.get("idempotent")),
+        **{key: result.get(key) for key in ("completion", "verification", "coverage", "accepted", "reason_code")},
+        "exit_code": int(closed["exit_code"]), "policy_profile": manifest["policy_profile"],
+        **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
+    })
+    return int(closed["exit_code"])
+
+
 def cmd_status(args: Any) -> int:
     project = Path(args.project).resolve()
     root, _run, _state = _read_run_coordinate(project, args.run)
@@ -1699,6 +1719,8 @@ def build_parser() -> JsonArgumentParser:
     scan_parser = sub.add_parser("scan", parents=[shared])
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     status_parser = sub.add_parser("status", parents=[shared])
+    finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
+    finish_parser.add_argument("--run", required=True)
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])
     exec_parser.add_argument("--run", required=True)
@@ -1735,6 +1757,7 @@ def main(argv: list[str] | None = None) -> int:
         "exec": cmd_exec,
         "rerun-retained": cmd_rerun_retained,
         "status": cmd_status,
+        "finish": cmd_finish,
     }
     try:
         return commands[args.command](args)

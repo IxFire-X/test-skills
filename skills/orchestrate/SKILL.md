@@ -38,15 +38,9 @@ run manifest и journal bindings. Не запрещай их общим запр
 адресно, не выводи весь Python-модуль. Это правило вывода статуса: полное чтение
 обязательных входов роли, выполнение validators, digest и readback остаются обязательными.
 
-Целевая модель всех модельных ролей, включая независимых reviewers, — Deepseek 0731
-Flash. Зафиксируй фактический ID в выбранной CLI, настройки и host evidence отдельного
-контекста reviewer; имя семейства не заменяет подтверждённый ID. До каждого вызова
-сверь лимит с инструкциями, схемой, полным входом, историей и резервом ответа. Сохрани
-способ измерения; оценка токенов не равна подтверждению транспорта без обрезки.
-Используй существующие независимые batches и кодовую сборку, но полный reviewer
-package не сокращай. Если обязательный вход не помещается или изоляция не доказана,
-зафиксируй блокер; не переключай модель, не урезай покрытие и не объявляй ревью полным
-по вместимости или совпадению hashes. Измеренные ограничения требуют адресного решения.
+В `model_id` запросов записывай фактический ID модели выбранной CLI. Размер входа каждого шага
+проверяет `tools.step_size` (§3); вход не урезай и модель ради вместимости не меняй — не
+влезает, значит стоп и подсказка человеку.
 
 ## 0. Проверь готовность
 
@@ -69,9 +63,7 @@ Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сб�
 
 ## 1. Выбери профиль и создай run
 
-Зафиксируй краткий план запуска: проект, разрешённую область кода, источники и их
-версии, вариант объёма, профиль, границу приложения, ожидаемый результат и условия
-остановки. Для OpenSpec уточни фактическую версию и схему и выбери один объём:
+Для OpenSpec уточни фактическую версию и схему и выбери один объём:
 
 - вся актуальная согласованная спецификация: учти все её требования; pending changes
   включаются только по явному указанию;
@@ -247,10 +239,11 @@ correction — `REWORK/PARTIAL`. Без host isolation evidence записыва
 
 ### `cases-only-v1`
 
-Не вызывай automation, materialization или executor. Зафиксируй их как
-`NOT_APPLICABLE`, затем создай branch-valid pre-finalization trace и выполни общий
-finalization/terminal порядок. Результат draft/artifact-only: `verification=NOT_APPLICABLE`,
-`accepted=false`; green full-pipeline exit 0 запрещён.
+Не вызывай automation, materialization или executor. После ревью закрой попытку одной командой
+`python -m tools.run_pipeline finish --project <abs> --run <run_id>`: она сама помечает их
+`NOT_APPLICABLE` и проходит закрытие. Результат draft/artifact-only: `verification=NOT_APPLICABLE`,
+`accepted=false`; green full-pipeline exit 0 запрещён. Прогон, пониженный до cases-only в
+FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается так же.
 
 ### `local-pilot-v1`
 
@@ -279,53 +272,32 @@ Exact transport input/output bytes сохраняются отдельно; их
    Maven `test` читает Surefire: если проект требует Failsafe/integration-test lifecycle,
    этот маршрут недостаточен — сохрани блокер. Не исправляй тест после runtime `FAIL`.
 
-Для первого запуска используй существующий `tools.run_pipeline exec` из cwd пакета.
-Передай все шесть carrier paths к уже опубликованным/read-back артефактам этого
-attempt; они сверяются с durable evidence и не заменяют authorization или review:
+Исполнение и всё закрытие — одна команда из cwd пакета; шесть квитанций она берёт из журнала
+попытки сама (явный путь `--canonical-document` и т. п. — необязательная сверка тех же байтов):
 
 ```powershell
-python -m tools.run_pipeline exec --project "$project" --module "$moduleId" --run "$runId" `
-  --canonical-document "$effectiveCanonicalPath" `
-  --automation-artifact "$automationPath" --autotest-review "$automationReviewPath" `
-  --authorization-receipt "$authorizationPath" --host-isolation-receipt "$isolationPath" `
-  --generated-delta-receipt "$generatedDeltaPath"
+python -m tools.run_pipeline exec --project "$project" --module "$moduleId" --run "$runId"
 ```
 
-Здесь `$moduleId` — выбранный ID, а все `*Path` — абсолютные пути: effective canonical,
-принятые automation/review, run authorization, `automation-review-boundary-rN` и
-generated-delta соответственно. Получи их из результатов штатной публикации и
-readback; не создавай заменяющие receipts. Перед первым `exec` проверь наличие всех
-шести значений. Пропущенный carrier даёт `RUNNER_INPUT` до старта; это не результат
-тестов. Resume после `EXECUTION_STARTED` следует штатной ветке восстановления,
-а не повторному запуску по этому примеру.
+Resume после `EXECUTION_STARTED` идёт штатной веткой восстановления той же командой, а не
+повторным запуском тестов.
 
 Controller/process timeout без authoritative framework result даёт `UNKNOWN`.
 Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`. После
 `EXECUTION_STARTED` interruption не перезапускай автоматически.
 
-## 6. Выполни линейное закрытие
+## 6. Закрытие
 
-Строго соблюдай порядок:
+`exec` (local-pilot) и `finish` (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации) сами проходят
+линейное закрытие в фиксированном порядке: materialization → execution → execution trace →
+dispositions → pre-finalization trace → finalization → terminal result и event. Повторный вызов
+возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
+называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную.
 
-```text
-materialization -> execution -> execution trace -> retain/cleanup decision
--> disposition receipts -> pre-finalization trace -> finalization verification
--> finalization receipt readback -> terminal result -> derived terminal trace
--> terminal event
-```
-
-Disposition обязан покрыть весь generated file set:
-
-- `PASS` + valid trace/path/digests: `RETAINED` до finalization;
-- `FAIL`/`NOT_RUNNABLE`: очищай только byte-identical pipeline-owned files;
-- `UNKNOWN`: cleanup запрещён; используй `PRESERVED_EXECUTION_UNKNOWN` или
-  `PRESERVED_CONTENT_CONFLICT`;
-- partial materialization: execution не начинается; созданные неизменённые files
-  безопасно очищаются, остальные получают `NOT_MATERIALIZED`.
-
-Terminal transition требует completed/read-back finalization receipt. `valid=false`
-всё равно terminal, но даёт `FINALIZATION_INVALID` и `accepted=false`, не переписывая
-verification/coverage. `RETAINED` сам по себе не означает acceptance.
+Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` и
+`NOT_RUNNABLE` — очистка только byte-identical pipeline-owned файлов; `UNKNOWN` — очистка
+запрещена (`PRESERVED_EXECUTION_UNKNOWN`); частичная материализация — исполнения нет.
+`valid=false` финализации — terminal с `FINALIZATION_INVALID` и `accepted=false`.
 
 ## Resume и child attempts
 

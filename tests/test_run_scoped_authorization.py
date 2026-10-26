@@ -434,19 +434,10 @@ def test_cmd_exec_missing_carrier_is_controller_error_and_leaves_attempt_resumab
     result = cmd_exec(args)
 
     assert result == 2
-    capsys.readouterr()
-    from tools.run_pipeline import build_parser
-
-    omitted = build_parser().parse_args(["exec", "--project", str(project), "--run", args.run])
-    before = derive_state(coordinates["run_root"])
-    assert cmd_exec(omitted) == 2
     error = json.loads(capsys.readouterr().out)
-    assert error["reason"] == "RUNNER_INPUT"
-    assert error["message"] == (
-        "initial execution requires: --canonical-document, --automation-artifact, --autotest-review, "
-        "--authorization-receipt, --host-isolation-receipt, --generated-delta-receipt"
-    )
-    assert derive_state(coordinates["run_root"]) == before
+    assert error["status"] == "error"
+    # FaT-4: omitted carriers come from the attempt (tests/test_finish.py); a given carrier that cannot be read stops
+    # before anything starts and leaves the attempt resumable.
     with pytest.raises(ValueError, match="missing execution-receipt"):
         read_attempt_receipt(
             coordinates["run_root"], coordinates["attempt"]["attempt_id"], "execution-receipt", "ARTIFACT_READ_BACK",

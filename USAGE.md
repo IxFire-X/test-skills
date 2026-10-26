@@ -144,6 +144,11 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 других задач. Продолжение после `/clear` — «продолжай test-skills <run_id>», дальше
 `run_pipeline status` и его `next_step`.
 
+**Закрытие.** `python -m tools.run_pipeline exec --project <abs> --module <ID> --run <id>` исполняет
+тесты и закрывает попытку; квитанции берёт из журнала сам (явные пути — необязательная сверка).
+`python -m tools.run_pipeline finish --project <abs> --run <id>` закрывает попытку без исполнения
+(cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации — отвергнута последняя допустимая ревизия или BLOCKED при блокерах в каноне) и уже закрытую — идемпотентно.
+
 ## 4. Durable run
 
 До scan или model call controller создаёт:
