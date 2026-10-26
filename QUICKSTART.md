@@ -13,30 +13,27 @@
 
 ## 2. Один раз подключить пакет
 
-Установите пакет из ветки **`main`**. Откройте терминал **в корне рабочего проекта** и выполните:
+Пакет приходит папкой — ветка Fix-and-Test целиком. Положите её в рабочий проект как `.tools/test-skills`: должен существовать файл `.tools/test-skills/skills/orchestrate/SKILL.md`. Затем откройте терминал **в корне рабочего проекта** и создайте окружение пакета (если `python` не находится, используйте путь к установленному Python 3.11+):
 
 ```text
-git clone --branch main --single-branch https://github.com/IxFire-X/test-skills.git .tools/test-skills
 python -m venv .tools/test-skills/.venv
 ```
-
-Вместо Git можно скачать [ZIP ветки main](https://github.com/IxFire-X/test-skills/archive/refs/heads/main.zip) и распаковать содержимое папки пакета в `.tools/test-skills`. После распаковки должен существовать файл `.tools/test-skills/skills/orchestrate/SKILL.md`; затем выполните команду создания `.venv` выше. Если `python` не находится, используйте путь к установленному Python 3.11+.
 
 Установите зависимости пакета в созданное окружение. Выберите команду для своей ОС; терминал по-прежнему должен быть в корне проекта.
 
 **Windows / PowerShell:**
 
 ```powershell
-.\.tools\test-skills\.venv\Scripts\python.exe -m pip install -r .tools\test-skills\requirements.txt
+.\.tools\test-skills\.venv\Scripts\python.exe -m pip install --no-cache-dir --require-hashes -r .tools\test-skills\requirements.txt
 ```
 
 **Linux:**
 
 ```bash
-.tools/test-skills/.venv/bin/python -m pip install -r .tools/test-skills/requirements.txt
+.tools/test-skills/.venv/bin/python -m pip install --no-cache-dir --require-hashes -r .tools/test-skills/requirements.txt
 ```
 
-В рабочей сети используйте разрешённый в компании источник Python-пакетов. Это окружение обслуживает инструменты пайплайна; автотесты используют среду самого проекта.
+`requirements.txt` закрепляет версии и SHA-256 каждого файла. Если pip сообщает о несовпадении хешей, не снимайте `--require-hashes`, а сообщите об этом: файл пакета мог быть подменён. `--no-cache-dir` нужен потому, что кэш pip пишется вне проекта, а запись вне проекта запрещена политикой компании. В рабочей сети используйте разрешённый в компании источник Python-пакетов. Это окружение обслуживает инструменты пайплайна; автотесты используют среду самого проекта.
 
 ## 3. Дать модели один из двух запросов
 
