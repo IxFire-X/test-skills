@@ -175,6 +175,12 @@ SKILL.md и references). Код выхода 3 (не влезает в `limits.s
 `TASK_DOC_OUTSIDE_CONTEXT`, передай человеку `fix`: модель без документа задачи пишет кейсы без
 требований.
 
+0. Разметка частями: `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и
+   `input_digests`. Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
+   `context-marker:requirements` (только документы) → по каждой части `step_size --stage
+   context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
+   context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
+   status покажет `next_step`.
 1. Один раз вызови `context-marker` для authorized requirements/context и
    persist/readback-проверь полный normalized source-requirement artifact. До вызова
    persist/readback-проверь `model-request` с exact stage/role/policy, model,

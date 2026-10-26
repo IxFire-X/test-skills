@@ -59,7 +59,8 @@
     "limits": {
       "type": "object", "additionalProperties": false,
       "description": "FaT-3: step_input_bytes — the input budget of one model step (tools.step_size); default 500000.",
-      "properties": {"step_input_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000}}
+      "properties": {"step_input_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000},
+                     "context_batch_bytes": {"type": "integer", "minimum": 1024, "maximum": 100000000, "description": "FaT-5: bytes of one context batch, one part of the context marker; default 262144"}}
     },
     "v2_project": {
       "type": "object",

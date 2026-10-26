@@ -151,7 +151,9 @@ def _model_event_errors(
     ]
     instances = {str(row.get("stage_instance_id")) for row in executed}
     lifecycle = durable["model_lifecycle"].get("stages", {})
-    if not isinstance(lifecycle, Mapping) or any(stage not in instances | {"assembly"} for stage in lifecycle):
+    # The marker parts (FaT-5) are bound through the input digests of the merged context-marker:baseline request.
+    parts = ("context-marker:requirements", "context-marker:batch-")
+    if not isinstance(lifecycle, Mapping) or any(stage not in instances | {"assembly"} and not str(stage).startswith(parts) for stage in lifecycle):
         _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
 
     def one(event_type: str, stage_instance_id: str) -> tuple[int, Mapping[str, Any]] | None:

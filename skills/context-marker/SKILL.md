@@ -12,6 +12,20 @@ read back the exact authorized inventory/context receipts. Produce the complete 
 source-requirement set from those inputs; the controller creates batches afterwards. Do
 not rescan the project, create a run/attempt, or widen feature/module scope.
 
+## Parts (FaT-5)
+
+A module whose context does not fit one call is marked in parts (`python -m tools.context_marker_parts plan`):
+
+- `context-marker:requirements` — the documents of the run only, no code. Produce the complete normalized requirement
+  set as below, with the one source `шаг требований — код не анализировался`.
+- `context-marker:batch-NNN` — the requirements answer and the files of one context batch. Copy the requirements
+  unchanged (a changed requirement rejects the part: `CONTEXT_MARKER_REQUIREMENTS_CHANGED`) and add only the code
+  observations of this batch in `sources` and `warnings`. A requirement whose code is not in this batch is the warning
+  `часть N — код для <требование> не найден`, not a requirement gap; the task document met in a batch is not rewritten.
+- the merge into `context-marker:baseline` is done by code (`merge`), not by a model call.
+
+With one context batch the marker stays one call, as below.
+
 ## Procedure
 
 1. Read only authorized inputs. Не сканируй посторонние файлы. Classify explicit behavior and acceptance criteria as requirements; retain route, symbol, and module observations as provenance, not new behavior.

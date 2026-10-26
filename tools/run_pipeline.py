@@ -27,7 +27,7 @@ from tools.project_inventory import (
 
 ROOT = Path(__file__).resolve().parents[1]
 
-_SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024
+_SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024  # default of .skillsrc limits.context_batch_bytes (FaT-5)
 
 
 class HostStop(RuntimeError):
@@ -72,6 +72,8 @@ def _confined(project: Path, candidate: Path) -> Path:
 _NEXT_STEPS = (
     # (substring of next_expected_artifact, stage, action, section of skills/orchestrate/SKILL.md)
     (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
+    ("context-marker parts merge", "context-marker:parts",
+     "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели", "3"),
     ("module selection", "scan", "scan: выбрать модуль и заморозить baseline", "2"),
     ("context-marker", "context-marker", "разметка контекста по квитанциям выбора", "3"),
     ("canonical reviewer package", "canonical-review", "собрать пакет ревью и начать независимое ревью", "4"),
@@ -216,6 +218,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
                 "tc-reviewer": "reviewer ledger and effective selection or negative closure",
                 "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization or rework",
             }[stage_id.split(":", 1)[0]]
+            if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
+                next_artifact = "context-marker parts merge"  # FaT-5: the remaining parts, then the merge by code
             record(digest, stage_id, next_artifact, publication["path"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
@@ -426,8 +430,16 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
     return selected
 
 
-def _scan_context_budget(inventory: Mapping[str, Any]) -> int:
+def _scan_context_budget(inventory: Mapping[str, Any], project: Path | None = None) -> int:
+    """The byte budget of one context batch: ``.skillsrc limits.context_batch_bytes``, else 256 KiB (FaT-5)."""
     del inventory
+    path = None if project is None else project / ".skillsrc"
+    if path is not None and path.is_file():
+        from tools.skillsrc_manifest import load_skillsrc
+
+        value = (load_skillsrc(path).get("limits") or {}).get("context_batch_bytes")
+        if isinstance(value, int) and value > 0:
+            return value
     return _SCAN_CONTEXT_BYTE_BUDGET
 
 
@@ -563,7 +575,7 @@ def cmd_scan(args: Any) -> int:
             frozen_inventory,
             project,
             selected_ids,
-            byte_budget=_scan_context_budget(frozen_inventory),
+            byte_budget=_scan_context_budget(frozen_inventory, project),
         )
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])

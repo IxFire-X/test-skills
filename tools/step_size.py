@@ -58,7 +58,14 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
         if batch is None or receipt.get("batch_index") == batch:
             files.extend(project / item["project_path"] for item in receipt["files"])
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
-    files.extend(project / row["path"] for row in baseline["requirements"].get("docs", []))
+    answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
+                   if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                   and event.get("stage_instance_id") == "context-marker:requirements"), None)
+    if batch is not None and answer is not None:
+        # FaT-5: a part of the marker reads the requirements answer, not the documents again.
+        files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))
+    else:
+        files.extend(project / row["path"] for row in baseline["requirements"].get("docs", []))
     return list(dict.fromkeys(files))
 
 

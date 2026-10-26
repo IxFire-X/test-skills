@@ -25,7 +25,7 @@ _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 _MIXED_TOKEN = re.compile(r"^(?=.{24,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$")
 _MODEL_EVENT_TYPES = {"MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED", "REVIEW_REQUESTED"}
 _MODEL_STAGE_INSTANCE = re.compile(
-    r"^(?:context-marker:baseline|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
+    r"^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|assembly|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"
 )
 _MODEL_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _MODEL_STAGE_REGISTRY = {
@@ -382,6 +382,17 @@ def _validate_event_transitions(events: list[dict[str, Any]]) -> None:
                 if event_type == "MODEL_REQUESTED":
                     if key in model_requests:
                         raise ValueError("duplicate model request")
+                    # FaT-5: the marker in parts — requirements, then the batches, then the merge by code.
+                    if stage.startswith("context-marker:") and stage != "context-marker:baseline" and (attempt_id, "context-marker:baseline") in model_requests:
+                        raise ValueError("context-marker part request after the merged request")
+                    if stage.startswith("context-marker:batch-") and (attempt_id, "context-marker:requirements") not in model_responses:
+                        raise ValueError("context-marker part request requires the requirements answer")
+                    if stage == "context-marker:baseline" and any(
+                        request_attempt == attempt_id and request_stage.startswith("context-marker:")
+                        and request_stage != "context-marker:baseline" and (request_attempt, request_stage) not in model_responses
+                        for request_attempt, request_stage in model_requests
+                    ):
+                        raise ValueError("merged context-marker request requires every part answer")
                     if stage.startswith("tc-generator:BATCH-") and attempt_id not in context_selected:
                         raise ValueError("model request requires selected context")
                     if stage.startswith("tc-generator:") and (
@@ -1435,15 +1446,75 @@ def _model_request_target(root: Path, attempt_id: str, request_digest: str) -> P
     )
 
 
-def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, Any], inputs: Sequence[str]) -> list[dict[str, str]]:
+def _context_marker_parts(state: Mapping[str, Any], attempt_id: str) -> tuple[tuple[str, str | None] | None, list[tuple[str, str, str | None]]]:
+    """FaT-5: ``(requirements (request, response) or None, [(batch stage, request, response)…] in batch order)``."""
+    requests: dict[str, str] = {}
+    responses: dict[str, str] = {}
+    for event in state["events"]:
+        stage = str(event.get("stage_instance_id") or "")
+        if event.get("attempt_id") != attempt_id or not stage.startswith("context-marker:") or stage == "context-marker:baseline":
+            continue
+        if event["event_type"] == "MODEL_REQUESTED":
+            requests[stage] = str(event.get("artifact_digest"))
+        elif event["event_type"] == "MODEL_RESPONSE_RECEIVED":
+            responses[stage] = str(event.get("artifact_digest"))
+    requirements = requests.get("context-marker:requirements")
+    batches = [(stage, requests[stage], responses.get(stage)) for stage in sorted(requests) if stage.startswith("context-marker:batch-")]
+    return (None if requirements is None else (requirements, responses.get("context-marker:requirements"))), batches
+
+
+def _context_marker_receipt_digests(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str, inputs: Sequence[str],
+) -> list[str]:
+    """The context receipts a marker request binds after requirements and inventory (FaT-5, after main P1).
+
+    The requirements step binds none (documents only).  A part binds exactly one receipt and then the requirements
+    answer.  The merged ``context-marker:baseline`` of a marker in parts binds every part's receipt in part order, the
+    requirements answer and every part answer in the same order (an identical answer once); a single marker binds the
+    receipts only, as before.
+    """
+    requirements, batches = _context_marker_parts(state, attempt_id)
+    # Every context receipt the attempt published, once each, in publication order: batch-NNN is the N-th of them.
+    published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
+                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+    if stage_instance_id == "context-marker:requirements":
+        if len(inputs) != 2:
+            raise ValueError("context-marker requirements step binds the requirements and the inventory only")
+        return []
+    if stage_instance_id.startswith("context-marker:batch-"):
+        if len(inputs) != 4 or requirements is None or requirements[1] is None or inputs[3] != requirements[1]:
+            raise ValueError("context-marker part must bind one context receipt and the requirements answer")
+        number = int(stage_instance_id.rsplit("-", 1)[1])
+        if not 1 <= number <= len(published) or inputs[2] != published[number - 1]:
+            raise ValueError(f"{stage_instance_id} must bind context receipt {number} of the attempt (batch-NNN is the N-th published receipt)")
+        return [inputs[2]]
+    if not batches:
+        if list(inputs[2:]) != published:
+            raise ValueError("context-marker:baseline must bind every context receipt of the attempt, once, in publication order")
+        return list(inputs[2:])
+    if requirements is None or requirements[1] is None or any(response is None for _stage, _request, response in batches):
+        raise ValueError("merged context-marker request requires every part answer")
+    receipts = [_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"][2] for stage, request, _response in batches]
+    if receipts != published:
+        missing = [f"batch-{index:03d}" for index, digest in enumerate(published, start=1) if digest not in receipts]
+        raise ValueError(f"CONTEXT_MARKER_PARTS_INCOMPLETE: the parts must cover every context receipt of the attempt once, in order; missing {missing}")
+    if list(inputs[2:]) != [*receipts, requirements[1], *dict.fromkeys(str(response) for _stage, _request, response in batches)]:
+        raise ValueError("merged context-marker request must bind every part receipt, the requirements answer and every part answer in order")
+    return receipts
+
+
+def _context_marker_snapshots(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str],
+) -> list[dict[str, str]]:
     from tools.build_context import _OPENSPEC_PATH
     from tools.project_inventory import read_execution_baseline
 
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
-    if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < 3:
+    minimum = 2 if stage_instance_id == "context-marker:requirements" else 3
+    if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < minimum:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
     snapshots: dict[str, dict[str, str]] = {}
-    for digest in inputs[2:]:
+    for digest in _context_marker_receipt_digests(project, root, state, str(attempt["attempt_id"]), stage_instance_id, inputs):
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if receipt["inventory_digest"] != baseline["inventory_digest"]:
             raise ValueError("context-marker receipt must bind the attempt inventory")
@@ -1462,10 +1533,30 @@ def _context_marker_snapshots(project: Path, root: Path, attempt: Mapping[str, A
     return list(snapshots.values())
 
 
-def _validate_context_marker_sources(project: Path, root: Path, attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
+def _validate_context_marker_sources(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
+) -> None:
     from tools.build_context import openspec_diagnostics
+    from tools.context_marker_merge import merge_marker_artifacts, requirements_of
 
-    snapshots = _context_marker_snapshots(project, root, attempt, request["input_digests"])
+    stage_instance_id = str(request["stage_instance_id"])
+    attempt_id = str(attempt["attempt_id"])
+    snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"])
+    requirements, batches = _context_marker_parts(state, attempt_id)
+    if stage_instance_id.startswith("context-marker:batch-"):
+        answer = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:requirements", str(requirements[1]))["artifact"]
+        if requirements_of(value) != requirements_of(answer):
+            raise ValueError("CONTEXT_MARKER_REQUIREMENTS_CHANGED: a part may add code observations only, not change the requirements")
+        return
+    if stage_instance_id != "context-marker:baseline":
+        return  # the requirements step: OpenSpec is reconciled on the merged marker, against every receipt
+    if batches:
+        # The merged marker is a pure function of the recorded answers: it is recomputed on every write and read.
+        answer = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:requirements", str(requirements[1]))["artifact"]
+        parts = [_read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, str(response))["artifact"]
+                 for stage, _request, response in batches]
+        if dict(value) != merge_marker_artifacts(answer, parts):
+            raise ValueError("merged context-marker artifact differs from the merge of its parts")
     if snapshots:
         diagnostics = openspec_diagnostics(dict(value), snapshots)
         if diagnostics:
@@ -1559,7 +1650,7 @@ def publish_model_request(
     ):
         raise ValueError("invalid model request")
     if stage == "context-marker":
-        _context_marker_snapshots(project, root, attempt, inputs)
+        _context_marker_snapshots(project, root, state, attempt, stage_instance_id, inputs)
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
         if stage == "tc-to-autotest":
@@ -1677,7 +1768,7 @@ def read_model_request(
 def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     from tools.schema_validation import schema_diagnostics
 
-    if stage_instance_id == "context-marker:baseline":
+    if stage_instance_id.startswith("context-marker:"):
         schema_name = "context-marker-output.schema.json"
         if value.get("stage") != "context-marker":
             raise ValueError("invalid context-marker artifact")
@@ -1771,8 +1862,8 @@ def publish_model_stage_artifact(
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
-    if stage_instance_id == "context-marker:baseline":
-        _validate_context_marker_sources(project, root, attempt, request, value)
+    if stage_instance_id.startswith("context-marker:"):
+        _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
@@ -1857,8 +1948,8 @@ def _read_model_stage_artifact_with_state(
         str(requests[0].get("artifact_digest", "")),
     )
     _validate_model_stage_artifact(stage_instance_id, value)
-    if stage_instance_id == "context-marker:baseline":
-        _validate_context_marker_sources(project, root, attempt, request, value)
+    if stage_instance_id.startswith("context-marker:"):
+        _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     return {
         "artifact": dict(value),

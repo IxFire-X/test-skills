@@ -130,6 +130,12 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 `--run <run_id> --stage context-marker` оценивает вход шага (байты и токены при 0,24 ток/Б) до
 вызова модели; код 3 — не влезает, с подсказкой сузить контекст.
 
+**Разметка частями.** Если выбранный контекст разбит на несколько батчей (`.skillsrc`
+`limits.context_batch_bytes`, по умолчанию 256 КиБ), разметка идёт частями:
+`context-marker:requirements` по документам, по вызову на батч и слияние кодом в
+`context-marker:baseline` (`python -m tools.context_marker_parts plan|merge --run-root <run>`). Журнал
+пересчитывает слияние при записи и чтении; генератор и ревью читают тот же baseline.
+
 **Документ задачи.** Файл из `--docs`, лежащий в inventory модуля, всегда входит в выбор
 контекста — и с `--target`; файлы других задач в каталогах `to_do` при заданном `--docs` в
 контекст не идут. Документ вне inventory модуля (модуль-подкаталог, правило исключения) —
