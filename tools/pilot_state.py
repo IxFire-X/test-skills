@@ -631,6 +631,15 @@ def _events(project: Path, root: Path) -> list[dict[str, Any]]:
 
 
 def create_run(project: Path, policy_profile: str, authorization: Mapping[str, Any]) -> Mapping[str, Any]:
+    return _create_run(project, policy_profile, authorization, None)
+
+
+def create_lowered_run(project: Path, authorization: Mapping[str, Any], skipped: Mapping[str, str]) -> Mapping[str, Any]:
+    """FaT-R: a local-pilot request whose build is not ready runs as cases-only-v1; the manifest keeps both profiles."""
+    return _create_run(project, "cases-only-v1", authorization, {"requested_policy_profile": "local-pilot-v1", **skipped})
+
+
+def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, Any], downgrade: Mapping[str, Any] | None) -> Mapping[str, Any]:
     safe_auth = _validate_authorization(policy_profile, authorization)
     root_project = _project_root(project)
     project_state = _project_state_snapshot(root_project)
@@ -651,7 +660,11 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
-        manifest = _publish(root_project, root, root / "run-manifest.json", {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}, "run manifest")
+        manifest_data = {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}
+        if downgrade is not None:
+            manifest_data["requested_policy_profile"] = str(downgrade["requested_policy_profile"])
+            manifest_data["execution_skipped"] = {"reason": str(downgrade["reason"]), "fix": str(downgrade["fix"])}
+        manifest = _publish(root_project, root, root / "run-manifest.json", manifest_data, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
         return {"run_root": str(root), "manifest": manifest, "authorization": receipt}
     except _PublicationUnknown:

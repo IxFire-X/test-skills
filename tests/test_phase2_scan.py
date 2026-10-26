@@ -198,4 +198,8 @@ def test_cases_only_scan_needs_no_runtime_and_cannot_supply_local_execution_proo
     assert "EXECUTION_BASELINE_FROZEN" in [event["event_type"] for event in derive_state(root)["events"]]
     with pytest.raises(InventoryError, match="profile"):
         validate_execution_baseline_binding(baseline, inventory, module)
-    assert run_pipeline.cmd_scan(_args(project)) == 2
+    # FaT-R: a local-pilot request without build facts no longer fails the scan; it runs cases-only and says why.
+    assert run_pipeline.cmd_scan(_args(project)) == 0
+    lowered = payloads[-1]
+    assert lowered["policy_profile"] == "cases-only-v1" and lowered["requested_policy_profile"] == "local-pilot-v1"
+    assert lowered["execution_skipped"]["reason"]

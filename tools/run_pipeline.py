@@ -103,6 +103,8 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         "next_expected_artifact": "module selection, inventory and profile baseline",
         "stop_reason": None,
         "evidence_path": str(root / "run-manifest.json"),
+        "policy_profile": run["manifest"]["policy_profile"],
+        **{key: run["manifest"][key] for key in ("requested_policy_profile", "execution_skipped") if key in run["manifest"]},
         "warnings": [], "warning_evidence_path": None, "evidence_errors": [],
         **extra,
     }
@@ -283,15 +285,36 @@ def _docs_projection(snapshot: list[dict[str, str]]) -> list[dict[str, str]]:
     return [{"path": row["path"], "sha256": row["sha256"]} for row in snapshot]
 
 
+def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
+    """``{"reason", "fix"}`` when the module of a local-pilot request cannot be built and tested by the package."""
+    from tools.init_skillsrc import InitError, NeedsInput
+    from tools.ready import execution_facts, proposed_modules, select_module
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+
+    try:
+        path = project / ".skillsrc"
+        modules = normalize_skillsrc(load_skillsrc(path))["modules"] if path.is_file() else proposed_modules(project)
+    except (NeedsInput, InitError, SkillsrcError, OSError, ValueError, KeyError, TypeError):
+        return None  # .skillsrc and discovery problems are reported by the scan itself
+    module, _problem = select_module(modules, getattr(args, "module", None))
+    if module is None:
+        return None
+    facts = execution_facts(project, module)
+    return None if facts["ready"] else {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
+
+
 def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
     from tools.init_skillsrc import ensure_skillsrc
-    from tools.pilot_state import create_run
+    from tools.pilot_state import create_lowered_run, create_run
 
-    run = create_run(
-        project,
-        getattr(args, "profile", "local-pilot-v1"),
-        {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": getattr(args, "profile", "local-pilot-v1") == "local-pilot-v1"},
-    )
+    profile = getattr(args, "profile", "local-pilot-v1")
+    skipped = _execution_skipped(project, args) if profile == "local-pilot-v1" else None
+    if skipped is not None:
+        # FaT-R: no build facts — the cases still run; the run says it is cases-only and what to fix for execution.
+        profile = "cases-only-v1"
+        args.profile = profile
+    authorization = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
+    run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
         receipt = {"status": "unchanged"}

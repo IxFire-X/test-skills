@@ -12,6 +12,13 @@ else:  # direct CLI execution
     from json_cli import JsonArgumentParser
 
 
+def _available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):  # a module blocked in sys.modules has no spec
+        return False
+
+
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
     root = root.resolve()
@@ -78,8 +85,16 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 missing_integrity.append(f"invalid:{relative}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             missing_integrity.append(f"invalid:{relative}")
+    dependencies = {name: {"required": True, "available": _available(name)} for name in ("jsonschema", "yaml")}
+    missing_modules = [name for name, item in dependencies.items() if not item["available"]]
+    # FaT-R: without them the contract and manifest checks cannot run — say what is missing, not "invalid contract".
+    messages = [
+        f"у этого Python ({sys.executable}) нет модуля {name}; проверка контракта и манифеста пропущена. Команда: "
+        f'"{sys.executable}" -m pip install --no-cache-dir --require-hashes -r "{root / "requirements.txt"}"'
+        for name in missing_modules
+    ]
     pipeline_path = root / "contracts" / "pipeline.json"
-    if pipeline_path.is_file():
+    if pipeline_path.is_file() and not missing_modules:
         try:
             if __package__:
                 from .contract_check import validate_pipeline_contract
@@ -88,10 +103,11 @@ def inspect_environment(root: Path) -> dict[str, object]:
             contract_report = validate_pipeline_contract(json.loads(pipeline_path.read_text(encoding="utf-8")), root, check_drift=False)
             if contract_report["status"] != "passed":
                 missing_integrity.append("invalid:pipeline_contract")
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError) as error:
             missing_integrity.append("invalid:pipeline_contract")
+            messages.append(f"проверка контракта: {type(error).__name__}: {error}")
     release_manifest_path = root / "release" / "manifest.json"
-    if release_manifest_path.is_file():
+    if release_manifest_path.is_file() and not missing_modules:
         try:
             if __package__:
                 from .release_manifest import load_release_manifest
@@ -99,12 +115,9 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 from release_manifest import load_release_manifest
             manifest = load_release_manifest(root)
             qualification = dict(manifest["qualification"])
-        except (ImportError, TypeError, ValueError):
+        except (ImportError, TypeError, ValueError) as error:
             missing_integrity.append("invalid:release/manifest.json")
-    dependencies = {
-        name: {"required": True, "available": importlib.util.find_spec(name) is not None}
-        for name in ("jsonschema", "yaml")
-    }
+            messages.append(f"release/manifest.json: {type(error).__name__}: {error}")
     python_supported = sys.version_info >= (3, 11)
     ready = not missing_integrity and python_supported and all(item["available"] for item in dependencies.values())
     return {
@@ -116,6 +129,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
             "version": platform.python_version(),
         },
         "dependencies": dependencies,
+        "messages": messages,
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
         "languages": {
             "java": {"execution": True, "verified": False},

@@ -9,7 +9,7 @@
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "project": {"type": "string", "minLength": 1},
     "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
-    "authorization_digest": {"$ref": "#/$defs/digest"},
+    "authorization_digest": {"$ref": "#/$defs/digest"}, "requested_policy_profile": {"const": "local-pilot-v1", "description": "FaT-R: the profile asked for when the run was lowered to cases-only-v1 because the build was not ready"}, "execution_skipped": {"type": "object", "additionalProperties": false, "required": ["reason", "fix"], "properties": {"reason": {"type": "string", "minLength": 1}, "fix": {"type": "string", "minLength": 1}}},
     "project_state": {
       "oneOf": [
         {"type": "null"},
