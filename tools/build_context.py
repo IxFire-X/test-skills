@@ -34,22 +34,68 @@ def _compare_key(value: str) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFC", value or "")).strip()
 
 
-def extract_inventory(analytics: str) -> list[dict[str, Any]]:
+_BUILTIN_ID = r"(?:REQ|AC|US|FR|BR|TR|ТР|ПС)[-_]\d+\b"
+
+
+def compile_id_pattern(pattern: str | None) -> re.Pattern[str] | None:
+    """The project's explicit requirement ID (``.skillsrc`` ``requirements.id_pattern``), or None.
+
+    The pattern marks an ID at the start of a line, exactly like the built-in ``REQ-``/``AC-`` IDs;
+    a pattern that does not compile or matches the empty string is rejected.
+    """
+    if pattern is None:
+        return None
+    if not isinstance(pattern, str) or not pattern or len(pattern) > 200:
+        raise ValueError("requirements.id_pattern must be a non-empty string of at most 200 characters")
+    try:
+        compiled = re.compile(pattern)
+    except re.error as error:
+        raise ValueError(f"requirements.id_pattern does not compile: {error}") from error
+    if compiled.fullmatch("") is not None or compiled.match("") is not None:
+        raise ValueError("requirements.id_pattern must not match the empty string")
+    return compiled
+
+
+def _heading_regex(id_re: re.Pattern[str] | None) -> re.Pattern[str]:
+    if id_re is None:
+        return HEADING_RE
+    return re.compile(r"^(?:#{1,6}\s+[^\n]+|(?:[-*]\s+)?(?:" + _BUILTIN_ID + r"|(?-i:" + id_re.pattern + r"))[^\n]*)", re.M | re.I)
+
+
+def extract_inventory(analytics: str, id_pattern: str | re.Pattern[str] | None = None) -> list[dict[str, Any]]:
     """Partition authorized requirement prose without dropping unlabelled content.
 
-    Semantic classification belongs to context-marker/reviewer, not heading heuristics.
+    Semantic classification belongs to context-marker/reviewer, not heading heuristics.  With ``id_pattern``
+    (``.skillsrc`` ``requirements.id_pattern``, FaT-3) a line starting with the project's ID opens a requirement
+    section like a built-in ``REQ-`` ID does; without it the split is the built-in one.
     """
     text = analytics or ""
     if not text.strip():
         return []
+    id_re = id_pattern if isinstance(id_pattern, re.Pattern) else compile_id_pattern(id_pattern)
     found: list[dict[str, Any]] = []
-    boundaries = sorted({0, len(text), *(match.start() for match in HEADING_RE.finditer(text))})
+    boundaries = sorted({0, len(text), *(match.start() for match in _heading_regex(id_re).finditer(text))})
     for start, stop in zip(boundaries, boundaries[1:]):
         section = text[start:stop].strip()
         if section:
             title = _norm(section.splitlines()[0].lstrip("# "))
-            found.append({"kind": "requirement" if REQ_ID_RE.match(title) else "flow", "title": title, "text": section})
+            requirement = REQ_ID_RE.match(title) or (id_re is not None and id_re.match(title))
+            found.append({"kind": "requirement" if requirement else "flow", "title": title, "text": section})
     return found
+
+
+def _project_id_pattern(project: Path) -> str | None:
+    """``requirements.id_pattern`` of the project's ``.skillsrc``; None when absent or unreadable."""
+    manifest = project / ".skillsrc"
+    try:
+        if not manifest.is_file():
+            return None
+        from tools.skillsrc_manifest import load_skillsrc
+
+        value = (load_skillsrc(manifest).get("requirements") or {}).get("id_pattern")
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, str) else None
 
 
 def _nfc(value: str) -> str:
@@ -262,6 +308,7 @@ def build_context(
     source_snapshot: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     project = project.resolve()
+    id_re = compile_id_pattern(_project_id_pattern(project))
     if docs is not None and docs_snapshot is not None:
         raise ValueError("cannot pass docs and docs_snapshot together")
     if source_files and source_snapshot:
@@ -312,7 +359,7 @@ def build_context(
         if _OPENSPEC_PATH.fullmatch(rel.replace("\\", "/")) or rel.replace("\\", "/").startswith("openspec/changes/archive/"):
             openspec_entries.append(entry)
             continue
-        rows = extract_inventory(text)
+        rows = extract_inventory(text, id_re)
         for row in rows:
             snippet = str(row.get("text") or row["title"])
             normalized_rows.append((_compare_key(rel.replace("\\", "/")), digest, snippet, _norm(row["title"])))

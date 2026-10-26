@@ -22,7 +22,8 @@ _PROFILE = _PROFILE_V4
 _PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
 _XML_PROFILE = "zephyr-scale-xml-observed-v1"
-_PRIORITIES = {"CRITICAL": "Highest", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
+# The company's Zephyr accepts only High/Normal/Low (FaT-3): CRITICAL goes out as High.
+_PRIORITIES = {"CRITICAL": "High", "HIGH": "High", "MEDIUM": "Normal", "LOW": "Low"}
 _HEADERS = (
     "Key", "Name", "Status", "Precondition", "Objective", "Folder", "Priority",
     "Component", "Labels", "Owner", "Estimated Time", "Coverage (Issues)",

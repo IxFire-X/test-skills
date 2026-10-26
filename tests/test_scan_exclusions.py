@@ -118,11 +118,11 @@ def test_scan_prints_the_summary_and_reads_docs_in_drafts(tmp_path: Path, monkey
     project, module = _project(tmp_path)
     _write(module, "src/app.py", "X = 1\n")
     _write(module, "docs/coverage/notes.md", "x\n")
-    _write(project, "docs/to_do/task.md", "Пользователь видит список.\n")
+    _write(module, "docs/to_do/task.md", "Пользователь видит список.\n")
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
     args = _args(project)
-    args.docs = ["docs/to_do/task.md"]
+    args.docs = ["services/api/docs/to_do/task.md"]
     assert run_pipeline.cmd_scan(args) == 0, payloads[-1]
     summary = payloads[-1]["exclusion_summary"]
     assert summary["suspicious"]["dual_name_outside_module_root"] == ["services/api/docs/coverage"]

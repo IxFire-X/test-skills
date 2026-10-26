@@ -36,7 +36,7 @@ def _python_project(tmp_path: Path, *, runtime: bool) -> Path:
     module = project / "services" / "api"
     _write(module, "src/app.py", "X = 1\n")
     _write(module, "pyproject.toml", "[project]\nname = 'api'\n")
-    _write(project, "docs/feature.md", "Пользователь видит список.\n")
+    _write(project, "services/api/docs/feature.md", "Пользователь видит список.\n")
     (project / ".skillsrc").write_bytes(_skillsrc())
     if runtime:
         _write(module, ".venv/Scripts/python.exe", "fixture-runtime-v1")
@@ -81,21 +81,21 @@ def test_ready_reports_every_problem_in_one_run_with_a_fix_each(tmp_path: Path) 
     from tools.init_skillsrc import _payload
 
     (project / ".skillsrc").write_bytes(_payload(document))
-    report = check(project, docs=["docs/missing.md", "../outside.md", "docs/feature.md"], profile="local-pilot-v1")
+    report = check(project, docs=["docs/missing.md", "../outside.md", "services/api/docs/feature.md"], profile="local-pilot-v1")
     assert report["status"] == "BLOCKED"
     stops = [item for item in report["checks"] if item["level"] == "STOP"]
     assert {item["id"] for item in stops} >= {"docs:docs/missing.md", "docs:../outside.md", "module"}
     assert all(item.get("fix") for item in stops)
     module = next(item for item in stops if item["id"] == "module")
     assert "nested" in module["message"] and "web" in module["message"] and "--module" in module["fix"]
-    assert _levels(report)["docs:docs/feature.md"] == "OK"
+    assert _levels(report)["docs:services/api/docs/feature.md"] == "OK"
 
 
 def test_ready_lets_cases_start_without_a_build(tmp_path: Path) -> None:
     from tools.ready import check
 
     project = _python_project(tmp_path, runtime=False)
-    report = check(project, docs=["docs/feature.md"], profile="local-pilot-v1", module="nested")
+    report = check(project, docs=["services/api/docs/feature.md"], profile="local-pilot-v1", module="nested")
     assert report["status"] == "READY", report
     execution = [item for item in report["checks"] if item["block"] == "execution"]
     assert execution and any(item["level"] == "WARN" and item.get("fix") for item in execution)
@@ -105,7 +105,7 @@ def test_ready_lets_cases_start_without_a_build(tmp_path: Path) -> None:
 
 def test_ready_cli_exit_code_and_table(tmp_path: Path) -> None:
     project = _python_project(tmp_path, runtime=False)
-    ok = subprocess.run([sys.executable, "-m", "tools.ready", "--project", str(project), "--docs", "docs/feature.md", "--module", "nested"],
+    ok = subprocess.run([sys.executable, "-m", "tools.ready", "--project", str(project), "--docs", "services/api/docs/feature.md", "--module", "nested"],
                         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert json.loads(ok.stdout)["status"] == "READY" and "ВНИМАНИЕ" in ok.stderr
@@ -117,7 +117,7 @@ def test_ready_cli_exit_code_and_table(tmp_path: Path) -> None:
 def test_ready_runs_without_jsonschema_and_yaml(tmp_path: Path) -> None:
     project = _python_project(tmp_path, runtime=False)
     script = ("import runpy, sys\nsys.modules['jsonschema'] = None\nsys.modules['yaml'] = None\n"
-              f"sys.argv = ['ready', '--project', {str(project)!r}, '--docs', 'docs/feature.md']\n"
+              f"sys.argv = ['ready', '--project', {str(project)!r}, '--docs', 'services/api/docs/feature.md']\n"
               "runpy.run_module('tools.ready', run_name='__main__')\n")
     completed = subprocess.run([sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -126,7 +126,7 @@ def test_ready_runs_without_jsonschema_and_yaml(tmp_path: Path) -> None:
     deps = next(item for item in report["checks"] if item["id"] == "deps")
     assert deps["level"] == "STOP" and "--require-hashes" in deps["fix"] and "--no-cache-dir" in deps["fix"]
     levels = _levels(report)
-    assert levels["python"] == "OK" and levels["git"] == "OK" and levels["docs:docs/feature.md"] == "OK"
+    assert levels["python"] == "OK" and levels["git"] == "OK" and levels["docs:services/api/docs/feature.md"] == "OK"
     assert completed.returncode == 2
 
 

@@ -163,6 +163,18 @@ Run остаётся связан с исходной project/module identity.
 
 ## 3. Построй canonical из deterministic batches
 
+Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
+размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
+для разметки, для остальных шагов — `--files <файлы шага> --role <роль>` (роль добавляет её
+SKILL.md и references). Код выхода 3 (не влезает в `limits.step_input_bytes`, по умолчанию
+500 000 Б) — остановись и передай человеку `hint`: сузить `--target` или `paths` модуля. Вход не
+обрезай.
+
+Документ задачи (`--docs`) всегда входит в выбор контекста, документы других задач из `to_do` —
+нет; `context_summary` вывода scan показывает, что уйдёт модели. Если scan остановился с
+`TASK_DOC_OUTSIDE_CONTEXT`, передай человеку `fix`: модель без документа задачи пишет кейсы без
+требований.
+
 1. Один раз вызови `context-marker` для authorized requirements/context и
    persist/readback-проверь полный normalized source-requirement artifact. До вызова
    persist/readback-проверь `model-request` с exact stage/role/policy, model,
@@ -310,6 +322,12 @@ Terminal transition требует completed/read-back finalization receipt. `va
 verification/coverage. `RETAINED` сам по себе не означает acceptance.
 
 ## Resume и child attempts
+
+Если контекст сессии занят больше чем наполовину, после завершённого шага попроси человека
+сделать `/clear` (или открыть новую сессию) и написать «продолжай test-skills <run_id>». Затем
+выполни `python -m tools.run_pipeline status --project <abs> --run <run_id>` и продолжи с
+`next_step` (стадия, действие, раздел этого SKILL; при `pending_request_path` — ответ на этот
+запрос). Ничего уже подтверждённого журналом не повторяй.
 
 `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages остаются
 nonterminal. Продолжай их в новой CLI session только после snapshot/config validation.

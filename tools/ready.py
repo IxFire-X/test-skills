@@ -208,7 +208,7 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
 
 
-def check_scan(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
+def check_scan(project: Path, module: Mapping[str, Any]) -> tuple[dict[str, Any], Mapping[str, Any]]:
     from tools.project_inventory import build_inventory
     from tools.scan_rules import exclusion_summary
 
@@ -226,8 +226,25 @@ def check_scan(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
                "exclusion_summary": summary}
     message = f"скан: {details['files']} файлов, {details['bytes']} Б, {seconds} с; исключено {summary['total']}"
     if summary["suspicious"]:
-        return _row("scan", CASES, "WARN", message + "; есть подозрительные исключения", summary["hint"], details)
-    return _row("scan", CASES, "OK", message, None, details)
+        return _row("scan", CASES, "WARN", message + "; есть подозрительные исключения", summary["hint"], details), inventory
+    return _row("scan", CASES, "OK", message, None, details), inventory
+
+
+def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
+    """FaT-3: a document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
+    from tools.run_pipeline import TASK_DOC_FIX, _exclusion_note
+
+    root = Path(project).resolve()
+    paths = {str(item["project_path"]) for item in inventory["files"]}
+    for raw in docs:
+        row = next((item for item in rows if item["id"] == f"docs:{raw}"), None)
+        if row is None or row["level"] != "OK":
+            continue
+        candidate = Path(raw)
+        relative = (candidate if candidate.is_absolute() else root / candidate).resolve().relative_to(root).as_posix()
+        if relative not in paths:
+            row.update(level="STOP", fix=TASK_DOC_FIX,
+                       message=f"{raw}: документ задачи не входит в inventory выбранного модуля{_exclusion_note(inventory, relative)} — модель его не получит")
 
 
 def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
@@ -298,7 +315,9 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
         rows.append(module_row)
         if selected is not None:
             try:
-                rows.append(check_scan(project, selected))
+                scan_row, inventory = check_scan(project, selected)
+                rows.append(scan_row)
+                check_task_documents(rows, project, docs, inventory)
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1":

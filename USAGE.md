@@ -120,6 +120,24 @@ evidence.
 test root, wrapper/interpreter/executable, adapter ID, build profile и typed adapter parameters
 принадлежат этому attempt. Cross-module orchestration в pilot отсутствует.
 
+**Шаблон ID требований** (`.skillsrc` `requirements.id_pattern`). Строка, начинающаяся с ID
+проекта, открывает отдельное требование, как встроенные `REQ-`/`AC-`: для нумерованных
+спецификаций — `requirements: {id_pattern: '\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s'}`. Без шаблона
+разбиение прежнее.
+
+**Бюджет шага модели** (`.skillsrc` `limits.step_input_bytes`, по умолчанию 500 000 Б).
+`python -m tools.step_size --project <abs> --files <файлы> [--role <роль>]` или
+`--run <run_id> --stage context-marker` оценивает вход шага (байты и токены при 0,24 ток/Б) до
+вызова модели; код 3 — не влезает, с подсказкой сузить контекст.
+
+**Документ задачи.** Файл из `--docs`, лежащий в inventory модуля, всегда входит в выбор
+контекста — и с `--target`; файлы других задач в каталогах `to_do` при заданном `--docs` в
+контекст не идут. Документ вне inventory модуля (модуль-подкаталог, правило исключения) —
+стоп `TASK_DOC_OUTSIDE_CONTEXT`; без `--docs` уходят все документы `to_do`, и scan об этом
+предупреждает. `context_summary` вывода scan: файлы кода, документы задачи, пропущенные файлы
+других задач. Продолжение после `/clear` — «продолжай test-skills <run_id>», дальше
+`run_pipeline status` и его `next_step`.
+
 ## 4. Durable run
 
 До scan или model call controller создаёт:

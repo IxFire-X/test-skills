@@ -8,7 +8,7 @@
     "schema_version": {"const": "5.0.0"},
     "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
-    "discovery": {}, "modules": {}
+    "discovery": {}, "modules": {}, "requirements": {}, "limits": {}
   },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
@@ -29,7 +29,9 @@
         "sdd": {"$ref": "#/$defs/v2_sdd"},
         "resolution": {"$ref": "#/$defs/resolution"},
         "contracts": {"$ref": "#/$defs/contracts"},
-        "skills_registry": {"$ref": "#/$defs/skills_registry"}
+        "skills_registry": {"$ref": "#/$defs/skills_registry"},
+        "requirements": {"$ref": "#/$defs/requirements"},
+        "limits": {"$ref": "#/$defs/limits"}
       }
     },
     "v3": {
@@ -44,8 +46,20 @@
         "modules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/module"}},
         "resolution": {"$ref": "#/$defs/resolution"},
         "contracts": {"$ref": "#/$defs/contracts"},
-        "skills_registry": {"$ref": "#/$defs/skills_registry"}
+        "skills_registry": {"$ref": "#/$defs/skills_registry"},
+        "requirements": {"$ref": "#/$defs/requirements"},
+        "limits": {"$ref": "#/$defs/limits"}
       }
+    },
+    "requirements": {
+      "type": "object", "additionalProperties": false,
+      "description": "FaT-3: id_pattern marks an explicit requirement ID at the start of a line (numbered specifications: 3.1, 6.3.1), like the built-in REQ-/AC- IDs; without it the split is unchanged.",
+      "properties": {"id_pattern": {"type": "string", "minLength": 1, "maxLength": 200}}
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false,
+      "description": "FaT-3: step_input_bytes — the input budget of one model step (tools.step_size); default 500000.",
+      "properties": {"step_input_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000}}
     },
     "v2_project": {
       "type": "object",

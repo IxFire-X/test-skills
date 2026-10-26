@@ -31,9 +31,10 @@ _SCAN_CONTEXT_BYTE_BUDGET = 256 * 1024
 
 
 class HostStop(RuntimeError):
-    def __init__(self, code: str, message: str = ""):
+    def __init__(self, code: str, message: str = "", fix: str | None = None):
         super().__init__(message or code)
         self.code = code
+        self.fix = fix
 
 
 def _print(payload: dict[str, Any]) -> None:
@@ -68,6 +69,39 @@ def _confined(project: Path, candidate: Path) -> Path:
     return resolved
 
 
+_NEXT_STEPS = (
+    # (substring of next_expected_artifact, stage, action, section of skills/orchestrate/SKILL.md)
+    (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
+    ("module selection", "scan", "scan: выбрать модуль и заморозить baseline", "2"),
+    ("context-marker", "context-marker", "разметка контекста по квитанциям выбора", "3"),
+    ("canonical reviewer package", "canonical-review", "собрать пакет ревью и начать независимое ревью", "4"),
+    ("reviewer evidence or verdict", "canonical-review", "продолжить ревью: следующая часть или вердикт", "4"),
+    ("effective canonical", "canonical-review", "завершить ревью и опубликовать effective canonical", "4"),
+    ("automation artifact", "automation", "автоматизация принятых кейсов", "5"),
+    ("materialization", "exec", "материализация автотестов", "5"),
+    ("execution receipt", "exec", "exec: запуск тестов", "5"),
+    ("execution trace", "closure", "трасса исполнения и диспозиции", "6"),
+    ("disposition", "closure", "диспозиции и финализация", "6"),
+    ("finalization", "closure", "линейное закрытие и финализация", "6"),
+    ("terminal", "closure", "терминальный результат", "6"),
+    ("validated inputs or child attempt", "resume", "проверить входы или начать дочернюю попытку", "Resume и child attempts"),
+)
+
+
+def _next_step(status: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-3: what to do next after /clear, from the same facts status shows (only reads)."""
+    expected = status.get("next_expected_artifact")
+    if expected is None:
+        return {"stage": "terminal", "action": "передать человеку результат попытки", "skill_section": "5"}
+    for needle, stage, action, section in _NEXT_STEPS:
+        if needle in str(expected):
+            step = {"stage": stage, "action": action, "skill_section": section}
+            if stage == "model":
+                step["stage"] = str(expected).removesuffix(" response")
+            return step
+    return {"stage": "unknown", "action": f"следующий артефакт: {expected}", "skill_section": "Stop conditions"}
+
+
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     """FaT-2: what the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
@@ -83,6 +117,13 @@ def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, 
 
 
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
+    result = _durable_status_facts(project, run_root, stage=stage, status=status, **extra)
+    if result.get("attempt_id") is not None:
+        result["next_step"] = _next_step(result)
+    return result
+
+
+def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
 
@@ -505,12 +546,19 @@ def cmd_scan(args: Any) -> int:
         frozen = freeze_phase_two_inputs(run_root, project, module_root, baseline)
         frozen_inventory = frozen["inventory"]
         exclusion_receipt = frozen["exclusions"]
+        task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
+            frozen_inventory, project, getattr(args, "docs", None))
         attempt = create_attempt(
             run_root,
             {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
             frozen["baseline"],
         )
         selected_ids = _context_scope_ids(frozen_inventory, project, module_root, getattr(args, "target", None))
+        # FaT-3: the task document of --docs always goes to the model; the other tasks of to_do do not.
+        selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
+        selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
+        by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
+        context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
         batches = select_context_batches(
             frozen_inventory,
             project,
@@ -521,6 +569,10 @@ def cmd_scan(args: Any) -> int:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
     except ContextSelectionError:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", scope=scope))
+        return 2
+    except HostStop as stop:
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=str(stop), scope=scope,
+                               **({"fix": stop.fix} if stop.fix else {})))
         return 2
     except (InventoryError, ValueError, OSError) as error:
         detail = str(error) if isinstance(error, InventoryError) else "scan input is unreadable" if isinstance(error, OSError) else "scan input or receipt is invalid"
@@ -540,9 +592,54 @@ def cmd_scan(args: Any) -> int:
         inventory_file_count=len(frozen_inventory["files"]),
         exclusion_count=len(exclusion_receipt["exclusions"]),
         context_batch_count=len(batches),
+        context_summary=context_summary,
+        **({"warnings": context_warnings} if context_warnings else {}),
     )
     _print(payload)
     return 0
+
+
+TASK_DOC_FIX = ("выберите модуль, внутри которого лежит документ (например, корневой --module <ID>), и сузьте --target на нужный "
+                "подмодуль; или положите документ внутрь модуля")
+
+
+def _under_to_do(project_path: str) -> bool:
+    return "to_do" in project_path.split("/")[:-1]
+
+
+def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
+    """FaT-3: ``(ids of the task documents, ids of other tasks' files in to_do, summary, warnings)``.
+
+    A document of --docs must be a file of the module's inventory (its bytes are bound by the inventory digest);
+    otherwise the scan stops with TASK_DOC_OUTSIDE_CONTEXT — cases without their requirements are no cases.
+    """
+    files = [item for item in inventory.get("files", []) if isinstance(item, Mapping)]
+    by_path = {str(item["project_path"]): item for item in files}
+    to_do = [item for item in files if _under_to_do(str(item["project_path"]))]
+    if not docs:
+        warnings = []
+        if to_do:
+            size = sum(int(item.get("size") or 0) for item in to_do)
+            warnings.append(f"модели уйдут все документы из to_do — {len(to_do)} файл(ов), {size} байт; укажите --docs документа задачи")
+        return [], set(), {"task_documents": [], "other_tasks_skipped": 0}, warnings
+    task_paths = [row["path"] for row in _docs_entries(project, docs)]
+    task_ids: list[str] = []
+    for path in task_paths:
+        item = by_path.get(path)
+        if item is None:
+            raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не входит в inventory выбранного модуля"
+                           + _exclusion_note(inventory, path), TASK_DOC_FIX)
+        task_ids.append(str(item["opaque_id"]))
+    others = {str(item["opaque_id"]) for item in to_do if str(item["project_path"]) not in task_paths}
+    return task_ids, others, {"task_documents": task_paths, "other_tasks_skipped": len(others)}, []
+
+
+def _exclusion_note(inventory: Mapping[str, Any], path: str) -> str:
+    for row in inventory.get("exclusions", []):
+        excluded = str(row.get("project_path"))
+        if path == excluded or path.startswith(excluded + "/"):
+            return f" (исключён правилом {row.get('scanner_rule_id')}: {excluded})"
+    return " (он вне корня модуля)"
 
 
 
