@@ -324,7 +324,13 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 Если в `.skillsrc` задан `projection.zephyr.template`, после закрытия попытки (`exec` или `finish`) один раз
 запусти `python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`
 выбранной ревизии. Он кладёт рядом `.zephyr-import.csv` с полями из шаблона — этот файл человек импортирует
-в Zephyr. Ошибка `ZEPHYR_TEMPLATE_*` — покажи человеку `hint` как есть; сам шаблон не правь.
+в Zephyr. Ошибка `ZEPHYR_TEMPLATE_*` (шаблон) или `ZEPHYR_EXPORT_*` (`NOT_CLOSED` — попытка не закрыта,
+`RUN_MISMATCH` — набор из другого run, `CASES` — не тот файл `--cases`, `CONFLICT` — файл импорта уже другой,
+`FAILED` — прочий сбой) — покажи человеку `hint` как есть; сам шаблон не правь.
+
+В конце прогона (после закрытия или остановки) один раз запусти
+`python -m tools.run_pipeline report --project <abs> --run <id>`: он пишет в каталог run `report.md`,
+`report.json` и `questions-for-analyst.md` без кода и текста спеки — назови человеку эти пути.
 
 ## Resume и child attempts
 

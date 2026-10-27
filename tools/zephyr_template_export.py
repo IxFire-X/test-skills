@@ -227,6 +227,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
     bundle_csv = Path(bundle_csv).resolve()
     base = bundle_csv.name.removesuffix(".zephyr-scale.csv")
     try:
+        bundle_csv.relative_to(Path(project).resolve())  # FaT-B: the import file is written only inside the project
         if base == bundle_csv.name:
             raise ValueError
         document = json.loads(bundle_csv.with_name(base + ".json").read_text(encoding="utf-8"))
@@ -266,13 +267,10 @@ def main(argv: list[str] | None = None) -> int:
     except ZephyrTemplateError as error:
         print(json.dumps({"status": "error", "code": error.code, "hint": error.hint}, ensure_ascii=False))
         return 2
-    except Exception as error:  # noqa: BLE001 - HostStop of the run coordinate
-        if getattr(error, "code", None):
-            print(json.dumps({"status": "error", "code": error.code, "hint": str(error)}, ensure_ascii=False))
-            return 2
-        raise
-    except (OSError, ValueError, KeyError) as error:
-        print(json.dumps({"status": "error", "code": "ZEPHYR_EXPORT_FAILED", "hint": str(error)}, ensure_ascii=False))
+    except Exception as error:  # noqa: BLE001 - FaT-B: HostStop of the run coordinate and any other failure: one JSON, code 2
+        code = getattr(error, "code", None)
+        print(json.dumps({"status": "error", "code": code if isinstance(code, str) and code else "ZEPHYR_EXPORT_FAILED",
+                          "hint": str(error) or type(error).__name__}, ensure_ascii=False))
         return 2
     print(json.dumps(result, ensure_ascii=False))
     return 0

@@ -314,6 +314,11 @@ def test_cleanup_is_sealed_in_the_receipt_and_quarantine_leaves_it_unchanged(tmp
         create_run(tmp_path / "c", "local-pilot-v1", {"request_id": "r", "execution_requested": True, "disposition_policy": "quarantine"})
 
 
+def _skillsrc(policy: str) -> dict:
+    fixture = Path(__file__).resolve().parent / "fixtures" / "projects" / "python-pytest" / ".skillsrc"
+    return {**json.loads(fixture.read_text(encoding="utf-8")), "disposition_policy": policy}
+
+
 @pytest.mark.parametrize(("skillsrc", "flag", "expected"), [
     (None, None, None),
     ("cleanup", None, "cleanup"),
@@ -325,9 +330,22 @@ def test_scan_reads_skillsrc_once_and_the_flag_wins(tmp_path: Path, skillsrc: st
 
     from tools.run_pipeline import _scan_disposition_policy
 
-    if skillsrc is not None:
-        (tmp_path / ".skillsrc").write_text(json.dumps({"disposition_policy": skillsrc}), encoding="utf-8")
+    if skillsrc is not None:  # FaT-B: a valid .skillsrc (load_skillsrc checks the schema), here in JSON
+        (tmp_path / ".skillsrc").write_text(json.dumps(_skillsrc(skillsrc)), encoding="utf-8")
     assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=flag)) == expected
+
+
+def test_scan_reads_the_policy_from_a_yaml_skillsrc_fat_b(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    import yaml
+
+    from tools.run_pipeline import _scan_disposition_policy
+
+    (tmp_path / ".skillsrc").write_text(yaml.safe_dump(_skillsrc("cleanup"), allow_unicode=True), encoding="utf-8")
+    assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) == "cleanup"
+    (tmp_path / ".skillsrc").write_text("disposition_policy: [\n", encoding="utf-8")
+    assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) is None
 
 
 def test_a_junit_failure_keeps_its_first_line_for_the_note() -> None:

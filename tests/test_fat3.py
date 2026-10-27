@@ -188,3 +188,68 @@ def test_status_names_the_next_step(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     run_pipeline.cmd_status(type("A", (), {"project": str(project), "run": payloads[-1]["run_id"]})())
     step = payloads[-1]["next_step"]
     assert step["action"] and step["stage"] and step["skill_section"]
+    assert step["stage"] != "unknown" and step["skill_section"] != "Stop conditions"
+
+
+def _next_artifacts() -> set[str]:
+    """FaT-B: every literal next_expected_artifact that _durable_status_facts can set, read from its source."""
+    import ast
+    import inspect
+    import textwrap
+
+    from tools import run_pipeline
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(run_pipeline._durable_status_facts)))
+    found: set[str] = set()
+
+    def strings(node: ast.AST | None) -> None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.add(node.value)
+        elif isinstance(node, ast.IfExp):
+            strings(node.body), strings(node.orelse)
+        elif isinstance(node, ast.Dict):
+            for value in node.values:
+                strings(value)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):  # {...}.get(stage, default)
+            strings(node.func.value), [strings(argument) for argument in node.args[1:]]
+        elif isinstance(node, ast.Subscript):
+            strings(node.value)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == "next_expected_artifact":
+            strings(node.value)
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "next_expected_artifact":
+                    strings(value)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and any(isinstance(target, ast.Name) and target.id == "next_artifact" for target in getattr(node, "targets", [getattr(node, "target", None)])):
+            strings(node.value)
+        elif isinstance(node, ast.Assign) and any(isinstance(target, ast.Tuple) and any(isinstance(item, ast.Name) and item.id == "next_artifact" for item in target.elts) for target in node.targets):
+            strings(node.value.elts[0]) if isinstance(node.value, ast.Tuple) else None
+        elif isinstance(node, ast.For) and isinstance(node.target, ast.Tuple) and any(isinstance(item, ast.Name) and item.id == "next_artifact" for item in node.target.elts):
+            index = [getattr(item, "id", None) for item in node.target.elts].index("next_artifact")
+            for row in node.iter.elts:
+                strings(row.elts[index])
+        elif isinstance(node, ast.Call) and getattr(node.func, "id", None) == "record" and len(node.args) >= 3:
+            strings(node.args[2])
+    return found
+
+
+def test_every_next_artifact_the_code_sets_has_a_next_step() -> None:
+    from tools.run_pipeline import _next_step
+
+    artifacts = _next_artifacts()
+    assert {"authorized context", "context-marker response", "generator fragments", "remaining fragments or assembled candidate",
+            "reviewer ledger and effective selection or negative closure", "static automation review"} <= artifacts
+    assert len(artifacts) >= 24
+    for expected in sorted(artifacts) + ["context-marker:baseline response", "tc-generator:BATCH-1 response"]:
+        step = _next_step({"next_expected_artifact": expected})
+        assert step["stage"] != "unknown" and step["skill_section"] != "Stop conditions", expected
+    assert "pending_request_path" not in _next_step({"next_expected_artifact": "context-marker response"})["action"]
+
+
+def test_the_automation_role_counts_its_conventions_fat_b() -> None:
+    from tools.step_size import role_files
+
+    names = {path.name for path in role_files("tc-to-autotest")}
+    assert {"SKILL.md", "automation-output-contract.md", "java-junit5.md", "python-pytest.md"} <= names

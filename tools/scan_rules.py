@@ -27,7 +27,7 @@ SOURCE_SUFFIXES = frozenset({
 INCLUDABLE_RULES = frozenset({"output-directory-v1", "dependency-directory-v1", "secret-directory-v1"})
 # The content rules of project_inventory (token_signature_rule): a source file that fell out by them is worth a look.
 CONTENT_RULES = frozenset({"token-assignment-v1", "github-token-v1", "openai-key-v1", "service-token-v1", "aws-key-v1",
-                           "google-key-v1", "jwt-v1", "url-credentials-v1"})
+                           "google-key-v1", "jwt-v1", "url-credentials-v1", "private-key-pem-v1", "password-assignment-v1"})
 _SUMMARY_PATHS = 10
 
 

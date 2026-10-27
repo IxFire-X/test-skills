@@ -15,7 +15,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from tools.scan_rules import INCLUDABLE_RULES, directory_reason, include_mode, is_source, path_reason
+from tools.scan_rules import INCLUDABLE_RULES, SECRET_DIRS, directory_reason, include_mode, is_source, path_reason
 from tools.stack_catalog import MANIFEST_LANGUAGES
 from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
@@ -48,7 +48,13 @@ _TOKEN_SIGNATURES = (
     ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{20,}")),
     ("jwt-v1", re.compile(rb"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")),
     ("url-credentials-v1", re.compile(rb"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")),
+    ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  # FaT-B
 )
+# FaT-B: a password set in YAML/properties of any length and alphabet; an empty value or a ${placeholder} is no secret.
+_CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties"})
+_PASSWORD_ASSIGNMENT = re.compile(rb"(?im)^[ 	]*[\w.-]*(?:password|passwd|pwd)[\w.-]*[ 	]*[:=][ 	]*(?![ 	]*$)(?!['\"]?\$\{)(?!['\"]{2})\S")
+# FaT-B: non-source files in a secrets/credentials directory are left out also inside src/.
+_SECRET_DIR_SUFFIXES = frozenset({".yml", ".yaml", ".json", ".pem", ".key", ".properties"})
 _CLOSED_MANIFESTS = frozenset({
     "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "pipfile", "pom.xml",
     "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties",
@@ -259,19 +265,24 @@ def token_signature_rule(contents: bytes) -> str | None:
     return next((rule_id for rule_id, signature in _TOKEN_SIGNATURES if signature.search(assignments if rule_id == "token-assignment-v1" else contents)), None)
 
 
-def _secret_rule(path: Path, contents: bytes) -> tuple[str, str] | None:
+def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -> tuple[str, str] | None:
     name = path.name.casefold()
+    if project_path is not None and path.suffix.casefold() in _SECRET_DIR_SUFFIXES and any(
+            part.casefold() in SECRET_DIRS for part in project_path.split("/")[:-1]):
+        return "secret-directory-v1", "credential-material"
     if name == ".env" or name.startswith(".env."):
         return "filename-dotenv-v1", "dotenv"
     if path.suffix.casefold() in _PRIVATE_SUFFIXES or name in _PRIVATE_NAMES:
         return "private-extension-v1", "private-material"
     # FaT-2: a secret-looking name is a rule for non-source files; a source file is judged by its content.
-    # Secret directories are left out by place (scan_rules.directory_reason), not here.
+    # Secret directories are left out by place (scan_rules.directory_reason); inside src/ only their non-source files (above).
     if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
     rule_id = token_signature_rule(contents)
     if rule_id is not None:
         return rule_id, "token-signature"
+    if path.suffix.casefold() in _CONFIG_SUFFIXES and _PASSWORD_ASSIGNMENT.search(contents):
+        return "password-assignment-v1", "token-signature"
     return None
 
 
@@ -426,7 +437,7 @@ def build_inventory(
             if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
                 exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
                 continue
-            secret = _secret_rule(path, b"")
+            secret = _secret_rule(path, b"", project_path)
             if secret is not None:
                 rule, label = secret
                 exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
@@ -441,7 +452,7 @@ def build_inventory(
             if b"\0" in contents[:8192]:
                 exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-content-v1", "binary-or-generated"))
                 continue
-            secret = _secret_rule(path, contents)
+            secret = _secret_rule(path, contents, project_path)
             if secret is not None:
                 rule, label = secret
                 exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
@@ -506,7 +517,7 @@ def build_inventory(
                 contents = path.read_bytes()
             except OSError as error:
                 raise InventoryError(f"required parent configuration is unreadable: {project_path}") from error
-            secret = _secret_rule(path, contents)
+            secret = _secret_rule(path, contents, project_path)
             if secret is not None:
                 rule, label = secret
                 exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))

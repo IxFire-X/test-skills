@@ -54,6 +54,27 @@ def test_secret_directories_inside_src_are_judged_by_content(tmp_path: Path) -> 
     assert leaky["reason_code"] == "SECRET_SUSPECTED" and leaky["scanner_rule_id"] == "token-assignment-v1"
 
 
+def test_secret_material_under_src_is_left_out_fat_b(tmp_path: Path) -> None:
+    """FaT-B: the bug-hunt scenario — secrets/ and credentials/ under src/ with a short password and a PEM key."""
+    project = tmp_path / "project"
+    _write(project, "src/main/resources/secrets/db.yml", "spring:\n  datasource:\n    password: hunter2!\n")
+    _write(project, "src/main/resources/credentials/service-account.json",
+           '{"type": "service_account", "private_key": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n"}\n')
+    _write(project, "src/main/resources/application.properties", "spring.datasource.password=s3cr!\n")
+    _write(project, "src/main/resources/application.yml", "spring:\n  datasource:\n    password: ${DB_PASSWORD}\n    username: sa\n")
+    _write(project, "src/main/resources/empty.properties", "spring.datasource.password=\n")
+    _write(project, "src/main/resources/keys/server.txt", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n")
+    _write(project, "src/main/java/com/x/secrets/SecretsService.java", JAVA)
+    files, exclusions = _paths(project)
+    rules = {row["project_path"]: row["scanner_rule_id"] for row in exclusions}
+    assert rules["src/main/resources/secrets/db.yml"] == "secret-directory-v1"
+    assert rules["src/main/resources/credentials/service-account.json"] == "secret-directory-v1"
+    assert rules["src/main/resources/application.properties"] == "password-assignment-v1"
+    assert rules["src/main/resources/keys/server.txt"] == "private-key-pem-v1"
+    assert {"src/main/resources/application.yml", "src/main/resources/empty.properties",
+            "src/main/java/com/x/secrets/SecretsService.java"} <= files  # a placeholder, an empty value and a source stay
+
+
 def test_secret_file_names_are_a_rule_for_non_source_files_only(tmp_path: Path) -> None:
     project = tmp_path / "project"
     _write(project, "app/token_service.py", "def issue():\n    return None\n")

@@ -284,3 +284,35 @@ def test_a_skillsrc_with_the_template_still_validates(tmp_path: Path) -> None:
     document["projection"] = {"zephyr": {"template": "zephyr/stubs.csv"}}
     (tmp_path / ".skillsrc").write_text(json.dumps(document), encoding="utf-8")
     assert load_skillsrc(tmp_path / ".skillsrc")["projection"]["zephyr"]["template"] == "zephyr/stubs.csv"
+
+
+@pytest.mark.parametrize("failure", [ValueError("'Name' is not in list"), IndexError("list index out of range"), StopIteration()])
+def test_an_error_without_a_code_is_one_json_line_with_code_two(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                 monkeypatch: pytest.MonkeyPatch, failure: Exception) -> None:
+    """FaT-B: errors without .code never leave a traceback — one JSON line, code 2."""
+    import tools.zephyr_template_export as export
+
+    def broken(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(export, "export_import_csv", broken)
+    assert export.main(["--project", str(tmp_path), "--run", "r", "--cases", str(tmp_path / "x.zephyr-scale.csv")]) == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "error" and output["code"] == "ZEPHYR_EXPORT_FAILED" and output["hint"]
+
+
+def test_a_copy_of_the_set_outside_the_project_is_refused_fat_b(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """FaT-B: the import file is never written beside a copy outside the project."""
+    import shutil
+
+    from tools.zephyr_template_export import main
+
+    project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
+    capsys.readouterr()
+    outside = tmp_path.parent / (tmp_path.name + "-outside")  # the project is tmp_path itself
+    outside.mkdir()
+    copy = Path(shutil.copy2(bundle_csv, outside / bundle_csv.name))
+    shutil.copy2(bundle_csv.with_name(bundle_csv.name.removesuffix(".zephyr-scale.csv") + ".json"), outside)
+    assert main(["--project", str(project), "--run", run_root.name, "--cases", str(copy)]) == 2
+    assert json.loads(capsys.readouterr().out)["code"] == "ZEPHYR_EXPORT_CASES"
+    assert not list(outside.glob("*.zephyr-import.csv"))

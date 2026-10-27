@@ -75,6 +75,15 @@ def _confined(project: Path, candidate: Path) -> Path:
 
 _NEXT_STEPS = (
     # (substring of next_expected_artifact, stage, action, section of skills/orchestrate/SKILL.md)
+    # FaT-B: every value _durable_status_facts sets must match a row (tests/test_fat3.py walks them all).
+    ("authorized context", "context", "выбор контекста: опубликовать квитанцию выбора по baseline", "3"),
+    ("context-marker response", "context-marker", "опубликовать запрос context-marker:baseline и вызвать модель", "3"),
+    ("generator fragments", "tc-generator", "запрос генератора на первую пачку плана и его ответ", "3"),
+    ("remaining fragments or assembled candidate", "tc-generator",
+     "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3"),
+    ("reviewer ledger and effective selection or negative closure", "canonical-review",
+     "завершить журнал ревью и выбрать effective canonical или закрыть отрицательную ветку", "4"),
+    ("static automation review", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5"),
     (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
     ("context-marker parts merge", "context-marker:parts",
      "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели", "3"),
@@ -427,11 +436,13 @@ def _scan_disposition_policy(project: Path, args: Any) -> str | None:
     flag = getattr(args, "disposition_policy", None)
     if flag is not None:
         return "cleanup" if flag == "cleanup" else None
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
+
     try:
-        document = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        document = load_skillsrc(project / ".skillsrc")  # FaT-B: the package writes YAML; JSON is YAML too
+    except (OSError, SkillsrcError):
         return None
-    return "cleanup" if isinstance(document, Mapping) and document.get("disposition_policy") == "cleanup" else None
+    return "cleanup" if document.get("disposition_policy") == "cleanup" else None
 
 
 def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
@@ -835,7 +846,8 @@ def _validated_execution_coordinates(project: Path, run_id: str) -> dict[str, An
         or authorization.get("execution_requested") is not True
         or authorization.get("policy_profile") != "local-pilot-v1"
     ):
-        raise HostStop("EXECUTION_COORDINATES", "run lacks local execution authorization")
+        raise HostStop("EXECUTION_COORDINATES", "run lacks local execution authorization; a run without execution "
+                       "(cases-only or lowered to it) closes with run_pipeline finish")
     attempts = state.get("attempts")
     if not isinstance(attempts, list) or not attempts:
         raise HostStop("EXECUTION_COORDINATES", "run has no attempt to continue")

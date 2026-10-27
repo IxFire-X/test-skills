@@ -40,7 +40,7 @@ Use equivalence classes and boundary values for input rules, feasible decision-r
 combinations for interacting conditions, and transitions for stateful behavior when
 applicable. These guide selection within the authorized scope, not mandatory extra cases.
 Record the design in the same answer. A requirement with input parameters gets `design`:
-its parameters (`P-…`), valid and invalid classes (`C-…`; `label` only when the ID does not
+its parameters (`P-…` with a required `name`, 1–80 characters), valid and invalid classes (`C-…`; `label` only when the ID does not
 speak for itself, at most 40 characters) and numeric `bounds` (`min`/`max`, `step`, `unit`).
 A requirement without inputs gets no `design`. Every case gets `technique` (`EP`, `BVA`, `DT`,
 `PAIRWISE`, `OTHER`) and `design_refs`: which class or bound (`min`, `max`, `below_min`,

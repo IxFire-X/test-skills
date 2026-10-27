@@ -40,7 +40,8 @@ def role_files(role: str) -> list[Path]:
     base = PACK / "skills" / role
     if not (base / "SKILL.md").is_file():
         raise ValueError(f"unknown role: {role}")
-    return [base / "SKILL.md", *sorted(path for path in (base / "references").rglob("*") if path.is_file())]
+    # FaT-B: tc-to-autotest also reads assets/ (the Java/Python conventions)
+    return [base / "SKILL.md", *sorted(path for folder in ("references", "assets") for path in (base / folder).rglob("*") if path.is_file())]
 
 
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:
