@@ -83,8 +83,9 @@ def test_model_calls_are_timed_from_request_to_response_and_show_attempts() -> N
         _event(4, "MODEL_RESPONSE_RECEIVED", None, "tc-generator:BATCH-a", transport_attempts=1),
     ]
     first, second = model_calls(events)
-    assert first["stage"] == "tc-reviewer:canonical" and first["duration_sec"] == 90.5 and first["transport_attempts"] == 2
-    assert second["duration_sec"] is None and second["transport_attempts"] == 1
+    # FaT-6b: the first request has no earlier event, so its step runs from the request itself.
+    assert first["stage"] == "tc-reviewer:canonical" and first["step_sec"] == 90.5 and first["transport_attempts"] == 2
+    assert second["step_sec"] is None and second["transport_attempts"] == 1
 
 
 def _finished_run(tmp_path: Path):
@@ -203,3 +204,135 @@ def test_status_and_a_second_report_still_work_after_the_report(tmp_path: Path, 
     assert status["evidence_errors"] == []
     assert main(["report", "--project", str(tmp_path), "--run", run_root.name]) == 0
     assert json.loads((run_root / "report.json").read_bytes())["steps"] == json.loads(first)["steps"]
+
+
+# --- FaT-6b: the report on a real-shaped run ------------------------------------------------------
+
+def _real_shaped_run(tmp_path: Path) -> tuple[Path, dict]:
+    """A run directory shaped like a real one: case-sets/r1, a context receipt, nested receipts, model requests."""
+    import hashlib
+
+    from tests.test_requirement_traceability import canonical_fixture
+    from tools.batch_assembly import canonical_bytes
+
+    root = tmp_path / "run"
+    document = canonical_fixture()
+    doc_bytes = canonical_bytes(document)
+    (root / "case-sets" / "r1").mkdir(parents=True)
+    (root / "case-sets" / "r1" / "TCDOC-x.r1.json").write_bytes(doc_bytes)
+    context = {"schema_version": "1.0.0", "files": [], "byte_count": 90000, "digest": "sha256:" + "c" * 64}
+    (root / "context-selections" / "a").mkdir(parents=True)
+    (root / "context-selections" / "a" / ("c" * 64 + ".json")).write_text(json.dumps(context), encoding="utf-8")
+    bundle = {"kind": "bundle", "digest": "sha256:" + "b" * 64, "rows": ["x" * 500]}
+    (root / "effective-canonicals").mkdir()
+    (root / "effective-canonicals" / "a.json").write_text(json.dumps({"document": document, "effective_bundle_receipt": bundle,
+                                                                      "digest": "sha256:" + "e" * 64}), encoding="utf-8")
+    doc_digest = "sha256:" + hashlib.sha256(doc_bytes).hexdigest()
+    return root, {"doc": doc_digest, "doc_bytes": len(doc_bytes), "context": context["digest"], "bundle": bundle["digest"],
+                  "bundle_bytes": len(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")), "document": document}
+
+
+def test_inputs_are_resolved_by_file_digest_receipt_digest_and_context_byte_count(tmp_path: Path) -> None:
+    from tools.run_report import digest_index, input_bytes
+
+    root, facts = _real_shaped_run(tmp_path)
+    index = digest_index(root)
+    resolved, unresolved = input_bytes(index, [facts["doc"], facts["context"], facts["bundle"], "sha256:" + "f" * 64])
+    assert resolved == facts["doc_bytes"] + 90000 + facts["bundle_bytes"] and unresolved == 1
+
+
+def test_the_case_document_is_found_in_the_case_sets(tmp_path: Path) -> None:
+    from tools.run_report import case_document
+
+    root, facts = _real_shaped_run(tmp_path)
+    assert case_document(root, None) == facts["document"]
+    (root / "case-sets" / "r2").mkdir()
+    newer = dict(facts["document"], revision=2)
+    (root / "case-sets" / "r2" / "TCDOC-x.r2.json").write_text(json.dumps(newer), encoding="utf-8")
+    assert case_document(root, None)["revision"] == 2
+
+
+def test_step_time_runs_from_the_previous_event_to_the_response() -> None:
+    from tools.run_report import model_calls
+
+    events = [
+        _event(1, "CANDIDATE_PUBLISHED", "2026-10-27T10:00:00.000000Z", "assembly"),
+        _event(2, "ARTIFACT_READ_BACK", "2026-10-27T10:00:10.000000Z"),
+        _event(3, "MODEL_REQUESTED", "2026-10-27T10:09:20.000000Z", "tc-to-autotest:r1", artifact_digest="sha256:" + "1" * 64),
+        _event(4, "MODEL_RESPONSE_RECEIVED", "2026-10-27T10:09:26.500000Z", "tc-to-autotest:r1", transport_attempts=1),
+    ]
+    [call] = model_calls(events)
+    assert call["step_sec"] == 556.5 and call["journal_request_to_response_sec"] == 6.5
+    assert "duration_sec" not in call
+
+
+def test_the_markdown_names_the_step_time_honestly() -> None:
+    from tools.run_report import STEP_TIME_NOTE
+
+    assert "от предыдущего события" in STEP_TIME_NOTE and "с готовым ответом" in STEP_TIME_NOTE
+
+
+def test_the_report_runs_inside_one_closure_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FaT-6b: on a real run the report hung for minutes — every read re-derived the journal without the FaT-9 cache."""
+    import collections
+
+    from tools import pilot_state
+    from tools.run_report import write_report
+
+    run_root = _finished_run(tmp_path)
+    counts: collections.Counter = collections.Counter()
+    original = pilot_state._derive_state
+    monkeypatch.setattr(pilot_state, "_derive_state", lambda root: counts.update(["derive"]) or original(root))
+    write_report(tmp_path, run_root.name)
+    assert counts["derive"] <= 3, counts
+
+
+def test_an_unresolved_input_and_a_code_step_are_marked_not_hidden() -> None:
+    from tools.run_report import _size_cell, _tokens_cell
+
+    partial = {"input_bytes": 100, "role_bytes": 5, "unresolved_inputs": 2, "size_complete": False, "by": "model", "tokens_est": 25}
+    assert _size_cell(partial) == "100+5 (размер неполный: не найдено 2)" and _tokens_cell(partial) == "25"
+    merge = {"input_bytes": 9, "role_bytes": 0, "unresolved_inputs": 0, "size_complete": True, "by": "code", "tokens_est": None}
+    assert _size_cell(merge) == "9+0" and _tokens_cell(merge) == "код"
+
+
+def test_a_controller_merge_is_a_code_step_outside_the_model_budget(tmp_path: Path) -> None:
+    from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
+    from tools.context_marker_parts import merge_parts
+    from tools.run_report import build_report
+
+    root, attempt_id, baseline, receipts = _run(tmp_path, files=2)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    for index, receipt in enumerate(receipts, start=1):
+        _publish_part(root, attempt_id, baseline, index, receipt, requirements, _marker([f"src/part{index - 1}.py — наблюдение"]))
+    merge_parts(root)
+    report, _warnings = build_report(tmp_path, root.name)
+    merge = next(call for call in report["model_calls"] if call["stage"] == "context-marker:baseline")
+    parts = [call for call in report["model_calls"] if call["stage"] != "context-marker:baseline"]
+    assert merge["by"] == "code" and merge["fits"] is None and merge["budget_bytes"] is None and merge["tokens_est"] is None
+    assert parts and all(call["by"] == "model" and call["fits"] is not None for call in parts)
+
+
+def test_a_forged_copy_during_report_is_one_error_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from tools import pilot_state
+    from tools.run_pipeline import main
+
+    run_root = _finished_run(tmp_path)
+    copy = run_root / "events" / "0000000002.json"
+    original = pilot_state._derive_state
+    forged = {"done": False}
+
+    def derive_then_forge(root):
+        state = original(root)
+        if not forged["done"] and pilot_state._CLOSURE_CACHE.get() is not None:
+            forged["done"] = True
+            copy.write_bytes(copy.read_bytes().replace(b'"seq":2', b'"seq":2 '))
+        return state
+
+    monkeypatch.setattr(pilot_state, "_derive_state", derive_then_forge)
+    capsys.readouterr()
+    code = main(["report", "--project", str(tmp_path), "--run", run_root.name])
+    out = capsys.readouterr()
+    assert forged["done"] and code == 2 and "Traceback" not in out.out + out.err
+    answer = json.loads(out.out)
+    assert answer["status"] == "error" and out.out.count('"status"') == 1

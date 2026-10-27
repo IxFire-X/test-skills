@@ -105,9 +105,23 @@ def _validate_schema(name: str, value: Mapping[str, Any]) -> None:
 
     schema_text = (_SCHEMA_ROOT / name).read_text(encoding="utf-8")
     serialized = _json_validation_key(value)
+    # FaT-6b: inside one closure a successful check of the same bytes is remembered by digest; the global lru cache
+    # (64 entries) drops large artifacts such as an inventory, whose uniqueItems check is quadratic.
+    cache = _CLOSURE_CACHE.get()
+    key = None
+    if cache is not None:
+        try:
+            key = ("schema", name, hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                                                             allow_nan=False).encode("utf-8")).hexdigest())
+        except (TypeError, ValueError):
+            key = None
+    if key is not None and key in cache:
+        return
     valid = _artifact_schema_valid(schema_text, serialized) if serialized is not None else _artifact_validator(schema_text).is_valid(value)
     if not valid:
         raise ValueError(f"schema validation failed: {name}")
+    if key is not None:
+        cache[key] = True
 
 
 def _is_reparse(path: Path) -> bool:

@@ -63,10 +63,16 @@ def _seconds(start: Any, end: Any) -> float | None:
     return round((last - first).total_seconds(), 3) if first and last else None
 
 
+STEP_TIME_NOTE = ("время шага модели — от предыдущего события журнала до ответа: агент пишет MODEL_REQUESTED "
+                  "уже с готовым ответом, поэтому «запрос → ответ» в журнале не показывает работу")
+
+
 def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One row per ``MODEL_REQUESTED``: the time to its response and the transport attempts of the response."""
+    """One row per ``MODEL_REQUESTED``: the step time (FaT-6b: from the previous journal event to the response) and attempts."""
     rows = []
-    for request in (event for event in events if event.get("event_type") == "MODEL_REQUESTED"):
+    ordered = sorted(events, key=lambda event: event["seq"])
+    for request in (event for event in ordered if event.get("event_type") == "MODEL_REQUESTED"):
+        previous = next((event for event in reversed(ordered) if event["seq"] < request["seq"]), None)
         response = next((
             event for event in events
             if event.get("event_type") == "MODEL_RESPONSE_RECEIVED" and event["seq"] > request["seq"]
@@ -75,15 +81,51 @@ def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         rows.append({
             "stage": request.get("stage_instance_id"), "attempt_id": request.get("attempt_id"),
             "requested_at": request.get("observed_at"), "received_at": response.get("observed_at") if response else None,
-            "duration_sec": _seconds(request.get("observed_at"), response.get("observed_at")) if response else None,
+            "step_sec": _seconds((previous or request).get("observed_at"), response.get("observed_at")) if response else None,
+            "journal_request_to_response_sec": _seconds(request.get("observed_at"), response.get("observed_at")) if response else None,
             "transport_attempts": response.get("transport_attempts") if response else None,
             "request_digest": request.get("artifact_digest"),
         })
     return rows
 
 
-def _digest_sizes(root: Path) -> dict[str, int]:
-    return {path.stem: path.stat().st_size for path in root.rglob("*.json") if len(path.stem) == 64}
+def digest_index(root: Path) -> dict[str, int]:
+    """FaT-6b: bytes a model reads behind a digest — by file name, file bytes, a receipt's own ``digest`` (also nested
+    one level), and the canonical document digest; a context receipt counts its ``byte_count``, not its JSON."""
+    import hashlib
+
+    from tools.canonical_document import document_sha256
+
+    index: dict[str, int] = {}
+    for path in sorted(Path(root).rglob("*.json")):
+        try:
+            raw = path.read_bytes()
+            value = json.loads(raw.decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+        size = int(value["byte_count"]) if isinstance(value, Mapping) and isinstance(value.get("byte_count"), int) and "files" in value else len(raw)
+        keys = [path.stem, hashlib.sha256(raw).hexdigest()]
+        if isinstance(value, Mapping):
+            if isinstance(value.get("digest"), str):
+                keys.append(value["digest"].removeprefix("sha256:"))
+            if isinstance(value.get("test_cases"), list):
+                try:
+                    keys.append(document_sha256(dict(value)).removeprefix("sha256:"))
+                except Exception:  # noqa: BLE001 - a non-canonical document only lacks this key
+                    pass
+            for nested in value.values():
+                if isinstance(nested, Mapping) and isinstance(nested.get("digest"), str):
+                    index.setdefault(nested["digest"].removeprefix("sha256:"),
+                                     len(json.dumps(nested, ensure_ascii=False, separators=(",", ":")).encode("utf-8")))
+        for key in keys:
+            index.setdefault(key, size)
+    return index
+
+
+def input_bytes(index: Mapping[str, int], digests: Sequence[str]) -> tuple[int, int]:
+    """``(resolved bytes, unresolved count)`` of a model request's input digests."""
+    found = [index[str(digest).removeprefix("sha256:")] for digest in digests if str(digest).removeprefix("sha256:") in index]
+    return sum(found), len(digests) - len(found)
 
 
 def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, int]) -> None:
@@ -91,24 +133,55 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
     from tools.step_size import TOKENS_PER_BYTE, role_files, step_budget
 
     inputs: list[str] = []
+    by_code = False
     try:
         request = pilot.read_model_request(root, str(call["attempt_id"]), str(call["stage"]), str(call["request_digest"]))
         inputs = list(request.get("input_digests") or [])
+        # FaT-6b: a controller step (the FaT-5 merge of the marker parts) is code, not a model call.
+        by_code = str(request.get("model_id") or "").startswith("controller:")
     except (KeyError, OSError, TypeError, ValueError):
         pass
-    found = [sizes[digest.removeprefix("sha256:")] for digest in inputs if digest.removeprefix("sha256:") in sizes]
+    resolved, unresolved = input_bytes(sizes, inputs)
     role = str(call["stage"]).split(":", 1)[0]
     try:
         role_bytes = sum(path.stat().st_size for path in role_files(role)) if role in _ROLES else 0
     except ValueError:
         role_bytes = 0
-    total = sum(found) + role_bytes
+    total = resolved + role_bytes
     budget = step_budget(project)
-    call.update(input_bytes=sum(found), role_bytes=role_bytes, unresolved_inputs=len(inputs) - len(found),
-                tokens_est=round(total * TOKENS_PER_BYTE), budget_bytes=budget, fits=total <= budget)
+    call.update(input_bytes=resolved, role_bytes=role_bytes, unresolved_inputs=unresolved, size_complete=unresolved == 0,
+                by="code" if by_code else "model")
+    if by_code:  # code reads no prompt: no token estimate and no comparison with the step budget of a model
+        call.update(role_bytes=0, tokens_est=None, budget_bytes=None, fits=None)
+    else:
+        call.update(tokens_est=round(total * TOKENS_PER_BYTE), budget_bytes=budget, fits=total <= budget)
 
 
 # --- the report ---------------------------------------------------------------------------------
+
+def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
+    """FaT-6b: the selected case document — the effective canonical of the attempt, else the newest case-sets/r*."""
+    from tools import pilot_state as pilot
+
+    if attempt_id:
+        try:
+            effective = pilot.read_effective_canonical_if_present(root, attempt_id)
+            if effective and isinstance(effective.get("document"), Mapping):
+                return effective["document"]
+        except (KeyError, OSError, TypeError, ValueError):
+            pass
+    revisions = sorted((path for path in (Path(root) / "case-sets").glob("r*") if path.is_dir()),
+                       key=lambda path: int(path.name[1:]) if path.name[1:].isdigit() else 0)
+    for revision in reversed(revisions):
+        for path in sorted(revision.glob("*.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(value, Mapping) and isinstance(value.get("test_cases"), list):
+                return value
+    return None
+
 
 def _json_at(root: Path, digest: Any) -> Any:
     if not isinstance(digest, str):
@@ -167,7 +240,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     attempt_id = attempt["attempt_id"] if attempt else None
     status = _durable_status_facts(project, root, stage="report")
 
-    sizes = _digest_sizes(root)
+    sizes = digest_index(root)
     calls = model_calls(events)
     for call in calls:
         _size(project, root, call, sizes)
@@ -197,7 +270,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             requirements = None
     cases = None
     candidate = next((event for event in reversed(events) if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"), None)
-    document = _json_at(root, candidate.get("artifact_digest")) if candidate else None
+    document = case_document(root, attempt_id) or (_json_at(root, candidate.get("artifact_digest")) if candidate else None)
     if isinstance(document, Mapping) and isinstance(document.get("test_cases"), list):
         cases = len(document["test_cases"])
 
@@ -238,6 +311,17 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     return report, list(status.get("warnings") or [])
 
 
+def _size_cell(call: Mapping[str, Any]) -> str:
+    cell = f"{_dash(call.get('input_bytes'))}+{_dash(call.get('role_bytes'))}"
+    if not call.get("size_complete", True):
+        cell += f" (размер неполный: не найдено {call.get('unresolved_inputs')})"
+    return cell
+
+
+def _tokens_cell(call: Mapping[str, Any]) -> str:
+    return "код" if call.get("by") == "code" else _dash(call.get("tokens_est"))
+
+
 def _dash(value: Any) -> str:
     return "—" if value is None else str(value)
 
@@ -249,9 +333,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"- Профиль: {report['policy_profile']}", f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
         "## Числа", "", *(f"- {key}: {_dash(value)}" for key, value in counts.items()), "",
-        "## Вызовы модели", "", "| Стадия | Начало | Длительность, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает |", "|---|---|---|---|---|---|---|---|",
-        *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['duration_sec'])} | {_dash(c['transport_attempts'])} | "
-          f"{_dash(c.get('input_bytes'))}+{_dash(c.get('role_bytes'))} | {_dash(c.get('tokens_est'))} | {_dash(c.get('budget_bytes'))} | {_dash(c.get('fits'))} |"
+        "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
+        "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает |", "|---|---|---|---|---|---|---|---|",
+        *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
+          f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} |"
           for c in report["model_calls"]), "",
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
@@ -268,6 +353,14 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
 
 def write_report(project: Path, run_id: str) -> list[str]:
+    """Build and write the report inside one closure_cache (FaT-6b): each journal and receipt is checked once, not per read."""
+    from tools.pilot_state import closure_cache
+
+    with closure_cache():
+        return _write_report(project, run_id)
+
+
+def _write_report(project: Path, run_id: str) -> list[str]:
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     project = Path(project).resolve()
