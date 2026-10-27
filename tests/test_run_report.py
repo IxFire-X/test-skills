@@ -123,6 +123,35 @@ def test_the_report_has_steps_counts_and_no_project_content(tmp_path: Path) -> N
                 assert line.strip().encode("utf-8") not in blob
 
 
+def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path: Path) -> None:
+    from tools.run_report import write_report
+
+    run_root = _finished_run(tmp_path)
+    write_report(tmp_path, run_root.name)
+    report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
+    assert report["step_sizes"] == [] and "STEP_OVER_BUDGET" not in report["warnings"]
+    rows = [{"step": "tc-reviewer:canonical", "bytes": 732886, "input_bytes": 700000, "role_bytes": 32886, "role": "tc-reviewer",
+             "files": 3, "tokens_est": 175893, "budget_bytes": 500000, "fits": False, "warning": "STEP_OVER_BUDGET", "at": "2026-10-28T01:00:00Z"},
+            {"step": "context-marker", "bytes": 1000, "input_bytes": 900, "role_bytes": 100, "role": "context-marker",
+             "files": 2, "tokens_est": 240, "budget_bytes": 500000, "fits": True, "warning": None, "at": "2026-10-28T00:59:00Z"}]
+    (run_root / "step-sizes.jsonl").write_bytes(("".join(json.dumps(row) + "\n" for row in rows) + "not json\n").encode("utf-8"))
+    write_report(tmp_path, run_root.name)
+    report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
+    markdown = (run_root / "report.md").read_text(encoding="utf-8")
+    assert [row["step"] for row in report["step_sizes"]] == ["tc-reviewer:canonical", "context-marker"]
+    assert report["warnings"] == ["STEP_OVER_BUDGET"]
+    assert "## Размер входа шагов" in markdown and "| tc-reviewer:canonical | 732886 |" in markdown
+    assert "STEP_OVER_BUDGET" in markdown.split("## Предупреждения", 1)[1].split("##", 1)[0]
+
+
+def test_a_journaled_model_call_over_the_budget_is_a_warning_too() -> None:
+    from tools.run_report import budget_warnings
+
+    assert budget_warnings([{"by": "model", "fits": True}, {"by": "code", "fits": None}], []) == []
+    assert budget_warnings([{"by": "model", "fits": False}], []) == ["STEP_OVER_BUDGET"]
+    assert budget_warnings([], [{"fits": False}]) == ["STEP_OVER_BUDGET"]
+
+
 def test_report_is_a_pipeline_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.run_pipeline import main
 

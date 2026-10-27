@@ -85,8 +85,10 @@ def test_step_size_fits_and_does_not_fit(tmp_path: Path) -> None:
     code, report = _step("--project", str(tmp_path), "--files", str(small))
     assert code == 0 and report["fits"] and report["bytes"] == 1000 and report["budget_bytes"] == 500_000
     assert report["tokens_est"] == 240
+    assert report["warning"] is None
     code, report = _step("--project", str(tmp_path), "--files", str(small), str(big))
-    assert code == 3 and not report["fits"] and "--target" in report["hint"]
+    # FaT-RV: over the budget is a warning, not a stop — the run goes on, the advice to narrow --target stays.
+    assert code == 0 and not report["fits"] and report["warning"] == "STEP_OVER_BUDGET" and "--target" in report["hint"]
 
 
 def test_step_size_counts_the_role_instructions_and_reads_the_skillsrc_budget(tmp_path: Path) -> None:
@@ -104,7 +106,7 @@ def test_step_size_counts_the_role_instructions_and_reads_the_skillsrc_budget(tm
     document["limits"] = {"step_input_bytes": 1500}
     (tmp_path / ".skillsrc").write_bytes(_payload(document))
     code, report = _step("--project", str(tmp_path), "--files", str(doc), "--role", "tc-generator")
-    assert report["budget_bytes"] == 1500 and code == 3
+    assert report["budget_bytes"] == 1500 and code == 0 and report["warning"] == "STEP_OVER_BUDGET"
 
 
 def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,6 +126,52 @@ def test_step_size_reads_the_context_marker_input_from_the_journal(tmp_path: Pat
     code, report = _step("--project", str(project), "--run", payloads[-1]["run_id"], "--stage", "context-marker")
     skill = (ROOT / "skills" / "context-marker" / "SKILL.md").stat().st_size
     assert code == 0 and report["files"] >= 2 and report["bytes"] >= 600 + len("Требование.\n".encode()) + skill
+    rows = (project / ".pilot-runs" / payloads[-1]["run_id"] / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()
+    assert report["recorded"] and [json.loads(row)["step"] for row in rows] == ["context-marker"]
+
+
+def _scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+    from tests.test_phase2_scan import _args, _project
+    from tools import run_pipeline
+
+    project, module = _project(tmp_path)
+    (module / "src" / "app.py").write_text("X = 1\n", encoding="utf-8")
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+    args = _args(project)
+    args.profile = "cases-only-v1"
+    assert run_pipeline.cmd_scan(args) == 0
+    return project, payloads[-1]["run_id"]
+
+
+def test_step_size_records_the_step_and_bytes_in_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project, run_id = _scanned(tmp_path, monkeypatch)
+    cases = project / "cases.json"
+    cases.write_bytes(b"c" * 2000)
+    code, fits = _step("--project", str(project), "--run", run_id, "--files", str(cases), "--step", "tc-reviewer:canonical", "--budget-bytes", "5000")
+    assert code == 0 and fits["fits"] and fits["recorded"]
+    code, over = _step("--project", str(project), "--run", run_id, "--files", str(cases), "--role", "tc-reviewer", "--step", "tc-reviewer:canonical")
+    assert code == 0 and over["warning"] is None
+    code, over = _step("--project", str(project), "--run", run_id, "--files", str(cases), "--step", "tc-to-autotest", "--budget-bytes", "1000")
+    assert code == 0 and over["warning"] == "STEP_OVER_BUDGET" and over["recorded"]
+    rows = [json.loads(line) for line in (project / ".pilot-runs" / run_id / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["step"] for row in rows] == ["tc-reviewer:canonical", "tc-reviewer:canonical", "tc-to-autotest"]
+    assert rows[-1]["bytes"] == 2000 and rows[-1]["budget_bytes"] == 1000 and rows[-1]["fits"] is False
+    assert rows[-1]["warning"] == "STEP_OVER_BUDGET" and rows[1]["role"] == "tc-reviewer" and rows[1]["role_bytes"] > 0
+    # the record keeps no project content: no file paths, only the step, the sizes and the code
+    assert all("cases.json" not in json.dumps(row) and "files" in row and isinstance(row["files"], int) for row in rows)
+
+
+def test_step_size_without_a_run_records_nothing_and_an_unknown_run_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project, run_id = _scanned(tmp_path, monkeypatch)
+    doc = project / "doc.md"
+    doc.write_bytes(b"d" * 10)
+    code, report = _step("--project", str(project), "--files", str(doc))
+    assert code == 0 and report["recorded"] is False and not (project / ".pilot-runs" / run_id / "step-sizes.jsonl").exists()
+    code, report = _step("--project", str(project), "--run", "0" * 32, "--files", str(doc))
+    assert code == 2 and report["status"] == "error"
+    code, report = _step("--project", str(project), "--run", "..", "--files", str(doc))
+    assert code == 2 and report["status"] == "error"
 
 
 def test_status_names_the_next_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

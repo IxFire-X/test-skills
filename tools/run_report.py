@@ -157,6 +157,36 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
         call.update(tokens_est=round(total * TOKENS_PER_BYTE), budget_bytes=budget, fits=total <= budget)
 
 
+_STEP_KEYS = ("step", "bytes", "input_bytes", "role_bytes", "role", "files", "tokens_est", "budget_bytes", "fits", "warning", "at")
+
+
+def step_sizes(root: Path) -> list[dict[str, Any]]:
+    """FaT-RV: the ``tools.step_size --run`` measurements in order; an unreadable line is skipped, not fatal."""
+    from tools.step_size import RECORD
+
+    try:
+        lines = (Path(root) / RECORD).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, Mapping) and isinstance(value.get("step"), str):
+            rows.append({key: value.get(key) for key in _STEP_KEYS})
+    return rows
+
+
+def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]]) -> list[str]:
+    """FaT-RV: ``STEP_OVER_BUDGET`` when a measured step or a journaled model call is over the step budget."""
+    from tools.step_size import OVER_BUDGET
+
+    over = any(call.get("by") == "model" and call.get("fits") is False for call in calls) or any(row.get("fits") is False for row in sizes)
+    return [OVER_BUDGET] if over else []
+
+
 # --- the report ---------------------------------------------------------------------------------
 
 def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
@@ -244,6 +274,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     calls = model_calls(events)
     for call in calls:
         _size(project, root, call, sizes)
+    measured = step_sizes(root)
 
     terminal: Mapping[str, Any] = {}
     if attempt and attempt["state"] == "TERMINAL":
@@ -288,7 +319,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "duration_sec": _seconds(events[0].get("observed_at"), events[-1].get("observed_at")) if events else None,
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
-        "model_calls": calls,
+        "model_calls": calls, "step_sizes": measured, "warnings": budget_warnings(calls, measured),
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -338,6 +369,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
           f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} |"
           for c in report["model_calls"]), "",
+        "## Предупреждения", "", *(f"- {code}: вход шага больше бюджета, прогон шёл дальше" for code in report["warnings"]),
+        *([] if report["warnings"] else ["- нет"]), "",
+        "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",
+        "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
+        *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
+          f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), "",
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
     if report.get("test_design"):

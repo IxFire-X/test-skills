@@ -128,7 +128,9 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 **Бюджет шага модели** (`.skillsrc` `limits.step_input_bytes`, по умолчанию 500 000 Б).
 `python -m tools.step_size --project <abs> --files <файлы> [--role <роль>]` или
 `--run <run_id> --stage context-marker` оценивает вход шага (байты и токены при 0,24 ток/Б) до
-вызова модели; код 3 — не влезает, с подсказкой сузить контекст.
+вызова модели. Не влезает — предупреждение `STEP_OVER_BUDGET` с советом сузить контекст, не стоп
+(код 0). С `--run` шаг (`--step`) и байты пишутся в `step-sizes.jsonl` прогона; `run_pipeline report`
+показывает их и предупреждение.
 
 **Разметка частями.** Если выбранный контекст разбит на несколько батчей (`.skillsrc`
 `limits.context_batch_bytes`, по умолчанию 256 КиБ), разметка идёт частями:
