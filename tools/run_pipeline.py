@@ -150,6 +150,34 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
     )} if unresolved else {})}
 
 
+_KEPT_DISPOSITIONS = frozenset({"RETAINED", "QUARANTINED", "PRESERVED_EXECUTION_UNKNOWN", "PRESERVED_CONTENT_CONFLICT",
+                                 "PRESERVED_CLEANUP_CONFLICT"})
+
+
+def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, str]:
+    """FaT-L: the project's style checks the selected-tests run skipped and how to format the files left in the project."""
+    from tools import execution_adapters as adapters
+    from tools import pilot_state as pilot
+    from tools.project_inventory import read_execution_baseline
+
+    try:
+        attempt = next(row for row in pilot.derive_state(run_root)["attempts"] if row.get("attempt_id") == attempt_id)
+        baseline = read_execution_baseline(Path(run_root) / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        project_root = Path(project).resolve()
+        module_root = project_root if attempt["module"] == "." else project_root.joinpath(*str(attempt["module"]).split("/"))
+        adapter_id = str(baseline["adapter_id"])
+        runtime = str(baseline[{adapters.PYTEST: "interpreter_path", adapters.SYSTEM_MAVEN: "executable_path"}.get(adapter_id, "wrapper_path")])
+        executable = runtime if adapter_id == adapters.SYSTEM_MAVEN else str(module_root / runtime)
+        try:
+            rows = pilot.read_attempt_receipt(run_root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]["files"]
+        except (KeyError, OSError, TypeError, ValueError):
+            rows = []
+        kept = tuple(str(row["path"]) for row in rows if row.get("disposition") in _KEPT_DISPOSITIONS)
+        return adapters.style_notes(adapter_id, executable, adapters.project_style_checks(project_root, module_root), kept)
+    except (KeyError, OSError, StopIteration, TypeError, ValueError):  # a hint never fails the step
+        return {}
+
+
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -1218,6 +1246,7 @@ def _execute(
         "status": "ok", "stage": "exec", "run_id": coordinates["manifest"]["run_id"],
         "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": result.get("verification"),
         "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
+        **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
     })
     return int(closed["exit_code"])
 
@@ -1287,6 +1316,7 @@ def cmd_exec(args: Any) -> int:
             "status": "ok", "stage": "exec", "run_id": coordinates["manifest"]["run_id"],
             "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": terminal.get("verification"),
             "accepted": terminal.get("accepted"), "executor": "local", "finalization": "complete",
+            **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return exit_code(terminal)
     execution_receipt_path = (
@@ -1365,6 +1395,7 @@ def cmd_exec(args: Any) -> int:
             "status": "ok", "stage": "exec", "run_id": coordinates["manifest"]["run_id"],
             "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": result.get("verification"),
             "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
+            **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return int(closed["exit_code"])
     try:
@@ -1699,6 +1730,7 @@ def cmd_finish(args: Any) -> int:
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
         **_quarantine_summary(root, attempt_id),
+        **_style_notes(project, root, attempt_id),
         **({"fix": "повтори scan с теми же --module, --docs и --profile, что у этого прогона, и добавь --accept-self-review"
                    " — только если человек согласен на ревью в той же сессии"}
            if result.get("reason_code") == "INDEPENDENCE_UNVERIFIED" else {}),

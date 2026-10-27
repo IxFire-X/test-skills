@@ -319,6 +319,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 После `finish`/`exec` с `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку
 `quarantine_unresolved` как есть. `@Disabled`/`xfail` в этом прогоне не снимай и тесты не чини.
 `scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
+Строки `style_checks_skipped` и `format_hint` из вывода `exec`/`finish` передай человеку как есть; файлы сам не форматируй.
 
 Если в `.skillsrc` задан `projection.zephyr.template`, после закрытия попытки (`exec` или `finish`) один раз
 запусти `python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`

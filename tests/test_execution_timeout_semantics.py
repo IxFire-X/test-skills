@@ -64,7 +64,7 @@ def test_pytest_class_method_nodeid_is_matched_without_java_style_path_rewrite()
 
 def test_java_zero_report_with_negative_exit_is_unknown(tmp_path, monkeypatch):
     from tests.test_project_native_pytest import _reviewed_inputs
-    from tools.execution_adapters import ExecutionRequest, MAVEN, request_digest
+    from tools.execution_adapters import ExecutionRequest, MAVEN, MAVEN_STYLE_SKIPS, request_digest
     from tools.pilot_state import claim_execution_start
     from tools.run_tests import ProcessOutcome, RunnerCompatibility, run_tests_v5
 
@@ -92,7 +92,7 @@ def test_java_zero_report_with_negative_exit_is_unknown(tmp_path, monkeypatch):
     request = ExecutionRequest(
         MAVEN,
         str(wrapper.resolve()),
-        (str(wrapper.resolve()), "-Pdefault", f"-Dtest={selector}", "test"),
+        (str(wrapper.resolve()), "-B", "-Pdefault", *MAVEN_STYLE_SKIPS, f"-Dtest={selector}", "test"),
         str(project.resolve()),
         (selector,),
         600,

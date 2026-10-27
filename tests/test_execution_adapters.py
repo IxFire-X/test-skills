@@ -87,7 +87,7 @@ def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tm
 
     assert request.selectors == ("pkg.SampleTest#works",)
     assert request.argv[-2:] == ("--tests", "pkg.SampleTest.works")
-    assert "--rerun-tasks" in request.argv
+    assert request.argv[1:3] == ("cleanTest", "test") and "--rerun-tasks" not in request.argv
     from tools.run_tests import _request_report_path
     assert _request_report_path(request) == tmp_path.resolve() / "build/test-results/test"
     from dataclasses import replace
@@ -179,7 +179,7 @@ def test_legacy_v3_entrypoint_is_process_free(tmp_path: Path, monkeypatch):
 
 
 def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path, monkeypatch):
-    from tools.execution_adapters import build_request
+    from tools.execution_adapters import MAVEN_STYLE_SKIPS, build_request
     from tools.run_tests import _request_is_attempt_local, _request_report_path
 
     executable = tmp_path / ("mvn.cmd" if os.name == "nt" else "mvn")
@@ -194,7 +194,7 @@ def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path
     }, [{"selector": "pkg.SampleTest#works"}])
 
     assert request.executable == str(executable.resolve())
-    assert request.argv == (str(executable.resolve()), "-Pdefault", "-Dtest=pkg.SampleTest#works", "test")
+    assert request.argv == (str(executable.resolve()), "-B", "-Pdefault", *MAVEN_STYLE_SKIPS, "-Dtest=pkg.SampleTest#works", "test")
     assert _request_is_attempt_local(request, tmp_path, module)
     assert _request_report_path(request) == module / "target/surefire-reports"
     from tools.run_tests import ProcessOutcome, _process_row, validate_process_evidence

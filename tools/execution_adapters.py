@@ -11,6 +11,7 @@ import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
@@ -22,6 +23,23 @@ GRADLE = "gradle-wrapper:selected-symbols-v1"
 ADAPTER_IDS = frozenset({PYTEST, MAVEN, SYSTEM_MAVEN, GRADLE})
 SAFE_ENVIRONMENT_LABELS = frozenset({"PROJECT_NATIVE_ENV"})
 _UNSAFE_TOKEN_CHARS = frozenset("|><;&$`\n\r")
+# FaT-L: the project's style, license-header and static-analysis checks never change how a selected test behaves, so the
+# selected-tests run skips this closed list (absent plugins ignore the property).  maven-enforcer is NOT here: it checks
+# the environment.  Each property is the plugin's own user property:
+MAVEN_STYLE_SKIPS = (
+    "-Dcheckstyle.skip=true",                  # maven-checkstyle-plugin 3.6.0 plugin.xml; covers nohttp-checkstyle
+    "-Dspring-javaformat.validate.skip=true",  # spring-javaformat-maven-plugin 0.0.47 plugin.xml (no spring-javaformat.skip)
+    "-Dspotless.check.skip=true",              # spotless SpotlessCheckMojo: @Parameter(property = "spotless.check.skip")
+    "-Drat.skip=true",                         # apache-rat-plugin check goal docs: User Property rat.skip
+    "-Dlicense.skip=true",                     # com.mycila license-maven-plugin AbstractLicenseMojo: property = "license.skip"
+    "-Dlicense.skipCheckLicense=true",         # org.codehaus.mojo license-maven-plugin check-file-header docs
+    "-Dlicense.skipUpdateLicense=true",        # org.codehaus.mojo license-maven-plugin update-file-header docs
+    "-Dformatter.skip=true",                   # net.revelc formatter-maven-plugin validate/format docs
+    "-Dimpsort.skip=true",                     # net.revelc impsort-maven-plugin check/sort docs
+    "-Dpmd.skip=true",                         # maven-pmd-plugin check goal docs
+    "-Dcpd.skip=true",                         # maven-pmd-plugin cpd-check goal docs
+    "-Dspotbugs.skip=true",                    # spotbugs-maven-plugin check goal docs
+)
 
 
 class AdapterRequestError(ValueError):
@@ -154,11 +172,110 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
     if adapter_id == PYTEST:
         return ("test-results/pytest.xml",), (executable, "-m", "pytest", "--junitxml", "test-results/pytest.xml", *selectors)
     elif adapter_id in {MAVEN, SYSTEM_MAVEN}:
-        return ("target/surefire-reports",), (executable, f"-P{profile}", f"-Dtest={','.join(selectors)}", "test")
+        return ("target/surefire-reports",), (executable, "-B", f"-P{profile}", *MAVEN_STYLE_SKIPS, f"-Dtest={','.join(selectors)}", "test")
     elif adapter_id == GRADLE:
+        # cleanTest reruns only the test task; --rerun-tasks rebuilt everything (FaT-L: 10 s against 34 s on Petclinic).
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)
-        return ("build/test-results/test",), (executable, "test", "--rerun-tasks", f"-Pprofile={profile}", *(part for selector in gradle_selectors for part in ("--tests", selector)))
+        return ("build/test-results/test",), (executable, "cleanTest", "test", f"-Pprofile={profile}", *(part for selector in gradle_selectors for part in ("--tests", selector)))
     raise AdapterRequestError("adapter is not in the closed pilot set")
+
+
+def probe_command_for(adapter_id: str, executable: str, profile: str) -> tuple[str, ...]:
+    """FaT-L: the closed offline validate-phase probe of ``ready`` — the flags of the selected-tests run, no tests."""
+    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        return (executable, "-B", "-o", "-q", f"-P{profile}", *MAVEN_STYLE_SKIPS, "validate")
+    raise AdapterRequestError("only Maven has a validate-phase probe")
+
+
+def probe_executable(module_root: Path, test: Mapping[str, Any]) -> str:
+    """The very runtime ``build_request`` would start, for the probe; NOT_RUNNABLE when it is unavailable."""
+    adapter_id = test.get("adapter_id")
+    runtime_key = "executable" if adapter_id == SYSTEM_MAVEN else "wrapper"
+    if adapter_id not in {MAVEN, SYSTEM_MAVEN}:
+        raise AdapterRequestError("only Maven has a validate-phase probe")
+    closed = {key: test.get(key) for key in ("adapter_id", "build_profile", "adapter_parameters", runtime_key)}
+    root = Path(module_root).resolve()
+    return str(_runtime(root, _test_config({"module_root": str(root), "test": closed}, str(adapter_id)), str(adapter_id)))
+
+
+# FaT-L: the project's own style checks, read statically from its build files — for hints only, never for the command.
+# name -> (Maven markers, Gradle markers, Maven format goal, Gradle format task, scans the whole project directory)
+_STYLE_CHECKS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str | None, str | None, bool], ...] = (
+    ("spring-javaformat", (r"<artifactId>\s*spring-javaformat-maven-plugin\s*</artifactId>",), (r"io\.spring\.javaformat",),
+     "spring-javaformat:apply", "format", False),
+    ("checkstyle", (r"<artifactId>\s*maven-checkstyle-plugin\s*</artifactId>",),
+     (r"""(?:id|apply\s+plugin:)\s*\(?\s*['"]checkstyle['"]""",), None, None, False),
+    ("nohttp", (r"<artifactId>\s*nohttp-checkstyle\s*</artifactId>",), (r"io\.spring\.nohttp",), None, None, True),
+    ("spotless", (r"<artifactId>\s*spotless-maven-plugin\s*</artifactId>",), (r"com\.diffplug\.spotless",), "spotless:apply", "spotlessApply", False),
+    ("formatter", (r"<artifactId>\s*formatter-maven-plugin\s*</artifactId>",), (), "formatter:format", None, False),
+    ("impsort", (r"<artifactId>\s*impsort-maven-plugin\s*</artifactId>",), (), "impsort:sort", None, False),
+    ("apache-rat", (r"<artifactId>\s*apache-rat-plugin\s*</artifactId>",), (), None, None, True),
+    ("license-mycila", (r"<groupId>\s*com\.mycila\s*</groupId>\s*<artifactId>\s*license-maven-plugin",), (), "license:format", None, True),
+    ("license-codehaus", (r"<groupId>\s*org\.codehaus\.mojo\s*</groupId>\s*<artifactId>\s*license-maven-plugin",), (),
+     "license:update-file-header", None, False),
+    ("pmd", (r"<artifactId>\s*maven-pmd-plugin\s*</artifactId>",), (), None, None, False),
+    ("spotbugs", (r"<artifactId>\s*spotbugs-maven-plugin\s*</artifactId>",), (), None, None, False),
+)
+_XML_COMMENTS = re.compile(r"<!--.*?-->", re.S)
+_GRADLE_COMMENTS = re.compile(r"(?<![:\"'])//[^\n]*|/\*.*?\*/", re.S)
+
+
+def _build_files(project_root: Path, module_root: Path) -> tuple[list[str], list[str]]:
+    project, current = Path(project_root).resolve(), Path(module_root).resolve()
+    maven: list[str] = []
+    gradle: list[str] = []
+    while True:
+        for name, bucket in (("pom.xml", maven), ("build.gradle", gradle), ("build.gradle.kts", gradle),
+                             ("settings.gradle", gradle), ("settings.gradle.kts", gradle)):
+            path = current / name
+            if path.is_file():
+                comments = _XML_COMMENTS if bucket is maven else _GRADLE_COMMENTS
+                try:
+                    bucket.append(comments.sub(" ", path.read_text(encoding="utf-8", errors="replace")))
+                except OSError:
+                    pass
+        if current == project or project not in current.parents:
+            return maven, gradle
+        current = current.parent
+
+
+def project_style_checks(project_root: Path, module_root: Path) -> tuple[str, ...]:
+    """Names of the known style checks the module's build files (module up to the project root) declare."""
+    maven, gradle = _build_files(project_root, module_root)
+    return tuple(name for name, maven_markers, gradle_markers, *_rest in _STYLE_CHECKS
+                 if any(re.search(marker, text) for marker in maven_markers for text in maven)
+                 or any(re.search(marker, text) for marker in gradle_markers for text in gradle))
+
+
+def whole_project_checks(checks: Sequence[str]) -> tuple[str, ...]:
+    """The found checks that read the whole project directory, the package folder and .pilot-runs included."""
+    return tuple(row[0] for row in _STYLE_CHECKS if row[5] and row[0] in checks)
+
+
+def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_files: Sequence[str]) -> dict[str, str]:
+    """FaT-L: what the selected-tests run skipped and how to format the generated files left in the project."""
+    notes: dict[str, str] = {}
+    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
+        found = ", ".join(checks) if checks else (
+            "в сборке проекта не найдены; флаги пропуска переданы всегда: "
+            + ", ".join(flag.removeprefix("-D").removesuffix("=true") for flag in MAVEN_STYLE_SKIPS))
+        notes["style_checks_skipped"] = f"проверки стиля проекта при запуске тестов пакета пропущены: {found}"
+    if adapter_id not in {MAVEN, SYSTEM_MAVEN, GRADLE} or not checks or not kept_files:
+        return notes
+    rows = [row for row in _STYLE_CHECKS if row[0] in checks]
+    if adapter_id == GRADLE:
+        commands = [f'"{executable}" {row[4]}' for row in rows if row[4]]
+        check = None
+    else:
+        commands = [f'"{executable}" {row[3]}' for row in rows if row[3]]
+        check = f'"{executable}" -B validate'
+    if not commands and check is None:
+        return notes
+    action = "; ".join(filter(None, [("отформатируйте: " + "; ".join(commands)) if commands else None,
+                                     f"затем проверьте: {check}" if check else None]))
+    notes["format_hint"] = (f"оставленные в проекте файлы ({', '.join(kept_files)}) проект проверяет на стиль "
+                            f"({', '.join(checks)}): {action}")
+    return notes
 
 
 def classify_prestart(module: Mapping[str, Any]) -> Literal["READY", "NOT_RUNNABLE"]:

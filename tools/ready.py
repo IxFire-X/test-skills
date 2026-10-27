@@ -1,10 +1,11 @@
 """Readiness of a project for a first run: every check at once, each problem with the command that fixes it (FaT-R).
 
-``python -m tools.ready --project <abs> --docs <path> [--docs …] [--profile …] [--module <ID>]`` only reads.  It never
+``python -m tools.ready --project <abs> --docs <path> [--docs …] [--profile …] [--module <ID>]`` reads, and starts one
+project process: the offline validate phase of a Maven module with the flags of the selected-tests run (FaT-L).  It never
 stops at the first problem: Python and the package dependencies, the pack itself (doctor), git, the requirement
 documents, ``.skillsrc``, the module, the scan with its exclusions and — as a separate block that cases do not need — the
-build (wrapper, system ``mvn``, JDK, the module interpreter).  The JSON report goes to stdout, a table to stderr; the exit
-code is 0 when cases can start.
+build (wrapper, system ``mvn``, JDK, the module interpreter, the project's style checks, the validate probe).  The JSON
+report goes to stdout, a table to stderr; the exit code is 0 when cases can start.
 
 Only the standard library at module level: ready must run where ``jsonschema`` or ``yaml`` is missing, so every part of
 the package is imported inside the check that needs it.
@@ -312,6 +313,91 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     return {"ready": False, "reason": "; ".join(reason for reason, _fix in problems), "fix": "; ".join(fix for _reason, fix in problems)}
 
 
+PROBE_TIMEOUT = 120
+_EXCLUSIONS = {
+    "nohttp": ("в maven-checkstyle-plugin, в <configuration> выполнения nohttp, допишите через запятую в <excludes>: "
+               "**/{pack}/**,**/.pilot-runs/**  (например <excludes>…,**/{pack}/**,**/.pilot-runs/**</excludes>); "
+               "для Gradle: nohttp {{ source.exclude(\"{pack}/**\", \".pilot-runs/**\") }}"),
+    "apache-rat": "в apache-rat-plugin, в <configuration>: <excludes><exclude>{pack}/**</exclude><exclude>.pilot-runs/**</exclude></excludes>"
+                  " (с RAT 0.17 параметр называется <inputExcludes>)",
+    "license-mycila": "в com.mycila license-maven-plugin, в <licenseSet> (до 4.x — в <configuration>): "
+                      "<excludes><exclude>{pack}/**</exclude><exclude>.pilot-runs/**</exclude></excludes>",
+}
+
+
+def _pack_folder(project: Path) -> str:
+    try:
+        return PACK.resolve().relative_to(Path(project).resolve()).parts[0]
+    except (ValueError, IndexError):
+        return ".tools"
+
+
+def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """FaT-L: the project's style checks (read from its build files) and what its own build needs to skip the package."""
+    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, project_style_checks, style_notes, whole_project_checks
+
+    root = Path(project).resolve()
+    module_root = (root / str(module.get("root") or ".")).resolve()
+    checks = project_style_checks(root, module_root)
+    test = module.get("test") if isinstance(module.get("test"), Mapping) else {}
+    adapter = str(test.get("adapter_id"))
+    if not checks or adapter not in {MAVEN, SYSTEM_MAVEN, GRADLE}:
+        return []
+    executable = str(test.get("executable") or "mvn") if adapter == SYSTEM_MAVEN else str(module_root / str(test.get("wrapper") or ""))
+    hint = style_notes(adapter, executable, checks, ("<сгенерированные файлы>",)).get("format_hint")
+    skipped = ("при запуске выбранных тестов пакет их пропускает флагами пропуска" if adapter != GRADLE
+               else "задача test Gradle от них не зависит")
+    rows = [_row("execution:style", EXECUTION, "WARN", f"проект проверяет стиль: {', '.join(checks)}; {skipped}", hint)]
+    whole = whole_project_checks(checks)
+    if whole:
+        pack = _pack_folder(root)
+        rows.append(_row(
+            "execution:project-checks", EXECUTION, "WARN",
+            f"{', '.join(whole)} проверяет всю папку проекта, включая {pack}/ (окружение пакета, в нём есть ссылки http) "
+            "и .pilot-runs/ пакета: ваша собственная сборка проекта на них упадёт, запуск тестов пакета — нет",
+            "; ".join(_EXCLUSIONS[name].format(pack=pack) for name in whole)))
+    return rows
+
+
+def _probe_runner(argv: Sequence[str], cwd: Path, *, timeout: int) -> Any:
+    from tools.run_tests import run_subprocess
+
+    return run_subprocess(list(argv), Path(cwd), timeout=timeout)
+
+
+def build_probe(project: Path, module: Mapping[str, Any], runner: Any = None) -> dict[str, Any] | None:
+    """FaT-L: the offline validate phase with the exec flags — whatever fails here fails the selected-tests run too."""
+    from tools.execution_adapters import AdapterRequestError, MAVEN, SYSTEM_MAVEN, probe_command_for, probe_executable
+
+    test = module.get("test") if isinstance(module.get("test"), Mapping) else None
+    if test is None or test.get("adapter_id") not in {MAVEN, SYSTEM_MAVEN}:
+        return None
+    module_root = (Path(project).resolve() / str(module.get("root") or ".")).resolve()
+    try:
+        argv = probe_command_for(str(test["adapter_id"]), probe_executable(module_root, test), str(test.get("build_profile")))
+    except (AdapterRequestError, KeyError, OSError):
+        return None
+    started = time.monotonic()
+    outcome = (runner or _probe_runner)(argv, module_root, timeout=PROBE_TIMEOUT)
+    seconds = round(time.monotonic() - started, 1)
+    command = " ".join(f'"{part}"' if " " in part else part for part in argv)
+    if getattr(outcome, "cause", None) == "TIMEOUT":
+        return _row("execution:build-probe", EXECUTION, "WARN", f"фаза validate офлайн не уложилась в {PROBE_TIMEOUT} с — не проверено",
+                    f"запустите вручную в {module_root}: {command}")
+    if outcome.returncode == 0:
+        return _row("execution:build-probe", EXECUTION, "OK", f"фаза validate проекта офлайн прошла за {seconds} с (флаги exec)")
+    output = f"{outcome.stdout}\n{outcome.stderr}"
+    errors = [line.strip() for line in output.splitlines() if line.strip().startswith("[ERROR]") and "-> [Help" not in line][:3]
+    if "offline mode" in output:
+        return _row("execution:build-probe", EXECUTION, "WARN",
+                    "фаза validate офлайн не проверена: плагинов или зависимостей проекта нет в локальном репозитории Maven; "
+                    "первый exec пойдёт за ними в сеть — нужна сеть или зеркало компании",
+                    "проверить заранее с сетью: " + command.replace(" -o ", " "))
+    return _row("execution:build-probe", EXECUTION, "STOP",
+                "фаза validate проекта падает с флагами exec — выбранные тесты не запустятся: " + (" | ".join(errors) or f"код {outcome.returncode}"),
+                f"исправьте сборку проекта, пока в {module_root} не пройдёт: {command}")
+
+
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None) -> str:
     """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim."""
     parts = [f'python -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
@@ -354,6 +440,10 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 rows.append(_row("execution:build", EXECUTION, "OK" if facts["ready"] else "WARN",
                                  "сборка и тесты модуля готовы" if facts["ready"] else
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
+                rows.extend(style_rows(project, selected))
+                probe = build_probe(project, selected) if facts["ready"] else None
+                if probe is not None:
+                    rows.append(probe)
                 # FaT-S: the baseline refusals the scan would meet, the same code; cases are not blocked by them.
                 from tools.run_pipeline import _baseline_blockers
 
