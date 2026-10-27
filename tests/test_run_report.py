@@ -144,6 +144,24 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
     assert "STEP_OVER_BUDGET" in markdown.split("## Предупреждения", 1)[1].split("##", 1)[0]
 
 
+def test_a_data_mismatch_is_in_the_report_by_id_and_count_without_the_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import run_report
+    from tools.review_view import DATA_MISMATCH
+
+    run_root = _finished_run(tmp_path)
+    document = json.loads((Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json").read_text(encoding="utf-8"))
+    step = next(step for step in document["test_cases"][0]["steps"] if any(item["source"]["kind"] == "literal" for item in step["inputs"]))
+    next(item for item in step["inputs"] if item["source"]["kind"] == "literal")["source"]["value"] = "Zebra-Street-77"
+    monkeypatch.setattr(run_report, "case_document", lambda root, attempt_id: document)
+    run_report.write_report(tmp_path, run_root.name)
+    report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
+    markdown = (run_root / "report.md").read_text(encoding="utf-8")
+    assert DATA_MISMATCH in report["warnings"]
+    assert report["data_mismatch"] == [{"case_id": document["test_cases"][0]["case_id"], "step_id": step["step_id"], "count": 1}]
+    assert f"{document['test_cases'][0]['case_id']} {step['step_id']}: 1" in markdown
+    assert b"Zebra-Street-77" not in (run_root / "report.json").read_bytes() + markdown.encode("utf-8")
+
+
 def test_a_journaled_model_call_over_the_budget_is_a_warning_too() -> None:
     from tools.run_report import budget_warnings
 

@@ -13,7 +13,8 @@
       "additionalProperties": false,
       "properties": {
         "validation_report": {"$ref": "#/$defs/review"},
-        "successor_document": {"$ref": "canonical-test-document.schema.json"}
+        "successor_document": {"$ref": "canonical-test-document.schema.json"},
+        "successor_edits": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/successor_edit"}}
       }
     },
     "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
@@ -21,18 +22,31 @@
   "allOf": [
     {
       "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ПРИНЯТО"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
-      "then": {"properties": {"artifacts": {"not": {"required": ["successor_document"]}, "properties": {"validation_report": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
+      "then": {"properties": {"artifacts": {"not": {"anyOf": [{"required": ["successor_document"]}, {"required": ["successor_edits"]}]}, "properties": {"validation_report": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
     },
     {
       "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
-      "then": {"properties": {"artifacts": {"required": ["successor_document"], "properties": {"validation_report": {"properties": {"corrections": {"minItems": 1}, "findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}}}}}}}}
+      "then": {"properties": {"artifacts": {"oneOf": [{"required": ["successor_document"]}, {"required": ["successor_edits"]}], "properties": {"validation_report": {"properties": {"corrections": {"minItems": 1}, "findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}}}}}}}}
     },
     {
       "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ТРЕБУЕТ ДОРАБОТКИ"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
-      "then": {"properties": {"artifacts": {"not": {"required": ["successor_document"]}, "properties": {"validation_report": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}, "corrections": {"maxItems": 0}}}}}}}
+      "then": {"properties": {"artifacts": {"not": {"anyOf": [{"required": ["successor_document"]}, {"required": ["successor_edits"]}]}, "properties": {"validation_report": {"properties": {"findings": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}, "corrections": {"maxItems": 0}}}}}}}
     }
   ],
   "$defs": {
+    "successor_edit": {
+      "type": "object", "required": ["correction_id", "case_id", "field", "old", "new"], "additionalProperties": false,
+      "properties": {
+        "correction_id": {"type": "string", "pattern": "^FIX-[A-Za-z0-9_.:-]+$"},
+        "case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"},
+        "field": {"enum": ["title", "objective", "precondition", "action", "test_data", "expectation"]},
+        "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"},
+        "expectation_id": {"type": "string", "pattern": "^EXP-[A-Za-z0-9_.:-]+$"},
+        "index": {"type": "integer", "minimum": 0},
+        "old": {"type": "string"},
+        "new": {"type": "string", "minLength": 1}
+      }
+    },
     "finding": {
       "type": "object", "required": ["severity", "code", "message", "evidence", "related_ids"], "additionalProperties": false,
       "properties": {

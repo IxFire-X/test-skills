@@ -32,6 +32,7 @@ def _reviewer_protocol_inputs(
     bind_boundary: bool = True,
     bundle_root: Path | None = None,
     fresh_context: bool = True,
+    edits: list | None = None,
 ):
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import (
@@ -142,6 +143,15 @@ def _reviewer_protocol_inputs(
         "reviewed_case_ids": [case["case_id"] for case in document["test_cases"]], "findings": [], "corrections": [],
     }
     review = {"schema_version": "5.0.0", "stage": "tc-reviewer", "artifacts": {"validation_report": report}, "warnings": []}
+    if edits is not None:  # FaT-CV: AUTO_FIX as exact edits; the effective reference comes from code, not from the model
+        from tools.review_edits import apply_edits
+
+        successor, _rows = apply_edits(document, edits)
+        report.update(verdict="AUTO_FIX_APPLIED", effective={
+            "document_id": successor["document_id"], "revision": successor["revision"], "document_sha256": document_sha256(successor)},
+            corrections=[{"id": "FIX-cv", "correction_kind": "MECHANICAL", "related_ids": [edits[0]["case_id"]],
+                          "description": "Уточнить текст.", "evidence": ["CREQ"]}])
+        review["artifacts"]["successor_edits"] = edits
     session = {
         "schema_version": "1.0.0", "session_id": "phase5-effective", "boundary_digest": boundary_digest,
         "package_binding": package,

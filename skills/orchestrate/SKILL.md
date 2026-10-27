@@ -240,8 +240,14 @@ boundary.package_digest]` из прочитанного `reviewer-session-bounda
 Successful session содержит ровно один verdict; explicit terminal pre-verdict abort,
 включая `REVIEW_CONTEXT_LIMIT`, содержит ноль.
 
+Ревьюер читает кандидата в компактном виде, не полный JSON (FaT-CV):
+`python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет
+`review-views/<sha>.md` (одинаковый кандидат — одинаковые байты); размер шага —
+`step_size --run <run_id> --files <вид> --role tc-reviewer --step tc-reviewer:canonical`.
+
 `ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает только один complete
-successor revision 2 и тот же authoritative verdict. Любая смысловая/частичная/третья
+successor revision 2 и тот же authoritative verdict; ревьюер отдаёт его как `successor_edits`
+(точные правки человеческих полей), код строит revision 2 из кандидата сам. Любая смысловая/частичная/третья
 correction — `REWORK/PARTIAL`. Без host isolation evidence записывай
 `independence_unverified` и не принимай branch.
 

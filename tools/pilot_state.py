@@ -2882,6 +2882,15 @@ def _validate_factual_receipt(
             reviewer_output = reviewer_publication.get("artifact") if isinstance(reviewer_publication, Mapping) else None
             report = reviewer_output.get("artifacts", {}).get("validation_report") if isinstance(reviewer_output, Mapping) else None
             successor = reviewer_output.get("artifacts", {}).get("successor_document") if isinstance(reviewer_output, Mapping) else None
+            edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
+            if edits is not None:
+                # FaT-CV: the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
+                from tools.review_edits import edits_rebuild
+
+                successor = document if (
+                    isinstance(document, Mapping) and isinstance(package_binding, Mapping)
+                    and edits_rebuild(document, edits, str(package_binding.get("candidate_digest")))
+                ) else None
             verdict_event = next(
                 (event for event in ledger.get("events", []) if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"),
                 None,

@@ -33,16 +33,17 @@ requires generated-delta, execution, and disposition evidence.
 | Verdict | Required output |
 |---|---|
 | `ПРИНЯТО` | candidate is selected; no successor |
-| `AUTO_FIX_APPLIED` | one complete successor document, incremented lineage, preserved identity graph |
+| `AUTO_FIX_APPLIED` | exact `successor_edits` of human fields that code applies to the candidate (or, for compatibility, one complete successor document); incremented lineage, preserved identity graph |
 | `ТРЕБУЕТ ДОРАБОТКИ` | blocking findings; no successor |
 
 `reviewed_case_ids` lists all candidate cases exactly once in physical order. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
 
 Review every human Action/Test Data/Expected Result triple against the mandatory
 [human scenario rules](../../tc-generator/references/case-generation-contract.md#human-scenario-rules),
-which are the shared format authority for generator and reviewer. Verify machine
-operation/input/output/assertion ownership, previous-step data flow and manual/blocker
-branches. A violation needs a precise location and a concrete ambiguity, semantic error
+which are the shared format authority for generator and reviewer. The canonical validator
+verifies machine operation/input/output/assertion ownership, previous-step data flow and
+manual/blocker branches; the compact view shows each step's checks in one line, so judge
+whether they assert the expected result. A violation needs a precise location and a concrete ambiguity, semantic error
 or broken format rule; a preference for different Russian wording is not rework.
 Check that testing-work instructions remain in linked canonical requirements rather than
 human case fields, while necessary setup and actual product constraints remain testable.

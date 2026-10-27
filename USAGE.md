@@ -132,6 +132,14 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 (код 0). С `--run` шаг (`--step`) и байты пишутся в `step-sizes.jsonl` прогона; `run_pipeline report`
 показывает их и предупреждение.
 
+**Вид для ревью.** Ревьюер читает не полный канон, а компактный вид:
+`python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет
+`review-views/<sha>.md` — требования, кейсы, шаги, данные, ожидания и проверки одной строкой
+(ночной канон 52 кейса: 733 КБ → 240 КБ). Машинную часть проверяет код; `CV_DATA_MISMATCH` —
+подсказка: значения входов шага не названы в его действии и данных. Исправление ревьюер отдаёт
+списком точных правок `successor_edits`; `python -m tools.review_edits --candidate <r1.json>
+--edits <файл>` проверяет их и печатает ссылку `effective` для отчёта.
+
 **Разметка частями.** Если выбранный контекст разбит на несколько батчей (`.skillsrc`
 `limits.context_batch_bytes`, по умолчанию 256 КиБ), разметка идёт частями:
 `context-marker:requirements` по документам, по вызову на батч и слияние кодом в

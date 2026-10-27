@@ -187,6 +187,20 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
+_WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
+                 "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)"}
+
+
+def data_mismatch(document: Any) -> list[dict[str, Any]]:
+    """FaT-CV: the steps with ``CV_DATA_MISMATCH`` by ID and count only — the values are case data and stay out."""
+    from tools.review_view import data_mismatches
+
+    try:
+        return [{key: hint[key] for key in ("case_id", "step_id", "count")} for hint in data_mismatches(document)]
+    except (KeyError, TypeError, AttributeError):
+        return []
+
+
 # --- the report ---------------------------------------------------------------------------------
 
 def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
@@ -344,6 +358,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     if isinstance(document, Mapping) and isinstance(document.get("test_cases"), list):
         cases = len(document["test_cases"])
     automation = automation_artifact(root, events)
+    mismatched = data_mismatch(document) if cases is not None else []
 
     if terminal.get("review_independence") == "SELF":
         review = "ревью в той же сессии (SELF), принято по согласию человека"
@@ -359,7 +374,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "duration_sec": _seconds(events[0].get("observed_at"), events[-1].get("observed_at")) if events else None,
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
-        "model_calls": calls, "step_sizes": measured, "warnings": budget_warnings(calls, measured),
+        "model_calls": calls, "step_sizes": measured,
+        "warnings": budget_warnings(calls, measured) + (["CV_DATA_MISMATCH"] if mismatched else []), "data_mismatch": mismatched,
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -411,7 +427,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
           f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} |"
           for c in report["model_calls"]), "",
-        "## Предупреждения", "", *(f"- {code}: вход шага больше бюджета, прогон шёл дальше" for code in report["warnings"]),
+        "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
+        *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
         *([] if report["warnings"] else ["- нет"]), "",
         "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",
         "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",

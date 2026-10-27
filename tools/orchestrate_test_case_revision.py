@@ -21,6 +21,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
+from tools.review_edits import reviewer_successor
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
 
@@ -482,7 +483,10 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     if rows:
         raise OrchestrationError("ORCHESTRATION_INPUT", rows, candidate_receipt) from None
     report = review_value["artifacts"]["validation_report"]
-    successor = review_value["artifacts"].get("successor_document")
+    try:
+        successor = reviewer_successor(candidate_value, review_value["artifacts"])  # FaT-CV: a document or exact edits
+    except SelectionError as error:
+        raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
     verdict = report["verdict"]
     facts = validate_reviewer_session(
         reviewer_session, package_binding, review_value,
@@ -587,7 +591,10 @@ def finalize_orchestration(candidate_document: Mapping[str, Any], tc_review_arti
     if review_rows:
         raise OrchestrationError("ORCHESTRATION_INPUT", _safe(review_rows, "ORCHESTRATION_TC_REVIEW"))
     report = tc_review["artifacts"]["validation_report"]
-    successor = tc_review["artifacts"].get("successor_document")
+    try:
+        successor = reviewer_successor(candidate, tc_review["artifacts"])
+    except SelectionError as error:
+        raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_TC_REVIEW")) from None
     decision_rows = validate_review_decision(candidate, report, successor)
     if decision_rows:
         raise OrchestrationError("ORCHESTRATION_INPUT", _safe(decision_rows, "ORCHESTRATION_TC_REVIEW"))

@@ -74,7 +74,7 @@ Inventory учитывает файлы выбранного модуля, paren
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
    candidate digest получает `REVIEW_REQUESTED` до reviewer `MODEL_REQUESTED`.
-8. Выбери candidate или единственный complete successor. Передай downstream только
+8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
 9. Для `cases-only-v1` зафиксируй materialization/execution/dispositions как
    `NOT_APPLICABLE` и перейди к trace/finalization.
