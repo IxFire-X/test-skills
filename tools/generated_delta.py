@@ -22,6 +22,7 @@ from tools.automation_validation import (
     validate_automation_revision_chain,
 )
 from tools.canonical_document import validate_canonical_document
+from tools.pilot_state import closure_cached as _closure_cached
 
 
 class GeneratedDeltaError(ValueError):
@@ -263,6 +264,7 @@ def _read_durable_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any
     return dict(durable)
 
 
+@_closure_cached  # FaT-9b
 def materialize_delta(
     project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
     canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,

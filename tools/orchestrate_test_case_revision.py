@@ -22,6 +22,7 @@ from tools.canonical_document import CanonicalDocumentError, canonical_bytes, do
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
 from tools.schema_validation import StrictJsonError, classify_version, load_json_strict, schema_diagnostics
+from tools.pilot_state import closure_cached as _closure_cached
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -261,6 +262,7 @@ def reviewer_package_binding(
     return binding
 
 
+@_closure_cached  # FaT-9b
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
     """Reserve the only canonical reviewer session for an active attempt before invocation."""
     from tools.pilot_state import append_event, publish_attempt_receipt, read_attempt_receipt
@@ -427,6 +429,7 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     return {"independence": "verified" if verified else "independence_unverified", "acceptance_eligible": admitted and verdict_count == 1, "verdict_count": verdict_count, "reviewer_session_digest": ledger_digest}
 
 
+@_closure_cached  # FaT-9b
 def publish_unreviewed_candidate(
     candidate: Mapping[str, Any],
     output_dir: str | os.PathLike[str],
@@ -451,6 +454,7 @@ def publish_unreviewed_candidate(
     return _receipt_copy(receipt)
 
 
+@_closure_cached  # FaT-9b
 def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receipt, package_binding: Mapping[str, Any], reviewer_session: Mapping[str, Any], review_artifact: Mapping[str, Any] | None, output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, *, run_root: Path, attempt_id: str, reviewer_evidence_receipts: Sequence[Mapping[str, Any]] = (), publisher=publish_bundle, verifier=verify_bundle) -> OrchestrationResult:
     """Select the published r1 and publish reviewer-produced r2 only when needed."""
     _validate_profile(csv_profile)

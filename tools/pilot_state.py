@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import copy
+import functools
 import hashlib
 import json
 import os
@@ -554,6 +555,66 @@ def _validate_process_stopped_bindings(
 
 
 def _events(project: Path, root: Path) -> list[dict[str, Any]]:
+    """The checked event journal; inside closure_cache() only the lines after the checked prefix are checked (FaT-9b)."""
+    cache = _CLOSURE_CACHE.get()
+    pending = root / "pending-events"
+    if cache is None or pending.is_dir() and any(pending.glob("*.json")):
+        return _events_full(project, root)  # a pending marker is checked and recovered by the full path
+    try:
+        journal_bytes = read_confined_bytes(project, root, root / "events.jsonl")
+    except OutputConfinementError:
+        journal_bytes = None
+    key = ("journal", str(root))
+    entry = cache.get(key)
+    if journal_bytes is None or not journal_bytes.endswith(b"\n") or entry is None or not journal_bytes.startswith(entry[0]):
+        events = _events_full(project, root)
+        if journal_bytes is not None and len(events) == journal_bytes.count(b"\n"):
+            cache[key] = (journal_bytes, copy.deepcopy(events))
+        return events
+    prefix, known = entry
+    event_dir = root / "events"
+    if not event_dir.is_dir() or _is_reparse(event_dir):
+        raise ValueError("invalid event journal")
+    total = journal_bytes.count(b"\n")
+    if sorted(event_dir.glob("*.json")) != [event_dir / f"{seq:010d}.json" for seq in range(1, total + 1)]:
+        raise ValueError("invalid event journal")
+    manifest, _receipt = _run_boundary(project, root)
+    # Only a journal checked by its prefix needs the full check on leaving the block.
+    cache.setdefault("journal_roots", {})[str(root)] = (project, root)
+    result = copy.deepcopy(known)
+    previous = result[-1]["digest"] if result else None
+    for seq, line in enumerate(journal_bytes[len(prefix):].splitlines(keepends=True), len(result) + 1):
+        result.append(_checked_event_line(project, root, manifest, seq, line, previous))
+        previous = result[-1]["digest"]
+    if not result or result[0].get("event_type") != "RUN_CREATED" or sum(event["event_type"] == "RUN_CREATED" for event in result) != 1:
+        raise ValueError("invalid event journal")
+    _validate_event_transitions(result)
+    _validate_process_stopped_bindings(project, root, result)
+    cache[key] = (journal_bytes, copy.deepcopy(result))
+    return result
+
+
+def _checked_event_line(project: Path, root: Path, manifest: Mapping[str, Any], seq: int, line: bytes, previous: str | None) -> dict[str, Any]:
+    """One journal line against its copy in events/, its schema, seal, seq, run and chain link (FaT-9b, as in _events_full)."""
+    event_bytes = read_confined_bytes(project, root, root / "events" / f"{seq:010d}.json")
+    if event_bytes != line:
+        raise ValueError("invalid event journal")
+    event = _parse_json_bytes(line, "event journal")
+    _check_sealed(event, "event")
+    _validate_schema("event.schema.json", event)
+    if event.get("schema_version") != "1.0.0" or event.get("seq") != seq or event.get("run_id") != manifest["run_id"] or event.get("prev_digest") != previous:
+        raise ValueError("invalid event journal")
+    stamp = event.get("observed_at")
+    if not isinstance(stamp, str) or not stamp.endswith("Z"):
+        raise ValueError("invalid event journal")
+    try:
+        datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("invalid event journal") from error
+    return event
+
+
+def _events_full(project: Path, root: Path) -> list[dict[str, Any]]:
     journal = root / "events.jsonl"
     try:
         journal_bytes = read_confined_bytes(project, root, journal)
@@ -829,11 +890,28 @@ def closure_cache():
     if _CLOSURE_CACHE.get() is not None:
         yield
         return
-    token = _CLOSURE_CACHE.set({})
+    cache: dict[Any, Any] = {}
+    token = _CLOSURE_CACHE.set(cache)
     try:
         yield
+        # FaT-9b: one full check of every journal the block read, so a copy changed inside the block is still caught.
+        for project, root in list(cache.get("journal_roots", {}).values()):
+            if (root / "events.jsonl").exists():
+                _events_full(project, root)
     finally:
         _CLOSURE_CACHE.reset(token)
+
+
+def closure_cached(function):
+    """Run a public entry point inside one closure_cache() (FaT-9b); nested entry points reuse the outer one."""
+
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with closure_cache():
+            return function(*args, **kwargs)
+
+    wrapper.__closure_cached__ = True
+    return wrapper
 
 
 def derive_state(run_root: Path) -> Mapping[str, Any]:
@@ -853,6 +931,8 @@ def derive_state(run_root: Path) -> Mapping[str, Any]:
         cache[key] = copy.deepcopy(_derive_state(run_root))
         return copy.deepcopy(cache[key])
     state = copy.deepcopy(cache[key])
+    # A reused state did not reread the event copies, so the journal gets the full check on leaving the block.
+    cache.setdefault("journal_roots", {})[str(root)] = (project, root)
     # The attempt records name a module directory of the project; that check looks at the tree, so it runs again.
     for attempt in state["attempts"]:
         module = _module(project, attempt.get("module"))
@@ -1157,6 +1237,7 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
     return event
 
 
+@closure_cached  # FaT-9b
 def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str | None = None, batch_id: str | None = None, artifact_digest: str | None = None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> Mapping[str, Any]:
     if event_type == "MODEL_REQUESTED":
         raise ValueError("MODEL_REQUESTED requires publish_model_request")
@@ -1704,6 +1785,7 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
         raise ValueError("generator fragment must match its request and stored context receipt")
 
 
+@closure_cached  # FaT-9b
 def publish_model_request(
     run_root: Path,
     attempt_id: str,
@@ -1901,6 +1983,7 @@ def _model_stage_artifact_target(root: Path, attempt_id: str, content_digest: st
     )
 
 
+@closure_cached  # FaT-9b
 def publish_model_stage_artifact(
     run_root: Path,
     attempt_id: str,
@@ -2057,6 +2140,7 @@ def read_model_stage_artifact(
     )
 
 
+@closure_cached  # FaT-9b
 def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back one inventory-owned exact C-lite byte-set receipt."""
     from tools.project_inventory import ContextSelectionError, freeze_context_receipt, validate_context_receipt_binding
@@ -3741,6 +3825,7 @@ def _read_effective_canonical_with_state(
     return readback["record"]
 
 
+@closure_cached  # FaT-9b
 def read_effective_canonical(
     run_root: Path,
     attempt_id: str,
@@ -3803,6 +3888,7 @@ def recover_execution_receipt_events(run_root: Path, attempt_id: str) -> Mapping
     return _recover_attempt_receipt_events(run_root, attempt_id, "execution-receipt")
 
 
+@closure_cached  # FaT-9b
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back the controller-owned isolation boundary for one V5 revision."""
     revision = facts.get("automation_revision")

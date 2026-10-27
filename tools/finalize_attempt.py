@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 
 from tools.generated_delta import GeneratedDeltaError, apply_dispositions, inspect_attempt_delta, resolve_disposition_policy
 from tools import pilot_state
+from tools.pilot_state import closure_cached as _closure_cached
 
 
 class FinalizationError(ValueError):
@@ -685,6 +686,7 @@ def _durable_branch(
     return branch, unknown_evidence
 
 
+@_closure_cached  # FaT-9b
 def finalize_attempt(
     branch: Mapping[str, Any], delta: Mapping[str, Any] | None, *, project: Path, verification: str,
     facts: Mapping[str, Any], publish: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None,

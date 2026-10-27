@@ -12,6 +12,7 @@ from typing import Any
 
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import loads_json_strict, schema_diagnostics
+from tools.pilot_state import closure_cached as _closure_cached
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -279,6 +280,7 @@ def _case_fingerprint(case: dict[str, Any]) -> str:
     return _digest(without_identity(case))
 
 
+@_closure_cached  # FaT-9b
 def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Assemble complete ordered fragments without semantic mutation."""
     batches = _plan_batches(plan)
