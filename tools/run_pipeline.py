@@ -1222,6 +1222,53 @@ def _execute(
     return int(closed["exit_code"])
 
 
+_NOT_PREPARED_FIX = ("exec запускает только принятую автоматизацию: заверши статическое ревью автотестов "
+                     "(autotest-reviewer, вердикт ПРИНЯТО), затем снова exec")
+
+
+def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
+    """FaT-E: before the first run, materialize the accepted reviewed automation of the attempt, if not done yet.
+
+    Inside the exec step, not a driver: the same ``materialize_delta`` the agent would call, from the journal's own
+    tc-to-autotest:rN and autotest-reviewer:rN answers.  Its checks stay as they are; a repeat is a no-op.
+    """
+    from tools.generated_delta import GeneratedDeltaError, materialize_delta
+    from tools.pilot_state import derive_state, read_attempt_receipt, read_effective_canonical, read_model_stage_artifact
+    from tools.project_inventory import read_execution_baseline
+
+    root = Path(coordinates["run_root"])
+    attempt = coordinates["attempt"]
+    attempt_id = str(attempt["attempt_id"])
+    try:
+        read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
+        return []
+    except (KeyError, OSError, TypeError, ValueError):
+        pass
+    answers: dict[str, dict[int, Mapping[str, Any]]] = {"tc-to-autotest": {}, "autotest-reviewer": {}}
+    for event in derive_state(root)["events"]:
+        stage = str(event.get("stage_instance_id") or "")
+        role, _, revision = stage.partition(":r")
+        if event.get("attempt_id") != attempt_id or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or role not in answers or not revision.isdigit():
+            continue
+        answers[role][int(revision)] = read_model_stage_artifact(root, attempt_id, stage, str(event["artifact_digest"]))["artifact"]
+    reviews, automations = answers["autotest-reviewer"], answers["tc-to-autotest"]
+    if not reviews or max(reviews) not in automations:
+        raise HostStop("EXECUTION_NOT_PREPARED", "no static review of the automation in this attempt", _NOT_PREPARED_FIX)
+    last = max(reviews)
+    try:
+        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        document = read_effective_canonical(root, attempt_id)["document"]
+        materialize_delta(
+            Path(str(coordinates["manifest"]["project"])), Path(coordinates["module_root"]), baseline, automations[last], reviews[last],
+            canonical_document=document, run_root=root, attempt_id=attempt_id,
+            automation_history=[automations[index] for index in range(1, last) if index in automations],
+            review_history=[reviews[index] for index in range(1, last) if index in reviews],
+        )
+    except (GeneratedDeltaError, KeyError, TypeError, ValueError, OSError) as error:
+        raise HostStop("EXECUTION_NOT_PREPARED", str(error), _NOT_PREPARED_FIX) from error
+    return ["execution-inputs", "generated-delta"]
+
+
 def cmd_exec(args: Any) -> int:
     project = Path(args.project).resolve()
     try:
@@ -1320,6 +1367,12 @@ def cmd_exec(args: Any) -> int:
             "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
         })
         return int(closed["exit_code"])
+    try:
+        _prepare_execution(coordinates)
+    except HostStop as stop:
+        _print({"status": "error", "reason": stop.code, "message": str(stop), **({"fix": stop.fix} if stop.fix else {}),
+                "attempt_id": coordinates["attempt"]["attempt_id"]})
+        return 2
     try:
         from tools.canonical_document import load_canonical_document
         from tools.run_tests import load_automation_artifact, load_autotest_review_artifact

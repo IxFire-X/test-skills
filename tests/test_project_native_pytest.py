@@ -92,8 +92,8 @@ def _local_attempt(project: Path, *, module: str = ".") -> tuple[Path, str, dict
 
 def _reviewed_inputs(
     project: Path, *, module: str = ".", generated_content: str | None = None,
-    wait_for_input: bool = False,
-) -> tuple[dict, dict, dict, dict, Path, str, dict, dict]:
+    wait_for_input: bool = False, materialize: bool = True, publish_static_review: bool = True, static_verdict: str = "ПРИНЯТО",
+) -> tuple[dict, dict, dict, dict, Path, str, dict, dict | None]:
     document = automated_document()
     artifact = automation(document, effective_bundle_receipt_digest=_effective_bundle_digest(document))
     generated_content = generated_content or """import pytest
@@ -136,25 +136,33 @@ def test_selected(plugin_value: str, conftest_value: str) -> None:
         run_root=run_root, attempt_id=attempt_id, document=document,
         generator=evidence["generator_invocation_id"], reviewer=evidence["reviewer_invocation_id"],
     )
-    static_review = review(document, artifact, boundary, "ПРИНЯТО", session_id="static-session")
+    static_review = review(document, artifact, boundary, static_verdict, session_id="static-session")
+    if static_verdict == "ТРЕБУЕТ ДОРАБОТКИ":  # a rework verdict carries a blocking finding and no corrections
+        body = static_review["artifacts"]["autotest_review"]
+        body["corrections"] = []
+        body["findings"] = [{"severity": "BLOCKING", "code": "WEAK_ORACLE", "message": "Проверка не доказывает результат.",
+                             "evidence": ["relation"], "related_ids": [artifact["artifacts"]["generated_files"][0]["file_id"]]}]
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt
 
-    reviewer_stage = "autotest-reviewer:r1"
-    append_event(
-        run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
-        stage_instance_id=reviewer_stage, artifact_digest=automation_sha256(artifact),
-    )
-    boundary_receipt = read_attempt_receipt(
-        run_root, attempt_id, "automation-review-boundary-r1", "ARTIFACT_READ_BACK",
-    )
-    publish_model_request(
-        run_root, attempt_id, reviewer_stage,
-        model_id="model-automation-reviewer",
-        invocation_id=evidence["reviewer_invocation_id"],
-        input_digests=[automation_sha256(artifact), boundary_receipt["digest"]],
-    )
-    publish_model_stage_artifact(run_root, attempt_id, reviewer_stage, static_review)
+    if publish_static_review:
+        reviewer_stage = "autotest-reviewer:r1"
+        append_event(
+            run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id,
+            stage_instance_id=reviewer_stage, artifact_digest=automation_sha256(artifact),
+        )
+        boundary_receipt = read_attempt_receipt(
+            run_root, attempt_id, "automation-review-boundary-r1", "ARTIFACT_READ_BACK",
+        )
+        publish_model_request(
+            run_root, attempt_id, reviewer_stage,
+            model_id="model-automation-reviewer",
+            invocation_id=evidence["reviewer_invocation_id"],
+            input_digests=[automation_sha256(artifact), boundary_receipt["digest"]],
+        )
+        publish_model_stage_artifact(run_root, attempt_id, reviewer_stage, static_review)
+    if not materialize:  # FaT-E: the agent stops after the static review; exec prepares its inputs itself
+        return document, artifact, static_review, boundary, run_root, attempt_id, authorization, None
     from tools.generated_delta import materialize_delta
     from tools.pilot_state import read_attempt_receipt
 

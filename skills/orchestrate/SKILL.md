@@ -273,13 +273,14 @@ Exact transport input/output bytes сохраняются отдельно; их
 1. Вызови `tc-to-autotest` для effective canonical.
 2. Открой attempt-owned automation review boundary и вызови `autotest-reviewer` в fresh
    invocation. Разрешены initial + максимум одна complete correction/review.
-3. После accepted static review сформируй complete generated delta. Controller
-   материализует каждый новый pipeline-owned file в active test root и пишет receipt;
-   partial materialization запрещает execution.
-4. Построй closed execution request. Используй только adapter ID, exact frozen
+3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует
+   execution-inputs и материализует принятую автоматизацию (generated delta) из ответов
+   журнала, если этого ещё не было; partial materialization по-прежнему запрещает execution.
+   Нет принятого static review — exec отвечает `EXECUTION_NOT_PREPARED` с подсказкой.
+4. exec строит closed execution request сам: adapter ID, exact frozen
    interpreter/wrapper/executable, build profile и typed params; user shell strings и
    `argv_template` запрещены.
-5. Запусти exact reviewed targets один раз через module-selected pytest, `mvnw`,
+5. exec запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
    системный `mvn` или `gradlew`. Системный Maven использует закрытый адаптер
    `maven:selected-symbols-v1` и поле `executable`; абсолютный launcher и его bytes
    связаны с baseline. Hash launcher не доказывает идентичность всех библиотек Maven/JDK.
