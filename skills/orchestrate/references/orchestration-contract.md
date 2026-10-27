@@ -126,7 +126,8 @@ disposition. Execution не начинается при partial materialization.
 | Branch | Disposition |
 |---|---|
 | authoritative `PASS` + valid trace | unchanged file `RETAINED` |
-| `FAIL` / `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
+| `FAIL` (policy `quarantine`, default) | failed methods marked, file `QUARANTINED`; none failed in file → `RETAINED`; unresolved → `CLEANED` + `QUARANTINE_UNRESOLVED` |
+| `FAIL` (policy `cleanup`) / `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
 | `UNKNOWN`, unchanged | `PRESERVED_EXECUTION_UNKNOWN` |
 | `UNKNOWN`, drifted | `PRESERVED_CONTENT_CONFLICT` + unknown evidence |
 | partial materialization | safe cleanup либо `NOT_MATERIALIZED` |

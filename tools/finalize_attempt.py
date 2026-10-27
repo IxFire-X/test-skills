@@ -23,7 +23,7 @@ class FinalizationError(ValueError):
 _DIGEST = "sha256:" + "0" * 64
 _VERIFICATIONS = {"PASS", "FAIL", "UNKNOWN", "NOT_RUNNABLE", "NOT_APPLICABLE"}
 _DISPOSITIONS = {
-    "RETAINED", "CLEANED", "NOT_MATERIALIZED", "PRESERVED_EXECUTION_UNKNOWN",
+    "RETAINED", "QUARANTINED", "CLEANED", "NOT_MATERIALIZED", "PRESERVED_EXECUTION_UNKNOWN",
     "PRESERVED_CONTENT_CONFLICT", "PRESERVED_CLEANUP_CONFLICT",
 }
 
@@ -92,6 +92,7 @@ def decide_dispositions(
     if verification != "UNKNOWN" and execution_unknown_evidence_digest is not None:
         raise FinalizationError("execution-unknown evidence is only valid for UNKNOWN")
     requested: dict[str, str] = {}
+    quarantine = verification == "FAIL" and pilot_state.disposition_policy(run_root) == "quarantine"
     for row in rows:
         path = str(row["path"])
         materialization = str(row.get("materialization"))
@@ -106,6 +107,7 @@ def decide_dispositions(
                 verification,
                 materialization,
                 retain_pass=verification == "PASS" and pre_trace_valid,
+                quarantine=quarantine,
             )
         except GeneratedDeltaError as error:
             raise FinalizationError(str(error)) from error
@@ -154,7 +156,7 @@ def disposition_receipt(delta: Mapping[str, Any] | None, *, verification: str) -
     return _seal({
         "schema_version": "1.0.0", "stage": "dispositions", "generated_delta_digest": delta.get("digest"),
         "verification": verification,
-        "files": [{key: row[key] for key in ("file_id", "path", "content_digest", "ownership_digest", "baseline_absent", "materialization", "disposition") if key in row} | ({"reason_code": row["reason_code"]} if "reason_code" in row else {}) for row in rows],
+        "files": [{key: row[key] for key in ("file_id", "path", "content_digest", "ownership_digest", "baseline_absent", "materialization", "disposition", "reason_code", "quarantine", "quarantined_digest") if key in row} for row in rows],
     })
 
 

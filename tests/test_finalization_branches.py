@@ -61,7 +61,11 @@ def _terminal_facts(run_id: str, attempt_id: str, *, verification: str, completi
 
 
 @pytest.mark.parametrize("verification", ["FAIL", "NOT_RUNNABLE"])
-def test_durable_fail_branches_clean_every_owned_file_and_terminalize_unaccepted(tmp_path: Path, verification: str) -> None:
+def test_durable_fail_branches_clean_every_owned_file_and_terminalize_unaccepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verification: str) -> None:
+    import tools.pilot_state as pilot_state
+
+    # FaT-8: FAIL cleans every owned file only under `scan --disposition-policy cleanup`.
+    monkeypatch.setattr(pilot_state, "_disposition_policy_at", lambda *_args: "cleanup")
     from tests.test_durable_execution_trace import _prestart_report, _publish_execution
     from tests.test_execution_receipt import _execution_facts
     from tools.finalize_attempt import decide_dispositions

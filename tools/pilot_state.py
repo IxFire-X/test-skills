@@ -18,7 +18,7 @@ from tools.confined_output import OutputConfinementError, atomic_write_confined_
 
 
 _PROFILES = {"cases-only-v1", "local-pilot-v1"}
-_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "accept_self_review"}
+_AUTH_KEYS = {"request_id", "execution_requested", "host_id", "accept_self_review", "disposition_policy"}
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -274,6 +274,8 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
         raise ValueError("unsafe authorization")
     if "accept_self_review" in authorization and authorization["accept_self_review"] is not True:
         raise ValueError("unsafe authorization")
+    if "disposition_policy" in authorization and authorization["disposition_policy"] != "cleanup":
+        raise ValueError("unsafe authorization")
     requested = authorization["execution_requested"]
     if (policy_profile == "cases-only-v1" and requested) or (policy_profile == "local-pilot-v1" and not requested):
         raise ValueError("authorization policy mismatch")
@@ -295,6 +297,16 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
 
 def _self_review_accepted_at(project: Path, root: Path) -> bool:
     return _run_boundary(project, root)[1].get("accept_self_review") is True
+
+
+def _disposition_policy_at(project: Path, root: Path) -> str:
+    return "cleanup" if _run_boundary(project, root)[1].get("disposition_policy") == "cleanup" else "quarantine"
+
+
+def disposition_policy(run_root: Path) -> str:
+    """FaT-8: what a FAIL does to generated files — ``quarantine`` (default) or ``cleanup`` (`scan --disposition-policy cleanup`)."""
+    project, root = _run_root(run_root)
+    return _disposition_policy_at(project, root)
 
 
 def self_review_accepted(run_root: Path) -> bool:
@@ -685,6 +697,9 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         if safe_auth.get("accept_self_review") is True:
             # FaT-4b: the human's choice before any review, under the same digest; absent means the prior rules.
             receipt_data["accept_self_review"] = True
+        if safe_auth.get("disposition_policy") == "cleanup":
+            # FaT-8: decided once at scan; absent means quarantine and the receipt keeps its prior bytes.
+            receipt_data["disposition_policy"] = "cleanup"
         receipt = _publish(root_project, root, root / "run-authorization-receipt.json", receipt_data, "authorization receipt")
         manifest_data = {"schema_version": "1.0.0", "run_id": run_id, "project": str(root_project), "policy_profile": policy_profile, "authorization_digest": receipt["digest"], "project_state": project_state}
         if downgrade is not None:
@@ -3173,6 +3188,8 @@ def _validate_factual_receipt(
             rows = payload["files"]
             from tools.generated_delta import GeneratedDeltaError, resolve_disposition_policy
 
+            quarantine = verification == "FAIL" and _disposition_policy_at(project, root) == "quarantine"
+
             if kind == "disposition-plan":
                 if payload.get("stage") != "disposition-plan" or len(rows) != len(expected_rows):
                     raise ValueError("invalid disposition-plan receipt")
@@ -3184,13 +3201,19 @@ def _validate_factual_receipt(
                             str(verification),
                             str(expected.get("materialization")),
                             retain_pass=verification == "PASS" and actual.get("requested_disposition") == "RETAINED",
+                            quarantine=quarantine,
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-plan receipt") from error
                     relation = expected | {"operation": operation, "requested_disposition": requested}
+                    quarantine_keys = {key for key in ("quarantine", "quarantined_digest", "quarantine_unresolved") if key in actual}
                     if (
                         any(actual.get(key) != relation.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
                         or actual.get("pre_effect_state") not in ({"NOT_APPLICABLE"} if operation == "NO_FILE" else {"EXACT", "MISSING", "DRIFT", "UNSAFE"})
+                        # FaT-8: a quarantine row is either unresolved or names its methods and their marked digest.
+                        or operation != "QUARANTINE_IF_EXACT" and quarantine_keys
+                        or operation == "QUARANTINE_IF_EXACT" and quarantine_keys not in ({"quarantine_unresolved"}, {"quarantine", "quarantined_digest"})
+                        or operation == "QUARANTINE_IF_EXACT" and "quarantine" in actual and (actual["quarantine"] == []) != (actual["quarantined_digest"] is None)
                     ):
                         raise ValueError("invalid disposition-plan receipt")
             else:
@@ -3218,6 +3241,7 @@ def _validate_factual_receipt(
                         operation, requested, outcomes = resolve_disposition_policy(
                             str(verification), str(plan_row.get("materialization")),
                             retain_pass=verification == "PASS" and plan_row.get("requested_disposition") == "RETAINED",
+                            quarantine=quarantine,
                         )
                     except GeneratedDeltaError as error:
                         raise ValueError("invalid disposition-receipt receipt") from error
@@ -3225,6 +3249,14 @@ def _validate_factual_receipt(
                         raise ValueError("invalid disposition-receipt receipt")
                     legal = outcomes.get(str(plan_row.get("pre_effect_state")), frozenset())
                     if (final_row.get("disposition"), final_row.get("reason_code")) not in legal:
+                        raise ValueError("invalid disposition-receipt receipt")
+                    if operation == "QUARANTINE_IF_EXACT" and not {
+                        "QUARANTINED": plan_row.get("quarantine") not in (None, [])
+                        and final_row.get("quarantine") == plan_row.get("quarantine")
+                        and final_row.get("quarantined_digest") == plan_row.get("quarantined_digest"),
+                        "RETAINED": plan_row.get("quarantine") == [],
+                        "CLEANED": plan_row.get("quarantine_unresolved") is True,
+                    }.get(str(final_row.get("disposition")), True):
                         raise ValueError("invalid disposition-receipt receipt")
     else:
         raise ValueError("invalid factual receipt")

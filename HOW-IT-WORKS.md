@@ -199,7 +199,8 @@ Disposition определяется для каждого materialized file и 
 | Verification | Неизменённый pipeline-owned file | Drift/conflict |
 |---|---|---|
 | `PASS` + valid trace | `RETAINED` | unaccepted conflict |
-| `FAIL` / `NOT_RUNNABLE` | `CLEANED` | preserved с точной причиной |
+| `FAIL` (карантин, по умолчанию) | `QUARANTINED` (упавшие методы `@Disabled`/`xfail`), без упавших — `RETAINED`, не сопоставлено — `CLEANED` + `QUARANTINE_UNRESOLVED` | preserved с точной причиной |
+| `FAIL` (`--disposition-policy cleanup`) / `NOT_RUNNABLE` | `CLEANED` | preserved с точной причиной |
 | `UNKNOWN` | `PRESERVED_EXECUTION_UNKNOWN` | `PRESERVED_CONTENT_CONFLICT` |
 
 Cleanup при `UNKNOWN` запрещён. `RETAINED` — только физический pre-finalization факт;

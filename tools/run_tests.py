@@ -13,7 +13,7 @@ import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
@@ -685,6 +685,7 @@ class JUnitCase:
     name: str
     file: str | None
     status: str
+    message: str = field(default="", compare=False)
 
     @property
     def identity(self) -> tuple[str, str, str | None]:
@@ -714,6 +715,17 @@ def _testcase_status(item: ET.Element) -> str:
     return "PASSED"
 
 
+def _failure_message(item: ET.Element) -> str:
+    """FaT-8: the first line of a failure or error, kept for the quarantine note (500 characters at most)."""
+    found = item.find("failure")
+    if found is None:
+        found = item.find("error")
+    if found is None:
+        return ""
+    text = (found.attrib.get("message") or found.text or "").strip()
+    return text.splitlines()[0][:500] if text else ""
+
+
 def parse_junit_element(root: ET.Element) -> JUnitParseResult:
     cases: list[JUnitCase] = []
     malformed: list[str] = []
@@ -725,7 +737,7 @@ def parse_junit_element(root: ET.Element) -> JUnitParseResult:
             malformed.append("missing testcase name")
             continue
         classname = item.attrib.get("classname", "")
-        row = JUnitCase(classname, name, _norm_junit_file(item.attrib.get("file")), _testcase_status(item))
+        row = JUnitCase(classname, name, _norm_junit_file(item.attrib.get("file")), _testcase_status(item), _failure_message(item))
         identity = row.identity
         count = seen.get(identity, 0) + 1
         seen[identity] = count
@@ -1000,6 +1012,27 @@ def _records_from_snapshots(snapshots: Mapping[Path, bytes], compatibility: Runn
     )
 
 
+def _failed_methods(snapshots: Mapping[Path, bytes], compatibility: RunnerCompatibility, evidence: Sequence[Mapping[str, Any]], *, java: bool) -> list[dict[str, str]]:
+    """FaT-8: one row per failed generated method of the authoritative evidence, with its framework message."""
+    messages: dict[tuple[str, str], str] = {}
+    for content in snapshots.values():
+        try:
+            parsed = parse_junit_element(ET.fromstring(content))
+        except ET.ParseError:
+            continue
+        for case in parsed.cases:
+            if case.status not in {"FAILED", "ERROR"}:
+                continue
+            for pair, binding in compatibility.bindings.items():
+                if _case_matches_pair(case, binding, java):
+                    messages.setdefault(pair, case.message)
+    return [
+        {"nodeid": f"{row['file_id']}::{row['symbol_id']}", "kind": "assertion_failed" if row["status"] == "FAILED" else "error",
+         "message": messages.get((row["file_id"], row["symbol_id"]), "")}
+        for row in evidence if row["status"] in {"FAILED", "ERROR"}
+    ]
+
+
 def _post_run_file_digests(compatibility: RunnerCompatibility) -> Mapping[str, str]:
     """Re-read every executed generated file before accepting its evidence."""
     values: dict[str, str] = {}
@@ -1084,7 +1117,7 @@ def _execution_receipt(request: Any, report_evidence: Sequence[Mapping[str, str]
     }
 
 
-def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None) -> dict[str, Any]:
+def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any], automation_digest: str, review_digest: str, diagnostics: Sequence[Mapping[str, str]] = (), run_id: str | None = None, evidence: Sequence[Mapping[str, Any]] = (), process_evidence: Sequence[Mapping[str, Any]] = (), authoritative: bool = False, exit_code: int | None = None, runner: str = "not_applicable", interpreter: str | None = None, command_profile: str | None = None, duration_sec: float | None = None, safe_key_labels: Sequence[str] = (), *, request: Any = None, report_evidence: Sequence[Mapping[str, str]] = (), artifact_evidence: Sequence[Mapping[str, str]] = (), run_root: Path | None = None, attempt_id: str | None = None, failed_methods: Sequence[Mapping[str, str]] | None = None) -> dict[str, Any]:
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
 
     prestart = verdict == "NOT_RUNNABLE" and run_id is None
@@ -1100,7 +1133,7 @@ def _report(verdict: str, project: Path, language: str, source: Mapping[str, Any
         safe_key_labels = request.environment_labels
     source = dict(source)
     source.setdefault("effective_bundle_receipt_digest", "sha256:" + "0" * 64)
-    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
+    report = {"schema_version": "5.0.0", "stage": "run-tests", "source": source, "automation_sha256": automation_digest, "autotest_review_sha256": review_digest, "verdict": verdict, "target": {"language": language, "framework": "pytest" if language == "python" else "junit5", "runner": runner, "command": command_profile}, "environment": {"status": "ready" if request_backed or not prestart else "partial", "interpreter": interpreter, "interpreter_path": interpreter, "working_dir": str(project), "missing": None if request_backed or not prestart else ["runner_precondition"], "safe_key_labels": sorted(set(safe_key_labels))}, "execution": _execution_receipt(request, report_evidence, artifact_evidence, run_root=run_root, attempt_id=attempt_id), "stats": _stats(evidence, duration_sec) if run_id else None, "failed_methods": [dict(row) for row in failed_methods] if failed_methods else None, "root_cause": None, "raw_output_excerpt": None, "ran_at": datetime.now(timezone.utc).isoformat(), "exit_code": exit_code, "run_id": run_id, "execution_evidence": [dict(row) for row in sorted(evidence, key=lambda row: (row["file_id"], row["symbol_id"]))], "process_evidence": [dict(row) for row in process_evidence], "evidence_authoritative": authoritative, "diagnostics": [dict(row) for row in sorted(diagnostics, key=lambda row: (row["path"], row["code"], row["message"]))]}
     from tools.schema_validation import schema_diagnostics
     if schema_diagnostics(report, _ROOT / "schemas" / "run-tests-output.schema.json", _ROOT):
         raise RuntimeError("RUNNER_REPORT_SCHEMA")
@@ -1534,7 +1567,8 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
         process_evidence.append(
             _process_row("JUNIT_INVALID", outcome, run_id, source, target[1], duration_sec)
         )
-    return _report(classified, project, language, source, automation_digest, review_digest, (), run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id)
+    failed_methods = _failed_methods(snapshots, compatibility, evidence, java=language == "java") if classified == "FAIL" and authoritative else None
+    return _report(classified, project, language, source, automation_digest, review_digest, (), run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, failed_methods=failed_methods)
 
 
 def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], provider_resolver: Any | None = None, adapter_registry: Any | None = None, *, runner_profile: str | None = None) -> dict[str, Any]:

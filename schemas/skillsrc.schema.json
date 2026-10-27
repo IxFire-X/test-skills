@@ -8,7 +8,8 @@
     "schema_version": {"const": "5.0.0"},
     "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
-    "discovery": {}, "modules": {}, "requirements": {}, "limits": {}
+    "discovery": {}, "modules": {}, "requirements": {}, "limits": {},
+    "disposition_policy": {"enum": ["quarantine", "cleanup"]}
   },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
@@ -31,7 +32,8 @@
         "contracts": {"$ref": "#/$defs/contracts"},
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
-        "limits": {"$ref": "#/$defs/limits"}
+        "limits": {"$ref": "#/$defs/limits"},
+        "disposition_policy": {"enum": ["quarantine", "cleanup"]}
       }
     },
     "v3": {
@@ -48,7 +50,8 @@
         "contracts": {"$ref": "#/$defs/contracts"},
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
-        "limits": {"$ref": "#/$defs/limits"}
+        "limits": {"$ref": "#/$defs/limits"},
+        "disposition_policy": {"enum": ["quarantine", "cleanup"]}
       }
     },
     "requirements": {

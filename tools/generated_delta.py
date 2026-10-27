@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from tools.confined_output import (
     OutputConfinementError,
+    atomic_write_confined_bytes_at_root,
     create_confined_bytes_exclusive,
     read_confined_bytes,
     remove_confined_bytes_if_equal,
@@ -545,14 +546,76 @@ def execution_readiness(project: Path, delta: Mapping[str, Any], run_root: Path,
     return {"ready": True}
 
 
+def _method_name(locator: Mapping[str, Any]) -> str:
+    if locator.get("kind") == "java_class_method":
+        return f"{str(locator['class_fqn']).rsplit('.', 1)[-1]}.{locator['method_name']}"
+    if locator.get("kind") == "python_class_method":
+        return f"{locator['qualified_class_name']}.{locator['method_name']}"
+    return str(locator.get("function_name"))
+
+
+def plan_quarantine(
+    files: Sequence[Mapping[str, Any]], symbols: Sequence[Mapping[str, Any]], payload: Mapping[str, Any],
+) -> dict[str, dict[str, Any]] | None:
+    """FaT-8: per generated path, the failed methods named by the authoritative execution evidence and the marked bytes.
+
+    ``None`` when a failure cannot be tied to exactly one generated method; the caller then cleans as before.
+    """
+    from tools.code_slices import SliceError
+    from tools.quarantine import failure_note, quarantine
+
+    evidence = payload.get("execution_evidence")
+    if payload.get("verdict") != "FAIL" or payload.get("evidence_authoritative") is not True or not isinstance(evidence, list):
+        return None
+    failed = {(row.get("file_id"), row.get("symbol_id")) for row in evidence if isinstance(row, Mapping) and row.get("status") in {"FAILED", "ERROR"}}
+    located = {(row.get("file_id"), row.get("symbol_id")): row.get("locator") for row in symbols if isinstance(row, Mapping)}
+    by_id = {row.get("file_id"): row for row in files if isinstance(row, Mapping)}
+    if not failed or any(pair not in located or not isinstance(located[pair], Mapping) or pair[0] not in by_id for pair in failed):
+        return None
+    messages = {
+        row.get("nodeid"): str(row.get("message") or "")
+        for row in payload.get("failed_methods") or [] if isinstance(row, Mapping)
+    }
+    plan: dict[str, dict[str, Any]] = {}
+    for file_id, row in by_id.items():
+        path, content = row.get("path"), row.get("content")
+        if not isinstance(path, str) or not isinstance(content, str):
+            return None
+        methods = []
+        for symbol in symbols:
+            pair = (symbol.get("file_id"), symbol.get("symbol_id"))
+            if pair[0] == file_id and pair in failed:
+                ref, message = failure_note(messages.get(f"{pair[0]}::{pair[1]}", ""))
+                methods.append((symbol["locator"], ref, message))
+        if not methods:
+            plan[path] = {"quarantine": [], "quarantined_digest": None, "content": None}
+            continue
+        try:
+            marked = quarantine(path, content, methods).encode("utf-8")
+        except (SliceError, KeyError, IndexError):
+            return None
+        if marked == content.encode("utf-8"):
+            return None
+        plan[path] = {
+            "quarantine": [{"method": _method_name(locator), "ref": ref, "message": message} for locator, ref, message in methods],
+            "quarantined_digest": _digest(marked), "content": marked,
+        }
+    return plan
+
+
 def resolve_disposition_policy(
     verification: str,
     materialization: str,
     *,
     retain_pass: bool,
+    quarantine: bool = False,
 ) -> tuple[str, str, Mapping[str, frozenset[tuple[str, str | None]]]]:
-    """Return the only permitted plan and its legal durable outcomes."""
-    if type(retain_pass) is not bool or verification != "PASS" and retain_pass:
+    """Return the only permitted plan and its legal durable outcomes.
+
+    FaT-8: ``quarantine`` (the run's policy, read from its authorization receipt) turns a FAIL of a
+    materialized file into QUARANTINE_IF_EXACT; RETAINED after FAIL is legal only under it.
+    """
+    if type(retain_pass) is not bool or type(quarantine) is not bool or verification != "PASS" and retain_pass:
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "invalid disposition policy input")
     if materialization == "NOT_MATERIALIZED":
         operation, requested = "NO_FILE", "NOT_MATERIALIZED"
@@ -561,6 +624,8 @@ def resolve_disposition_policy(
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "invalid materialization state")
     if verification == "PASS":
         operation, requested = ("RETAIN_IF_EXACT", "RETAINED") if retain_pass else ("CLEAN_IF_EXACT", "CLEANED")
+    elif verification == "FAIL" and quarantine:
+        operation, requested = "QUARANTINE_IF_EXACT", "QUARANTINED"
     else:
         try:
             operation, requested = {
@@ -574,6 +639,10 @@ def resolve_disposition_policy(
     exact = {
         "RETAIN_IF_EXACT": frozenset({("RETAINED", None), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")}),
         "CLEAN_IF_EXACT": frozenset({("CLEANED", None), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT"), ("PRESERVED_CLEANUP_CONFLICT", "CLEANUP_CONFLICT")}),
+        "QUARANTINE_IF_EXACT": frozenset({
+            ("QUARANTINED", None), ("RETAINED", None), ("CLEANED", "QUARANTINE_UNRESOLVED"),
+            ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT"), ("PRESERVED_CLEANUP_CONFLICT", "CLEANUP_CONFLICT"),
+        }),
         "PRESERVE_UNKNOWN": frozenset({("PRESERVED_EXECUTION_UNKNOWN", "EXECUTION_UNKNOWN"), ("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")}),
     }[operation]
     conflict = frozenset({("PRESERVED_CONTENT_CONFLICT", "CONTENT_CONFLICT")})
@@ -609,6 +678,9 @@ def apply_dispositions(
     paths = [row.get("path") for row in durable_files if isinstance(row, Mapping)] if isinstance(durable_files, list) else []
     if not paths or not all(isinstance(path, str) for path in paths) or len({path.casefold() for path in paths}) != len(paths) or set(requested) != set(paths):
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "a disposition is required for every generated file")
+    from tools.pilot_state import disposition_policy
+
+    quarantine = verification == "FAIL" and disposition_policy(run_root) == "quarantine"
     base_plan_rows: list[dict[str, Any]] = []
     for row in durable_files:
         if not isinstance(row, Mapping):
@@ -620,6 +692,7 @@ def apply_dispositions(
             verification,
             str(row.get("materialization")),
             retain_pass=verification == "PASS" and requested[path] == "RETAINED",
+            quarantine=quarantine,
         )
         if requested[path] != expected:
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "disposition is impossible for verification outcome")
@@ -628,6 +701,7 @@ def apply_dispositions(
         } | {"operation": operation, "requested_disposition": expected})
     from tools.pilot_state import _sealed as _seal_receipt, publish_phase5_receipt, read_attempt_receipt
 
+    execution_payload: Mapping[str, Any] = {}
     if verification in {"FAIL", "NOT_RUNNABLE"}:
         try:
             execution_record = read_attempt_receipt(
@@ -648,6 +722,20 @@ def apply_dispositions(
                 "MATERIALIZATION_CONFLICT",
                 "execution receipt does not authorize this cleanup outcome",
             )
+
+    marked_bytes: dict[str, bytes] = {}
+    if any(row["operation"] == "QUARANTINE_IF_EXACT" for row in base_plan_rows):
+        planned = _attempt_quarantine(run_root, attempt_id, result, execution_payload)
+        for row in base_plan_rows:
+            if row["operation"] != "QUARANTINE_IF_EXACT":
+                continue
+            if planned is None or row["path"] not in planned:
+                row["quarantine_unresolved"] = True
+                continue
+            entry = planned[row["path"]]
+            row.update(quarantine=entry["quarantine"], quarantined_digest=entry["quarantined_digest"])
+            if entry["content"] is not None:
+                marked_bytes[row["path"]] = entry["content"]
 
     module, root = _delta_root(project, result)
 
@@ -670,7 +758,7 @@ def apply_dispositions(
     if existing_plan is not None:
         plan_rows = existing_plan.get("files")
         if not isinstance(plan_rows, list) or existing_plan.get("generated_delta_digest") != generated_delta_digest or existing_plan.get("verification") != verification or existing_plan.get("execution_unknown_evidence_digest") != execution_unknown_evidence_digest or len(plan_rows) != len(base_plan_rows) or any(
-            not isinstance(actual, Mapping) or any(actual.get(key) != expected.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition"))
+            not isinstance(actual, Mapping) or any(actual.get(key) != expected.get(key) for key in ("file_id", "path", "content_digest", "materialization", "ownership_digest", "baseline_absent", "operation", "requested_disposition", "quarantine", "quarantined_digest", "quarantine_unresolved"))
             for actual, expected in zip(plan_rows, base_plan_rows)
         ):
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "disposition replay facts conflict")
@@ -758,11 +846,31 @@ def apply_dispositions(
             else:
                 final_rows.append(final_row | {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"})
             continue
-        if plan_row["operation"] == "RETAIN_IF_EXACT":
+        if plan_row["operation"] == "RETAIN_IF_EXACT" or plan_row["operation"] == "QUARANTINE_IF_EXACT" and plan_row.get("quarantine") == []:
             final_rows.append(final_row | ({"disposition": "RETAINED"} if exact else {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"}))
             continue
+        if plan_row["operation"] == "QUARANTINE_IF_EXACT" and not plan_row.get("quarantine_unresolved"):
+            quarantined = final_row | {"disposition": "QUARANTINED", "quarantine": plan_row["quarantine"], "quarantined_digest": plan_row["quarantined_digest"]}
+            if current is not None and _digest(current) == plan_row["quarantined_digest"]:
+                final_rows.append(quarantined)
+                continue
+            marked = marked_bytes.get(plan_row["path"])
+            if not exact or marked is None or _digest(marked) != plan_row["quarantined_digest"]:
+                final_rows.append(final_row | {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"})
+                continue
+            try:
+                atomic_write_confined_bytes_at_root(Path(project), root, target, marked)
+                written = read_confined_bytes(Path(project), root, target) == marked
+            except (OSError, OutputConfinementError):
+                written = False
+            final_rows.append(quarantined if written else final_row | {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"})
+            effects += 1
+            if interrupt_after_effects is not None and effects >= interrupt_after_effects:
+                raise GeneratedDeltaError("MATERIALIZATION_INTERRUPTED", "injected interruption after disposition effect")
+            continue
+        unresolved = {"reason_code": "QUARANTINE_UNRESOLVED"} if plan_row.get("quarantine_unresolved") else {}
         if current is None:
-            final_rows.append(final_row | {"disposition": "CLEANED"})
+            final_rows.append(final_row | {"disposition": "CLEANED"} | unresolved)
             continue
         if not exact:
             final_rows.append(final_row | {"disposition": "PRESERVED_CONTENT_CONFLICT", "reason_code": "CONTENT_CONFLICT"})
@@ -772,7 +880,7 @@ def apply_dispositions(
         except (OSError, OutputConfinementError):
             removed = False
         if removed:
-            final_rows.append(final_row | {"disposition": "CLEANED"})
+            final_rows.append(final_row | {"disposition": "CLEANED"} | unresolved)
             effects += 1
             if interrupt_after_effects is not None and effects >= interrupt_after_effects:
                 raise GeneratedDeltaError("MATERIALIZATION_INTERRUPTED", "injected interruption after disposition effect")
@@ -794,6 +902,26 @@ def apply_dispositions(
     return _merged_disposition_projection(result, final_rows)
 
 
+def _attempt_quarantine(
+    run_root: Path, attempt_id: str, delta: Mapping[str, Any], execution_payload: Mapping[str, Any],
+) -> dict[str, dict[str, Any]] | None:
+    """FaT-8: the quarantine plan of this attempt from its reviewed generated files and its own execution receipt."""
+    from tools.pilot_state import read_execution_inputs
+
+    try:
+        artifacts = read_execution_inputs(run_root, attempt_id)["automation_artifact"]["artifacts"]
+        generated = {row["file_id"]: row for row in artifacts["generated_files"]}
+        files = []
+        for row in delta["files"]:
+            source = generated[row["file_id"]]
+            if source.get("path") != row["path"] or _digest(str(source["content"]).encode("utf-8")) != row["content_digest"]:
+                return None
+            files.append({"file_id": row["file_id"], "path": row["path"], "content": source["content"]})
+        return plan_quarantine(files, artifacts["generated_symbols"], execution_payload)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _merged_disposition_projection(delta: Mapping[str, Any], final_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Return the legacy delta-shaped projection without altering its durable receipt."""
     result = json.loads(json.dumps(delta))
@@ -804,7 +932,8 @@ def _merged_disposition_projection(delta: Mapping[str, Any], final_rows: Sequenc
         if not isinstance(row, dict) or not isinstance(final, Mapping) or row.get("path") != final.get("path"):
             raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "disposition projection is mismatched")
         row["disposition"] = final["disposition"]
-        if "reason_code" in final:
-            row["reason_code"] = final["reason_code"]
+        for key in ("reason_code", "quarantine", "quarantined_digest"):
+            if key in final:
+                row[key] = final[key]
     result.pop("digest", None)
     return _seal(result)

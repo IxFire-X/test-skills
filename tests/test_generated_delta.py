@@ -841,6 +841,15 @@ def test_disposition_requires_a_decision_for_every_generated_file(tmp_path: Path
         raise AssertionError("a complete generated delta accepted an incomplete disposition")
 
 
+@pytest.fixture
+def cleanup_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FaT-8: these cases pin the pre-quarantine FAIL semantics (`scan --disposition-policy cleanup`)."""
+    import tools.pilot_state as pilot_state
+
+    monkeypatch.setattr(pilot_state, "_disposition_policy_at", lambda *_args: "cleanup")
+
+
+@pytest.mark.usefixtures("cleanup_policy")
 def test_disposition_recovery_publishes_plan_before_cleanup_and_recovers_deleted_file(tmp_path: Path):
     from tools.generated_delta import GeneratedDeltaError, apply_dispositions
     from tools.pilot_state import read_attempt_receipt
@@ -866,6 +875,7 @@ def test_disposition_recovery_publishes_plan_before_cleanup_and_recovers_deleted
     assert final["disposition_plan_digest"] == plan["digest"]
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_disposition_plan_recovers_when_persisted_before_its_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.pilot_state as pilot_state
     from tools.generated_delta import GeneratedDeltaError, apply_dispositions
@@ -899,6 +909,7 @@ def test_disposition_plan_recovers_when_persisted_before_its_events(tmp_path: Pa
         apply_dispositions(tmp_path, delta, {relative_path: "RETAINED"}, run_root=run_root, attempt_id=attempt_id, verification="PASS")
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_conflicting_raw_disposition_plan_remains_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.pilot_state as pilot_state
     from tools.generated_delta import GeneratedDeltaError, apply_dispositions
@@ -921,6 +932,7 @@ def test_conflicting_raw_disposition_plan_remains_blocked(tmp_path: Path, monkey
         apply_dispositions(tmp_path, delta, {relative_path: "CLEANED"}, run_root=run_root, attempt_id=attempt_id, verification="FAIL")
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_cleanup_missing_before_plan_is_not_recovered_as_cleaned(tmp_path: Path):
     from tools.generated_delta import apply_dispositions
     from tools.pilot_state import read_attempt_receipt
@@ -934,6 +946,7 @@ def test_cleanup_missing_before_plan_is_not_recovered_as_cleaned(tmp_path: Path)
     assert result["files"][0]["disposition"] == "PRESERVED_CONTENT_CONFLICT"
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_cleanup_exact_plan_crash_then_missing_is_recovered_cleaned(tmp_path: Path):
     from tools.generated_delta import GeneratedDeltaError, apply_dispositions
     from tools.pilot_state import read_attempt_receipt
@@ -948,6 +961,7 @@ def test_cleanup_exact_plan_crash_then_missing_is_recovered_cleaned(tmp_path: Pa
     assert result["files"][0]["disposition"] == "CLEANED"
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_preplan_drift_is_never_cleaned_after_byte_identical_restore(tmp_path: Path):
     from tools.generated_delta import GeneratedDeltaError, apply_dispositions
 
@@ -1033,6 +1047,7 @@ def test_unknown_disposition_binds_evidence_and_never_removes_files(tmp_path: Pa
     assert final["execution_unknown_evidence_digest"] == evidence
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 def test_exact_final_disposition_replay_does_not_mutate_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import tools.generated_delta as generated_delta
     from tools.generated_delta import apply_dispositions
@@ -1187,6 +1202,7 @@ def test_disposition_publisher_rejects_wrong_delta_stage_and_final_relation(tmp_
         publish_phase5_receipt(run_root, attempt_id, "disposition-plan", stage_swapped)
 
 
+@pytest.mark.usefixtures("cleanup_policy")
 @pytest.mark.parametrize(
     ("verification", "operation", "requested_disposition", "pre_effect_state", "disposition", "reason_code", "evidence"),
     [

@@ -23,13 +23,13 @@ from tools.schema_validation import schema_diagnostics
 
 def _execution_facts(
     tmp_path: Path, *, project: Path | None = None, failed: bool = False,
-    wait_for_input: bool = False,
+    wait_for_input: bool = False, generated_content: str | None = None,
 ) -> tuple[Path, str, dict, ExecutionRequest, dict]:
     project = project or tmp_path / "project"
     project.mkdir(exist_ok=True)
     (project / "tests").mkdir(exist_ok=True)
     document, automation, review, _boundary, run_root, attempt_id, _authorization, durable = _reviewed_inputs(
-        project, wait_for_input=wait_for_input,
+        project, wait_for_input=wait_for_input, generated_content=generated_content,
     )
     attempt = next(row for row in derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
     delta = durable["delta"]

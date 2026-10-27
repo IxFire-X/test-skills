@@ -256,7 +256,18 @@ materialization -> execution -> execution trace -> retain/cleanup decision
 Для всего generated file set:
 
 - `PASS` + valid trace/path/digests: `RETAINED` до finalization;
-- `FAIL`/`NOT_RUNNABLE`: byte-identical pipeline-owned files получают `CLEANED`;
+- `FAIL` (карантин, по умолчанию): упавшие методы — те, что exec отметил FAILED/ERROR
+  в своём отчёте, — получают одну строку `@org.junit.jupiter.api.Disabled("test-skills
+  quarantine: <ASSERT-… или FAIL> <первая строка сообщения>")` или
+  `@pytest.mark.xfail(strict=True, reason="…")`; файл с ними — `QUARANTINED` (новый digest
+  в receipt), файл без упавших — `RETAINED`. Если упали все методы, файл остаётся, помечен
+  каждый метод. Правятся только byte-identical pipeline-owned файлы, иначе — `PRESERVED_*`.
+  Если отказ нельзя однозначно сопоставить с методом, файлы очищаются (`CLEANED`,
+  `QUARANTINE_UNRESOLVED`). `finish`/`status` выводят `quarantine` (файл, метод, ref,
+  сообщение). Приёмка не меняется: `FAIL` даёт `accepted=false`. Прежняя очистка —
+  `scan --disposition-policy cleanup` или `"disposition_policy": "cleanup"` в `.skillsrc`;
+  выбор фиксируется в authorization receipt на scan, флаг сильнее `.skillsrc`;
+- `NOT_RUNNABLE` (и `FAIL` при `cleanup`): byte-identical pipeline-owned files получают `CLEANED`;
 - `UNKNOWN`: unchanged file получает `PRESERVED_EXECUTION_UNKNOWN`, изменённый —
   `PRESERVED_CONTENT_CONFLICT`; cleanup запрещён;
 - partial materialization: execution не начинается, неизменённые созданные файлы

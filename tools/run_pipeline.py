@@ -125,6 +125,27 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
     return result
 
 
+def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-8: what the FAIL closure did to the generated tests, read from the attempt's disposition receipt."""
+    from tools import pilot_state as pilot
+
+    try:
+        rows = pilot.read_attempt_receipt(run_root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]["files"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return {}
+    quarantine = [
+        {"file": row["path"], "method": item["method"], "ref": item["ref"], "message": item["message"]}
+        for row in rows if row.get("disposition") == "QUARANTINED" for item in row["quarantine"]
+    ]
+    unresolved = [row["path"] for row in rows if row.get("reason_code") == "QUARANTINE_UNRESOLVED"]
+    if not quarantine and not unresolved:
+        return {}
+    return {"quarantine": quarantine, **({"quarantine_unresolved": (
+        "QUARANTINE_UNRESOLVED: упавшие методы не удалось однозначно сопоставить с отчётом exec, "
+        f"поэтому сгенерированные файлы убраны целиком, включая прошедшие тесты: {', '.join(unresolved)}"
+    )} if unresolved else {})}
+
+
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -149,6 +170,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         "policy_profile": run["manifest"]["policy_profile"],
         **{key: run["manifest"][key] for key in ("requested_policy_profile", "execution_skipped") if key in run["manifest"]},
         **({"self_review_accepted": True} if run["authorization"].get("accept_self_review") is True else {}),
+        **({"disposition_policy": "cleanup"} if run["authorization"].get("disposition_policy") == "cleanup" else {}),
+        **(_quarantine_summary(root, attempt["attempt_id"]) if attempt else {}),
         "warnings": [], "warning_evidence_path": None, "evidence_errors": [],
         **extra,
     }
@@ -349,6 +372,18 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
     return None if facts["ready"] else {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
 
 
+def _scan_disposition_policy(project: Path, args: Any) -> str | None:
+    """FaT-8: ``cleanup`` when this scan asks for the old FAIL cleaning; the flag beats `.skillsrc`, read only here."""
+    flag = getattr(args, "disposition_policy", None)
+    if flag is not None:
+        return "cleanup" if flag == "cleanup" else None
+    try:
+        document = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return "cleanup" if isinstance(document, Mapping) and document.get("disposition_policy") == "cleanup" else None
+
+
 def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
     from tools.init_skillsrc import ensure_skillsrc
     from tools.pilot_state import create_lowered_run, create_run
@@ -362,6 +397,8 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
     authorization = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
     if getattr(args, "accept_self_review", False):
         authorization["accept_self_review"] = True
+    if _scan_disposition_policy(project, args) == "cleanup":
+        authorization["disposition_policy"] = "cleanup"
     run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
@@ -1560,6 +1597,7 @@ def cmd_finish(args: Any) -> int:
         "exit_code": int(closed["exit_code"]), "policy_profile": manifest["policy_profile"],
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
+        **_quarantine_summary(root, attempt_id),
         **({"fix": "повтори scan с теми же --module, --docs и --profile, что у этого прогона, и добавь --accept-self-review"
                    " — только если человек согласен на ревью в той же сессии"}
            if result.get("reason_code") == "INDEPENDENCE_UNVERIFIED" else {}),
@@ -1727,6 +1765,8 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     scan_parser.add_argument("--accept-self-review", action="store_true",
                              help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
+    scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
+                             help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
     status_parser = sub.add_parser("status", parents=[shared])
     finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
     finish_parser.add_argument("--run", required=True)

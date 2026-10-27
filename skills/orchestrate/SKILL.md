@@ -304,10 +304,16 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
 называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную.
 
-Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` и
-`NOT_RUNNABLE` — очистка только byte-identical pipeline-owned файлов; `UNKNOWN` — очистка
+Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` —
+карантин: упавшие методы помечаются `@Disabled`/`xfail`, прошедшие остаются (`QUARANTINED`); если
+сопоставить упавшие методы нельзя — очистка с `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — очистка
+только byte-identical pipeline-owned файлов; `UNKNOWN` — очистка
 запрещена (`PRESERVED_EXECUTION_UNKNOWN`); частичная материализация — исполнения нет.
 `valid=false` финализации — terminal с `FINALIZATION_INVALID` и `accepted=false`.
+
+После `finish`/`exec` с `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку
+`quarantine_unresolved` как есть. `@Disabled`/`xfail` в этом прогоне не снимай и тесты не чини.
+`scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
 
 ## Resume и child attempts
 
