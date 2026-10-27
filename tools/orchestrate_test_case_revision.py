@@ -82,6 +82,10 @@ class OrchestrationResult:
     diagnostics: tuple[Mapping[str, str], ...]
 
 
+# FaT-9b fix: contextlib (closure_cache) sets __traceback__ on the way out; the error's own fields stay immutable.
+_EXCEPTION_SLOTS = frozenset({"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"})
+
+
 class OrchestrationError(ValueError):
     """Immutable, value-redacting error with recoverable bundle receipts."""
 
@@ -93,7 +97,7 @@ class OrchestrationError(ValueError):
         ValueError.__init__(self, json.dumps({"code": self.code, "diagnostics": [dict(row) for row in self.diagnostics]}, ensure_ascii=False, separators=(",", ":")))
 
     def __setattr__(self, name: str, value: object) -> None:
-        if hasattr(self, "code"):
+        if name not in _EXCEPTION_SLOTS and hasattr(self, "code"):
             raise AttributeError("OrchestrationError is immutable")
         object.__setattr__(self, name, value)
 

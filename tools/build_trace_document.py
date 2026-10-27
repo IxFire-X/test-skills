@@ -19,6 +19,10 @@ RUN_SCHEMA = ROOT / "schemas" / "run-tests-output.schema.json"
 from tools.json_cli import JsonArgumentParser
 
 
+# FaT-9b fix: contextlib (closure_cache) sets __traceback__ on the way out; the error's own fields stay immutable.
+_EXCEPTION_SLOTS = frozenset({"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"})
+
+
 class _TraceArgumentParser(JsonArgumentParser):
     """Emit one value-redacting JSON object for every CLI argument error."""
 
@@ -48,7 +52,7 @@ class TraceBuildError(ValueError):
         return self._diagnostics
 
     def __setattr__(self, name: str, value: object) -> None:
-        if hasattr(self, "_diagnostics"):
+        if name not in _EXCEPTION_SLOTS and hasattr(self, "_diagnostics"):
             raise AttributeError("TraceBuildError is immutable")
         object.__setattr__(self, name, value)
 
