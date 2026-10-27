@@ -248,6 +248,45 @@ def render_test_design(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def expectation_summary(document: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-Q: hints on vague expectations of the cases by ID only, on any document."""
+    from tools.test_design_hints import capped, expectation_hints
+
+    hints = expectation_hints(document)
+    counts: dict[str, int] = {}
+    for hint in hints:
+        counts[hint["code"]] = counts.get(hint["code"], 0) + 1
+    return {"hints": counts, "gaps": capped(hints)}
+
+
+def render_expectations(summary: Mapping[str, Any]) -> str:
+    lines = ["## Ожидания кейсов", "", "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет")]
+    lines += [f"  - {gap['code']} {gap.get('case_id', '')} {gap.get('step_id', '')} {gap['detail']}".rstrip() for gap in summary["gaps"]]
+    return "\n".join(lines)
+
+
+def automation_artifact(root: Path, events: Sequence[Mapping[str, Any]]) -> Any:
+    """The newest ``tc-to-autotest`` answer of the run, by its journal digest."""
+    response = next((event for event in reversed(events) if event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                     and str(event.get("stage_instance_id")).startswith("tc-to-autotest:")), None)
+    return _json_at(root, response.get("artifact_digest")) if response else None
+
+
+def autotest_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-Q: weak assertions of the generated tests — file ID, line, rule and ASSERT ID, never the code."""
+    from tools.autotest_hints import autotest_hints, capped_autotest_hints, counts
+
+    hints = autotest_hints(artifact)
+    return {"hints": counts(hints), "gaps": capped_autotest_hints(hints)}
+
+
+def render_autotest_assertions(summary: Mapping[str, Any]) -> str:
+    lines = ["## Слабые утверждения автотестов", "", "- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет")]
+    lines += [f"  - {gap['code']} {gap['detail']}" if "file_id" not in gap else
+              f"  - {gap['code']} {gap['file_id']}:{gap['line']} {gap['rule']} {gap.get('assertion_id', '')}".rstrip() for gap in summary["gaps"]]
+    return "\n".join(lines)
+
+
 def _zephyr_import(root: Path) -> Any:
     """FaT-7: only the template path and digest of the import CSV, never its values."""
     try:
@@ -304,6 +343,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     document = case_document(root, attempt_id) or (_json_at(root, candidate.get("artifact_digest")) if candidate else None)
     if isinstance(document, Mapping) and isinstance(document.get("test_cases"), list):
         cases = len(document["test_cases"])
+    automation = automation_artifact(root, events)
 
     if terminal.get("review_independence") == "SELF":
         review = "ревью в той же сессии (SELF), принято по согласию человека"
@@ -336,6 +376,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
         "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,
+        "expectations": expectation_summary(document) if isinstance(document, Mapping) else None,
+        "autotest_assertions": autotest_summary(automation) if isinstance(automation, Mapping) else None,
         "environment": {"python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }
@@ -379,6 +421,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     ]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]
+    if report.get("expectations"):
+        lines += [render_expectations(report["expectations"]), ""]
+    if report.get("autotest_assertions"):
+        lines += [render_autotest_assertions(report["autotest_assertions"]), ""]
     if report["quarantine"] or report["quarantine_unresolved"]:
         lines += ["## Карантин", "", *(f"- {row['file']} :: {row['method']} ({row['ref']})" for row in report["quarantine"])]
         lines += [f"- {report['quarantine_unresolved']}"] if report["quarantine_unresolved"] else []

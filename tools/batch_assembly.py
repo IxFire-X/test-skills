@@ -13,7 +13,7 @@ from typing import Any
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import loads_json_strict, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
-from tools.test_design_hints import capped, design_hints
+from tools.test_design_hints import capped, code_hints
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -328,8 +328,8 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     for case in document["test_cases"]:
         fingerprints[_case_fingerprint(case)].append(case["case_id"])
     warnings = [{"code": "POSSIBLE_DUPLICATE", "fingerprint": fingerprint, "case_ids": sorted(case_ids)} for fingerprint, case_ids in sorted(fingerprints.items()) if len(case_ids) > 1]
-    # FaT-TD: test-design hints for the reviewer; none on a document without the new fields, so its bytes stay.
-    warnings += capped(design_hints(document))
+    # FaT-TD/FaT-Q: code hints for the reviewer; none on a document without the new fields and vague expectations, so its bytes stay.
+    warnings += capped(code_hints(document))
     receipt = _with_digest({
         "schema_version": "1.0.0", "plan_digest": plan["digest"], "header_digest": plan["header_digest"],
         "fragment_digests": [{"batch_id": fragment["batch_id"], "digest": _digest(fragment)} for fragment in ordered],

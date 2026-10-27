@@ -25,6 +25,9 @@ criterion before execution: describe the observable system result, never «Пр�
 автотестом» or «проверка пройдена». Runtime PASS/FAIL belongs in the execution report.
 One supported action with its meaningful oracle is sufficient; do not add steps or ID
 transfer to satisfy a length heuristic.
+Отказ = что именно наблюдается: поле или код ошибки, класс исключения, статус, данные не изменились;
+один флаг исхода (`failed=true`) — не оракул. Данные — из требований, не придумывать.
+Не утверждать поведение, которого нет в документе: такое ожидание — пробел, а не assertion.
 
 For each product-behavior requirement, cover all distinct supported behavior classes, not merely
 one happy-path case. Consider success, invalid input, relevant boundaries, authorization,
