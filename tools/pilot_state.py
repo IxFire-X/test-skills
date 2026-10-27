@@ -747,12 +747,20 @@ def create_run(project: Path, policy_profile: str, authorization: Mapping[str, A
     return _create_run(project, policy_profile, authorization, None)
 
 
+def create_scan_run(project: Path, policy_profile: str, authorization: Mapping[str, Any], scan_request: Mapping[str, Any],
+                    skipped: Mapping[str, str] | None = None) -> Mapping[str, Any]:
+    """FaT-G: the run of a scan — its flags as given go to the manifest (``scan_request``); lowered when ``skipped``."""
+    downgrade = None if skipped is None else {"requested_policy_profile": "local-pilot-v1", **skipped}
+    return _create_run(project, "cases-only-v1" if skipped is not None else policy_profile, authorization, downgrade, scan_request)
+
+
 def create_lowered_run(project: Path, authorization: Mapping[str, Any], skipped: Mapping[str, str]) -> Mapping[str, Any]:
     """FaT-R: a local-pilot request whose build is not ready runs as cases-only-v1; the manifest keeps both profiles."""
     return _create_run(project, "cases-only-v1", authorization, {"requested_policy_profile": "local-pilot-v1", **skipped})
 
 
-def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, Any], downgrade: Mapping[str, Any] | None) -> Mapping[str, Any]:
+def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, Any], downgrade: Mapping[str, Any] | None,
+                scan_request: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
     safe_auth = _validate_authorization(policy_profile, authorization)
     root_project = _project_root(project)
     project_state = _project_state_snapshot(root_project)
@@ -783,6 +791,9 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         if downgrade is not None:
             manifest_data["requested_policy_profile"] = str(downgrade["requested_policy_profile"])
             manifest_data["execution_skipped"] = {"reason": str(downgrade["reason"]), "fix": str(downgrade["fix"])}
+        if scan_request is not None:
+            # FaT-G: the scan's own flags as given — to compare a repeated scan and to print the next scan; absent before FaT-G.
+            manifest_data["scan_request"] = dict(scan_request)
         manifest = _publish(root_project, root, root / "run-manifest.json", manifest_data, "run manifest")
         _append_event(root_project, root, "RUN_CREATED", actor="controller", attempt_id=None, batch_id=None, artifact_digest=manifest["digest"])
         return {"run_root": str(root), "manifest": manifest, "authorization": receipt}

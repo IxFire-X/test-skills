@@ -59,11 +59,18 @@ def _reviewer_protocol_inputs(
     inventory = read_inventory_receipt(
         run_root / "inventories" / (baseline["inventory_digest"].removeprefix("sha256:") + ".json")
     )
-    context = publish_context_selection(
-        run_root,
-        attempt_id,
-        select_context_batches(inventory, Path(attempt["project"]), [], byte_budget=64 * 1024)[0]["receipt"],
-    )
+    scanned = [row["artifact_digest"] for row in derive_state(run_root)["events"]
+               if row["event_type"] == "CONTEXT_SELECTED" and row.get("attempt_id") == attempt_id]
+    if len(scanned) == 1:  # FaT-G: an attempt made by a real scan already selected its one context batch
+        from tools.pilot_state import read_context_selection
+
+        context = read_context_selection(run_root, attempt_id, scanned[0])
+    else:
+        context = publish_context_selection(
+            run_root,
+            attempt_id,
+            select_context_batches(inventory, Path(attempt["project"]), [], byte_budget=64 * 1024)[0]["receipt"],
+        )
 
     marker = {
         "schema_version": "5.0.0", "stage": "context-marker",

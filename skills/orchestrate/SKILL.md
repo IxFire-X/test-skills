@@ -107,7 +107,9 @@ pipeline в этом run. Наличие папки, scan или запрос te
 
 До scan и первого model call вызови durable Phase 1 boundary: создай
 `run-authorization-receipt.json`, `run-manifest.json`, readback-проверь оба и запиши
-`RUN_CREATED`. State хранится под `<project>/.pilot-runs/<run_id>/`. Не создавай clone,
+`RUN_CREATED`. State хранится под `<project>/.pilot-runs/<run_id>/`; `run_id` — последняя строка вывода scan.
+Если scan ответил `SCAN_RUN_IN_PROGRESS`, у этого запроса уже есть незавершённый прогон: продолжи его по `fix`
+(`status`), а `--new-run` — только если человек просит ещё один прогон рядом. Не создавай clone,
 worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
 
 ## 2. Выбери exact module и заморозь baseline
@@ -151,7 +153,7 @@ reviewer. Это техническое доказательство, не но�
    `ATTEMPT_CREATED`, затем создай один nonterminal attempt.
 
 Поздно найденный undeclared execution input не добавляй в baseline. Закрой branch как
-`NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение возможно только через child attempt.
+`NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение — новый scan того же запроса.
 Run остаётся связан с исходной project/module identity.
 
 До завершения анализа сопоставь проверяемые точки входа, реализацию, helpers,
@@ -341,7 +343,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 `python -m tools.run_pipeline report --project <abs> --run <id>`: он пишет в каталог run `report.md`,
 `report.json` и `questions-for-analyst.md` без кода и текста спеки — назови человеку эти пути.
 
-## Resume и child attempts
+## Resume и дрейф
 
 Если контекст сессии занят больше чем наполовину, после завершённого шага попроси человека
 сделать `/clear` (или открыть новую сессию) и написать «продолжай test-skills <run_id>». Затем
@@ -351,9 +353,11 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 
 `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages остаются
 nonterminal. Продолжай их в новой CLI session только после snapshot/config validation.
-Requirements/module/policy drift создаёт child attempt. Terminal attempt immutable.
-Execution retry требует доказанной остановки прежнего process scope и explicit child
-attempt; одновременно active может быть только один.
+После scan файлы проекта и `.skillsrc` не меняются до закрытия попытки. Если `status` показал `drift`,
+передай человеку пути из `drift.changed` и `drift.fix` как есть: вернуть файлы или начать новый прогон
+командой `drift.command`; сам файлы не правь и прогон не начинай. После `finish` с `next_run`
+(ТРЕБУЕТ ДОРАБОТКИ, отказ автоматизации) следующий заход — команда `next_run.command` как есть.
+Terminal attempt immutable; одновременно active может быть только один.
 
 ## Stop conditions
 

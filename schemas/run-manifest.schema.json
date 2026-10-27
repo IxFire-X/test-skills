@@ -10,6 +10,13 @@
     "project": {"type": "string", "minLength": 1},
     "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
     "authorization_digest": {"$ref": "#/$defs/digest"}, "requested_policy_profile": {"const": "local-pilot-v1", "description": "FaT-R: the profile asked for when the run was lowered to cases-only-v1 because the build was not ready"}, "execution_skipped": {"type": "object", "additionalProperties": false, "required": ["reason", "fix"], "properties": {"reason": {"type": "string", "minLength": 1}, "fix": {"type": "string", "minLength": 1}}},
+    "scan_request": {"type": "object", "additionalProperties": false, "description": "FaT-G: the scan flags as given, to refuse a repeated scan and to print the next scan",
+      "required": ["module", "docs", "target", "profile", "accept_self_review", "disposition_policy"],
+      "properties": {
+        "module": {"type": ["string", "null"], "minLength": 1}, "docs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "target": {"type": ["string", "null"], "minLength": 1}, "profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
+        "accept_self_review": {"type": "boolean"}, "disposition_policy": {"enum": ["quarantine", "cleanup", null]}
+      }},
     "project_state": {
       "oneOf": [
         {"type": "null"},

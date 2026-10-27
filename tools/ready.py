@@ -457,6 +457,8 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 for blocker in _baseline_blockers(project, selected):
                     rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "WARN",
                                      f"{blocker['file']}: {blocker['reason']}; прогон пойдёт как cases-only-v1", blocker["fix"]))
+    rows.append(_row("run:freeze", CASES, "OK", "после scan не меняйте файлы проекта и .skillsrc до finish или exec: иначе exec "
+                     "остановится на дрейфе и предложит вернуть файлы или начать новый scan"))
     # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
                      "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",

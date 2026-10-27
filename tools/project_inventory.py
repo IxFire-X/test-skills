@@ -1054,7 +1054,8 @@ def validate_execution_baseline(
         if runtime_identity_value is None:
             return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
         if runtime_identity_value != baseline.get(identity_key):
-            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
+            runtime = baseline.get("interpreter_path") or baseline.get("executable_path") or baseline.get("wrapper_path")
+            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True, "changed": [str(runtime)] if runtime else []}
     late_ids = list(late_dependency_file_ids)
     if late_ids:
         try:
@@ -1063,20 +1064,29 @@ def validate_execution_baseline(
             pass
         return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
     index = _inventory_index(inventory)
-    if {item.get("opaque_id") for item in baseline.get("inputs", [])} != set(index):
-        return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
-    for item in baseline.get("inputs", []):
-        current = index.get(item.get("opaque_id"))
-        if current is None or current.get("content_digest") != item.get("content_digest"):
-            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
+    changed = _changed_input_paths(baseline, index)
+    if changed:
+        return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True, "changed": changed}
     if baseline.get("secret_inputs"):
         # FaT-S: the secret inputs are compared by fingerprint only; the result names neither bytes nor digests.
         if project_root is None:
             return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
         current_secrets, unreadable = _secret_execution_inputs(Path(project_root), inventory)
         if unreadable or current_secrets != baseline["secret_inputs"]:
-            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
+            before = {row["project_path"]: row for row in baseline["secret_inputs"]}
+            after = {row["project_path"]: row for row in current_secrets}
+            changed = sorted({*unreadable, *(path for path in {*before, *after} if before.get(path) != after.get(path))})
+            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True, "changed": changed}
     return {"status": "UNCHANGED", "requires_child_attempt": False}
+
+
+def _changed_input_paths(baseline: Mapping[str, Any], index: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """FaT-G: the project paths added, removed or changed since the baseline — paths only, never bytes or digests."""
+    frozen = {item.get("opaque_id"): item for item in baseline.get("inputs", [])}
+    changed = {str(item.get("project_path")) for opaque, item in frozen.items()
+               if opaque not in index or index[opaque].get("content_digest") != item.get("content_digest")}
+    changed |= {str(item.get("project_path")) for opaque, item in index.items() if opaque not in frozen}
+    return sorted(changed)
 
 
 def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any]) -> list[Path]:

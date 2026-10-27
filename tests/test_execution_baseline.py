@@ -184,7 +184,7 @@ def test_nested_maven_baseline_binds_root_skillsrc_and_detects_drift(tmp_path: P
         frozen, build_inventory(project, module),
         runtime_identity_value=runtime_identity(module, "mvnw"),
     ) == {
-        "status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True,
+        "status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True, "changed": ["parent/child/src.py"],
     }
     (module / "late_dependency.py").write_text("LATE = 1\n", encoding="utf-8")
     latest = build_inventory(project, module)

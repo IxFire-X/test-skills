@@ -81,7 +81,7 @@ def test_status_preserves_requirement_gaps_and_reports_stale_evidence_without_wr
     status = _durable_status(tmp_path, root, stage="status")
     assert status["stop_reason"] == "EVIDENCE_UNVERIFIED"
     assert status["evidence_errors"] and status["warnings"] == []
-    assert status["next_expected_artifact"] == "validated inputs or child attempt"
+    assert status["next_expected_artifact"] == "validated inputs or new scan"
     assert _tree(root) == before
 
 

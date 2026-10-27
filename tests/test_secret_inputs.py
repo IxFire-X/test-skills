@@ -87,7 +87,7 @@ def test_the_drift_stop_names_no_secret_and_no_digest(tmp_path: Path) -> None:
     import inspect
 
     source = inspect.getsource(run_pipeline._revalidate_execution_baseline)
-    assert '"frozen execution baseline changed; use a child attempt"' in source
+    assert "child attempt" not in source and "_drift_report" in source  # FaT-G: the stop names paths only
     assert "secret_inputs" not in source and "content_digest" not in source
 
 

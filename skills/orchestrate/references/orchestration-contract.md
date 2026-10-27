@@ -157,9 +157,9 @@ finalization в PASS-подобный плоский status.
 ## Resume
 
 Waiting/model interruption продолжает тот же attempt только после validation frozen
-snapshot/config. Requirements/module/policy drift создаёт child attempt. Late undeclared
+snapshot/config. Requirements/module/policy drift останавливает attempt: status называет изменённые пути, выход — вернуть файлы или новый scan. Late undeclared
 execution input закрывает текущий attempt как `NOT_RUNNABLE/BASELINE_INCOMPLETE`.
-Execution interruption даёт `UNKNOWN`; retry — только explicit child attempt после
+Execution interruption даёт `UNKNOWN`; retry — только новый scan после
 доказанной остановки прежнего process scope.
 
 ## Release claim

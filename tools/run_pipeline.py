@@ -15,7 +15,7 @@ import json
 import os
 import re
 import uuid
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from tools.json_cli import JsonArgumentParser
 from tools.project_inventory import (
@@ -41,7 +41,11 @@ class HostStop(RuntimeError):
         self.fix = fix
 
 
+_PRINTED: list[dict[str, Any]] = []
+
+
 def _print(payload: dict[str, Any]) -> None:
+    _PRINTED[:] = [payload]
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
@@ -99,7 +103,7 @@ _NEXT_STEPS = (
     ("disposition", "closure", "диспозиции и финализация", "6"),
     ("finalization", "closure", "линейное закрытие и финализация", "6"),
     ("terminal", "closure", "терминальный результат", "6"),
-    ("validated inputs or child attempt", "resume", "проверить входы или начать дочернюю попытку", "Resume и child attempts"),
+    ("validated inputs or new scan", "resume", "файлы проекта изменились после scan: верните их или начните новый прогон (status: drift)", "Resume и дрейф"),
 )
 
 
@@ -315,7 +319,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
         ("execution-inputs", "materialization"), ("generated-delta", "execution receipt"),
         ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
-        ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or child attempt"),
+        ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or new scan"),
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
         if not path.exists():
@@ -356,7 +360,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
     if result["evidence_errors"]:
-        result.update(stop_reason="EVIDENCE_UNVERIFIED", next_expected_artifact="validated inputs or child attempt")
+        result.update(stop_reason="EVIDENCE_UNVERIFIED", next_expected_artifact="validated inputs or new scan")
     elif attempt["state"] == "WAITING_FOR_INPUT" and result["stop_reason"] is None:
         result["stop_detail"] = "WAITING_FOR_INPUT has no persisted cause; consult the originating request."
     return result
@@ -445,7 +449,7 @@ def _scan_disposition_policy(project: Path, args: Any) -> str | None:
     return "cleanup" if document.get("disposition_policy") == "cleanup" else None
 
 
-def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dict[str, Any]]:
+def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any] | None = None) -> tuple[Mapping[str, Any], dict[str, Any]]:
     from tools.init_skillsrc import ensure_skillsrc
     from tools.pilot_state import create_lowered_run, create_run
 
@@ -460,7 +464,12 @@ def _init_skillsrc_run(project: Path, args: Any) -> tuple[Mapping[str, Any], dic
         authorization["accept_self_review"] = True
     if _scan_disposition_policy(project, args) == "cleanup":
         authorization["disposition_policy"] = "cleanup"
-    run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
+    if scan_request is not None:
+        from tools.pilot_state import create_scan_run
+
+        run = create_scan_run(project, profile, authorization, scan_request, skipped)
+    else:
+        run = create_run(project, profile, authorization) if skipped is None else create_lowered_run(project, authorization, skipped)
     if (project / ".skillsrc").is_file():
         _read_skillsrc_binding(project / ".skillsrc")
         receipt = {"status": "unchanged"}
@@ -637,9 +646,200 @@ def _scan_execution_baseline(
     )
 
 
+def _scan_request(args: Any) -> dict[str, Any]:
+    """FaT-G: the scan flags as given (the requested profile before any lowering) — kept in the run manifest."""
+    return {
+        "module": getattr(args, "module", None), "docs": [str(doc) for doc in (getattr(args, "docs", None) or [])],
+        "target": getattr(args, "target", None), "profile": getattr(args, "profile", "local-pilot-v1"),
+        "accept_self_review": bool(getattr(args, "accept_self_review", False)),
+        "disposition_policy": getattr(args, "disposition_policy", None),
+    }
+
+
+def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The same request: the module (resolved by .skillsrc when not given), the --docs paths and the requested profile."""
+    module = request.get("module")
+    if module is None:
+        try:
+            from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc
+
+            modules = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]
+            module = modules[0].get("id") if len(modules) == 1 else None
+        except Exception:  # an unreadable .skillsrc: the scan itself will say so
+            module = None
+    docs = []
+    for raw in request.get("docs") or []:
+        path = Path(str(raw))
+        try:
+            docs.append((path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix())
+        except (OSError, ValueError):
+            docs.append(str(raw).replace("\\", "/"))
+    return module, tuple(sorted(docs)), request.get("profile")
+
+
+def _open_run_of(project: Path, request: Mapping[str, Any]) -> Path | None:
+    """FaT-G: an unfinished run of the same request — its scan selected the context (CONTEXT_SELECTED) and its last
+    attempt has no ATTEMPT_TERMINAL.  A run whose scan failed earlier never blocks; runs without ``scan_request``
+    (created before FaT-G) are never compared."""
+    from tools import pilot_state as pilot
+
+    runs = project / ".pilot-runs"
+    if not runs.is_dir():
+        return None
+    key = _request_key(project, request)
+    for root in sorted(path for path in runs.iterdir() if path.is_dir()):
+        try:
+            stored = pilot.read_run(root)["manifest"].get("scan_request")
+            if not isinstance(stored, Mapping) or _request_key(project, stored) != key:
+                continue
+            state = pilot.derive_state(root)
+            if not state["attempts"]:
+                continue
+            attempt = state["attempts"][-1]
+            selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
+                           for event in state["events"])
+            if selected and attempt.get("state") != "TERMINAL":
+                return root
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _run_in_progress(project: Path, root: Path) -> dict[str, Any]:
+    python = f'"{sys.executable}" -m tools.run_pipeline'
+    try:
+        next_step = _durable_status(project, root, stage="status").get("next_step")
+    except (HostStop, OSError, KeyError, TypeError, ValueError):
+        next_step = None
+    return {
+        "status": "error", "stage": "scan", "reason": "SCAN_RUN_IN_PROGRESS", "run_id": root.name, "run_root": str(root),
+        "next_step": next_step,
+        "message": "для этого проекта, документа и профиля уже есть незавершённый прогон; новый не создан",
+        "fix": (f'продолжите его: {python} status --project "{project}" --run {root.name}; '
+                f'закрыть его без продолжения: {python} finish --project "{project}" --run {root.name}; '
+                "нужен ещё один прогон рядом — повторите этот scan с флагом --new-run"),
+    }
+
+
+def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
+    """FaT-G: the scan of the same request, its flags as given — printed for the human; the code never runs it."""
+    parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"']
+    if request.get("module"):
+        parts.append(f'--module "{request["module"]}"')
+    parts += [f'--docs "{doc}"' for doc in request.get("docs") or []]
+    if request.get("target"):
+        parts.append(f'--target "{request["target"]}"')
+    parts.append(f"--profile {request.get('profile') or 'local-pilot-v1'}")
+    if request.get("accept_self_review"):
+        parts.append("--accept-self-review")
+    if request.get("disposition_policy"):
+        parts.append(f"--disposition-policy {request['disposition_policy']}")
+    return " ".join([*parts, *extra])
+
+
+def _drift_report(project: Path, manifest: Mapping[str, Any], changed: Sequence[str]) -> dict[str, Any]:
+    """FaT-G: the changed paths (never bytes) and the two real ways out."""
+    request = manifest.get("scan_request")
+    command = _scan_command(project, request, extra=("--new-run",)) if isinstance(request, Mapping) else None
+    fix = ("верните эти файлы к состоянию на момент scan — тогда прогон продолжится; или начните новый прогон: "
+           + (command or "scan с теми же --module, --docs, --profile и флагом --new-run"))
+    return {"changed": list(changed), "fix": fix, **({"command": command} if command else {})}
+
+
+_SECOND_PASS = {
+    "REWORK": "ревью вернуло кейсы на доработку: следующий заход — новый scan того же запроса",
+    "AUTOMATION_REJECTED": "автоматизация отклонена ревью: следующий заход — новый scan того же запроса",
+    "AUTOMATION_BLOCKED": "автоматизация заблокирована: следующий заход — новый scan того же запроса",
+}
+
+
+def _next_run(project: Path, manifest: Mapping[str, Any], reason_code: Any) -> dict[str, Any]:
+    """FaT-G: after a closed negative outcome, the scan command of the same request — printed, never run here."""
+    request = manifest.get("scan_request")
+    if reason_code not in _SECOND_PASS or not isinstance(request, Mapping):
+        return {}
+    return {"next_run": {"why": _SECOND_PASS[str(reason_code)], "command": _scan_command(project, request)}}
+
+
+def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], module_root: Path, request: Any = None) -> Mapping[str, Any]:
+    """FaT-G: the one baseline check of exec (with its request) and status (from the baseline alone); only reads."""
+    from tools.project_inventory import (
+        baseline_external_input_paths,
+        build_inventory,
+        read_execution_baseline,
+        runtime_identity,
+        validate_execution_baseline,
+    )
+    from tools.pilot_state import read_attempt_receipt
+
+    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    try:
+        durable_delta = read_attempt_receipt(root, str(attempt["attempt_id"]), "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
+    except (KeyError, OSError, TypeError, ValueError):
+        if request is not None:
+            raise
+        durable_delta = {"files": []}
+    module_prefix = "" if attempt["module"] == "." else str(attempt["module"]).rstrip("/") + "/"
+    generated_paths = {module_prefix + str(row["path"]) for row in durable_delta["files"] if isinstance(row, Mapping)}
+    current = build_inventory(
+        project, module_root, skill_pack_root=ROOT, generated_roots=(root.parent,),
+        proved_dependency_files=baseline_external_input_paths(project, baseline),
+    )
+    current["files"] = [row for row in current["files"] if row.get("project_path") not in generated_paths]
+    body = {key: value for key, value in current.items() if key != "digest"}
+    current["digest"] = "sha256:" + hashlib.sha256(
+        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if request is not None:
+        # exec: always against local-pilot-v1 with the runtime identity, as before FaT-G — never the baseline's own profile
+        policy, adapter_id, build_profile, parameters = "local-pilot-v1", request.adapter_id, request.build_profile, dict(request.typed_parameters)
+        executable = request.executable if request.adapter_id == "maven:selected-symbols-v1" else None
+    else:
+        # status: the baseline's own profile, so that a cases-only attempt also names its changed files
+        policy, adapter_id, build_profile = str(baseline.get("policy_profile")), baseline.get("adapter_id"), baseline.get("build_profile")
+        parameters = baseline.get("adapter_parameters") if policy == "local-pilot-v1" else None
+        executable = baseline.get("executable_path") if adapter_id == "maven:selected-symbols-v1" else None
+    identity = runtime_identity(
+        module_root, executable or str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
+        adapter_id=baseline.get("adapter_id"),
+    ) if policy == "local-pilot-v1" else None
+    return validate_execution_baseline(
+        baseline, current, requirements=baseline["requirements"], adapter_id=adapter_id, build_profile=build_profile,
+        adapter_parameters=parameters, runtime_identity_value=identity, policy_profile=policy, project_root=project,
+    )
+
+
+def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attempt: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-G: status of an open attempt names the files changed since the scan — the same check as exec."""
+    module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
+    try:
+        result = _baseline_check(project, root, attempt, module_root)
+    except Exception:  # an unreadable baseline is the status's own evidence error, not a drift
+        return {}
+    if result.get("status") == "UNCHANGED":
+        return {}
+    return {"drift": _drift_report(project, manifest, result.get("changed") or [])}
+
+
 def cmd_scan(args: Any) -> int:
+    """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
+    _PRINTED.clear()
+    code = _scan(args)
+    run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
+    if run_id:
+        print(f"run_id: {run_id}")
+    return code
+
+
+def _scan(args: Any) -> int:
     project = Path(args.project).resolve()
-    run, receipt = _init_skillsrc_run(project, args)
+    request = _scan_request(args)
+    if not getattr(args, "new_run", False):
+        open_root = _open_run_of(project, request)
+        if open_root is not None:
+            _print(_run_in_progress(project, open_root))
+            return 2
+    run, receipt = _init_skillsrc_run(project, args, request)
     run_root = Path(str(run["run_root"]))
     stopped = _skillsrc_receipt_exit(project, run_root, receipt)
     if stopped is not None:
@@ -870,50 +1070,20 @@ def _validated_execution_coordinates(project: Path, run_id: str) -> dict[str, An
 
 
 def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any) -> None:
-    """Reject any non-delta baseline drift before the execution-start gate."""
-    from tools.project_inventory import (
-        InventoryError,
-        baseline_external_input_paths,
-        build_inventory,
-        read_execution_baseline,
-        runtime_identity,
-        validate_execution_baseline,
-    )
-    from tools.pilot_state import read_attempt_receipt
+    """Reject any non-delta baseline drift before the execution-start gate; the stop names the changed paths (FaT-G)."""
+    from tools.project_inventory import InventoryError
 
     try:
         project = Path(str(coordinates["manifest"]["project"])).resolve()
         root, attempt, module_root = Path(coordinates["run_root"]), coordinates["attempt"], Path(coordinates["module_root"])
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
-        durable_delta = read_attempt_receipt(root, str(attempt["attempt_id"]), "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
-        module_prefix = "" if attempt["module"] == "." else str(attempt["module"]).rstrip("/") + "/"
-        generated_paths = {module_prefix + str(row["path"]) for row in durable_delta["files"] if isinstance(row, Mapping)}
-        current = build_inventory(
-            project, module_root, skill_pack_root=ROOT, generated_roots=(root.parent,),
-            proved_dependency_files=baseline_external_input_paths(project, baseline),
-        )
-        current["files"] = [row for row in current["files"] if row.get("project_path") not in generated_paths]
-        body = {key: value for key, value in current.items() if key != "digest"}
-        current["digest"] = "sha256:" + hashlib.sha256(
-            json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest()
-        result = validate_execution_baseline(
-            baseline,
-            current,
-            requirements=baseline["requirements"],
-            adapter_id=request.adapter_id,
-            build_profile=request.build_profile,
-            adapter_parameters=dict(request.typed_parameters),
-            runtime_identity_value=runtime_identity(
-                module_root, request.executable if request.adapter_id == "maven:selected-symbols-v1" else str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
-                adapter_id=baseline.get("adapter_id"),
-            ),
-            project_root=project,
-        )
+        result = _baseline_check(project, root, attempt, module_root, request)
     except (InventoryError, KeyError, TypeError, ValueError, OSError) as error:
         raise HostStop("BASELINE_INCOMPLETE", "execution baseline is unreadable or incomplete") from error
     if result.get("status") != "UNCHANGED":
-        raise HostStop(str(result.get("reason_code") or "BASELINE_DRIFT"), "frozen execution baseline changed; use a child attempt")
+        report = _drift_report(project, coordinates["manifest"], result.get("changed") or [])
+        changed = ", ".join(report["changed"]) or "входы baseline"
+        raise HostStop(str(result.get("reason_code") or "BASELINE_DRIFT"),
+                       f"файлы проекта изменились после scan: {changed}; {report['fix']}", report["fix"])
 
 
 def _reconstruct_started_request(
@@ -1743,9 +1913,13 @@ def cmd_finish(args: Any) -> int:
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
         **_quarantine_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),
-        **({"fix": "повтори scan с теми же --module, --docs и --profile, что у этого прогона, и добавь --accept-self-review"
-                   " — только если человек согласен на ревью в той же сессии"}
+        **({"fix": "только если человек согласен на ревью в той же сессии, повтори scan этого запроса с --accept-self-review: "
+                   + (_scan_command(project, manifest["scan_request"], extra=() if manifest["scan_request"].get("accept_self_review")
+                                    else ("--accept-self-review",))
+                      if isinstance(manifest.get("scan_request"), Mapping)
+                      else "scan с теми же --module, --docs и --profile, что у этого прогона, и --accept-self-review")}
            if result.get("reason_code") == "INDEPENDENCE_UNVERIFIED" else {}),
+        **_next_run(project, manifest, result.get("reason_code")),
     })
     return int(closed["exit_code"])
 
@@ -1764,8 +1938,19 @@ def cmd_report(args: Any) -> int:
 
 def cmd_status(args: Any) -> int:
     project = Path(args.project).resolve()
-    root, _run, _state = _read_run_coordinate(project, args.run)
-    _print(_durable_status(project, root, stage="status"))
+    root, run, state = _read_run_coordinate(project, args.run)
+    result = _durable_status(project, root, stage="status")
+    attempt = state["attempts"][-1] if state["attempts"] else None
+    if attempt is not None and attempt.get("state") == "TERMINAL":
+        from tools.pilot_state import read_terminal_result
+
+        try:
+            result.update(_next_run(project, run["manifest"], read_terminal_result(root, str(attempt["attempt_id"])).get("reason_code")))
+        except (KeyError, OSError, TypeError, ValueError):
+            pass
+    elif attempt is not None:
+        result.update(_status_drift(project, root, run["manifest"], attempt))
+    _print(result)
     return 0
 
 
@@ -1922,6 +2107,8 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     scan_parser.add_argument("--accept-self-review", action="store_true",
                              help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
+    scan_parser.add_argument("--new-run", action="store_true",
+                             help="FaT-G: start a new run although an unfinished run of the same request exists.")
     scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
                              help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
     status_parser = sub.add_parser("status", parents=[shared])
