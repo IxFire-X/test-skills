@@ -130,7 +130,9 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 `--run <run_id> --stage context-marker` оценивает вход шага (байты и токены при 0,24 ток/Б) до
 вызова модели. Не влезает — предупреждение `STEP_OVER_BUDGET` с советом сузить контекст, не стоп
 (код 0). С `--run` шаг (`--step`) и байты пишутся в `step-sizes.jsonl` прогона; `run_pipeline report`
-показывает их и предупреждение.
+показывает их и предупреждение. Ответ каждого вызова модели тоже меряется: `output_bytes` в результате
+публикации и в отчёте; больше `limits.step_output_warn_bytes` (по умолчанию 128 000 Б) — предупреждение
+`STEP_OUTPUT_LARGE`, только замер, деление на пачки выключено.
 
 **Вид для ревью.** Ревьюер читает не полный канон, а компактный вид:
 `python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет

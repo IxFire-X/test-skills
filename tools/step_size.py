@@ -8,6 +8,8 @@ else 500 000 bytes: the window is shared with the session history.  Prints
 ``{bytes, tokens_est, budget_bytes, fits, warning, hint, recorded, …}``.  FaT-RV: a step over the budget is the warning
 ``STEP_OVER_BUDGET`` with the hint, not a stop (exit 0).  With ``--run`` the measurement — the step (``--step``, else
 the stage or the role), sizes and the code, no file paths — is appended to ``<run>/step-sizes.jsonl`` for the report.
+FaT-O: ``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_output_warn_bytes`` (default
+``DEFAULT_OUTPUT_WARN``) is the warning ``STEP_OUTPUT_LARGE``; only a measurement, nothing is split or rewritten.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
 OVER_BUDGET = "STEP_OVER_BUDGET"
 RECORD = "step-sizes.jsonl"
+OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
+DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real output limit of the work model is not known yet
 TOKENS_PER_BYTE = 0.24
 _STAGE_ROLES = {"context-marker": "context-marker"}
 
@@ -34,6 +38,21 @@ def step_budget(project: Path) -> int:
 
     value = (load_skillsrc(path).get("limits") or {}).get("step_input_bytes")
     return int(value) if isinstance(value, int) and value > 0 else DEFAULT_BUDGET
+
+
+def output_warning(project: Path, byte_count: int) -> str | None:
+    """FaT-O: ``STEP_OUTPUT_LARGE`` when one model answer is over the output warning threshold, else ``None``."""
+    limit = DEFAULT_OUTPUT_WARN
+    path = Path(project) / ".skillsrc"
+    try:  # called after the answer is published: an unreadable .skillsrc must not fail the step, the default applies
+        if path.is_file():
+            from tools.skillsrc_manifest import load_skillsrc
+
+            value = (load_skillsrc(path).get("limits") or {}).get("step_output_warn_bytes")
+            limit = int(value) if isinstance(value, int) and value > 0 else DEFAULT_OUTPUT_WARN
+    except (OSError, ValueError):  # SkillsrcError is a ValueError
+        limit = DEFAULT_OUTPUT_WARN
+    return OUTPUT_LARGE if byte_count > limit else None
 
 
 def role_files(role: str) -> list[Path]:

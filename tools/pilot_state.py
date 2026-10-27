@@ -2069,7 +2069,12 @@ def publish_model_stage_artifact(
             stage_instance_id=stage_instance_id,
             artifact_digest=content_digest,
         )
-    return read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest)
+    published = dict(read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest))
+    # FaT-O: the answer size of every call, and a warning (never a stop) when it is large
+    from tools.step_size import output_warning
+
+    published.update(output_bytes=published["byte_count"], warning=output_warning(project, published["byte_count"]))
+    return published
 
 
 def _read_model_stage_artifact_with_state(

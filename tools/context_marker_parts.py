@@ -111,7 +111,9 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
               responses[stages[0]], *dict.fromkeys(responses[stage] for stage in stages[1:])]
     pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id=MERGE_MODEL_ID,
                                       invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)
-    return pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merge_marker_artifacts(answer, parts))
+    published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merge_marker_artifacts(answer, parts)))
+    published["warning"] = None  # FaT-O: the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
+    return published
 
 
 def main(argv: list[str] | None = None) -> int:

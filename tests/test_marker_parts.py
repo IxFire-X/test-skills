@@ -61,7 +61,8 @@ def _publish_part(root: Path, attempt_id: str, baseline: dict, index: int, recei
     return pilot_state.publish_model_stage_artifact(root, attempt_id, stage, value)
 
 
-def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path) -> None:
+def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import step_size
     from tools.context_marker_merge import merge_marker_artifacts
     from tools.context_marker_parts import merge_parts, plan
 
@@ -78,7 +79,10 @@ def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path)
         _publish_part(root, attempt_id, baseline, index, receipt, requirements, value)
         answers.append(value)
     assert plan(root)["next"] == "merge"
+    monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 10)
     merged = merge_parts(root)
+    # FaT-O: the merge is code — its size is measured, but no STEP_OUTPUT_LARGE about an answer the model never gave
+    assert merged["output_bytes"] == merged["byte_count"] > 10 and merged["warning"] is None
     artifact = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged["content_digest"])["artifact"]
     expected = merge_marker_artifacts(_marker(["шаг требований — код не анализировался"], ["док — требование без ожидаемого результата"]), answers)
     assert artifact == expected and len(artifact["artifacts"]["source_code_and_diff"]["sources"]) == 3

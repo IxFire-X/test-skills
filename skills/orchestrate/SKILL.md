@@ -170,6 +170,9 @@ Run остаётся связан с исходной project/module identity.
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить
 `--target` или `paths` модуля) и продолжай шаг. Вход не обрезай.
+Размер ответа каждого вызова меряет код (FaT-O): `publish_model_stage_artifact` возвращает
+`output_bytes` и `warning`; `STEP_OUTPUT_LARGE` (больше `limits.step_output_warn_bytes`, по умолчанию
+128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай.
 
 Документ задачи (`--docs`) всегда входит в выбор контекста, документы других задач из `to_do` —
 нет; `context_summary` вывода scan показывает, что уйдёт модели. Если scan остановился с

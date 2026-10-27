@@ -85,6 +85,7 @@ def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             "journal_request_to_response_sec": _seconds(request.get("observed_at"), response.get("observed_at")) if response else None,
             "transport_attempts": response.get("transport_attempts") if response else None,
             "request_digest": request.get("artifact_digest"),
+            "response_digest": response.get("artifact_digest") if response else None,
         })
     return rows
 
@@ -130,7 +131,7 @@ def input_bytes(index: Mapping[str, int], digests: Sequence[str]) -> tuple[int, 
 
 def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, int]) -> None:
     from tools import pilot_state as pilot
-    from tools.step_size import TOKENS_PER_BYTE, role_files, step_budget
+    from tools.step_size import TOKENS_PER_BYTE, output_warning, role_files, step_budget
 
     inputs: list[str] = []
     by_code = False
@@ -142,6 +143,9 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
     except (KeyError, OSError, TypeError, ValueError):
         pass
     resolved, unresolved = input_bytes(sizes, inputs)
+    # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
+    answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))
+    call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer) is not None)
     role = str(call["stage"]).split(":", 1)[0]
     try:
         role_bytes = sum(path.stat().st_size for path in role_files(role)) if role in _ROLES else 0
@@ -188,6 +192,7 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
 
 
 _WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
+                 "STEP_OUTPUT_LARGE": "ответ модели больше порога limits.step_output_warn_bytes — только замер, деление выключено",
                  "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)"}
 
 
@@ -375,7 +380,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
         "model_calls": calls, "step_sizes": measured,
-        "warnings": budget_warnings(calls, measured) + (["CV_DATA_MISMATCH"] if mismatched else []), "data_mismatch": mismatched,
+        "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
+                    + (["CV_DATA_MISMATCH"] if mismatched else []), "data_mismatch": mismatched,
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -423,9 +429,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
         "## Числа", "", *(f"- {key}: {_dash(value)}" for key, value in counts.items()), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
-        "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает |", "|---|---|---|---|---|---|---|---|",
+        "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа |", "|---|---|---|---|---|---|---|---|---|",
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
-          f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} |"
+          f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} | "
+          f"{_dash(c.get('output_bytes'))}{' (большой)' if c.get('output_large') else ''} |"
           for c in report["model_calls"]), "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),

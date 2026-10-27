@@ -383,3 +383,76 @@ def test_a_forged_copy_during_report_is_one_error_json(tmp_path: Path, monkeypat
     assert forged["done"] and code == 2 and "Traceback" not in out.out + out.err
     answer = json.loads(out.out)
     assert answer["status"] == "error" and out.out.count('"status"') == 1
+
+
+# --- FaT-O: the answer size of every model call ---------------------------------------------------
+
+def test_every_model_answer_is_measured_and_a_large_one_is_a_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_automation_revision_budget import automated_document
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_self_review import _run
+    from tools import pilot_state, step_size
+    from tools.run_report import write_report
+
+    published: list = []
+    original = pilot_state.publish_model_stage_artifact
+    monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", lambda *a, **k: published.append(original(*a, **k)) or published[-1])
+    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
+    monkeypatch.setattr(step_size, "DEFAULT_OUTPUT_WARN", 500)
+    _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
+    assert published and all(row["output_bytes"] == row["byte_count"] for row in published)
+    large = [row for row in published if row["byte_count"] > 500]
+    assert large and all(row["warning"] == step_size.OUTPUT_LARGE for row in large)
+    assert all(row["warning"] is None for row in published if row["byte_count"] <= 500)
+
+    write_report(tmp_path, run_root.name)
+    report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
+    sizes = {row["content_digest"]: row["byte_count"] for row in published}
+    answered = [call for call in report["model_calls"] if call["response_digest"]]
+    assert answered and all(call["output_bytes"] == sizes[call["response_digest"]] for call in answered)
+    assert all(call["output_large"] == (call["output_bytes"] > 500) for call in answered)
+    assert step_size.OUTPUT_LARGE in report["warnings"]
+    markdown = (run_root / "report.md").read_text(encoding="utf-8")
+    assert "Байты ответа" in markdown and f"{step_size.OUTPUT_LARGE}:" in markdown
+
+
+def test_the_answer_warning_reads_the_skillsrc_threshold_and_never_stops(tmp_path: Path) -> None:
+    from tests.test_phase2_scan import _skillsrc
+    from tools.init_skillsrc import _payload
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+    from tools.step_size import DEFAULT_OUTPUT_WARN, OUTPUT_LARGE, output_warning
+
+    assert output_warning(tmp_path, DEFAULT_OUTPUT_WARN) is None and output_warning(tmp_path, DEFAULT_OUTPUT_WARN + 1) == OUTPUT_LARGE
+    document = parse_skillsrc_bytes(_skillsrc())
+    document["limits"] = {"step_output_warn_bytes": 2000}
+    (tmp_path / ".skillsrc").write_bytes(_payload(document))
+    assert output_warning(tmp_path, 2001) == OUTPUT_LARGE and output_warning(tmp_path, 2000) is None
+    (tmp_path / ".skillsrc").write_bytes(b"limits: [unclosed\n\x00")  # unreadable after the answer is published: the default applies
+    assert output_warning(tmp_path, DEFAULT_OUTPUT_WARN) is None and output_warning(tmp_path, DEFAULT_OUTPUT_WARN + 1) == OUTPUT_LARGE
+
+
+def test_a_broken_skillsrc_after_publication_still_returns_the_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_automation_revision_budget import automated_document
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_self_review import _run
+    from tools import pilot_state, step_size
+
+    published: list = []
+    original = pilot_state.publish_model_stage_artifact
+    monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", lambda *a, **k: published.append(original(*a, **k)) or published[-1])
+    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
+    original_warning = step_size.output_warning
+
+    def broken_then_measure(project, byte_count):  # .skillsrc is unreadable only at the moment of the measurement
+        path = Path(project) / ".skillsrc"
+        before = path.read_bytes() if path.is_file() else None
+        path.write_bytes(b"limits: [unclosed\n\x00")
+        try:
+            return original_warning(project, byte_count)
+        finally:
+            path.write_bytes(before) if before is not None else path.unlink()
+
+    monkeypatch.setattr(step_size, "output_warning", broken_then_measure)
+    _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
+    assert published and all(row["warning"] == (step_size.OUTPUT_LARGE if row["byte_count"] > step_size.DEFAULT_OUTPUT_WARN else None)
+                             for row in published)
