@@ -9,7 +9,8 @@
     "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
     "discovery": {}, "modules": {}, "requirements": {}, "limits": {},
-    "disposition_policy": {"enum": ["quarantine", "cleanup"]}
+    "disposition_policy": {"enum": ["quarantine", "cleanup"]},
+    "projection": {}
   },
   "oneOf": [
     {"$ref": "#/$defs/v2"},
@@ -33,7 +34,8 @@
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
         "limits": {"$ref": "#/$defs/limits"},
-        "disposition_policy": {"enum": ["quarantine", "cleanup"]}
+        "disposition_policy": {"enum": ["quarantine", "cleanup"]},
+        "projection": {"$ref": "#/$defs/projection"}
       }
     },
     "v3": {
@@ -51,8 +53,14 @@
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
         "limits": {"$ref": "#/$defs/limits"},
-        "disposition_policy": {"enum": ["quarantine", "cleanup"]}
+        "disposition_policy": {"enum": ["quarantine", "cleanup"]},
+        "projection": {"$ref": "#/$defs/projection"}
       }
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false,
+      "description": "FaT-7: zephyr.template is a project-relative CSV export of Zephyr stubs; its custom fields fill the separate .zephyr-import.csv.",
+      "properties": {"zephyr": {"type": "object", "additionalProperties": false, "properties": {"template": {"type": "string", "minLength": 1, "maxLength": 500}}}}
     },
     "requirements": {
       "type": "object", "additionalProperties": false,

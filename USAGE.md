@@ -339,5 +339,14 @@ registry/digest, pipeline contract, profiles, adapters и release-eval suite. О
 окружение — без кода, текста спеки, кейсов и ответов модели. `questions-for-analyst.md` также
 появляется рядом с опубликованным набором кейсов.
 
+Zephyr без ручных правок (FaT-7): положите в проект CSV-экспорт Zephyr Scale с заглушками, где заполнены
+«АС», «Вид тестирования», «Команда», «Приоритет теста», «Статус», и укажите путь в `.skillsrc`:
+`"projection": {"zephyr": {"template": "zephyr/stubs.csv"}}`. После закрытия попытки
+`python -m tools.zephyr_template_export --project <abs> --run <id> --cases <…zephyr-scale.csv>` пишет рядом
+`<doc>.r<N>.zephyr-import.csv`: значения из первой заполненной заглушки, лишние колонки шаблона в конце,
+разделитель как в шаблоне («,» или «;»), UTF-8 с BOM. «Автоматизирован» (если в шаблоне да/нет) — «да»
+только для кейса с кодом в принятой автоматизации. Шаблон не в UTF-8 — ошибка с подсказкой до экспорта.
+Сам набор кейсов и его квитанция не меняются; в прогоне остаются только путь и digest шаблона.
+
 Company runner, production rollback и реальный Zephyr tenant round-trip для core pilot
 остаются `N/A`.

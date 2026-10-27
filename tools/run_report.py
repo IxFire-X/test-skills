@@ -120,6 +120,15 @@ def _json_at(root: Path, digest: Any) -> Any:
     return None
 
 
+def _zephyr_import(root: Path) -> Any:
+    """FaT-7: only the template path and digest of the import CSV, never its values."""
+    try:
+        record = json.loads((root / "zephyr-import.json").read_text(encoding="utf-8"))
+        return {key: record[key] for key in ("template_path", "template_digest", "columns_added", "rows")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
     """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
     from tools import pilot_state as pilot
@@ -196,6 +205,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         "quarantine": [{key: row[key] for key in ("file", "method", "ref")} for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
+        "zephyr_import": _zephyr_import(root),
         "environment": {"python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }

@@ -318,6 +318,11 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 `quarantine_unresolved` как есть. `@Disabled`/`xfail` в этом прогоне не снимай и тесты не чини.
 `scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
 
+Если в `.skillsrc` задан `projection.zephyr.template`, после закрытия попытки (`exec` или `finish`) один раз
+запусти `python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`
+выбранной ревизии. Он кладёт рядом `.zephyr-import.csv` с полями из шаблона — этот файл человек импортирует
+в Zephyr. Ошибка `ZEPHYR_TEMPLATE_*` — покажи человеку `hint` как есть; сам шаблон не правь.
+
 ## Resume и child attempts
 
 Если контекст сессии занят больше чем наполовину, после завершённого шага попроси человека
