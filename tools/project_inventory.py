@@ -1188,6 +1188,11 @@ def context_filter(
             if pattern is not None:
                 raise ContextStop("CONTEXT_EXCLUDE_TASK_DOCUMENT", project_path,
                                   f"документ задачи нельзя исключить: уберите «{pattern}» из .skillsrc paths.exclude или сузьте шаблон")
+            size = int(item.get("size", 0))
+            if size > byte_budget:  # FaT-B2: a task document is never cut, so it must fit one batch
+                raise ContextStop("CONTEXT_TASK_DOCUMENT_TOO_LARGE", f"{project_path}: {size} Б больше пачки {byte_budget} Б",
+                                  "разбейте документ задачи на части (по функции на документ) или поднимите .skillsrc "
+                                  "limits.context_batch_bytes, не выше бюджета шага limits.step_input_bytes")
             kept.append(opaque_id)
             continue
         if Path(project_path).name.casefold() == ".skillsrc" or Path(project_path).name.casefold() in _CLOSED_MANIFESTS:

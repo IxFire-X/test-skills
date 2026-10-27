@@ -125,8 +125,8 @@ def test_ready_shows_a_baseline_blocker_with_its_file_and_fix(tmp_path: Path) ->
     from tools.ready import check as inspect_project
 
     report = inspect_project(_two_test_roots(tmp_path), ["services/api/docs/feature.md"], profile="local-pilot-v1")
-    stops = [check for check in report["checks"] if check["level"] == "STOP"]
-    assert [check["block"] for check in stops] == ["execution"], stops
+    stops = [check for check in report["checks"] if check["id"].startswith("execution:baseline:")]
+    assert [(check["block"], check["level"]) for check in stops] == [("execution", "WARN")], stops
     assert "тестовый корень" in stops[0]["message"] and stops[0]["fix"]
 
 

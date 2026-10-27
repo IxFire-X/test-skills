@@ -182,7 +182,7 @@ class _Outcome(SimpleNamespace):
               stderr="", cause=None), "WARN", "офлайн"),
     (_Outcome(returncode=1, stdout="[INFO] x\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce "
               "(enforce-java) on project app: Some Enforcer rules have failed.\n[ERROR] -> [Help 1]\n", stderr="", cause=None),
-     "STOP", "maven-enforcer-plugin"),
+     "WARN", "maven-enforcer-plugin"),
     (_Outcome(returncode=124, stdout="", stderr="", cause="TIMEOUT"), "WARN", "120"),
 ])
 def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: Path, outcome: _Outcome, level: str, needle: str) -> None:
@@ -224,7 +224,7 @@ def test_ready_does_not_probe_gradle_pytest_or_a_build_that_is_not_ready(tmp_pat
                                                                    "build_profile": "default", "adapter_parameters": {}}}, runner=runner) is None
 
 
-def test_ready_stop_from_the_probe_does_not_block_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ready_probe_failure_does_not_block_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import ready
 
     project, module = _petclinic_like(tmp_path)
@@ -243,7 +243,7 @@ def test_ready_stop_from_the_probe_does_not_block_the_cases(tmp_path: Path, monk
     monkeypatch.setenv("JAVA_HOME", str(tmp_path))
     report = ready.check(project, ["docs/feature.md"], profile="local-pilot-v1")
     rows = {row["id"]: row for row in report["checks"]}
-    assert rows["execution:build-probe"]["level"] == "STOP", rows
+    assert rows["execution:build-probe"]["level"] == "WARN" and "не запустятся" in rows["execution:build-probe"]["message"], rows
     assert report["status"] == "READY", [row for row in report["checks"] if row["level"] == "STOP" and row["block"] == "cases"]
     assert rows["execution:style"]["level"] == "WARN"
 

@@ -231,7 +231,8 @@ def check_scan(project: Path, module: Mapping[str, Any]) -> tuple[dict[str, Any]
     return _row("scan", CASES, "OK", message, None, details), inventory
 
 
-def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any]) -> dict[str, Any]:
+def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any],
+                  target: str | None = None) -> dict[str, Any]:
     """FaT-A: what will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
     from tools.project_inventory import ContextStop, skipped_summary
     from tools.run_pipeline import HostStop, context_preview
@@ -239,11 +240,15 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()
     try:
-        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None)
+        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None, target)
     except ContextStop as stop:
         row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
         return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
-    except HostStop as stop:  # a task document problem is the task-documents check's row
+    except HostStop as stop:
+        if stop.code == "SOURCE_TARGET_INVALID":  # FaT-B2: the scan would stop on the same --target
+            return _row("context:target", CASES, "STOP", f"{stop.code}: --target {target}: {stop}",
+                        "укажите --target путём внутри модуля (от его корня), который существует")
+        # a task document problem is the task-documents check's row
         return _row("context:skipped", CASES, "WARN", f"контекст не посчитан: {stop.code}", stop.fix)
     summary = skipped_summary(skipped)
     reasons = ", ".join(f"{code} {value['files']} ({value['bytes']} Б)" for code, value in summary["by_reason"].items())
@@ -393,19 +398,21 @@ def build_probe(project: Path, module: Mapping[str, Any], runner: Any = None) ->
                     "фаза validate офлайн не проверена: плагинов или зависимостей проекта нет в локальном репозитории Maven; "
                     "первый exec пойдёт за ними в сеть — нужна сеть или зеркало компании",
                     "проверить заранее с сетью: " + command.replace(" -o ", " "))
-    return _row("execution:build-probe", EXECUTION, "STOP",
+    return _row("execution:build-probe", EXECUTION, "WARN",
                 "фаза validate проекта падает с флагами exec — выбранные тесты не запустятся: " + (" | ".join(errors) or f"код {outcome.returncode}"),
                 f"исправьте сборку проекта, пока в {module_root} не пройдёт: {command}")
 
 
-def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None) -> str:
-    """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim."""
-    parts = [f'python -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
-             f"--profile {profile}", *([f'--module "{module}"'] if module else []), "--accept-self-review"]
+def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:
+    """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim (package python)."""
+    parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
+             f"--profile {profile}", *([f'--module "{module}"'] if module else []), *([f'--target "{target}"'] if target else []),
+             "--accept-self-review"]
     return " ".join(parts)
 
 
-def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", module: str | None = None) -> dict[str, Any]:
+def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", module: str | None = None,
+          target: str | None = None) -> dict[str, Any]:
     project = Path(project).resolve()
     rows: list[dict[str, Any]] = [check_python()]
     deps = check_deps()
@@ -432,7 +439,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 scan_row, inventory = check_scan(project, selected)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
-                rows.append(check_context(project, selected, docs, inventory))
+                rows.append(check_context(project, selected, docs, inventory, target))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1":
@@ -448,12 +455,12 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 from tools.run_pipeline import _baseline_blockers
 
                 for blocker in _baseline_blockers(project, selected):
-                    rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "STOP",
+                    rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "WARN",
                                      f"{blocker['file']}: {blocker['reason']}; прогон пойдёт как cases-only-v1", blocker["fix"]))
     # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
                      "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
-                     _self_review_scan(project, docs, profile, module)))
+                     _self_review_scan(project, docs, profile, module, target)))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": profile, "checks": rows}
 
@@ -466,7 +473,7 @@ def _table(report: Mapping[str, Any]) -> str:
             lines.append(f"[{title}]")
             for row in rows:
                 lines.append(f"  {_LABELS[row['level']]:<9} {row['id']}: {row['message']}")
-                if row.get("fix") and row["level"] != "OK":
+                if row.get("fix") and (row["level"] != "OK" or row["id"] == "review:isolation"):
                     lines.append(f"            исправить: {row['fix']}")
     return "\n".join(lines)
 
@@ -480,8 +487,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--docs", action="append", default=[])
     parser.add_argument("--profile", choices=("cases-only-v1", "local-pilot-v1"), default="local-pilot-v1")
     parser.add_argument("--module")
+    parser.add_argument("--target", help="the narrowed context of scan --target, to preview before the scan")
     args = parser.parse_args(argv)
-    report = check(Path(args.project), args.docs, args.profile, args.module)
+    report = check(Path(args.project), args.docs, args.profile, args.module, args.target)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     print(_table(report), file=sys.stderr)
     return 0 if report["status"] == "READY" else 2
