@@ -1,12 +1,15 @@
 """Durable, append-only Phase 1 controller state with safe local receipts."""
 from __future__ import annotations
 
+import contextvars
+import copy
 import hashlib
 import json
 import os
 import re
 import subprocess
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -809,7 +812,56 @@ def _recover_single_uncommitted_attempt(project: Path, root: Path, events: list[
         raise ValueError("uncommitted attempt is invalid")
 
 
+# FaT-9: inside one closure the same bytes are derived and validated once.  Keys are content digests — the
+# journal for the state, the receipt bytes and the journal's last digest for a validation — so every write of
+# the closure itself changes the key.  Every file is still read through read_confined_bytes each time; only the
+# successful validation is remembered, never an error.  Outside closure_cache() nothing is cached.
+_CLOSURE_CACHE: contextvars.ContextVar[dict[Any, Any] | None] = contextvars.ContextVar("pilot_closure_cache", default=None)
+# These validations look at the project tree (module directory, runtime paths), not only at the run directory —
+# directly (phase1-artifact, execution-receipt) or through a nested read of execution-receipt (resume-validation,
+# execution-trace, trace-audit).  Nothing else reads one of these five, so the set is closed.
+_UNCACHED_RECEIPT_KINDS = frozenset({"phase1-artifact", "execution-receipt", "resume-validation", "execution-trace", "trace-audit"})
+
+
+@contextmanager
+def closure_cache():
+    """Remember derived state and successful receipt validations for one closure (FaT-9)."""
+    if _CLOSURE_CACHE.get() is not None:
+        yield
+        return
+    token = _CLOSURE_CACHE.set({})
+    try:
+        yield
+    finally:
+        _CLOSURE_CACHE.reset(token)
+
+
 def derive_state(run_root: Path) -> Mapping[str, Any]:
+    cache = _CLOSURE_CACHE.get()
+    if cache is None:
+        return _derive_state(run_root)
+    project, root = _run_root(run_root)
+    try:
+        journal = read_confined_bytes(project, root, root / "events.jsonl")
+    except OutputConfinementError:
+        journal = None
+    pending = root / "pending-events"
+    if journal is None or pending.is_dir() and any(pending.glob("*.json")):
+        return _derive_state(run_root)  # a pending marker is checked and recovered by _events every time
+    key = ("state", str(root), hashlib.sha256(journal).hexdigest())
+    if key not in cache:
+        cache[key] = copy.deepcopy(_derive_state(run_root))
+        return copy.deepcopy(cache[key])
+    state = copy.deepcopy(cache[key])
+    # The attempt records name a module directory of the project; that check looks at the tree, so it runs again.
+    for attempt in state["attempts"]:
+        module = _module(project, attempt.get("module"))
+        if not _module_selection_is_bound(project, state["events"], module):
+            raise ValueError("module selection binding is invalid")
+    return state
+
+
+def _derive_state(run_root: Path) -> Mapping[str, Any]:
     project, root = _run_root(run_root)
     events = _events(project, root)
     attempts = _attempts(project, root, events)
@@ -3325,7 +3377,14 @@ def _read_attempt_receipt_with_state(
         raise ValueError("unknown factual receipt attempt")
     target = _receipt_target(root, attempt_id, kind)
     receipt = _read_artifact(project, root, target, kind)
-    _validate_factual_receipt(project, root, attempt, kind, receipt, state)
+    cache = _CLOSURE_CACHE.get()
+    key = None
+    if cache is not None and kind not in _UNCACHED_RECEIPT_KINDS and state["events"]:
+        key = ("receipt", str(target), kind, attempt_id, hashlib.sha256(_canonical_bytes(receipt)).hexdigest(), state["events"][-1]["digest"])
+    if key is None or key not in cache:
+        _validate_factual_receipt(project, root, attempt, kind, receipt, state)
+        if key is not None:
+            cache[key] = True
     event = next((item for item in state["events"] if item["event_type"] == event_type and item.get("attempt_id") == attempt_id and item.get("artifact_digest") == receipt["digest"]), None)
     if event is None:
         raise ValueError("unbound factual receipt")

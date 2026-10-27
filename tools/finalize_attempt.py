@@ -931,6 +931,11 @@ def finalize_durable_execution_attempt(
     attempt_id: str,
 ) -> Mapping[str, Any]:
     """Close the public local-execution branch from durable evidence only."""
+    with pilot_state.closure_cache():  # FaT-9: one closure reads and validates each unchanged artifact once
+        return _finalize_durable_execution_attempt(run_root, attempt_id)
+
+
+def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     try:
         existing = pilot_state.read_terminal_result(run_root, attempt_id)
     except KeyError:
@@ -1161,6 +1166,11 @@ def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[
     Branches: an accepted cases-only canonical, and an early negative outcome of the canonical review (rework or a
     reviewer abort).  Any other state is not a closing point yet, and the error names the missing fact instead of a guess.
     """
+    with pilot_state.closure_cache():  # FaT-9
+        return _finalize_durable_branch_attempt(run_root, attempt_id)
+
+
+def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     try:
         existing = pilot_state.read_terminal_result(run_root, attempt_id)
     except KeyError:
