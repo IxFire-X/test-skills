@@ -314,7 +314,8 @@ def test_proved_sibling_dependency_is_bound_and_unproved_dependency_is_not_runna
 
 
 @pytest.mark.parametrize("secret_path", ["service/pyproject.toml", "parent/.mvn/maven.config"])
-def test_secret_suspected_execution_config_makes_baseline_not_runnable(tmp_path: Path, secret_path: str) -> None:
+def test_secret_suspected_execution_config_is_bound_by_fingerprint(tmp_path: Path, secret_path: str) -> None:
+    """FaT-S: the secret file stays out of the inventory and enters the baseline only as path, digest and size."""
     project = tmp_path / "project"
     module = project / ("service" if secret_path.startswith("service/") else "parent/child")
     module.mkdir(parents=True)
@@ -330,22 +331,24 @@ def test_secret_suspected_execution_config_makes_baseline_not_runnable(tmp_path:
     assert any(item["project_path"] == secret_path and item["reason_code"] == "SECRET_SUSPECTED" for item in inventory["exclusions"])
     assert "not-a-real-secret-value" not in serialized
     assert hashlib.sha256(secret.read_bytes()).hexdigest() not in serialized
-    with pytest.raises(InventoryError, match="NOT_RUNNABLE/BASELINE_INCOMPLETE"):
-        build_execution_baseline(
-            inventory, project_root=project,
-            requirements={"requirement_id": "req-1", "digest": "sha256:" + "a" * 64},
-            skillsrc_file_id=_file_id(inventory, ".skillsrc"),
-            skillsrc_authority=_authority(project),
-            execution_file_ids=[_file_id(inventory, source.relative_to(project).as_posix())],
-            parent_build_file_ids=[],
-            interpreter_path=".venv/Scripts/python.exe",
-            interpreter_identity="sha256:" + "b" * 64,
-            wrapper_path=None,
-            wrapper_identity=None,
-            adapter_id="pytest:selected-symbols-v1",
-            build_profile="default",
-            adapter_parameters={},
-        )
+    baseline = build_execution_baseline(
+        inventory, project_root=project,
+        requirements={"requirement_id": "req-1", "digest": "sha256:" + "a" * 64},
+        skillsrc_file_id=_file_id(inventory, ".skillsrc"),
+        skillsrc_authority=_authority(project),
+        execution_file_ids=[_file_id(inventory, source.relative_to(project).as_posix())],
+        parent_build_file_ids=[],
+        interpreter_path=".venv/Scripts/python.exe",
+        interpreter_identity="sha256:" + "b" * 64,
+        wrapper_path=None,
+        wrapper_identity=None,
+        adapter_id="pytest:selected-symbols-v1",
+        build_profile="default",
+        adapter_parameters={},
+    )
+    assert baseline["secret_inputs"] == [{"project_path": secret_path, "content_digest": "sha256:" + hashlib.sha256(secret.read_bytes()).hexdigest(),
+                                          "byte_count": secret.stat().st_size}]
+    assert "not-a-real-secret-value" not in repr(baseline)
 
 
 def test_unbound_dotenv_is_excluded_without_blocking_execution_baseline(tmp_path: Path) -> None:

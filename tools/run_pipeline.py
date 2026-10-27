@@ -369,7 +369,25 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
     if module is None:
         return None
     facts = execution_facts(project, module)
-    return None if facts["ready"] else {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
+    if not facts["ready"]:
+        return {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
+    # FaT-S: the same baseline blockers the freeze would meet, known before the run is created.
+    blockers = _baseline_blockers(project, module)
+    if not blockers:
+        return None
+    return {"reason": "; ".join(f"{row['file']}: {row['reason']}" for row in blockers), "fix": "; ".join(row["fix"] for row in blockers)}
+
+
+def _baseline_blockers(project: Path, module: Mapping[str, Any]) -> list[dict[str, str]]:
+    from tools.project_inventory import InventoryError, baseline_blockers, build_inventory
+
+    root = Path(project).resolve()
+    module_root = (root / str(module.get("root") or ".")).resolve()
+    try:
+        inventory = build_inventory(root, module_root, skill_pack_root=_scan_skill_pack_root(root), generated_roots=(root / ".pilot-runs",))
+    except (InventoryError, OSError, ValueError):
+        return []  # the scan itself reports an inventory problem
+    return baseline_blockers(root, inventory, module, "local-pilot-v1")
 
 
 def _scan_disposition_policy(project: Path, args: Any) -> str | None:
@@ -821,6 +839,7 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
                 module_root, request.executable if request.adapter_id == "maven:selected-symbols-v1" else str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
                 adapter_id=baseline.get("adapter_id"),
             ),
+            project_root=project,
         )
     except (InventoryError, KeyError, TypeError, ValueError, OSError) as error:
         raise HostStop("BASELINE_INCOMPLETE", "execution baseline is unreadable or incomplete") from error
@@ -1737,7 +1756,7 @@ def resume_phase_one_spine(run_root: Path) -> Mapping[str, Any]:
             baseline, current_inventory, policy_profile=policy_profile,
             requirements=baseline["requirements"], adapter_id=baseline.get("adapter_id"),
             build_profile=baseline.get("build_profile"), adapter_parameters=baseline.get("adapter_parameters"),
-            runtime_identity_value=current_runtime_identity,
+            runtime_identity_value=current_runtime_identity, project_root=project,
         )
     except (InventoryError, KeyError, TypeError) as error:
         raise ValueError("execution baseline revalidation failed: BASELINE_INCOMPLETE") from error

@@ -591,7 +591,12 @@ def _selected_test_root(project_root: Path, inventory: Mapping[str, Any], skills
     selected = [item for item in modules if isinstance(item, Mapping) and item.get("root") == inventory.get("module")]
     if len(selected) != 1:
         raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: selected module is ambiguous in .skillsrc")
-    paths = selected[0].get("paths")
+    return _module_test_root(project_root, inventory, selected[0])
+
+
+def _module_test_root(project_root: Path, inventory: Mapping[str, Any], module: Mapping[str, Any]) -> str:
+    """The one test root of a module; the same check for scan and ready (FaT-S)."""
+    paths = module.get("paths")
     roots = paths.get("tests") if isinstance(paths, Mapping) else None
     if not isinstance(roots, list) or len(roots) != 1 or not isinstance(roots[0], str):
         raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: selected module requires one test root")
@@ -626,6 +631,60 @@ def _verify_inventory_root(project_root: Path, inventory: Mapping[str, Any]) -> 
             raise InventoryError("project root does not match frozen inventory")
 
 
+_BLOCKER_TEXT = {
+    "selected module requires one test root": ("у модуля должен быть ровно один тестовый корень (paths.tests)",
+                                               "оставьте у модуля в .skillsrc один путь в paths.tests"),
+    "selected test root is unsafe": ("тестовый корень модуля небезопасен (абсолютный путь, «..» или «\\»)",
+                                     "укажите в .skillsrc paths.tests путь внутри модуля через «/»"),
+    "selected module escapes project": ("модуль выходит за пределы проекта", "укажите в .skillsrc root модуля внутри проекта"),
+}
+
+
+def _secret_execution_inputs(project_root: Path, inventory: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """FaT-S: fingerprints of the secret-suspected execution inputs, and the ones that are not a plain project file.
+
+    The bytes are read once, hashed and dropped; only the path, the digest and the size are kept.
+    """
+    module = str(inventory.get("module", "."))
+    fingerprints: list[dict[str, Any]] = []
+    unreadable: list[str] = []
+    root = Path(project_root).resolve()
+    for item in inventory.get("exclusions", []):
+        if not isinstance(item, Mapping) or not _secret_exclusion_is_execution_significant(item, module):
+            continue
+        relative = str(item["project_path"])
+        candidate = root / Path(relative)
+        chain = [candidate, *[parent for parent in candidate.parents if parent != root and root in parent.parents]]
+        try:
+            candidate.resolve().relative_to(root)
+            if any(_is_reparse(path) for path in chain) or not candidate.is_file():
+                raise ValueError
+            data = candidate.read_bytes()
+        except (OSError, ValueError):
+            unreadable.append(relative)
+            continue
+        fingerprints.append({"project_path": relative, "content_digest": "sha256:" + hashlib.sha256(data).hexdigest(), "byte_count": len(data)})
+        del data
+    return sorted(fingerprints, key=lambda row: row["project_path"]), sorted(unreadable)
+
+
+def baseline_blockers(project_root: Path, inventory: Mapping[str, Any], module: Mapping[str, Any], policy_profile: str) -> list[dict[str, str]]:
+    """FaT-S: why a local-pilot baseline cannot be frozen, known before a run — ``[{file, reason, fix}]`` (only reads)."""
+    if policy_profile != "local-pilot-v1":
+        return []
+    blockers: list[dict[str, str]] = []
+    try:
+        _module_test_root(Path(project_root), inventory, module)
+    except InventoryError as error:
+        detail = str(error).removeprefix("NOT_RUNNABLE/BASELINE_INCOMPLETE: ")
+        reason, fix = _BLOCKER_TEXT.get(detail, (detail, "исправьте модуль в .skillsrc и повторите ready"))
+        blockers.append({"file": ".skillsrc", "reason": reason, "fix": fix})
+    for relative in _secret_execution_inputs(Path(project_root), inventory)[1]:
+        blockers.append({"file": relative, "reason": "файл исполнения с секретом не является обычным файлом проекта (ссылка или каталог)",
+                         "fix": "замените ссылку обычным файлом внутри проекта"})
+    return blockers
+
+
 def build_execution_baseline(
     inventory: Mapping[str, Any], *, project_root: Path, requirements: Mapping[str, str], skillsrc_file_id: str,
     skillsrc_authority: Mapping[str, Any],
@@ -638,11 +697,12 @@ def build_execution_baseline(
     """Freeze controller-declared profile-applicable inputs; context is intentionally absent."""
     if policy_profile not in {"cases-only-v1", "local-pilot-v1"}:
         raise InventoryError("baseline policy profile is invalid")
-    if policy_profile == "local-pilot-v1" and any(
-        isinstance(item, Mapping) and _secret_exclusion_is_execution_significant(item, str(inventory.get("module", ".")))
-        for item in inventory.get("exclusions", [])
-    ):
-        raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: secret-suspected execution input requires a safe substitute")
+    secret_inputs: list[dict[str, Any]] = []
+    if policy_profile == "local-pilot-v1":
+        # FaT-S: a secret execution input is bound by its fingerprint; the build reads the real file.
+        secret_inputs, unreadable = _secret_execution_inputs(Path(project_root), inventory)
+        if unreadable:
+            raise InventoryError("NOT_RUNNABLE/BASELINE_INCOMPLETE: secret-suspected execution input is not a regular project file")
     if not isinstance(requirements.get("requirement_id"), str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", requirements["requirement_id"]):
         raise InventoryError("requirements identity is unsafe")
     if not isinstance(requirements.get("digest"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", requirements["digest"]):
@@ -730,6 +790,8 @@ def build_execution_baseline(
         else:
             baseline["wrapper_path"] = wrapper_path
             baseline["wrapper_identity"] = wrapper_identity
+        if secret_inputs:
+            baseline["secret_inputs"] = secret_inputs
     baseline["digest"] = _digest(baseline)
     _validate_receipt_schema(baseline, "execution-baseline.schema.json", InventoryError)
     return baseline
@@ -951,7 +1013,7 @@ def validate_execution_baseline(
     baseline: Mapping[str, Any], inventory: Mapping[str, Any], *, late_dependency_file_ids: Iterable[str] = (),
     requirements: Mapping[str, str] | None = None, adapter_id: str | None = None, build_profile: str | None = None,
     adapter_parameters: Mapping[str, Any] | None = None, runtime_identity_value: str | None = None,
-    policy_profile: str = "local-pilot-v1",
+    policy_profile: str = "local-pilot-v1", project_root: Path | None = None,
 ) -> dict[str, Any]:
     """Validate a frozen baseline without adding new inputs to it."""
     _validate_baseline_shape(baseline)
@@ -986,6 +1048,13 @@ def validate_execution_baseline(
     for item in baseline.get("inputs", []):
         current = index.get(item.get("opaque_id"))
         if current is None or current.get("content_digest") != item.get("content_digest"):
+            return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
+    if baseline.get("secret_inputs"):
+        # FaT-S: the secret inputs are compared by fingerprint only; the result names neither bytes nor digests.
+        if project_root is None:
+            return {"status": "NOT_RUNNABLE", "reason_code": "BASELINE_INCOMPLETE", "requires_child_attempt": True}
+        current_secrets, unreadable = _secret_execution_inputs(Path(project_root), inventory)
+        if unreadable or current_secrets != baseline["secret_inputs"]:
             return {"status": "DECLARED_INPUT_DRIFT", "requires_child_attempt": True}
     return {"status": "UNCHANGED", "requires_child_attempt": False}
 

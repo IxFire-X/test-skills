@@ -332,6 +332,12 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 rows.append(_row("execution:build", EXECUTION, "OK" if facts["ready"] else "WARN",
                                  "сборка и тесты модуля готовы" if facts["ready"] else
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
+                # FaT-S: the baseline refusals the scan would meet, the same code; cases are not blocked by them.
+                from tools.run_pipeline import _baseline_blockers
+
+                for blocker in _baseline_blockers(project, selected):
+                    rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "STOP",
+                                     f"{blocker['file']}: {blocker['reason']}; прогон пойдёт как cases-only-v1", blocker["fix"]))
     # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
                      "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
