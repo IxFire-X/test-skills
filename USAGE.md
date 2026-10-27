@@ -328,9 +328,16 @@ registry/digest, pipeline contract, profiles, adapters и release-eval suite. О
 эскалацию.
 Эта adaptive campaign запускается отдельно для release qualification; production run
 не вызывает её и не повторяет model stages ради квалификации.
-В обычном run generator записывает `MODEL_RESPONSE_RECEIVED.transport_attempts=1|2`;
-`2` означает единственный внутренний transport/schema retry. У остальных stages это
-поле равно `1`, а C-lite cardinality читается из evidence pairs reviewer ledger.
+В обычном run каждая model stage записывает `MODEL_RESPONSE_RECEIVED.transport_attempts=1|2`;
+`2` означает единственный повтор после ошибки схемы или валидации ответа (по `retry_prompt`
+из `validate_artifact`). C-lite cardinality читается из evidence pairs reviewer ledger.
+
+Отчёт прогона, который можно вынести с работы: `python -m tools.run_pipeline report --project <abs>
+--run <id>` пишет в каталог прогона `report.md`, `report.json` и `questions-for-analyst.md`. В отчёте
+шаги со временем (часы машины, не проверяются), длительность и размер входа каждого вызова модели
+против бюджета шага, `transport_attempts`, коды остановок, числа, карантин (файл, метод, ref) и
+окружение — без кода, текста спеки, кейсов и ответов модели. `questions-for-analyst.md` также
+появляется рядом с опубликованным набором кейсов.
 
 Company runner, production rollback и реальный Zephyr tenant round-trip для core pilot
 остаются `N/A`.

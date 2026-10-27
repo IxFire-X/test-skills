@@ -67,6 +67,9 @@ scope needs the selected delta and the justified related regression inputs.
 
 Keep gaps in existing `warnings`, with four fields: source requirement/scenario and link;
 what is missing; which checks it blocks; the concrete question requiring resolution.
+Write them in this order joined by ` — `, the requirement ID first
+(`REQ-x сценарий (path#anchor) — чего нет — что блокирует — вопрос?`): `questions-for-analyst.md`
+groups them by that ID.
 Requirement-without-scenario warnings preserve the requirement. Unsupported schema,
 unmatched names or missing baseline require clarification; they never authorize invented
 requirements. Substantive unresolved gaps block full-coverage claims, while independently

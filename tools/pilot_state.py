@@ -944,6 +944,11 @@ def _validate_automation_model_lifecycle(
         raise ValueError("automation model lifecycle is absent or mismatched") from error
 
 
+def model_transport_attempts_allowed(stage_instance_id: str, transport_attempts: Any) -> bool:
+    """FaT-6: every model stage may repeat its call once after a schema or validation error of the answer."""
+    return type(transport_attempts) is int and transport_attempts in {1, 2} and _MODEL_STAGE_INSTANCE.fullmatch(str(stage_instance_id)) is not None
+
+
 def _append_event(project: Path, root: Path, event_type: str, *, actor: str, attempt_id: str | None, batch_id: str | None, artifact_digest: str | None, stage_instance_id: str | None = None, transport_attempts: int | None = None) -> dict[str, Any]:
     events = _events(project, root) if (root / "events.jsonl").exists() else []
     manifest, _receipt = _run_boundary(project, root)
@@ -973,10 +978,8 @@ def _append_event(project: Path, root: Path, event_type: str, *, actor: str, att
         if artifact_digest is None:
             raise ValueError("model event requires an artifact digest")
         if event_type == "MODEL_RESPONSE_RECEIVED":
-            if type(transport_attempts) is not int or transport_attempts not in {1, 2}:
+            if not model_transport_attempts_allowed(stage_instance_id, transport_attempts):
                 raise ValueError("invalid model transport attempt count")
-            if not stage_instance_id.startswith("tc-generator:") and transport_attempts != 1:
-                raise ValueError("model transport retry is not allowed for this stage")
         elif transport_attempts is not None:
             raise ValueError("transport attempt count belongs only to model response")
     elif stage_instance_id is not None:

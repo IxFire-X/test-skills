@@ -731,7 +731,14 @@ def main(argv: list[str] | None = None) -> int:
                 candidate, args.output_dir, args.csv_profile,
                 run_root=args.run_root, attempt_id=args.attempt_id,
             )
-            print(json.dumps({"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            from tools.run_report import write_questions_next_to
+
+            # FaT-6: the analyst questions beside the case set; a failed write only warns, the set is published.
+            questions, code = write_questions_next_to(args.output_dir, args.run_root)
+            print(json.dumps({
+                "candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
+                "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [],
+            }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
         receipt = _load_receipt(args.candidate_receipt)
         base_contexts = [load_json_strict(path) for path in args.context_receipt]

@@ -1605,6 +1605,18 @@ def cmd_finish(args: Any) -> int:
     return int(closed["exit_code"])
 
 
+def cmd_report(args: Any) -> int:
+    """FaT-6: write the run report and the analyst questions; only reads the journal."""
+    from tools.run_report import GUARANTEE, write_report
+
+    project = Path(args.project).resolve()
+    _root, run, _state = _read_run_coordinate(project, args.run)
+    written = {Path(path).name: path for path in write_report(project, run["manifest"]["run_id"])}
+    _print({"status": "ok", "stage": "report", "run_id": run["manifest"]["run_id"], "report_md": written["report.md"],
+            "report_json": written["report.json"], "questions": written["questions-for-analyst.md"], "guarantee": GUARANTEE})
+    return 0
+
+
 def cmd_status(args: Any) -> int:
     project = Path(args.project).resolve()
     root, _run, _state = _read_run_coordinate(project, args.run)
@@ -1783,6 +1795,8 @@ def build_parser() -> JsonArgumentParser:
     exec_parser.add_argument("--generated-delta-receipt")
     rerun_parser = sub.add_parser("rerun-retained", parents=[shared])
     rerun_parser.add_argument("--run", required=True, help="Exact durable run ID")
+    report_parser = sub.add_parser("report", parents=[shared], help="FaT-6: report.md/report.json and questions-for-analyst.md of the run, without project content.")
+    report_parser.add_argument("--run", required=True, help="Exact durable run ID")
     return parser
 
 
@@ -1807,6 +1821,7 @@ def main(argv: list[str] | None = None) -> int:
         "rerun-retained": cmd_rerun_retained,
         "status": cmd_status,
         "finish": cmd_finish,
+        "report": cmd_report,
     }
     try:
         return commands[args.command](args)

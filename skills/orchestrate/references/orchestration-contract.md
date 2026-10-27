@@ -168,8 +168,8 @@ Manifest state `implemented_unverified` не является readiness. Доп�
 adaptive release eval имеет только вид `core-pilot-ready for <exact verified tuple>`.
 Adaptive `1 -> 3 -> 5` запускается только отдельной явной release qualification;
 пакет не создаёт и не изменяет CI. Обычный production run выполняет одну logical
-invocation каждой нужной model stage. Generator response записывает
-`transport_attempts=1|2`; остальные responses — `1`. Bounded reviewer C-lite
+invocation каждой нужной model stage. Каждая model response записывает
+`transport_attempts=1|2`; `2` — единственный повтор после ошибки схемы или валидации ответа (FaT-6). Bounded reviewer C-lite
 кардинальность выводится из exact evidence pairs ledger, а не из повторов stage.
 Instability или protocol violation навсегда дисквалифицирует текущую campaign; после
 устранения причины новая clean campaign связывается с её eval receipt и требует пять

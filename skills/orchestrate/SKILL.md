@@ -224,7 +224,10 @@ boundary.package_digest]` из прочитанного `reviewer-session-bounda
 
 Эти события ограничивают одну logical stage invocation. Поле
 `MODEL_RESPONSE_RECEIVED.transport_attempts` равно `1` без retry или `2` после
-единственного transport/schema retry генератора; для остальных stages оно всегда `1`.
+единственного повтора stage. Повтор есть у каждой model stage (у каждой части разметки — свой),
+только при ошибке схемы или валидации ответа, и не больше одного: `validate_artifact` печатает
+`retry_prompt` — отдай роли исходный вход и этот текст как есть. Перед повтором проверь вход
+(исходный + `retry_prompt`) тем же `step_size`, что и первый вызов. Третьей попытки нет — стоп.
 Кардинальность C-lite фиксируется самими
 `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs reviewer ledger. Эти внутренние действия
 не являются повторениями release campaign. Adaptive `1 -> 3 -> 5` запускается только

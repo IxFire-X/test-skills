@@ -202,11 +202,7 @@ def _model_event_errors(
             or request_receipt.get("invocation_id") != row.get("invocation_id")
             or request_receipt.get("input_digests") != inputs
             or response[1].get("artifact_digest") != outputs[0]
-            or (
-                response[1].get("transport_attempts") not in {1, 2}
-                if row.get("stage") == "tc-generator"
-                else response[1].get("transport_attempts") != 1
-            )
+            or response[1].get("transport_attempts") not in {1, 2}
         ):
             _error(errors, "MODEL_EVENT_EVIDENCE_INVALID")
             continue
