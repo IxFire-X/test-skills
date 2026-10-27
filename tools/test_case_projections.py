@@ -224,7 +224,8 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
     ]
     for case_number, case in enumerate(document["test_cases"], 1):
         rows.extend((
-            f"<section><h2>ТК-{case_number}. {_html_text(case['title'])}</h2><p><strong>Цель:</strong> {_html_text(case['objective'])}</p><h3>Предусловия</h3>",
+            f"<section><h2>ТК-{case_number}. {_html_text(case['title'])}</h2><p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
+            + (f"<p>Техника: {html.escape(case['technique'])}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
             "<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in case["preconditions"]) + "</ul>" if case["preconditions"] else "<p>Не требуются.</p>",
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
         ))
@@ -267,7 +268,10 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
     ]
     for case_number, case in enumerate(document["test_cases"], 1):
         lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
-        lines.extend([f"**Цель:** {escape_inline(case['objective'])}", "", "**Предусловия:**"])
+        lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
+        if "technique" in case:  # FaT-TD
+            lines.extend([f"Техника: {case['technique']}", ""])
+        lines.append("**Предусловия:**")
         if case["preconditions"]:
             lines.extend("- " + escape_inline(item) for item in case["preconditions"])
         else:

@@ -59,7 +59,24 @@
     },
     "requirement": {
       "type": "object", "additionalProperties": false, "required": ["requirement_id", "display_order", "text", "provenance"],
-      "properties": {"requirement_id": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "text": {"$ref": "#/$defs/nonempty"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}}
+      "properties": {"requirement_id": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "text": {"$ref": "#/$defs/nonempty"}, "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}}, "design": {"$ref": "#/$defs/design"}}
+    },
+    "design": {
+      "description": "FaT-TD: input parameters of the requirement, their equivalence classes and numeric bounds; only when it has inputs.",
+      "type": "object", "additionalProperties": false, "required": ["parameters"],
+      "properties": {"parameters": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/design_parameter"}}}
+    },
+    "design_parameter": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "valid", "invalid"],
+      "properties": {"id": {"type": "string", "pattern": "^P-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "name": {"type": "string", "minLength": 1, "maxLength": 80}, "valid": {"type": "array", "items": {"$ref": "#/$defs/design_class"}}, "invalid": {"type": "array", "items": {"$ref": "#/$defs/design_class"}}, "bounds": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"min": {"type": "number"}, "max": {"type": "number"}, "step": {"type": "number", "exclusiveMinimum": 0}, "unit": {"type": "string", "minLength": 1, "maxLength": 20}}}}
+    },
+    "design_class": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {"id": {"type": "string", "pattern": "^C-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "label": {"type": "string", "minLength": 1, "maxLength": 40}}
+    },
+    "design_ref": {
+      "type": "object", "additionalProperties": false, "required": ["parameter"],
+      "properties": {"parameter": {"type": "string", "pattern": "^P-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "class": {"type": "string", "pattern": "^C-[A-Za-z0-9_.:-]+$", "maxLength": 40}, "bound": {"enum": ["min", "max", "below_min", "above_max"]}, "value": {"type": "string", "maxLength": 40}}
     },
     "source_to_canonical_mapping": {
       "type": "object", "additionalProperties": false, "required": ["source_requirement_id", "canonical_requirement_ids"],
@@ -154,7 +171,7 @@
     },
     "test_case": {
       "type": "object", "additionalProperties": false, "required": ["case_id", "display_order", "requirement_ids", "title", "objective", "categories", "priority", "preconditions", "management", "steps"],
-      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}}, "title": {"$ref": "#/$defs/nonempty"}, "objective": {"$ref": "#/$defs/nonempty"}, "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]}}, "priority": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]}, "preconditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "management": {"$ref": "#/$defs/management"}, "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}}
+      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "display_order": {"type": "integer", "minimum": 1}, "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^CREQ-[A-Za-z0-9_.:-]+$"}}, "title": {"$ref": "#/$defs/nonempty"}, "objective": {"$ref": "#/$defs/nonempty"}, "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]}}, "priority": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"]}, "preconditions": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}}, "management": {"$ref": "#/$defs/management"}, "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}, "technique": {"enum": ["EP", "BVA", "DT", "PAIRWISE", "OTHER"]}, "design_refs": {"type": "array", "items": {"$ref": "#/$defs/design_ref"}}}
     }
   }
 }

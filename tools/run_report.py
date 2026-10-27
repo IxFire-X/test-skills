@@ -14,7 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-GUARANTEE = "без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов и коды"
+GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
+             "и ID требований, кейсов, параметров и классов")
 CLOCK_NOTE = "время по часам машины, не проверяется"
 NO_QUESTIONS = "вопросов нет\n"
 SEPARATOR = " — "
@@ -120,6 +121,30 @@ def _json_at(root: Path, digest: Any) -> Any:
     return None
 
 
+UNUSED_TEST_DESIGN = "генератор не заполнил технику и параметры — подсказки тест-дизайна не строились"
+
+
+def test_design_summary(document: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-TD: technique counts and code hints by ID only — never case text; ``used`` false says the fields were empty."""
+    from tools.test_design_hints import capped, design_hints, technique_counts, uses_test_design
+
+    hints = design_hints(document)
+    counts: dict[str, int] = {}
+    for hint in hints:
+        counts[hint["code"]] = counts.get(hint["code"], 0) + 1
+    return {"used": uses_test_design(document), "techniques": technique_counts(document), "hints": counts, "gaps": capped(hints)}
+
+
+def render_test_design(summary: Mapping[str, Any]) -> str:
+    lines = ["## Тест-дизайн", ""]
+    if not summary["used"]:
+        return "\n".join(lines + [f"- {UNUSED_TEST_DESIGN}"])
+    lines.append("- Техники: " + ", ".join(f"{name} {count}" for name, count in summary["techniques"].items()))
+    lines.append("- Подсказки кода: " + (", ".join(f"{code} {count}" for code, count in summary["hints"].items()) or "нет"))
+    lines += [f"  - {gap['code']} {gap.get('requirement_id', '')} {gap.get('parameter', '')} {gap['detail']}".rstrip() for gap in summary["gaps"]]
+    return "\n".join(lines)
+
+
 def _zephyr_import(root: Path) -> Any:
     """FaT-7: only the template path and digest of the import CSV, never its values."""
     try:
@@ -206,6 +231,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "quarantine": [{key: row[key] for key in ("file", "method", "ref")} for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
+        "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,
         "environment": {"python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
                         "adapter": (execution.get("execution") or {}).get("adapter_id")},
     }
@@ -229,6 +255,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
           for c in report["model_calls"]), "",
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
+    if report.get("test_design"):
+        lines += [render_test_design(report["test_design"]), ""]
     if report["quarantine"] or report["quarantine_unresolved"]:
         lines += ["## Карантин", "", *(f"- {row['file']} :: {row['method']} ({row['ref']})" for row in report["quarantine"])]
         lines += [f"- {report['quarantine_unresolved']}"] if report["quarantine_unresolved"] else []
