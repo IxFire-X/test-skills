@@ -285,6 +285,15 @@ def _is_binary_or_generated(path: Path) -> bool:
 
 def skillsrc_include(project_root: Path, module_root: Path) -> tuple[str, ...]:
     """``paths.include`` of the module at ``module_root`` in the project's ``.skillsrc`` (every inventory of a run reads it)."""
+    return _skillsrc_paths(project_root, module_root, "include")
+
+
+def skillsrc_exclude(project_root: Path, module_root: Path) -> tuple[str, ...]:
+    """FaT-A: ``paths.exclude`` of the module — globs kept out of the model context only."""
+    return _skillsrc_paths(project_root, module_root, "exclude")
+
+
+def _skillsrc_paths(project_root: Path, module_root: Path, key: str) -> tuple[str, ...]:
     path = Path(project_root) / ".skillsrc"
     if not path.is_file():
         return ()
@@ -301,7 +310,7 @@ def skillsrc_include(project_root: Path, module_root: Path) -> tuple[str, ...]:
     for module in document.get("modules") or []:
         if isinstance(module, Mapping) and str(module.get("root") or ".").strip("/") in {relative, relative + "/"}:
             paths = module.get("paths") if isinstance(module.get("paths"), Mapping) else {}
-            return tuple(str(item) for item in paths.get("include") or [])
+            return tuple(str(item) for item in paths.get(key) or [])
     return ()
 
 
@@ -1077,20 +1086,139 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
     return result
 
 
-def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes) -> dict[str, Any]:
+def _context_receipt(inventory: Mapping[str, Any], batch_index: int, files: list[dict[str, Any]], byte_count: int, byte_set: bytes,
+                     skipped: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     receipt: dict[str, Any] = {
         "schema_version": "1.0.0", "inventory_digest": inventory["digest"], "batch_index": batch_index,
         "files": [{key: item[key] for key in ("opaque_id", "project_path", "content_digest", "size")} for item in files],
         "byte_count": byte_count, "byte_set_digest": "sha256:" + hashlib.sha256(byte_set).hexdigest(),
     }
+    if skipped:
+        receipt["skipped"] = [dict(row) for row in skipped]
     receipt["digest"] = _digest(receipt)
     _validate_receipt_schema(receipt, "context-selection-receipt.schema.json", ContextSelectionError)
     return receipt
 
 
+class ContextStop(ContextSelectionError):
+    """FaT-A: a context the filter cannot make useful — a code, the detail and a fix for the human."""
+
+    def __init__(self, code: str, detail: str, fix: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code, self.detail, self.fix = code, detail, fix
+
+
+_FONT_SUFFIXES = frozenset({".woff", ".woff2", ".ttf", ".eot", ".otf"})
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp", ".webp"})
+_LONG_LINE_SUFFIXES = frozenset({".js", ".css", ".svg"})
+MINIFIED_MIN_BYTES = 20 * 1024
+MINIFIED_LINE_CHARS = 5000
+_SIZE_FIX = ("исключите файл из контекста модели (.skillsrc paths.exclude модуля), сузьте контекст (--target) "
+             "или поднимите .skillsrc limits.context_batch_bytes, не выше бюджета шага limits.step_input_bytes")
+
+
+def _read_context_file(project_root: Path, project_path: str) -> bytes:
+    """The bytes of one context file, only inside the project and only a regular non-reparse file (filter and batches)."""
+    candidate = project_root / Path(project_path)
+    try:
+        candidate.resolve().relative_to(project_root)
+    except (OSError, ValueError) as error:
+        raise ContextSelectionError("context path confinement failed") from error
+    if _is_reparse(candidate) or not candidate.is_file():
+        raise ContextSelectionError("context path reparse status changed")
+    try:
+        return candidate.read_bytes()
+    except OSError as error:
+        raise ContextSelectionError("context bytes are unreadable") from error
+
+
+def _asset_rule(project_path: str, contents: bytes) -> str | None:
+    path = Path(project_path)
+    suffix, name = path.suffix.casefold(), path.name.casefold()
+    if suffix in _FONT_SUFFIXES or suffix == ".svg" and (
+        {part.casefold() for part in path.parts[:-1]} & {"font", "fonts"} or b"<font" in contents[:65536] or b"<glyph" in contents[:65536]
+    ):
+        return "font"
+    if suffix in _IMAGE_SUFFIXES:
+        return "image"
+    if suffix == ".map":
+        return "source-map"
+    if name.endswith((".min.js", ".min.css")) or suffix in _LONG_LINE_SUFFIXES and len(contents) >= MINIFIED_MIN_BYTES and any(
+        len(line) > MINIFIED_LINE_CHARS for line in contents.splitlines()
+    ):
+        return "minified"
+    return None
+
+
+def context_filter(
+    inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
+    excludes: Iterable[str] = (), task_ids: Iterable[str] = (),
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """FaT-A: what the model gets — ``(kept ids, skipped [{project_path, size, reason, rule}])``; only reads.
+
+    Inventory and baseline do not change.  The task documents and closed manifests always stay; a source larger than
+    a batch, an exclude of a task document, or nothing left of the code is a ContextStop with a fix.
+    """
+    from tools.scan_rules import include_mode, is_source
+
+    from_scan = list(opaque_file_ids)
+    index = _inventory_index(inventory)
+    tasks = set(task_ids)
+    patterns = [str(item) for item in excludes]
+    kept: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    for opaque_id in from_scan:
+        item = index.get(opaque_id)
+        if item is None:
+            raise ContextSelectionError("context requires an eligible opaque file ID")
+        project_path = str(item["project_path"])
+        pattern = next((pattern for pattern in patterns if include_mode(project_path, [pattern]) == "full"), None)
+        if opaque_id in tasks:
+            if pattern is not None:
+                raise ContextStop("CONTEXT_EXCLUDE_TASK_DOCUMENT", project_path,
+                                  f"документ задачи нельзя исключить: уберите «{pattern}» из .skillsrc paths.exclude или сузьте шаблон")
+            kept.append(opaque_id)
+            continue
+        if Path(project_path).name.casefold() == ".skillsrc" or Path(project_path).name.casefold() in _CLOSED_MANIFESTS:
+            kept.append(opaque_id)
+            continue
+        size = int(item.get("size", 0))
+        if pattern is not None:
+            skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_EXCLUDED_BY_USER", "rule": pattern})
+            continue
+        contents = _read_context_file(Path(project_root).resolve(), project_path)
+        rule = _asset_rule(project_path, contents)
+        if rule is not None:
+            skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_ASSET", "rule": rule})
+        elif size > byte_budget and not is_source(Path(project_path).name):
+            skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_TOO_LARGE", "rule": f"больше пачки {byte_budget} Б"})
+        elif size > byte_budget:
+            raise ContextStop("CONTEXT_FILE_TOO_LARGE", f"{project_path}: {size} Б больше пачки {byte_budget} Б", _SIZE_FIX)
+        else:
+            kept.append(opaque_id)
+    code = [opaque for opaque in kept if opaque not in tasks and not (
+        Path(str(index[opaque]["project_path"])).name.casefold() == ".skillsrc"
+        or Path(str(index[opaque]["project_path"])).name.casefold() in _CLOSED_MANIFESTS)]
+    if skipped and not code:
+        raise ContextStop("CONTEXT_ALL_SKIPPED", f"пропущено {len(skipped)} файлов, кода в контексте не осталось",
+                          "весь контекст пропущен: проверьте .skillsrc paths.exclude и --target")
+    return kept, sorted(skipped, key=lambda row: row["project_path"])
+
+
+def skipped_summary(skipped: Iterable[Mapping[str, Any]], *, limit: int = 20) -> dict[str, Any]:
+    rows = list(skipped)
+    by_reason: dict[str, dict[str, int]] = {}
+    for row in rows:
+        entry = by_reason.setdefault(str(row["reason"]), {"files": 0, "bytes": 0})
+        entry["files"] += 1
+        entry["bytes"] += int(row["size"])
+    return {"files": len(rows), "bytes": sum(int(row["size"]) for row in rows), "by_reason": by_reason,
+            "paths": [str(row["project_path"]) for row in rows[:limit]]}
+
+
 def select_context_batches(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
-    include_closed_manifests: bool = True,
+    include_closed_manifests: bool = True, skipped: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Read verified eligible files into bounded, non-truncated C-lite batches."""
     if type(byte_budget) is not int or byte_budget <= 0:
@@ -1123,18 +1251,7 @@ def select_context_batches(
     current_count = 0
     current_bytes = bytearray()
     for item in selected:
-        candidate = project_root / Path(item["project_path"])
-        try:
-            resolved = candidate.resolve()
-            resolved.relative_to(project_root)
-        except (OSError, ValueError) as error:
-            raise ContextSelectionError("context path confinement failed") from error
-        if _is_reparse(candidate) or not candidate.is_file():
-            raise ContextSelectionError("context path reparse status changed")
-        try:
-            contents = candidate.read_bytes()
-        except OSError as error:
-            raise ContextSelectionError("context bytes are unreadable") from error
+        contents = _read_context_file(project_root, str(item["project_path"]))
         if "sha256:" + hashlib.sha256(contents).hexdigest() != item["content_digest"]:
             raise ContextSelectionError("context digest drift")
         if len(contents) > byte_budget:
@@ -1142,7 +1259,7 @@ def select_context_batches(
         prepared = {**dict(item), "bytes": contents}
         if current and current_count + len(contents) > byte_budget:
             index_number = len(batches) + 1
-            receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes))
+            receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes), skipped if index_number == 1 else None)
             batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
             current, current_count, current_bytes = [], 0, bytearray()
         current.append(prepared)
@@ -1150,7 +1267,7 @@ def select_context_batches(
         current_bytes.extend(item["opaque_id"].encode("ascii") + b"\0" + contents)
     if current:
         index_number = len(batches) + 1
-        receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes))
+        receipt = _context_receipt(inventory, index_number, current, current_count, bytes(current_bytes), skipped if index_number == 1 else None)
         batches.append({"files": current, "byte_count": current_count, "receipt": receipt})
     return batches
 

@@ -129,7 +129,8 @@ def test_scan_rejects_an_oversized_context_file_without_silent_truncation(tmp_pa
         "RUN_CREATED", "MODULE_SELECTED", "INVENTORY_READY", "SNAPSHOT_BOUND",
         "EXECUTION_BASELINE_FROZEN", "ATTEMPT_CREATED",
     ]
-    assert payloads[-1]["reason"] == "CONTEXT_SELECTION_INVALID"
+    # FaT-A: an oversized source is a named stop with a fix, no longer the anonymous CONTEXT_SELECTION_INVALID.
+    assert payloads[-1]["reason"] == "CONTEXT_FILE_TOO_LARGE" and "paths.exclude" in payloads[-1]["fix"]
 
 
 def test_scan_denied_directory_keeps_diagnostic_run_without_inventory_ready(tmp_path: Path, monkeypatch) -> None:

@@ -230,6 +230,27 @@ def check_scan(project: Path, module: Mapping[str, Any]) -> tuple[dict[str, Any]
     return _row("scan", CASES, "OK", message, None, details), inventory
 
 
+def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str], inventory: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-A: what will not go to the model and why — the same filter as scan; a stop the scan would meet is a STOP here."""
+    from tools.project_inventory import ContextStop, skipped_summary
+    from tools.run_pipeline import HostStop, context_preview
+
+    root = Path(project).resolve()
+    module_root = (root / str(module.get("root") or ".")).resolve()
+    try:
+        _kept, skipped, budget = context_preview(inventory, root, module_root, list(docs) or None)
+    except ContextStop as stop:
+        row_id = {"CONTEXT_FILE_TOO_LARGE": "context:too-large"}.get(stop.code, "context:" + stop.code.removeprefix("CONTEXT_").casefold().replace("_", "-"))
+        return _row(row_id, CASES, "STOP", f"{stop.code}: {stop.detail}", stop.fix)
+    except HostStop as stop:  # a task document problem is the task-documents check's row
+        return _row("context:skipped", CASES, "WARN", f"контекст не посчитан: {stop.code}", stop.fix)
+    summary = skipped_summary(skipped)
+    reasons = ", ".join(f"{code} {value['files']} ({value['bytes']} Б)" for code, value in summary["by_reason"].items())
+    message = (f"модели не пойдут {summary['files']} файлов, {summary['bytes']} Б: {reasons}" if summary["files"]
+               else "в контекст модели идёт всё отобранное")
+    return _row("context:skipped", CASES, "OK", message + f"; пачка {budget} Б", None, summary)
+
+
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
     """FaT-3: a document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
     from tools.run_pipeline import TASK_DOC_FIX, _exclusion_note
@@ -325,6 +346,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 scan_row, inventory = check_scan(project, selected)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
+                rows.append(check_context(project, selected, docs, inventory))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
             if profile == "local-pilot-v1":

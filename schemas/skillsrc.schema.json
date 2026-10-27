@@ -167,7 +167,8 @@
         "tests": {"type": "string"},
         "resources": {"type": "string"},
         "docs": {"type": "string"},
-        "include": {"$ref": "#/$defs/include_globs"}
+        "include": {"$ref": "#/$defs/include_globs"},
+        "exclude": {"$ref": "#/$defs/exclude_globs"}
       }
     },
     "module_paths": {
@@ -177,7 +178,8 @@
         "source": {"$ref": "#/$defs/unique_nonempty_strings"},
         "tests": {"$ref": "#/$defs/unique_nonempty_strings"},
         "resources": {"$ref": "#/$defs/unique_nonempty_strings"},
-        "include": {"$ref": "#/$defs/include_globs"}
+        "include": {"$ref": "#/$defs/include_globs"},
+        "exclude": {"$ref": "#/$defs/exclude_globs"}
       }
     },
     "include_globs": {
@@ -185,6 +187,13 @@
       "uniqueItems": true,
       "maxItems": 64,
       "description": "FaT-2: globs relative to the project root that bring back a directory the scan leaves out by its name (build output, dependencies, secret directories); files inside still pass the binary and secret rules.",
+      "items": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"}
+    },
+    "exclude_globs": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "description": "FaT-A: globs relative to the project root kept out of the model's context only; inventory and baseline still track them. Beats include; the task document cannot be excluded.",
       "items": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"}
     },
     "v2_test": {

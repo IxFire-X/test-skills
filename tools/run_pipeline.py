@@ -20,9 +20,13 @@ from typing import Any, Mapping
 from tools.json_cli import JsonArgumentParser
 from tools.project_inventory import (
     ContextSelectionError,
+    ContextStop,
     InventoryError,
     build_inventory,
+    context_filter,
     select_context_batches,
+    skillsrc_exclude,
+    skipped_summary,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -488,6 +492,23 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
     return selected
 
 
+def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: Path, selected_ids: list[str],
+                      task_ids: list[str], budget: int) -> tuple[list[str], list[dict[str, Any]]]:
+    """FaT-A: assets, user excludes and large non-sources stay out of the model context, always listed (scan and ready)."""
+    return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids)
+
+
+def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,
+                    target: str | None = None) -> tuple[list[str], list[dict[str, Any]], int]:
+    """What the scan would hand the model, without a run: ``(ids, skipped, batch budget)``; only reads."""
+    task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs)
+    selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
+    selected += [opaque for opaque in task_ids if opaque not in selected]
+    budget = _scan_context_budget(inventory, project)
+    kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget)
+    return kept, skipped, budget
+
+
 def _scan_context_budget(inventory: Mapping[str, Any], project: Path | None = None) -> int:
     """The byte budget of one context batch: ``.skillsrc limits.context_batch_bytes``, else 256 KiB (FaT-5)."""
     del inventory
@@ -629,14 +650,21 @@ def cmd_scan(args: Any) -> int:
         selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
         by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
         context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
+        budget = _scan_context_budget(frozen_inventory, project)
+        selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget)
+        context_skipped = skipped_summary(skipped)
         batches = select_context_batches(
             frozen_inventory,
             project,
             selected_ids,
-            byte_budget=_scan_context_budget(frozen_inventory, project),
+            byte_budget=budget,
+            skipped=skipped,
         )
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
+    except ContextStop as stop:
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=stop.detail, fix=stop.fix, scope=scope))
+        return 2
     except ContextSelectionError:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason="CONTEXT_SELECTION_INVALID", scope=scope))
         return 2
@@ -663,6 +691,7 @@ def cmd_scan(args: Any) -> int:
         exclusion_count=len(exclusion_receipt["exclusions"]),
         context_batch_count=len(batches),
         context_summary=context_summary,
+        **({"context_skipped": context_skipped} if context_skipped["files"] else {}),
         **({"warnings": context_warnings} if context_warnings else {}),
     )
     _print(payload)
