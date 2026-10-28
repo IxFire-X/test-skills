@@ -301,10 +301,12 @@ generator cannot discard a requirement by declaring it out of scope.
 
 ### 9.2 Batch plan
 
-The deterministic default is one batch. Requirements are split only when normalized
-input provides provable grouping evidence, such as separate named feature groups or
-independent exact targets. If independence is unproved or a shared scenario is possible,
-the controller uses one batch.
+The deterministic default is one batch. FaT-BO (28.10, approved by the user): the
+controller splits only when the step input plus the expected answer (source requirement
+text bytes x 42) exceed 0.85 of `.skillsrc limits.step_window_bytes` (0 = never). Every
+batch reads the whole requirement document and context; only the owned requirements
+differ. A requirement group (`id_pattern` group, ID letter prefix, else `#`/`##` section)
+is never torn between batches.
 
 Each batch has a stable `batch_id`, ordinal, controller-owned ID namespace,
 `owned_source_requirement_ids`, immutable header digest, context-selection digest, and

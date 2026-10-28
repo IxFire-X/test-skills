@@ -64,7 +64,7 @@
     },
     "requirements": {
       "type": "object", "additionalProperties": false,
-      "description": "FaT-3: id_pattern marks an explicit requirement ID at the start of a line (numbered specifications: 3.1, 6.3.1), like the built-in REQ-/AC- IDs; without it the split is unchanged.",
+      "description": "FaT-3: id_pattern marks an explicit requirement ID at the start of a line (numbered specifications: 3.1, 6.3.1), like the built-in REQ-/AC- IDs; without it the split is unchanged. FaT-BO: a named group (?P<group>…) is the requirement group tc-generator batches never tear.",
       "properties": {"id_pattern": {"type": "string", "minLength": 1, "maxLength": 200}}
     },
     "limits": {
@@ -72,7 +72,8 @@
       "description": "FaT-3: step_input_bytes — the input budget of one model step (tools.step_size); default 500000.",
       "properties": {"step_input_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000},
                      "context_batch_bytes": {"type": "integer", "minimum": 1024, "maximum": 100000000, "description": "FaT-5: bytes of one context batch, one part of the context marker; default 262144"},
-                     "step_output_warn_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000, "description": "FaT-O: an answer of one model call above it is the warning STEP_OUTPUT_LARGE, only measured; default 128000"}}
+                     "step_output_warn_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000, "description": "FaT-O: an answer of one model call above it is the warning STEP_OUTPUT_LARGE, only measured; default 128000"},
+                     "step_window_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000, "description": "FaT-BO: the model window in bytes; tc-generator batches split when input + expected answer exceed 0.85 of it; 0 turns the split off; default 1000000"}}
     },
     "v2_project": {
       "type": "object",

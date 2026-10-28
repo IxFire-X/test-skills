@@ -81,8 +81,13 @@ def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = 
             publish_generator_input(run_root, attempt_id, "header", header)
             publish_generator_input(run_root, attempt_id, "plan", plan)
         stage = f"tc-generator:{fragment['batch_id']}"
+        prior = []
+        if index > 1:  # FaT-BO: from batch 2 the capabilities of the accepted earlier batches are the fifth input
+            from tools.pilot_state import publish_prior_capabilities
+
+            prior = [publish_prior_capabilities(run_root, attempt_id, fragment["batch_id"])["digest"]]
         publish_model_request(run_root, attempt_id, stage, model_id="model-generator", invocation_id=f"invoke-{index}",
-                              input_digests=[marker_digest, context["digest"], fragment["plan_digest"], fragment["header_digest"]])
+                              input_digests=[marker_digest, context["digest"], fragment["plan_digest"], fragment["header_digest"], *prior])
         publish_model_stage_artifact(run_root, attempt_id, stage, fragment)
     session, _package, _review = _session()
     start = {key: session[key] for key in ("session_id", "generator_role", "reviewer_role", "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "context_budget_bytes")}

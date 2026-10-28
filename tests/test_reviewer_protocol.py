@@ -247,13 +247,18 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     publish_generator_input(run_root, attempt_id, "plan", plan)
     for index, fragment in enumerate(fragments, start=1):
         batch_id = fragment["batch_id"]
+        prior = []
+        if index > 1:  # FaT-BO: from batch 2 the capabilities of the accepted earlier batches are the fifth input
+            from tools.pilot_state import publish_prior_capabilities
+
+            prior = [publish_prior_capabilities(run_root, attempt_id, batch_id)["digest"]]
         publish_model_request(
             run_root, attempt_id, f"tc-generator:{batch_id}",
             model_id="model-generator",
             invocation_id=("invoke-1" if index == 1 else f"invoke-1-{index}"),
             input_digests=[
                 marker_publication["content_digest"], context["digest"],
-                fragment["plan_digest"], fragment["header_digest"],
+                fragment["plan_digest"], fragment["header_digest"], *prior,
             ],
         )
         publish_model_stage_artifact(

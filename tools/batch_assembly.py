@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -90,40 +91,169 @@ def _evidence_digests(grouping_evidence: dict[str, Any]) -> tuple[str, str]:
     return _digest_value(grouping_evidence, "header_digest"), _digest_value(grouping_evidence, "context_receipt_digest")
 
 
-def _split_groups(ids: set[str], order: dict[str, int], evidence: dict[str, Any]) -> list[list[str]] | None:
-    groups = evidence.get("groups")
-    if not (evidence.get("complete") is True and evidence.get("independence_proven") is True and isinstance(groups, list) and groups):
+ANSWER_PER_TEXT_BYTE = 42  # FaT-BO: the largest "fragment bytes / source requirement text bytes" of the 28.10 campaign (23–41)
+WINDOW_SHARE = 0.85  # FaT-BO: input + expected answer of one batch stay under this share of the model window
+_LETTER_ID = re.compile(r"(?:#{1,6}[^\n]*\n\s*)?(?:[-*]\s+)?([^\W\d_]{1,4})[-_.]?\d")
+_HEADING = re.compile(r"#{1,2}\s+(\S.*)")
+
+
+class BatchPlan(dict):
+    """The plan itself (schema bytes unchanged) plus ``notes``: the lines plan-batches prints about the split."""
+
+    notes: list[str]
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _section_of(text: str, documents: dict[str, str]) -> str | None:
+    """The ``#``/``##`` section of the documents that holds the first line of *text*, or the heading *text* opens."""
+    first = _norm(text.split("\n", 1)[0])
+    own = _HEADING.match(first)
+    if own:
+        return own.group(1)
+    snippet = first[:120]
+    if len(snippet) < 8:
         return None
-    partitions: list[tuple[tuple[str, ...], list[str]]] = []
-    seen: set[str] = set()
-    for group in groups:
-        if not isinstance(group, dict) or not isinstance(group.get("group_id"), str) or not group["group_id"]:
-            raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "each split group needs a stable group_id")
-        members = group.get("source_requirement_ids")
-        proof = group.get("independence_evidence")
-        if not isinstance(members, list) or not members or not isinstance(proof, list) or not proof:
-            raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "split group lacks complete explicit independence evidence")
-        if any(not isinstance(member, str) or member not in ids for member in members):
-            raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "split group names an unknown source requirement")
-        normalized = sorted(members, key=order.__getitem__)
-        if len(set(normalized)) != len(normalized) or seen.intersection(normalized):
-            raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "split groups overlap or name an unknown source requirement")
-        seen.update(normalized)
-        partitions.append((tuple(order[member] for member in normalized), normalized))
-    if seen != ids:
-        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "split groups do not completely partition source requirements")
-    return [members for _sort, members in sorted(partitions)]
+    for path in sorted(documents):
+        section = None
+        for line in documents[path].splitlines():
+            heading = _HEADING.match(line.strip())
+            if heading:
+                section = f"{path}#{_norm(heading.group(1))}"
+            elif section is not None and snippet in _norm(line):
+                return section
+    return None
 
 
-def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any]) -> dict[str, Any]:
-    """Create one complete partition; split only from complete explicit evidence."""
+def _group_keys(source: list[dict[str, Any]], id_pattern: re.Pattern[str] | None,
+                documents: dict[str, str]) -> tuple[dict[str, str | None], dict[str, int]]:
+    """Group of every source requirement: ``id_pattern`` group, else letter prefix of the ID, else document section."""
+    keys: dict[str, str | None] = {item["source_requirement_id"]: None for item in source}
+    counts = {"id_pattern": 0, "id_prefix": 0, "section": 0}
+    if id_pattern is not None and "group" in id_pattern.groupindex:
+        line_id = re.compile(r"^(?:[-*]\s+)?(?:" + id_pattern.pattern + ")", re.M | (id_pattern.flags & re.I))
+        for item in source:
+            match = line_id.search(item["text"])
+            if match and match.group("group"):
+                keys[item["source_requirement_id"]] = "id:" + match.group("group")
+                counts["id_pattern"] += 1
+    letters = {item["source_requirement_id"]: match.group(1).upper() for item in source
+               if keys[item["source_requirement_id"]] is None and (match := _LETTER_ID.match(item["text"].lstrip()))}
+    if len(set(letters.values())) >= 2:  # one prefix for every ID (REQ-1, REQ-2…) is not a grouping
+        for source_id, letter in letters.items():
+            keys[source_id] = "prefix:" + letter
+            counts["id_prefix"] += 1
+    for item in source:
+        if keys[item["source_requirement_id"]] is None and (section := _section_of(item["text"], documents)) is not None:
+            keys[item["source_requirement_id"]] = "section:" + section
+            counts["section"] += 1
+    return keys, counts
+
+
+def _balanced(groups: list[tuple[list[str], int]], cap: int) -> list[list[str]]:
+    """Ordered groups into the fewest contiguous batches of at most *cap* expected bytes, the largest one smallest."""
+    count = -(-sum(size for _members, size in groups) // cap)
+
+    def pack(limit: int) -> list[list[str]]:
+        batches: list[list[str]] = []
+        load = 0
+        for members, size in groups:
+            if batches and load + size <= limit:
+                batches[-1].extend(members)
+                load += size
+            else:
+                batches.append(list(members))
+                load = size
+        return batches
+
+    low, high = max(size for _members, size in groups), cap
+    while low < high:
+        middle = (low + high) // 2
+        if len(pack(middle)) <= count:
+            high = middle
+        else:
+            low = middle + 1
+    return pack(low)
+
+
+def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: int, id_pattern: re.Pattern[str] | None,
+                documents: dict[str, str]) -> tuple[list[list[str]] | None, list[str]]:
+    """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements."""
+    expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
+    total = sum(expected.values())
+    if window_bytes <= 0:
+        return None, ["одна пачка: деление выключено (.skillsrc limits.step_window_bytes: 0)"]
+    step_input = input_bytes + len(canonical_bytes(source))
+    cap = int(window_bytes * WINDOW_SHARE) - step_input
+    budget = f"порог пачки {cap} Б = окно {window_bytes} Б × {WINDOW_SHARE} − вход шага {step_input} Б"
+    if total <= cap:
+        return None, [f"одна пачка: оценка ответа {total} Б ≤ {budget}"]
+    if cap <= 0:
+        return None, [f"одна пачка: вход шага {step_input} Б не оставляет места ответу в окне {window_bytes} Б — сузьте контекст"]
+    keys, counts = _group_keys(source, id_pattern, documents)
+    groups: dict[str, tuple[int, list[str], int]] = {}
+    for item in source:
+        source_id = item["source_requirement_id"]
+        key = keys[source_id] or "own:" + source_id
+        order, members, size = groups.get(key, (item["display_order"], [], 0))
+        groups[key] = (order, members + [source_id], size + expected[source_id])
+    notes: list[str] = []
+    batches: list[list[str]] = []
+    segment: list[tuple[list[str], int]] = []
+    for _order, members, size in sorted(groups.values(), key=lambda value: value[0]):
+        if size <= cap:
+            segment.append((members, size))
+            continue
+        if segment:
+            batches.extend(_balanced(segment, cap))
+            segment = []
+        if len(members) == 1:
+            batches.append(list(members))
+            notes.append(f"BATCH_GROUP_OVER_BUDGET: требование {members[0]} — оценка ответа {size} Б больше порога пачки {cap} Б; "
+                         "оно не делится и идёт отдельной пачкой")
+            continue
+        # FaT-BO: a group over the batch budget is cut in display order, one requirement per unit — else a document of
+        # FR-1…FR-40 is one prefix group and the split gives nothing
+        parts: list[list[str]] = []
+        units: list[tuple[list[str], int]] = []
+        for member in members + [""]:
+            if member and expected[member] <= cap:
+                units.append(([member], expected[member]))
+                continue
+            if units:
+                parts.extend(_balanced(units, cap))
+                units = []
+            if member:
+                parts.append([member])
+        batches.extend(parts)
+        notes.append(f"BATCH_GROUP_OVER_BUDGET: группа {', '.join(members)} — оценка ответа {size} Б больше порога пачки {cap} Б; "
+                     f"разрезана подряд по требованиям на {len(parts)} пачек: " + " | ".join(", ".join(part) for part in parts))
+    if segment:
+        batches.extend(_balanced(segment, cap))
+    used = ", ".join(f"{name} {number}" for name, number in counts.items() if number)
+    notes.insert(0, f"пачек {len(batches)}: оценка ответа {total} Б > {budget}; требования по группам: {used or 'нет'}")
+    unplaced = [item["source_requirement_id"] for item in source if keys[item["source_requirement_id"]] is None]
+    if unplaced:
+        subject = "требование {} не попало" if len(unplaced) == 1 else "требования {} не попали"
+        notes.append(subject.format(", ".join(unplaced)) + " ни в одну группу: нет ID группы (.skillsrc requirements.id_pattern "
+                     "с группой (?P<group>…) или буквенный префикс) и первая строка не найдена в разделе # / ## документа "
+                     "контекста — каждое идёт своей группой")
+    return batches, notes
+
+
+def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
+                 input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
+                 documents: dict[str, str] | None = None) -> BatchPlan:
+    """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO)."""
     source = _source_requirements(source_requirements)
     header_digest, context_digest = _evidence_digests(grouping_evidence)
-    ids = {item["source_requirement_id"] for item in source}
+    groups, notes = _size_split(source, window_bytes, input_bytes, id_pattern, documents or {})
     physical_order = {item["source_requirement_id"]: item["display_order"] for item in source}
-    groups = _split_groups(ids, physical_order, grouping_evidence) or [[item["source_requirement_id"] for item in source]]
     batches = []
-    for ordinal, members in enumerate(groups, start=1):
+    for ordinal, members in enumerate(groups or [list(physical_order)], start=1):
+        members = sorted(members, key=physical_order.__getitem__)
         batch_seed = {"ordinal": ordinal, "owned_source_requirement_ids": members, "header_digest": header_digest, "context_receipt_digest": context_digest}
         batches.append({
             "batch_id": "BATCH-" + hashlib.sha256(canonical_bytes(batch_seed)).hexdigest()[:16],
@@ -134,9 +264,37 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
             "context_receipt_digest": context_digest,
             "completeness": "COMPLETE",
         })
-    plan = _with_digest({"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches})
+    plan = BatchPlan(_with_digest({"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}))
     _schema_valid(plan, _PLAN_SCHEMA, "batch plan")
+    plan.notes = notes
     return plan
+
+
+_DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
+
+
+def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
+                             input_files: list[Path], context_receipt: dict[str, Any]) -> BatchPlan:
+    """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
+    it (the given files, the context files of the receipt and the tc-generator role), the documents of the receipt."""
+    from tools.build_context import _project_id_pattern, compile_id_pattern
+    from tools.step_size import measure, step_window
+
+    project = Path(project).resolve()
+    _validate_context_receipt(context_receipt, _evidence_digests(grouping_evidence)[1])
+    context_files: list[Path] = []
+    documents: dict[str, str] = {}
+    for item in context_receipt["files"]:
+        path = project / item["project_path"]
+        context_files.append(path)
+        if path.suffix.lower() in _DOCUMENT_SUFFIXES:
+            data = path.read_bytes()
+            if "sha256:" + hashlib.sha256(data).hexdigest() != item["content_digest"]:
+                raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"context file changed after selection: {item['project_path']}")
+            documents[item["project_path"]] = data.decode("utf-8", errors="replace")
+    step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator")["bytes"]
+    return plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
+                        id_pattern=compile_id_pattern(_project_id_pattern(project)), documents=documents)
 
 
 def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -202,8 +360,57 @@ def _require_namespaced_identifiers(fragment: dict[str, Any]) -> None:
                     require(assertion, "assertion_id")
 
 
-def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], context_receipt: dict[str, Any]) -> None:
-    """Validate a complete or failed fragment against controller-owned bindings."""
+def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]], batch: dict[str, Any],
+                       fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """FaT-BO: exactly the fragments of the batches before *batch* in plan order (batches go one after another)."""
+    earlier = sorted((item for item in batches.values() if item["ordinal"] < batch["ordinal"]), key=lambda item: item["ordinal"])
+    by_batch = {item.get("batch_id"): item for item in fragments if isinstance(item, dict) and item.get("plan_digest") == plan["digest"]}
+    missing = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch]
+    if missing:
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", f"batch {batch['namespace']} goes after {', '.join(missing)}: give the accepted "
+                                 "fragments of the earlier batches (--prior-fragment, one per batch)")
+    return [by_batch[item["batch_id"]] for item in earlier]
+
+
+def _capabilities_of(fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    capabilities = _unique_by_id([item for fragment in fragments for item in fragment.get("operation_capabilities") or []],
+                                 "capability_id", "BATCH_ID_CONFLICT", permit_equal=True)
+    return [capabilities[key] for key in sorted(capabilities)]
+
+
+def prior_capabilities(plan: dict[str, Any], batch_id: str, fragments: list[dict[str, Any]]) -> dict[str, Any]:
+    """FaT-BO: the fifth tc-generator input of batch k>=2 — the operation capabilities of the accepted batches 1..k-1."""
+    batches = _plan_batches(plan)
+    batch = batches.get(batch_id)
+    if batch is None:
+        raise BatchAssemblyError("BATCH_ID_CONFLICT", f"{batch_id} is not a batch of the plan")
+    if batch["ordinal"] == 1:
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "the first batch has no earlier capabilities: its input is the four digests")
+    earlier = _earlier_fragments(plan, batches, batch, fragments)
+    return with_digest({
+        "schema_version": "1.0.0", "plan_digest": plan["digest"], "batch_id": batch_id,
+        "fragment_digests": [{"batch_id": item["batch_id"], "digest": item["digest"]} for item in earlier],
+        "operation_capabilities": _capabilities_of(earlier),
+    })
+
+
+def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str, Any]]) -> None:
+    """FaT-BO: the same capability ID has the same bytes, the same adapter/action the same ID as in the earlier batches."""
+    known = {item["capability_id"]: item for item in _capabilities_of(earlier)}
+    actions = {(item.get("adapter"), item.get("action")): key for key, item in known.items()}
+    for capability in fragment["operation_capabilities"]:
+        key = capability.get("capability_id")
+        owner = known.get(key) or known.get(actions.get((capability.get("adapter"), capability.get("action"))))
+        if owner is not None and canonical_bytes(owner) != canonical_bytes(capability):
+            raise BatchAssemblyError(
+                "BATCH_CAPABILITY_CONFLICT",
+                f"capability {key} differs from capability {owner['capability_id']} of an earlier batch; take it verbatim from the "
+                f"prior capabilities input: {canonical_bytes(owner).decode('utf-8')}")
+
+
+def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], context_receipt: dict[str, Any],
+                      prior_fragments: list[dict[str, Any]] | None = None) -> None:
+    """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches)."""
     batches = _plan_batches(plan)
     if not isinstance(fragment, dict):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment must be an object")
@@ -234,6 +441,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     if fragment.get("status") != "COMPLETE":
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment status is invalid")
     _require_namespaced_identifiers(fragment)
+    if batch["ordinal"] > 1:
+        _require_prior_capabilities(fragment, _earlier_fragments(plan, batches, batch, prior_fragments or []))
     requirement_ids = _fragment_requirements(fragment)
     mappings = fragment.get("source_to_canonical_mappings")
     if not isinstance(mappings, list):
@@ -311,8 +520,9 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     if len(fragments) != len(batches):
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "there must be exactly one fragment per batch")
     by_batch: dict[str, dict[str, Any]] = {}
-    for fragment in fragments:
-        validate_fragment(fragment, plan, header, fragment.get("context_receipt"))
+    ordinals = {key: item["ordinal"] for key, item in batches.items()}
+    for fragment in sorted(fragments, key=lambda item: ordinals.get(item.get("batch_id"), 0) if isinstance(item, dict) else 0):
+        validate_fragment(fragment, plan, header, fragment.get("context_receipt"), list(by_batch.values()))
         batch_id = fragment["batch_id"]
         if batch_id in by_batch:
             raise BatchAssemblyError("BATCH_ID_CONFLICT", "multiple fragments for one batch")

@@ -102,11 +102,15 @@ def _cmd_read_context(a):
 
 
 def _cmd_plan_batches(a):
-    return batch_assembly.plan_batches(a.requirements, a.grouping)
+    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, a.context_receipt)
 
 
 def _cmd_validate_fragment(a):
-    return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt)
+    return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment)
+
+
+def _cmd_prior_capabilities(a):
+    return pilot_state.publish_prior_capabilities(a.run_root, a.attempt, a.batch_id)
 
 
 def _cmd_assemble(a):
@@ -204,8 +208,11 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
-    "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json)), None, ()),
-    "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json)), None, ()),
+    "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
+                                         ("--input-file", Path, "append"), ("--context-receipt", _json)), None, ()),
+    "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
+                                                   ("--prior-fragment", _json, "append", "optional")), None, ()),
+    "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
     "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
     "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
     "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
@@ -244,6 +251,8 @@ def _parser() -> JsonArgumentParser:
                 command.add_argument(flag, dest=dest, action="store_true")
             elif rest == ["append"]:
                 command.add_argument(flag, dest=dest, action="append", required=True)
+            elif rest[1:] == ["append", "optional"]:
+                command.add_argument(flag, dest=dest, type=rest[0], action="append", default=[])
             elif len(rest) == 2 and rest[1] == "append":
                 command.add_argument(flag, dest=dest, type=rest[0], action="append", required=True)
             elif len(rest) == 2:
@@ -300,6 +309,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
+    if getattr(result, "notes", None):  # FaT-BO: plan-batches says how and why it split
+        payload["notes"] = list(result.notes)
     if parts:
         payload["out"] = {part: _write(targets[part], plain(value)) for part, value in zip(parts, result, strict=True)}
     elif out is not None:

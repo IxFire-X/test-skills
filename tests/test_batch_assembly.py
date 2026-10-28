@@ -46,16 +46,12 @@ def _requirements():
 
 
 def _plan(header, context):
-    from tools.batch_assembly import plan_batches
+    from tools.batch_assembly import canonical_bytes, plan_batches
 
-    return plan_batches(_requirements(), {
-        "header_digest": _header_digest(header), "context_receipt_digest": context["digest"],
-        "complete": True, "independence_proven": True,
-        "groups": [
-            {"group_id": "payment", "source_requirement_ids": ["SREQ-payment"], "independence_evidence": ["target:payment"]},
-            {"group_id": "refund", "source_requirement_ids": ["SREQ-refund"], "independence_evidence": ["target:refund"]},
-        ],
-    })
+    # FaT-BO: a window that leaves room for one requirement's expected answer splits the two into two batches
+    input_bytes = int(10_000 * 0.85) - len(canonical_bytes(_requirements())) - 600
+    return plan_batches(_requirements(), {"header_digest": _header_digest(header), "context_receipt_digest": context["digest"]},
+                        window_bytes=10_000, input_bytes=input_bytes)
 
 
 def _fragment(plan, context, batch_index: int):
@@ -111,8 +107,8 @@ def test_assemble_candidate_is_byte_identical_for_shuffled_fragments_and_keeps_d
     context = _context_receipt()
     plan = _plan(header, context)
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
-    for fragment in fragments:
-        validate_fragment(fragment, plan, header, context)
+    for index, fragment in enumerate(fragments):
+        validate_fragment(fragment, plan, header, context, fragments[:index])  # FaT-BO: batch 2 goes after batch 1
 
     first, first_receipt = assemble_candidate(header, plan, fragments)
     second, second_receipt = assemble_candidate(header, plan, list(reversed(fragments)))
@@ -152,7 +148,7 @@ def test_assemble_candidate_rejects_same_capability_id_with_different_semantics(
     fragments = [_fragment(plan, context, 0), _fragment(plan, context, 1)]
     fragments[1]["operation_capabilities"][0]["action"] = "different"
     _refresh(fragments[1])
-    with pytest.raises(BatchAssemblyError, match="BATCH_ID_CONFLICT"):
+    with pytest.raises(BatchAssemblyError, match="BATCH_CAPABILITY_CONFLICT"):  # FaT-BO: refused with the batch, before assembly
         assemble_candidate(header, plan, fragments)
 
 
@@ -233,4 +229,4 @@ def test_duplicate_mapping_is_partition_conflict_and_failed_fragment_publication
     assert published["model_receipt"]["bytes"] == (tmp_path / "model-receipts" / f"{failed['batch_id']}.json").read_bytes()
     with pytest.raises(BatchAssemblyError, match="BATCH_ID_CONFLICT"):
         publish_fragment(tmp_path, failed)
-    validate_fragment(_fragment(plan, context, 1), plan, header, context)
+    validate_fragment(_fragment(plan, context, 1), plan, header, context, [_fragment(plan, context, 0)])

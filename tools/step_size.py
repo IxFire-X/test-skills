@@ -29,6 +29,7 @@ from tools.json_cli import JsonArgumentParser
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
+DEFAULT_WINDOW = 1_000_000  # FaT-BO: DeepSeek 239k tokens / 0.239 tok/B
 OVER_BUDGET = "STEP_OVER_BUDGET"
 RECORD = "step-sizes.jsonl"
 OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
@@ -44,14 +45,23 @@ _REQUEST_STAGES = ("tc-generator", "tc-to-autotest", "autotest-reviewer")
 _HEX = re.compile(r"[0-9a-f]{64}")
 
 
-def step_budget(project: Path) -> int:
+def _limit(project: Path, key: str, default: int, *, zero: bool = False) -> int:
     path = Path(project) / ".skillsrc"
     if not path.is_file():
-        return DEFAULT_BUDGET
+        return default
     from tools.skillsrc_manifest import load_skillsrc
 
-    value = (load_skillsrc(path).get("limits") or {}).get("step_input_bytes")
-    return int(value) if isinstance(value, int) and value > 0 else DEFAULT_BUDGET
+    value = (load_skillsrc(path).get("limits") or {}).get(key)
+    return int(value) if isinstance(value, int) and (value > 0 or zero and value == 0) else default
+
+
+def step_budget(project: Path) -> int:
+    return _limit(project, "step_input_bytes", DEFAULT_BUDGET)
+
+
+def step_window(project: Path) -> int:
+    """FaT-BO: the model window in bytes (``.skillsrc`` ``limits.step_window_bytes``); 0 turns the tc-generator split off."""
+    return _limit(project, "step_window_bytes", DEFAULT_WINDOW, zero=True)
 
 
 def looks_truncated(text: str) -> bool:

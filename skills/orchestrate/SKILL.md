@@ -217,17 +217,23 @@ Run остаётся связан с исходной project/module identity.
    каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
    `tools.api read-context --digest <d>`. Сначала header: `tools.api publish-generator-input --kind header --value <f>`
    (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. План — `tools.api plan-batches
-   --requirements <f> --grouping <f>`, затем `tools.api publish-generator-input --kind plan --value <план>`. У plan и header
-   один digest — `result.digest` этой команды; sha256 байтов файла входом не бывает.
-3. Для каждого batch вызови `tc-generator` с declared immutable inputs.
-   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; неверный вход `model-request`
+   --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f>`, затем
+   `tools.api publish-generator-input --kind plan --value <план>`. У plan и header один digest — `result.digest` этой
+   команды; sha256 байтов файла входом не бывает. Пачки делит код по оценке ответа и окну `.skillsrc
+   limits.step_window_bytes`, группы требований не рвёт; `notes` в выводе — сколько пачек и почему, покажи их человеку как есть.
+3. Для каждого batch вызови `tc-generator` с declared immutable inputs — пачки строго по очереди (`ordinal`),
+   пачка k после принятого ответа пачки k−1, не параллельно.
+   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; с пачки 2 — пятый вход,
+   capabilities прошлых пачек: `tools.api prior-capabilities --run-root <run> --attempt <attempt_id> --batch-id <id>`
+   (код строит его из журнала), его `result.digest` — пятый `--input-digest`. Неверный вход `model-request`
    отклоняет (`MODEL_INPUTS_MISMATCH`) и называет правильный digest и его источник. Digest-поля ответов (фрагмента,
    ревьюеров, автотестов) `model-response` сверяет с журналом до записи (`MODEL_RESPONSE_DIGEST_MISMATCH`) — это ошибка
    ответа, на неё идёт единственный повтор стадии.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
-   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>`, затем `assemble` и
+   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>` (с пачки 2 —
+   `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты), затем `assemble` и
    `validate-canonical` из п.4 на этом же файле (всех фрагментах). Отказ любой из трёх — ошибка ответа: на неё идёт
    единственный повтор стадии (`retry_prompt` — текст отказа); после `model-response` ответ стадии не заменить.
    `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).

@@ -1813,7 +1813,8 @@ def _validate_model_request_predecessors(
         from tools.project_inventory import read_execution_baseline
 
         markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
-        if len(inputs) != 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
+        # FaT-BO: from batch 2 a fifth input — the capabilities of the earlier batches (prior-capabilities)
+        if len(inputs) not in (4, 5) or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
         _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
         context = read_context_selection(root, attempt_id, inputs[1])
@@ -1847,7 +1848,7 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
     inputs = request["input_digests"]
     context = read_context_selection(root, attempt_id, inputs[1])
     if (
-        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:]
+        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:4]
         or value.get("context_receipt") != context
     ):
         raise ValueError("generator fragment must match its request and stored context receipt")
@@ -2124,7 +2125,8 @@ def publish_model_stage_artifact(
             if published is None:  # a run from before FaT-DG: no published plan/header to check against
                 require_batch_coverage(value)  # FaT-DG: the coverage rule of assemble, on this batch, before the write
             else:  # FaT-DG: the whole fragment check (coverage inside) against the journal, before the write
-                validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))))
+                validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))),
+                                  _accepted_earlier_fragments(project, root, state, attempt_id, published[0], stage_instance_id.split(":", 1)[1]))
         except BatchAssemblyError as error:
             raise BatchAssemblyError(error.code, str(error).split(": ", 1)[1] + "; fix: исправь фрагмент и отдай его единственным "
                                      "повтором стадии (--transport-attempts 2), ничего не записано") from error
@@ -2578,6 +2580,10 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
     directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers"}
+    if kind.startswith(_PRIOR_KIND):  # FaT-BO: one receipt per batch, in its own folder
+        if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_PRIOR_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+            raise ValueError("invalid factual receipt")
+        return root / "prior-capabilities" / f"{attempt_id}.{kind[len(_PRIOR_KIND):]}.json"
     if kind not in directories or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
         raise ValueError("invalid factual receipt")
     suffix = "" if not kind.startswith("automation-review-boundary-r") else f".{kind[-2:]}"
@@ -2911,6 +2917,13 @@ def _validate_factual_receipt(
             or not isinstance(value, Mapping)
             or value.get("digest") != _generator_input_digest(value)
             or field == "plan" and not _plan_batches_listed(value)
+        ):
+            raise ValueError(f"invalid {kind} receipt")
+    elif kind.startswith(_PRIOR_KIND):  # FaT-BO: the value is the one the journal gives, nothing else
+        if (
+            set(receipt) != common | {"prior_capabilities"}
+            or not identity_matches
+            or receipt.get("prior_capabilities") != _prior_capabilities_value(project, root, state, str(attempt["attempt_id"]), kind[len(_PRIOR_KIND):])
         ):
             raise ValueError(f"invalid {kind} receipt")
     elif kind == "structured-result":
@@ -4096,6 +4109,74 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
 
 
 _GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  # FaT-DG
+_PRIOR_KIND = "prior-capabilities-"  # FaT-BO: + batch_id — the fifth tc-generator input from batch 2
+
+
+def _batch_ordinal(batch: Mapping[str, Any]) -> int:
+    """FaT-BO: the ordinal of a published plan batch; a fixture plan without one is a first batch (four inputs)."""
+    return batch["ordinal"] if type(batch.get("ordinal")) is int else 1
+
+
+def _accepted_earlier_fragments(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, plan: Mapping[str, Any],
+                                batch_id: str) -> list[dict[str, Any]]:
+    """FaT-BO: the accepted fragments (model-response) of the batches before *batch_id*; one missing is refused by name."""
+    rows = [row for row in plan.get("batches") or [] if isinstance(row, Mapping)]
+    current = next((row for row in rows if row.get("batch_id") == batch_id), None)
+    if current is None:
+        return []
+    fragments: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for row in sorted((row for row in rows if _batch_ordinal(row) < _batch_ordinal(current)), key=_batch_ordinal):
+        stage = f"tc-generator:{row['batch_id']}"
+        answers = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                   and event.get("stage_instance_id") == stage]
+        if not answers:
+            missing.append(f"{row.get('namespace', '')} {row['batch_id']}".strip())
+            continue
+        fragments.append(dict(_read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, str(answers[-1]["artifact_digest"]))["artifact"]))
+    if missing:
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: пачки идут по очереди — сначала принятый ответ (model-response) пачки "
+                                  f"{', '.join(missing)}, потом {current.get('namespace', '')} {batch_id}")
+    return fragments
+
+
+def _prior_capabilities_value(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str) -> Mapping[str, Any]:
+    """FaT-BO: the capabilities of the accepted batches before *batch_id*, built by code from the published plan and the journal."""
+    from tools.batch_assembly import BatchAssemblyError, prior_capabilities
+
+    plan = _generator_input(project, root, state, attempt_id, "plan")
+    batch = next((row for row in plan["batches"] if row.get("batch_id") == batch_id), None)
+    if batch is None:
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {batch_id} is not a batch of the published plan {plan['digest']}")
+    if _batch_ordinal(batch) == 1:
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {batch_id} — первая пачка, у неё четыре входа, capabilities прошлых пачек нет")
+    fragments = _accepted_earlier_fragments(project, root, state, attempt_id, plan, batch_id)
+    try:
+        return prior_capabilities(dict(plan), batch_id, fragments)
+    except BatchAssemblyError as error:
+        raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {error}") from error
+
+
+@closure_cached  # FaT-BO
+def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -> dict[str, Any]:
+    """Publish the fifth tc-generator input of batch k>=2 — built from the journal, one receipt per batch; the same value
+    again changes nothing, another one is refused."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    value = _prior_capabilities_value(project, root, state, attempt_id, batch_id)
+    kind = _PRIOR_KIND + batch_id
+    target = _receipt_target(root, attempt_id, kind)
+    if target.exists():
+        try:
+            prior = _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["prior_capabilities"]
+        except (ValueError, OSError, KeyError):
+            prior = None
+        if prior != value:
+            raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {batch_id} already has other prior capabilities; another one needs "
+                             "a new run (scan --new-run)")
+    _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
+    return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(value["operation_capabilities"]),
+            "path": target.relative_to(root).as_posix()}
 
 
 class ModelInputsMismatch(ValueError):
@@ -4214,12 +4295,23 @@ def _expected_model_inputs(
         if batch["header_digest"] != header["digest"]:
             raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the plan binds the header {batch['header_digest']}, the published header is "
                                       f"{header['digest']}; the plan is built from the header digest of publish-generator-input")
-        return [
+        expected = [
             (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
             (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
             (str(plan["digest"]), "result.digest команды publish-generator-input --kind plan"),
             (str(header["digest"]), "result.digest команды publish-generator-input --kind header"),
         ]
+        if _batch_ordinal(batch) > 1:  # FaT-BO: from batch 2 the capabilities of the accepted earlier batches
+            prior = _prior_capabilities_value(project, root, state, attempt_id, instance)
+            try:
+                _read_attempt_receipt_with_state(project, root, state, attempt_id, _PRIOR_KIND + instance, "ARTIFACT_READ_BACK")
+            except (ValueError, OSError, KeyError) as error:
+                raise ModelInputsMismatch(
+                    f"MODEL_INPUTS_MISMATCH: capabilities прошлых пачек для {instance} не опубликованы; fix: tools.api prior-capabilities "
+                    f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — пятый вход"
+                ) from error
+            expected.append((str(prior["digest"]), f"result.digest команды tools.api prior-capabilities --batch-id {instance}"))
+        return expected
     try:
         if stage == "tc-reviewer":
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
