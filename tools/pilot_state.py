@@ -2072,6 +2072,10 @@ def _model_stage_artifact_target(root: Path, attempt_id: str, content_digest: st
     )
 
 
+_RETRY_EXHAUSTED_FIX = ("fix: python -m tools.run_pipeline finish --project <project> --run <run_id> назовёт выход — "
+                        "для стадии автоматизации finish --abandon STAGE_RETRY_EXHAUSTED, до ревью кейсов — scan --new-run")
+
+
 @closure_cached  # FaT-9b
 def publish_model_stage_artifact(
     run_root: Path,
@@ -2097,6 +2101,10 @@ def publish_model_stage_artifact(
     value = dict(artifact)
     if attempt is None or attempt["state"] == "TERMINAL":
         raise ValueError("unknown model stage artifact attempt")
+    # FaT-AB C5: one answer per stage, at most the one retry — a third answer is refused by name before anything is written
+    if type(transport_attempts) is int and transport_attempts > 2:
+        raise ValueError(f"MODEL_STAGE_RETRY_EXHAUSTED: {stage_instance_id}: у стадии один ответ и единственный повтор "
+                         f"(--transport-attempts 1 или 2), третьего ответа нет; ничего не записано; " + _RETRY_EXHAUSTED_FIX)
     data = _model_stage_artifact_bytes(value)
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     requests = [
@@ -2119,6 +2127,9 @@ def publish_model_stage_artifact(
             or responses[0].get("transport_attempts") != transport_attempts
         )
     ):
+        if len(requests) == 1 and len(responses) == 1:
+            raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
+                             "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
         raise ValueError("model stage artifact requires its exact prior request")
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),

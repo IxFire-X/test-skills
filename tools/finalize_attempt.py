@@ -1172,16 +1172,46 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
     return "AUTOMATION_REJECTED", None
 
 
-def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int) -> str:
-    """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point."""
+# FaT-AB: the closed list of `finish --abandon` codes and the state each one closes
+ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE")
+_PENDING_ABANDON = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID")
+
+
+def _abandon_command(code: str) -> str:
+    return f"python -m tools.run_pipeline finish --project <project> --run <run_id> --abandon {code}"
+
+
+def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
+    """FaT-AB D3: exec began to prepare the accepted automation (inputs published) and wrote nothing into the project."""
+    root = Path(run_root)
+    return ((root / "execution-inputs" / f"{attempt_id}.json").exists()
+            and not (root / "materialization-ownership" / f"{attempt_id}.json").exists()
+            and not (root / "generated-deltas" / f"{attempt_id}.json").exists())
+
+
+def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int, abandon: str | None = None) -> str:
+    """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
+
+    FaT-AB: ``abandon`` is the agent's decision that the chain cannot go on; the code closes with it only where no
+    other command closes the attempt — an unfinished chain, or an accepted one exec failed to prepare."""
     outcome, stage = automation_outcome(run_root, attempt_id, canonical_blockers)
     if outcome == "ACCEPTED":
-        raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec")
+        if abandon == "AUTOMATION_NOT_MATERIALIZABLE" and _accepted_unprepared(run_root, attempt_id):
+            return abandon
+        raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec",
+                                fix="python -m tools.run_pipeline exec --project <project> --run <run_id>")
     if outcome == "PENDING":
+        if abandon in _PENDING_ABANDON:
+            return str(abandon)
         name, revision = str(stage).split(":")
         what = "следующая ревизия" if name == "tc-to-autotest" else "ревью ревизии"
         raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: {what} {revision} ({name})",
-                                fix=f"следующий шаг — {stage}; после принятого ревью попытку закрывает exec, после отказа — finish")
+                                fix=f"следующий шаг — {stage}; после принятого ревью попытку закрывает exec, после отказа — finish; "
+                                    f"единственный повтор стадии {stage} исчерпан — {_abandon_command('STAGE_RETRY_EXHAUSTED')}; "
+                                    f"сборка или публикация ревизии падает после записанных ответов — {_abandon_command('ASSEMBLY_INVALID')}")
+    if abandon is not None:
+        raise FinalizationError(f"ABANDON_NOT_NEEDED: автоматизация уже закончена ({outcome}) — попытку закрывает finish без --abandon",
+                                fix="python -m tools.run_pipeline finish --project <project> --run <run_id>")
     return outcome
 
 
@@ -1201,26 +1231,29 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
     return True
 
 
-# FaT-RL: the ways out of an attempt finish cannot close yet
+# FaT-RL: the ways out of an attempt finish cannot close yet; FaT-AB D2: each names its exact abort code
+_REVIEW_ABORT = ("python -m tools.api review-abort --run-root <run> --attempt <attempt_id> --reason {code} "
+                 "--out <run>/tmp/session.json, затем select с этим --reviewer-session без --review")
 _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (next_step); "
-                    "ревью кейсов, которое не может закончиться, закрой python -m tools.api review-abort --run-root <run> "
-                    "--attempt <attempt_id> --reason <код> — затем finish закроет попытку отрицательно")
+                    "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
+                    + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
+                    "select отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")
 _UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: выбери его (шаг 4, выбор effective canonical, "
-                   "проверка — python -m tools.api read-effective) или закрой ревью python -m tools.api review-abort "
-                   "--run-root <run> --attempt <attempt_id> --reason <код>; затем снова finish")
+                   "проверка — python -m tools.api read-effective), затем снова finish; сессия с вердиктом закрыта, "
+                   "review-abort её не закроет — select отказывает всегда: прогон оставь, scan с --new-run начнёт новый")
 
 
-def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+def finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: str | None = None) -> Mapping[str, Any]:
     """FaT-4: close an attempt that ran no tests, from durable evidence only — the facts the agent used to assemble.
 
     Branches: an accepted cases-only canonical, and an early negative outcome of the canonical review (rework or a
     reviewer abort).  Any other state is not a closing point yet, and the error names the missing fact instead of a guess.
     """
     with pilot_state.closure_cache():  # FaT-9
-        return _finalize_durable_branch_attempt(run_root, attempt_id)
+        return _finalize_durable_branch_attempt(run_root, attempt_id, abandon)
 
 
-def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: str | None = None) -> Mapping[str, Any]:
     try:
         existing = pilot_state.read_terminal_result(run_root, attempt_id)
     except KeyError:
@@ -1229,13 +1262,18 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping
         closed = finalize_attempt({"attempt_id": attempt_id}, None, project=Path(run_root), verification=str(existing.get("verification")),
                                   facts={}, run_root=run_root)
         return {**closed, "exit_code": pilot_state.exit_code(existing)}
-    attempt, branch, facts = _durable_branch_facts(run_root, attempt_id)
+    attempt, branch, facts = _durable_branch_facts(run_root, attempt_id, abandon)
     closed = finalize_attempt(branch, None, project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
     return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
 
 
-def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any]]:
-    """``(attempt, branch, facts)`` of a closing point without tests, or FinalizationError naming the missing fact; only reads."""
+def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None = None) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any]]:
+    """``(attempt, branch, facts)`` of a closing point without tests, or FinalizationError naming the missing fact; only reads.
+
+    FaT-AB: ``abandon`` (one of ABANDON_CODES) closes an automation chain that cannot go on — the same branch as a refused
+    automation; everywhere else it is refused with the command that closes or continues the attempt."""
+    if abandon is not None and abandon not in ABANDON_CODES:
+        raise FinalizationError(f"ABANDON_CODE_INVALID: one of {list(ABANDON_CODES)}")
     try:
         state = pilot_state.derive_state(run_root)
         attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
@@ -1265,7 +1303,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str,
                      "blocker_count": blockers, "mixed_manual_traceable": coverage == "MIXED", "prior_stage_cause": "CANONICAL_COMPLETE"}
             causes = ["CANONICAL_COMPLETE"]
         else:
-            refusal = _automation_refusal(run_root, attempt_id, blockers)
+            refusal = _automation_refusal(run_root, attempt_id, blockers, abandon)
             facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": coverage, "reason_code": refusal,
                      "blocker_count": blockers, "mixed_manual_traceable": False, "prior_stage_cause": refusal}
             causes = [refusal]
@@ -1282,5 +1320,8 @@ def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str,
         facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": cause,
                  "blocker_count": 0, "mixed_manual_traceable": False, "prior_stage_cause": cause}
         branch = {"attempt_id": attempt_id, "evidence": {}, "stage_causes": [cause]}
+    if abandon is not None and facts["reason_code"] != abandon:
+        raise FinalizationError(f"ABANDON_NOT_NEEDED: попытку закрывает finish без --abandon ({facts['reason_code'] or 'COMPLETE'})",
+                                fix="python -m tools.run_pipeline finish --project <project> --run <run_id>")
     return attempt, branch, facts
 

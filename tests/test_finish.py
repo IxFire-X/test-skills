@@ -201,12 +201,14 @@ def test_finish_on_a_lowered_run_closes_cases_only_and_names_both_profiles(tmp_p
 
 def test_finish_before_the_review_names_what_is_missing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_reviewer_protocol import _new_run
-    from tools.run_pipeline import HostStop, cmd_finish
+    from tools.run_pipeline import cmd_finish
 
     run_root, _attempt_id = _new_run(tmp_path)
-    with pytest.raises(HostStop) as stop:
-        cmd_finish(SimpleNamespace(project=str(tmp_path), run=run_root.name))
-    assert stop.value.code == "FINISH_FACT_UNDETERMINED"
+    capsys.readouterr()
+    # FaT-AB tier C: the refusal is printed with its next run (a HostStop could not carry next_run)
+    assert cmd_finish(SimpleNamespace(project=str(tmp_path), run=run_root.name)) == 2
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["reason"] == "FINISH_FACT_UNDETERMINED" and "--new-run" in printed["next_run"]["command"], printed
 
 
 def test_finish_closes_a_reviewer_abort_branch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -492,7 +492,9 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
 
 
-_ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT",)  # the only pre-verdict abort the contract names
+# the pre-verdict aborts: the context ceiling, and FaT-AB D2 — a reviewer answer that twice failed its check or a select
+# refusal, so the session cannot end in a verdict
+_ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT", "REVIEW_UNUSABLE")
 
 
 @_closure_cached  # FaT-10c

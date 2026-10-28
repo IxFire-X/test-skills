@@ -913,7 +913,7 @@ def _abandoned(project: Path, root: Path, attempt: Mapping[str, Any]) -> str | N
     return f"дрейф: {len(changed)} файл(ов)" if changed else "сверка baseline не прошла"
 
 
-def _run_in_progress(project: Path, root: Path) -> dict[str, Any]:
+def _run_in_progress(project: Path, root: Path, request: Mapping[str, Any] | None = None) -> dict[str, Any]:
     from tools.finalize_attempt import finish_closes
     from tools.pilot_state import derive_state
 
@@ -933,7 +933,8 @@ def _run_in_progress(project: Path, root: Path) -> dict[str, Any]:
         "next_step": next_step,
         "message": "для этого проекта, документа и профиля уже есть незавершённый прогон; новый не создан",
         "fix": (f'продолжите его: {python} status --project "{project}" --run {root.name}; '
-                f"{finish}нужен ещё один прогон рядом — повторите этот scan с флагом --new-run"),
+                f"{finish}нужен ещё один прогон рядом или этот не закрыть — "
+                + (_scan_command(project, request, extra=("--new-run",)) if request is not None else "повторите этот scan с флагом --new-run")),
     }
 
 
@@ -969,6 +970,10 @@ _SECOND_PASS = {
     "AUTOMATION_REJECTED": "автоматизация отклонена ревью: следующий заход — новый scan того же запроса",
     "AUTOMATION_BLOCKED": "автоматизация заблокирована: следующий заход — новый scan того же запроса",
     "AUTOMATION_NOT_MATERIALIZABLE": "принятую автоматизацию нельзя записать в проект: следующий заход — новый scan того же запроса",
+    # FaT-AB: finish --abandon
+    "STAGE_RETRY_EXHAUSTED": "стадия автоматизации исчерпала единственный повтор: следующий заход — новый scan того же запроса",
+    "ASSEMBLY_INVALID": "сборка или публикация ревизии автоматизации не прошла: следующий заход — новый scan того же запроса",
+    "REVIEW_UNUSABLE": "ревью кейсов не может закончиться вердиктом: следующий заход — новый scan того же запроса",
 }
 
 
@@ -1068,7 +1073,7 @@ def _scan(args: Any) -> int:
     if not getattr(args, "new_run", False):
         open_root, abandoned = _open_run_of(project, request)
         if open_root is not None:
-            _print(_run_in_progress(project, open_root))
+            _print(_run_in_progress(project, open_root, request))
             return 2
     run, receipt = _init_skillsrc_run(project, args, request)
     run_root = Path(str(run["run_root"]))
@@ -1757,8 +1762,32 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
             automation_history=inputs["automation_history"], review_history=inputs["review_history"],
         )
     except (GeneratedDeltaError, KeyError, TypeError, ValueError, OSError) as error:
-        raise HostStop("EXECUTION_NOT_PREPARED", str(error), _not_prepared_fix(root, attempt_id)) from error
+        raise HostStop("EXECUTION_NOT_PREPARED", str(error), _prepare_failure_fix(root, attempt_id, error)) from error
     return ["execution-inputs", "generated-delta"]
+
+
+# FaT-AB D3: the accepted automation passed the precheck, then its preparation failed
+_PREPARE_IO_FIX = ("подготовка принятой автоматизации прервалась на вводе-выводе (причина в message): снова вызови exec — "
+                   "ответы и журнал те же, повтор безопасен")
+_PREPARE_FINAL_FIX = ("подготовка принятой автоматизации отказала после записанных входов исполнения, и повтор exec ответит так же: "
+                      "закрой попытку командой finish --abandon AUTOMATION_NOT_MATERIALIZABLE — она закроет её отрицательно "
+                      "и напечатает next_run")
+
+
+def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> str:
+    from tools.finalize_attempt import _accepted_unprepared, automation_next
+    from tools.pilot_state import read_run
+
+    try:
+        outcome, _detail = automation_next(root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return _NOT_PREPARED_FIX
+    if outcome != "ACCEPTED":
+        return _not_prepared_fix(root, attempt_id)
+    if isinstance(error, OSError) or isinstance(error.__cause__, OSError) or not _accepted_unprepared(root, attempt_id):
+        return _PREPARE_IO_FIX
+    return (_PREPARE_FINAL_FIX.replace("finish --abandon", f'"{sys.executable}" -m tools.run_pipeline finish --project '
+                                       f'"{read_run(root)["manifest"]["project"]}" --run {root.name} --abandon'))
 
 
 def cmd_exec(args: Any) -> int:
@@ -2193,6 +2222,38 @@ _INTERRUPTED_FIX = ("запуск тестов начался, но квитан
                     "прерванный запуск как UNKNOWN и закроет попытку")
 
 
+def _before_canonical_review(root: Path, attempt_id: str) -> bool:
+    """FaT-AB tier C: the attempt has no reviewer session yet — no closing command exists before the canonical review."""
+    from tools.pilot_state import read_reviewer_session_ledger
+
+    try:
+        read_reviewer_session_ledger(root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return True
+    return False
+
+
+def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: str) -> dict[str, Any]:
+    """FaT-AB tier C (until FaT-AB2): the honest answer and the next run — this run stays as it is, --new-run starts another."""
+    request = manifest.get("scan_request")
+    command = (_scan_command(project, request, extra=("--new-run",)) if isinstance(request, Mapping)
+               else "scan с теми же --module, --docs и --profile, что у этого прогона, и --new-run")
+    return {
+        "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
+        "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
+        "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — прогон оставлен "
+               "как есть, следующий заход: " + command,
+        "next_run": {"why": "попытка остановилась до ревью кейсов: следующий заход — новый прогон того же запроса", "command": command},
+    }
+
+
+def _exact_fix(fix: str, project: Path, root: Path, attempt_id: str) -> str:
+    """FaT-AB: the fix of finish with this run's own coordinates, a command to copy as it is."""
+    return (fix.replace("python -m tools.", f'"{sys.executable}" -m tools.').replace("<project>", f'"{project}"')
+            .replace("<run_id>", root.name).replace("<run>/tmp/session.json", f'"{root / "tmp" / "session.json"}"')
+            .replace("<run>", f'"{root}"').replace("<attempt_id>", attempt_id))
+
+
 def cmd_finish(args: Any) -> int:
     """FaT-4: close the current attempt in one command — the same order and checks as the manual sequence."""
     from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
@@ -2215,12 +2276,20 @@ def cmd_finish(args: Any) -> int:
             refusal = detail if outcome == "AUTOMATION_NOT_MATERIALIZABLE" else None
         except (KeyError, OSError, TypeError, ValueError):
             refusal = None
+    abandon = getattr(args, "abandon", None)
+    if abandon is not None and (executed or attempt.get("state") == "TERMINAL"):
+        raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает exec или она уже закрыта: --abandon не нужен",
+                       _exact_fix("python -m tools.run_pipeline exec --project <project> --run <run_id>", project, root, attempt_id))
     try:
-        closed = finalize_durable_execution_attempt(root, attempt_id) if executed else finalize_durable_branch_attempt(root, attempt_id)
+        closed = (finalize_durable_execution_attempt(root, attempt_id) if executed
+                  else finalize_durable_branch_attempt(root, attempt_id, abandon))
     except FinalizationError as error:
-        code = str(error).split(":", 1)[0] if str(error).startswith("FINISH_") else "FINALIZATION"
+        if not executed and str(error).startswith("FINISH_FACT_UNDETERMINED") and _before_canonical_review(root, attempt_id):
+            _print(_closed_before_review(project, run["manifest"], str(error)))
+            return 2
+        code = str(error).split(":", 1)[0] if str(error).startswith(("FINISH_", "ABANDON_")) else "FINALIZATION"
         fix = getattr(error, "fix", None) or (_INTERRUPTED_FIX if executed and not (root / "execution-receipts" / f"{attempt_id}.json").exists() else None)
-        raise HostStop(code, str(error), fix) from error
+        raise HostStop(code, str(error), _exact_fix(fix, project, root, attempt_id) if fix else None) from error
     except (KeyError, TypeError, ValueError, OSError) as error:
         if not executed or (root / "execution-receipts" / f"{attempt_id}.json").exists():
             raise
@@ -2454,6 +2523,8 @@ def build_parser() -> JsonArgumentParser:
     status_parser = sub.add_parser("status", parents=[shared])
     finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
     finish_parser.add_argument("--run", required=True)
+    finish_parser.add_argument("--abandon", choices=("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE"),
+                               help="FaT-AB: close an automation chain that cannot go on, only where no other command closes it.")
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])
     exec_parser.add_argument("--run", required=True)

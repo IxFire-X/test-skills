@@ -247,9 +247,11 @@ Run остаётся связан с исходной project/module identity.
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
    `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>` (с пачки 2 —
-   `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты), затем `assemble` и
-   `validate-canonical` из п.4 на этом же файле (всех фрагментах). Отказ любой из трёх — ошибка ответа: на неё идёт
-   единственный повтор стадии (`retry_prompt` — текст отказа); после `model-response` ответ стадии не заменить.
+   `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты). До `model-response` пачки — только
+   `validate-fragment`: `assemble` на части пачек всегда отказывает (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет).
+   Отказ `validate-fragment` — ошибка ответа: на неё идёт единственный повтор стадии (`retry_prompt` — текст отказа);
+   после `model-response` ответ стадии не заменить, третьего ответа нет. `assemble` и `validate-canonical` из п.4 —
+   после ответа последней пачки, на всех фрагментах.
    `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
@@ -312,7 +314,8 @@ Successful session содержит ровно один verdict; explicit termin
 и дописывает пару в ledger (digest считает код); `result.evidence_receipt.digest` потом в `select --evidence-receipt`
 (файл — `tools.api read-context --digest <d> --out <run>/tmp/evidence-N.json`). Не хватает бюджета — отказ
 `REVIEW_CONTEXT_LIMIT`: закрой сессию `tools.api review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json`
-и вызови `select` с этим `--reviewer-session` без `--review`.
+и вызови `select` с этим `--reviewer-session` без `--review`. Ответ ревьюера дважды не прошёл проверку или `select`
+отказал, а сессия ждёт вердикта — то же с `--reason REVIEW_UNUSABLE`.
 
 Ревьюер читает кандидата в компактном виде, не полный JSON (FaT-CV):
 `python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет
@@ -393,7 +396,8 @@ Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`.
 линейное закрытие в фиксированном порядке: materialization → execution → execution trace →
 dispositions → pre-finalization trace → finalization → terminal result и event. Повторный вызов
 возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
-называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную.
+называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную. Цепочка автоматизации не может
+продолжиться — `finish --abandon <код>` из fix; список кодов закрытый, и `finish` сам откажет, если выход другой.
 
 Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` —
 карантин: упавшие методы помечаются `@Disabled`/`xfail`, прошедшие остаются (`QUARANTINED`); если

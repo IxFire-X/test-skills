@@ -128,7 +128,7 @@ def test_b_an_open_canonical_review_names_how_to_close_it(tmp_path: Path, capsys
     root, _attempt_id = _new_run(tmp_path, "local-pilot-v1")
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED", finish
-    assert "review-abort" in finish["fix"], finish
+    assert "--new-run" in finish["fix"] and finish.get("next_run"), finish  # FaT-AB tier C: no closing before the review
     _code, refused = _run(capsys, "exec", tmp_path, root)
     assert refused["status"] == "error" and refused.get("fix"), refused
 
@@ -142,7 +142,8 @@ def test_c_an_accepted_review_without_selection_names_the_selection(tmp_path: Pa
     _published_reviewer_ledger(root, attempt_id, automated_document())
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED", finish
-    assert "effective" in finish["fix"] and "review-abort" in finish["fix"], finish
+    # FaT-AB: a session with a verdict is closed — review-abort refuses it, so the fix does not send there
+    assert "effective" in finish["fix"] and "--new-run" in finish["fix"] and "--reason" not in finish["fix"], finish
 
 
 def test_d_an_interrupted_execution_is_finished_by_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
