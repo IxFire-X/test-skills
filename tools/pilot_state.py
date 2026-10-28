@@ -1700,8 +1700,12 @@ def _context_marker_receipt_digests(
     """
     requirements, batches = _context_marker_parts(state, attempt_id)
     # Every context receipt the attempt published, once each, in publication order: batch-NNN is the N-th of them.
+    # FaT-10c: a recorded request binds the receipts published before it; reviewer evidence published later is not its input.
+    cutoff = next((event["seq"] for event in state["events"] if event.get("attempt_id") == attempt_id
+                   and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage_instance_id), None)
     published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
-                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"
+                                   and (cutoff is None or event["seq"] < cutoff)))
     if stage_instance_id == "context-marker:requirements":
         if len(inputs) != 2:
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")

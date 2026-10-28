@@ -244,7 +244,9 @@ exact. Не ограничивай число requirements/cases искусст�
 Controller формирует immutable package из candidate, exact requirements/context/source
 evidence и provenance. Открой одну fresh role-isolated reviewer session
 (`python -m tools.orchestrate_test_case_revision open-session …`) и вызови
-`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …`. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
+`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …` с
+`--reviewer-session` из `tools.api complete-review --out <run>/tmp/session.json` (сессию с вердиктом строит код из
+журнала и ответа ревьюера после `model-response`; руками её не собирай) и `--review` — тем же ответом ревьюера. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
 candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <boundary.canonical_branch_digest>`
 (повтор с тем же digest ничего не меняет, другой digest — отказ); сам вызов окружи stage-bound `MODEL_REQUESTED` и
 `MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
@@ -270,6 +272,11 @@ boundary.package_digest]` из прочитанного `reviewer-session-bounda
 вторая session, generator dialogue/reasoning и больше одного authoritative verdict.
 Successful session содержит ровно один verdict; explicit terminal pre-verdict abort,
 включая `REVIEW_CONTEXT_LIMIT`, содержит ноль.
+Ревьюер просит файлы проекта — `tools.api review-evidence --path <путь в проекте> [--path …]`: код публикует receipt
+и дописывает пару в ledger (digest считает код); `result.evidence_receipt.digest` потом в `select --evidence-receipt`
+(файл — `tools.api read-context --digest <d> --out <run>/tmp/evidence-N.json`). Не хватает бюджета — отказ
+`REVIEW_CONTEXT_LIMIT`: закрой сессию `tools.api review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json`
+и вызови `select` с этим `--reviewer-session` без `--review`.
 
 Ревьюер читает кандидата в компактном виде, не полный JSON (FaT-CV):
 `python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет

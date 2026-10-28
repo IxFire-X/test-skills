@@ -25,8 +25,8 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api read-context`, `tools.api plan-batches`, `tools.api with-digest`, `tools.api publish-artifact` | independent plan и current receipt без truncation |
 | Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`; `tools.api validate-fragment` | fragment связан с marker/context/plan/header; code-owned digests |
 | Сборка | `tools.api assemble`, `tools.orchestrate_test_case_revision publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
-| Canonical review | `tools.orchestrate_test_case_revision open-session`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
-| Выбор | `tools.orchestrate_test_case_revision select`, `tools.api read-effective` | immutable selected document и receipt |
+| Canonical review | `tools.orchestrate_test_case_revision open-session`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api review-evidence`, `tools.api review-abort`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
+| Выбор | `tools.api complete-review` (сессия ревьюера с вердиктом), `tools.orchestrate_test_case_revision select`, `tools.api read-effective` | immutable selected document и receipt |
 | Автоматизация | `model-request`/`model-response`; `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
 | Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
 | Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |

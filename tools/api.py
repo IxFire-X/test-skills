@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, pilot_state, run_tests, step_size
+from tools import automation_validation, batch_assembly, canonical_document, orchestrate_test_case_revision, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -129,6 +129,18 @@ def _cmd_validate_canonical(a):
     return canonical_document.validate_canonical_document(a.document)
 
 
+def _cmd_complete_review(a):
+    return orchestrate_test_case_revision.complete_reviewer_session(a.run_root, a.attempt)
+
+
+def _cmd_review_evidence(a):
+    return orchestrate_test_case_revision.provide_reviewer_evidence(a.run_root, a.attempt, a.path)
+
+
+def _cmd_review_abort(a):
+    return orchestrate_test_case_revision.abort_reviewer_session(a.run_root, a.attempt, a.reason)
+
+
 def _cmd_read_ledger(a):
     return pilot_state.read_reviewer_session_ledger(a.run_root, a.attempt, a.digest)
 
@@ -191,6 +203,9 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
+    "complete-review": (_cmd_complete_review, RUN, None, ()),
+    "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
+    "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None, ()),
     "read-effective": (_cmd_read_effective, RUN, None, ()),
     "open-automation-boundary": (_cmd_open_automation_boundary, (*RUN, ("--facts", _json)), None, ()),
     "read-receipt": (_cmd_read_receipt, (*RUN, "--kind", "--event"), None, ()),

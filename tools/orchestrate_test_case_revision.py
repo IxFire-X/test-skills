@@ -331,6 +331,130 @@ def _read_reviewer_boundary(run_root: Path, attempt_id: str, package: Mapping[st
     return record
 
 
+_VERDICT_EVENT = {"ПРИНЯТО": "ACCEPTED", "AUTO_FIX_APPLIED": "ACCEPTED", "ТРЕБУЕТ ДОРАБОТКИ": "REJECTED"}
+
+
+@_closure_cached  # FaT-10c
+def complete_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-10c: the completed reviewer session for `select`, built from the published ledger and the recorded review.
+
+    The session keeps the ledger events, then adds the one AUTHORITATIVE_VERDICT bound to the recorded
+    tc-reviewer:canonical answer and REVIEW_SESSION_COMPLETED. Nothing is written: `select` validates and publishes it.
+    """
+    from tools.pilot_state import derive_state, read_model_stage_artifact, read_reviewer_session_ledger, reviewer_lifecycle_projection
+
+    responses = [event for event in derive_state(Path(run_root))["events"]
+                 if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                 and event.get("stage_instance_id") == "tc-reviewer:canonical"]
+    if len(responses) != 1:
+        raise ValueError("REVIEWER_RESPONSE_MISSING: publish the tc-reviewer:canonical answer first (tools.api model-response)")
+    review = read_model_stage_artifact(Path(run_root), attempt_id, "tc-reviewer:canonical", str(responses[0]["artifact_digest"]))["artifact"]
+    report = _plain(review).get("artifacts", {}).get("validation_report")
+    verdict = _VERDICT_EVENT.get(report.get("verdict")) if isinstance(report, dict) else None
+    if verdict is None:
+        raise ValueError("REVIEWER_VERDICT_INVALID: the recorded review has no ПРИНЯТО / AUTO_FIX_APPLIED / ТРЕБУЕТ ДОРАБОТКИ verdict")
+    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id)))
+    lifecycle = reviewer_lifecycle_projection(session)
+    events = list(session["events"])
+    bound = {
+        "event_type": "AUTHORITATIVE_VERDICT", "verdict": verdict,
+        "report_digest": "sha256:" + hashlib.sha256(canonical_bytes(report)).hexdigest(),
+        "verdict_digest": "sha256:" + hashlib.sha256(canonical_bytes({"verdict": report.get("verdict"), "effective": report.get("effective")})).hexdigest(),
+    }
+    if not lifecycle["waiting"]:
+        recorded = next((event for event in events if event.get("event_type") == "AUTHORITATIVE_VERDICT"), None)
+        if session.get("status") == "COMPLETED" and recorded is not None and {key: recorded.get(key) for key in bound} == bound:
+            return session  # already completed with this review: the same session again
+        raise ValueError("REVIEWER_SESSION_CLOSED: the published reviewer session is already closed with another outcome")
+    events.append({"ordinal": len(events) + 1, **bound})
+    events.append({"ordinal": len(events) + 1, "event_type": "REVIEW_SESSION_COMPLETED"})
+    session.update(events=events, status="COMPLETED")
+    try:
+        reviewer_lifecycle_projection(session)
+    except ValueError as error:
+        raise ValueError("REVIEWER_SESSION_OPEN_EVIDENCE: an evidence request has no answer yet") from error
+    session["digest"] = _session_digest(session)
+    return session
+
+
+def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    from tools.pilot_state import read_reviewer_session_ledger, reviewer_lifecycle_projection
+
+    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id)))
+    if not reviewer_lifecycle_projection(session)["waiting"]:
+        raise ValueError("REVIEWER_SESSION_CLOSED: the published reviewer session is already closed")
+    return session
+
+
+@_closure_cached  # FaT-10c
+def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str]) -> dict[str, Any]:
+    """FaT-10c: one C-lite evidence pair for the open reviewer session.
+
+    The named project files of the attempt inventory become one context receipt (published like publish-evidence);
+    the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
+    with the cumulative package digest, and the WAITING ledger is published again.
+    """
+    from tools.pilot_state import derive_state, publish_context_selection
+    from tools.project_inventory import ContextSelectionError, read_inventory_receipt, select_context_batches
+
+    session = _waiting_reviewer_session(run_root, attempt_id)
+    package = session["package_binding"]
+    events = list(session["events"])
+    provided = [event for event in events if event.get("event_type") == "EVIDENCE_PROVIDED"]
+    remaining = session["context_budget_bytes"] - package["base_package_byte_count"] - sum(event["byte_count"] for event in provided)
+    if remaining <= 0:
+        raise ValueError("REVIEW_CONTEXT_LIMIT: no context budget is left for evidence; abort the session with REVIEW_CONTEXT_LIMIT")
+    attempt = next(row for row in derive_state(Path(run_root))["attempts"] if row["attempt_id"] == attempt_id)
+    inventory = read_inventory_receipt(Path(run_root) / "inventories" / (package["inventory_digest"].removeprefix("sha256:") + ".json"))
+    by_path = {item["project_path"]: item["opaque_id"] for item in inventory["files"]}
+    paths = sorted(set(project_paths))
+    unknown = [path for path in paths if path not in by_path]
+    if not paths or unknown:
+        raise ValueError(f"REVIEWER_EVIDENCE_PATH_UNKNOWN: not in the attempt inventory: {unknown}")
+    try:
+        batches = select_context_batches(inventory, Path(attempt["project"]), [by_path[path] for path in paths],
+                                         byte_budget=remaining, include_closed_manifests=False)
+    except ContextSelectionError as error:
+        raise ValueError(f"REVIEW_CONTEXT_LIMIT: the evidence does not fit the remaining {remaining} bytes ({error})") from error
+    if len(batches) != 1:
+        raise ValueError(f"REVIEW_CONTEXT_LIMIT: the evidence does not fit the remaining {remaining} bytes in one receipt")
+    selected = batches[0]["receipt"]
+    digests = [event["provided_digest"] for event in provided]
+    if selected["digest"] in package["context_receipt_digests"] or selected["digest"] in digests:
+        raise ValueError("REVIEWER_EVIDENCE_DUPLICATE: these files were already given to the reviewer")
+    receipt = publish_context_selection(Path(run_root), attempt_id, selected)
+    request_digest = "sha256:" + hashlib.sha256(canonical_bytes({"project_paths": paths, "byte_budget": remaining})).hexdigest()
+    digests.append(receipt["digest"])
+    events.append({"ordinal": len(events) + 1, "event_type": "EVIDENCE_REQUESTED", "request_digest": request_digest, "byte_count": remaining})
+    events.append({
+        "ordinal": len(events) + 1, "event_type": "EVIDENCE_PROVIDED", "request_digest": request_digest,
+        "provided_digest": receipt["digest"], "byte_count": receipt["byte_count"],
+        "cumulative_package_digest": "sha256:" + hashlib.sha256(canonical_bytes({"package_digest": package["package_digest"], "evidence_digests": digests})).hexdigest(),
+    })
+    session["events"] = events
+    session["digest"] = _session_digest(session)
+    return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
+
+
+_ABORT_REASONS = ("REVIEW_CONTEXT_LIMIT",)  # the only pre-verdict abort the contract names
+
+
+@_closure_cached  # FaT-10c
+def abort_reviewer_session(run_root: Path, attempt_id: str, reason_code: str) -> dict[str, Any]:
+    """FaT-10c: the aborted reviewer session for `select` (no verdict). Nothing is written: `select` validates and publishes it."""
+    from tools.pilot_state import reviewer_lifecycle_projection
+
+    if reason_code not in _ABORT_REASONS:
+        raise ValueError(f"REVIEWER_ABORT_REASON_INVALID: one of {list(_ABORT_REASONS)}")
+    session = _waiting_reviewer_session(run_root, attempt_id)
+    events = list(session["events"])
+    events.append({"ordinal": len(events) + 1, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": reason_code})
+    session.update(events=events, status="ABORTED")
+    reviewer_lifecycle_projection(session)
+    session["digest"] = _session_digest(session)
+    return session
+
+
 def _publish_reviewer_ledger(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> str:
     from tools.pilot_state import publish_reviewer_session_ledger
 
