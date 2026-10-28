@@ -74,7 +74,8 @@ def test_a_repeated_scan_is_refused_with_the_open_run(tmp_path: Path, monkeypatc
                                         "accept_self_review": False, "disposition_policy": None}
     code, again = _scan(project, monkeypatch)
     assert code == 2 and again["reason"] == "SCAN_RUN_IN_PROGRESS" and again["run_id"] == first["run_id"], again
-    assert "status" in again["fix"] and "finish" in again["fix"] and "--new-run" in again["fix"] and again.get("next_step")
+    assert "status" in again["fix"] and "--new-run" in again["fix"] and again.get("next_step")
+    assert "finish" not in again["fix"]  # FaT-H2b 2.2: finish would not close a fresh attempt — never offered as a dead end
     assert _runs(project) == [first["run_id"]]
     code, forced = _scan(project, monkeypatch, new_run=True)
     assert code == 0 and forced["run_id"] != first["run_id"] and len(_runs(project)) == 2

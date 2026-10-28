@@ -124,11 +124,11 @@ def _init_command(project: Path) -> str:
     return f'"{sys.executable}" -m tools.init_skillsrc --project "{project}"'
 
 
-def check_skillsrc(project: Path) -> list[dict[str, Any]]:
+def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
     from tools.init_skillsrc import ensure_skillsrc
 
-    receipt = ensure_skillsrc(Path(project), {}, write=False)
+    receipt = ensure_skillsrc(Path(project), {}, write=False, selected_module=module)
     status = receipt.get("status")
     if not (Path(project) / ".skillsrc").is_file():
         return [_row("skillsrc", CASES, "OK", ".skillsrc нет — первый scan создаст его по проекту")] if status in {"preview", "created"} else \
@@ -176,23 +176,24 @@ def _test_change(project: Path) -> tuple[Mapping[str, Any] | None, Mapping[str, 
     return None, None
 
 
-def _modules(project: Path) -> list[dict[str, Any]]:
+def _modules(project: Path, selected: str | None = None) -> list[dict[str, Any]]:
     from tools.skillsrc_manifest import load_skillsrc, normalize_skillsrc
 
     path = Path(project) / ".skillsrc"
     if path.is_file():
         return list(normalize_skillsrc(load_skillsrc(path))["modules"])
-    return proposed_modules(project)
+    return proposed_modules(project, selected)
 
 
-def proposed_modules(project: Path) -> list[dict[str, Any]]:
+def proposed_modules(project: Path, selected: str | None = None) -> list[dict[str, Any]]:
     """The modules the first scan would write into a missing .skillsrc."""
     from tools.discover_project import discover_project
-    from tools.init_skillsrc import compile_skillsrc
+    from tools.init_skillsrc import compile_skillsrc, not_selected_defaults
     from tools.skillsrc_manifest import normalize_skillsrc
 
     root = Path(project).resolve()
-    return list(normalize_skillsrc(compile_skillsrc(discover_project(root), {}, root))["modules"])
+    discovery = discover_project(root)
+    return list(normalize_skillsrc(compile_skillsrc(discovery, not_selected_defaults(discovery, selected)[0], root))["modules"])
 
 
 def select_module(modules: Sequence[Mapping[str, Any]], module_id: str | None) -> tuple[Mapping[str, Any] | None, str | None]:
@@ -205,7 +206,7 @@ def select_module(modules: Sequence[Mapping[str, Any]], module_id: str | None) -
 
 
 def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], Mapping[str, Any] | None]:
-    module, problem = select_module(_modules(project), module_id)
+    module, problem = select_module(_modules(project, module_id), module_id)
     if module is None:
         return _row("module", CASES, "STOP", str(problem), "укажите --module <ID> из списка"), None
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
@@ -443,7 +444,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
         rows.extend(_row(name, CASES, "WARN", skipped, deps.get("fix")) for name in ("pack", "skillsrc", "module", "scan"))
     else:
         rows.append(check_pack())
-        for name, run in (("skillsrc", lambda: check_skillsrc(project)),):
+        for name, run in (("skillsrc", lambda: check_skillsrc(project, module)),):
             try:
                 rows.extend(run())
             except Exception as error:

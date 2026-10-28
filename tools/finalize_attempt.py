@@ -1129,10 +1129,11 @@ def _coverage_and_blockers(document: Mapping[str, Any]) -> tuple[str, int]:
     return coverage, blockers
 
 
-def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int) -> str:
-    """FaT-4: the final automation outcome of a local-pilot attempt, read from the r1/r2 model stages.
+def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int) -> tuple[str, str | None]:
+    """FaT-4: the automation outcome of a local-pilot attempt, read from the r1/r2 model stages (only reads).
 
-    Returns AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
+    ``("AUTOMATION_BLOCKED" | "AUTOMATION_REJECTED", None)`` — final, finish closes the attempt;
+    ``("ACCEPTED", None)`` — exec closes it; ``("PENDING", "<stage>:rN")`` — the next model stage of the chain.
     BLOCKED is final only with blockers in the canonical (every revision must then be BLOCKED); without them it is an
     invalid answer that the review may still send to a correction.
     """
@@ -1140,26 +1141,54 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
     for revision in (1, 2):
         generator = stages.get(f"tc-to-autotest:r{revision}", {})
         if "MODEL_RESPONSE_RECEIVED" not in generator:
-            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: следующая ревизия r{revision} (tc-to-autotest)")
+            return "PENDING", f"tc-to-autotest:r{revision}"
         generated = pilot_state.read_model_stage_artifact(
             run_root, attempt_id, f"tc-to-autotest:r{revision}", str(generator["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
         status_blocked = generated["artifacts"].get("automation_status") == "BLOCKED"
         if status_blocked and canonical_blockers:
-            return "AUTOMATION_BLOCKED"
+            return "AUTOMATION_BLOCKED", None
         reviewer = stages.get(f"autotest-reviewer:r{revision}", {})
         if "MODEL_RESPONSE_RECEIVED" not in reviewer:
-            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: ревью ревизии r{revision} (autotest-reviewer)")
+            return "PENDING", f"autotest-reviewer:r{revision}"
         reviewed = pilot_state.read_model_stage_artifact(
             run_root, attempt_id, f"autotest-reviewer:r{revision}", str(reviewer["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
         verdict = reviewed["artifacts"]["autotest_review"]["verdict"]
         if verdict == "ПРИНЯТО":
             if status_blocked or canonical_blockers:
                 # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
-                return "AUTOMATION_BLOCKED"
-            raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec")
+                return "AUTOMATION_BLOCKED", None
+            return "ACCEPTED", None
         if verdict != "AUTO_FIX_APPLIED":
-            return "AUTOMATION_REJECTED"
-    return "AUTOMATION_REJECTED"
+            return "AUTOMATION_REJECTED", None
+    return "AUTOMATION_REJECTED", None
+
+
+def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int) -> str:
+    """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point."""
+    outcome, stage = automation_outcome(run_root, attempt_id, canonical_blockers)
+    if outcome == "ACCEPTED":
+        raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec")
+    if outcome == "PENDING":
+        name, revision = str(stage).split(":")
+        what = "следующая ревизия" if name == "tc-to-autotest" else "ревью ревизии"
+        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: {what} {revision} ({name})")
+    return outcome
+
+
+def automation_next(run_root: Path, attempt_id: str) -> tuple[str, str | None]:
+    """FaT-H2b 2.8/2.9: the automation outcome of the attempt with the blockers of its effective canonical (only reads)."""
+    effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
+    blockers = _coverage_and_blockers(effective["document"])[1] if effective is not None else 0
+    return automation_outcome(run_root, attempt_id, blockers)
+
+
+def finish_closes(run_root: Path, attempt_id: str) -> bool:
+    """FaT-H2b 2.2: would ``finish`` close this attempt now — the same reading as finish, without writing."""
+    try:
+        _durable_branch_facts(run_root, attempt_id)
+    except (FinalizationError, KeyError, StopIteration, TypeError, ValueError, OSError):
+        return False
+    return True
 
 
 def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
@@ -1181,6 +1210,13 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping
         closed = finalize_attempt({"attempt_id": attempt_id}, None, project=Path(run_root), verification=str(existing.get("verification")),
                                   facts={}, run_root=run_root)
         return {**closed, "exit_code": pilot_state.exit_code(existing)}
+    attempt, branch, facts = _durable_branch_facts(run_root, attempt_id)
+    closed = finalize_attempt(branch, None, project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
+    return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
+
+
+def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any]]:
+    """``(attempt, branch, facts)`` of a closing point without tests, or FinalizationError naming the missing fact; only reads."""
     try:
         state = pilot_state.derive_state(run_root)
         attempt = next(row for row in state["attempts"] if row["attempt_id"] == attempt_id)
@@ -1226,6 +1262,5 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping
         facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": cause,
                  "blocker_count": 0, "mixed_manual_traceable": False, "prior_stage_cause": cause}
         branch = {"attempt_id": attempt_id, "evidence": {}, "stage_causes": [cause]}
-    closed = finalize_attempt(branch, None, project=Path(attempt["project"]), verification="NOT_APPLICABLE", facts=facts, run_root=run_root)
-    return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
+    return attempt, branch, facts
 

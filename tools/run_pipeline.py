@@ -81,13 +81,20 @@ _NEXT_STEPS = (
     # (substring of next_expected_artifact, stage, action, section of skills/orchestrate/SKILL.md)
     # FaT-B: every value _durable_status_facts sets must match a row (tests/test_fat3.py walks them all).
     ("authorized context", "context", "выбор контекста: опубликовать квитанцию выбора по baseline", "3"),
-    ("context-marker response", "context-marker", "опубликовать запрос context-marker:baseline и вызвать модель", "3"),
+    ("context-marker response", "context-marker",
+     "сначала context_marker_parts plan --run-root <run>: single — запрос context-marker:baseline и вызов модели; "
+     "parts — context-marker:requirements, затем части по плану", "3"),
     ("generator fragments", "tc-generator", "запрос генератора на первую пачку плана и его ответ", "3"),
     ("remaining fragments or assembled candidate", "tc-generator",
      "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3"),
     ("reviewer ledger and effective selection or negative closure", "canonical-review",
      "завершить журнал ревью и выбрать effective canonical или закрыть отрицательную ветку", "4"),
     ("static automation review", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5"),
+    # FaT-H2b 2.8: after autotest-reviewer the verdict decides — exec, the next revision, or finish
+    ("automation revision", "tc-to-autotest", "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5"),
+    ("automation refused", "finish",
+     "автоматизация отклонена или заблокирована: finish закрывает попытку и печатает next_run — команду следующего захода; "
+     "нового ревью сверх лимита ревизий нет", "6"),
     (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
     ("context-marker parts merge", "context-marker:parts",
      "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели", "3"),
@@ -300,10 +307,16 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             next_artifact = {
                 "context-marker": "generator fragments", "tc-generator": "remaining fragments or assembled candidate",
                 "tc-reviewer": "reviewer ledger and effective selection or negative closure",
-                "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization or rework",
+                "tc-to-autotest": "static automation review", "autotest-reviewer": "review disposition and materialization",
             }[stage_id.split(":", 1)[0]]
             if stage_id.startswith(("context-marker:requirements", "context-marker:batch-")):
                 next_artifact = "context-marker parts merge"  # FaT-5: the remaining parts, then the merge by code
+            if stage_id.startswith("autotest-reviewer:"):
+                from tools.finalize_attempt import automation_next
+
+                outcome = automation_next(root, attempt_id)[0]
+                next_artifact = ("review disposition and materialization" if outcome == "ACCEPTED"
+                                 else "automation revision" if outcome == "PENDING" else "automation refused")
             record(digest, stage_id, next_artifact, publication["path"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
@@ -422,7 +435,7 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
 
     try:
         path = project / ".skillsrc"
-        modules = normalize_skillsrc(load_skillsrc(path))["modules"] if path.is_file() else proposed_modules(project)
+        modules = normalize_skillsrc(load_skillsrc(path))["modules"] if path.is_file() else proposed_modules(project, getattr(args, "module", None))
     except (NeedsInput, InitError, SkillsrcError, OSError, ValueError, KeyError, TypeError):
         return None  # .skillsrc and discovery problems are reported by the scan itself
     module, _problem = select_module(modules, getattr(args, "module", None))
@@ -490,7 +503,7 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
         receipt = {"status": "unchanged"}
     else:
         # ``--target`` is C-lite context scope, not an instruction to mutate .skillsrc.
-        receipt = ensure_skillsrc(project, {}, write=True)
+        receipt = ensure_skillsrc(project, {}, write=True, selected_module=getattr(args, "module", None))
     return run, receipt
 
 
@@ -692,15 +705,19 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
     return module, tuple(sorted(docs)), request.get("profile")
 
 
-def _open_run_of(project: Path, request: Mapping[str, Any]) -> Path | None:
+def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None, list[str]]:
     """FaT-G: an unfinished run of the same request — its scan selected the context (CONTEXT_SELECTED) and its last
     attempt has no ATTEMPT_TERMINAL.  A run whose scan failed earlier never blocks; runs without ``scan_request``
-    (created before FaT-G) are never compared."""
+    (created before FaT-G) are never compared.
+
+    FaT-H2b 2.2: ``(the live run that blocks, the abandoned ones)``.  An unfinished run whose baseline check finds
+    drift or fails is abandoned: it cannot go on, so it never blocks; the scan names it and leaves it as it is."""
     from tools import pilot_state as pilot
 
     runs = project / ".pilot-runs"
+    abandoned: list[str] = []
     if not runs.is_dir():
-        return None
+        return None, abandoned
     key = _request_key(project, request)
     for root in sorted(path for path in runs.iterdir() if path.is_dir()):
         try:
@@ -714,25 +731,49 @@ def _open_run_of(project: Path, request: Mapping[str, Any]) -> Path | None:
             selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
                            for event in state["events"])
             if selected and attempt.get("state") != "TERMINAL":
-                return root
+                why = _abandoned(project, root, attempt)
+                if why is None:
+                    return root, abandoned
+                abandoned.append(f"{root.name} ({why})")
         except (OSError, KeyError, TypeError, ValueError):
             continue
-    return None
+    return None, abandoned
+
+
+def _abandoned(project: Path, root: Path, attempt: Mapping[str, Any]) -> str | None:
+    """Why an unfinished run cannot go on — the same baseline check as exec and status; None when it can."""
+    module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
+    try:
+        result = _baseline_check(project, root, attempt, module_root)
+    except Exception:  # an unreadable baseline: the run cannot resume
+        return "сверка baseline не прошла"
+    if result.get("status") == "UNCHANGED":
+        return None
+    changed = result.get("changed") or []
+    return f"дрейф: {len(changed)} файл(ов)" if changed else "сверка baseline не прошла"
 
 
 def _run_in_progress(project: Path, root: Path) -> dict[str, Any]:
+    from tools.finalize_attempt import finish_closes
+    from tools.pilot_state import derive_state
+
     python = f'"{sys.executable}" -m tools.run_pipeline'
     try:
         next_step = _durable_status(project, root, stage="status").get("next_step")
     except (HostStop, OSError, KeyError, TypeError, ValueError):
         next_step = None
+    try:
+        closes = finish_closes(root, str(derive_state(root)["attempts"][-1]["attempt_id"]))
+    except (OSError, KeyError, IndexError, TypeError, ValueError):
+        closes = False
+    # FaT-H2b 2.2: finish only where it closes the attempt (rework, a refused automation), never as a dead end
+    finish = f'закрыть его без продолжения: {python} finish --project "{project}" --run {root.name}; ' if closes else ""
     return {
         "status": "error", "stage": "scan", "reason": "SCAN_RUN_IN_PROGRESS", "run_id": root.name, "run_root": str(root),
         "next_step": next_step,
         "message": "для этого проекта, документа и профиля уже есть незавершённый прогон; новый не создан",
         "fix": (f'продолжите его: {python} status --project "{project}" --run {root.name}; '
-                f'закрыть его без продолжения: {python} finish --project "{project}" --run {root.name}; '
-                "нужен ещё один прогон рядом — повторите этот scan с флагом --new-run"),
+                f"{finish}нужен ещё один прогон рядом — повторите этот scan с флагом --new-run"),
     }
 
 
@@ -814,14 +855,25 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
         policy, adapter_id, build_profile = str(baseline.get("policy_profile")), baseline.get("adapter_id"), baseline.get("build_profile")
         parameters = baseline.get("adapter_parameters") if policy == "local-pilot-v1" else None
         executable = baseline.get("executable_path") if adapter_id == "maven:selected-symbols-v1" else None
-    identity = runtime_identity(
-        module_root, executable or str(baseline.get("interpreter_path") or baseline.get("wrapper_path")),
-        adapter_id=baseline.get("adapter_id"),
-    ) if policy == "local-pilot-v1" else None
-    return validate_execution_baseline(
+    runtime = executable or str(baseline.get("interpreter_path") or baseline.get("wrapper_path"))
+    vanished = None
+    try:
+        identity = runtime_identity(module_root, runtime, adapter_id=baseline.get("adapter_id")) if policy == "local-pilot-v1" else None
+    except (OSError, ValueError):
+        if request is not None:
+            raise
+        # FaT-H2b 2.11: status names the vanished runtime and still compares the files against the scan
+        vanished = (runtime if adapter_id == "maven:selected-symbols-v1" else module_prefix + runtime) + " (runtime недоступен)"
+        identity_key = ("interpreter_identity" if baseline.get("adapter_id") == "pytest:selected-symbols-v1"
+                        else "executable_identity" if baseline.get("adapter_id") == "maven:selected-symbols-v1" else "wrapper_identity")
+        identity = baseline.get(identity_key)
+    result = validate_execution_baseline(
         baseline, current, requirements=baseline["requirements"], adapter_id=adapter_id, build_profile=build_profile,
         adapter_parameters=parameters, runtime_identity_value=identity, policy_profile=policy, project_root=project,
     )
+    if vanished is None:
+        return result
+    return {**result, "status": "DECLARED_INPUT_DRIFT", "changed": [vanished, *(result.get("changed") or [])]}
 
 
 def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attempt: Mapping[str, Any]) -> dict[str, Any]:
@@ -849,8 +901,9 @@ def cmd_scan(args: Any) -> int:
 def _scan(args: Any) -> int:
     project = Path(args.project).resolve()
     request = _scan_request(args)
+    abandoned: list[str] = []
     if not getattr(args, "new_run", False):
-        open_root = _open_run_of(project, request)
+        open_root, abandoned = _open_run_of(project, request)
         if open_root is not None:
             _print(_run_in_progress(project, open_root))
             return 2
@@ -947,9 +1000,23 @@ def _scan(args: Any) -> int:
         context_summary=context_summary,
         **({"context_skipped": context_skipped} if context_skipped["files"] else {}),
         **({"warnings": context_warnings} if context_warnings else {}),
+        **_skillsrc_defaults(project, module),
+        **({"abandoned_runs": abandoned} if abandoned else {}),
     )
     _print(payload)
     return 0
+
+
+def _skillsrc_defaults(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-H2b P2b: a test framework the build files of the module do not show was taken by default — say so."""
+    from tools.discover_project import module_test_evidenced
+
+    framework = (module.get("test") or {}).get("framework") if isinstance(module.get("test"), Mapping) else None
+    if framework is None or module_test_evidenced(project, module):
+        return {}
+    return {"skillsrc_defaults": [
+        f"{module.get('id')}: test.framework={framework} выбран по умолчанию — в сборке модуля нет признака тестового "
+        f"фреймворка; проверьте, что тесты модуля на {framework}, иначе исправьте .skillsrc"]}
 
 
 TASK_DOC_FIX = ("выберите модуль, внутри которого лежит документ (например, корневой --module <ID>), и сузьте --target на нужный "
@@ -1093,6 +1160,10 @@ def _revalidate_execution_baseline(coordinates: Mapping[str, Any], request: Any)
         root, attempt, module_root = Path(coordinates["run_root"]), coordinates["attempt"], Path(coordinates["module_root"])
         result = _baseline_check(project, root, attempt, module_root, request)
     except (InventoryError, KeyError, TypeError, ValueError, OSError) as error:
+        executable = Path(str(getattr(request, "executable", "") or ""))
+        if str(executable) not in {"", "."} and not executable.is_file():  # FaT-H2b 2.11: name the vanished runtime
+            raise HostStop("BASELINE_INCOMPLETE", f"среда запуска модуля недоступна: {executable}; верните её или начните "
+                           "новый прогон (команда — в status: drift)") from error
         raise HostStop("BASELINE_INCOMPLETE", "execution baseline is unreadable or incomplete") from error
     if result.get("status") != "UNCHANGED":
         report = _drift_report(project, coordinates["manifest"], result.get("changed") or [])
@@ -1450,6 +1521,21 @@ def _execute(
 
 _NOT_PREPARED_FIX = ("exec запускает только принятую автоматизацию: заверши статическое ревью автотестов "
                      "(autotest-reviewer, вердикт ПРИНЯТО), затем снова exec")
+# FaT-H2b 2.9: after a review that did not accept the automation — never push for another review past the limit
+_REFUSED_FIX = ("статическое ревью не приняло автоматизацию, ревизий больше нет: закройте попытку командой finish — "
+                "она напечатает next_run, команду следующего захода")
+_REVISION_FIX = "ревью вернуло автоматизацию на правку: следующая ревизия tc-to-autotest:r2, её ревью autotest-reviewer:r2, затем exec"
+
+
+def _not_prepared_fix(root: Path, attempt_id: str) -> str:
+    from tools.finalize_attempt import automation_next
+
+    try:
+        outcome = automation_next(root, attempt_id)[0]
+    except (KeyError, OSError, TypeError, ValueError):
+        return _NOT_PREPARED_FIX
+    # reached only after a static review exists (no review is the stop above)
+    return _REFUSED_FIX if outcome in {"AUTOMATION_REJECTED", "AUTOMATION_BLOCKED"} else _REVISION_FIX if outcome == "PENDING" else _NOT_PREPARED_FIX
 
 
 def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
@@ -1491,7 +1577,7 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
             review_history=[reviews[index] for index in range(1, last) if index in reviews],
         )
     except (GeneratedDeltaError, KeyError, TypeError, ValueError, OSError) as error:
-        raise HostStop("EXECUTION_NOT_PREPARED", str(error), _NOT_PREPARED_FIX) from error
+        raise HostStop("EXECUTION_NOT_PREPARED", str(error), _not_prepared_fix(root, attempt_id)) from error
     return ["execution-inputs", "generated-delta"]
 
 

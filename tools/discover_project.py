@@ -43,6 +43,8 @@ else:
 
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
+# FaT-H2b P2a: JUnit 4 in the same build — spring-boot-starter-test alone is then no proof of JUnit 5.
+_JUNIT4_MARKERS = re.compile(r"junit-vintage-engine|<artifactid>\s*junit\s*</artifactid>|['\"]junit:junit[:'\"]")
 SOURCE_SUFFIXES = {"python": frozenset({".py"}), "java": frozenset({".java"}), "typescript": frozenset({".ts", ".tsx", ".js", ".jsx"}), "go": frozenset({".go"})}
 def _parts(root: Path, path: Path) -> tuple[str, ...]:
     try:
@@ -121,6 +123,26 @@ def _id(rel: str) -> str:
     return "root--"+"--".join(part.encode("utf-8").hex() for part in rel.split("/"))
 def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
     return {"id":f"module:{mid}:{field}","field":f"modules.{mid}.{field}","impact":"Определяет шаблон генерации и средство запуска тестов","options":[{"id":v,"value":v,"evidence":sorted(values[v])} for v in sorted(values)]}
+def _test_values(lang: str, texts: Mapping[str, str]) -> dict[str, list[str]]:
+    """Test framework values found in lowered build files, with their evidence (path:marker.value)."""
+    text = "\n".join(texts.values())
+    values = {v: [f"{rel}:marker.{v}" for rel, body in texts.items() if needle in body] for needle, v in MARKERS[lang][1] if needle in text}
+    if lang == "java" and "junit5" in values and "junit-jupiter" not in text and _JUNIT4_MARKERS.search(text):
+        values.pop("junit5")
+    return values
+def module_test_evidenced(project_dir: Path, module: Mapping[str, Any]) -> bool:
+    """FaT-H2b P2b: is the module's test.framework seen in its own build files (not taken by default)?"""
+    lang = (module.get("stack") or {}).get("language")
+    framework = (module.get("test") or {}).get("framework")
+    if lang not in MARKERS or lang == "go" or framework is None:
+        return True
+    root = Path(project_dir).resolve()
+    texts = {}
+    for rel in module.get("detected_from") or []:
+        path = root / str(rel)
+        if _ok(root, path) and path.is_file():
+            texts[str(rel)] = _read(path).lower()
+    return framework in _test_values(lang, texts)
 def _source_dir_has_code(root: Path, directory: Path, suffixes: frozenset[str]) -> bool:
     for current, directories, files in os.walk(directory, followlinks=False):
         parent = Path(current)
@@ -203,7 +225,7 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
             vals={v:sorted(set(hits)) for v,hits in vals.items()}
             stack["framework"] = next(iter(vals)) if len(vals) == 1 else "unknown"
             supported_test = {"python": "pytest", "java": "junit5"}.get(lang)
-            tv={v:[f"{_rel(root,p)}:marker.{v}" for p in owned if needle in texts[p]] for needle,v in tm if needle in text}
+            tv=_test_values(lang,{_rel(root,p):texts[p] for p in owned})
             if supported_test:
                 tv = {value: evidence for value, evidence in tv.items() if value == supported_test}
             if lang=="go": tv={"go-testing":[f"{_rel(root,p)}:go-testing" for p in owned]}

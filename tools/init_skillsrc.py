@@ -605,7 +605,41 @@ def _authority_question() -> dict[str, Any]:
     }
 
 
-def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None = None, replacement_approval: Mapping[str, Any] | None = None, immutable_evidence_dir: Path | None = None) -> dict[str, Any]:
+NOT_SELECTED_EVIDENCE = "default:not-selected-module"
+
+
+def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | None) -> tuple[dict[str, str], list[str]]:
+    """FaT-H2b P2b: ``(answers, notes)`` for questions of modules the human did not select whose only option is the
+    host's supported runner — no decision is left there.  A question with several options stays a question."""
+    if selected_module is None:
+        return {}, []
+    answers: dict[str, str] = {}
+    notes: list[str] = []
+    for question in discovery.get("questions", []):
+        if not isinstance(question, Mapping):
+            continue
+        parts = str(question.get("field", "")).split(".")
+        options = question.get("options")
+        if len(parts) < 4 or parts[1] == selected_module or not isinstance(options, list) or len(options) != 1:
+            continue
+        option = options[0]
+        if not isinstance(option, Mapping) or list(option.get("evidence") or []) != ["host:supported-runner"]:
+            continue
+        answers[str(question["id"])] = str(option["id"])
+        notes.append(f"{question['field']}={option['value']}: {NOT_SELECTED_EVIDENCE}")
+    return answers, notes
+
+
+def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None = None, replacement_approval: Mapping[str, Any] | None = None, immutable_evidence_dir: Path | None = None, selected_module: str | None = None) -> dict[str, Any]:
+    notes: list[str] = []
+    receipt = _ensure_skillsrc(project_dir, answers, write, explicit_target=explicit_target, replacement_approval=replacement_approval,
+                               immutable_evidence_dir=immutable_evidence_dir, selected_module=selected_module, notes=notes)
+    if notes and receipt.get("status") in {"created", "updated", "preview", "unchanged"}:
+        receipt["warnings"] = list(receipt.get("warnings") or []) + notes
+    return receipt
+
+
+def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, *, explicit_target: str | None, replacement_approval: Mapping[str, Any] | None, immutable_evidence_dir: Path | None, selected_module: str | None, notes: list[str]) -> dict[str, Any]:
     root = project_dir.resolve(); destination = root / ".skillsrc"
     try:
         discovery = discover_project(root)
@@ -665,7 +699,9 @@ def ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool, 
         if extra:
             return _receipt("error", root, False, modules, [], ["answer_unknown"], fingerprint, _input_exit_code("answer_unknown"))
         return _receipt("needs_input", root, False, modules, questions, [], fingerprint)
-    effective_answers = _existing_discovery_answers(existing, working_discovery, answers)
+    defaults, default_notes = not_selected_defaults(working_discovery, selected_module)
+    notes.extend(note for key, note in zip(defaults, default_notes) if key not in answers)
+    effective_answers = _existing_discovery_answers(existing, working_discovery, {**defaults, **answers})
     try:
         proposed = compile_skillsrc(working_discovery, effective_answers, root)
     except NeedsInput as error:

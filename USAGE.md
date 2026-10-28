@@ -170,6 +170,19 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 `python -m tools.run_pipeline finish --project <abs> --run <id>` закрывает попытку без исполнения
 (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации — отвергнута последняя допустимая ревизия или BLOCKED при блокерах в каноне) и уже закрытую — идемпотентно.
 
+**Повторный заход и дрейф.**
+- Последняя строка вывода scan — `run_id: <id>`.
+- Повторный scan того же запроса (модуль, `--docs`, профиль) при живом незакрытом прогоне отвечает
+  `SCAN_RUN_IN_PROGRESS` с его `run_id` и новый прогон не создаёт. `fix` называет `status`, `--new-run`
+  и `finish` — последний только когда он закроет попытку.
+- Незакрытый прогон, файлы которого изменились после scan (или baseline которого не сверяется),
+  брошен: он не мешает, scan называет его в `abandoned_runs` и не трогает.
+- `status` незакрытой попытки показывает `drift`: изменённые пути (и пропавший runtime модуля),
+  `fix` и `command` нового scan с `--new-run`.
+- После ТРЕБУЕТ ДОРАБОТКИ или отказа автоматизации `finish` и `status` печатают `next_run` —
+  команду следующего захода; код её не запускает.
+- `--new-run` — явный второй прогон рядом с живым, по просьбе человека.
+
 ## 4. Durable run
 
 До scan или model call controller создаёт:
@@ -187,8 +200,8 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 child attempts. Одновременно разрешён максимум один nonterminal attempt.
 
 `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages можно
-продолжить из новой CLI session после snapshot/config validation. Изменение
-requirements, module или policy создаёт child attempt. Terminal attempt не меняется.
+продолжить из новой CLI session после snapshot/config validation. Изменение файлов
+проекта после scan — дрейф (раздел 3): вернуть файлы или начать новый прогон. Terminal attempt не меняется.
 
 Если процесс был запущен, но authoritative framework result отсутствует, результат —
 `UNKNOWN`; автоматический повтор запрещён. Новый execution retry возможен только в
