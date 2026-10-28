@@ -790,15 +790,18 @@ def _scan_execution_baseline(
         for item in files
         if isinstance(item, Mapping)
         and item.get("opaque_id") != skillsrc.get("opaque_id")
+        and item.get("origin") != "context"
         and prefix
         and not str(item.get("project_path", "")).startswith(prefix)
     ]
+    context_ids = [str(item["opaque_id"]) for item in files if isinstance(item, Mapping) and item.get("origin") == "context"]
     execution_ids = [
         str(item["opaque_id"])
         for item in files
         if isinstance(item, Mapping)
         and item.get("opaque_id") != skillsrc.get("opaque_id")
         and item.get("opaque_id") not in parent_ids
+        and item.get("opaque_id") not in context_ids
     ]
     policy_profile = getattr(args, "profile", "local-pilot-v1")
     runtime_facts: dict[str, Any] = {}
@@ -836,6 +839,7 @@ def _scan_execution_baseline(
         skillsrc_authority=build_skillsrc_authority_receipt((project / ".skillsrc").read_bytes()),
         execution_file_ids=execution_ids,
         parent_build_file_ids=parent_ids,
+        context_file_ids=context_ids,
         policy_profile=policy_profile,
         **runtime_facts,
     )
@@ -1143,7 +1147,7 @@ def _scan(args: Any) -> int:
             generated_roots=(project / ".pilot-runs",),
         )
         prefix = "" if module_path == "." else module_path + "/"
-        scope["parent_files"] = [item["project_path"] for item in inventory["files"] if prefix and not item["project_path"].startswith(prefix)]
+        scope["parent_files"] = [item["project_path"] for item in inventory["files"] if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
         baseline = _scan_execution_baseline(project, module_root, module, inventory, args)
         frozen = freeze_phase_two_inputs(run_root, project, module_root, baseline)
         frozen_inventory = frozen["inventory"]

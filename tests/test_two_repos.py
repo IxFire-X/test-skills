@@ -265,3 +265,57 @@ def test_the_context_root_takes_no_part_in_the_build_of_exec(tmp_path: Path) -> 
     request = build_request(MAVEN, module, [{"selector": "org.example.OwnersApiTest#createsOwner"}])
     assert Path(request.cwd) == (root / "autotests").resolve()
     assert not [item for item in (request.executable, *request.argv) if "app" in Path(str(item)).parts]
+
+
+@pytest.mark.parametrize("profile", ["local-pilot-v1", "cases-only-v1"])
+def test_a_scan_of_a_tests_module_with_a_neighbour_reaches_the_context_and_names_its_drift(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str) -> None:
+    """FaT-2R2: the neighbour's files are context inputs of the baseline, not parent build files (run 7d546b2c…)."""
+    from tests.test_phase2_scan import _args, _project
+    from tools import run_pipeline
+    from tools.init_skillsrc import _payload
+    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+
+    project, _module = _project(tmp_path)
+    app = project / "services" / "app" / "src"
+    app.mkdir(parents=True)
+    (app / "owners.py").write_text("OWNERS = []\n", encoding="utf-8")
+    document = parse_skillsrc_bytes((project / ".skillsrc").read_bytes())
+    document["modules"][0]["paths"]["context"] = ["services/app"]
+    document["modules"][0]["service_url_env"] = "STAND_URL"
+    (project / ".skillsrc").write_bytes(_payload(document))
+    payloads: list[dict] = []
+    monkeypatch.setattr(run_pipeline, "_print", payloads.append)
+
+    args = _args(project)
+    args.profile = profile
+    assert run_pipeline.cmd_scan(args) == 0, payloads[-1:]
+    scan = payloads[-1]
+    run_root = Path(scan["run_root"])
+    inventory = read_inventory_receipt(run_root / "inventories" / (scan["inventory_digest"].removeprefix("sha256:") + ".json"))
+    baseline = read_execution_baseline(run_root / "baselines" / (scan["baseline_digest"].removeprefix("sha256:") + ".json"))
+    assert scan["policy_profile"] == profile and "context-marker" in json.dumps(scan, ensure_ascii=False), scan
+    assert [row["project_path"] for row in inventory["files"] if row.get("origin") == "context"] == ["services/app/src/owners.py"]
+    assert "services/app/src/owners.py" in {row["project_path"] for row in baseline["inputs"]}
+    assert scan["scope"]["parent_files"] == [".skillsrc"], scan["scope"]
+
+    (app / "owners.py").write_text("OWNERS = ['changed']\n", encoding="utf-8")
+    assert run_pipeline.cmd_status(SimpleNamespace(project=str(project), run=scan["run_id"])) == 0
+    assert payloads[-1]["drift"]["changed"] == ["services/app/src/owners.py"], payloads[-1]
+
+
+def test_a_repeated_init_keeps_the_declared_context_and_stand_address(tmp_path: Path) -> None:
+    """FaT-2R2 (а): discovery cannot see paths.context or service_url_env; a repeated init proposes no replacement."""
+    from tools.init_skillsrc import _payload, ensure_skillsrc
+    from tools.skillsrc_manifest import parse_skillsrc_bytes
+
+    root = _stand(tmp_path)
+    questions = _questions(ensure_skillsrc(root, {}, False))
+    answers = {key: question["options"][0]["id"] for key, question in questions.items()}
+    assert ensure_skillsrc(root, answers, True)["status"] == "created"
+    document = parse_skillsrc_bytes((root / ".skillsrc").read_bytes())
+    next(module for module in document["modules"] if module["root"] == "autotests")["service_url_env"] = "STAND_URL"
+    (root / ".skillsrc").write_bytes(_payload(document))
+    again = ensure_skillsrc(root, {key: value for key, value in answers.items() if key.endswith(":test.framework")}, False)
+    assert again["status"] == "unchanged", again.get("proposal") or again

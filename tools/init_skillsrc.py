@@ -752,6 +752,12 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         for module in proposed.get("modules") or []:  # FaT-2R: the answered context roots of a tests-only module
             if isinstance(module, dict) and module.get("id") in context_paths:
                 module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])
+            # FaT-2R2: discovery cannot see what the person declared; a repeated init keeps it instead of proposing its removal
+            declared = next((row for row in existing_modules if isinstance(module, dict) and row.get("id") == module.get("id")), {})
+            if (declared.get("paths") or {}).get("context") and module.get("id") not in context_paths:
+                module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
+            if declared.get("service_url_env") and "service_url_env" not in module:
+                module["service_url_env"] = declared["service_url_env"]
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:

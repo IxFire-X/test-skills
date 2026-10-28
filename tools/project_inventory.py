@@ -797,8 +797,9 @@ def build_execution_baseline(
     interpreter_identity: str | None = None, wrapper_identity: str | None = None,
     proved_dependency_file_ids: Iterable[str] = (), policy_profile: str = "local-pilot-v1",
     executable_path: str | None = None, executable_identity: str | None = None,
+    context_file_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """Freeze controller-declared profile-applicable inputs; context is intentionally absent."""
+    """Freeze controller-declared profile-applicable inputs; paths.context files are frozen as context, not build inputs."""
     if policy_profile not in {"cases-only-v1", "local-pilot-v1"}:
         raise InventoryError("baseline policy profile is invalid")
     secret_inputs: list[dict[str, Any]] = []
@@ -862,11 +863,14 @@ def build_execution_baseline(
     execution_items = _require_file_ids(inventory, execution_file_ids)
     parent_items = _require_file_ids(inventory, parent_build_file_ids)
     dependency_items = _require_file_ids(inventory, proved_dependency_file_ids)
+    context_items = _require_file_ids(inventory, context_file_ids)
+    if any(item.get("origin") != "context" for item in context_items):
+        raise InventoryError("context inputs must come from paths.context")
     module_prefix = "" if inventory["module"] == "." else str(inventory["module"]) + "/"
     for item in parent_items:
         if item["project_path"].startswith(module_prefix) or Path(str(item["project_path"])).name.casefold() not in _CLOSED_MANIFESTS:
             raise InventoryError("parent build inputs must be parent build manifests")
-    selected = [skillsrc_item, *execution_items, *parent_items, *dependency_items]
+    selected = [skillsrc_item, *execution_items, *parent_items, *dependency_items, *context_items]
     inputs = [
         {"opaque_id": item["opaque_id"], "project_path": item["project_path"], "content_digest": item["content_digest"]}
         for item in selected
@@ -1180,12 +1184,14 @@ def baseline_external_input_paths(project_root: Path, baseline: Mapping[str, Any
     if not isinstance(module, str) or not isinstance(inputs, list):
         raise InventoryError("execution baseline external inputs are invalid")
     prefix = "" if module == "." else module.rstrip("/") + "/"
+    # FaT-2R2: the paths.context files are read again by build_inventory itself (origin context), not as dependencies
+    context = tuple(_relative(project_root, root) + "/" for root in skillsrc_context(project_root, Path(project_root) / module)) if prefix else ()
     result: list[Path] = []
     for item in inputs:
         if not isinstance(item, Mapping) or not isinstance(item.get("project_path"), str):
             raise InventoryError("execution baseline external inputs are invalid")
         project_path = str(item["project_path"])
-        if Path(project_path).name == ".skillsrc" or not prefix or project_path.startswith(prefix):
+        if Path(project_path).name == ".skillsrc" or not prefix or project_path.startswith(prefix) or project_path.startswith(context):
             continue
         result.append(Path(project_root) / Path(project_path))
     return result
