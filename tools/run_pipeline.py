@@ -527,6 +527,10 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
         # FaT-DOC: a project of documents only has nothing to build — local-pilot is refused, not lowered
         raise HostStop("NO_BUILD_MODULE", "в проекте только документы, сборки и тестов нет: local-pilot-v1 недоступен",
                        "повтори scan с --profile cases-only-v1 — кейсы по документам без автотестов")
+    if (module.get("paths") or {}).get("context") and not module.get("service_url_env"):
+        # FaT-2R: the tests call an application the package does not start; without the stand's address — cases only
+        return {"reason": "модуль только с тестами: приложение поднимает человек, адрес стенда не объявлен",
+                "fix": "укажите в .skillsrc у модуля service_url_env: <ИМЯ> — переменную окружения с адресом поднятого стенда"}
     facts = execution_facts(project, module)
     if not facts["ready"]:
         return {"reason": str(facts["reason"]), "fix": str(facts["fix"])}
@@ -535,6 +539,75 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
     if not blockers:
         return None
     return {"reason": "; ".join(f"{row['file']}: {row['reason']}" for row in blockers), "fix": "; ".join(row["fix"] for row in blockers)}
+
+
+SERVICE_TIMEOUT_SECONDS = 3
+
+
+def _safe_address(address: str) -> tuple[str, bool]:
+    """The stand's address to show — scheme, host, port and path; userinfo, query and fragment (where secrets live) cut —
+    and whether its port is valid (an out-of-range or non-numeric port is left out of the shown address)."""
+    import urllib.parse
+
+    parts = urllib.parse.urlsplit(address)
+    host = parts.hostname or ""
+    try:
+        port, valid = parts.port, True
+    except ValueError:
+        port, valid = None, False
+    netloc = (f"[{host}]" if ":" in host else host) + (f":{port}" if port else "")
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, "", "")), valid
+
+
+def _service_stop(project: Path, module_root: str) -> dict[str, str] | None:
+    """FaT-2R: for a module with ``service_url_env`` — one request without a body to the stand's address (any HTTP
+    answer counts), no wait and no retry: the agent decides.  ``{code, reason, message, fix, address}`` when the
+    variable is missing, not an http(s) address or nobody answers; the address without userinfo, query and fragment."""
+    import os
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, normalize_skillsrc
+
+    try:
+        modules = normalize_skillsrc(load_skillsrc(project / ".skillsrc"))["modules"]
+    except (OSError, SkillsrcError, ValueError, KeyError, TypeError):
+        return None
+    wanted = module_root.strip("/") or "."
+    module = next((row for row in modules if (str(row.get("root") or ".").strip("/") or ".") == wanted), None)
+    variable = str((module or {}).get("service_url_env") or "")
+    if not variable:
+        return None
+    fix = f"поднимите стенд приложения по адресу из переменной {variable} и запустите exec снова"
+    address = os.environ.get(variable, "")
+
+    def stop(code: str, message: str, shown: str | None) -> dict[str, str]:
+        return {"code": code, "reason": code, "message": message, "fix": fix, "service_url_env": variable,
+                **({"address": shown} if shown else {})}
+
+    if not address:
+        return stop("SERVICE_URL_MISSING", f"переменная {variable} с адресом стенда не задана", None)
+    try:
+        scheme = urllib.parse.urlsplit(address).scheme
+        shown, port_valid = _safe_address(address)
+    except ValueError:
+        scheme, shown, port_valid = "", None, False
+    if scheme not in {"http", "https"}:
+        return stop("SERVICE_URL_INVALID", f"в {variable} не http(s)-адрес", None)
+    if not port_valid:
+        return stop("SERVICE_URL_INVALID", f"в {variable} неверный порт (не число или вне 0–65535)", shown)
+    try:
+        # no proxy: the Java tests do not read HTTP_PROXY, and a corporate proxy answering 502/403 is not the stand
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(urllib.request.Request(address, method="HEAD"), timeout=SERVICE_TIMEOUT_SECONDS):
+            pass
+    except urllib.error.HTTPError:
+        return None  # the stand answered: an HTTP error status is an answer
+    except (urllib.error.URLError, OSError, ValueError):
+        return stop("SERVICE_UNREACHABLE", f"стенд {shown} (из {variable}) не ответил за {SERVICE_TIMEOUT_SECONDS} с; "
+                    "тесты не запускались, файлы не записаны", shown)
+    return None
 
 
 def _baseline_blockers(project: Path, module: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -1720,6 +1793,13 @@ def cmd_exec(args: Any) -> int:
         if event.get("attempt_id") == coordinates["attempt"]["attempt_id"]
         and event.get("event_type") == "EXECUTION_STARTED"
     ]
+    if not execution_receipt_path.exists() and not started:
+        # FaT-2R: the package never starts the application; before any write a module with a stand checks it answers.
+        # A stop here leaves the attempt open: the person brings the stand up and runs exec again (no files, no quarantine).
+        stand = _service_stop(project, str(coordinates["attempt"]["module"]))
+        if stand is not None:
+            _print({"status": "error", **stand, "attempt_id": coordinates["attempt"]["attempt_id"]})
+            return 2
     if execution_receipt_path.exists() or started:
         try:
             from tools.finalize_attempt import finalize_durable_execution_attempt

@@ -480,7 +480,7 @@ def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _input_exit_code(code: str) -> int:
-    return 2 if code in {"answer_unknown", "discovery_invalid", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
+    return 2 if code in {"answer_unknown", "context_root_invalid", "discovery_invalid", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
 
 
 def _safe_fingerprint(value: Any) -> str:
@@ -606,6 +606,45 @@ def _authority_question() -> dict[str, Any]:
 
 
 NOT_SELECTED_EVIDENCE = "default:not-selected-module"
+CONTEXT_IMPACT = ("Модуль только с тестами: исходники приложения лежат в соседнем каталоге проекта. Назовите его (paths.context): "
+                  "пакет только читает его для контекста модели, ничего там не пишет и не собирает")
+
+
+def _tests_only_context(root: Path, discovery: Mapping[str, Any], answers: Mapping[str, str],
+                        declared: set[str]) -> tuple[dict[str, Any], dict[str, str], dict[str, list[str]]]:
+    """FaT-2R: the ``paths.source`` question of a tests-only module becomes ``paths.context``; an answer (option IDs or
+    paths from the project root, comma-separated) closes both.  Returns (discovery, the other answers, {module: roots})."""
+    from tools.project_inventory import context_root_problem
+
+    modules = {str(module.get("id")): module for module in discovery.get("modules", []) if isinstance(module, Mapping)}
+    questions: list[Any] = []
+    rest = dict(answers)
+    context: dict[str, list[str]] = {}
+    for question in discovery.get("questions", []):
+        field = str(question.get("field", "")) if isinstance(question, Mapping) else ""
+        options = question.get("options") if isinstance(question, Mapping) else None
+        tests_only = field.endswith(".paths.source") and any(
+            str(item).endswith(":tests-only") for option in options or [] if isinstance(option, Mapping) for item in option.get("evidence") or [])
+        if not tests_only:
+            questions.append(question)
+            continue
+        module_id = field.split(".")[1]
+        if module_id in declared:
+            continue
+        module_root = root / str((modules.get(module_id) or {}).get("root") or ".")
+        question_id = f"module:{module_id}:paths.context"
+        if question_id in rest:
+            chosen = [item.strip() for item in rest.pop(question_id).split(",") if item.strip()]
+            problems = [problem for item in chosen if (problem := context_root_problem(root, module_root, item))]
+            if not chosen or problems:
+                raise InitError("context_root_invalid", "; ".join(problems) or "paths.context: пустой ответ")
+            context[module_id] = chosen
+            continue
+        candidates = sorted(str(other.get("root")) for other_id, other in modules.items() if other_id != module_id
+                            and (other.get("paths") or {}).get("source") and context_root_problem(root, module_root, str(other.get("root"))) is None)
+        questions.append({"id": question_id, "field": f"modules.{module_id}.paths.context", "impact": CONTEXT_IMPACT,
+                          "options": [{"id": item, "value": item, "evidence": [f"{item}:sources"]} for item in candidates]})
+    return {**discovery, "questions": questions}, rest, context
 
 
 def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | None) -> tuple[dict[str, str], list[str]]:
@@ -678,8 +717,13 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         str(module.get("id"))
         for module in existing_modules
         if list((module.get("paths") or {}).get("source") or [])
+        or list((module.get("paths") or {}).get("context") or [])  # FaT-2R: a tests-only module reads its sources there
         or list((module.get("feature_sources") or {}).get("source") or [])
     }
+    try:
+        working_discovery, answers, context_paths = _tests_only_context(root, working_discovery, answers, declared_existing)
+    except InitError as error:
+        return _receipt("error", root, False, modules, [], [error.code], fingerprint, _input_exit_code(error.code))
     working_discovery["questions"] = [
         question
         for question in working_discovery.get("questions", [])
@@ -689,7 +733,8 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
             and str(question.get("field", "")).split(".")[1] in declared_existing
         )
     ]
-    source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping) and str(question.get("field", "")).endswith(".paths.source")]
+    source_questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)
+                        and str(question.get("field", "")).endswith((".paths.source", ".paths.context"))]
     if source_questions:
         questions = [question for question in working_discovery.get("questions", []) if isinstance(question, Mapping)]
         if not questions:
@@ -704,6 +749,9 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     effective_answers = _existing_discovery_answers(existing, working_discovery, {**defaults, **answers})
     try:
         proposed = compile_skillsrc(working_discovery, effective_answers, root)
+        for module in proposed.get("modules") or []:  # FaT-2R: the answered context roots of a tests-only module
+            if isinstance(module, dict) and module.get("id") in context_paths:
+                module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:

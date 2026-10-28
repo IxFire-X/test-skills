@@ -352,6 +352,36 @@ def skillsrc_exclude(project_root: Path, module_root: Path) -> tuple[str, ...]:
     return _skillsrc_paths(project_root, module_root, "exclude")
 
 
+def context_root_problem(project_root: Path, module_root: Path, relative: str) -> str | None:
+    """FaT-2R: why ``relative`` (``paths.context``, from the project root) cannot be a context root, or None: it must be
+    an existing directory inside the project, outside the module (the module not inside it), with no link on the way."""
+    raw = Path(relative)
+    if not relative or raw.is_absolute() or "\\" in relative or any(part in {"", ".", ".."} for part in raw.parts):
+        return f"{relative}: путь от корня проекта без ., .. и абсолютного пути"
+    project, module = Path(project_root).absolute(), Path(module_root).absolute()
+    current = project
+    for part in raw.parts:
+        current /= part
+        if _is_reparse(current):
+            return f"{relative}: симлинк или reparse-точка"
+    if not current.is_dir():
+        return f"{relative}: нет такого каталога"
+    if current == module or module in current.parents or current in module.parents:
+        return f"{relative}: пересекается с модулем"
+    return None
+
+
+def skillsrc_context(project_root: Path, module_root: Path) -> tuple[Path, ...]:
+    """FaT-2R: the context roots of the module (``paths.context``), checked; read only, for the model context."""
+    roots = []
+    for relative in _skillsrc_paths(project_root, module_root, "context"):
+        problem = context_root_problem(project_root, module_root, relative)
+        if problem is not None:
+            raise InventoryError(f"CONTEXT_ROOT_INVALID: {problem}")
+        roots.append(Path(project_root).absolute() / relative)
+    return tuple(roots)
+
+
 def _skillsrc_paths(project_root: Path, module_root: Path, key: str) -> tuple[str, ...]:
     path = Path(project_root) / ".skillsrc"
     if not path.is_file():
@@ -434,85 +464,91 @@ def build_inventory(
 
     # Directories left out by name that a glob of `include` only leads through: (reason, rule) of the passage.
     passages: dict[Path, tuple[str, str]] = {}
-    for current, dir_names, file_names in os.walk(module_root, topdown=True, followlinks=False, onerror=walk_error):
-        current_path = Path(current)
-        passage = passages.get(current_path)
-        admitted_dirs: list[str] = []
-        for name in sorted(dir_names):
-            candidate = current_path / name
-            project_path = _safe_rel(project_root, candidate)
-            if project_path is None or _is_reparse(candidate):
-                lexical_path = _lexical_rel(project_root, candidate)
-                if lexical_path is not None:
-                    exclusions.append(_exclusion(lexical_path, "REPARSE_ESCAPE", "reparse-policy-v1", "reparse"))
-                continue
-            root_exclusion = excluded_root(candidate)
-            if root_exclusion is not None:
-                exclusions.append(_exclusion(project_path, *root_exclusion))
-                continue
-            excluded = directory_reason(tuple(project_path.split("/")[:-1]), name)
-            mode = include_mode(project_path, include) if include else None
-            if passage is not None and excluded is None and mode is None:
-                excluded = passage  # off the way of the glob inside a passage: left out as the passage was
-            if excluded is not None and excluded[1] in INCLUDABLE_RULES and mode is not None:
-                if mode == "through":
-                    passages[candidate] = excluded
-                excluded = None
-            elif passage is not None and mode == "through":
-                passages[candidate] = passage
-            if excluded is not None:
-                reason_code, rule = excluded
-                exclusions.append(_exclusion(project_path, reason_code, rule, "excluded-directory"))
-                continue
-            admitted_dirs.append(name)
-        dir_names[:] = admitted_dirs
-        for name in sorted(file_names):
-            path = current_path / name
-            project_path = _safe_rel(project_root, path)
-            if project_path is None or _is_reparse(path):
-                lexical_path = _lexical_rel(project_root, path)
-                if lexical_path is not None:
-                    exclusions.append(_exclusion(lexical_path, "REPARSE_ESCAPE", "reparse-policy-v1", "reparse"))
-                continue
-            root_exclusion = excluded_root(path)
-            if root_exclusion is not None:
-                exclusions.append(_exclusion(project_path, *root_exclusion))
-                continue
-            if passage is not None and include_mode(project_path, include) != "full":
-                exclusions.append(_exclusion(project_path, passage[0], passage[1], "excluded-directory"))
-                continue
-            suffix = path.suffix.casefold()
-            if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
-                exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
-                continue
-            secret = _secret_rule(path, b"", project_path)
-            if secret is not None:
-                rule, label = secret
-                exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
-                continue
-            try:
-                contents = path.read_bytes()
-            except OSError as error:
-                if _kind(project_path, path) in {"source", "config"} or suffix in {".md", ".markdown", ".rst", ".txt", ".adoc"}:
-                    raise InventoryError(f"required inventory file is unreadable: {project_path}") from error
-                exclusions.append(_exclusion(project_path, "UNREADABLE", "readability-v1", "unreadable"))
-                continue
-            if b"\0" in contents[:8192]:
-                exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-content-v1", "binary-or-generated"))
-                continue
-            secret = _secret_rule(path, contents, project_path)
-            if secret is not None:
-                rule, label = secret
-                exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
-                continue
-            files.append({
-                "opaque_id": _opaque_id(project_identity, module, project_path),
-                "project_path": project_path,
-                "kind": _kind(project_path, path),
-                "language": _language(path),
-                "size": len(contents),
-                "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
-            })
+    def walk(start: Path, origin: str | None) -> None:
+        """One walk of the module or (FaT-2R) of a context root: the same exclusions, secrets and binaries rules."""
+        for current, dir_names, file_names in os.walk(start, topdown=True, followlinks=False, onerror=walk_error):
+            current_path = Path(current)
+            passage = passages.get(current_path)
+            admitted_dirs: list[str] = []
+            for name in sorted(dir_names):
+                candidate = current_path / name
+                project_path = _safe_rel(project_root, candidate)
+                if project_path is None or _is_reparse(candidate):
+                    lexical_path = _lexical_rel(project_root, candidate)
+                    if lexical_path is not None:
+                        exclusions.append(_exclusion(lexical_path, "REPARSE_ESCAPE", "reparse-policy-v1", "reparse"))
+                    continue
+                root_exclusion = excluded_root(candidate)
+                if root_exclusion is not None:
+                    exclusions.append(_exclusion(project_path, *root_exclusion))
+                    continue
+                excluded = directory_reason(tuple(project_path.split("/")[:-1]), name)
+                mode = include_mode(project_path, include) if include else None
+                if passage is not None and excluded is None and mode is None:
+                    excluded = passage  # off the way of the glob inside a passage: left out as the passage was
+                if excluded is not None and excluded[1] in INCLUDABLE_RULES and mode is not None:
+                    if mode == "through":
+                        passages[candidate] = excluded
+                    excluded = None
+                elif passage is not None and mode == "through":
+                    passages[candidate] = passage
+                if excluded is not None:
+                    reason_code, rule = excluded
+                    exclusions.append(_exclusion(project_path, reason_code, rule, "excluded-directory"))
+                    continue
+                admitted_dirs.append(name)
+            dir_names[:] = admitted_dirs
+            for name in sorted(file_names):
+                path = current_path / name
+                project_path = _safe_rel(project_root, path)
+                if project_path is None or _is_reparse(path):
+                    lexical_path = _lexical_rel(project_root, path)
+                    if lexical_path is not None:
+                        exclusions.append(_exclusion(lexical_path, "REPARSE_ESCAPE", "reparse-policy-v1", "reparse"))
+                    continue
+                root_exclusion = excluded_root(path)
+                if root_exclusion is not None:
+                    exclusions.append(_exclusion(project_path, *root_exclusion))
+                    continue
+                if passage is not None and include_mode(project_path, include) != "full":
+                    exclusions.append(_exclusion(project_path, passage[0], passage[1], "excluded-directory"))
+                    continue
+                suffix = path.suffix.casefold()
+                if suffix in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
+                    exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-generated-v1", "binary-or-generated"))
+                    continue
+                secret = _secret_rule(path, b"", project_path)
+                if secret is not None:
+                    rule, label = secret
+                    exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
+                    continue
+                try:
+                    contents = path.read_bytes()
+                except OSError as error:
+                    if _kind(project_path, path) in {"source", "config"} or suffix in {".md", ".markdown", ".rst", ".txt", ".adoc"}:
+                        raise InventoryError(f"required inventory file is unreadable: {project_path}") from error
+                    exclusions.append(_exclusion(project_path, "UNREADABLE", "readability-v1", "unreadable"))
+                    continue
+                if b"\0" in contents[:8192]:
+                    exclusions.append(_exclusion(project_path, "BINARY_OR_GENERATED", "binary-content-v1", "binary-or-generated"))
+                    continue
+                secret = _secret_rule(path, contents, project_path)
+                if secret is not None:
+                    rule, label = secret
+                    exclusions.append(_exclusion(project_path, "SECRET_SUSPECTED", rule, label))
+                    continue
+                files.append({
+                    "opaque_id": _opaque_id(project_identity, module, project_path),
+                    "project_path": project_path,
+                    "kind": _kind(project_path, path),
+                    "language": _language(path),
+                    "size": len(contents),
+                    "content_digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
+                    **({"origin": origin} if origin else {}),
+                })
+    walk(module_root, None)
+    for context_root in skillsrc_context(project_root, module_root):  # FaT-2R: read only, for the model context
+        walk(context_root.resolve(), "context")
     for declared_dependency in proved_dependency_files:
         raw = Path(declared_dependency)
         candidate = raw if raw.is_absolute() else project_root / raw

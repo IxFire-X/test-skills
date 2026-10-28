@@ -116,6 +116,7 @@
         "paths": {"$ref": "#/$defs/module_paths"},
         "test": {"$ref": "#/$defs/module_test"},
         "feature_sources": {"$ref": "#/$defs/feature_sources"},
+        "service_url_env": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
         "detected_from": {"$ref": "#/$defs/nonempty_unique_strings"}
       },
       "allOf": [
@@ -181,7 +182,8 @@
         "tests": {"$ref": "#/$defs/unique_nonempty_strings"},
         "resources": {"$ref": "#/$defs/unique_nonempty_strings"},
         "include": {"$ref": "#/$defs/include_globs"},
-        "exclude": {"$ref": "#/$defs/exclude_globs"}
+        "exclude": {"$ref": "#/$defs/exclude_globs"},
+        "context": {"$ref": "#/$defs/unique_nonempty_strings"}
       }
     },
     "include_globs": {

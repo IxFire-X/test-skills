@@ -23,6 +23,10 @@ attempt-local/isolated project copy and never authorizes execution.
 4. Emit exactly one manual disposition for every manual step. Emit `BLOCKED` only for a canonical blocker with empty generated/relation/disposition arrays; a project-generation problem without a canonical blocker stops without fabricating a BLOCKED artifact.
 5. Validate via `tools.automation_validation`. Each `generated_files` row carries exact UTF-8 `content` and its matching SHA-256 `content_digest`; the complete artifact has one deterministic digest for independent review. Never write project files or claim execution. Never create a third version, a partial/destructive correction, or any regeneration after runtime `FAIL`.
 
+A module whose `.skillsrc` has `paths.context` (FaT-2R) holds only tests: the application lives in another directory
+and runs as a stand. Test it through its external API at the address from the environment variable named by
+`service_url_env`; no MockMvc and no application classes (they are not on the test classpath).
+
 Generate functional application tests for the accepted cases. Use the declared application
 boundary: prefer the external API when both routes are available; MockMvc with real
 application components is also allowed unless this run explicitly requires the external
