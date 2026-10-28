@@ -268,7 +268,23 @@ _WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюдже�
                  "STEP_OUTPUT_LARGE": "ответ модели больше порога limits.step_output_warn_bytes — только замер, деление выключено",
                  "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)",
                  "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
-                                     "(подсказка ревьюеру)"}
+                                     "(подсказка ревьюеру)",
+                 "CV_EXISTING_TEST": "кейсы повторяют тесты проекта — тот же эндпоинт и исход (справка ревьюеру, кейсы остаются)"}
+
+
+def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+    """FaT-EC: how many cases repeat a test of the project (the map of the generator's context) — counts and IDs only;
+    None when the project has no map."""
+    from tools.existing_tests import repeats
+    from tools.review_view import run_existing_tests
+
+    if not attempt_id or not isinstance(document, Mapping):
+        return None
+    try:
+        existing = run_existing_tests(root, attempt_id)
+        return {"repeating": repeats(document, existing), "cases": len(document["test_cases"])} if existing else None
+    except (KeyError, OSError, TypeError, ValueError, AttributeError):
+        return None
 
 
 def end_to_end(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
@@ -457,6 +473,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     automation = automation_artifact(root, events)
     mismatched = data_mismatch(document) if cases is not None else []
     path_hint = end_to_end(root, attempt_id, document) if cases is not None else None
+    existing = existing_repeats(root, attempt_id, document) if cases is not None else None
     notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
     autotest_notes = review_notes(root, attempt_id, "autotests") if attempt_id else {"count": 0, "items": []}
 
@@ -476,8 +493,9 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
         "model_calls": calls, "step_sizes": measured,
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
-                    + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else []),
-        "data_mismatch": mismatched, "end_to_end": path_hint,
+                    + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
+                    + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else []),
+        "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing,
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -550,6 +568,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
         *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),
+        *([f"  - кейсов, повторяющих тесты проекта: {len(report['existing_tests']['repeating'])} из {report['existing_tests']['cases']}"
+           f" ({', '.join(report['existing_tests']['repeating'][:10])})"] if report.get("existing_tests") and report["existing_tests"]["repeating"] else []),
         *([] if report["warnings"] else ["- нет"]), "",
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),

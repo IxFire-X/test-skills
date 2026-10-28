@@ -178,7 +178,8 @@ Run остаётся связан с исходной project/module identity.
 из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` — тот же список). Вход,
 которого код не нашёл или нашёл в двух файлах, — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
 одной строкой). Для `tc-to-autotest:rN` и `autotest-reviewer:rN` там же `java_level` — уровень Java модуля по его сборке — и `junit_params` (есть ли junit-jupiter-params для групп `param_group`);
-передай его генератору и ревьюеру как ограничение API. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
+передай его генератору и ревьюеру как ограничение API. Для `tc-generator:<batch>` там же может быть файл
+`existing-tests.md` (basis «карта», FaT-EC) — карта существующих тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
 (роль добавляет её SKILL.md и references; `--run` записывает шаг и байты в run, их покажет
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить

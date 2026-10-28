@@ -303,6 +303,14 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         else:
             targets = [path]
         files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
+        if stage.startswith("tc-generator:") and selections in path.parents:
+            # FaT-EC: the map of existing project tests for this context — built (again, when its bytes differ) from the
+            # frozen inventory and the receipt; no input digest of its own, like the autotest view
+            from tools.existing_tests import ensure_view
+
+            existing = ensure_view(root, digest)
+            if existing is not None:
+                files.append({"digest": digest, "path": str(existing), "bytes": existing.stat().st_size, "basis": "карта"})
     result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
               "unresolved": unresolved}
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
@@ -324,13 +332,14 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
-            budget: int | None = None, binding_bytes: int = 0) -> dict[str, Any]:
-    """``binding_bytes`` (FaT-AV): inputs a step reads inside a carrier, not as files of their own."""
+            budget: int | None = None, extra_bytes: int = 0) -> dict[str, Any]:
+    """``extra_bytes``: what a step reads beyond the listed files — bindings inside a carrier (FaT-AV), the map of existing
+    project tests before its file is written (FaT-EC)."""
     paths = [Path(path) for path in files]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise ValueError(f"files are missing: {missing[:5]}")
-    input_bytes = sum(path.stat().st_size for path in paths) + binding_bytes
+    input_bytes = sum(path.stat().st_size for path in paths) + extra_bytes
     instructions = role_files(role) if role else []
     role_bytes = sum(path.stat().st_size for path in instructions)
     total = input_bytes + role_bytes
@@ -394,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
                 files += journal_files(project, args.run, args.stage, args.batch)
         role = args.role or stage_role
         report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes,
-                         binding_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
+                         extra_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
         if requested is not None:
             report.update(input_files=requested["files"], input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)

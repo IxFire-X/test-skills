@@ -239,9 +239,28 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
     """FaT-E2E: the requirement groups of a run's document (by the context receipt the plan was built from, else the last
     context of the attempt) and the batches of its published plan (None before FaT-DG); None — nothing to group by."""
     from tools.batch_assembly import requirement_groups
+
+    found = _plan_context(Path(root), attempt_id)
+    if found is None:
+        return None
+    plan, receipt = found
+    groups = requirement_groups(list(document["source_requirements"]), Path(root).parent.parent, dict(receipt))
+    return groups, None if plan is None else [list(batch["owned_source_requirement_ids"]) for batch in plan["batches"]]
+
+
+def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-EC: the map of existing project tests for the context the generator's plan was built from (the one of
+    ``step-inputs``); empty when the project has none."""
+    from tools.existing_tests import for_context
+
+    found = _plan_context(Path(root), attempt_id)
+    return {} if found is None else for_context(Path(root).parent.parent, found[1])
+
+
+def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None, Mapping[str, Any]] | None:
+    """The published plan (None before FaT-DG) and the context receipt it was built from (else the last of the attempt)."""
     from tools.pilot_state import derive_state, read_attempt_receipt, read_context_selection
 
-    root = Path(root)
     try:
         plan = read_attempt_receipt(root, attempt_id, "batch-plan", "ARTIFACT_READ_BACK")["record"]["plan"]
     except (KeyError, OSError, ValueError):
@@ -253,9 +272,7 @@ def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, A
         if not selected:
             return None
         context_digest = str(selected[-1]["artifact_digest"])
-    receipt = read_context_selection(root, attempt_id, context_digest)
-    groups = requirement_groups(list(document["source_requirements"]), root.parent.parent, dict(receipt))
-    return groups, None if plan is None else [list(batch["owned_source_requirement_ids"]) for batch in plan["batches"]]
+    return plan, read_context_selection(root, attempt_id, context_digest)
 
 
 def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
@@ -263,6 +280,17 @@ def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
         return []
     return [f"- {hint['code']}: групп требований {hint['groups']}, кейсов, связывающих две и больше групп, — 0: если документ описывает "
             "процесс, первым нужен сквозной позитивный кейс (для библиотеки — типичная цепочка использования); нет процесса — отклони"]
+
+
+def _existing_lines(document: Mapping[str, Any], existing: Mapping[str, Any]) -> list[str]:
+    """FaT-EC: ``CV_EXISTING_TEST`` (count and case IDs) and the map lines, the same lines the generator reads."""
+    from tools.existing_tests import hint_line, render_map, repeats
+
+    body = render_map(existing).decode("utf-8")
+    if not body:
+        return []
+    line = hint_line(repeats(document, existing))
+    return ([line] if line else []) + ["- Существующие тесты проекта (справка, не вердикт):"] + ["  " + row for row in body.splitlines()]
 
 
 def _hint_lines(hints: list[dict[str, Any]]) -> list[str]:
@@ -346,10 +374,11 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
 
 
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
-           batches: Iterable[Iterable[str]] | None = None) -> bytes:
+           batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
-    without them the bytes are the same as before."""
+    without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
+    ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
     if profile not in PROFILES:
@@ -363,6 +392,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
             sources.setdefault(requirement_id, []).append(mapping["source_requirement_id"])
     hints = data_mismatches(document)
     path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(document, groups, batches))
+    path_hint += _existing_lines(document, existing or {})
     lines = [
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
@@ -494,7 +524,11 @@ def main(argv: list[str] | None = None) -> int:
             grouping = None if profile == "autotest" or not state["attempts"] else run_requirement_groups(root, str(state["attempts"][-1]["attempt_id"]), document)
         except (OSError, ValueError, KeyError, TypeError):
             grouping = None
-        data = render(document, profile, *(grouping or (None, None)))
+        try:  # FaT-EC: the map is a hint too — none, and the view is the one before FaT-EC
+            existing = None if profile == "autotest" or not state["attempts"] else run_existing_tests(root, str(state["attempts"][-1]["attempt_id"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            existing = None
+        data = render(document, profile, *(grouping or (None, None)), existing=existing)
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
