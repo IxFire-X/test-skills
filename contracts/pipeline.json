@@ -36,7 +36,7 @@
     {"stage":"autotest-reviewer","role":"automation-reviewer","role_policy":"autotest-static-reviewer-v1","cardinality":"per_automation_revision","profiles":["local-pilot-v1"]}
   ],
   "projection_profiles": [
-    {"id":"zephyr-scale-step-row-24-v4","format":"csv","mode":"default","tenant_status":"N_A"},
+    {"id":"zephyr-scale-step-row-24-v5","format":"csv","mode":"default","tenant_status":"N_A"},
     {"id":"zephyr-scale-xml-observed-v1","format":"xml","mode":"opt_in_observed","tenant_status":"N_A"}
   ],
   "release_qualification": {"package_version":"0.5.0-pilot","compatibility_contract_version":"portable-cli-v1","execution_profile_version":"v1","release_eval_policy":"adaptive-1-3-5-v1","scenario_suite":"pilot-critical-v1","manifest_path":"release/manifest.json","component_state":"implemented_unverified","ready_tuple":null,"not_applicable":["company_runner","zephyr_tenant","production_rollback"]},

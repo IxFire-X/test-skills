@@ -20,8 +20,12 @@ _PROFILE_V1 = "zephyr-scale-step-row-24-v1"
 _PROFILE_V2 = "zephyr-scale-step-row-24-v2"
 _PROFILE_V3 = "zephyr-scale-step-row-24-v3"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
-_PROFILE = _PROFILE_V4
-_PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4))
+_PROFILE_V5 = "zephyr-scale-step-row-24-v5"
+_PROFILE = _PROFILE_V5
+_PROFILES = frozenset((_PROFILE_V1, _PROFILE_V2, _PROFILE_V3, _PROFILE_V4, _PROFILE_V5))
+# Profiles a new bundle may be published with: V5 is the human-only default, V4 keeps the
+# machine-model step columns as an explicit compatibility opt-in.  Their HTML/Markdown are identical.
+_PUBLISHABLE_PROFILES = frozenset((_PROFILE_V4, _PROFILE_V5))
 _CUSTOM_KEYS = ("АС", "Автоматизирован", "Вид тестирования", "Команда", "Приоритет теста", "Статус")
 _XML_PROFILE = "zephyr-scale-xml-observed-v1"
 # The company's Zephyr accepts only High/Normal/Low (FaT-3): CRITICAL goes out as High.
@@ -227,28 +231,49 @@ def _literal_url_value(value: Any) -> str:
     return str(value)
 
 
-def _http_url(step: dict[str, Any]) -> str | None:
+def _url_placeholder(source: dict[str, Any], display_orders: dict[str, int] | None) -> str:
+    """Tell a manual tester where a non-literal URL value comes from; never a secret handle."""
+    kind = source["kind"]
+    if kind == "step_output":
+        number = (display_orders or {}).get(source["step_id"])
+        origin = f"шага {number}" if number is not None else f"шага {source['step_id']}"
+        return f"<{source['output_id']} из {origin}>"
+    if kind == "fixture":
+        return f"<фикстура {source['name']}>"
+    if kind == "environment":
+        return f"<переменная окружения {source['name']}>"
+    return f"<{source['safe_label']}>"
+
+
+def _http_url(step: dict[str, Any], display_orders: dict[str, int] | None = None) -> str | None:
     operation = step["operation"]
     if operation is None or operation["kind"] != "http":
         return None
     path = operation["path"]
-    query: list[tuple[str, str]] = []
+    query: list[str] = []
     for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
         target, source = item["target"], item["source"]
-        if target.get("sensitive") or source["kind"] != "literal":
+        if target["location"] not in {"path", "query"}:
             continue
-        value = _literal_url_value(source["value"])
+        if source["kind"] == "literal" and not target.get("sensitive"):
+            value = _literal_url_value(source["value"])
+            path_value, query_value = quote(value, safe=""), urlencode([(target["name"], value)])
+        else:
+            # A dynamic or sensitive value cannot be printed; a readable placeholder replaces
+            # the bare ``{name}`` so the tester knows what to substitute.
+            path_value = _url_placeholder(source, display_orders)
+            query_value = urlencode([(target["name"], "")]) + path_value
         if target["location"] == "path":
-            path = path.replace("{" + target["name"] + "}", quote(value, safe=""))
-        elif target["location"] == "query":
-            query.append((target["name"], value))
-    return path + ("?" + urlencode(query) if query else "")
+            path = path.replace("{" + target["name"] + "}", path_value)
+        else:
+            query.append(query_value)
+    return path + ("?" + "&".join(query) if query else "")
 
 
-def _human_action(step: dict[str, Any]) -> str:
+def _human_action(step: dict[str, Any], display_orders: dict[str, int] | None = None) -> str:
     action = step["action"]
     operation = step["operation"]
-    url = _http_url(step)
+    url = _http_url(step, display_orders)
     if url is None or operation is None:
         return action
     signature = f"{operation['method']} {operation['path']}"
@@ -260,8 +285,8 @@ def _human_action(step: dict[str, Any]) -> str:
     return action
 
 
-def _html_action(step: dict[str, Any]) -> str:
-    return _html_text(_human_action(step))
+def _html_action(step: dict[str, Any], display_orders: dict[str, int] | None = None) -> str:
+    return _html_text(_human_action(step, display_orders))
 
 
 def _html_test_data(step: dict[str, Any]) -> str:
@@ -296,19 +321,19 @@ def _html_expected(step: dict[str, Any]) -> str:
     return "".join(parts) or "—"
 
 
-def render_html_preview(document: dict[str, Any], profile: str = _PROFILE_V4) -> Projection:
+def render_html_preview(document: dict[str, Any], profile: str = _PROFILE) -> Projection:
     """Render the current standalone three-column human preview."""
     _reject_unknown_profile(profile)
-    if profile != _PROFILE_V4:
-        raise ValueError(f"HTML preview is only available for {_PROFILE_V4}")
+    if profile not in _PUBLISHABLE_PROFILES:
+        raise ValueError(f"HTML preview is only available for {_PROFILE_V5} and {_PROFILE_V4}")
     require_valid_canonical_document(document)
     return _render_html_preview_validated(document, profile)
 
 
-def _render_html_preview_validated(document: dict[str, Any], profile: str = _PROFILE_V4) -> Projection:
+def _render_html_preview_validated(document: dict[str, Any], profile: str = _PROFILE) -> Projection:
     """Render the current preview after the caller has validated the document."""
-    if profile != _PROFILE_V4:
-        raise ValueError(f"HTML preview is only available for {_PROFILE_V4}")
+    if profile not in _PUBLISHABLE_PROFILES:
+        raise ValueError(f"HTML preview is only available for {_PROFILE_V5} and {_PROFILE_V4}")
     metadata = document["metadata"]
     warnings: tuple[str, ...] = ()
     documentation = metadata["documentation"]
@@ -332,8 +357,9 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
             "<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in case["preconditions"]) + "</ul>" if case["preconditions"] else "<p>Не требуются.</p>",
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
         ))
+        display_orders = {step["step_id"]: step["display_order"] for step in case["steps"]}
         for step_number, step in enumerate(case["steps"], 1):
-            rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step)}</td><td>{_html_test_data(step)}</td><td>{_html_expected(step)}</td></tr>")
+            rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step, display_orders)}</td><td>{_html_test_data(step)}</td><td>{_html_expected(step)}</td></tr>")
         rows.append("</tbody></table>" + (_html_variants(group, variants) if group else "") + "</section>")
         if group:
             rows[start:] = [row.replace(SLOT, f"<code>&lt;{_html_text(group['parameter']['name'])}&gt;</code>") for row in rows[start:]]
@@ -341,10 +367,10 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
     return Projection("".join(rows).encode("utf-8"), warnings)
 
 
-def render_markdown(document: dict[str, Any], profile: str = _PROFILE_V4) -> Projection:
+def render_markdown(document: dict[str, Any], profile: str = _PROFILE) -> Projection:
     """Render a current human-readable Markdown companion from canonical JSON."""
     _reject_unknown_profile(profile)
-    if profile == _PROFILE_V4:
+    if profile in _PUBLISHABLE_PROFILES:
         require_valid_canonical_document(document)
         return _render_markdown_validated(document, profile)
     raise ValueError("historical Markdown projections are verification-only through an explicit bundle receipt")
@@ -352,6 +378,8 @@ def render_markdown(document: dict[str, Any], profile: str = _PROFILE_V4) -> Pro
 
 def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projection:
     """Render Markdown after the public facade has accepted the canonical document."""
+    if profile == _PROFILE_V5:
+        profile = _PROFILE_V4  # the human Markdown companion is identical for both publishable profiles
     metadata = document["metadata"]
     documentation = metadata["documentation"]
     warnings: tuple[str, ...] = ()
@@ -407,7 +435,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
                     lines.append(f"| {step_number} | {render(step['action'])} | {render(data)} | {render(expected)} |")
                 else:
                     lines.extend([
-                        "", f"### Шаг {step_number}", "", escape_inline(_human_action(step)) if profile == _PROFILE_V4 else step["action"], "",
+                        "", f"### Шаг {step_number}", "", escape_inline(_human_action(step, display_orders)) if profile == _PROFILE_V4 else step["action"], "",
                         "**Тестовые данные / запрос**", "", *_markdown_human_blocks(data, literal=profile == _PROFILE_V4), "",
                         "**Ожидаемый результат**", "", *_markdown_human_blocks(expected, literal=profile == _PROFILE_V4),
                     ])
@@ -676,9 +704,9 @@ def render_zephyr_xml(document: dict[str, Any], profile: str = _XML_PROFILE) -> 
 
 
 def render_zephyr_csv(document: dict[str, Any], profile: str = _PROFILE) -> Projection:
-    """Project a new document to the sole default V4 Zephyr Scale step-row profile."""
+    """Project a new document to the human-only V5 default or the opt-in V4 step-row profile."""
     _reject_unknown_profile(profile)
-    if profile != _PROFILE_V4:
+    if profile not in _PUBLISHABLE_PROFILES:
         raise ValueError("historical Zephyr CSV profiles are verification-only through an explicit bundle receipt")
     require_valid_canonical_document(document)
     return _render_zephyr_csv_validated(document, profile)
@@ -695,6 +723,13 @@ def _render_zephyr_csv_validated(document: dict[str, Any], profile: str = _PROFI
         metadata = _case_metadata(case)
         for step_index, step in enumerate(case["steps"]):
             record = metadata if step_index == 0 else [""] * 19
+            if profile == _PROFILE_V5:
+                # Human scenario only: the action with its resolved URL, the authored test data
+                # and the expectation prose.  No operation, binding or assertion model.
+                expected = "\n\n".join(item["text"] for item in step["expectations"])
+                record = list(record) + [_human_action(step, display_orders), step["test_data"], expected, "", ""]
+                records.append([_formula_safe(value) for value in record])
+                continue
             data = _step_data(step, display_orders) if profile == _PROFILE_V1 else _detailed_step_data(step, display_orders, capabilities)
             expected = "\n".join(item["text"] for item in step["expectations"]) if profile == _PROFILE_V1 else _detailed_expected_result(step, display_orders)
             record = list(record) + [step["action"], data, expected, "", ""]

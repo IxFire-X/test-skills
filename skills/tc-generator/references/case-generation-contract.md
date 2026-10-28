@@ -93,7 +93,7 @@ For catalog prerequisites, check the entries needed by the scenario. Require the
 entire catalog or its order only when that is part of the required behavior; source
 seed contents alone do not make catalog equality a requirement.
 
-The v4 projection displays `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
+The HTML preview and the default v5 Zephyr CSV display only `action`, `test_data`, and `expectations[].text`; structured literal path/query inputs resolve the displayed HTTP URL, a non-literal one shows a readable placeholder. Follow the mandatory human scenario rules below. HTML and CSV are derived human/export views, never automation inputs or a second editable semantic source.
 
 ## Canonical physical order
 
@@ -168,7 +168,7 @@ and bind that exact output structurally. Human wording is a view of those bindin
 never a source from which automation reconstructs missing values. The direct `http`
 body-format rules below remain specific to that operation kind.
 
-For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A no-body request says exactly `Тело запроса отсутствует.`; a manual or undefined body says `—`. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings.
+For an HTTP step, `test_data` contains only a full pretty-printed JSON request body. Literal-only JSON is copyable as-is. A dynamic value uses a readable previous-step placeholder at the exact substitution point. A no-body request says exactly `Тело запроса отсутствует.`; a manual or undefined body says `—`. Canonical Action retains the exact supported method/path signature; the HTML projection resolves literal path/query inputs in its displayed URL. Safe header prerequisites and positive authorization belong in Preconditions; authorization stays in Action only when its absence is the scenario. Never render raw `body:/...`, `env:...`, `secret:...`, or binding listings. A project-native call of an HTTP endpoint follows the same human rule: Action names the method and path, `test_data` is the whole pretty-printed JSON request body, as for `http`, or exactly `Тело запроса отсутствует.`
 
 The Expected Result first states the observable system result, then, for HTTP, a blank line, exact `HTTP <status> <reason>`, and only confirmed response fields as pretty-printed JSON. Omit an unconfirmed body rather than inventing it. Do not print `Выход:`, `Проверка:`, `http_body:/...`, assertion expressions, «успешно», `ok`, or a bare HTTP code. Do not fork `200 или 201`. Data is deterministic: no `random` / `faker` / «любое значение». A source-proven non-secret helper/default with one safe deterministic value is a canonical literal, visible in the URL or body. Use a fixture only when authorized sources do not safely determine that value. Secret values and handles never render; only `safe_label` may appear, and it is not a resolved value.
 

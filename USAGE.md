@@ -246,7 +246,9 @@ branch. Внутри неё допустимы bounded C-lite evidence requests,
   запрещён.
 
 Canonical human fields пишутся по-русски. JSON остаётся единственным semantic source;
-HTML и `zephyr-scale-step-row-24-v4` CSV — derived exports.
+HTML, Markdown и CSV — derived exports. Профиль CSV по умолчанию —
+`zephyr-scale-step-row-24-v5` (только человеческие поля шага); прежний v4 включается
+явным `--csv-profile zephyr-scale-step-row-24-v4`.
 
 ## 6. `cases-only-v1`
 

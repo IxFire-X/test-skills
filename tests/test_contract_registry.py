@@ -77,7 +77,7 @@ def test_frozen_registries_are_complete_ordered_and_truthful(pack_root: Path) ->
     assert {item["version"] for item in contract["adapter_registry"] + contract["policy_profiles"]} == {"v1"}
     assert contract["stage_registry"] == STAGE_ROWS
     assert contract["projection_profiles"] == [
-        {"id": "zephyr-scale-step-row-24-v4", "format": "csv", "mode": "default", "tenant_status": "N_A"},
+        {"id": "zephyr-scale-step-row-24-v5", "format": "csv", "mode": "default", "tenant_status": "N_A"},
         {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
     ]
     assert contract["release_qualification"] == {

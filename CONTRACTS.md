@@ -26,7 +26,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 
 | Profile | Format | Mode | Tenant status |
 |---|---|---|---|
-| `zephyr-scale-step-row-24-v4` | `csv` | `default` | `N_A` |
+| `zephyr-scale-step-row-24-v5` | `csv` | `default` | `N_A` |
 | `zephyr-scale-xml-observed-v1` | `xml` | `opt_in_observed` | `N_A` |
 
 ## Artifact registry

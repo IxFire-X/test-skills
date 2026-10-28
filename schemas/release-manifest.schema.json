@@ -58,7 +58,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "format", "mode", "tenant_status"],
       "properties": {
-        "id": {"enum": ["zephyr-scale-step-row-24-v4", "zephyr-scale-xml-observed-v1"]},
+        "id": {"enum": ["zephyr-scale-step-row-24-v5", "zephyr-scale-step-row-24-v4", "zephyr-scale-xml-observed-v1"]},
         "format": {"enum": ["csv", "xml"]},
         "mode": {"enum": ["default", "opt_in_observed"]},
         "tenant_status": {"const": "N_A"}

@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 from tools.json_cli import JsonArgumentParser
 from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _formula_safe
+from tools.zephyr_csv import detect_delimiter
 
 TEMPLATE_LIMIT = 1024 * 1024
 AUTOMATED = "Автоматизирован"
@@ -57,10 +58,6 @@ class Template:
     values: dict[str, str] = field(default_factory=dict)
 
 
-def _header_cells(line: str, delimiter: str) -> list[str]:
-    return next(csv.reader([line], delimiter=delimiter), [])
-
-
 def read_template(project: Path, relative: str) -> Template:
     """Read the template inside the project, through no link or junction, and take the first filled stub row."""
     project = Path(project).resolve()
@@ -87,14 +84,10 @@ def read_template(project: Path, relative: str) -> Template:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ZephyrTemplateError("ZEPHYR_TEMPLATE_ENCODING") from None
-    first = text.splitlines()[0] if text.strip() else ""
-    splits = {delimiter: _header_cells(first, delimiter) for delimiter in (",", ";")}
-    if max(len(cells) for cells in splits.values()) < 2:
-        raise ZephyrTemplateError("ZEPHYR_TEMPLATE_NOT_CSV")
-    known = {delimiter: len(set(cells) & set(_HEADERS)) for delimiter, cells in splits.items()}
-    if known[","] == known[";"]:
-        raise ZephyrTemplateError("ZEPHYR_TEMPLATE_DELIMITER")
-    delimiter = max(known, key=known.__getitem__)
+    try:  # FaT-Z5: the one delimiter rule of the Zephyr CSV reader
+        delimiter = detect_delimiter(text)
+    except ValueError as error:
+        raise ZephyrTemplateError("ZEPHYR_TEMPLATE_NOT_CSV" if str(error) == "ZEPHYR_CSV_NOT_CSV" else "ZEPHYR_TEMPLATE_DELIMITER") from None
     rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
     header = [cell.strip() for cell in rows[0]]
     if "Name" not in header or not set(header) & set(_CUSTOM_KEYS):

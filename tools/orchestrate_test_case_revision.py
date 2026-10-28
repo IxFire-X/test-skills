@@ -36,8 +36,9 @@ OUTPUT_SCHEMA = ROOT / "schemas" / "orchestrator-output.schema.json"
 AUTOMATION_REVIEW_SCHEMA = ROOT / "schemas" / "autotest-reviewer-output.schema.json"
 TRACE_AUDIT_SCHEMA = ROOT / "schemas" / "trace-audit-output.schema.json"
 _PROFILE_V4 = "zephyr-scale-step-row-24-v4"
-_PROFILE = _PROFILE_V4
-_PROFILES = frozenset({_PROFILE_V4})
+_PROFILE_V5 = "zephyr-scale-step-row-24-v5"
+_PROFILE = _PROFILE_V5
+_PROFILES = frozenset({_PROFILE_V4, _PROFILE_V5})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -105,7 +106,7 @@ class OrchestrationError(ValueError):
 
 def _expected_paths(document: Mapping[str, Any], output_dir: str | os.PathLike[str], profile: str) -> tuple[str, str, str]:
     base = Path(output_dir).resolve() / f"{document['document_id']}.r{document['revision']}"
-    return str(base) + ".json", str(base) + (".html" if profile == _PROFILE_V4 else ".md"), str(base) + ".zephyr-scale.csv"
+    return str(base) + ".json", str(base) + (".html" if profile in _PROFILES else ".md"), str(base) + ".zephyr-scale.csv"
 
 
 def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | os.PathLike[str] | None, profile: str) -> list[dict[str, str]]:

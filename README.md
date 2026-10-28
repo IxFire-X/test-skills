@@ -66,7 +66,9 @@ explicit Skill invocation
 resume; terminal attempt неизменяем.
 
 Canonical JSON — единственный семантический источник. HTML, Markdown и
-`zephyr-scale-step-row-24-v4` CSV — derived human projections. Опциональный
+CSV — derived human projections. Профиль CSV по умолчанию —
+`zephyr-scale-step-row-24-v5`; прежний `zephyr-scale-step-row-24-v4` доступен только по
+явному `--csv-profile zephyr-scale-step-row-24-v4`. Опциональный
 `zephyr-scale-xml-observed-v1` остаётся observed/unverified: реальный Zephyr tenant
 import/re-export не доказан.
 
