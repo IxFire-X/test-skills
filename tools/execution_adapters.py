@@ -175,8 +175,9 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
         return ("target/surefire-reports",), (executable, "-B", f"-P{profile}", *MAVEN_STYLE_SKIPS, f"-Dtest={','.join(selectors)}", "test")
     elif adapter_id == GRADLE:
         # cleanTest reruns only the test task; --rerun-tasks rebuilt everything (FaT-L: 10 s against 34 s on Petclinic).
+        # FaT-H2a: --no-build-cache — with org.gradle.caching the test task would come FROM-CACHE with old reports.
         gradle_selectors = tuple(selector.replace("#", ".", 1) for selector in selectors)
-        return ("build/test-results/test",), (executable, "cleanTest", "test", f"-Pprofile={profile}", *(part for selector in gradle_selectors for part in ("--tests", selector)))
+        return ("build/test-results/test",), (executable, "cleanTest", "test", "--no-build-cache", f"-Pprofile={profile}", *(part for selector in gradle_selectors for part in ("--tests", selector)))
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
 
@@ -263,15 +264,22 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
     if adapter_id not in {MAVEN, SYSTEM_MAVEN, GRADLE} or not checks or not kept_files:
         return notes
     rows = [row for row in _STYLE_CHECKS if row[0] in checks]
+    # FaT-H2a: only spotless (Maven) takes a file filter; every other command formats the whole module.
+    spotless_files = ",".join(".*" + r"[\\/]".join(re.escape(part) for part in path.split("/")) for path in kept_files)
     if adapter_id == GRADLE:
         commands = [f'"{executable}" {row[4]}' for row in rows if row[4]]
+        whole = bool(commands)
         check = None
     else:
-        commands = [f'"{executable}" {row[3]}' for row in rows if row[3]]
+        commands = [f'"{executable}" {row[3]}' + (f' -DspotlessFiles="{spotless_files}"' if row[0] == "spotless" else "")
+                    for row in rows if row[3]]
+        whole = any(row[3] and row[0] != "spotless" for row in rows)
         check = f'"{executable}" -B validate'
     if not commands and check is None:
         return notes
-    action = "; ".join(filter(None, [("отформатируйте: " + "; ".join(commands)) if commands else None,
+    scope = ("команда форматирует весь модуль, не только эти файлы — проверьте дифф чужих файлов перед коммитом"
+             if whole else "команда форматирует только эти файлы")
+    action = "; ".join(filter(None, [(f"отформатируйте ({scope}): " + "; ".join(commands)) if commands else None,
                                      f"затем проверьте: {check}" if check else None]))
     notes["format_hint"] = (f"оставленные в проекте файлы ({', '.join(kept_files)}) проект проверяет на стиль "
                             f"({', '.join(checks)}): {action}")

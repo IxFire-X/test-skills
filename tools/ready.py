@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -359,8 +360,10 @@ def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]
         pack = _pack_folder(root)
         rows.append(_row(
             "execution:project-checks", EXECUTION, "WARN",
-            f"{', '.join(whole)} проверяет всю папку проекта, включая {pack}/ (окружение пакета, в нём есть ссылки http) "
-            "и .pilot-runs/ пакета: ваша собственная сборка проекта на них упадёт, запуск тестов пакета — нет",
+            # FaT-H2a P6: RAT fell on a task document in commons-lang — the checks see every file outside the project's git.
+            f"проверки проекта ({', '.join(whole)}) видят файлы, которых нет в git проекта: {pack}/ (окружение пакета, "
+            "в нём есть ссылки http), .pilot-runs/, новые документы требований; ваша собственная сборка проекта "
+            "на них упадёт, запуск тестов пакета эти проверки пропускает",
             "; ".join(_EXCLUSIONS[name].format(pack=pack) for name in whole)))
     return rows
 
@@ -369,6 +372,17 @@ def _probe_runner(argv: Sequence[str], cwd: Path, *, timeout: int) -> Any:
     from tools.run_tests import run_subprocess
 
     return run_subprocess(list(argv), Path(cwd), timeout=timeout)
+
+
+_URL_USERINFO = re.compile(r"://[^/\s@]+@")
+_SECRET_VALUE = re.compile(r"(?i)((?:password|passwd|pwd|token|secret)[\w.-]*['\"]?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;)]+)")
+PROBE_LINE_CHARS = 200
+
+
+def _scrub(line: str) -> str:
+    """FaT-H2a: an [ERROR] line of the probe goes to the agent — no URL userinfo, no secret values, at most 200 chars."""
+    line = _SECRET_VALUE.sub(r"***", _URL_USERINFO.sub("://***@", line))
+    return line if len(line) <= PROBE_LINE_CHARS else line[:PROBE_LINE_CHARS - 1] + "…"
 
 
 def build_probe(project: Path, module: Mapping[str, Any], runner: Any = None) -> dict[str, Any] | None:
@@ -387,20 +401,24 @@ def build_probe(project: Path, module: Mapping[str, Any], runner: Any = None) ->
     outcome = (runner or _probe_runner)(argv, module_root, timeout=PROBE_TIMEOUT)
     seconds = round(time.monotonic() - started, 1)
     command = " ".join(f'"{part}"' if " " in part else part for part in argv)
-    if getattr(outcome, "cause", None) == "TIMEOUT":
+    # FaT-H2a P1: run_tests.ProcessOutcome — exit_code and kind (EXIT, TIMEOUT, OS_ERROR), never returncode/cause.
+    if outcome.kind == "TIMEOUT":
         return _row("execution:build-probe", EXECUTION, "WARN", f"фаза validate офлайн не уложилась в {PROBE_TIMEOUT} с — не проверено",
                     f"запустите вручную в {module_root}: {command}")
-    if outcome.returncode == 0:
+    if outcome.kind == "OS_ERROR":
+        return _row("execution:build-probe", EXECUTION, "WARN", "фазу validate офлайн не удалось запустить — не проверено",
+                    f"запустите вручную в {module_root}: {command}")
+    if outcome.exit_code == 0:
         return _row("execution:build-probe", EXECUTION, "OK", f"фаза validate проекта офлайн прошла за {seconds} с (флаги exec)")
     output = f"{outcome.stdout}\n{outcome.stderr}"
-    errors = [line.strip() for line in output.splitlines() if line.strip().startswith("[ERROR]") and "-> [Help" not in line][:3]
+    errors = [_scrub(line.strip()) for line in output.splitlines() if line.strip().startswith("[ERROR]") and "-> [Help" not in line][:3]
     if "offline mode" in output:
         return _row("execution:build-probe", EXECUTION, "WARN",
                     "фаза validate офлайн не проверена: плагинов или зависимостей проекта нет в локальном репозитории Maven; "
                     "первый exec пойдёт за ними в сеть — нужна сеть или зеркало компании",
                     "проверить заранее с сетью: " + command.replace(" -o ", " "))
     return _row("execution:build-probe", EXECUTION, "WARN",
-                "фаза validate проекта падает с флагами exec — выбранные тесты не запустятся: " + (" | ".join(errors) or f"код {outcome.returncode}"),
+                "фаза validate проекта падает с флагами exec — выбранные тесты не запустятся: " + (" | ".join(errors) or f"код {outcome.exit_code}"),
                 f"исправьте сборку проекта, пока в {module_root} не пройдёт: {command}")
 
 

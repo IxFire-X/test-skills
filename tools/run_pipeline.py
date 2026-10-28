@@ -1662,6 +1662,19 @@ def cmd_exec(args: Any) -> int:
         authorization, isolation, delta,
     )
 
+def _rerun_request_current(request: Any) -> None:
+    """FaT-H2a: a Gradle request recorded before --no-build-cache would replay the build cache, not rerun the tests."""
+    from tools.execution_adapters import GRADLE
+
+    if request.adapter_id == GRADLE and "--no-build-cache" not in request.argv:
+        raise HostStop(
+            "RERUN_REQUEST_OUTDATED",
+            "команда Gradle изменилась в пакете: теперь cleanTest test --no-build-cache, а этот прогон записан старой "
+            "командой — её повтор может взять результат тестов из кэша сборки, а не запустить их",
+            "перепроверка этого прогона невозможна; начните новый прогон тем же scan, его тесты запустятся новой командой",
+        )
+
+
 def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Rerun one accepted attempt's retained tests through its recorded native request."""
     from tools.execution_adapters import invoke_request, request_digest
@@ -1736,6 +1749,7 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     request = context["request"]
     if request_digest(request) != context["execution_receipt"]["execution_request_digest"]:
         raise ValueError("retained native rerun request binding is invalid")
+    _rerun_request_current(request)
     executable = Path(request.executable)
     if not executable.is_file() or (os.name != "nt" and not os.access(executable, os.X_OK)):
         raise ValueError("retained native rerun executable is unavailable")

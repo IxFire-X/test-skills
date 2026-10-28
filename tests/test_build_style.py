@@ -19,6 +19,7 @@ import pytest
 
 from tests.test_execution_adapters import _module
 from tests.test_first_run import _write
+from tools.run_tests import ProcessOutcome
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAIN = "http" + "://"  # kept split so this file does not trip the guard below
@@ -75,7 +76,8 @@ def test_gradle_reruns_only_the_test_task(tmp_path: Path) -> None:
     from tools.execution_adapters import GRADLE, build_request
 
     request = build_request(GRADLE, _module(tmp_path, GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
-    assert request.argv == (str((tmp_path / "gradlew").resolve()), "cleanTest", "test", "-Pprofile=default", "--tests", "pkg.SampleTest.works")
+    assert request.argv == (str((tmp_path / "gradlew").resolve()), "cleanTest", "test", "--no-build-cache", "-Pprofile=default",
+                            "--tests", "pkg.SampleTest.works")
     assert "--rerun-tasks" not in request.argv
 
 
@@ -90,8 +92,10 @@ def test_the_receipt_policy_refuses_any_other_flag_set(tmp_path: Path) -> None:
     for argv in (without_skip, with_enforcer_skip, tuple(token for token in maven.argv if token != "-B")):
         assert _request_report_path(replace(maven, argv=argv)) is None, argv
     gradle = build_request(GRADLE, _module(tmp_path / "g", GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
-    rerun = (gradle.argv[0], "test", "--rerun-tasks", *gradle.argv[3:])
-    assert _request_report_path(replace(gradle, argv=rerun)) is None
+    rerun = (gradle.argv[0], "test", "--rerun-tasks", *gradle.argv[4:])
+    cached = tuple(token for token in gradle.argv if token != "--no-build-cache")
+    for argv in (rerun, cached):
+        assert _request_report_path(replace(gradle, argv=argv)) is None, argv
 
 
 # --------------------------------------------------------------------------------------
@@ -171,21 +175,17 @@ def test_ready_names_the_style_checks_and_the_exclusions_for_the_project_build(t
     assert style_rows(plain, _maven_module(plain)) == []
 
 
-class _Outcome(SimpleNamespace):
-    pass
-
-
 @pytest.mark.parametrize(("outcome", "level", "needle"), [
-    (_Outcome(returncode=0, stdout="", stderr="", cause=None), "OK", "validate"),
-    (_Outcome(returncode=1, stdout="[ERROR] Plugin io.spring.javaformat:spring-javaformat-maven-plugin:0.0.47 or one of its dependencies "
+    (ProcessOutcome(exit_code=0, stdout="", stderr=""), "OK", "validate"),
+    (ProcessOutcome(exit_code=1, stdout="[ERROR] Plugin io.spring.javaformat:spring-javaformat-maven-plugin:0.0.47 or one of its dependencies "
               "could not be resolved: Cannot access central in offline mode and the artifact has not been downloaded from it before.\n",
-              stderr="", cause=None), "WARN", "офлайн"),
-    (_Outcome(returncode=1, stdout="[INFO] x\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce "
-              "(enforce-java) on project app: Some Enforcer rules have failed.\n[ERROR] -> [Help 1]\n", stderr="", cause=None),
+              stderr=""), "WARN", "офлайн"),
+    (ProcessOutcome(exit_code=1, stdout="[INFO] x\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce "
+              "(enforce-java) on project app: Some Enforcer rules have failed.\n[ERROR] -> [Help 1]\n", stderr=""),
      "WARN", "maven-enforcer-plugin"),
-    (_Outcome(returncode=124, stdout="", stderr="", cause="TIMEOUT"), "WARN", "120"),
+    (ProcessOutcome(exit_code=124, stdout="", stderr="", kind="TIMEOUT"), "WARN", "120"),
 ])
-def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: Path, outcome: _Outcome, level: str, needle: str) -> None:
+def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: Path, outcome: ProcessOutcome, level: str, needle: str) -> None:
     from tools.execution_adapters import MAVEN_STYLE_SKIPS
     from tools.ready import build_probe
 
@@ -230,8 +230,8 @@ def test_ready_probe_failure_does_not_block_the_cases(tmp_path: Path, monkeypatc
     project, module = _petclinic_like(tmp_path)
     _write(project, "docs/feature.md", "Требование.\n")
     _write(project, "src/main/java/x/App.java", "package x;\npublic class App {}\n")
-    failed = _Outcome(returncode=1, stdout="[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce\n",
-                      stderr="", cause=None)
+    failed = ProcessOutcome(exit_code=1, stdout="[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce\n",
+                      stderr="")
     from tools.init_skillsrc import _payload
 
     (project / ".skillsrc").write_bytes(_payload({

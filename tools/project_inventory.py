@@ -50,11 +50,23 @@ _TOKEN_SIGNATURES = (
     ("url-credentials-v1", re.compile(rb"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")),
     ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  # FaT-B
 )
+# FaT-H2a P5: token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
+_SOURCE_TOKEN_LITERAL = re.compile(
+    rb"(?i)(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|secret|token)['\"]?\s*[:=]\s*(['\"])(?P<value>[^'\"\r\n]{8,})\1")
+_PROPERTY_NAME = re.compile(rb"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
 # FaT-B: a password set in YAML/properties of any length and alphabet; an empty value or a ${placeholder} is no secret.
+# FaT-H2a: the rule reads the value on the key's own line — YAML list items and quoted keys, any .json, XML elements, a
+# ${X:default} with a default, a short secret.  Not a secret: an empty value, ${X} or ${X:}, a true/false/yes/no/on/off
+# flag.  Message bundles (messages*.properties, ValidationMessages*.properties) are texts, never passwords.
 _CONFIG_SUFFIXES = frozenset({".yml", ".yaml", ".properties"})
-_PASSWORD_ASSIGNMENT = re.compile(rb"(?im)^[ 	]*[\w.-]*(?:password|passwd|pwd)[\w.-]*[ 	]*[:=][ 	]*(?![ 	]*$)(?!['\"]?\$\{)(?!['\"]{2})\S")
-# FaT-B: non-source files in a secrets/credentials directory are left out also inside src/.
-_SECRET_DIR_SUFFIXES = frozenset({".yml", ".yaml", ".json", ".pem", ".key", ".properties"})
+_PASSWORD_KEY = rb"[\w.-]*(?:password|passwd|pwd|secret)[\w.-]*"
+_PASSWORD_LINE = re.compile(rb"(?im)^[ \t]*(?:-[ \t]+)?(['\"]?)" + _PASSWORD_KEY + rb"\1[ \t]*[:=][ \t]*(?P<value>[^\r\n]*)")
+_PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*)"')
+_PASSWORD_XML = re.compile(rb"(?is)<(?P<tag>" + _PASSWORD_KEY + rb")(?:\s[^>]*)?(?<!/)>(?P<value>[^<]*)</(?P=tag)\s*>")
+_PLACEHOLDER = re.compile(rb"\$\{\{[^}]*\}\}|\$\{[^}:]*(?::(?P<default>[^}]*))?\}")  # ${{ secrets.X }}: a CI reference
+_FLAG_VALUES = frozenset({b"true", b"false", b"yes", b"no", b"on", b"off"})
+_MESSAGE_BUNDLE = re.compile(r"(?i)^(?:validation)?messages[\w.-]*\.properties$")
+# FaT-B: non-source files in a secrets/credentials directory are left out also inside src/; FaT-H2a: any non-source file.
 _CLOSED_MANIFESTS = frozenset({
     "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py", "pipfile", "pom.xml",
     "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties",
@@ -257,8 +269,14 @@ def _kind(project_path: str, path: Path) -> str:
     return "resource"
 
 
-def token_signature_rule(contents: bytes) -> str | None:
+def token_signature_rule(contents: bytes, *, source: bool = False) -> str | None:
     """Return the existing scanner rule for a credential-like byte sequence."""
+    if source:
+        # FaT-H2a P5: in source code only a string literal is a secret — `this.password = password;` or
+        # `Token token = read();` assign a variable, and a dotted property name ("java.net.socks.password") is a name.
+        literal = any(not _PROPERTY_NAME.fullmatch(match.group("value")) for match in _SOURCE_TOKEN_LITERAL.finditer(contents))
+        return "token-assignment-v1" if literal else next(
+            (rule_id for rule_id, signature in _TOKEN_SIGNATURES if rule_id != "token-assignment-v1" and signature.search(contents)), None)
     # Shell ${NAME:+word} substitutes word; it does not assign word to NAME.
     # Keep word visible, including any real assignment or service token inside it.
     assignments = re.sub(rb"(\$\{[A-Za-z_][A-Za-z0-9_]*):\+", rb"\1 ", contents)
@@ -267,7 +285,7 @@ def token_signature_rule(contents: bytes) -> str | None:
 
 def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -> tuple[str, str] | None:
     name = path.name.casefold()
-    if project_path is not None and path.suffix.casefold() in _SECRET_DIR_SUFFIXES and any(
+    if project_path is not None and not is_source(path.name) and any(
             part.casefold() in SECRET_DIRS for part in project_path.split("/")[:-1]):
         return "secret-directory-v1", "credential-material"
     if name == ".env" or name.startswith(".env."):
@@ -278,12 +296,38 @@ def _secret_rule(path: Path, contents: bytes, project_path: str | None = None) -
     # Secret directories are left out by place (scan_rules.directory_reason); inside src/ only their non-source files (above).
     if not is_source(path.name) and _SECRET_NAME.search(path.stem):
         return "secret-filename-v1", "credential-material"
-    rule_id = token_signature_rule(contents)
+    rule_id = token_signature_rule(contents, source=is_source(path.name))
     if rule_id is not None:
         return rule_id, "token-signature"
-    if path.suffix.casefold() in _CONFIG_SUFFIXES and _PASSWORD_ASSIGNMENT.search(contents):
+    if _has_password(path, contents):
         return "password-assignment-v1", "token-signature"
     return None
+
+
+def _secret_value(raw: bytes) -> bool:
+    """FaT-H2a: a value is a secret unless it is empty, a flag, or only placeholders without a default."""
+    value = raw.strip()
+    if len(value) >= 2 and value[:1] == value[-1:] and value[:1] in (b"'", b'"'):
+        value = value[1:-1].strip()
+    if not value or value.lower() in _FLAG_VALUES:
+        return False
+    placeholders = list(_PLACEHOLDER.finditer(value))
+    if placeholders and not _PLACEHOLDER.sub(b"", value).strip():
+        return any((match.group("default") or b"").strip() for match in placeholders)
+    return True
+
+
+def _has_password(path: Path, contents: bytes) -> bool:
+    suffix = path.suffix.casefold()
+    if suffix in _CONFIG_SUFFIXES:
+        if _MESSAGE_BUNDLE.match(path.name):
+            return False
+        return any(_secret_value(match.group("value")) for match in _PASSWORD_LINE.finditer(contents))
+    if suffix == ".json":
+        return any(_secret_value(match.group("value")) for match in _PASSWORD_JSON.finditer(contents))
+    if suffix == ".xml":
+        return any(_secret_value(match.group("value")) for match in _PASSWORD_XML.finditer(contents))
+    return False
 
 
 def _is_binary_or_generated(path: Path) -> bool:
@@ -1202,7 +1246,8 @@ def context_filter(
             if size > byte_budget:  # FaT-B2: a task document is never cut, so it must fit one batch
                 raise ContextStop("CONTEXT_TASK_DOCUMENT_TOO_LARGE", f"{project_path}: {size} Б больше пачки {byte_budget} Б",
                                   "разбейте документ задачи на части (по функции на документ) или поднимите .skillsrc "
-                                  "limits.context_batch_bytes, не выше бюджета шага limits.step_input_bytes")
+                                  "limits.context_batch_bytes выше размера документа: бюджет шага limits.step_input_bytes — "
+                                  "только предупреждение, предел даёт окно модели (≈ 1 МБ на DeepSeek)")
             kept.append(opaque_id)
             continue
         if Path(project_path).name.casefold() == ".skillsrc" or Path(project_path).name.casefold() in _CLOSED_MANIFESTS:

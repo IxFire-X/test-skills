@@ -53,12 +53,17 @@ sanitized source, safe fixture или opaque runtime handle.
   `.gemini`);
 - только вне дерева `src/` — имена сборки и зависимостей, которые бывают и именами пакетов
   (`build`, `target`, `dist`, `out`, `coverage`, `htmlcov`, `generated`, `generated-sources`,
-  `test-results`, `vendor`), и каталоги `secrets`/`credentials`; внутри `src/…` это код, и
-  секреты в нём ищут правила по содержимому.
+  `test-results`, `vendor`), и каталоги `secrets`/`credentials`; внутри `src/…` из
+  `secrets`/`credentials` исключается любой не-исходник, а исходник проверяется по содержимому.
 
 Секретное имя файла (`token`, `secret`, `password`, `api-key`…) исключает только
 не-исходники (конфиги, ключи, текст); исходник (`.java`, `.kt`, `.py`, `.ts`, `.js`, `.go`,
 `.cs`…) проверяется по содержимому, и файл с ключом или паролем выпадает целиком.
+Пароль ищется по значению на строке ключа (`password`, `passwd`, `pwd`, `secret`): в
+YAML/properties, в любом `.json`, в элементах XML (`<password>` в `settings.xml`); `${X:умолчание}`
+с непустым умолчанием — тоже пароль. Не пароль: пустое значение, `${X}`, `${{ secrets.X }}`,
+флаг `true/false/yes/no/on/off`. Пакеты сообщений (`messages*.properties`,
+`ValidationMessages*.properties`) правило паролей не проверяет, ключи и токены — проверяет.
 
 Вывод `scan` и `status` несёт `exclusion_summary`: число исключений по причинам и правилам,
 до 10 путей на причину и `suspicious` — то, что стоит проверить. Лишнее исключение по имени
