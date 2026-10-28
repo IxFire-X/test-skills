@@ -141,8 +141,10 @@ def test_model_request_and_response_match_the_direct_calls(tmp_path: Path, capsy
 def _error_of(call) -> dict:
     try:
         call()
-    except Exception as error:  # the command must report the same failure
-        return {"code": getattr(error, "code", type(error).__name__), "message": str(error)}
+    except Exception as error:  # the command must report the same failure, its code read as the CLI reads it (FaT-U6)
+        from tools.json_cli import error_fields
+
+        return {"code": error_fields(error)["code"], "message": str(error)}
     raise AssertionError("the direct call did not fail")
 
 
