@@ -1,0 +1,30 @@
+{
+ "batches": [
+  {
+   "batch_id": "BATCH-3ba185126b83e150",
+   "completeness": "COMPLETE",
+   "context_receipt_digest": "sha256:e68b02ddaf62904d39a472ae7b9aa79f26de6595a2ced7eb961a0adc77f0b591",
+   "header_digest": "sha256:2c1118d91388e91cc5a856b02f5b4672a29fe0fae2564344c2595e412962e00a",
+   "namespace": "B1",
+   "ordinal": 1,
+   "owned_source_requirement_ids": [
+    "SREQ-0003"
+   ]
+  }
+ ],
+ "context_receipt_digest": "sha256:e68b02ddaf62904d39a472ae7b9aa79f26de6595a2ced7eb961a0adc77f0b591",
+ "digest": "sha256:c6a16ae1694a450d72ce02dad6bfed78408e270b2536b1c1e93cfec3d3e94306",
+ "header_digest": "sha256:2c1118d91388e91cc5a856b02f5b4672a29fe0fae2564344c2595e412962e00a",
+ "schema_version": "1.0.0",
+ "source_requirements": [
+  {
+   "digest": "sha256:79e7fe60566fbe401fb43b4b81f107849098f19c83c90d05eff781a00f40d7f8",
+   "display_order": 1,
+   "provenance": [
+    "docs/portable-owner-lifecycle-requirements.md:16 — O03; sha256:79e7fe60566fbe401fb43b4b81f107849098f19c83c90d05eff781a00f40d7f8"
+   ],
+   "source_requirement_id": "SREQ-0003",
+   "text": "O03. Имя и фамилия независимо допускают 30 символов и отклоняют 31 символ. Для каждого поля использовать строки из 30 и 31 латинской A. Проверить конкретное поле ошибки и отсутствие сохранения при превышении."
+  }
+ ]
+}

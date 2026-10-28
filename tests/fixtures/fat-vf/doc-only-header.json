@@ -1,0 +1,20 @@
+{
+ "content_locale": "ru-RU",
+ "digest": "sha256:2c1118d91388e91cc5a856b02f5b4672a29fe0fae2564344c2595e412962e00a",
+ "document_id": "TCDOC-owner-lifecycle-doc-only-c1f13463",
+ "metadata": {
+  "author": "portable tc-generator",
+  "date": "2026-10-29",
+  "documentation": [
+   "docs/portable-owner-lifecycle-requirements.md"
+  ],
+  "project": "doc-only (проект без кода, только требования)",
+  "subject": {
+   "kind": "generic",
+   "name": "Полный цикл работы с владельцем, питомцами и визитами"
+  }
+ },
+ "parent_sha256": null,
+ "revision": 1,
+ "schema_version": "1.1.0"
+}

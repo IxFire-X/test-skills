@@ -554,6 +554,41 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         if not isinstance(references, list) or not references or any(item not in requirement_ids for item in references):
             raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "case references a canonical requirement outside its batch")
     require_batch_coverage(fragment)
+    _fragment_audit(fragment, plan, header, _earlier_fragments(plan, batches, batch, prior_fragments or []) if batch["ordinal"] > 1 else [])
+
+
+# FaT-VF: the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
+# decided by one batch and runs on the fragment before the answer is written
+DOCUMENT_WIDE_CODES = frozenset({
+    "SEMANTIC_PARAM_GROUP_SINGLE", "SEMANTIC_PARAM_GROUP_MISMATCH", "SEMANTIC_PARAM_GROUP_PARAMETER",  # a group may span batches
+    "SEMANTIC_RU_RU_HUMAN_FIELDS",  # Russian prose anywhere in the document
+})
+
+
+def _fragment_audit(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> None:
+    """FaT-VF: the canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
+    header, the batch's own source requirements, the capabilities of the earlier batches and this one, and this fragment,
+    with the same display_order — so an order or format error is refused by validate-fragment, not first by assemble."""
+    from tools.canonical_document import validate_canonical_document
+
+    owned = set(fragment["owned_source_requirement_ids"])
+    probe = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
+    probe.update({
+        "source_requirements": [dict(deepcopy(row), display_order=index) for index, row in
+                                enumerate((row for row in plan["source_requirements"] if row["source_requirement_id"] in owned), start=1)],
+        "source_to_canonical_mappings": deepcopy(fragment["source_to_canonical_mappings"]),
+        "operation_capabilities": list(_unique_by_id([item for part in [*earlier, fragment] for item in part["operation_capabilities"]],
+                                                     "capability_id", "BATCH_ID_CONFLICT", permit_equal=True).values()),
+        "requirements": deepcopy(fragment["requirements"]),
+        "test_cases": deepcopy(fragment["test_cases"]),
+    })
+    for name in ("requirements", "test_cases"):
+        for index, item in enumerate(probe[name], start=1):
+            item["display_order"] = index
+    diagnostics = [row for row in validate_canonical_document(probe) if row["code"] not in DOCUMENT_WIDE_CODES]
+    if diagnostics:
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {diagnostics[0]['code']} at "
+                                                            f"{diagnostics[0]['path']} (of this fragment) — {diagnostics[0]['message']}")
 
 
 def require_batch_coverage(fragment: dict[str, Any]) -> None:

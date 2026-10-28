@@ -1,0 +1,243 @@
+{
+ "batch_id": "BATCH-3ba185126b83e150",
+ "context_receipt": {
+  "batch_index": 1,
+  "byte_count": 40982,
+  "byte_set_digest": "sha256:f23e85c3f905d2ace635d9c9f45b413e46adf66e5ae099c836ada649a4152fd5",
+  "digest": "sha256:e68b02ddaf62904d39a472ae7b9aa79f26de6595a2ced7eb961a0adc77f0b591",
+  "files": [
+   {
+    "content_digest": "sha256:7f8dce38861c201aabec306561c895809b22d1f0ebf61a95d2b83543d645c29d",
+    "opaque_id": "file-b15f8650664e82ddd8a93d09",
+    "project_path": ".skillsrc",
+    "size": 292
+   },
+   {
+    "content_digest": "sha256:51a3b9ff40dcd1822f5a414c669439f80fa9b3baa80109e0e71fb85da1e17bf5",
+    "opaque_id": "file-76ffbba4e8c3b63db7e25bcc",
+    "project_path": "docs/owners-api-requirements.md",
+    "size": 21734
+   },
+   {
+    "content_digest": "sha256:79e7fe60566fbe401fb43b4b81f107849098f19c83c90d05eff781a00f40d7f8",
+    "opaque_id": "file-3e29657465b3d85026c4d7e6",
+    "project_path": "docs/portable-owner-lifecycle-requirements.md",
+    "size": 18956
+   }
+  ],
+  "inventory_digest": "sha256:e9ff88d710344b4c2a5fc4b6faa814b6c5c2fa4c4b79dc26842915b4c59b999d",
+  "schema_version": "1.0.0"
+ },
+ "context_receipt_digest": "sha256:e68b02ddaf62904d39a472ae7b9aa79f26de6595a2ced7eb961a0adc77f0b591",
+ "diagnostics": [],
+ "digest": "sha256:58b7c9b43dee1af5aa81dc57add4b5d2132fc114fef31908041e1718390790d1",
+ "header_digest": "sha256:2c1118d91388e91cc5a856b02f5b4672a29fe0fae2564344c2595e412962e00a",
+ "namespace": "B1",
+ "operation_capabilities": [],
+ "owned_source_requirement_ids": [
+  "SREQ-0003"
+ ],
+ "plan_digest": "sha256:c6a16ae1694a450d72ce02dad6bfed78408e270b2536b1c1e93cfec3d3e94306",
+ "requirements": [
+  {
+   "design": {
+    "parameters": [
+     {
+      "bounds": {
+       "max": 30,
+       "unit": "символов"
+      },
+      "id": "P-NAME-LEN",
+      "invalid": [
+       {
+        "id": "C-LEN-31",
+        "label": "31 символ"
+       }
+      ],
+      "name": "Длина имени или фамилии владельца",
+      "valid": [
+       {
+        "id": "C-LEN-30",
+        "label": "30 символов"
+       }
+      ]
+     }
+    ]
+   },
+   "display_order": 6,
+   "provenance": [
+    "docs/portable-owner-lifecycle-requirements.md — O03 (строка 16) — 30 символов"
+   ],
+   "requirement_id": "CREQ-B1-006",
+   "text": "Имя и фамилия владельца независимо принимаются при длине 30 символов (строка из 30 латинских A)."
+  },
+  {
+   "design": {
+    "parameters": [
+     {
+      "bounds": {
+       "max": 30,
+       "unit": "символов"
+      },
+      "id": "P-NAME-LEN",
+      "invalid": [
+       {
+        "id": "C-LEN-31",
+        "label": "31 символ"
+       }
+      ],
+      "name": "Длина имени или фамилии владельца",
+      "valid": [
+       {
+        "id": "C-LEN-30",
+        "label": "30 символов"
+       }
+      ]
+     }
+    ]
+   },
+   "display_order": 7,
+   "provenance": [
+    "docs/portable-owner-lifecycle-requirements.md — O03 (строка 16) — 31 символ"
+   ],
+   "requirement_id": "CREQ-B1-007",
+   "text": "Имя и фамилия владельца независимо отклоняются при длине 31 символ (строка из 31 латинской A): ошибка именно этого поля, владелец не сохранён."
+  }
+ ],
+ "schema_version": "1.0.0",
+ "source_to_canonical_mappings": [
+  {
+   "canonical_requirement_ids": [
+    "CREQ-B1-006",
+    "CREQ-B1-007"
+   ],
+   "source_requirement_id": "SREQ-0003"
+  }
+ ],
+ "status": "COMPLETE",
+ "test_cases": [
+  {
+   "case_id": "TC-B1-014",
+   "categories": [
+    "boundary",
+    "positive"
+   ],
+   "design_refs": [
+    {
+     "bound": "max",
+     "parameter": "P-NAME-LEN",
+     "value": "30"
+    }
+   ],
+   "display_order": 14,
+   "management": {
+    "components": [],
+    "custom_fields": {},
+    "estimated_time": null,
+    "external_keys": {},
+    "external_links": {
+     "issues": [],
+     "pages": []
+    },
+    "folder": null,
+    "labels": [],
+    "owner": null,
+    "status": null
+   },
+   "objective": "Подтвердить верхнюю допустимую границу длины.",
+   "preconditions": [
+    "Запущено приложение Spring Petclinic с чистой базой данных H2; в справочнике типов питомцев есть dog и cat."
+   ],
+   "priority": "HIGH",
+   "requirement_ids": [
+    "CREQ-B1-006"
+   ],
+   "steps": [
+    {
+     "action": "Отправить форму создания владельца с проверяемым полем из 30 латинских A.",
+     "automation_blockers": [],
+     "display_order": 1,
+     "expectations": [
+      {
+       "assertions": [],
+       "display_order": 1,
+       "expectation_id": "EXP-B1-014-01-1",
+       "text": "Владелец создан, имя из 30 символов сохранено полностью."
+      }
+     ],
+     "inputs": [],
+     "manual_only": true,
+     "manual_reason": "В проекте нет исходного кода и тестового окружения: операцию нельзя привязать к проверенному коду, поэтому шаг выполняется вручную по требованию документа.",
+     "operation": null,
+     "outputs": [],
+     "step_id": "STEP-B1-014-01",
+     "test_data": "Имя: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Фамилия: PilotLifecycle; Адрес: 10 Test Street; Город: Testville; Телефон: 0123456789"
+    }
+   ],
+   "technique": "BVA",
+   "title": "Приём имя владельца из 30 символов"
+  },
+  {
+   "case_id": "TC-B1-015",
+   "categories": [
+    "boundary",
+    "negative"
+   ],
+   "design_refs": [
+    {
+     "bound": "above_max",
+     "parameter": "P-NAME-LEN",
+     "value": "31"
+    }
+   ],
+   "display_order": 15,
+   "management": {
+    "components": [],
+    "custom_fields": {},
+    "estimated_time": null,
+    "external_keys": {},
+    "external_links": {
+     "issues": [],
+     "pages": []
+    },
+    "folder": null,
+    "labels": [],
+    "owner": null,
+    "status": null
+   },
+   "objective": "Подтвердить, что превышение границы длины блокирует создание.",
+   "preconditions": [
+    "Запущено приложение Spring Petclinic с чистой базой данных H2; в справочнике типов питомцев есть dog и cat.",
+    "Число владельцев зафиксировано до отправки."
+   ],
+   "priority": "HIGH",
+   "requirement_ids": [
+    "CREQ-B1-007"
+   ],
+   "steps": [
+    {
+     "action": "Отправить форму создания владельца с проверяемым полем из 31 латинской A.",
+     "automation_blockers": [],
+     "display_order": 1,
+     "expectations": [
+      {
+       "assertions": [],
+       "display_order": 1,
+       "expectation_id": "EXP-B1-015-01-1",
+       "text": "Форма остаётся открытой с ошибкой поля «имя»; владелец не сохранён, число владельцев прежнее."
+      }
+     ],
+     "inputs": [],
+     "manual_only": true,
+     "manual_reason": "В проекте нет исходного кода и тестового окружения: операцию нельзя привязать к проверенному коду, поэтому шаг выполняется вручную по требованию документа.",
+     "operation": null,
+     "outputs": [],
+     "step_id": "STEP-B1-015-01",
+     "test_data": "Имя: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Фамилия: PilotLifecycle; Адрес: 10 Test Street; Город: Testville; Телефон: 0123456789"
+    }
+   ],
+   "technique": "BVA",
+   "title": "Отклонение имя владельца из 31 символа"
+  }
+ ]
+}
