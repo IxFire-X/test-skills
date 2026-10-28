@@ -24,7 +24,7 @@ Python validators выполняются как код. Исходник tools �
 при этом остаётся выбранным module root, как требует frozen request.
 
 При формировании reviewer prompt явно передай `run_root` и `attempt_id` и разреши
-read-only вызовы штатных `tools.pilot_state` readers для exact boundary, effective
+read-only команды `python -m tools.api read-receipt`, `read-effective` и `read-ledger` для exact boundary, effective
 canonical и связанных receipts текущего attempt. Эти API также читают необходимые
 run manifest и journal bindings. Не запрещай их общим запретом на run-файлы:
 проверка происхождения обязательна. За пределами reviewer context остаются диалог
@@ -165,6 +165,12 @@ Run остаётся связан с исходной project/module identity.
 
 ## 3. Построй canonical из deterministic batches
 
+Функции пакета не импортируй и своих скриптов с `tools` не пиши: каждый шаг ниже — команда
+`python -m tools.api <команда> --run-root <run> --attempt <attempt_id> …` (cwd пакета). Она вызывает одну функцию
+и печатает одну строку JSON: `status: ok` и `result`, `invalid` (код 1, диагностики в `result`) или `error`
+(код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` — только в
+каталог прогона, никогда в исходники проекта. Аргументы — `python -m tools.api <команда> --help`.
+
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
 для разметки, для остальных шагов — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
@@ -172,7 +178,7 @@ Run остаётся связан с исходной project/module identity.
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить
 `--target` или `paths` модуля) и продолжай шаг. Вход не обрезай.
-Размер ответа каждого вызова меряет код (FaT-O): `publish_model_stage_artifact` возвращает
+Размер ответа каждого вызова меряет код (FaT-O): `tools.api model-response` возвращает в `result`
 `output_bytes` и `warning`; `STEP_OUTPUT_LARGE` (больше `limits.step_output_warn_bytes`, по умолчанию
 128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай.
 
@@ -193,24 +199,33 @@ Run остаётся связан с исходной project/module identity.
    persist/readback-проверь `model-request` с exact stage/role/policy, model,
    invocation и ordered artifact `input_digests`; `MODEL_REQUESTED` ссылается на digest
    этого envelope. После schema-valid ответа запиши `MODEL_RESPONSE_RECEIVED` с exact
-   output digest.
+   output digest. Команды: `tools.api model-request --stage <stage> --model-id <id> --invocation-id <id>
+   --input-digest <d1> --input-digest <d2> …` (порядок флагов = порядок входов) и `tools.api model-response
+   --stage <stage> --artifact <ответ.json>` — ответ передаётся как есть; `result.content_digest` — его digest.
    Порядок `input_digests`: `[baseline.requirements.digest, baseline.inventory_digest,
    ...authorized_context_receipt_digests]`; нужен минимум один current/readback receipt.
 2. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
-   каждый context-selection receipt.
+   каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
+   `tools.api read-context --digest <d>`. План — `tools.api plan-batches --requirements <f> --grouping <f>`,
+   self-digest плана и header — `tools.api with-digest --value <f>`, публикация байтов — `tools.api
+   publish-artifact --name <имя> --file <f>`.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs.
    Порядок входов: `[marker.content_digest, context.digest, plan.digest, header_digest]`.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
-   Persist/readback-проверь каждый complete fragment и сразу запиши
+   Persist/readback-проверь каждый complete fragment (`tools.api validate-fragment --fragment <f> --plan <f>
+   --header <f> --context-receipt <f>`, затем `model-response`) и сразу запиши
    `CANDIDATE_PUBLISHED` для его exact digest.
 4. Собери один bare canonical JSON `1.0.0` с explicit many-to-many traceability и
-   выполни schema/semantic/provenance audit.
+   выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
+   --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
+   `tools.api validate-canonical --document <run>/tmp/candidate.json`.
    Проверь полноту относительно исходного документа, а не только normalized context.
    Передай reviewer исходные authorized requirement bytes через существующие immutable
    context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.
 5. Немедленно опубликуй revision 1 как `UNREVIEWED` с V4 derived bundle и прочитай exact
-   bytes обратно; journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
+   bytes обратно (`python -m tools.orchestrate_test_case_revision publish --candidate <f> --output-dir <dir>
+   --run-root <run> --attempt-id <id>`); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
    HTML/CSV никогда не становятся downstream model input.
 
 Human-facing canonical поля обязательны на русском; technical tokens сохраняются
@@ -219,8 +234,9 @@ exact. Не ограничивай число requirements/cases искусст�
 ## 4. Выполни одно authoritative canonical review
 
 Controller формирует immutable package из candidate, exact requirements/context/source
-evidence и provenance. Открой одну fresh role-isolated reviewer session и вызови
-`tc-reviewer`. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
+evidence и provenance. Открой одну fresh role-isolated reviewer session
+(`python -m tools.orchestrate_test_case_revision open-session …`) и вызови
+`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …`. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
 candidate; сам вызов окружи stage-bound `MODEL_REQUESTED` и
 `MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
 Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
@@ -275,16 +291,16 @@ FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается та�
 
 Для model request `tc-to-autotest:rN` передай `input_digests` ровно как
 `[effective.document_digest, effective.effective_bundle_receipt_digest]` из
-`read_effective_canonical`. Для `autotest-reviewer:rN` — ровно
+`python -m tools.api read-effective`. Для `autotest-reviewer:rN` — ровно
 `[boundary.automation_digest, boundary.digest]` из read-back
-`automation-review-boundary-rN`. Порядок значим. Это привязки артефактов этапа,
+`automation-review-boundary-rN` (`tools.api read-receipt --kind automation-review-boundary-rN --event ARTIFACT_READ_BACK`). Порядок значим. Это привязки артефактов этапа,
 а не hashes всех прочитанных skill/schema/source файлов или полного prompt.
 Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
 эти поля. Не переписывай опубликованный request после вызова модели.
 
 1. Вызови `tc-to-autotest` для effective canonical.
-2. Открой attempt-owned automation review boundary и вызови `autotest-reviewer` в fresh
-   invocation. Разрешены initial + максимум одна complete correction/review.
+2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`) и
+   вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
 3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует
    execution-inputs и материализует принятую автоматизацию (generated delta) из ответов
    журнала, если этого ещё не было; partial materialization по-прежнему запрещает execution.

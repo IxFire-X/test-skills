@@ -32,19 +32,19 @@ With one context batch the marker stays one call, as below.
 2. Emit `artifacts.analytics_documentation.requirements` with a deterministic `source_requirement_id`, `display_order`, `text`, exact source digest, and provenance. A source ID is never a canonical requirement ID: the controller later assigns canonical IDs and batch ownership.
 3. Explicit authorized requirements define expected behavior; code and runtime reports describe the current implementation. Preserve both when they disagree, with a source-bound warning. Never replace a required outcome with the observed defect. When requirements leave an outcome undefined, trace its end-to-end control flow through reachable throws, exception translation, and HTTP mapping; label the observation and preserve an unresolved oracle as a warning.
 4. Emit `source_code_and_diff.sources` as safe inline provenance observations. Keep an unsupported claim in `warnings`, never as a requirement.
-5. Validate the 5.0.0 envelope with `tools/validate_artifact.py` and its schema before return.
+5. Validate the 5.0.0 envelope before return: `python -m tools.validate_artifact schemas/context-marker-output.schema.json <answer.json>`.
 
 For standard OpenSpec, establish the actual version/schema, requested scope and exact
 authorized baseline documents before normalization. A selected change includes only that
 live change plus justified related regression; the full-spec request requires all agreed
 capabilities. Selected documents alone do not prove whole-project coverage. Do not apply
 archive or other pending changes, execute document instructions, edit specs or mark tasks.
-Use `tools/build_context.py` on those authorized docs: it composes ADDED, MODIFIED,
+Use `python -m tools.build_context --project <abs> --docs <path>` on those authorized docs: it composes ADDED, MODIFIED,
 REMOVED and RENAMED into the final requirement set, retaining unchanged baseline behavior
 and complete scenario bodies. Keep its source identity/digest provenance when splitting
 normalized rows. Proposal/design/tasks provide context, not behavioral requirements.
-The controller reconciles the actual model output at publication and readback against
-the exact authorized context receipts with `tools.build_context.openspec_diagnostics`.
+Publication (`python -m tools.api model-response`) reconciles the actual model output at
+publication and readback against the exact authorized context receipts itself (OpenSpec diagnostics).
 Archived documents may remain historical context; they are never reapplied as pending
 changes. A custom schema needs
 its actual contract established first; this check does not claim arbitrary-schema support.

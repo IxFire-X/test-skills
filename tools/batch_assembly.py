@@ -39,10 +39,14 @@ def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def _with_digest(value: dict[str, Any]) -> dict[str, Any]:
+def with_digest(value: dict[str, Any]) -> dict[str, Any]:
+    """Copy of *value* with its own canonical self-digest (batch plan, generator header)."""
     result = deepcopy(value)
     result["digest"] = _digest(result)
     return result
+
+
+_with_digest = with_digest
 
 
 def _schema_valid(value: dict[str, Any], schema: Path, label: str) -> None:

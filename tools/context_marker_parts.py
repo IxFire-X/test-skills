@@ -10,13 +10,13 @@ a merge of the parts by code, recorded with the model id ``controller:context-ma
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 from tools import pilot_state
+from tools.json_cli import JsonArgumentParser
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
 MERGE_TEXT = "слияние частей кодом (не вызов модели): python -m tools.context_marker_parts merge --run-root <run>"
@@ -123,7 +123,7 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="The context marker in parts: plan and merge.")
+    parser = JsonArgumentParser(description="The context marker in parts: plan and merge.")
     parser.add_argument("command", choices=("plan", "merge"))
     parser.add_argument("--run-root", required=True, type=Path)
     args = parser.parse_args(argv)

@@ -14,11 +14,12 @@ FaT-O: ``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any, Iterable
+
+from tools.json_cli import JsonArgumentParser
 
 PACK = Path(__file__).resolve().parents[1]
 DEFAULT_BUDGET = 500_000
@@ -135,7 +136,7 @@ def record(project: Path, run_id: str, step: str, report: dict[str, Any]) -> str
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Size of one model step's input against the step budget.")
+    parser = JsonArgumentParser(description="Size of one model step's input against the step budget.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--files", nargs="+", default=[])
     parser.add_argument("--run")

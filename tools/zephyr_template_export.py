@@ -8,7 +8,6 @@ is «Автоматизирован» known.  The template's values stay in that
 
 from __future__ import annotations
 
-import argparse
 import csv
 import hashlib
 import io
@@ -20,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from tools.json_cli import JsonArgumentParser
 from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _formula_safe
 
 TEMPLATE_LIMIT = 1024 * 1024
@@ -257,7 +257,7 @@ def export_import_csv(project: Path, run_id: str, bundle_csv: Path) -> dict[str,
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Zephyr import CSV from the project's Zephyr export template (FaT-7).")
+    parser = JsonArgumentParser(description="Zephyr import CSV from the project's Zephyr export template (FaT-7).")
     parser.add_argument("--project", required=True)
     parser.add_argument("--run", required=True)
     parser.add_argument("--cases", required=True, help="the published bundle .zephyr-scale.csv")

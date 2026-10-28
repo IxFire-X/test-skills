@@ -12,12 +12,13 @@ reference the reviewer puts into the report (the digest is never computed by the
 
 from __future__ import annotations
 
-import argparse
 import copy
 import json
 import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from tools.json_cli import JsonArgumentParser
 
 EDITABLE = ("title", "objective", "precondition", "action", "test_data", "expectation")
 _CASE_FIELDS = {"title", "objective"}
@@ -139,7 +140,7 @@ def reviewer_successor(candidate: Mapping[str, Any], artifacts: Mapping[str, Any
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Apply reviewer edits to a candidate and print the effective reference.")
+    parser = JsonArgumentParser(description="Apply reviewer edits to a candidate and print the effective reference.")
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--edits", required=True, help="a JSON list of edits, or a reviewer output with artifacts.successor_edits")
     args = parser.parse_args(argv)

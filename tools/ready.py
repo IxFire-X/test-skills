@@ -13,7 +13,6 @@ the package is imported inside the check that needs it.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import shutil
@@ -22,6 +21,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from tools.json_cli import JsonArgumentParser
 
 PACK = Path(__file__).resolve().parents[1]
 CASES, EXECUTION = "cases", "execution"
@@ -484,7 +485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Readiness of a project for a run: every problem at once, with fixes.")
+    parser = JsonArgumentParser(description="Readiness of a project for a run: every problem at once, with fixes.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--docs", action="append", default=[])
     parser.add_argument("--profile", choices=("cases-only-v1", "local-pilot-v1"), default="local-pilot-v1")

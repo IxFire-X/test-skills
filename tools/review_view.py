@@ -12,11 +12,12 @@ stop: a literal input value of a step (at least ``MIN_LITERAL`` characters) is m
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+from tools.json_cli import JsonArgumentParser
 
 VIEW_VERSION = "review-view-v1"
 DATA_MISMATCH = "CV_DATA_MISMATCH"
@@ -138,7 +139,7 @@ def render(document: Mapping[str, Any]) -> bytes:
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Write the compact review view of the assembled candidate of a run.")
+    parser = JsonArgumentParser(description="Write the compact review view of the assembled candidate of a run.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--run", required=True)
     parser.add_argument("--candidate", required=True)

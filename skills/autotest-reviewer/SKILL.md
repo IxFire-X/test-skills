@@ -5,18 +5,18 @@ description: Use when selected effective canonical test cases and generated V5 a
 
 # Static automation review
 
-Consume the selected effective canonical document, V5 automation artifact, and every declared generated file plus its required authorized dependencies. Read the [review contract](references/autotest-review-contract.md) and `schemas/autotest-reviewer-output.schema.json`. Execute canonical/automation validators; read their source only as needed to diagnose a failure.
+Consume the selected effective canonical document, V5 automation artifact, and every declared generated file plus its required authorized dependencies. Read the [review contract](references/autotest-review-contract.md) and `schemas/autotest-reviewer-output.schema.json`. Execute canonical/automation validators (`python -m tools.api validate-canonical --document <file>`, `tools.api validate-automation --automation <file> --canonical <file>`); read their source only as needed to diagnose a failure.
 
 ## Procedure
 
 Use the supplied `run_root` and `attempt_id` to read the exact review boundary with
-`tools.pilot_state.read_attempt_receipt(run_root, attempt_id, "automation-review-boundary-rN", "ARTIFACT_READ_BACK")`,
-where `N` is the automation revision. Its read-only validation follows the current
+`python -m tools.api read-receipt --run-root <run_root> --attempt <attempt_id> --kind automation-review-boundary-rN --event ARTIFACT_READ_BACK`,
+where `N` is the automation revision (cwd: the package root; do not import package functions). Its read-only validation follows the current
 attempt's effective canonical, receipts and journal bindings. This is required
 provenance evidence, not generator conversation; an inline boundary copy alone is
 insufficient. Do not inspect generator dialogue, transport logs or unrelated runs.
 
-1. Independently verify source digest and attempt-owned `effective_bundle_receipt_digest`, every declared file's exact UTF-8 `content` and full-byte digest, the deterministic complete `automation_sha256`, the complete physical relation-array digest, project-native setup, and every locator variant. Confirm that each generated framework equals the selected `.skillsrc` module framework and that every Java path is the class FQN under its selected native test root. Call `tools.run_tests.validate_artifact_runner_compatibility(module_root, language, canonical, automation, materialized=False)` on the proposed inline content before accepting; generated files need not exist yet. The controller uses the default on-disk check after materialization and before execution.
+1. Independently verify source digest and attempt-owned `effective_bundle_receipt_digest`, every declared file's exact UTF-8 `content` and full-byte digest, the deterministic complete `automation_sha256` (`python -m tools.api automation-digest --automation <file>`), the complete physical relation-array digest (`tools.api relations-digest --relations <file>`), project-native setup, and every locator variant. Confirm that each generated framework equals the selected `.skillsrc` module framework and that every Java path is the class FQN under its selected native test root. Run `python -m tools.api runner-compat --module-root <module_root> --language <python|java> --canonical <file> --automation <file>` (without `--materialized`) on the proposed inline content before accepting; `status: invalid` (exit 1) means `NOT_RUNNABLE`; generated files need not exist yet. The controller uses the default on-disk check after materialization and before execution.
 2. Verify atomic operation/assertion relation ownership, order, and coverage for every operation and assertion, including canonical manual/blocker branches. Compare every canonical input literal and binding to its actual generated symbol; drift requires rework even when relations and digests otherwise match.
    Follow each claimed relation into the actual symbol: the operation must execute and
    its assertion must inspect the observed result, with the canonical comparator/value.

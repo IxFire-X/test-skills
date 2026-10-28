@@ -3,15 +3,16 @@
 
 from __future__ import annotations
 
-import argparse
 import subprocess
 import sys
 from pathlib import Path
 from typing import Sequence
 
+from tools.json_cli import JsonArgumentParser
+
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = JsonArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="Portable pack root")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()

@@ -13,26 +13,27 @@ Human docs не переопределяют machine truth. Каждый artifac
 
 ## Короткая карта вызовов
 
-Команды выполняются из корня пакета; `--project` — абсолютный путь. В таблице API
-относятся к существующим Python modules, не к model tools произвольного хоста.
+Команды выполняются из корня пакета (`python -m tools.…`); `--project` — абсолютный путь.
+Каждая команда `tools.api` вызывает одну функцию пакета и печатает её результат JSON;
+функции пакета не импортируй. Это не model tools произвольного хоста.
 
 | Этап | Команда/API | Результат и проверка |
 | --- | --- | --- |
 | Целостность | `tools.doctor --root <pack-root>` | manifest и registered bytes; не readiness |
 | Подготовка | `tools.run_pipeline scan --project <path> --profile <profile> --docs <path>` (повтори `--docs` для всех входов) | run, inventory, baseline, context receipts; при нескольких modules нужен exact `--module <ID>` |
-| Контекст | `pilot_state.publish_model_request` → model call → `publish_model_stage_artifact` | schema, exact authorized context; marker OpenSpec reconciliation |
-| Батчи | `batch_assembly.plan_batches`, `project_inventory.select_context_batches`, `pilot_state.publish_context_selection` | independent plan и current receipt без truncation |
-| Генерация | те же request/artifact API для `tc-generator:<batch>` | fragment связан с marker/context/plan/header; code-owned digests |
-| Сборка | `batch_assembly.assemble_candidate`, `orchestrate_test_case_revision.publish_unreviewed_candidate` | semantic/provenance audit, UNREVIEWED bundle/readback |
-| Canonical review | `reviewer_package_binding`, `open_reviewer_session` в `orchestrate_test_case_revision`; request/artifact API | complete package, отдельный reviewer, exact boundary/ledger |
-| Выбор | `orchestrate_test_case_revision.orchestrate_revision`, `pilot_state.read_effective_canonical` | immutable selected document и receipt |
-| Автоматизация | request/artifact API; `pilot_state.open_automation_review_boundary` | одна версия и независимое static review; максимум одна correction |
-| Материализация | `generated_delta.materialize_delta` | accepted exact generated set, ownership/readback |
+| Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
+| Батчи | receipts выбора контекста публикует `scan`; `tools.api read-context`, `tools.api plan-batches`, `tools.api with-digest`, `tools.api publish-artifact` | independent plan и current receipt без truncation |
+| Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`; `tools.api validate-fragment` | fragment связан с marker/context/plan/header; code-owned digests |
+| Сборка | `tools.api assemble`, `tools.orchestrate_test_case_revision publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
+| Canonical review | `tools.orchestrate_test_case_revision open-session`; `model-request`/`model-response`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
+| Выбор | `tools.orchestrate_test_case_revision select`, `tools.api read-effective` | immutable selected document и receipt |
+| Автоматизация | `model-request`/`model-response`; `tools.api open-automation-boundary`, `tools.api read-receipt` | одна версия и независимое static review; максимум одна correction |
+| Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
 | Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |
-| Закрытие | существующий `finalize_attempt.finalize_attempt` / `finalize_durable_execution_attempt` | trace/dispositions/finalization/terminal по выбранной ветке |
+| Закрытие | `tools.run_pipeline exec` / `tools.run_pipeline finish` | trace/dispositions/finalization/terminal по выбранной ветке |
 | Ход/resume | `tools.run_pipeline status --project <path> --run <id>` | last confirmed stage, next artifact, stop reason, evidence paths и сохранённые warnings; чтение не запускает recovery |
 
-Точные сигнатуры бери из нужной функции, не перечитывай все modules. Envelope и digests
+Аргументы команды — в `python -m tools.api <команда> --help`; modules не перечитывай. Envelope и digests
 создают существующие API; модель пишет содержательную тестовую логику. Отдельного
 универсального `next/submit` нет. Status различает journal-only assembly observation
 и reread artifact; ранний scan может не иметь сохранённой причины. Ошибка readback
