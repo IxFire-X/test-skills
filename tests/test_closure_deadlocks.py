@@ -35,8 +35,32 @@ def _status(project: Path, run_root: Path, capsys: pytest.CaptureFixture[str]) -
 # --------------------------------------------------------------------------------------
 
 
-def test_an_accepted_review_exec_cannot_materialize_is_closed_by_finish(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"], edit_review=_wrong_relations)
+def _journal_before_dg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+    """The 523ec561 journal as the package before FaT-DG wrote it: model-response did not check the digest fields yet."""
+    from tools import pilot_state
+
+    with monkeypatch.context() as old:
+        old.setattr(pilot_state, "_response_digest_rows", lambda *_args: [])
+        return _automation_chain(tmp_path, ["ПРИНЯТО"], edit_review=_wrong_relations)
+
+
+def test_today_model_response_refuses_the_unbound_answer_and_writes_nothing(tmp_path: Path) -> None:
+    """FaT-DG keeps new runs out of this state; the closure below is for journals written before it."""
+    from tools.pilot_state import ModelResponseDigestMismatch, derive_state
+
+    with pytest.raises(ModelResponseDigestMismatch) as refused:
+        _automation_chain(tmp_path, ["ПРИНЯТО"], edit_review=_wrong_relations)
+    assert refused.value.code == "MODEL_RESPONSE_DIGEST_MISMATCH" and "reviewed_relations_sha256" in str(refused.value)
+    [root] = list((tmp_path / ".pilot-runs").iterdir())
+    events = derive_state(root)["events"]
+    assert events[-1]["event_type"] == "MODEL_REQUESTED" and events[-1]["stage_instance_id"] == "autotest-reviewer:r1"
+    assert not any(row["event_type"] == "MODEL_RESPONSE_RECEIVED" and row.get("stage_instance_id") == "autotest-reviewer:r1"
+                   for row in events)
+
+
+def test_an_accepted_review_exec_cannot_materialize_is_closed_by_finish(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    root, attempt_id = _journal_before_dg(tmp_path, monkeypatch)
 
     status = _status(tmp_path, root, capsys)
     assert status["next_step"]["stage"] == "finish", status["next_step"]
