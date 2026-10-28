@@ -281,7 +281,8 @@ def _real_shaped_run(tmp_path: Path) -> tuple[Path, dict]:
 
 
 def test_inputs_are_resolved_by_file_digest_receipt_digest_and_context_byte_count(tmp_path: Path) -> None:
-    from tools.run_report import digest_index, input_bytes
+    from tools.run_report import input_bytes
+    from tools.step_size import digest_index
 
     root, facts = _real_shaped_run(tmp_path)
     index = digest_index(root)
@@ -466,7 +467,8 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
     from tests.test_self_review import _run
     from tools.canonical_document import document_sha256
     from tools.review_view import render
-    from tools.run_report import build_report, digest_index, render_markdown
+    from tools.run_report import build_report, render_markdown
+    from tools.step_size import digest_index
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()
@@ -486,4 +488,53 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
     assert before["input_basis"] == "канон" and after["input_basis"] == "вид"
     assert after["input_bytes"] == before["input_bytes"] - candidate_bytes + len(view)
     assert after["fits"] == (after["input_bytes"] + after["role_bytes"] <= after["budget_bytes"])
+    assert "(вид)" in render_markdown(report)
+
+
+# --- FaT-AV: one digest index, the effective receipt, the view of the automation generator --------
+
+def test_the_report_has_no_digest_index_of_its_own() -> None:
+    from tools import run_report, step_size
+
+    assert not hasattr(run_report, "digest_index") and callable(step_size.digest_index)
+
+
+def test_the_effective_receipt_without_its_own_digest_is_found_inside_its_carrier(tmp_path: Path) -> None:
+    """FaT-AV: a real effective-canonicals record keeps the bundle receipt without a ``digest`` field; the request binds
+    the sha256 of its canonical JSON. The report counts the receipt's bytes (the report said «размер неполный»)."""
+    import hashlib
+
+    from tools.run_report import input_bytes
+    from tools.step_size import digest_index
+
+    root, facts = _real_shaped_run(tmp_path)
+    receipt = {"document_id": "TCDOC-x", "revision": 1, "json_path": "case-sets/r1/TCDOC-x.r1.json"}
+    compact = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    (root / "effective-canonicals" / "b.json").write_text(json.dumps({"document": facts["document"], "effective_bundle_receipt": receipt}),
+                                                          encoding="utf-8")
+    resolved, unresolved = input_bytes(digest_index(root), [facts["doc"], "sha256:" + hashlib.sha256(compact).hexdigest()])
+    assert (resolved, unresolved) == (facts["doc_bytes"] + len(compact), 0)
+
+
+def test_the_automation_input_is_the_autotest_view_and_the_receipt_not_the_carrier(tmp_path: Path) -> None:
+    from tests.test_finish import _project
+    from tools import review_view
+    from tools.pilot_state import read_effective_canonical
+    from tools.run_report import build_report, render_markdown
+
+    project, run_root, attempt_id, _values = _project(tmp_path)
+    effective = read_effective_canonical(run_root, attempt_id)
+    receipt = len(json.dumps(effective["effective_bundle_receipt"], ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    def automation_call() -> tuple[dict, dict]:
+        report = build_report(project, run_root.name)[0]
+        return next(call for call in report["model_calls"] if call["stage"] == "tc-to-autotest:r1"), report
+
+    before, _report = automation_call()
+    document = next(path for path in (run_root / "candidate-bundle").rglob("*.json")).stat().st_size
+    assert before["size_complete"] is True and before["input_basis"] == "канон" and before["input_bytes"] == document + receipt, before
+    assert review_view.main(["--project", str(project), "--run", run_root.name, "--effective"]) == 0
+    view = run_root / "review-views" / (effective["document_digest"].removeprefix("sha256:") + ".autotest.md")
+    after, report = automation_call()
+    assert after["input_basis"] == "вид" and after["input_bytes"] == view.stat().st_size + receipt, after
     assert "(вид)" in render_markdown(report)

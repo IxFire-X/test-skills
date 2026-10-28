@@ -5,7 +5,7 @@ description: Use when the selected effective canonical test-case document must b
 
 # Project-native automation generation
 
-Use only the selected effective canonical document and its digest. Read the [automation contract](references/automation-output-contract.md), output schema and required authorized project inputs. Execute canonical, automation and preflight validators; read their source only as needed to diagnose a failure.
+Use only the selected effective canonical document and its digest. Read the document through its autotest view `review-views/<sha>.autotest.md` (FaT-AV, `python -m tools.review_view --effective`; `step-inputs` lists it): the canonical requirements with their testing-work constraints, the machine part whole — every ID, target, type and literal exactly, a secret as its handle — and the capabilities with their whole test boundary; without source requirements and test data. Open the full JSON only to diagnose a validator failure; never open the `effective-canonicals` record (it repeats the document). Read the [automation contract](references/automation-output-contract.md), output schema and required authorized project inputs. Execute canonical, automation and preflight validators; read their source only as needed to diagnose a failure.
 
 Emit a complete proposed generated file set; the controller alone materializes it in the
 selected module's active test root after accepted static review. This role does not use an

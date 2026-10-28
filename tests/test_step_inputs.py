@@ -71,11 +71,47 @@ def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) 
     places = {}
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
         found = request_files(run_root, stage)
-        assert found["unresolved"] == [] and len(found["files"]) == 2, (stage, found)
+        assert found["unresolved"] == [], (stage, found)
         places[stage] = [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"]]
     # the document file itself answers before the carrier that holds the same document inside
-    assert places["tc-to-autotest:r1"] == ["candidate-bundle", "effective-canonicals"], places
+    assert places["tc-to-autotest:r1"] == ["candidate-bundle"], places
     assert places["autotest-reviewer:r1"] == ["model-stage-artifacts", "automation-review-boundaries"], places
+
+
+def test_the_receipt_inside_the_effective_carrier_is_a_binding_not_a_second_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """FaT-AV: the effective bundle receipt has no file of its own; its carrier holds the whole document again (Petclinic
+    1 603 574 B = 801 053 + 802 521). The step reads the receipt's own bytes, never the carrier."""
+    from tests.test_finish import _project
+    from tools import step_size
+    from tools.pilot_state import read_effective_canonical
+
+    project, run_root, attempt_id, _values = _project(tmp_path)
+    effective = read_effective_canonical(run_root, attempt_id)
+    found = step_size.request_files(run_root, "tc-to-autotest:r1")
+    receipt = json.dumps(effective["effective_bundle_receipt"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert [row["digest"] for row in found["files"]] == [effective["document_digest"]], found
+    assert [{key: row[key] for key in ("digest", "key", "bytes")} for row in found["bindings"]] == [
+        {"digest": effective["effective_bundle_receipt_digest"], "key": "effective_bundle_receipt", "bytes": len(receipt)}], found
+    assert Path(found["bindings"][0]["carrier"]).relative_to(run_root).parts[0] == "effective-canonicals"
+    code = step_size.main(["--project", str(project), "--run", run_root.name, "--stage", "tc-to-autotest:r1"])
+    report = json.loads(capsys.readouterr().out)
+    document = Path(found["files"][0]["path"]).stat().st_size
+    assert code == 0 and report["input_bytes"] == document + len(receipt) and report["size_complete"] is True, report
+
+
+def test_the_automation_step_reads_the_autotest_view_when_it_is_built(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """FaT-AV: like the reviewer, the generator reads the view of the effective document; the request digests stay."""
+    from tests.test_finish import _project
+    from tools import review_view, step_size
+    from tools.pilot_state import read_effective_canonical
+
+    project, run_root, attempt_id, _values = _project(tmp_path)
+    effective = read_effective_canonical(run_root, attempt_id)
+    code = review_view.main(["--project", str(project), "--run", run_root.name, "--effective"])
+    built = json.loads(capsys.readouterr().out)
+    assert code == 0, built
+    found = step_size.request_files(run_root, "tc-to-autotest:r1")
+    assert found["files"] == [{"digest": effective["document_digest"], "path": built["path"], "bytes": built["bytes"], "basis": "вид"}], found
 
 
 def test_no_request_yet_is_an_error(tmp_path: Path) -> None:
@@ -148,3 +184,19 @@ def test_the_api_command_matches_the_function(tmp_path: Path, capsys: pytest.Cap
     assert code == 0 and payload["result"] == json.loads(json.dumps(api.plain(request_files(root, "tc-generator:BATCH-fixture")), ensure_ascii=False))
     code = api.main(["step-inputs", "--run-root", str(root), "--stage", "tc-to-autotest:r1"])
     assert code == 2 and json.loads(capsys.readouterr().out)["status"] == "error"
+
+
+def test_a_document_kept_only_in_its_carrier_is_read_once_from_it(tmp_path: Path) -> None:
+    """FaT-AV: the microservices run kept the case document in tmp/ only; the carrier is then the one file of the step
+    and the receipt it also holds adds nothing."""
+    from tests.test_finish import _project
+    from tools.pilot_state import read_effective_canonical
+    from tools.step_size import request_files
+
+    _project_path, run_root, attempt_id, _values = _project(tmp_path)
+    effective = read_effective_canonical(run_root, attempt_id)
+    for path in (run_root / "candidate-bundle").rglob("*.json"):
+        path.unlink()
+    found = request_files(run_root, "tc-to-autotest:r1")
+    assert [Path(row["path"]).relative_to(run_root).parts[0] for row in found["files"]] == ["effective-canonicals"], found
+    assert [(row["digest"], row["bytes"]) for row in found["bindings"]] == [(effective["effective_bundle_receipt_digest"], 0)], found

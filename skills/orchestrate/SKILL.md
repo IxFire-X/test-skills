@@ -319,7 +319,9 @@ FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается та�
 
 Для model request `tc-to-autotest:rN` передай `input_digests` ровно как
 `[effective.document_digest, effective.effective_bundle_receipt_digest]` из
-`python -m tools.api read-effective`. Для `autotest-reviewer:rN` — ровно
+`python -m tools.api read-effective`. Перед вызовом построй вид документа для генератора (FaT-AV):
+`python -m tools.review_view --project <abs> --run <run_id> --effective` — `step_size`/`step-inputs` отдают этот вид
+вместо JSON документа, квитанцию — в `input_bindings` (носитель `effective-canonicals` не читай). Для `autotest-reviewer:rN` — ровно
 `[boundary.automation_digest, boundary.digest]` из read-back
 `automation-review-boundary-rN` (`tools.api read-receipt --kind automation-review-boundary-rN --event ARTIFACT_READ_BACK`). Порядок значим. Это привязки артефактов этапа,
 а не hashes всех прочитанных skill/schema/source файлов или полного prompt.

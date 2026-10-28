@@ -11,6 +11,16 @@ step's action and data — a number of any length as a whole token, other text f
 
 ``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
 ``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
+
+FaT-AV: the profile ``autotest`` is the view of the effective document that the automation generator reads instead of
+the full JSON (``--effective`` writes ``<run>/review-views/<document sha>.autotest.md``).  It keeps what a test is built
+from — the canonical requirements (ID and text: the testing-work constraints), the capabilities with their whole
+provenance (the test boundary), each case's requirement IDs, objective, preconditions, each step's action, operation,
+inputs, outputs, blockers, expectation text and every assertion with its ID — and the machine part whole: every ID,
+target (name or body pointer), semantic type, type provenance and literal exactly, a secret input as its handle and safe
+label, nothing cut.  It drops what the generator does not use: source requirements, mappings, the provenance and
+design of requirements, management, blocker provenance and the step's test data (values come from the structured
+inputs only).
 """
 
 from __future__ import annotations
@@ -24,6 +34,8 @@ from typing import Any, Iterable, Mapping
 from tools.json_cli import JsonArgumentParser
 
 VIEW_VERSION = "review-view-v2"
+AUTOTEST_VIEW_VERSION = "autotest-view-v1"
+PROFILES = ("review", "autotest")
 DATA_MISMATCH = "CV_DATA_MISMATCH"
 MIN_LITERAL = 3
 LITERAL_LIMIT = 200
@@ -144,11 +156,89 @@ def _hint_lines(hints: list[dict[str, Any]]) -> list[str]:
     return lines + ([f"- ещё {len(hints) - HINT_LIMIT} шаг(ов) с {DATA_MISMATCH}"] if len(hints) > HINT_LIMIT else [])
 
 
-def render(document: Mapping[str, Any]) -> bytes:
-    """The deterministic review view of a valid canonical document."""
+def _exact(value: Mapping[str, Any]) -> str:
+    """FaT-AV: a source, actual or expected value whole: a literal as its exact JSON, else its kind and its fields."""
+    if value.get("kind") == "literal":
+        return _json(value.get("value"))
+    rest = {key: item for key, item in value.items() if key != "kind"}
+    return str(value.get("kind")) + (_json(rest) if rest else "")
+
+
+def _semantic(row: Mapping[str, Any]) -> str:
+    semantic = dict(row.get("semantic_type") or {})
+    head = f"{semantic.pop('kind', '?')}/{semantic.pop('type', '?')}"
+    return head + (_json(semantic) if semantic else "")
+
+
+def _typed(row: Mapping[str, Any]) -> str:
+    """The semantic type of an input or output and, when the document gives it, where the type comes from."""
+    return _semantic(row) + (f" (тип: {_json(row['type_provenance'])})" if row.get("type_provenance") else "")
+
+
+def _target(target: Mapping[str, Any]) -> str:
+    """Where an input goes, exactly: a name (path, query, header, arg) or the JSON pointer of the body."""
+    return f"{target.get('location')}:{target['pointer'] if 'pointer' in target else target.get('name')}"
+
+
+def _autotest_capability(capability: Mapping[str, Any]) -> list[str]:
+    arguments = ", ".join(f"{row['name']}:{_semantic(row)}{'*' if row.get('required') else ''}" for row in capability["arguments"]) or "—"
+    results = ", ".join(f"{row['name']}:{_semantic(row)}" for row in capability["results"]) or "—"
+    return ([f"- {capability['capability_id']}: {capability['action']}, adapter {capability['adapter']}; аргументы {arguments};"
+             f" результаты {results}"] + [f"  граница: {line}" for line in capability["provenance"]])
+
+
+def _autotest_step(step: Mapping[str, Any]) -> list[str]:
+    manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
+    lines = [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Операция: {_json(step['operation'])}"]
+    for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
+        # a secret input shows its source as is: a secret_handle is the handle and its safe label, never the secret
+        secret = " (секрет)" if item["target"].get("sensitive") else ""
+        lines.append(f"   Вход {item['input_id']} → {_target(item['target'])}{secret} {_typed(item)} = {_exact(item['source'])}")
+    lines += [f"   Выход {row['output_id']} {_typed(row)} ← {_exact(row['source'])}"
+              for row in sorted(step["outputs"], key=lambda row: row["display_order"])]
+    lines += [f"   Блокер автоматизации {blocker['blocker_id']} [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
+              for blocker in step["automation_blockers"]]
+    for expectation in sorted(step["expectations"], key=lambda row: row["display_order"]):
+        lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
+        lines += [f"     {row['assertion_id']}: {_exact(row['actual'])} {row['operator']}"
+                  + (f" {_exact(row['expected'])}" if isinstance(row.get("expected"), Mapping) else "")
+                  for row in sorted(expectation["assertions"], key=lambda row: row["display_order"])]
+    return lines
+
+
+def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
+    lines = [
+        f"# Вид для генератора автотестов {document['document_id']} r{document['revision']}", "",
+        f"- Вид: {AUTOTEST_VIEW_VERSION}, построен кодом из effective-документа; одинаковый документ — одинаковые байты.",
+        f"- document_sha256: {digest}",
+        "- Машинная часть целиком: ID, цели, типы и литералы точно как в JSON (литерал — его JSON). Значения запроса бери только"
+        " отсюда; текст действия и ожидания — пояснение. Полный JSON — только для диагностики валидатора.", "",
+        # the testing-work constraints (boundary, framework, dependencies, edits, interface, authorization) live in the
+        # canonical requirements the cases link (automation-output-contract)
+        "## Требования", "", *(f"- {row['requirement_id']}: {row['text']}" for row in document["requirements"]), "",
+        "## Операции (capabilities)", "",
+        *([line for row in document["operation_capabilities"] for line in _autotest_capability(row)] or ["- нет"]), "",
+        "## Кейсы",
+    ]
+    for case in document["test_cases"]:
+        lines += ["", f"### {case['case_id']} {case['title']}", "", f"- требования {', '.join(case['requirement_ids'])}",
+                  f"- Цель: {case['objective']}"]
+        lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+        for step in sorted(case["steps"], key=lambda row: row["display_order"]):
+            lines += _autotest_step(step)
+    return lines
+
+
+def render(document: Mapping[str, Any], profile: str = "review") -> bytes:
+    """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
+    automation generator."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
+    if profile not in PROFILES:
+        raise ValueError(f"unknown view profile: {profile}")
     require_valid_canonical_document(dict(document))
+    if profile == "autotest":
+        return ("\n".join(_autotest(document, document_sha256(dict(document)))) + "\n").encode("utf-8")
     sources: dict[str, list[str]] = {}
     for mapping in document["source_to_canonical_mappings"]:
         for requirement_id in mapping["canonical_requirement_ids"]:
@@ -197,33 +287,49 @@ def render(document: Mapping[str, Any]) -> bytes:
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    parser = JsonArgumentParser(description="Write the compact review view of the assembled candidate of a run.")
+    parser = JsonArgumentParser(description="Write the compact view of the assembled candidate (reviewer) or of the effective "
+                                            "document (automation generator) of a run.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--run", required=True)
-    parser.add_argument("--candidate", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--candidate")
+    source.add_argument("--effective", action="store_true", help="FaT-AV: the autotest view of the effective document")
     args = parser.parse_args(argv)
     try:
         from tools.canonical_document import document_sha256
         from tools.confined_output import atomic_write_confined_bytes_at_root
-        from tools.pilot_state import derive_state
+        from tools.pilot_state import derive_state, read_effective_canonical
+        from tools.step_size import autotest_view
 
         project = Path(args.project).resolve()
         if Path(args.run).name != args.run or args.run in {"", ".", ".."}:
             raise ValueError(f"unknown run: {args.run}")
         root = project / ".pilot-runs" / args.run
-        document = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
-        digest = document_sha256(document)
-        published = [event for event in derive_state(root)["events"]
-                     if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
-        if not published or published[-1].get("artifact_digest") != digest:
-            raise ValueError("the candidate is not the assembled candidate of the run")
-        data = render(document)
-        target = root / "review-views" / (digest.removeprefix("sha256:") + ".md")
+        state = derive_state(root)
+        if args.effective:
+            if not state["attempts"]:
+                raise ValueError("the run has no attempt yet")
+            effective = read_effective_canonical(root, str(state["attempts"][-1]["attempt_id"]))
+            document, profile = effective["document"], "autotest"
+            digest = document_sha256(dict(document))
+            if digest != effective["document_digest"]:
+                raise ValueError("the effective document does not match its digest")
+            target = autotest_view(root, digest)
+        else:
+            document, profile = json.loads(Path(args.candidate).read_text(encoding="utf-8")), "review"
+            digest = document_sha256(document)
+            published = [event for event in state["events"]
+                         if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
+            if not published or published[-1].get("artifact_digest") != digest:
+                raise ValueError("the candidate is not the assembled candidate of the run")
+            target = root / "review-views" / (digest.removeprefix("sha256:") + ".md")
+        data = render(document, profile)
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
         return 2
-    print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": VIEW_VERSION,
+    view = AUTOTEST_VIEW_VERSION if profile == "autotest" else VIEW_VERSION
+    print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
                       "data_mismatch": len(data_mismatches(document))}, ensure_ascii=False, sort_keys=True))
     return 0
 

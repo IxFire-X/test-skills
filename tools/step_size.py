@@ -166,22 +166,31 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
     return list(dict.fromkeys(files))
 
 
-def _digest_paths(root: Path) -> tuple[dict[str, set[Path]], dict[str, set[Path]]]:
-    """``(whole, inside)``: the keys a run file answers to as a whole — its name, the sha256 of its bytes, its own
-    ``digest``, a canonical digest — and the keys of an object it carries one level inside."""
+def _compact(value: Any) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _digest_paths(root: Path, *, scratch: bool = False) -> tuple[dict[str, set[Path]], dict[str, set[tuple[Path, str, int]]], dict[Path, int]]:
+    """``(whole, inside, sizes)``: the keys a run file answers to as a whole — its name, the sha256 of its bytes, its own
+    ``digest``, a canonical digest —, the keys of an object it carries one level inside as ``(carrier, field, bytes of the
+    object)``, and the bytes a model reads behind each file (a context receipt counts its ``byte_count``, FaT-6b).  The
+    agent's scratch ``tmp/`` counts only with ``scratch`` (the report: a run may keep its candidate only there)."""
     from tools.canonical_document import document_sha256
 
     index: dict[str, set[Path]] = {}
-    inside: dict[str, set[Path]] = {}
+    inside: dict[str, set[tuple[Path, str, int]]] = {}
+    sizes: dict[Path, int] = {}
     # FaT-10d: run artifacts (artifacts/<attempt>/batch-plan, batch-header) are JSON files without a suffix
     for path in sorted(root.rglob("*")):
-        if path.relative_to(root).parts[0] == "tmp" or path.suffix not in {".json", ""} or not path.is_file():
+        if (path.relative_to(root).parts[0] == "tmp" and not scratch) or path.suffix not in {".json", ""} or not path.is_file():
             continue
         try:
             raw = path.read_bytes()
             value = json.loads(raw.decode("utf-8"))
         except (OSError, ValueError):
             continue
+        receipt = isinstance(value, dict) and isinstance(value.get("byte_count"), int) and "files" in value
+        sizes[path] = int(value["byte_count"]) if receipt else len(raw)
         keys = {hashlib.sha256(raw).hexdigest()}
         if _HEX.fullmatch(path.stem):
             keys.add(path.stem)
@@ -195,17 +204,31 @@ def _digest_paths(root: Path) -> tuple[dict[str, set[Path]], dict[str, set[Path]
                     pass
             # a receipt kept inside its carrier (the effective bundle receipt in effective-canonicals/): its own
             # ``digest`` or the sha256 of its canonical JSON, with and without the journal's trailing newline
-            for nested in value.values():
+            for field, nested in value.items():
                 if isinstance(nested, dict):
-                    compact = json.dumps(nested, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    compact = _compact(nested)
                     carried = {hashlib.sha256(compact).hexdigest(), hashlib.sha256(compact + b"\n").hexdigest()}
                     if isinstance(nested.get("digest"), str):
                         carried.add(nested["digest"].removeprefix("sha256:"))
                     for key in carried:
-                        inside.setdefault(key, set()).add(path)
+                        inside.setdefault(key, set()).add((path, field, len(compact)))
         for key in keys:
             index.setdefault(key, set()).add(path)
-    return index, inside
+    return index, inside, sizes
+
+
+def digest_index(root: Path) -> dict[str, int]:
+    """FaT-6b/FaT-AV: the bytes a model reads behind each digest of the run, for the report — the one index of the
+    package (``request_files`` reads the same): a file as a whole first, else the object a carrier holds inside."""
+    whole, inside, sizes = _digest_paths(Path(root), scratch=True)
+    index = {key: min(rows)[2] for key, rows in inside.items()}
+    index.update({key: sizes[min(paths)] for key, paths in whole.items()})
+    return index
+
+
+def autotest_view(root: Path, document_digest: str) -> Path:
+    """FaT-AV: where ``python -m tools.review_view --effective`` writes the view of the effective document."""
+    return root / "review-views" / (str(document_digest).removeprefix("sha256:") + ".autotest.md")
 
 
 def request_files(run_root: Path, stage: str) -> dict[str, Any]:
@@ -213,7 +236,10 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
 
     Only a measurement: a context-selection receipt opens into the project files it lists; a file that is the input as a
     whole answers before a file that only carries it inside; an input digest that no file or more than one file of the
-    same kind answers is ``unresolved`` (``not-found``/``ambiguous``), never chosen."""
+    same kind answers is ``unresolved`` (``not-found``/``ambiguous``), never chosen.  FaT-AV: the document of
+    ``tc-to-autotest`` is its autotest view when the view is built (``basis: вид``); an input only carried inside another
+    file is a ``binding`` with its own bytes when that carrier repeats an input the step reads anyway (the effective bundle
+    receipt next to the whole document in ``effective-canonicals/``), else the step reads the carrier once."""
     from tools.pilot_state import derive_state, read_model_request
 
     root = Path(run_root).resolve()
@@ -228,15 +254,37 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
     request_digest = str(requested[-1]["artifact_digest"])
     request = read_model_request(root, attempt_id, stage, request_digest)
-    whole, inside = _digest_paths(root)
+    whole, inside, _sizes = _digest_paths(root)
     selections = root / "context-selections"
+    digests = [str(digest) for digest in request.get("input_digests") or []]
+    keys = [digest.removeprefix("sha256:") for digest in digests]
+    views = {0: autotest_view(root, keys[0])} if stage.startswith("tc-to-autotest:") and keys and autotest_view(root, keys[0]).is_file() else {}
+    # the inputs the step reads as a file of their own (or as the view): a carrier of one of them repeats it
+    read = {key for position, key in enumerate(keys) if position in views or len(whole.get(key) or ()) == 1}
+    carried: dict[Path, set[str]] = {}
+    for key, rows in inside.items():
+        for carrier, _field, _size in rows:
+            carried.setdefault(carrier, set()).add(key)
     files: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
-    for digest in request.get("input_digests") or []:
-        key = str(digest).removeprefix("sha256:")
-        paths = sorted(whole.get(key) or inside.get(key) or ())
+    for position, (digest, key) in enumerate(zip(digests, keys)):
+        if position in views:
+            view = views[position]
+            files.append({"digest": digest, "path": str(view), "bytes": view.stat().st_size, "basis": "вид"})
+            continue
+        paths = sorted(whole.get(key) or ())
+        if not paths and len(inside.get(key) or ()) == 1:
+            carrier, field, size = next(iter(inside[key]))
+            if carried[carrier] & (read - {key}):
+                bindings.append({"digest": digest, "carrier": str(carrier), "key": field, "bytes": size})
+                continue
+            if any(row["path"] == str(carrier) for row in files):
+                bindings.append({"digest": digest, "carrier": str(carrier), "key": field, "bytes": 0})  # read with its carrier
+                continue
+            paths = [carrier]
         if len(paths) != 1:
-            unresolved.append({"digest": str(digest), "reason": "not-found" if not paths else "ambiguous"})
+            unresolved.append({"digest": digest, "reason": "ambiguous" if paths or inside.get(key) else "not-found"})
             continue
         path = paths[0]
         if selections in path.parents:
@@ -244,8 +292,9 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
             targets = [project / item["project_path"] for item in receipt["files"]]
         else:
             targets = [path]
-        files.extend({"digest": str(digest), "path": str(target), "bytes": target.stat().st_size} for target in targets)
-    result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "unresolved": unresolved}
+        files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
+    result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
+              "unresolved": unresolved}
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
         # FaT-JL: the Java level of the module's build, so that the generator and its reviewer keep to its API
         from tools.discover_project import java_api_level
@@ -258,12 +307,13 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
-            budget: int | None = None) -> dict[str, Any]:
+            budget: int | None = None, binding_bytes: int = 0) -> dict[str, Any]:
+    """``binding_bytes`` (FaT-AV): inputs a step reads inside a carrier, not as files of their own."""
     paths = [Path(path) for path in files]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise ValueError(f"files are missing: {missing[:5]}")
-    input_bytes = sum(path.stat().st_size for path in paths)
+    input_bytes = sum(path.stat().st_size for path in paths) + binding_bytes
     instructions = role_files(role) if role else []
     role_bytes = sum(path.stat().st_size for path in instructions)
     total = input_bytes + role_bytes
@@ -326,9 +376,10 @@ def main(argv: list[str] | None = None) -> int:
             elif args.stage:
                 files += journal_files(project, args.run, args.stage, args.batch)
         role = args.role or stage_role
-        report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes)
+        report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes,
+                         binding_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
         if requested is not None:
-            report.update(input_files=requested["files"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
+            report.update(input_files=requested["files"], input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
             if "java_level" in requested:
                 report["java_level"] = requested["java_level"]

@@ -415,3 +415,164 @@ def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, h
     item["target"]["sensitive"] = False
     step.update(action=text, test_data="—", inputs=[item])
     assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+
+
+# --- FaT-AV: the view for the automation generator ------------------------------------------------
+
+_PROSE = {"test_data", "action", "text", "manual_reason", "provenance", "type_provenance"}
+
+
+def _machine_leaves(value, skip=_PROSE):
+    """Every scalar of the machine part a test needs: IDs, targets, types, literals, operators, sources."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            # a literal is shown as its exact JSON, so its kind is the form of the value, not a word of the view
+            if key not in skip and key != "display_order" and (key, item) != ("kind", "literal"):
+                yield from _machine_leaves(item, skip)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _machine_leaves(item, skip)
+    elif value is not None and not isinstance(value, bool):
+        yield value
+
+
+def _case_block(view: str, case_id: str) -> str:
+    return view.split(f"\n### {case_id} ", 1)[1].split("\n### ", 1)[0]
+
+
+def test_the_autotest_view_keeps_every_machine_value_whole_and_drops_what_the_generator_does_not_need() -> None:
+    from tools.canonical_document import document_sha256
+    from tools.review_view import LITERAL_LIMIT, render
+
+    document = _example()
+    _case, mvc = _mvc_step(document)
+    long_path = "/owners/" + "x" * (LITERAL_LIMIT * 2)
+    next(item for item in mvc["inputs"] if item["target"]["name"] == "path")["source"]["value"] = long_path
+    view = render(document, profile="autotest").decode("utf-8")
+    assert document_sha256(document) in view and json.dumps(long_path) in view and "симв.)" not in view
+    for case in document["test_cases"]:
+        block = _case_block(view, case["case_id"])
+        assert case["objective"] in block and all(text in block for text in case["preconditions"])
+        for step in case["steps"]:
+            assert step["action"] in block and all(row["text"] in block for row in step["expectations"])
+            for leaf in _machine_leaves(step):
+                shown = json.dumps(leaf, ensure_ascii=False)
+                assert str(leaf) in block or shown in block, (step["step_id"], leaf)
+    for capability in document["operation_capabilities"]:
+        assert all(str(line) in view for line in capability.get("provenance") or [])  # the test boundary, whole
+        assert all(str(leaf) in view for leaf in _machine_leaves(capability))
+    kept = "\n".join([row["text"] for row in document["requirements"]]
+                     + [str(line) for row in document["operation_capabilities"] for line in row["provenance"]]
+                     + [text for case in document["test_cases"] for text in (case["objective"], *case["preconditions"])]
+                     + [text for case in document["test_cases"] for step in case["steps"]
+                        for text in (step["action"], *(row["text"] for row in step["expectations"]))])
+    gone = [step["test_data"] for case in document["test_cases"] for step in case["steps"] if step.get("test_data")]
+    gone += [row["text"] for row in document["source_requirements"]]
+    gone = [text for text in gone if text not in kept]  # a test data equal to a kept text is that text, not the field
+    assert gone and not [text for text in gone if text in view] and "Данные:" not in view
+    # campaign 28.10: 42–50 % of the canonical JSON on the 6 projects, the example 53 %
+    assert len(view.encode("utf-8")) < 0.6 * len(EXAMPLE.read_bytes())
+
+
+def test_the_autotest_view_is_deterministic_and_is_not_the_review_view() -> None:
+    from tools.review_view import render
+
+    document = _example()
+    shuffled = json.loads(json.dumps(document, sort_keys=True))
+    view = render(document, profile="autotest")
+    assert view == render(copy.deepcopy(document), profile="autotest") == render(shuffled, profile="autotest")
+    assert view != render(document) and render(document) == render(document, profile="review")
+    with pytest.raises(ValueError, match="profile"):
+        render(document, profile="other")
+
+
+def test_the_view_command_writes_the_autotest_view_of_the_effective_document_only(tmp_path: Path) -> None:
+    from tests.test_finish import _project
+    from tools.pilot_state import read_effective_canonical
+    from tools.review_view import render
+
+    project, run_root, attempt_id, _values = _project(tmp_path)
+    effective = read_effective_canonical(run_root, attempt_id)
+    command = [sys.executable, "-m", "tools.review_view", "--project", str(project), "--run", run_root.name]
+    both = subprocess.run([*command, "--effective", "--candidate", str(tmp_path / "x.json")], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    assert both.returncode != 0
+    done = subprocess.run([*command, "--effective"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    out = json.loads(done.stdout)
+    data = render(effective["document"], profile="autotest")
+    assert done.returncode == 0 and out["candidate_sha256"] == effective["document_digest"] and out["profile"] == "autotest", out
+    assert Path(out["path"]) == run_root / "review-views" / (effective["document_digest"].removeprefix("sha256:") + ".autotest.md")
+    assert Path(out["path"]).read_bytes() == data and out["bytes"] == len(data)
+
+
+def _variant_step() -> dict:
+    """FaT-AV: a step with every target, value source, output source, assertion actual and expected of the schema."""
+    typed = {"semantic_type": {"kind": "json", "type": "string", "format": "uuid"}, "type_provenance": ["тип из OpenAPI owners.yaml"]}
+    inputs = [
+        {"input_id": "INPUT-V-1", "display_order": 1, "target": {"location": "path", "name": "ownerId", "sensitive": False},
+         "source": {"kind": "step_output", "step_id": "STEP-V-0", "output_id": "owner_id"}, "semantic_type": {"kind": "json", "type": "integer"}},
+        {"input_id": "INPUT-V-2", "display_order": 2, "target": {"location": "query", "name": "lastName", "sensitive": False},
+         "source": {"kind": "literal", "value": "Фамилия «с кавычками» \"x\""}, "semantic_type": {"kind": "json", "type": "string"}},
+        {"input_id": "INPUT-V-3", "display_order": 3, "target": {"location": "header", "name": "X-Tenant", "sensitive": False},
+         "source": {"kind": "environment", "name": "TENANT_ID"}, "semantic_type": {"kind": "json", "type": "string"}, "type_provenance": ["env"]},
+        {"input_id": "INPUT-V-4", "display_order": 4, "target": {"location": "body", "pointer": "/owner/address/city", "sensitive": False},
+         "source": {"kind": "fixture", "name": "city_fixture"}, **typed},
+        {"input_id": "INPUT-V-5", "display_order": 5, "target": {"location": "header", "name": "Authorization", "sensitive": True},
+         "source": {"kind": "secret_handle", "handle": "secret://petclinic/api-token", "safe_label": "API token"},
+         "semantic_type": {"kind": "json", "type": "string"}, "type_provenance": ["auth"]},
+        {"input_id": "INPUT-V-6", "display_order": 6, "target": {"location": "arg", "name": "form_fields", "sensitive": False},
+         "source": {"kind": "literal", "value": {"a": [1, 2.5, None, True]}}, "semantic_type": {"kind": "json", "type": "object"}},
+    ]
+    outputs = [
+        {"output_id": "status", "display_order": 1, "source": {"kind": "http_status"}, "semantic_type": {"kind": "json", "type": "integer"}},
+        {"output_id": "location", "display_order": 2, "source": {"kind": "http_header", "name": "Location"}, "semantic_type": {"kind": "json", "type": "string"}},
+        {"output_id": "count", "display_order": 3, "source": {"kind": "project_result", "name": "owner_count"}, "semantic_type": {"kind": "json", "type": "integer"}},
+        {"output_id": "body_id", "display_order": 4, "source": {"kind": "http_body", "pointer": "/id"}, **typed},
+    ]
+    actuals = [{"kind": "http_status"}, {"kind": "http_header", "name": "Content-Type"}, {"kind": "project_result", "name": "view_name"},
+               {"kind": "http_body", "pointer": "/errors/0/field", **typed}, {"kind": "step_output", "step_id": "STEP-V-0", "output_id": "owner_id"}]
+    expecteds = [{"kind": "literal", "value": 201}, {"kind": "step_output", "step_id": "STEP-V-0", "output_id": "owner_id"},
+                 {"kind": "fixture", "name": "expected_view", **typed}, {"kind": "environment", "name": "EXPECTED_CT", **typed},
+                 {"kind": "secret_handle", "handle": "secret://h2", "safe_label": "пароль", **typed},
+                 {"kind": "regex", "dialect": "portable-regex-v1", "pattern": r"^owners/\d+$"},
+                 {"kind": "schema_ref", "uri": "schemas/owner.json", "sha256": "sha256:" + "a" * 64, "draft": "2020-12", "provenance": ["api.yaml"]}]
+    assertions = [{"assertion_id": f"ASSERT-V-{index}", "display_order": index, "actual": actuals[index % len(actuals)], "operator": "equals",
+                   "expected": expected} for index, expected in enumerate(expecteds, start=1)]
+    assertions.append({"assertion_id": "ASSERT-V-9", "display_order": 9, "actual": actuals[0], "operator": "exists"})
+    return {"step_id": "STEP-V-1", "display_order": 1, "action": "Создать владельца", "test_data": "—", "manual_only": False, "manual_reason": None,
+            "operation": {"kind": "http", "binding_profile": "http-binding-v1", "method": "POST", "path": "/owners/{ownerId}",
+                          "base_url_source": {"kind": "environment", "name": "BASE_URL", "provenance": ["application.yml server.port"]}},
+            "inputs": inputs, "outputs": outputs,
+            "automation_blockers": [{"blocker_id": "BLOCK-V-1", "code": "UNRESOLVED_OPERATION", "field_path": "/operation", "reason": "Адрес?",
+                                     "provenance": ["нет в документации"]}],
+            "expectations": [{"expectation_id": "EXP-V-1", "display_order": 1, "text": "Владелец создан", "assertions": assertions}]}
+
+
+def test_the_autotest_step_loses_no_machine_value_of_any_target_source_or_assertion() -> None:
+    """FaT-AV (старшая 3): every leaf of operation, inputs, outputs, assertions and blockers (without blocker provenance)
+    is in the bytes of the view — a body target keeps its pointer, a secret input its handle and safe label."""
+    from tools.review_view import _autotest_step
+
+    step = _variant_step()
+    block = "\n".join(_autotest_step(step))
+    machine = {key: step[key] for key in ("operation", "inputs", "outputs", "expectations")}
+    machine["automation_blockers"] = [{key: value for key, value in row.items() if key != "provenance"} for row in step["automation_blockers"]]
+    for leaf in _machine_leaves(machine, skip={"text"}):
+        shown = json.dumps(leaf, ensure_ascii=False)
+        assert str(leaf) in block or shown in block, leaf
+    assert "body:/owner/address/city" in block and "None" not in block
+    secret = next(line for line in block.splitlines() if "INPUT-V-5" in line)
+    assert "(секрет)" in secret and "secret://petclinic/api-token" in secret and "API token" in secret and "***" not in secret
+
+
+def test_the_autotest_view_keeps_the_canonical_requirements_the_cases_link() -> None:
+    """FaT-AV (старшая 3): the testing-work constraints live in the canonical requirements (automation contract)."""
+    from tools.review_view import render
+
+    document = _example()
+    view = render(document, profile="autotest").decode("utf-8")
+    section = view.split("\n## Требования\n", 1)[1].split("\n## Операции (capabilities)\n", 1)[0]  # a text may hold its own headers
+    for requirement in document["requirements"]:
+        assert f"- {requirement['requirement_id']}: {requirement['text']}" in section
+    canonical = "\n".join(row["text"] for row in document["requirements"])
+    unique = [row["text"] for row in document["source_requirements"] if row["text"] not in canonical]
+    assert unique and not [text for text in unique if text in view]  # a source text kept as a canonical one stays

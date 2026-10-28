@@ -179,39 +179,6 @@ def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def digest_index(root: Path) -> dict[str, int]:
-    """FaT-6b: bytes a model reads behind a digest — by file name, file bytes, a receipt's own ``digest`` (also nested
-    one level), and the canonical document digest; a context receipt counts its ``byte_count``, not its JSON."""
-    import hashlib
-
-    from tools.canonical_document import document_sha256
-
-    index: dict[str, int] = {}
-    for path in sorted(Path(root).rglob("*.json")):
-        try:
-            raw = path.read_bytes()
-            value = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError):
-            continue
-        size = int(value["byte_count"]) if isinstance(value, Mapping) and isinstance(value.get("byte_count"), int) and "files" in value else len(raw)
-        keys = [path.stem, hashlib.sha256(raw).hexdigest()]
-        if isinstance(value, Mapping):
-            if isinstance(value.get("digest"), str):
-                keys.append(value["digest"].removeprefix("sha256:"))
-            if isinstance(value.get("test_cases"), list):
-                try:
-                    keys.append(document_sha256(dict(value)).removeprefix("sha256:"))
-                except Exception:  # noqa: BLE001 - a non-canonical document only lacks this key
-                    pass
-            for nested in value.values():
-                if isinstance(nested, Mapping) and isinstance(nested.get("digest"), str):
-                    index.setdefault(nested["digest"].removeprefix("sha256:"),
-                                     len(json.dumps(nested, ensure_ascii=False, separators=(",", ":")).encode("utf-8")))
-        for key in keys:
-            index.setdefault(key, size)
-    return index
-
-
 def input_bytes(index: Mapping[str, int], digests: Sequence[str]) -> tuple[int, int]:
     """``(resolved bytes, unresolved count)`` of a model request's input digests."""
     found = [index[str(digest).removeprefix("sha256:")] for digest in digests if str(digest).removeprefix("sha256:") in index]
@@ -233,9 +200,13 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
         pass
     resolved, unresolved = input_bytes(sizes, inputs)
     basis = None
-    if str(call["stage"]).startswith("tc-reviewer:") and inputs:
-        # FaT-CV2 (2.13): the reviewer reads the view of the candidate (its first input), not the full canonical JSON
-        view = root / "review-views" / (str(inputs[0]).removeprefix("sha256:") + ".md")
+    if str(call["stage"]).startswith(("tc-reviewer:", "tc-to-autotest:")) and inputs:
+        # FaT-CV2 (2.13): the reviewer reads the view of the candidate (its first input), not the full canonical JSON;
+        # FaT-AV: the automation generator reads the autotest view of the effective document the same way
+        from tools.step_size import autotest_view
+
+        view = (autotest_view(root, inputs[0]) if str(call["stage"]).startswith("tc-to-autotest:")
+                else root / "review-views" / (str(inputs[0]).removeprefix("sha256:") + ".md"))
         basis = "канон"
         if view.is_file():
             rest, unresolved = input_bytes(sizes, inputs[1:])
@@ -430,9 +401,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     attempt_id = attempt["attempt_id"] if attempt else None
     status = _durable_status_facts(project, root, stage="report")
 
+    from tools.step_size import digest_index, output_sizes
+
     sizes = digest_index(root)
     calls = model_calls(events)
-    from tools.step_size import output_sizes
 
     raw_sizes = output_sizes(root)
     for call in calls:
