@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A sample in the shape Gradle writes a JUnit Platform @ParameterizedTest: the invocation name is its display name. -->
+<testsuite name="p.GroupTest" tests="4" skipped="0" failures="1" errors="0">
+  <testcase name="plain()" classname="p.GroupTest"/>
+  <testcase name="[1] TC-B1-001" classname="p.GroupTest"/>
+  <testcase name="[2] TC-B1-002" classname="p.GroupTest">
+    <failure message="org.opentest4j.AssertionFailedError: expected: not equal but was: &lt;2&gt;" type="org.opentest4j.AssertionFailedError"></failure>
+  </testcase>
+  <testcase name="[3] TC-B1-003" classname="p.GroupTest"/>
+</testsuite>

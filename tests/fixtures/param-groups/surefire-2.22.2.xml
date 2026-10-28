@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" name="p.GroupTest" tests="4" errors="0" skipped="0" failures="1">
+  <testcase name="plain" classname="p.GroupTest"/>
+  <testcase name="tc_group_age{String, int}[1]" classname="p.GroupTest"/>
+  <testcase name="tc_group_age{String, int}[2]" classname="p.GroupTest">
+    <failure message="expected: not equal but was: &lt;2&gt;" type="org.opentest4j.AssertionFailedError"></failure>
+  </testcase>
+  <testcase name="tc_group_age{String, int}[3]" classname="p.GroupTest"/>
+</testsuite>

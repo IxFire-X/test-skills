@@ -307,12 +307,19 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
               "unresolved": unresolved}
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
         # FaT-JL: the Java level of the module's build, so that the generator and its reviewer keep to its API
-        from tools.discover_project import java_api_level
+        from tools.discover_project import java_api_level, junit_params_available
 
         module = str(state["attempts"][-1].get("module") or ".")
-        level = java_api_level(project if module == "." else project.joinpath(*module.split("/")))
+        module_root = project if module == "." else project.joinpath(*module.split("/"))
+        level = java_api_level(module_root)
         if level is not None:
             result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее отклонит runner-compat (RUNNER_API_LEVEL)"}
+        if (module_root / "pom.xml").is_file() or (module_root / "build.gradle").is_file() or (module_root / "build.gradle.kts").is_file():
+            # FaT-PT: a param_group becomes one @ParameterizedTest only where the tests have junit-jupiter-params
+            params = junit_params_available(module_root)
+            result["junit_params"] = {"available": params, "rule": (
+                "группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\"), строки литералами по display_order"
+                if params else "junit-jupiter-params нет в зависимостях тестов: по методу @Test на каждый кейс группы, зависимость не добавлять")}
     return result
 
 
@@ -391,8 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         if requested is not None:
             report.update(input_files=requested["files"], input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
-            if "java_level" in requested:
-                report["java_level"] = requested["java_level"]
+            report.update({key: requested[key] for key in ("java_level", "junit_params") if key in requested})
         report["recorded"] = False
         if args.run:
             stage = args.stage and (f"{args.stage}:batch-{args.batch:03d}" if args.batch is not None else args.stage)

@@ -419,6 +419,185 @@ def _java_api_level_diagnostics(pointer: str, text: str, level: Mapping[str, Any
                   f"замени на {fix}; используй только API Java {target}") for since, name, fix in found]
 
 
+# FaT-PT: a param_group of the canonical is one @ParameterizedTest whose rows are literals in the same class — the first
+# argument of a row is its case ID, the rows follow the display order of the group.  Surefire writes an invocation as
+# `method(Type, …)[N]` without the display name, so N is all the report gives on Maven; the literal rows prove N → case ID.
+_PARAM_ROWS_FIX = ("группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\") со строками-литералами в том же классе: "
+                   "@MethodSource провайдер `static Stream<Arguments> rows() { return Stream.of(Arguments.of(\"<case ID>\", …), …); }` "
+                   "или @CsvSource({\"<case ID>, …\", …}); первый аргумент строки — case ID, строки — все кейсы группы по display_order; "
+                   "без вычислений, циклов, внешних вызовов, @CsvFileSource/@ValueSource/@ArgumentsSource и провайдера в другом классе")
+_PARAMS_UNAVAILABLE_FIX = ("в зависимостях тестов модуля нет junit-jupiter-params (junit-jupiter, spring-boot-starter-test): "
+                           "сделай по методу @Test на каждый кейс группы; зависимость пакет не добавляет")
+_PARAM_TEST_NAME = re.compile(r'@\s*(?:org\s*\.\s*junit\s*\.\s*jupiter\s*\.\s*params\s*\.\s*)?ParameterizedTest\s*\(\s*name\s*=\s*"\[\{index\}\] \{0\}"\s*\)')
+_PARAM_ANNOTATION = re.compile(r"@\s*(?:[\w$]+\s*\.\s*)*([A-Za-z_$][\w$]*)\b")
+_PARAM_OTHER_SOURCES = frozenset({"CsvFileSource", "ValueSource", "ArgumentsSource", "EnumSource", "NullSource", "EmptySource",
+                                  "NullAndEmptySource", "FieldSource", "ArgumentsSources", "MethodSources", "CsvSources"})
+_PARAM_TOKEN = re.compile(r"\s+|(?P<string>\"(?:[^\"\\\n])*\")|(?P<char>'(?:[^'\\\n])')|(?P<number>-?(?:0[xX][0-9a-fA-F_]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)[lLfFdD]?)|(?P<name>[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)|(?P<punct>[(){},;=])")
+_ROW_FACTORIES = frozenset({"Arguments.of", "Arguments.arguments", "arguments", "org.junit.jupiter.params.provider.Arguments.of",
+                            "org.junit.jupiter.params.provider.Arguments.arguments"})
+
+
+def _param_tokens(raw: str) -> list[tuple[str, str]] | None:
+    """Tokens of a literal-only fragment, or None when anything else (an operator, a comment, a text block) is there."""
+    tokens, index = [], 0
+    while index < len(raw):
+        match = _PARAM_TOKEN.match(raw, index)
+        if match is None:
+            return None
+        index = match.end()
+        if match.lastgroup is not None:
+            value = match.group(match.lastgroup)
+            tokens.append((match.lastgroup, re.sub(r"\s+", "", value) if match.lastgroup == "name" else value))
+    return tokens
+
+
+def _literal_rows(tokens: list[tuple[str, str]]) -> list[str] | None:
+    """First string literal of each `Arguments.of(<literals>)` of `{ return Stream.of(row, …); }`, or None."""
+    head = [("punct", "{"), ("name", "return")]
+    if len(tokens) < 8 or tokens[:2] != head or tokens[2] not in {("name", "Stream.of"), ("name", "java.util.stream.Stream.of")} or tokens[3:4] != [("punct", "(")]:
+        return None
+    if tokens[-3:] != [("punct", ")"), ("punct", ";"), ("punct", "}")]:
+        return None
+    ids, index, body = [], 4, tokens[:-3]
+    while index < len(body):
+        if body[index][0] != "name" or body[index][1] not in _ROW_FACTORIES or body[index + 1:index + 2] != [("punct", "(")]:
+            return None
+        index += 2
+        literals = []
+        while index < len(body) and body[index] != ("punct", ")"):
+            if body[index][0] not in {"string", "char", "number"} and body[index] not in {("name", "true"), ("name", "false"), ("name", "null")}:
+                return None
+            literals.append(body[index])
+            index += 1
+            if index < len(body) and body[index] == ("punct", ","):
+                index += 1
+        if index >= len(body) or not literals or literals[0][0] != "string":
+            return None
+        ids.append(literals[0][1][1:-1])
+        index += 1
+        if index < len(body):
+            if body[index] != ("punct", ","):
+                return None
+            index += 1
+    return ids
+
+
+def _csv_rows(raw: str) -> list[str] | None:
+    """First column of each literal row of `@CsvSource({"…", …})` / `@CsvSource(value = {…})` / `@CsvSource("…")`, or None."""
+    tokens = _param_tokens(raw)
+    if not tokens or tokens[0] != ("punct", "(") or tokens[-1] != ("punct", ")"):
+        return None
+    inner = tokens[1:-1]
+    if inner[:2] == [("name", "value"), ("punct", "=")]:
+        inner = inner[2:]
+    if inner[:1] == [("punct", "{")] and inner[-1:] == [("punct", "}")]:
+        inner = inner[1:-1]
+    strings = [token for token in inner if token != ("punct", ",")]
+    if not strings or any(kind != "string" for kind, _value in strings) or len(inner) != 2 * len(strings) - 1:
+        return None
+    return [value[1:-1].split(",", 1)[0].strip().strip("'") for _kind, value in strings]
+
+
+def _annotation_region(masked: str, start: int) -> int:
+    """Where the annotations of the member declared at ``start`` begin: after the previous `;`, `}` or the class `{`."""
+    depth, index = 0, start
+    while index > 0:
+        char = masked[index - 1]
+        if char in ")}" and not (char == "}" and depth == 0):
+            depth += 1
+        elif char in "({" and depth > 0:
+            depth -= 1
+        elif depth == 0 and char in ";{}":
+            break
+        index -= 1
+    return index
+
+
+def _declaration(masked: str, pattern: str) -> list[re.Match[str]]:
+    return [match for match in re.finditer(pattern, masked) if _declared_after_type(masked, match.start("name"))]
+
+
+def _param_group_rows(text: str, method: str) -> list[str] | None:
+    """The case IDs of the literal rows of the @ParameterizedTest ``method`` of a generated Java class, or None."""
+    masked = _mask_java_noncode(text)
+    # the test method, not a same-named provider of an unnamed @MethodSource: the one with @ParameterizedTest before it
+    declarations = [match for match in _declaration(masked, r"\b(?P<name>" + re.escape(method) + r")\s*\(")
+                    if "ParameterizedTest" in masked[_annotation_region(masked, match.start("name")):match.start("name")]]
+    if len(declarations) != 1:
+        return None
+    start = declarations[0].start("name")
+    region_start = _annotation_region(masked, start)
+    raw_region, masked_region = text[region_start:start], masked[region_start:start]
+    names = [match.group(1) for match in _PARAM_ANNOTATION.finditer(masked_region)]
+    if not _PARAM_TEST_NAME.search(raw_region) or _PARAM_OTHER_SOURCES & set(names) or names.count("MethodSource") + names.count("CsvSource") != 1:
+        return None
+    if "CsvSource" in names:
+        found = re.search(r"@\s*(?:[\w$]+\s*\.\s*)*CsvSource\s*(?=\()", masked_region)
+        open_at = found.end()
+        depth, close = 0, None
+        for index in range(open_at, len(masked_region)):
+            depth += {"(": 1, ")": -1}.get(masked_region[index], 0)
+            if depth == 0:
+                close = index + 1
+                break
+        return None if close is None else _csv_rows(raw_region[open_at:close])
+    source = re.search(r"@\s*(?:[\w$]+\s*\.\s*)*MethodSource\b\s*(?:\(\s*(?:value\s*=\s*)?\"(?P<provider>[A-Za-z_$][\w$]*)\"\s*\))?", raw_region)
+    if source is None or re.search(r"@\s*(?:[\w$]+\s*\.\s*)*MethodSource\s*\(", raw_region) and source.group("provider") is None:
+        return None  # a provider in another class, several providers or a computed name
+    provider = source.group("provider") or method
+    found = _declaration(masked, r"\bstatic\b[^;{}()=]*?\b(?P<name>" + re.escape(provider) + r")\s*\(\s*\)\s*\{")
+    if len(found) != 1:
+        return None
+    open_at = found[0].end() - 1
+    depth = 0
+    for index in range(open_at, len(masked)):
+        depth += {"{": 1, "}": -1}.get(masked[index], 0)
+        if depth == 0:
+            tokens = _param_tokens(text[open_at:index + 1])
+            return None if tokens is None else _literal_rows(tokens)
+    return None
+
+
+def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: Mapping[str, Any], texts: Mapping[str, str],
+                             params: bool) -> tuple[list[dict[str, str]], dict[tuple[str, str], tuple[str, ...]]]:
+    """FaT-PT: RUNNER_PARAM_ROWS / RUNNER_PARAMS_UNAVAILABLE per Java param_group, and each group's (file, symbol) → case IDs."""
+    from tools.canonical_document import param_groups
+
+    relations = automation_artifact["artifacts"]["implementation_relations"]
+    symbols = {(row["file_id"], row["symbol_id"]): row for row in automation_artifact["artifacts"]["generated_symbols"]}
+    diagnostics: list[dict[str, str]] = []
+    rows_by_pair: dict[tuple[str, str], tuple[str, ...]] = {}
+    for group in param_groups(dict(document)):
+        case_ids = [case["case_id"] for case in group["cases"]]
+        pairs_of = {case_id: {(row["file_id"], row["symbol_id"]) for row in relations if row["case_id"] == case_id} for case_id in case_ids}
+        bound = [case_id for case_id in case_ids if pairs_of[case_id]]
+        if not bound:
+            continue  # a group without automation (manual or blocked cases) has no rows to run
+        pairs = set().union(*pairs_of.values())
+        pointer = "/artifacts/implementation_relations"
+        if len(bound) != len(case_ids):
+            diagnostics.append(_diag(pointer, "RUNNER_PARAM_ROWS", f"{group['group_id']}: автоматизированы не все кейсы группы; {_PARAM_ROWS_FIX}"))
+            continue
+        if len(pairs) > 1:
+            if params:
+                diagnostics.append(_diag(pointer, "RUNNER_PARAM_ROWS", f"{group['group_id']}: кейсы группы связаны с {len(pairs)} методами; {_PARAM_ROWS_FIX}"))
+            continue  # without junit-jupiter-params a method per case is the way
+        (pair,) = pairs
+        if not params:
+            diagnostics.append(_diag(pointer, "RUNNER_PARAMS_UNAVAILABLE", f"{group['group_id']}: {_PARAMS_UNAVAILABLE_FIX}"))
+            continue
+        symbol = symbols.get(pair)
+        text = texts.get(pair[0])
+        locator = symbol["locator"] if symbol else {}
+        rows = _param_group_rows(text, str(locator.get("method_name"))) if text is not None and locator.get("kind") == "java_class_method" else None
+        if rows != case_ids:
+            found = "строки не литералы или не тот вид" if rows is None else f"строки {rows}"
+            diagnostics.append(_diag(pointer, "RUNNER_PARAM_ROWS", f"{group['group_id']}: {found}, ожидаются {case_ids}; {_PARAM_ROWS_FIX}"))
+            continue
+        rows_by_pair[pair] = tuple(case_ids)
+    return diagnostics, rows_by_pair
+
+
 def validate_artifact_runner_compatibility(project: Path, language: Literal["python", "java"], document: Mapping[str, Any], automation_artifact: Mapping[str, Any], *, materialized: bool = True) -> RunnerCompatibility:
     """Check inline proposals before review, or exact on-disk bytes before execution.
 
@@ -440,6 +619,7 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
     files = automation_artifact["artifacts"]["generated_files"]
     file_map = {row["file_id"]: row for row in files}
     symbols = automation_artifact["artifacts"]["generated_symbols"]
+    texts: dict[str, str] = {}
     if language == "java":
         from tools.discover_project import java_api_level
 
@@ -460,6 +640,7 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
         paths[row["file_id"]], digests[row["file_id"]] = file, actual
         try:
             text = content.decode("utf-8")
+            texts[row["file_id"]] = text
             parsed[row["file_id"]] = ast.parse(text, filename=str(file)) if language == "python" else _java_class(file, text)
         except (UnicodeDecodeError, SyntaxError):
             parsed[row["file_id"]] = None
@@ -477,6 +658,14 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
         if node is None:
             diagnostics.append(_diag(f"/artifacts/generated_symbols/{index}/locator", "RUNNER_LOCATOR", "Generated locator is absent or ambiguous.")); continue
         bindings[pair] = {"path": file, "relative_path": file_map[pair[0]]["path"], "locator": symbol["locator"], "node": node}
+    if language == "java":
+        from tools.discover_project import junit_params_available
+
+        group_rows, param_rows = _param_group_diagnostics(document, automation_artifact, texts, junit_params_available(root))
+        diagnostics.extend(group_rows)
+        for pair, case_ids in param_rows.items():
+            if pair in bindings:
+                bindings[pair] = {**bindings[pair], "param_rows": case_ids}
     return _compat("NOT_RUNNABLE", diagnostics=diagnostics) if diagnostics else _compat("READY", pairs, bindings, digests)
 
 
@@ -873,11 +1062,16 @@ def parse_junit_bytes(data: bytes) -> JUnitParseResult:
     return parse_junit_element(root)
 
 
+def junit_method_name(name: str) -> str:
+    """The Java method of a JUnit testcase name — Surefire 3 writes an invocation `method(Type, …)[N]`, Surefire 2.22
+    `method{Type, …}[N]` (FaT-PT); the one reading of a name for the evidence and for the run_pipeline hint."""
+    return re.split(r"[\[({]", name, maxsplit=1)[0]
+
+
 def _case_matches_pair(case: JUnitCase, binding: Mapping[str, Any], java: bool) -> bool:
     loc = binding["locator"]
     if java:
-        base_name = case.name.split("[", 1)[0].split("(", 1)[0]
-        return case.classname == loc["class_fqn"] and base_name == loc["method_name"]
+        return case.classname == loc["class_fqn"] and junit_method_name(case.name) == loc["method_name"]
     base_name = case.name.split("[", 1)[0]
     relative = str(binding.get("relative_path") or Path(binding["path"]).as_posix()).replace("\\", "/")
     expected_module = relative.removesuffix(".py").replace("/", ".")
@@ -885,6 +1079,29 @@ def _case_matches_pair(case: JUnitCase, binding: Mapping[str, Any], java: bool) 
     same_file = case.file == relative or (case.file is None and case.classname == class_module)
     expected_name = loc["function_name"] if loc["kind"] == "python_module_function" else loc["method_name"]
     return same_file and case.classname == class_module and base_name == expected_name
+
+
+# FaT-PT: an invocation of a group method — Surefire `method(Type, …)[N]`, Gradle `[N] <case ID>` (the display name).
+_SUREFIRE_INVOCATION = re.compile(r"\[(\d+)\]$")
+_DISPLAY_INVOCATION = re.compile(r"\[(\d+)\] (\S+)$")
+
+
+def _group_invocation(case: JUnitCase) -> tuple[int, str | None] | None:
+    """``(N, case ID in the name or None)`` of an invocation of a group method, or None when it names no row."""
+    found = _DISPLAY_INVOCATION.fullmatch(case.name)
+    if found is not None:
+        return int(found.group(1)), found.group(2)
+    found = _SUREFIRE_INVOCATION.search(case.name)
+    return (int(found.group(1)), None) if found is not None else None
+
+
+def _group_pair(case: JUnitCase, bindings: Mapping[tuple[str, str], Mapping[str, Any]]) -> list[tuple[str, str]]:
+    """Gradle names a group invocation `[N] <case ID>` without the method: the pair is the group of that class with that ID."""
+    found = _DISPLAY_INVOCATION.fullmatch(case.name)
+    if found is None:
+        return []
+    return [pair for pair, binding in bindings.items() if binding.get("param_rows") and case.classname == binding["locator"].get("class_fqn")
+            and found.group(2) in binding["param_rows"]]
 
 
 def match_junit_cases(
@@ -902,18 +1119,43 @@ def match_junit_cases(
     if parsed.duplicate_identities:
         errors.append("duplicate JUnit testcase identity")
     observed: dict[tuple[str, str], list[str]] = {pair: [] for pair in compatibility.required_pairs}
+    invocations: dict[tuple[str, str], list[tuple[int, str | None, str]]] = {}
     unmatched: list[JUnitCase] = []
     ambiguous = False
     for case in parsed.cases:
         matches = [pair for pair, binding in compatibility.bindings.items() if _case_matches_pair(case, binding, java)]
+        if java and not matches:
+            matches = _group_pair(case, compatibility.bindings)
         if len(matches) == 1:
             observed[matches[0]].append(case.status)
+            binding = compatibility.bindings[matches[0]]
+            if binding.get("param_rows"):
+                row = _group_invocation(case)
+                if row is None:
+                    errors.append("parameterized invocation without its row index")
+                else:
+                    invocations.setdefault(matches[0], []).append((row[0], row[1], case.status))
         elif len(matches) > 1:
             ambiguous = True
         else:
             unmatched.append(case)
     if ambiguous:
         errors.append("ambiguous JUnit testcase")
+    # FaT-PT: a group method answers each of its rows exactly once, row N being the N-th case ID of the literal rows
+    group_rows: dict[tuple[str, str], list[dict[str, str | int]]] = {}
+    for pair, binding in compatibility.bindings.items():
+        rows = binding.get("param_rows")
+        seen = invocations.get(pair, [])
+        if not rows or not observed.get(pair):
+            continue
+        indices = [index for index, _name_id, _status in seen]
+        if sorted(indices) != list(range(1, len(rows) + 1)):
+            errors.append("parameterized rows do not match the group (missing, extra or repeated row index)")
+            continue
+        if any(name_id is not None and name_id != rows[index - 1] for index, name_id, _status in seen):
+            errors.append("parameterized row names another case ID than the group order")
+            continue
+        group_rows[pair] = [{"index": index, "case_id": rows[index - 1], "status": status} for index, _name_id, status in sorted(seen)]
     if strict and unmatched:
         errors.append("unmatched JUnit testcase")
     if strict:
@@ -932,6 +1174,7 @@ def match_junit_cases(
                     "symbol_id": pair[1],
                     "file_digest": compatibility.verified_file_digests[pair[0]],
                     "status": max(values, key=lambda value: severity[value]),
+                    **({"rows": group_rows[pair]} if pair in group_rows else {}),
                 }
             )
     return rows, errors
@@ -1146,7 +1389,8 @@ def _failed_methods(snapshots: Mapping[Path, bytes], compatibility: RunnerCompat
                     messages.setdefault(pair, case.message)
     return [
         {"nodeid": f"{row['file_id']}::{row['symbol_id']}", "kind": "assertion_failed" if row["status"] == "FAILED" else "error",
-         "message": messages.get((row["file_id"], row["symbol_id"]), "")}
+         "message": messages.get((row["file_id"], row["symbol_id"]), ""),
+         **({"failed_rows": [item["case_id"] for item in row["rows"] if item["status"] in {"FAILED", "ERROR"}]} if row.get("rows") else {})}
         for row in evidence if row["status"] in {"FAILED", "ERROR"}
     ]
 

@@ -492,7 +492,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
-        "quarantine": [{key: row[key] for key in ("file", "method", "ref")} for row in status.get("quarantine") or []],
+        "quarantine": [{key: row[key] for key in ("file", "method", "ref", "failed_rows", "disabled_passed_rows") if key in row}
+                       for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
         "test_design": test_design_summary(document) if isinstance(document, Mapping) else None,
@@ -565,7 +566,9 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     if report.get("autotest_assertions"):
         lines += [render_autotest_assertions(report["autotest_assertions"]), ""]
     if report["quarantine"] or report["quarantine_unresolved"]:
-        lines += ["## Карантин", "", *(f"- {row['file']} :: {row['method']} ({row['ref']})" for row in report["quarantine"])]
+        lines += ["## Карантин", "", *(f"- {row['file']} :: {row['method']} ({row['ref']})" + (
+            f"; упали строки {', '.join(row['failed_rows'])}; вместе с методом отключены прошедшие строки: "
+            f"{', '.join(row['disabled_passed_rows']) or 'нет'}" if "failed_rows" in row else "") for row in report["quarantine"])]
         lines += [f"- {report['quarantine_unresolved']}"] if report["quarantine_unresolved"] else []
         lines.append("")
     lines += ["## Шаги", "", "| # | Событие | Стадия | Время |", "|---|---|---|---|",

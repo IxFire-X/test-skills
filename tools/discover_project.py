@@ -191,15 +191,8 @@ def _pom_levels(pom: Path, inherited: Mapping[str, str], external: str | None = 
                     tests = any((node.text or "").strip() == "true" for scope in [configuration, *plugin_level] for node in scope.iter() if _xml_name(node) == "checkTestClasses")
                     if match and tests: levels.append((int(match.group(1)), f"{pom.name}: animal-sniffer {name} (checkTestClasses)"))
     return levels, properties
-def java_api_level(module_root: Path) -> dict[str, Any] | None:
-    """FaT-JL: the Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
-
-    Read from the build files only, never by running them: Maven ``maven.compiler.release/source/target`` (and ``test*``)
-    in properties or the compiler plugin, an animal-sniffer ``java1N`` signature that checks test classes, the parent poms
-    of the reactor that list this module; Gradle ``sourceCompatibility``/``targetCompatibility``, toolchain, ``release``.
-    Several values (profiles, executions) give the lowest: an API allowed by it compiles under every one of them."""
-    root = Path(module_root).resolve()
-    levels: list[tuple[int, str]] = []
+def _reactor_chain(root: Path) -> tuple[list[Path], str | None]:
+    """The module pom and its reactor parents (each lists its child), and the artifactId of the external parent at the top."""
     chain, pom, external = [], root / "pom.xml", None
     while pom.is_file() and len(chain) < 6:
         chain.append(pom)
@@ -215,6 +208,39 @@ def java_api_level(module_root: Path) -> dict[str, Any] | None:
             external = next(((child.text or "").strip() for child in parent if _xml_name(child) == "artifactId"), None) if parent is not None else None
             break
         pom = candidate
+    return chain, external
+_JUNIT_PARAMS_ARTIFACTS = frozenset({"junit-jupiter", "junit-jupiter-params", "spring-boot-starter-test"})
+_BOOT_TEST_STARTER = re.compile(r"spring-boot-starter-[\w.-]+-test")  # Spring Boot 4 module test starters pull spring-boot-starter-test
+def junit_params_available(module_root: Path) -> bool:
+    """FaT-PT: does the module's build give its tests junit-jupiter-params — a dependency (not a managed version) on
+    junit-jupiter, junit-jupiter-params, spring-boot-starter-test or a Boot 4 `spring-boot-starter-*-test` in the module pom, its reactor parents or build.gradle.
+    Read only; an external parent pom is not read, so what only it adds counts as absent."""
+    root = Path(module_root).resolve()
+    for pom in _reactor_chain(root)[0]:
+        try: data = ET.fromstring(_read(pom))
+        except ET.ParseError: continue
+        for dependencies in (child for child in data.iter() if _xml_name(child) == "dependencies"):
+            if any(_xml_name(node) == "dependencyManagement" for node in data.iter() if dependencies in list(node)):
+                continue
+            for dependency in dependencies:
+                artifact = next(((child.text or "").strip() for child in dependency if _xml_name(child) == "artifactId"), "")
+                if artifact in _JUNIT_PARAMS_ARTIFACTS or _BOOT_TEST_STARTER.fullmatch(artifact):
+                    return True
+    for name in ("build.gradle", "build.gradle.kts"):
+        text = _read(root / name) if (root / name).is_file() else ""
+        if re.search(r"""['"](?:org\.junit\.jupiter:junit-jupiter(?:-params)?|org\.springframework\.boot:spring-boot-starter-test)\b""", text):
+            return True
+    return False
+def java_api_level(module_root: Path) -> dict[str, Any] | None:
+    """FaT-JL: the Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
+
+    Read from the build files only, never by running them: Maven ``maven.compiler.release/source/target`` (and ``test*``)
+    in properties or the compiler plugin, an animal-sniffer ``java1N`` signature that checks test classes, the parent poms
+    of the reactor that list this module; Gradle ``sourceCompatibility``/``targetCompatibility``, toolchain, ``release``.
+    Several values (profiles, executions) give the lowest: an API allowed by it compiles under every one of them."""
+    root = Path(module_root).resolve()
+    levels: list[tuple[int, str]] = []
+    chain, external = _reactor_chain(root)
     properties: dict[str, str] = {}
     for index, pom in enumerate(reversed(chain)):
         try: found, properties = _pom_levels(pom, properties, external)

@@ -159,7 +159,8 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
     except (KeyError, OSError, TypeError, ValueError):
         return {}
     quarantine = [
-        {"file": row["path"], "method": item["method"], "ref": item["ref"], "message": item["message"]}
+        {"file": row["path"], "method": item["method"], "ref": item["ref"], "message": item["message"],
+         **{key: item[key] for key in ("failed_rows", "disabled_passed_rows") if key in item}}  # FaT-PT: a group method's rows
         for row in rows if row.get("disposition") == "QUARANTINED" for item in row["quarantine"]
     ]
     unresolved = [row["path"] for row in rows if row.get("reason_code") == "QUARANTINE_UNRESOLVED"]
@@ -220,7 +221,7 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
     A testcase whose method is selected but whose classname is none of that method's selected classes is what a class
     display name does (Surefire writes it as the classname); the hint names the selected classes only."""
     from tools import pilot_state as pilot
-    from tools.run_tests import parse_junit_bytes
+    from tools.run_tests import junit_method_name, parse_junit_bytes
 
     try:
         payload = pilot.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
@@ -238,7 +239,7 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
             if row.get("kind") != "native_report" or relative.is_absolute() or relative.parts[:2] != ("artifacts", attempt_id) or ".." in relative.parts:
                 continue
             for case in parse_junit_bytes((Path(run_root) / relative).read_bytes()).cases:
-                method = case.name.split("[", 1)[0].split("(", 1)[0]
+                method = junit_method_name(case.name)
                 if method in selected and case.classname not in selected[method]:
                     classes |= selected[method]
     except (AttributeError, KeyError, OSError, TypeError, ValueError):  # a hint never fails the step

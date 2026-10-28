@@ -651,6 +651,9 @@ def plan_quarantine(
     if payload.get("verdict") != "FAIL" or payload.get("evidence_authoritative") is not True or not isinstance(evidence, list):
         return None
     failed = {(row.get("file_id"), row.get("symbol_id")) for row in evidence if isinstance(row, Mapping) and row.get("status") in {"FAILED", "ERROR"}}
+    # FaT-PT: a group method is disabled whole — the mark names its failed rows, the receipt also the passed rows it took along
+    group_rows = {(row.get("file_id"), row.get("symbol_id")): row["rows"] for row in evidence
+                  if isinstance(row, Mapping) and isinstance(row.get("rows"), list)}
     located = {(row.get("file_id"), row.get("symbol_id")): row.get("locator") for row in symbols if isinstance(row, Mapping)}
     by_id = {row.get("file_id"): row for row in files if isinstance(row, Mapping)}
     if not failed or any(pair not in located or not isinstance(located[pair], Mapping) or pair[0] not in by_id for pair in failed):
@@ -664,11 +667,16 @@ def plan_quarantine(
         path, content = row.get("path"), row.get("content")
         if not isinstance(path, str) or not isinstance(content, str):
             return None
-        methods = []
+        methods, rows_of = [], {}
         for symbol in symbols:
             pair = (symbol.get("file_id"), symbol.get("symbol_id"))
             if pair[0] == file_id and pair in failed:
                 ref, message = failure_note(messages.get(f"{pair[0]}::{pair[1]}", ""))
+                if pair in group_rows:
+                    failed_rows = [str(item["case_id"]) for item in group_rows[pair] if item.get("status") in {"FAILED", "ERROR"}]
+                    passed_rows = [str(item["case_id"]) for item in group_rows[pair] if item.get("status") not in {"FAILED", "ERROR"}]
+                    message = f"rows {'+'.join(failed_rows)}: {message}"[:120].rstrip()
+                    rows_of[_method_name(symbol["locator"])] = {"failed_rows": failed_rows, "disabled_passed_rows": passed_rows}
                 methods.append((symbol["locator"], ref, message))
         if not methods:
             plan[path] = {"quarantine": [], "quarantined_digest": None, "content": None}
@@ -680,7 +688,8 @@ def plan_quarantine(
         if marked == content.encode("utf-8"):
             return None
         plan[path] = {
-            "quarantine": [{"method": _method_name(locator), "ref": ref, "message": message} for locator, ref, message in methods],
+            "quarantine": [{"method": _method_name(locator), "ref": ref, "message": message, **rows_of.get(_method_name(locator), {})}
+                           for locator, ref, message in methods],
             "quarantined_digest": _digest(marked), "content": marked,
         }
     return plan
