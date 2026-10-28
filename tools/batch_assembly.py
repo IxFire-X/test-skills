@@ -256,6 +256,25 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         references = case.get("requirement_ids") if isinstance(case, dict) else None
         if not isinstance(references, list) or not references or any(item not in requirement_ids for item in references):
             raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "case references a canonical requirement outside its batch")
+    require_batch_coverage(fragment)
+
+
+def require_batch_coverage(fragment: dict[str, Any]) -> None:
+    """FaT-DG: every canonical requirement of this batch is referenced by a case — the rule assemble applies as
+    SEMANTIC_UNCOVERED_REQUIREMENT (canonical_document.uncovered_requirements), checked on the batch alone."""
+    from tools.canonical_document import uncovered_requirements
+
+    if fragment.get("status") != "COMPLETE":
+        return
+    requirements = [item for item in fragment.get("requirements") or [] if isinstance(item, dict)]
+    cases = [item for item in fragment.get("test_cases") or [] if isinstance(item, dict)]
+    missing = [requirements[index].get("requirement_id") for index in uncovered_requirements(requirements, cases)]
+    if missing:
+        raise BatchAssemblyError(
+            "BATCH_UNCOVERED_REQUIREMENT",
+            f"requirements without a test case: {', '.join(map(str, missing))}; every requirement of the batch needs a case "
+            "(or a case with an explicit blocker) — this is an error of the answer, it takes the one retry of the stage",
+        )
 
 
 def _unique_by_id(items: list[dict[str, Any]], key: str, code: str, *, permit_equal: bool = False) -> dict[str, dict[str, Any]]:

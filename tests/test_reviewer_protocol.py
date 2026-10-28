@@ -241,6 +241,10 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     marker_publication = publish_model_stage_artifact(
         run_root, attempt_id, "context-marker:baseline", marker,
     )
+    from tools.pilot_state import publish_generator_input
+
+    publish_generator_input(run_root, attempt_id, "header", header)  # FaT-DG: the generator request takes the published pair
+    publish_generator_input(run_root, attempt_id, "plan", plan)
     for index, fragment in enumerate(fragments, start=1):
         batch_id = fragment["batch_id"]
         publish_model_request(

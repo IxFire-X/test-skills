@@ -1886,6 +1886,11 @@ def publish_model_request(
         raise ValueError("invalid model request")
     if stage == "context-marker":
         _context_marker_snapshots(project, root, state, attempt, stage_instance_id, inputs)
+    # FaT-DG: the inputs the journal fixes, each wrong position named with its right digest and source; publish time only,
+    # so a journal written before the generator inputs were published still replays
+    expected = _expected_model_inputs(project, root, state, attempt, stage_instance_id)
+    if expected is not None and inputs != [digest for digest, _source in expected]:
+        raise _inputs_mismatch(stage_instance_id, inputs, expected)
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
         if stage == "tc-to-autotest":
@@ -2076,7 +2081,6 @@ def publish_model_stage_artifact(
     value = dict(artifact)
     if attempt is None or attempt["state"] == "TERMINAL":
         raise ValueError("unknown model stage artifact attempt")
-    _validate_model_stage_artifact(stage_instance_id, value)
     data = _model_stage_artifact_bytes(value)
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     requests = [
@@ -2103,6 +2107,27 @@ def publish_model_stage_artifact(
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
     )
+    # FaT-DG: digest fields of the answer against the journal before anything is written; the stage keeps its one retry
+    mismatches = _response_digest_rows(project, root, state, attempt_id, stage_instance_id, request, value)
+    if mismatches:
+        raise ModelResponseDigestMismatch(
+            f"MODEL_RESPONSE_DIGEST_MISMATCH: {stage_instance_id}: "
+            + "; ".join(f"{pointer}: дан {given}, ожидается {expected} — {source}" for pointer, given, expected, source in mismatches)
+            + "; fix: это ошибка ответа — исправь поля и отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано"
+        )
+    _validate_model_stage_artifact(stage_instance_id, value)
+    if stage_instance_id.startswith("tc-generator:"):
+        from tools.batch_assembly import BatchAssemblyError, require_batch_coverage, validate_fragment
+
+        try:
+            published = _published_generator_inputs(project, root, state, attempt_id)
+            if published is None:  # a run from before FaT-DG: no published plan/header to check against
+                require_batch_coverage(value)  # FaT-DG: the coverage rule of assemble, on this batch, before the write
+            else:  # FaT-DG: the whole fragment check (coverage inside) against the journal, before the write
+                validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))))
+        except BatchAssemblyError as error:
+            raise BatchAssemblyError(error.code, str(error).split(": ", 1)[1] + "; fix: исправь фрагмент и отдай его единственным "
+                                     "повтором стадии (--transport-attempts 2), ничего не записано") from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
@@ -2552,7 +2577,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers"}
     if kind not in directories or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
         raise ValueError("invalid factual receipt")
     suffix = "" if not kind.startswith("automation-review-boundary-r") else f".{kind[-2:]}"
@@ -2877,6 +2902,17 @@ def _validate_factual_receipt(
             raise ValueError("invalid factual receipt")
         if set(receipt) != common | {"module_selection_digest", "baseline_digest"} or not isinstance(receipt.get("module_selection_digest"), str) or not isinstance(receipt.get("baseline_digest"), str) or receipt["module_selection_digest"] != module_selection_digest(project, attempt["module"]) or receipt["baseline_digest"] != attempt["baseline_digest"]:
             raise ValueError("invalid phase1 artifact")
+    elif kind in _GENERATOR_INPUT_KINDS.values():  # FaT-DG: the plan or the header with its one self-digest
+        field = next(name for name, value in _GENERATOR_INPUT_KINDS.items() if value == kind)
+        value = receipt.get(field)
+        if (
+            set(receipt) != common | {field}
+            or not identity_matches
+            or not isinstance(value, Mapping)
+            or value.get("digest") != _generator_input_digest(value)
+            or field == "plan" and not _plan_batches_listed(value)
+        ):
+            raise ValueError(f"invalid {kind} receipt")
     elif kind == "structured-result":
         expected = terminal_result({
             "run_id": attempt["run_id"], "attempt_id": attempt["attempt_id"],
@@ -4057,6 +4093,234 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
         "reviewer_invocation_id": reviewer, "role_policy": "autotest-static-reviewer-v1", "host_isolation": isolation,
         "effective_canonical_digest": effective["document_digest"], "effective_bundle_receipt_digest": effective["effective_bundle_receipt_digest"],
     }
+
+
+_GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  # FaT-DG
+
+
+class ModelInputsMismatch(ValueError):
+    """FaT-DG: a model request whose input digests are not the ones the journal fixes."""
+
+    code = "MODEL_INPUTS_MISMATCH"
+
+
+class ModelResponseDigestMismatch(ValueError):
+    """FaT-DG: a digest field of a model answer that does not match the journal; nothing is written."""
+
+    code = "MODEL_RESPONSE_DIGEST_MISMATCH"
+
+
+def _generator_input_digest(value: Mapping[str, Any]) -> str:
+    from tools.batch_assembly import with_digest
+
+    return with_digest({key: item for key, item in value.items() if key != "digest"})["digest"]
+
+
+def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
+    batches = plan.get("batches")
+    return isinstance(batches, list) and bool(batches) and all(
+        isinstance(row, Mapping) and isinstance(row.get("batch_id"), str)
+        and _DIGEST.fullmatch(str(row.get("context_receipt_digest", ""))) is not None
+        and _DIGEST.fullmatch(str(row.get("header_digest", ""))) is not None
+        for row in batches
+    )
+
+
+@closure_cached  # FaT-DG
+def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    """Publish the batch plan or the generator header of the attempt with its one digest — the self-digest.
+
+    A value without ``digest`` gets it here; a ``digest`` that is not the self-digest (the sha256 of the file bytes,
+    say) is refused with the right one. One plan and one header per attempt; the same value again changes nothing."""
+    if kind not in _GENERATOR_INPUT_KINDS or not isinstance(value, Mapping):
+        raise ValueError("GENERATOR_INPUT_INVALID: --kind is plan or header, --value a JSON object")
+    item = dict(value)
+    expected = _generator_input_digest(item)
+    if "digest" not in item:
+        item["digest"] = expected
+    elif item["digest"] != expected:
+        raise ValueError(f"GENERATOR_INPUT_DIGEST: the {kind} digest {item['digest']} is not its self-digest {expected} "
+                         "(the sha256 of the file bytes is not the digest); drop the field or put this value")
+    if kind == "plan" and not _plan_batches_listed(item):
+        raise ValueError("GENERATOR_INPUT_INVALID: the plan lists no batches; build it with tools.api plan-batches")
+    receipt_kind = _GENERATOR_INPUT_KINDS[kind]
+    project, root = _run_root(run_root)
+    if kind == "plan":  # FaT-DG: a plan the generator request would refuse is refused now, while another plan is still possible
+        state = derive_state(root)
+        try:
+            header = _generator_input(project, root, state, attempt_id, "header")
+        except ModelInputsMismatch as error:
+            raise ValueError("GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input "
+                             "--kind header --value <file>, build the plan with its result.digest, then publish the plan") from error
+        for row in item["batches"]:
+            if row["header_digest"] != header["digest"]:
+                raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
+                                 f"header is {header['digest']}; fix: put {header['digest']} as header_digest in the grouping and rerun plan-batches")
+            try:
+                read_context_selection(root, attempt_id, str(row["context_receipt_digest"]))
+            except ValueError as error:
+                selected = sorted({str(event["artifact_digest"]) for event in state["events"]
+                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
+                raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {row['context_receipt_digest']}, which "
+                                 f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
+                                 "(tools.api read-context --digest <d>)") from error
+    try:
+        prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, receipt_kind, "ARTIFACT_READ_BACK")["record"][kind]
+    except (ValueError, OSError, KeyError):
+        prior = None
+    if prior is not None and prior != item:
+        raise ValueError(f"GENERATOR_INPUT_CONFLICT: this attempt already has the {kind} {prior.get('digest')}; "
+                         "another one needs a new run (scan --new-run)")
+    _publish_bound_attempt_receipt(run_root, attempt_id, receipt_kind, {kind: item})
+    return {"kind": kind, "digest": item["digest"],
+            "path": str(_receipt_target(root, attempt_id, receipt_kind).relative_to(root)).replace("\\", "/")}
+
+
+def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
+    """FaT-DG: the published (plan, header) of the attempt, or None when the run published neither (before FaT-DG)."""
+    try:
+        return _generator_input(project, root, state, attempt_id, "plan"), _generator_input(project, root, state, attempt_id, "header")
+    except ModelInputsMismatch:
+        return None
+
+
+def _generator_input(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, kind: str) -> Mapping[str, Any]:
+    try:
+        return _read_attempt_receipt_with_state(project, root, state, attempt_id, _GENERATOR_INPUT_KINDS[kind], "ARTIFACT_READ_BACK")["record"][kind]
+    except (ValueError, OSError, KeyError) as error:
+        raise ModelInputsMismatch(
+            f"MODEL_INPUTS_MISMATCH: the {kind} of this attempt is not published; fix: tools.api publish-generator-input "
+            f"--kind {kind} --value <file>, its result.digest is the input"
+        ) from error
+
+
+def _expected_model_inputs(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str,
+) -> list[tuple[str, str]] | None:
+    """FaT-DG: the ordered input digests the journal fixes for a model request, each with where it comes from.
+
+    None — the journal does not fix them here (context-marker, or a predecessor is missing: the existing checks name it)."""
+    stage, _, instance = stage_instance_id.partition(":")
+    attempt_id = str(attempt["attempt_id"])
+    if stage == "tc-generator":
+        markers = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                   and event.get("stage_instance_id") == "context-marker:baseline"]
+        if len(markers) != 1:
+            return None
+        plan, header = _generator_input(project, root, state, attempt_id, "plan"), _generator_input(project, root, state, attempt_id, "header")
+        batch = next((row for row in plan["batches"] if row.get("batch_id") == instance), None)
+        if batch is None:
+            raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {instance} is not a batch of the published plan {plan['digest']}")
+        if batch["header_digest"] != header["digest"]:
+            raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the plan binds the header {batch['header_digest']}, the published header is "
+                                      f"{header['digest']}; the plan is built from the header digest of publish-generator-input")
+        return [
+            (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
+            (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
+            (str(plan["digest"]), "result.digest команды publish-generator-input --kind plan"),
+            (str(header["digest"]), "result.digest команды publish-generator-input --kind header"),
+        ]
+    try:
+        if stage == "tc-reviewer":
+            boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
+            return [(str(boundary["canonical_branch_digest"]), "boundary.canonical_branch_digest (read-receipt reviewer-session-boundary)"),
+                    (str(boundary["package_digest"]), "boundary.package_digest (read-receipt reviewer-session-boundary)")]
+        if stage == "tc-to-autotest":
+            effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
+            return [(str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)"),
+                    (str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")]
+        if stage == "autotest-reviewer":
+            boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
+            return [(str(boundary["automation_digest"]), f"boundary.automation_digest (read-receipt automation-review-boundary-{instance})"),
+                    (str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")]
+    except (ValueError, OSError, KeyError, TypeError):
+        return None
+    return None
+
+
+def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Sequence[tuple[str, str]]) -> ModelInputsMismatch:
+    rows = [f"вход {index}: дан {inputs[index - 1] if index <= len(inputs) else 'нет'}, ожидается {digest} — {source}"
+            for index, (digest, source) in enumerate(expected, start=1) if index > len(inputs) or inputs[index - 1] != digest]
+    if len(inputs) > len(expected):
+        rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
+    order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
+    return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + f"; fix: повтори model-request с {order}")
+
+
+def _response_digest_rows(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+    request: Mapping[str, Any], value: Mapping[str, Any],
+) -> list[tuple[str, Any, str, str]]:
+    """FaT-DG: the digest fields of a model answer against the journal — (pointer, given, expected, source) per mismatch.
+
+    A shape the schema refuses yields what it could check; the schema and the later checks stay the backstop."""
+    from tools.automation_validation import automation_sha256, autotest_review_sha256, implementation_relations_sha256
+
+    stage, _, instance = stage_instance_id.partition(":")
+    rows: list[tuple[str, Any, str, str]] = []
+
+    def check(pointer: str, given: Any, expected: str, source: str) -> None:
+        if given != expected:
+            rows.append((pointer, given, expected, source))
+
+    def answer(stage_id: str, event_type: str) -> Mapping[str, Any]:
+        events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_id
+                  and event["event_type"] == event_type]
+        return _read_model_stage_artifact_with_state(project, root, state, attempt_id, stage_id, str(events[-1]["artifact_digest"]))["artifact"]
+
+    try:
+        if stage == "tc-generator":
+            inputs = request["input_digests"]
+            for pointer, index, name in (("/context_receipt_digest", 1, "context"), ("/plan_digest", 2, "plan"), ("/header_digest", 3, "header")):
+                check(pointer, value.get(pointer[1:]), str(inputs[index]), f"вход {index + 1} запроса ({name})")
+            check("/digest", value.get("digest"), _model_stage_artifact_digest({key: item for key, item in value.items() if key != "digest"}),
+                  "самодайджест фрагмента (без поля digest)")
+        elif stage == "tc-reviewer":
+            boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
+            report = value["artifacts"]["validation_report"]
+            candidate = str(boundary["canonical_branch_digest"])
+            check("/artifacts/validation_report/candidate/document_sha256", report["candidate"]["document_sha256"], candidate,
+                  "boundary.canonical_branch_digest")
+            if report["verdict"] == "ПРИНЯТО" and isinstance(report.get("effective"), Mapping):
+                check("/artifacts/validation_report/effective/document_sha256", report["effective"]["document_sha256"], candidate,
+                      "ПРИНЯТО выбирает кандидата: boundary.canonical_branch_digest")
+        elif stage == "tc-to-autotest":
+            effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
+            artifacts = value["artifacts"]
+            check("/artifacts/source/source_digest", artifacts["source"]["source_digest"], str(effective["document_digest"]),
+                  "effective.document_digest (tools.api read-effective)")
+            check("/artifacts/source/effective_bundle_receipt_digest", artifacts["source"]["effective_bundle_receipt_digest"],
+                  str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")
+            for index, row in enumerate(artifacts["generated_files"]):
+                check(f"/artifacts/generated_files/{index}/content_digest", row["content_digest"],
+                      "sha256:" + hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest(), "sha256 поля content этого файла (UTF-8)")
+            if instance == "r2":
+                check("/artifacts/predecessor_automation_sha256", artifacts["predecessor_automation_sha256"],
+                      automation_sha256(answer("tc-to-autotest:r1", "CANDIDATE_PUBLISHED")), "tools.api automation-digest ответа tc-to-autotest:r1")
+                check("/artifacts/correction_review_sha256", artifacts["correction_review_sha256"],
+                      autotest_review_sha256(answer("autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")), "digest ответа autotest-reviewer:r1")
+        elif stage == "autotest-reviewer":
+            review = value["artifacts"]["autotest_review"]
+            automation = answer(f"tc-to-autotest:{instance}", "CANDIDATE_PUBLISHED")
+            boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
+            check("/artifacts/autotest_review/automation_sha256", review["automation_sha256"], automation_sha256(automation),
+                  f"tools.api automation-digest ответа tc-to-autotest:{instance}")
+            check("/artifacts/autotest_review/reviewed_relations_sha256", review["reviewed_relations_sha256"],
+                  implementation_relations_sha256(automation["artifacts"]["implementation_relations"]),
+                  f"tools.api relations-digest массива implementation_relations ответа tc-to-autotest:{instance} (не digest артефакта)")
+            check("/artifacts/autotest_review/host_isolation_sha256", review["host_isolation_sha256"], str(boundary["digest"]),
+                  f"boundary.digest (read-receipt automation-review-boundary-{instance})")
+            for key in ("source_digest", "effective_bundle_receipt_digest"):
+                check(f"/artifacts/autotest_review/source/{key}", review["source"][key], str(automation["artifacts"]["source"][key]),
+                      f"source.{key} ответа tc-to-autotest:{instance}")
+            files = {row["file_id"]: row["content_digest"] for row in automation["artifacts"]["generated_files"]}
+            for index, row in enumerate(review["reviewed_files"]):
+                if row["file_id"] in files:
+                    check(f"/artifacts/autotest_review/reviewed_files/{index}/content_digest", row["content_digest"], files[row["file_id"]],
+                          f"content_digest файла {row['file_id']} в ответе tc-to-autotest:{instance}")
+    except (KeyError, TypeError, IndexError, ValueError, AttributeError):
+        return rows
+    return rows
 
 
 def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any]) -> Mapping[str, Any]:

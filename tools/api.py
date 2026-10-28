@@ -75,13 +75,6 @@ def _yes_no(value: str) -> bool:
     return value == "yes"
 
 
-def _bytes(path: str) -> bytes:
-    try:
-        return Path(path).read_bytes()
-    except OSError as error:
-        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
-
-
 # --------------------------------------------------------------------------------------
 # commands: one package function each
 # --------------------------------------------------------------------------------------
@@ -112,10 +105,6 @@ def _cmd_plan_batches(a):
     return batch_assembly.plan_batches(a.requirements, a.grouping)
 
 
-def _cmd_with_digest(a):
-    return batch_assembly.with_digest(a.value)
-
-
 def _cmd_validate_fragment(a):
     return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt)
 
@@ -124,8 +113,8 @@ def _cmd_assemble(a):
     return batch_assembly.assemble_candidate(a.header, a.plan, a.fragment)
 
 
-def _cmd_publish_artifact(a):
-    return pilot_state.publish_run_artifact_bytes(a.run_root, a.attempt, a.name, a.file)
+def _cmd_publish_generator_input(a):
+    return pilot_state.publish_generator_input(a.run_root, a.attempt, a.kind, a.value)
 
 
 def _cmd_document_digest(a):
@@ -216,10 +205,9 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json)), None, ()),
-    "with-digest": (_cmd_with_digest, (("--value", _json),), None, ()),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json)), None, ()),
     "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
-    "publish-artifact": (_cmd_publish_artifact, (*RUN, "--name", ("--file", _bytes)), None, ()),
+    "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
     "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),

@@ -9,7 +9,7 @@ from http import HTTPStatus
 from dataclasses import dataclass
 from types import MappingProxyType
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from tools.schema_validation import load_json_strict, schema_diagnostics
 
@@ -353,7 +353,6 @@ def _build_index(document: dict[str, Any], diagnostics: list[dict[str, str]]) ->
 
 
 def _requirement_coverage(index: _DocumentIndex, document: dict[str, Any], diagnostics: list[dict[str, str]]) -> None:
-    covered: set[str] = set()
     for case_index, case in enumerate(index.cases):
         requirement_ids = case["requirement_ids"]
         expected = [item["requirement_id"] for item in document["requirements"] if item["requirement_id"] in requirement_ids]
@@ -362,11 +361,15 @@ def _requirement_coverage(index: _DocumentIndex, document: dict[str, Any], diagn
         for requirement_index, requirement_id in enumerate(requirement_ids):
             if requirement_id not in index.requirements:
                 diagnostics.append(_diagnostic(_pointer("test_cases", case_index, "requirement_ids", requirement_index), "SEMANTIC_UNKNOWN_REQUIREMENT", f"unknown requirement_id: {requirement_id}"))
-            else:
-                covered.add(requirement_id)
-    for requirement_index, requirement in enumerate(document["requirements"]):
-        if requirement["requirement_id"] in index.requirements and requirement["requirement_id"] not in covered:
+    for requirement_index in uncovered_requirements(document["requirements"], index.cases):
+        if document["requirements"][requirement_index]["requirement_id"] in index.requirements:
             diagnostics.append(_diagnostic(_pointer("requirements", requirement_index, "requirement_id"), "SEMANTIC_UNCOVERED_REQUIREMENT", "every requirement must be covered by a test case"))
+
+
+def uncovered_requirements(requirements: Sequence[Mapping[str, Any]], cases: Sequence[Mapping[str, Any]]) -> list[int]:
+    """FaT-DG: the indexes of requirements no case references — the one coverage rule of assemble and of one batch fragment."""
+    covered = {requirement_id for case in cases for requirement_id in case.get("requirement_ids") or ()}
+    return [index for index, requirement in enumerate(requirements) if requirement.get("requirement_id") not in covered]
 
 
 def _source_requirement_traceability(document: dict[str, Any], diagnostics: list[dict[str, str]]) -> None:

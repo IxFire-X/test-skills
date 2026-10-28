@@ -92,8 +92,11 @@ def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path,
     receipt = pilot_state.read_model_request(root, attempt_id, "context-marker:baseline", request["artifact_digest"])
     assert receipt["model_id"] == "controller:context-marker-merge"
     # the generator takes the merged marker like a single one
+    from tests.helpers import publish_fixture_generator_inputs
+
+    plan_digest, header_digest = publish_fixture_generator_inputs(root, attempt_id, ["BATCH-fixture"], receipts[0]["digest"])  # FaT-DG
     pilot_state.publish_model_request(root, attempt_id, "tc-generator:BATCH-fixture", model_id="model-generator", invocation_id="invoke-generator",
-                                      input_digests=[merged["content_digest"], receipts[0]["digest"], "sha256:" + "1" * 64, "sha256:" + "2" * 64])
+                                      input_digests=[merged["content_digest"], receipts[0]["digest"], plan_digest, header_digest])
 
 
 def test_a_part_that_changes_the_requirements_is_rejected(tmp_path: Path) -> None:

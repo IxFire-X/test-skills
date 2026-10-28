@@ -28,8 +28,26 @@ def _generator_run(tmp_path: Path):
 
 
 def _request(root: Path, attempt_id: str, stage: str, digests: list[str]) -> None:
-    pilot_state.publish_model_request(root, attempt_id, stage, model_id="model-generator", invocation_id="invoke-" + stage.replace(":", "-"),
-                                      input_digests=digests)
+    # step_size measures requests of runs from before FaT-DG too: plan/header as plain run files, inputs unchecked
+    with pytest.MonkeyPatch.context() as old:
+        old.setattr(pilot_state, "_expected_model_inputs", lambda *_args: None)
+        pilot_state.publish_model_request(root, attempt_id, stage, model_id="model-generator", invocation_id="invoke-" + stage.replace(":", "-"),
+                                          input_digests=digests)
+
+
+def test_published_generator_inputs_are_found(tmp_path: Path) -> None:
+    """FaT-DG: plan and header from publish-generator-input are found by their one digest."""
+    from tools.step_size import request_files
+
+    root, attempt_id, _baseline, receipts, marker, *_rest = _generator_run(tmp_path)
+    header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Опубликованный заголовок"})
+    plan = pilot_state.publish_generator_input(root, attempt_id, "plan", {"kind": "plan", "header_digest": header["digest"], "batches": [
+        {"batch_id": "BATCH-fixture", "context_receipt_digest": receipts[0]["digest"], "header_digest": header["digest"]}]})
+    pilot_state.publish_model_request(root, attempt_id, "tc-generator:BATCH-fixture", model_id="model-generator", invocation_id="invoke-generator",
+                                      input_digests=[marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
+    found = request_files(root, "tc-generator:BATCH-fixture")
+    assert found["unresolved"] == [], found
+    assert {row["path"] for row in found["files"] if row["digest"] in {plan["digest"], header["digest"]}} == {str(root / plan["path"]), str(root / header["path"])}
 
 
 def test_the_generator_inputs_come_from_the_published_request(tmp_path: Path) -> None:

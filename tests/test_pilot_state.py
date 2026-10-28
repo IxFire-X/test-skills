@@ -336,33 +336,37 @@ def test_model_lifecycle_events_are_stage_bound_and_ordered(tmp_path: Path) -> N
             "source_code_and_diff": {"sources": ["fixture — durable model input"]},
         }, "warnings": [],
     })
+    from tests.helpers import generator_requests_before_dg
+
+    plan_digest, header_digest = "sha256:" + "1" * 64, "sha256:" + "2" * 64
     before = _snapshot(root)
-    with pytest.raises(ValueError, match="tc-generator input digests"):
+    with generator_requests_before_dg():  # FaT-DG: the fragment below has no real plan
+        with pytest.raises(ValueError, match="tc-generator input digests"):
+            pilot_state.publish_model_request(
+                root, attempt_id, "tc-generator:BATCH-fixture",
+                model_id="model-generator", invocation_id="invoke-generator",
+                input_digests=[DIGEST_A, context["digest"], plan_digest, header_digest],
+            )
+        assert _snapshot(root) == before
         pilot_state.publish_model_request(
             root, attempt_id, "tc-generator:BATCH-fixture",
             model_id="model-generator", invocation_id="invoke-generator",
-            input_digests=[DIGEST_A, context["digest"], "sha256:" + "1" * 64, "sha256:" + "2" * 64],
+            input_digests=[marker["content_digest"], context["digest"], plan_digest, header_digest],
         )
-    assert _snapshot(root) == before
-    pilot_state.publish_model_request(
-        root, attempt_id, "tc-generator:BATCH-fixture",
-        model_id="model-generator", invocation_id="invoke-generator",
-        input_digests=[marker["content_digest"], context["digest"], "sha256:" + "1" * 64, "sha256:" + "2" * 64],
-    )
     fragment = {
         "schema_version": "1.0.0", "status": "COMPLETE", "batch_id": "BATCH-fixture", "namespace": "B1",
-        "plan_digest": "sha256:" + "1" * 64, "header_digest": DIGEST_A,
+        "plan_digest": plan_digest, "header_digest": DIGEST_A,
         "context_receipt_digest": context["digest"], "context_receipt": context,
         "owned_source_requirement_ids": [automated_document()["source_requirements"][0]["source_requirement_id"]],
         "requirements": [], "source_to_canonical_mappings": [], "operation_capabilities": [], "test_cases": [], "diagnostics": [],
     }
     fragment["digest"] = pilot_state._model_stage_artifact_digest(fragment)
     before = _snapshot(root)
-    with pytest.raises(ValueError, match="fragment must match"):
+    with pytest.raises(ValueError, match="MODEL_RESPONSE_DIGEST_MISMATCH"):
         pilot_state.publish_model_stage_artifact(root, attempt_id, "tc-generator:BATCH-fixture", fragment)
     assert _snapshot(root) == before
     fragment.pop("digest")
-    fragment["header_digest"] = "sha256:" + "2" * 64
+    fragment["header_digest"] = header_digest
     fragment["digest"] = pilot_state._model_stage_artifact_digest(fragment)
     pilot_state.publish_model_stage_artifact(root, attempt_id, "tc-generator:BATCH-fixture", fragment, transport_attempts=2)
     append_event(

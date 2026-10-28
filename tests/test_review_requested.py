@@ -33,7 +33,7 @@ def _journal(run_root: Path) -> bytes:
     return (run_root / "events.jsonl").read_bytes()
 
 
-def _generated_run(tmp_path: Path, self_review: bool = False) -> dict:
+def _generated_run(tmp_path: Path, self_review: bool = False, generated: bool = True) -> dict:
     """A run with the context, the marker and two generator answers published (as test_reviewer_protocol does)."""
     from tests.test_batch_assembly import _fragment, _header, _plan
     from tests.test_reviewer_protocol import _new_run, _session
@@ -74,7 +74,12 @@ def _generated_run(tmp_path: Path, self_review: bool = False) -> dict:
     publish_model_request(run_root, attempt_id, "context-marker:baseline", model_id="model-context", invocation_id=f"context-{attempt_id}",
                           input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], context["digest"]])
     marker_digest = publish_model_stage_artifact(run_root, attempt_id, "context-marker:baseline", marker)["content_digest"]
-    for index, fragment in enumerate(fragments, start=1):
+    for index, fragment in enumerate(fragments if generated else [], start=1):  # FaT-DG: generated=False stops before the generator
+        if index == 1:
+            from tools.pilot_state import publish_generator_input
+
+            publish_generator_input(run_root, attempt_id, "header", header)
+            publish_generator_input(run_root, attempt_id, "plan", plan)
         stage = f"tc-generator:{fragment['batch_id']}"
         publish_model_request(run_root, attempt_id, stage, model_id="model-generator", invocation_id=f"invoke-{index}",
                               input_digests=[marker_digest, context["digest"], fragment["plan_digest"], fragment["header_digest"]])
@@ -88,7 +93,7 @@ def _generated_run(tmp_path: Path, self_review: bool = False) -> dict:
         "header": _put(tmp / "header.json", header), "plan": _put(tmp / "plan.json", plan),
         "fragments": [_put(tmp / f"fragment-{index}.json", value) for index, value in enumerate(fragments)],
         "inventory": _put(tmp / "inventory.json", inventory), "context": _put(tmp / "context.json", context),
-        "marker": _put(tmp / "marker.json", marker), "start": _put(tmp / "session-start.json", start),
+        "marker": _put(tmp / "marker.json", marker), "start": _put(tmp / "session-start.json", start), "marker_digest": marker_digest,
     }
 
 

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import shutil
@@ -112,3 +113,29 @@ def projection_fixture(root: Path, target: Path) -> Path:
         path = target / relative_path
         path.write_text(contents, encoding="utf-8", newline="\n")
     return target
+
+
+@contextlib.contextmanager
+def generator_requests_before_dg():
+    """FaT-DG: fixtures whose generator fragments carry no real plan publish their requests as runs did before
+    FaT-DG — no published plan/header, so model-request checks no inputs and model-response checks only coverage."""
+    import pytest
+
+    from tools import pilot_state
+
+    with pytest.MonkeyPatch.context() as old:
+        old.setattr(pilot_state, "_expected_model_inputs", lambda *_args: None)
+        yield
+
+
+def publish_fixture_generator_inputs(run_root, attempt_id: str, batch_ids, context_digest: str) -> tuple[str, str]:
+    """FaT-DG: a minimal plan and header published the way a run publishes them, for fixtures whose generator
+    fragments carry no real plan; returns (plan digest, header digest)."""
+    from tools.pilot_state import publish_generator_input
+
+    header = publish_generator_input(run_root, attempt_id, "header", {"kind": "fixture-header"})["digest"]
+    plan = publish_generator_input(run_root, attempt_id, "plan", {
+        "kind": "fixture-plan", "header_digest": header,
+        "batches": [{"batch_id": batch_id, "context_receipt_digest": context_digest, "header_digest": header} for batch_id in batch_ids],
+    })["digest"]
+    return plan, header

@@ -215,11 +215,15 @@ Run остаётся связан с исходной project/module identity.
    ...authorized_context_receipt_digests]`; нужен минимум один current/readback receipt.
 2. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
    каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
-   `tools.api read-context --digest <d>`. План — `tools.api plan-batches --requirements <f> --grouping <f>`,
-   self-digest плана и header — `tools.api with-digest --value <f>`, публикация байтов — `tools.api
-   publish-artifact --name <имя> --file <f>`.
+   `tools.api read-context --digest <d>`. Сначала header: `tools.api publish-generator-input --kind header --value <f>`
+   (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. План — `tools.api plan-batches
+   --requirements <f> --grouping <f>`, затем `tools.api publish-generator-input --kind plan --value <план>`. У plan и header
+   один digest — `result.digest` этой команды; sha256 байтов файла входом не бывает.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs.
-   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header_digest]`.
+   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; неверный вход `model-request`
+   отклоняет (`MODEL_INPUTS_MISMATCH`) и называет правильный digest и его источник. Digest-поля ответов (фрагмента,
+   ревьюеров, автотестов) `model-response` сверяет с журналом до записи (`MODEL_RESPONSE_DIGEST_MISMATCH`) — это ошибка
+   ответа, на неё идёт единственный повтор стадии.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:

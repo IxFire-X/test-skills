@@ -93,28 +93,32 @@ def _reviewer_protocol_inputs(
         run_root, attempt_id, "context-marker:baseline", marker,
     )
     fragments = []
+    from tests.helpers import generator_requests_before_dg
+
+    plan_digest, header_digest = "sha256:" + "1" * 64, "sha256:" + "2" * 64  # FaT-DG: no real plan — pre-DG requests below
     for index, source in enumerate(document["source_requirements"], start=1):
         batch_id = f"BATCH-fixture-{'a' if index == 1 else 'b'}"
         fragment = {
             "schema_version": "1.0.0", "status": "COMPLETE",
             "batch_id": batch_id, "namespace": f"B{index}",
-            "plan_digest": "sha256:" + "1" * 64,
-            "header_digest": "sha256:" + "2" * 64,
+            "plan_digest": plan_digest,
+            "header_digest": header_digest,
             "context_receipt_digest": context["digest"], "context_receipt": context,
             "owned_source_requirement_ids": [source["source_requirement_id"]],
             "requirements": [], "source_to_canonical_mappings": [],
             "operation_capabilities": [], "test_cases": [], "diagnostics": [],
         }
         fragment["digest"] = "sha256:" + hashlib.sha256(json.dumps(fragment, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-        publish_model_request(
-            run_root, attempt_id, f"tc-generator:{batch_id}",
-            model_id="model-generator",
-            invocation_id=(generator_invocation_id if index == 1 else f"{generator_invocation_id}-{index}"),
-            input_digests=[
-                marker_publication["content_digest"], context["digest"],
-                fragment["plan_digest"], fragment["header_digest"],
-            ],
-        )
+        with generator_requests_before_dg():
+            publish_model_request(
+                run_root, attempt_id, f"tc-generator:{batch_id}",
+                model_id="model-generator",
+                invocation_id=(generator_invocation_id if index == 1 else f"{generator_invocation_id}-{index}"),
+                input_digests=[
+                    marker_publication["content_digest"], context["digest"],
+                    fragment["plan_digest"], fragment["header_digest"],
+                ],
+            )
         fragments.append(publish_model_stage_artifact(
             run_root, attempt_id, f"tc-generator:{batch_id}", fragment,
         ))
@@ -308,7 +312,7 @@ def test_automation_request_rejects_wrong_inputs_before_publication(tmp_path: Pa
     before = (run_root / "events.jsonl").read_bytes()
     requests = sorted((run_root / "model-requests").rglob("*.json"))
     for stage in ("tc-to-autotest:r1", "autotest-reviewer:r1"):
-        with pytest.raises(ValueError, match="input digests"):
+        with pytest.raises(ValueError, match="input digests|MODEL_INPUTS_MISMATCH"):  # FaT-DG: named with the right digest
             publish_model_request(
                 run_root, attempt_id, stage, model_id="model-test",
                 invocation_id="wrong-inputs", input_digests=["sha256:" + "f" * 64],
