@@ -9,7 +9,7 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import loads_json_strict, schema_diagnostics
@@ -92,6 +92,7 @@ def _evidence_digests(grouping_evidence: dict[str, Any]) -> tuple[str, str]:
 
 
 ANSWER_PER_TEXT_BYTE = 42  # FaT-BO: the largest "fragment bytes / source requirement text bytes" of the 28.10 campaign (23–41)
+IMPORT_ANSWER_PER_HUMAN_BYTE = 5  # FaT-IMP: a full case of the campaign is 3.9–4.5 times its human fields
 WINDOW_SHARE = 0.85  # FaT-BO: input + expected answer of one batch stay under this share of the model window
 _LETTER_ID = re.compile(r"(?:#{1,6}[^\n]*\n\s*)?(?:[-*]\s+)?([^\W\d_]{1,4})[-_.]?\d")
 _HEADING = re.compile(r"#{1,2}\s+(\S.*)")
@@ -178,10 +179,20 @@ def _balanced(groups: list[tuple[list[str], int]], cap: int) -> list[list[str]]:
     return pack(low)
 
 
+def _human_bytes(case: Mapping[str, Any]) -> int:
+    return len(canonical_bytes({key: case[key] for key in ("title", "objective", "preconditions", "steps")}))
+
+
 def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: int, id_pattern: re.Pattern[str] | None,
-                documents: dict[str, str]) -> tuple[list[list[str]] | None, list[str]]:
-    """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements."""
-    expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
+                documents: dict[str, str], imported: Mapping[str, Any] | None = None) -> tuple[list[list[str]] | None, list[str]]:
+    """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
+
+    FaT-IMP: in an import the answer is the human fields of a case with its machine part (× 5), a case is its own group."""
+    if imported is not None:
+        human = {case["source_requirement_id"]: _human_bytes(case) for case in imported["cases"]}
+        expected = {item["source_requirement_id"]: human.get(item["source_requirement_id"], 0) * IMPORT_ANSWER_PER_HUMAN_BYTE for item in source}
+    else:
+        expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
     total = sum(expected.values())
     if window_bytes <= 0:
         return None, ["одна пачка: деление выключено (.skillsrc limits.step_window_bytes: 0)"]
@@ -192,7 +203,11 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
         return None, [f"одна пачка: оценка ответа {total} Б ≤ {budget}"]
     if cap <= 0:
         return None, [f"одна пачка: вход шага {step_input} Б не оставляет места ответу в окне {window_bytes} Б — сузьте контекст"]
-    keys, counts = _group_keys(source, id_pattern, documents)
+    if imported is not None:
+        keys: dict[str, str | None] = {item["source_requirement_id"]: "case:" + item["source_requirement_id"] for item in source}
+        counts = {"imported": len(source)}
+    else:
+        keys, counts = _group_keys(source, id_pattern, documents)
     groups: dict[str, tuple[int, list[str], int]] = {}
     for item in source:
         source_id = item["source_requirement_id"]
@@ -240,7 +255,8 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
         notes.append(subject.format(", ".join(unplaced)) + " ни в одну группу: нет ID группы (.skillsrc requirements.id_pattern "
                      "с группой (?P<group>…) или буквенный префикс) и первая строка не найдена в разделе # / ## документа "
                      "контекста — каждое идёт своей группой")
-    notes.extend(_end_to_end_notes(batches, keys))
+    if imported is None:
+        notes.extend(_end_to_end_notes(batches, keys))
     return batches, notes
 
 
@@ -256,11 +272,11 @@ def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> 
 
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
-                 documents: dict[str, str] | None = None) -> BatchPlan:
+                 documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None) -> BatchPlan:
     """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO)."""
     source = _source_requirements(source_requirements)
     header_digest, context_digest = _evidence_digests(grouping_evidence)
-    groups, notes = _size_split(source, window_bytes, input_bytes, id_pattern, documents or {})
+    groups, notes = _size_split(source, window_bytes, input_bytes, id_pattern, documents or {}, imported)
     physical_order = {item["source_requirement_id"]: item["display_order"] for item in source}
     batches = []
     for ordinal, members in enumerate(groups or [list(physical_order)], start=1):
@@ -285,7 +301,7 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 
 
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
-                             input_files: list[Path], context_receipt: dict[str, Any]) -> BatchPlan:
+                             input_files: list[Path], context_receipt: dict[str, Any], imported: Mapping[str, Any] | None = None) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipt, the map of existing project tests — FaT-EC — and the tc-generator
     role), the documents of the receipt."""
@@ -298,7 +314,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator",
                          extra_bytes=len(view_bytes(for_context(project, context_receipt))))["bytes"]
     return plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
-                        id_pattern=_grouping_pattern(project), documents=documents)
+                        id_pattern=_grouping_pattern(project), documents=documents, imported=imported)
 
 
 def _grouping_pattern(project: Path) -> re.Pattern[str] | None:
@@ -440,8 +456,46 @@ def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str
                 f"prior capabilities input: {canonical_bytes(owner).decode('utf-8')}")
 
 
+def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any], imported: Mapping[str, Any]) -> None:
+    """FaT-IMP: the cases of the batch keep the human fields of the import byte for byte — one case per imported case of
+    the batch, in its order; the model completes only the machine part.  A difference names its path."""
+    owned = set(batch["owned_source_requirement_ids"])
+    expected = [case for case in imported["cases"] if case["source_requirement_id"] in owned]
+    cases = sorted(fragment["test_cases"], key=lambda case: case.get("display_order", 0))
+    differences: list[str] = []
+    if len(cases) != len(expected):
+        differences.append(f"/test_cases: кейсов {len(cases)}, в импорте у пачки {len(expected)}")
+    for index, (case, source) in enumerate(zip(cases, expected)):
+        for field in ("title", "objective", "preconditions", "priority"):
+            if case.get(field) != source[field]:
+                differences.append(f"/test_cases/{index}/{field}")
+        steps = case.get("steps") or []
+        if len(steps) != len(source["steps"]):
+            differences.append(f"/test_cases/{index}/steps: шагов {len(steps)}, в импорте {len(source['steps'])}")
+        for number, (step, row) in enumerate(zip(steps, source["steps"])):
+            for field in ("action", "test_data"):
+                if step.get(field) != row[field]:
+                    differences.append(f"/test_cases/{index}/steps/{number}/{field}")
+            if [item.get("text") for item in step.get("expectations") or []] != row["expectations"]:
+                differences.append(f"/test_cases/{index}/steps/{number}/expectations")
+    if differences:
+        raise BatchAssemblyError("IMPORT_HUMAN_FIELD_CHANGED", "человеческие поля импорта изменены: " + ", ".join(differences[:12])
+                                 + " — верни их байт в байт из входа imported, достраивай только машинную часть")
+    # FaT-IMP: the case of an imported row traces to that row's source requirement only — never to another case's one
+    sources: dict[str, set[str]] = {}
+    for mapping in fragment.get("source_to_canonical_mappings") or []:
+        for requirement_id in mapping.get("canonical_requirement_ids") or []:
+            sources.setdefault(requirement_id, set()).add(mapping.get("source_requirement_id"))
+    traced = [f"/test_cases/{index}/requirement_ids: ведут к {', '.join(sorted(found)) or 'ничему'}, у кейса импорта {source['source_requirement_id']}"
+              for index, (case, source) in enumerate(zip(cases, expected))
+              if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) != {source["source_requirement_id"]}]
+    if traced:
+        raise BatchAssemblyError("IMPORT_TRACE_CHANGED", "трассировка кейсов импорта ведёт не к их строке CSV: " + "; ".join(traced[:12])
+                                 + " — требования каждого кейса должны отображаться только в source requirement его строки")
+
+
 def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], context_receipt: dict[str, Any],
-                      prior_fragments: list[dict[str, Any]] | None = None) -> None:
+                      prior_fragments: list[dict[str, Any]] | None = None, imported: Mapping[str, Any] | None = None) -> None:
     """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches)."""
     batches = _plan_batches(plan)
     if not isinstance(fragment, dict):
@@ -475,6 +529,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     _require_namespaced_identifiers(fragment)
     if batch["ordinal"] > 1:
         _require_prior_capabilities(fragment, _earlier_fragments(plan, batches, batch, prior_fragments or []))
+    if imported is not None:
+        require_imported_human_fields(fragment, batch, imported)
     requirement_ids = _fragment_requirements(fragment)
     mappings = fragment.get("source_to_canonical_mappings")
     if not isinstance(mappings, list):

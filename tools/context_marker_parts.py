@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools import pilot_state
+from tools.cases_import import cases_path
 from tools.json_cli import JsonArgumentParser
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
@@ -63,7 +64,8 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         return {"stage": stage, "input_digests": inputs, "bytes": {**sizes, "total": total}, "fits": total <= budget,
                 "hint": None if total <= budget else over_hint, "done": stage in responses}
 
-    if len(receipts) <= 1:
+    imported = cases_path(root) is not None  # FaT-IMP: the requirements of an import are answered by code, always a part
+    if len(receipts) <= 1 and not imported:
         parts = [step("context-marker:baseline", [*head, *(receipt["digest"] for receipt in receipts)],
                       {"batch": sum(int(receipt["byte_count"]) for receipt in receipts), "requirements": documents, "role": role},
                       "вход разметки больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan")]
@@ -74,6 +76,8 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                               if answer else documents)
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
+        if imported:  # code, not a model call: no prompt, no budget
+            parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}")
         for receipt in receipts:
             part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [*head, receipt["digest"], answer],
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},

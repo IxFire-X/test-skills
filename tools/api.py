@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, orchestrate_test_case_revision, pilot_state, run_tests, step_size
+from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser, error_fields
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -101,12 +101,18 @@ def _cmd_read_context(a):
     return pilot_state.read_context_selection(a.run_root, a.attempt, a.digest)
 
 
+def _cmd_cases_import(a):
+    return cases_import.import_requirements(a.run_root, a.attempt)
+
+
 def _cmd_plan_batches(a):
-    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, a.context_receipt)
+    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value
+    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, a.context_receipt, imported)
 
 
 def _cmd_validate_fragment(a):
-    return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment)
+    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value
+    return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment, imported)
 
 
 def _cmd_prior_capabilities(a):
@@ -208,10 +214,11 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
+    "cases-import": (_cmd_cases_import, RUN, None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
-                                         ("--input-file", Path, "append"), ("--context-receipt", _json)), None, ()),
+                                         ("--input-file", Path, "append"), ("--context-receipt", _json), ("--imported", _json, None)), None, ()),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
-                                                   ("--prior-fragment", _json, "append", "optional")), None, ()),
+                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
     "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
     "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),

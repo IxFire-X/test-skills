@@ -23,6 +23,7 @@ and finalization predicates of `cases-only-v1` or `local-pilot-v1`.
 
 1. Schema- and semantic-validate the candidate. `reviewed_case_ids` equals every case exactly once in physical order.
 2. Review every step, data-flow edge, human field, assertion, disposition and requirement relation. Apply the mandatory [human scenario rules](../tc-generator/references/case-generation-contract.md#human-scenario-rules) and the [review contract](references/review-verdicts.md). Findings cite the exact canonical location and violated requirement or rule; stylistic preference alone cannot reject an unambiguous conforming case.
+   Импорт готовых кейсов: если вид начинается со строки «Импорт (FaT-IMP)», человеческий текст кейсов — CSV человека, код сверил его байт в байт. Его не оценивай и вердикт из-за него не снижай; проверяй только машинную часть против этого текста.
    Expected must describe a system result before execution in every step, including
    the last; a service-only mark such as «Проверено автотестом» is invalid. A short
    native case with a supported action and oracle needs no HTTP block, minimum step

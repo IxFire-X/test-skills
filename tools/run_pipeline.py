@@ -441,13 +441,18 @@ def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
     return parse_skillsrc_bytes(data), _digest_bytes(data)
 
 
-def _input_files(project: Path, paths: Sequence[str] | None, flag: str) -> list[tuple[str, bytes]]:
-    """The files a scan flag names (``--docs``, ``--reference``): inside the project, no reparse point, each path once."""
+def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outside_fix: str | None = None) -> list[tuple[str, bytes]]:
+    """The files a scan flag names (``--docs``, ``--reference``, ``--cases``): inside the project, no reparse point, each
+    path once.  FaT-IMP: a path outside the project is the refusal ``SNAPSHOT_DOCS`` with *outside_fix*."""
     files: list[tuple[str, bytes]] = []
     seen: set[str] = set()
     for raw in paths or []:
         candidate = Path(raw)
-        confined = _confined(project, candidate if candidate.is_absolute() else project / candidate)
+        try:
+            confined = _confined(project, candidate if candidate.is_absolute() else project / candidate)
+        except ValueError:
+            raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is outside the project: {raw}",
+                           fix=outside_fix or f"укажите {flag} путём внутри проекта") from None
         if _is_reparse(confined) or not confined.is_file():
             raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is missing or a reparse point: {raw}")
         rel = confined.relative_to(project.resolve()).as_posix()
@@ -816,6 +821,9 @@ def _scan_execution_baseline(
         "module_id": module.get("id"),
         "selected_target": getattr(args, "target", None),
         "docs": _docs_projection(_docs_entries(project, getattr(args, "docs", None))),
+        # FaT-IMP: the CSV of --cases is the requirement document of an import; its bytes bind the requirement digest
+        **({"cases": [{"path": rel, "sha256": _digest_bytes(data)} for rel, data in _input_files(project, [args.cases], "--cases")]}
+           if getattr(args, "cases", None) else {}),
     }
     requirement_digest = _digest_bytes(
         json.dumps(requirement, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -835,12 +843,14 @@ def _scan_execution_baseline(
 
 def _scan_request(args: Any) -> dict[str, Any]:
     """FaT-G: the scan flags as given (the requested profile before any lowering) — kept in the run manifest."""
+    cases = getattr(args, "cases", None)
     return {
         "module": getattr(args, "module", None), "docs": [str(doc) for doc in (getattr(args, "docs", None) or [])],
         "target": getattr(args, "target", None), "profile": getattr(args, "profile", "local-pilot-v1"),
         "accept_self_review": bool(getattr(args, "accept_self_review", False)),
         "disposition_policy": getattr(args, "disposition_policy", None),
         **({"reference": str(args.reference)} if getattr(args, "reference", None) else {}),
+        **({"cases": str(cases)} if cases else {}),  # FaT-IMP
     }
 
 
@@ -1056,9 +1066,35 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
     return {"drift": _drift_report(project, manifest, result.get("changed") or [])}
 
 
+def _scan_cases(project: Path, args: Any) -> int | None:
+    """FaT-IMP: ``--cases`` — the Zephyr CSV is checked before anything is written and becomes the document of the run."""
+    from tools.cases_import import CasesImportError, read_cases
+
+    cases = getattr(args, "cases", None)
+    if not cases:
+        return None
+    try:
+        if getattr(args, "docs", None):
+            raise CasesImportError("IMPORT_WITH_DOCS_LATER", "--cases вместе с --docs — ступень 2 (кейсы сопоставляет с требованиями модель)")
+        [(rel, data)] = _input_files(project, [cases], "--cases",
+                                     outside_fix="CSV кейсов должен лежать внутри проекта: укажите --cases путём от корня проекта")
+        read_cases(data)
+    except HostStop as stop:
+        _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
+        return 2
+    except CasesImportError as error:
+        _print({"status": "error", "stage": "scan", "reason": error.code, "detail": str(error), "fix": error.fix})
+        return 2
+    args.cases = rel
+    return None
+
+
 def cmd_scan(args: Any) -> int:
     """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
     _PRINTED.clear()
+    refused = _scan_cases(Path(args.project).resolve(), args)
+    if refused is not None:
+        return refused
     code = _scan(args)
     run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
     if run_id:
@@ -2512,6 +2548,7 @@ def build_parser() -> JsonArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     scan_parser = sub.add_parser("scan", parents=[shared])
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
+    scan_parser.add_argument("--cases", help="FaT-IMP: a Zephyr CSV of ready test cases inside the project; autotests from them, without --docs")
     scan_parser.add_argument("--accept-self-review", action="store_true",
                              help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
     scan_parser.add_argument("--reference", default=None,

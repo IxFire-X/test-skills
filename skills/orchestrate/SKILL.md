@@ -217,6 +217,10 @@ Run остаётся связан с исходной project/module identity.
    по каждой части `step_size --stage context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
    context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
    status покажет `next_step`.
+   Импорт готовых кейсов (`scan --cases <csv>`, без `--docs`): шаг `context-marker:requirements` делает код —
+   `python -m tools.api cases-import --run-root <run> --attempt <attempt_id>` (план частей называет его в `by_code`); его
+   `imported.digest` — последний `--input-digest` каждой пачки `tc-generator`, файл `<run>/imported-cases/<attempt_id>.json`
+   передай в `plan-batches --imported` и `validate-fragment --imported`. Человеческие поля кейсов не меняются.
 1. Один раз вызови `context-marker` для authorized requirements/context и
    persist/readback-проверь полный normalized source-requirement artifact. До вызова
    persist/readback-проверь `model-request` с exact stage/role/policy, model,

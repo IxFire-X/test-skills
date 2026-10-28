@@ -394,9 +394,15 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
     return lines
 
 
+IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предусловия, действие, данные и ожидаемый результат кейсов взяты из CSV человека"
+               " дословно, код сверил их байт в байт. Их текст не оценивай и вердикт из-за него не снижай — замечание к нему только"
+               " для человека. Проверяй машинную часть против этого текста: операция соответствует действию, входы — данным шага,"
+               " каждое утверждение — ожидаемому результату; невыводимое из текста должно быть manual или blocked.")
+
+
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
-           reference: Iterable[Mapping[str, Any]] | None = None) -> bytes:
+           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
@@ -424,6 +430,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         "- Код проверил структуру и ссылки (типы, ID, порядок, поток данных между шагами), не смысл. Смысл операций, входов"
         " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
         " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
+        *(["- " + IMPORT_NOTE] if imported else []),  # FaT-IMP: one line, the view of other runs keeps its bytes
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",
@@ -552,11 +559,13 @@ def main(argv: list[str] | None = None) -> int:
             existing = None if profile == "autotest" or not state["attempts"] else run_existing_tests(root, str(state["attempts"][-1]["attempt_id"]))
         except (OSError, ValueError, KeyError, TypeError):
             existing = None
+        from tools.cases_import import cases_path
         from tools.pilot_state import read_reference_cases
 
         reference = None if profile == "autotest" or not state["attempts"] else read_reference_cases(root, str(state["attempts"][-1]["attempt_id"]))
         data = render(document, profile, *(grouping or (None, None)), existing=existing,
-                      reference=None if reference is None else reference["cases"])
+                      reference=None if reference is None else reference["cases"],
+                      imported=profile == "review" and cases_path(root) is not None)
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
