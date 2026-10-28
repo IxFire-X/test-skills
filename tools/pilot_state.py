@@ -4005,6 +4005,55 @@ def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapp
     return {**readback, "created": published["created"]}
 
 
+class IndependenceUnverified(ValueError):
+    """FaT-10d: the host states no fresh context in a run without ``scan --accept-self-review``."""
+
+    code = "INDEPENDENCE_UNVERIFIED"
+
+
+def require_fresh_context_statement(run_root: Path, fresh_context: bool) -> None:
+    """FaT-10d: ``fresh_context`` is the host's statement; ``no`` needs SELF admitted at scan, ``yes`` is left to the protocol."""
+    if type(fresh_context) is not bool:
+        raise ValueError("fresh_context must be the host's yes or no")
+    if not fresh_context and not self_review_accepted(run_root):
+        raise IndependenceUnverified(
+            "INDEPENDENCE_UNVERIFIED: ревьюер без свежего контекста, а прогон не принял SELF; fix: только если человек согласен "
+            "на ревью в той же сессии, повтори scan этого запроса с --accept-self-review; иначе вызови ревьюера отдельным "
+            "субагентом без истории генерации и укажи --fresh-context yes"
+        )
+
+
+@closure_cached  # FaT-10d
+def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *, fresh_context: bool, reviewer_invocation_id: str) -> dict[str, Any]:
+    """The ``--facts`` of ``open-automation-boundary`` for revision N from the journal; writes nothing.
+
+    The automation digest is the CANDIDATE_PUBLISHED of ``tc-to-autotest:rN``, the generator invocation its
+    MODEL_REQUESTED, the effective pair the read-back effective canonical. ``fresh_context`` and the reviewer
+    invocation are the host's statement; the code computes only ``distinct_invocations`` and the digest."""
+    if type(revision) is not int or revision not in {1, 2}:
+        raise ValueError("AUTOMATION_REVISION_INVALID: the automation revision is 1 or 2")
+    require_fresh_context_statement(run_root, fresh_context)
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    stage = f"tc-to-autotest:r{revision}"
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage]
+    requested = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
+    published = [event for event in events if event["event_type"] == "CANDIDATE_PUBLISHED"]
+    if len(requested) != 1 or len(published) != 1:
+        raise ValueError(f"AUTOMATION_RESPONSE_MISSING: {stage} has no recorded answer yet: tools.api model-response --stage {stage} first")
+    generator = str(_read_model_request_with_state(project, root, state, attempt_id, stage, str(requested[0]["artifact_digest"]))["invocation_id"])
+    effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
+    reviewer = str(reviewer_invocation_id)
+    isolation = {"fresh_context": fresh_context, "distinct_invocations": generator != reviewer}
+    isolation["evidence_digest"] = "sha256:" + hashlib.sha256(json.dumps(isolation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return {
+        "automation_digest": str(published[0]["artifact_digest"]), "automation_revision": revision,
+        "reviewer_session_id": f"autotest-review-{attempt_id}-r{revision}", "generator_invocation_id": generator,
+        "reviewer_invocation_id": reviewer, "role_policy": "autotest-static-reviewer-v1", "host_isolation": isolation,
+        "effective_canonical_digest": effective["document_digest"], "effective_bundle_receipt_digest": effective["effective_bundle_receipt_digest"],
+    }
+
+
 def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bind one complete materialization receipt to the active attempt and read it back."""
     published = publish_attempt_receipt(run_root, attempt_id, "generated-delta", {"delta": dict(delta)})

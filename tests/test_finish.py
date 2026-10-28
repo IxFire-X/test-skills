@@ -214,7 +214,7 @@ def test_finish_closes_a_reviewer_abort_branch(tmp_path: Path, capsys: pytest.Ca
     from tools.orchestrate_test_case_revision import validate_reviewer_session
 
     aborted = {"ordinal": 2, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_CONTEXT_LIMIT"}
-    session, binding, _review = _session(_started(), aborted, status="ABORTED", package=_package(1001))
+    session, binding, _review = _session(_started(), aborted, status="ABORTED", package=_package(1000))  # FaT-10d: over the budget open-session refuses
     run_root, attempt_id = _bind_session(tmp_path, session, binding, "cases-only-v1")
     validate_reviewer_session(session, binding, run_root=run_root, attempt_id=attempt_id)
     code, output = _finish(tmp_path, run_root, capsys)

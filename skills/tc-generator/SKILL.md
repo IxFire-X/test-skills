@@ -5,7 +5,7 @@ description: Use when a 5.0.0 source-requirement context batch must become one c
 
 # Canonical test-case generation
 
-Consume valid 5.0.0 context and emit JSON-only `artifacts.candidate_fragment`. Read the [generation contract](references/case-generation-contract.md); `schemas/tc-generator-output.schema.json`, `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume valid 5.0.0 context and emit JSON-only bare candidate fragment: the top-level object is the fragment of `schemas/candidate-fragment.schema.json` itself, with its own `digest`, no `artifacts` envelope (`tools.api model-response` accepts only that). Read the [generation contract](references/case-generation-contract.md); `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
 
 The controller invokes this role once per deterministic batch with declared immutable
 inputs and persists/readback-checks the complete fragment before assembly. Do not create
@@ -17,7 +17,7 @@ run state, review your own output, publish projections, or write generated proje
 2. Create exactly one candidate fragment for the controller-owned batch namespace. Preserve distinct `SREQ-*` source IDs, assign only the controller-authorized canonical IDs, and emit explicit many-to-many source -> canonical -> case mappings. A case may cite only canonical requirements owned by that batch; `out_of_scope` is never a generator decision.
 3. For every step, write three human fields: `action`, `test_data`, and `expectations[].text`. Keep the structured operation, typed inputs, previous-step output references, outputs, and assertions as a separate exact automation model. The three human fields must be independently executable and cover the machine semantics without printing binding or assertion expressions.
 4. For a manual or blocked step, use its exact canonical manual/blocker branch and reason; do not turn a project-generation obstacle into invented behavior.
-5. Validate the fragment's canonical content through `tools.canonical_document`, wrap it in the 5.0.0 generator envelope, validate it against `schemas/tc-generator-output.schema.json`, and return it. The controller assembles all immutable fragments into the sole canonical document before reviewer or projection work.
+5. Validate the fragment's canonical content through `tools.canonical_document` and return the bare fragment (no generator envelope); the controller checks it with `tools.api validate-fragment`, `assemble` and `validate-canonical` before `model-response`. The controller assembles all immutable fragments into the sole canonical document before reviewer or projection work.
 
 Apply the mandatory [human scenario rules](references/case-generation-contract.md#human-scenario-rules) to every human field and its structured inputs/assertions. They are the single format authority for Russian wording, HTTP/JSON, placeholders, and requirement oracles.
 The shared canonical validator checks every step, including the last. Expected is a

@@ -221,9 +221,11 @@ Run остаётся связан с исходной project/module identity.
    Порядок входов: `[marker.content_digest, context.digest, plan.digest, header_digest]`.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
-   Persist/readback-проверь каждый complete fragment (`tools.api validate-fragment --fragment <f> --plan <f>
-   --header <f> --context-receipt <f>`, затем `model-response`); `CANDIDATE_PUBLISHED` для его exact digest
-   `model-response` пишет сам (так же для `tc-to-autotest:rN`).
+   Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
+   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>`, затем `assemble` и
+   `validate-canonical` из п.4 на этом же файле (всех фрагментах). Отказ любой из трёх — ошибка ответа: на неё идёт
+   единственный повтор стадии (`retry_prompt` — текст отказа); после `model-response` ответ стадии не заменить.
+   `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.0.0` с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
    --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
@@ -243,7 +245,7 @@ exact. Не ограничивай число requirements/cases искусст�
 
 Controller формирует immutable package из candidate, exact requirements/context/source
 evidence и provenance. Открой одну fresh role-isolated reviewer session
-(`python -m tools.orchestrate_test_case_revision open-session …`) и вызови
+(`python -m tools.orchestrate_test_case_revision open-session … --session-start <run>/tmp/session-start.json`) и вызови
 `tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …` с
 `--reviewer-session` из `tools.api complete-review --out <run>/tmp/session.json` (сессию с вердиктом строит код из
 журнала и ответа ревьюера после `model-response`; руками её не собирай) и `--review` — тем же ответом ревьюера. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
@@ -253,6 +255,15 @@ candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <b
 Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
 boundary.package_digest]` из прочитанного `reviewer-session-boundary` и его exact
 `reviewer_invocation_id`. Request проверяет существующие boundary/ledger и порядок.
+Файл `--session-start` строит код, руками его не собирай: `tools.api session-start` с теми же `--candidate`,
+`--candidate-receipt`, `--assembly-receipt`, `--inventory-receipt`, `--context-receipt`, `--context-marker-output`,
+`--generator-fragment`, что у `open-session`, и `--out <run>/tmp/session-start.json`, плюс два твоих заявления:
+`--reviewer-invocation-id <id вызова ревьюера>` (тот же id потом в его `model-request`) и `--fresh-context yes|no`.
+Называй честно: `yes` — только если ревьюер отдельный субагент или вызов без истории генерации; ревью в этой же
+сессии — `no`, и оно допустимо только при флаге из §1 (иначе отказ `INDEPENDENCE_UNVERIFIED` с fix). Бюджет сессии
+`context_budget_bytes` = `base_package_byte_count` пакета ревью + `.skillsrc limits.context_batch_bytes` (256 КиБ по
+умолчанию: место под C-lite evidence); бюджет, `distinct_invocations` (твой id против id генератора из журнала) и
+`evidence_digest` считает код. Бюджет меньше пакета — `open-session` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
 
 Ревью без свежего контекста допускается только по флагу из §1 (вопрос задаётся до scan).
 
@@ -315,7 +326,10 @@ Exact transport input/output bytes сохраняются отдельно; их
 эти поля. Не переписывай опубликованный request после вызова модели.
 
 1. Вызови `tc-to-autotest` для effective canonical.
-2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`), запиши
+2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
+   код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
+   `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no
+   --out <run>/tmp/auto-facts-rN.json` (заявления — как для `session-start` в §4). Затем запиши
    `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
    вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
 3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует

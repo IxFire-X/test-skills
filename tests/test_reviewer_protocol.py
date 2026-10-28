@@ -265,6 +265,7 @@ def test_unreviewed_r1_is_read_back_and_bound_before_session_reservation(tmp_pat
     with pytest.raises(ValueError, match="context receipt"):
         reviewer_package_binding(candidate, receipt, assembly, inventory, [fabricated], context_marker_output=marker, generator_fragments=fragments, run_root=run_root, attempt_id=attempt_id)
     session, _unused, _review = _session(_started(), _verdict(), _completed(), package=binding)
+    session["context_budget_bytes"] = binding["base_package_byte_count"]  # FaT-10d: open-session refuses a budget below the package
     start = {key: session[key] for key in ("session_id", "generator_role", "reviewer_role", "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "context_budget_bytes")}
     boundary = open_reviewer_session(run_root, attempt_id, binding, start)
     session["boundary_digest"] = boundary["digest"]
@@ -298,7 +299,7 @@ def test_evidence_retrieval_is_bounded_and_abort_is_only_zero_verdict_terminal_p
 
     project = tmp_path / "overflow"
     project.mkdir()
-    large_binding = _package(1001)
+    large_binding = _package(1000)  # FaT-10d: a package over the budget is refused at open-session; the abort closure stays
     aborted = {"ordinal": 2, "event_type": "REVIEW_SESSION_ABORTED", "reason_code": "REVIEW_CONTEXT_LIMIT"}
     too_large, large_binding, _review = _session(_started(), aborted, status="ABORTED", package=large_binding)
     run_root, attempt_id = _bind_session(project, too_large, large_binding)

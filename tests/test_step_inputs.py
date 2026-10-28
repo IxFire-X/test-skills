@@ -47,6 +47,22 @@ def test_the_generator_inputs_come_from_the_published_request(tmp_path: Path) ->
     assert all(row["bytes"] == Path(row["path"]).stat().st_size for row in found["files"])
 
 
+def test_plan_and_header_published_without_a_suffix_are_found(tmp_path: Path) -> None:
+    """FaT-10d: the microservices run published `--name batch-plan` and `--name batch-header`; both were STEP_INPUT_UNRESOLVED."""
+    from tools.batch_assembly import with_digest
+    from tools.step_size import request_files
+
+    root, attempt_id, _baseline, receipts, marker, _plan, _header, _plan_path, _header_path = _generator_run(tmp_path)
+    plan = with_digest({"kind": "plan", "batches": ["BATCH-fixture"], "name": "без суффикса"})
+    header = with_digest({"kind": "header", "title": "Заголовок без суффикса"})
+    paths = [pilot_state.publish_run_artifact_bytes(root, attempt_id, name, json.dumps(value, ensure_ascii=False).encode("utf-8"))["path"]
+             for name, value in (("batch-plan", plan), ("batch-header", header))]
+    _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
+    found = request_files(root, "tc-generator:BATCH-fixture")
+    assert found["unresolved"] == [], found
+    assert [row["path"] for row in found["files"] if row["digest"] in {plan["digest"], header["digest"]}] == [str(root / path) for path in paths]
+
+
 def test_the_automation_inputs_come_from_the_published_requests(tmp_path: Path) -> None:
     from tests.test_finish import _project
     from tools.step_size import request_files

@@ -267,6 +267,54 @@ def reviewer_package_binding(
     return binding
 
 
+@_closure_cached  # FaT-10d
+def reviewer_session_start(
+    run_root: Path,
+    attempt_id: str,
+    *,
+    candidate: Mapping[str, Any],
+    candidate_receipt: Path,
+    assembly_receipt: Mapping[str, Any],
+    inventory_receipt: Mapping[str, Any],
+    context_receipts: Sequence[Mapping[str, Any]],
+    context_marker_output: Mapping[str, Any],
+    generator_fragments: Sequence[Mapping[str, Any]],
+    fresh_context: bool,
+    reviewer_invocation_id: str,
+) -> dict[str, Any]:
+    """The ``--session-start`` of ``open-session``, from the open-session inputs and the journal; writes nothing.
+
+    Budget rule: ``context_budget_bytes = base_package_byte_count + .skillsrc limits.context_batch_bytes`` (256 KiB by
+    default) — the whole review package plus room for C-lite evidence of one context batch. ``fresh_context`` and the
+    reviewer invocation are the host's statement; the generator invocation is the one of the first batch's
+    ``MODEL_REQUESTED``; the code computes ``distinct_invocations``, the evidence digest and the budget."""
+    from tools.pilot_state import derive_state, read_model_request, require_fresh_context_statement
+    from tools.run_pipeline import _scan_context_budget
+
+    require_fresh_context_statement(Path(run_root), fresh_context)
+    package = reviewer_package_binding(
+        candidate, _load_receipt(Path(candidate_receipt)), assembly_receipt, inventory_receipt, context_receipts,
+        context_marker_output=context_marker_output, generator_fragments=generator_fragments,
+        run_root=Path(run_root), attempt_id=attempt_id,
+    )
+    stage = f"tc-generator:{package['generator_batches'][0]['batch_id']}"
+    requested = [event for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
+                 and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
+    if len(requested) != 1:
+        raise ValueError(f"REVIEWER_PROTOCOL: {stage} has no single model request")
+    generator = str(read_model_request(Path(run_root), attempt_id, stage, str(requested[0]["artifact_digest"]))["invocation_id"])
+    reviewer = str(reviewer_invocation_id)
+    isolation = {"fresh_context": fresh_context, "distinct_invocations": generator != reviewer,
+                 "role_policy": "canonical-reviewer-v1"}
+    isolation["evidence_digest"] = _host_isolation_digest(isolation)
+    reserve = _scan_context_budget({}, Path(run_root).resolve().parent.parent)
+    return {
+        "session_id": f"review-{attempt_id}", "generator_role": "generator", "reviewer_role": "canonical-reviewer",
+        "generator_invocation_id": generator, "reviewer_invocation_id": reviewer, "host_isolation": isolation,
+        "context_budget_bytes": package["base_package_byte_count"] + reserve,
+    }
+
+
 @_closure_cached  # FaT-9b
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
     """Reserve the only canonical reviewer session for an active attempt before invocation."""
@@ -283,6 +331,12 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
         or isolation.get("evidence_digest") != _host_isolation_digest(isolation)
     ):
         raise ValueError("REVIEWER_PROTOCOL: invalid reviewer session start")
+    budget = start["context_budget_bytes"]
+    if type(budget) is not int or budget < package["base_package_byte_count"]:  # FaT-10d: refuse now, not after the review
+        raise ValueError(
+            f"REVIEW_CONTEXT_LIMIT: context_budget_bytes {budget} is smaller than the review package "
+            f"({package['base_package_byte_count']} bytes); build the session start with tools.api session-start"
+        )
     facts = {
         **start,
         "canonical_branch_digest": package["candidate_digest"],
@@ -814,6 +868,14 @@ def _read_existing_context_receipts(paths: Sequence[Path], run_root: Path, attem
     return result
 
 
+_FIXES = {  # FaT-10d
+    "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
+                            "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови select без --review; вердикт уже записан — "
+                            "начни новый прогон (scan --new-run) и строй session-start командой `tools.api session-start`",
+    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: передай те же файлы, что open-session, и сессию из `tools.api complete-review`",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _Parser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -917,8 +979,12 @@ def main(argv: list[str] | None = None) -> int:
     except OrchestrationError as error:
         exit_code = 2 if error.code in {"ORCHESTRATION_PUBLICATION", "ORCHESTRATION_VERIFICATION"} else 1
         print(json.dumps({"candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt), "code": error.code, "diagnostics": [dict(row) for row in error.diagnostics], "status": "error", "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
-    except (StrictJsonError, OSError, ValueError):
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_IO")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
+    except (StrictJsonError, OSError, ValueError) as error:
+        # FaT-10d: the inner refusal code and its fix, not only ORCHESTRATION_IO
+        reason = re.match(r"^([A-Z][A-Z0-9_]+)(?::|$)", str(error))
+        reason_code = reason.group(1) if reason else None
+        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_IO")], "status": "error", "successor_bundle_receipt": None,
+                          "reason_code": reason_code, "message": str(error), "fix": _FIXES.get(reason_code)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     output = {"candidate_bundle_receipt": _receipt_json(result.candidate_bundle_receipt), "diagnostics": [], "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt), "effective_source": None if result.effective_document is None else _source(result.effective_document), "facts": _plain(result.facts), "status": result.status, "successor_bundle_receipt": _receipt_json(result.successor_bundle_receipt)}
     print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0

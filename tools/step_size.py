@@ -173,8 +173,9 @@ def _digest_paths(root: Path) -> tuple[dict[str, set[Path]], dict[str, set[Path]
 
     index: dict[str, set[Path]] = {}
     inside: dict[str, set[Path]] = {}
-    for path in sorted(root.rglob("*.json")):
-        if path.relative_to(root).parts[0] == "tmp":
+    # FaT-10d: run artifacts (artifacts/<attempt>/batch-plan, batch-header) are JSON files without a suffix
+    for path in sorted(root.rglob("*")):
+        if path.relative_to(root).parts[0] == "tmp" or path.suffix not in {".json", ""} or not path.is_file():
             continue
         try:
             raw = path.read_bytes()

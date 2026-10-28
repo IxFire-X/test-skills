@@ -68,6 +68,13 @@ def _answer(path: str) -> _Answer:
         raise argparse.ArgumentTypeError(f"{path}: {error}") from error
 
 
+def _yes_no(value: str) -> bool:
+    """FaT-10d: the host's own statement (`--fresh-context yes|no`), never derived by the code."""
+    if value not in {"yes", "no"}:
+        raise argparse.ArgumentTypeError(f"{value}: expected yes or no")
+    return value == "yes"
+
+
 def _bytes(path: str) -> bytes:
     try:
         return Path(path).read_bytes()
@@ -129,6 +136,14 @@ def _cmd_validate_canonical(a):
     return canonical_document.validate_canonical_document(a.document)
 
 
+def _cmd_session_start(a):
+    return orchestrate_test_case_revision.reviewer_session_start(
+        a.run_root, a.attempt, candidate=a.candidate, candidate_receipt=a.candidate_receipt, assembly_receipt=a.assembly_receipt,
+        inventory_receipt=a.inventory_receipt, context_receipts=a.context_receipt, context_marker_output=a.context_marker_output,
+        generator_fragments=a.generator_fragment, fresh_context=a.fresh_context, reviewer_invocation_id=a.reviewer_invocation_id,
+    )
+
+
 def _cmd_complete_review(a):
     return orchestrate_test_case_revision.complete_reviewer_session(a.run_root, a.attempt)
 
@@ -151,6 +166,11 @@ def _cmd_read_effective(a):
 
 def _cmd_open_automation_boundary(a):
     return pilot_state.open_automation_review_boundary(a.run_root, a.attempt, a.facts)
+
+
+def _cmd_automation_boundary_facts(a):
+    return pilot_state.automation_boundary_facts(a.run_root, a.attempt, a.revision, fresh_context=a.fresh_context,
+                                                 reviewer_invocation_id=a.reviewer_invocation_id)
 
 
 def _cmd_read_receipt(a):
@@ -203,10 +223,16 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
+    "session-start": (_cmd_session_start, (*RUN, ("--candidate", _json), ("--candidate-receipt", Path), ("--assembly-receipt", _json),
+                                           ("--inventory-receipt", _json), ("--context-receipt", _json, "append"),
+                                           ("--context-marker-output", _json), ("--generator-fragment", _json, "append"),
+                                           ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None, ()),
     "complete-review": (_cmd_complete_review, RUN, None, ()),
     "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
     "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None, ()),
     "read-effective": (_cmd_read_effective, RUN, None, ()),
+    "automation-boundary-facts": (_cmd_automation_boundary_facts, (*RUN, ("--revision", int), ("--fresh-context", _yes_no),
+                                                                     "--reviewer-invocation-id"), None, ()),
     "open-automation-boundary": (_cmd_open_automation_boundary, (*RUN, ("--facts", _json)), None, ()),
     "read-receipt": (_cmd_read_receipt, (*RUN, "--kind", "--event"), None, ()),
     "automation-digest": (_cmd_automation_digest, (("--automation", _json),), None, ()),
