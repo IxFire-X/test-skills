@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -19,13 +20,20 @@ GUARANTEE = ("без кода, текста спеки, кейсов и отве
 CLOCK_NOTE = "время по часам машины, не проверяется"
 NO_QUESTIONS = "вопросов нет\n"
 SEPARATOR = " — "
+REVIEW_STAGE = "tc-reviewer:canonical"
+_NOTE_VERDICTS = frozenset({"ПРИНЯТО", "AUTO_FIX_APPLIED"})
+_NOTE_SEVERITIES = ("WARNING", "INFO")
+_SAFE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,39}$")
 _ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
 
 # --- questions for the analyst ----------------------------------------------------------------
 
-def analyst_questions(warnings: Iterable[Any]) -> str:
-    """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее»."""
+def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = ()) -> str:
+    """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
+
+    FaT-RN: ``notes`` — the WARNING/INFO findings of the accepted review, with their text, under «Замечания ревью».
+    """
     groups: dict[str, list[list[str]]] = {}
     loose: list[str] = []
     for warning in warnings:
@@ -35,7 +43,7 @@ def analyst_questions(warnings: Iterable[Any]) -> str:
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
         elif text:
             loose.append(text)
-    if not groups and not loose:
+    if not groups and not loose and not notes:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
     for requirement, items in groups.items():
@@ -46,7 +54,67 @@ def analyst_questions(warnings: Iterable[Any]) -> str:
         lines.append("")
     if loose:
         lines += ["## Прочее", "", *(f"- {text}" for text in loose), ""]
+    if notes:
+        lines += ["## Замечания ревью", "", "Ревью приняло кейсы; это мелочи, кейсы код не менял.", ""]
+        lines += [f"- [{row['severity']} {row['code']}] {', '.join(row['related_ids'])}: {' '.join(str(row['message']).split())}"
+                  for row in notes]
+        lines.append("")
     return "\n".join(lines)
+
+
+# --- notes of the accepted review (FaT-RN) ------------------------------------------------------
+
+def _document_ids(value: Any, found: set[str] | None = None) -> set[str]:
+    """Every identifier of a canonical document: values of ``*id`` keys and items of ``*_ids`` lists."""
+    found = set() if found is None else found
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if isinstance(item, str) and (key == "id" or str(key).endswith("_id")):
+                found.add(item)
+            elif isinstance(item, list) and str(key).endswith("_ids"):
+                found.update(entry for entry in item if isinstance(entry, str))
+            _document_ids(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _document_ids(item, found)
+    return found
+
+
+def review_notes(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-RN: the WARNING/INFO findings of the review that selected the effective document; only reads the journal.
+
+    ``items`` may leave the workplace: a code only when it is an identifier, related IDs only those of the effective
+    document (the others are counted).  ``texts`` keep the model text for the analyst questions only.  ``path`` is the
+    journal-bound reviewer answer.  The code never changes a case or recomputes the verdict.
+    """
+    from tools import pilot_state as pilot
+
+    root = Path(run_root)
+    empty: dict[str, Any] = {"count": 0, "path": None, "items": [], "texts": []}
+    responses = [row for row in pilot.derive_state(root)["events"] if row.get("attempt_id") == attempt_id
+                 and row["event_type"] == "MODEL_RESPONSE_RECEIVED" and row.get("stage_instance_id") == REVIEW_STAGE]
+    if not responses:
+        return empty
+    try:
+        publication = pilot.read_model_stage_artifact(root, attempt_id, REVIEW_STAGE, str(responses[-1]["artifact_digest"]))
+        report = publication["artifact"]["artifacts"]["validation_report"]
+        findings = [row for row in report.get("findings") or [] if row.get("severity") in _NOTE_SEVERITIES]
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return empty
+    if report.get("verdict") not in _NOTE_VERDICTS or not findings:
+        return empty
+    try:
+        known = _document_ids(pilot.read_effective_canonical(root, attempt_id)["document"])
+    except (KeyError, OSError, TypeError, ValueError):
+        known = set()  # no effective document yet: no ID is confirmed, all are counted as dropped
+    items, texts = [], []
+    for row in findings:
+        related = [str(value) for value in row.get("related_ids") or []]
+        kept = [value for value in related if value in known]
+        code = row.get("code") if isinstance(row.get("code"), str) and _SAFE_CODE.fullmatch(row["code"]) else None
+        items.append({"severity": row["severity"], "code": code, "related_ids": kept, "dropped_ids": len(related) - len(kept)})
+        texts.append({"severity": row["severity"], "code": code or "—", "related_ids": kept or ["—"], "message": row.get("message", "")})
+    return {"count": len(items), "path": str(root / publication["path"]), "items": items, "texts": texts}
 
 
 # --- model calls --------------------------------------------------------------------------------
@@ -364,6 +432,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         cases = len(document["test_cases"])
     automation = automation_artifact(root, events)
     mismatched = data_mismatch(document) if cases is not None else []
+    notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
 
     if terminal.get("review_independence") == "SELF":
         review = "ревью в той же сессии (SELF), принято по согласию человека"
@@ -394,6 +463,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "completion": terminal.get("completion"), "coverage": terminal.get("coverage"), "accepted": terminal.get("accepted"),
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
+        "review_notes": {"count": notes["count"], "items": notes["items"]},
         "quarantine": [{key: row[key] for key in ("file", "method", "ref")} for row in status.get("quarantine") or []],
         "quarantine_unresolved": "QUARANTINE_UNRESOLVED" if status.get("quarantine_unresolved") else None,
         "zephyr_import": _zephyr_import(root),
@@ -421,6 +491,11 @@ def _dash(value: Any) -> str:
     return "—" if value is None else str(value)
 
 
+def _note_line(row: Mapping[str, Any]) -> str:
+    dropped = f" (отброшено ID: {row['dropped_ids']})" if row["dropped_ids"] else ""
+    return f"- {row['severity']} {_dash(row['code'])}: {', '.join(row['related_ids']) or '—'}{dropped}"
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     lines = [
@@ -437,6 +512,9 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
         *([] if report["warnings"] else ["- нет"]), "",
+        *(["## Замечания ревью", "", "Ревью приняло кейсы с замечаниями-мелочами; текст — в questions-for-analyst.md.", "",
+           *(_note_line(row) for row in report["review_notes"]["items"]), ""]
+          if (report.get("review_notes") or {}).get("count") else []),
         "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",
         "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
         *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
@@ -476,13 +554,20 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
-        "questions-for-analyst.md": analyst_questions(warnings).encode("utf-8"),
+        "questions-for-analyst.md": analyst_questions(warnings, _attempt_notes(root)["texts"]).encode("utf-8"),
     }
     written = []
     for name, data in outputs.items():
         atomic_write_confined_bytes_at_root(project, root, root / name, data)
         written.append(str(root / name))
     return written
+
+
+def _attempt_notes(run_root: Path) -> dict[str, Any]:
+    from tools import pilot_state as pilot
+
+    attempts = pilot.derive_state(Path(run_root))["attempts"]
+    return review_notes(run_root, attempts[-1]["attempt_id"]) if attempts else {"count": 0, "texts": []}
 
 
 def write_questions_next_to(output_dir: Path, run_root: Path) -> tuple[str | None, str | None]:
@@ -499,7 +584,7 @@ def write_questions_next_to(output_dir: Path, run_root: Path) -> tuple[str | Non
     try:
         run_root = Path(run_root).resolve()
         warnings = _durable_status_facts(run_root.parents[1], run_root, stage="publish").get("warnings") or []
-        data = analyst_questions(warnings).encode("utf-8")
+        data = analyst_questions(warnings, _attempt_notes(run_root)["texts"]).encode("utf-8")
     except Exception:  # noqa: BLE001 - the case set is already published; the report still writes the file
         return None, "ANALYST_QUESTIONS_UNREADABLE"
     temporary: Path | None = None

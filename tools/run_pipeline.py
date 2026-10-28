@@ -163,6 +163,17 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
     )} if unresolved else {})}
 
 
+def _review_notes_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-RN: how many notes the accepted review left and where its answer is; nothing when there are none."""
+    from tools.run_report import review_notes
+
+    try:
+        notes = review_notes(run_root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):  # a hint never fails the step
+        return {}
+    return {"review_notes": {"count": notes["count"], "path": notes["path"]}} if notes["count"] else {}
+
+
 _KEPT_DISPOSITIONS = frozenset({"RETAINED", "QUARANTINED", "PRESERVED_EXECUTION_UNKNOWN", "PRESERVED_CONTENT_CONFLICT",
                                  "PRESERVED_CLEANUP_CONFLICT"})
 
@@ -1912,6 +1923,7 @@ def cmd_finish(args: Any) -> int:
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
         **_quarantine_summary(root, attempt_id),
+        **_review_notes_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),
         **({"fix": "только если человек согласен на ревью в той же сессии, повтори scan этого запроса с --accept-self-review: "
                    + (_scan_command(project, manifest["scan_request"], extra=() if manifest["scan_request"].get("accept_self_review")
@@ -1941,6 +1953,8 @@ def cmd_status(args: Any) -> int:
     root, run, state = _read_run_coordinate(project, args.run)
     result = _durable_status(project, root, stage="status")
     attempt = state["attempts"][-1] if state["attempts"] else None
+    if attempt is not None:
+        result.update(_review_notes_summary(root, str(attempt["attempt_id"])))
     if attempt is not None and attempt.get("state") == "TERMINAL":
         from tools.pilot_state import read_terminal_result
 

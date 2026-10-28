@@ -32,9 +32,14 @@ requires generated-delta, execution, and disposition evidence.
 
 | Verdict | Required output |
 |---|---|
-| `ПРИНЯТО` | candidate is selected; no successor |
+| `ПРИНЯТО` | candidate is selected; no successor, no corrections; optional `WARNING`/`INFO` findings for trifles only (wording, imprecision, a question to the analyst), never `BLOCKING` |
 | `AUTO_FIX_APPLIED` | exact `successor_edits` of human fields that code applies to the candidate (or, for compatibility, one complete successor document); incremented lineage, preserved identity graph |
 | `ТРЕБУЕТ ДОРАБОТКИ` | blocking findings; no successor |
+
+A semantic error in an expected result, a wrong reading of a requirement, a false PASS, or a
+missing state check is not a note: it is `ТРЕБУЕТ ДОРАБОТКИ` (or `AUTO_FIX_APPLIED` for a
+mechanical fix). Notes of `ПРИНЯТО`/`AUTO_FIX_APPLIED` reach the person through `report.md`,
+`questions-for-analyst.md` and `finish`/`status` (`review_notes`); code does not act on them.
 
 `reviewed_case_ids` lists all candidate cases exactly once in physical order. A safe correction has a single evidence-backed mechanical meaning. It retains every unrelated entity and all IDs, including nested capability, step, output, expectation, and assertion identities. Removing a case, changing behavior, filling a missing technical fact, or returning a fragment is rework.
 

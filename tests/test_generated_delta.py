@@ -33,6 +33,7 @@ def _reviewer_protocol_inputs(
     bundle_root: Path | None = None,
     fresh_context: bool = True,
     edits: list | None = None,
+    findings: list | None = None,
 ):
     from tools.canonical_document import document_sha256
     from tools.orchestrate_test_case_revision import (
@@ -159,6 +160,8 @@ def _reviewer_protocol_inputs(
             corrections=[{"id": "FIX-cv", "correction_kind": "MECHANICAL", "related_ids": [edits[0]["case_id"]],
                           "description": "Уточнить текст.", "evidence": ["CREQ"]}])
         review["artifacts"]["successor_edits"] = edits
+    if findings is not None:  # FaT-RN: WARNING/INFO notes of an accepted (or auto-fixed) review
+        report["findings"] = findings
     session = {
         "schema_version": "1.0.0", "session_id": "phase5-effective", "boundary_digest": boundary_digest,
         "package_binding": package,

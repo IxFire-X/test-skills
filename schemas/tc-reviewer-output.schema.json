@@ -22,7 +22,7 @@
   "allOf": [
     {
       "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "ПРИНЯТО"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
-      "then": {"properties": {"artifacts": {"not": {"anyOf": [{"required": ["successor_document"]}, {"required": ["successor_edits"]}]}, "properties": {"validation_report": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
+      "then": {"properties": {"artifacts": {"not": {"anyOf": [{"required": ["successor_document"]}, {"required": ["successor_edits"]}]}, "properties": {"validation_report": {"properties": {"findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}}, "corrections": {"maxItems": 0}}}}}}}
     },
     {
       "if": {"properties": {"artifacts": {"properties": {"validation_report": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}, "required": ["verdict"]}}, "required": ["validation_report"]}}, "required": ["artifacts"]},
