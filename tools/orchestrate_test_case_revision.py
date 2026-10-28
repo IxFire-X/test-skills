@@ -19,6 +19,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
+from tools.json_cli import error_code_prefix, error_fields
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
 from tools.review_edits import reviewer_successor
@@ -982,10 +983,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt), "code": error.code, "diagnostics": [dict(row) for row in error.diagnostics], "status": "error", "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
     except (StrictJsonError, OSError, ValueError) as error:
         # FaT-10d: the inner refusal code and its fix, not only ORCHESTRATION_IO
-        reason = re.match(r"^([A-Z][A-Z0-9_]+)(?::|$)", str(error))
-        reason_code = reason.group(1) if reason else None
+        fields = error_fields(error)  # FaT-U6: the same reading as tools.api
+        reason_code = error_code_prefix(fields["message"])
         print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_IO")], "status": "error", "successor_bundle_receipt": None,
-                          "reason_code": reason_code, "message": str(error), "fix": _FIXES.get(reason_code)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
+                          "reason_code": reason_code, "message": fields["message"], "fix": _FIXES.get(reason_code) or fields.get("fix")}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     output = {"candidate_bundle_receipt": _receipt_json(result.candidate_bundle_receipt), "diagnostics": [], "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt), "effective_source": None if result.effective_document is None else _source(result.effective_document), "facts": _plain(result.facts), "status": result.status, "successor_bundle_receipt": _receipt_json(result.successor_bundle_receipt)}
     print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0

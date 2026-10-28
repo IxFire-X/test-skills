@@ -2367,6 +2367,13 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(error, (FileNotFoundError, ValueError)):
             _print({"status": "error", "reason": str(error)})
             return 2
+        if isinstance(error, (KeyError, TypeError, OSError)):
+            # FaT-F1: a JSON answer with the code instead of a traceback; an OSError names its file
+            from tools.json_cli import error_fields
+
+            fields = error_fields(error)
+            _print({"status": "error", "reason": fields["code"], **fields})
+            return 2
         raise
 
 

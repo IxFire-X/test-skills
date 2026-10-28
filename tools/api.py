@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import automation_validation, batch_assembly, canonical_document, orchestrate_test_case_revision, pilot_state, run_tests, step_size
-from tools.json_cli import JsonArgumentParser
+from tools.json_cli import JsonArgumentParser, error_fields
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
 
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         out = _out_target(args.out) if not parts and args.out is not None else None
         result = handler(args)
     except Exception as error:
-        _print({"status": "error", "command": args.command, "code": str(getattr(error, "code", None) or type(error).__name__), "message": str(error)})
+        _print({"status": "error", "command": args.command, **error_fields(error)})  # FaT-U6: the refusal's own code and fix
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
