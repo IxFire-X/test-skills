@@ -232,6 +232,15 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
     except (KeyError, OSError, TypeError, ValueError):
         pass
     resolved, unresolved = input_bytes(sizes, inputs)
+    basis = None
+    if str(call["stage"]).startswith("tc-reviewer:") and inputs:
+        # FaT-CV2 (2.13): the reviewer reads the view of the candidate (its first input), not the full canonical JSON
+        view = root / "review-views" / (str(inputs[0]).removeprefix("sha256:") + ".md")
+        basis = "канон"
+        if view.is_file():
+            rest, unresolved = input_bytes(sizes, inputs[1:])
+            resolved, basis = rest + view.stat().st_size, "вид"
+    call["input_basis"] = basis
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
     answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer) is not None)
@@ -501,6 +510,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
 
 def _size_cell(call: Mapping[str, Any]) -> str:
     cell = f"{_dash(call.get('input_bytes'))}+{_dash(call.get('role_bytes'))}"
+    if call.get("input_basis"):
+        cell += f" ({call['input_basis']})"
     if not call.get("size_complete", True):
         cell += f" (размер неполный: не найдено {call.get('unresolved_inputs')})"
     return cell

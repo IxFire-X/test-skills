@@ -2,9 +2,12 @@
 
 The view is a pure function of the candidate: the same candidate gives the same bytes.  It keeps what a person
 reviews — source and canonical requirements, case title, requirements, objective, preconditions, each step's action,
-test data, automation blockers, expected text and its assertions in one line — and leaves out the machine part (inputs, outputs, operation,
-capabilities, provenance, digests), which the canonical validator checks.  ``CV_DATA_MISMATCH`` is a code hint, not a
-stop: a literal input value of a step (at least ``MIN_LITERAL`` characters) is missing from the step's action and data.
+test data, automation blockers, expected text and its assertions in one line — and (FaT-CV2) the machine part whose
+meaning only the reviewer judges: one line per step with its operation, inputs and outputs, and the list of
+capabilities with action, arguments, results and the first line of provenance (the test boundary).  The validator
+checks structure and references, not meaning.  A literal longer than ``LITERAL_LIMIT`` is cut with a mark; a sensitive
+input is ``***``.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
+step's action and data — a number of any length as a whole token, other text from ``MIN_LITERAL`` characters.
 
 ``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
 ``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
@@ -13,15 +16,18 @@ stop: a literal input value of a step (at least ``MIN_LITERAL`` characters) is m
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from tools.json_cli import JsonArgumentParser
 
-VIEW_VERSION = "review-view-v1"
+VIEW_VERSION = "review-view-v2"
 DATA_MISMATCH = "CV_DATA_MISMATCH"
 MIN_LITERAL = 3
+LITERAL_LIMIT = 200
+_NUMERIC = re.compile(r"^-?\d+(?:[.,]\d+)?$")
 HINT_LIMIT = 50
 _SHOWN = 3
 _OPERATORS = {
@@ -55,6 +61,51 @@ def _assertion(assertion: Mapping[str, Any]) -> str:
     return text + (f" {_value(assertion['expected'])}" if isinstance(assertion.get("expected"), Mapping) else "")
 
 
+def _cut(text: str) -> str:
+    """A long literal is cut with a mark; the full value stays in the candidate JSON at the same step."""
+    return text if len(text) <= LITERAL_LIMIT else f"{text[:LITERAL_LIMIT]}…(+{len(text) - LITERAL_LIMIT} симв.)"
+
+
+def _input(item: Mapping[str, Any]) -> str:
+    target = item.get("target") or {}
+    name = target.get("name") or item.get("input_id")
+    return f"{name}=***" if target.get("sensitive") else f"{name}={_cut(_value(item.get('source') or {}))}"
+
+
+def _operation(step: Mapping[str, Any], actions: Mapping[str, str]) -> str:
+    """One line of the machine part of a step: what it calls, with which inputs, and what it outputs."""
+    operation = step.get("operation") or {}
+    capability_id = operation.get("capability_id")
+    if capability_id:
+        head = f"{capability_id} ({actions.get(capability_id, '—')})"
+    else:
+        rest = {key: value for key, value in operation.items() if key != "kind"}
+        head = str(operation.get("kind") or "—") + (f" {_cut(_json(rest))}" if rest else "")
+    inputs = ", ".join(_input(item) for item in sorted(step.get("inputs") or [], key=lambda row: row.get("display_order", 0))) or "—"
+    outputs = ", ".join(str(row.get("output_id")) for row in step.get("outputs") or []) or "—"
+    return f"   Операция: {head} | входы: {inputs} | выходы: {outputs}"
+
+
+def _type(row: Mapping[str, Any]) -> str:
+    semantic = row.get("semantic_type") or {}
+    return str(semantic.get("type") or semantic.get("kind") or "?")
+
+
+def _capability(capability: Mapping[str, Any]) -> str:
+    arguments = ", ".join(f"{row['name']}:{_type(row)}{'*' if row.get('required') else ''}" for row in capability.get("arguments") or []) or "—"
+    results = ", ".join(f"{row['name']}:{_type(row)}" for row in capability.get("results") or []) or "—"
+    line = f"- {capability['capability_id']}: {capability['action']}, adapter {capability['adapter']}; аргументы {arguments}; результаты {results}"
+    first = next(iter(str((capability.get("provenance") or [""])[0]).splitlines()), "")
+    return line + (f"; граница: {_cut(first)}" if first else "")
+
+
+def _named(leaf: str, text: str) -> bool:
+    """FaT-CV2 (2.10): a number is named only as a whole token (17 is not in 170 or 1.17); other text from MIN_LITERAL."""
+    if _NUMERIC.fullmatch(leaf):
+        return re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None
+    return len(leaf) < MIN_LITERAL or leaf in text
+
+
 def _leaves(value: Any) -> Iterable[str]:
     if isinstance(value, Mapping):
         for item in value.values():
@@ -77,7 +128,9 @@ def data_mismatches(document: Mapping[str, Any]) -> list[dict[str, Any]]:
                 source = item.get("source") or {}
                 if source.get("kind") != "literal" or (item.get("target") or {}).get("sensitive"):
                     continue
-                missing += [leaf for leaf in _leaves(source.get("value")) if len(leaf) >= MIN_LITERAL and leaf not in text and leaf not in missing]
+                for leaf in _leaves(source.get("value")):
+                    if not _named(leaf, text) and leaf not in missing:
+                        missing.append(leaf)
             if missing:
                 hints.append({"code": DATA_MISMATCH, "case_id": case["case_id"], "step_id": step["step_id"], "count": len(missing),
                               "values": [value[:40] for value in missing[:_SHOWN]]})
@@ -105,8 +158,9 @@ def render(document: Mapping[str, Any]) -> bytes:
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
         f"- candidate document_sha256: {document_sha256(dict(document))}",
-        "- Машинную часть (входы и выходы шагов, операции, связи с источником) проверил код. Здесь — то, что читает человек,"
-        " и проверки шага одной строкой.",
+        "- Код проверил структуру и ссылки (типы, ID, порядок, поток данных между шагами), не смысл. Смысл операций, входов"
+        " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
+        " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",
@@ -114,8 +168,11 @@ def render(document: Mapping[str, Any]) -> bytes:
         *(f"- {row['requirement_id']} (из {', '.join(sources.get(row['requirement_id'], [])) or '—'}): {row['text']}"
           for row in document["requirements"]), "",
         "## Подсказки кода", "", *(_hint_lines(hints) or ["- нет"]), "",
+        "## Операции (capabilities)", "",
+        *([_capability(row) for row in document.get("operation_capabilities") or []] or ["- нет"]), "",
         "## Кейсы",
     ]
+    actions = {row["capability_id"]: row["action"] for row in document.get("operation_capabilities") or []}
     for case in document["test_cases"]:
         facts = [f"требования {', '.join(case['requirement_ids'])}", f"приоритет {case['priority']}",
                  f"категории {', '.join(case['categories'])}"]
@@ -125,7 +182,8 @@ def render(document: Mapping[str, Any]) -> bytes:
         lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
         for step in case["steps"]:
             manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
-            lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}"]
+            lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}",
+                      _operation(step, actions)]
             # the reviewer judges whether a gap is justified (missing oracle, input, access or setup), so a blocker is shown
             lines += [f"   Блокер автоматизации [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
                       for blocker in step["automation_blockers"]]

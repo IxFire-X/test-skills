@@ -157,7 +157,8 @@ def test_a_data_mismatch_is_in_the_report_by_id_and_count_without_the_values(tmp
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert DATA_MISMATCH in report["warnings"]
-    assert report["data_mismatch"] == [{"case_id": document["test_cases"][0]["case_id"], "step_id": step["step_id"], "count": 1}]
+    # FaT-CV2 (2.10): the example also has «3» written as a word in other steps; this test watches the changed step
+    assert {"case_id": document["test_cases"][0]["case_id"], "step_id": step["step_id"], "count": 1} in report["data_mismatch"]
     assert f"{document['test_cases'][0]['case_id']} {step['step_id']}: 1" in markdown
     assert b"Zebra-Street-77" not in (run_root / "report.json").read_bytes() + markdown.encode("utf-8")
 
@@ -456,3 +457,33 @@ def test_a_broken_skillsrc_after_publication_still_returns_the_record(tmp_path: 
     _reviewer_protocol_inputs(automated_document(), run_root, attempt_id, bundle_root=run_root / "bundle")
     assert published and all(row["warning"] == (step_size.OUTPUT_LARGE if row["byte_count"] > step_size.DEFAULT_OUTPUT_WARN else None)
                              for row in published)
+
+
+def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path: Path) -> None:
+    """FaT-CV2 (2.13): the report counts the review view the reviewer read, like ``step_size --files <view>``."""
+    from tests.test_automation_revision_budget import automated_document
+    from tests.test_generated_delta import _reviewer_protocol_inputs
+    from tests.test_self_review import _run
+    from tools.canonical_document import document_sha256
+    from tools.review_view import render
+    from tools.run_report import build_report, digest_index, render_markdown
+
+    run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
+    document = automated_document()
+    _reviewer_protocol_inputs(document, run_root, attempt_id, bundle_root=run_root / "bundle")
+
+    def reviewer_call() -> tuple[dict, dict]:
+        report = build_report(tmp_path, run_root.name)[0]
+        return next(call for call in report["model_calls"] if call["stage"] == "tc-reviewer:canonical"), report
+
+    before, _report = reviewer_call()
+    candidate = document_sha256(document).removeprefix("sha256:")
+    candidate_bytes = digest_index(run_root).get(candidate, 0)
+    view = render(document)
+    (run_root / "review-views").mkdir(exist_ok=True)
+    (run_root / "review-views" / f"{candidate}.md").write_bytes(view)
+    after, report = reviewer_call()
+    assert before["input_basis"] == "канон" and after["input_basis"] == "вид"
+    assert after["input_bytes"] == before["input_bytes"] - candidate_bytes + len(view)
+    assert after["fits"] == (after["input_bytes"] + after["role_bytes"] <= after["budget_bytes"])
+    assert "(вид)" in render_markdown(report)

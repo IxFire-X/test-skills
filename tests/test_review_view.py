@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 NIGHT = Path(r"D:\AI-Projects\live\petclinic-fat-night-20261027\.pilot-runs\7a71393605b2482b989c9a824cf30188\cases\TCDOC-owner-lifecycle-night-7a713936.r1.json")
-TARGET_BYTES = 300_000
+TARGET_BYTES = 320_000  # FaT-CV2: машинная часть шага для ревьюера, +61 КБ на ночном каноне; ради размера её не режем
 TARGET_CASES = 52
 
 
@@ -38,7 +38,7 @@ def test_the_view_of_the_example_fits_the_target_per_case_with_the_role() -> Non
 
 
 @pytest.mark.skipif(not NIGHT.is_file(), reason="the night canonical of 27.10 is on the work machine only")
-def test_the_night_canonical_of_52_cases_is_at_most_300_kb_for_the_reviewer() -> None:
+def test_the_night_canonical_of_52_cases_is_at_most_320_kb_for_the_reviewer() -> None:
     from tools.review_view import render
 
     document = json.loads(NIGHT.read_text(encoding="utf-8"))
@@ -54,7 +54,7 @@ def test_the_view_is_the_same_bytes_for_the_same_candidate() -> None:
     assert render(document) == render(copy.deepcopy(document)) == render(shuffled)
 
 
-def test_the_view_keeps_the_human_part_and_one_line_of_checks_but_not_the_machine_part() -> None:
+def test_the_view_keeps_the_human_part_and_one_line_of_checks_and_no_raw_machine_keys() -> None:
     from tools.canonical_document import document_sha256
     from tools.review_view import render
 
@@ -67,7 +67,7 @@ def test_the_view_keeps_the_human_part_and_one_line_of_checks_but_not_the_machin
                  document_sha256(document)):
         assert text in view
     assert "   Проверки: " in view
-    for machine in ("input_id", "INPUT-", "capability_id", "semantic_type", "type_provenance", "provenance", "ASSERT-", '"kind"'):
+    for machine in ("input_id", "INPUT-", "capability_id", "semantic_type", "type_provenance", "ASSERT-", '"kind"'):
         assert machine not in view
     reviewed = view.split("reviewed_case_ids по порядку: ", 1)[1].split("\n", 1)[0].split(", ")
     assert reviewed == [item["case_id"] for item in document["test_cases"]]
@@ -90,6 +90,11 @@ def test_a_literal_input_missing_from_the_step_data_is_a_hint_not_a_stop() -> No
     from tools.review_view import DATA_MISMATCH, data_mismatches, render
 
     document = _example()
+    # FaT-CV2 (2.10): the only number of the example not named as a token is «3» of «через три дня» (written as a word)
+    assert {value for hint in data_mismatches(document) for value in hint["values"]} == {"3"}
+    for hint_case in document["test_cases"]:
+        for hint_step in hint_case["steps"]:
+            hint_step["test_data"] = (hint_step.get("test_data") or "") + " (3)"
     assert data_mismatches(document) == []
     case = document["test_cases"][0]
     step = next(step for step in case["steps"] if any(item["source"]["kind"] == "literal" for item in step["inputs"]))
@@ -297,3 +302,116 @@ def test_the_closure_check_rebuilds_the_candidate_from_the_effective_document() 
     forged["test_cases"][0]["objective"] = "Подменённая цель."
     assert not edits_rebuild(forged, edits, document_sha256(document))
     assert not edits_rebuild(successor, edits, "sha256:" + "0" * 64)
+
+
+# --- FaT-CV2: the machine part of each step, for the reviewer to judge its meaning -----------------
+
+def _mvc_step(document: dict) -> tuple[dict, dict]:
+    for case in document["test_cases"]:
+        for step in case["steps"]:
+            if any(item["target"]["name"] == "path" and item["source"]["kind"] == "literal" for item in step["inputs"]):
+                return case, step
+    raise AssertionError("the example has an MVC step")
+
+
+def _step_lines(view: str, step_id: str) -> list[str]:
+    lines = view.splitlines()
+    start = next(index for index, text in enumerate(lines) if f"[{step_id}]" in text)
+    end = next((index for index in range(start + 1, len(lines)) if not lines[index].startswith("   ")), len(lines))
+    return lines[start:end]
+
+
+def _operation_line(view: str, step_id: str) -> str:
+    return next(text for text in _step_lines(view, step_id) if text.startswith("   Операция: "))
+
+
+def test_each_step_shows_its_operation_inputs_and_outputs() -> None:
+    from tools.review_view import render
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    capabilities = {item["capability_id"]: item for item in document["operation_capabilities"]}
+    capability = capabilities[step["operation"]["capability_id"]]
+    line = _operation_line(render(document).decode("utf-8"), step["step_id"])
+    assert line.startswith(f"   Операция: {capability['capability_id']} ({capability['action']}) | входы: ")
+    for item in sorted(step["inputs"], key=lambda row: row["display_order"]):
+        assert f"{item['target']['name']}={json.dumps(item['source']['value'], ensure_ascii=False, sort_keys=True, separators=(',', ':'))}" in line
+    assert line.endswith(" | выходы: " + (", ".join(row["output_id"] for row in step["outputs"]) or "—"))
+
+
+def test_a_changed_capability_or_path_is_visible_to_the_reviewer() -> None:
+    from tools.review_view import render
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    before = _operation_line(render(document).decode("utf-8"), step["step_id"])
+    path = next(item for item in step["inputs"] if item["target"]["name"] == "path")
+    path["source"]["value"] = "/vets"
+    after = _operation_line(render(document).decode("utf-8"), step["step_id"])
+    assert after != before and 'path="/vets"' in after
+
+
+def test_a_sensitive_input_is_masked_and_a_long_literal_is_cut_with_a_mark_found_in_the_full_json() -> None:
+    from tools.review_view import LITERAL_LIMIT, render
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    path = next(item for item in step["inputs"] if item["target"]["name"] == "path")
+    path["source"]["value"] = "/owners/" + "x" * 400
+    line = _operation_line(render(document).decode("utf-8"), step["step_id"])
+    shown = json.dumps(path["source"]["value"], ensure_ascii=False)
+    mark = f"…(+{len(shown) - LITERAL_LIMIT} симв.)"
+    assert f"path={shown[:LITERAL_LIMIT]}{mark}" in line
+    # the mark leads back to the same step of the full JSON: its step ID heads the block, its value starts with the shown part
+    step_id = _step_lines(render(document).decode("utf-8"), step["step_id"])[0].split("[", 1)[1].split("]", 1)[0]
+    found = next(row for case in document["test_cases"] for row in case["steps"] if row["step_id"] == step_id)
+    assert json.dumps(next(item for item in found["inputs"] if item["target"]["name"] == "path")["source"]["value"],
+                      ensure_ascii=False).startswith(shown[:LITERAL_LIMIT])
+    # a sensitive input is masked in the view (the canonical schema rejects one today, the view never names it anyway)
+    from tools.review_view import _input
+
+    masked = copy.deepcopy(path)
+    masked["target"]["sensitive"] = True
+    assert _input(masked) == "path=***"
+
+
+def test_the_view_lists_every_capability_with_its_action_and_test_boundary() -> None:
+    from tools.review_view import LITERAL_LIMIT, render
+
+    document = _example()
+    view = render(document).decode("utf-8")
+    section = view.split("## Операции (capabilities)\n", 1)[1].split("\n## ", 1)[0]
+    for capability in document["operation_capabilities"]:
+        line = next(text for text in section.splitlines() if text.startswith(f"- {capability['capability_id']}: "))
+        assert line.startswith(f"- {capability['capability_id']}: {capability['action']}, adapter {capability['adapter']}")
+        for argument in capability["arguments"]:
+            assert f"{argument['name']}:{argument['semantic_type']['type']}{'*' if argument.get('required') else ''}" in line
+        if capability.get("provenance"):
+            first = str(capability["provenance"][0]).splitlines()[0]
+            assert f"граница: {first[:LITERAL_LIMIT]}" in line
+            assert len(first) <= LITERAL_LIMIT or f"…(+{len(first) - LITERAL_LIMIT} симв.)" in line
+
+
+def test_the_header_says_code_checked_structure_not_meaning() -> None:
+    from tools.review_view import VIEW_VERSION, render
+
+    view = render(_example()).decode("utf-8")
+    assert VIEW_VERSION == "review-view-v2"
+    assert "Машинную часть" not in view
+    assert "Код проверил структуру и ссылки" in view and "не смысл" in view and "проверяешь ты" in view
+
+
+@pytest.mark.parametrize(("text", "value", "hinted"), [
+    ("Ввести возраст 18", 17, True), ("Ввести возраст 18", 18, False), ("Ввести возраст 18", "18", False),
+    ("Ввести возраст 170", 17, True), ("Ввести сумму 1.17", 17, True), ("Ввести 0", 0, False), ("Ввести 10", 0, True),
+])
+def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, hinted: bool) -> None:
+    from tools.review_view import data_mismatches
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    item = copy.deepcopy(step["inputs"][0])
+    item["source"]["value"] = value
+    item["target"]["sensitive"] = False
+    step.update(action=text, test_data="—", inputs=[item])
+    assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted

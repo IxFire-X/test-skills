@@ -289,3 +289,32 @@ def test_many_pairs_never_push_out_a_missing_negative_case() -> None:
     assert {"code": "TD_NEGATIVE_MISSING", "requirement_id": document["requirements"][1]["requirement_id"], "parameter": "P-sum",
             "detail": "C-sum-neg"} in kept
     assert kept[0]["code"] == "TD_NEGATIVE_MISSING"
+
+
+def test_vague_expectations_never_push_the_design_hints_out_of_the_receipt() -> None:
+    """FaT-CV2 (2.6): the hunter's scenario — 56 vague + 5 boundaries + 1 pair keeps all 6 design hints."""
+    from tools.test_design_hints import GROUP_BYTES, GROUP_LIMIT, HINT_BYTES, HINT_LIMIT, capped_code_hints
+
+    vague = [{"code": "TD_VAGUE_EXPECTATION", "case_id": f"TC-night-{index:03d}", "step_id": f"STEP-night-{index:03d}",
+              "detail": "отказ виден только как флаг failed=true"} for index in range(56)]
+    bounds = [{"code": "TD_BOUNDARY_MISSING", "requirement_id": f"CREQ-night-{index}", "parameter": "P-age", "detail": "max"}
+              for index in range(5)]
+    pair = [{"code": "TD_PAIR_UNCOVERED", "requirement_id": "CREQ-night-9", "detail": "C-a-1 × C-b-2"}]
+    kept = capped_code_hints(sorted(vague + bounds + pair, key=lambda hint: {"TD_VAGUE_EXPECTATION": 1}.get(hint["code"], 3)))
+    assert [hint for hint in kept if hint["code"] in {"TD_BOUNDARY_MISSING", "TD_PAIR_UNCOVERED"}] == bounds + pair
+    def more_of(rows):
+        return [hint for hint in rows if hint["code"] == "TD_MORE"]
+
+    shown = [hint for hint in kept if hint["code"] == "TD_VAGUE_EXPECTATION"]
+    assert 0 < len(shown) < GROUP_LIMIT and len(json.dumps(shown + more_of(kept), ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= GROUP_BYTES
+    more = more_of(kept)
+    assert more == [{"code": "TD_MORE", "detail": f"и ещё {56 - len(shown)} (ожидания)"}]
+    assert len(kept) <= HINT_LIMIT and len(json.dumps(kept, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= HINT_BYTES
+
+
+def test_the_receipt_hints_without_overflow_are_the_same_as_before() -> None:
+    from tools.test_design_hints import capped, capped_code_hints
+
+    hints = [{"code": "TD_NEGATIVE_MISSING", "requirement_id": "CREQ-a", "parameter": "P-x", "detail": "C-neg"},
+             {"code": "TD_VAGUE_EXPECTATION", "case_id": "TC-a", "step_id": "STEP-a", "detail": "флаг"}]
+    assert capped_code_hints(hints) == capped(hints) == hints

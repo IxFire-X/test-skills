@@ -20,6 +20,11 @@ from typing import Any, Iterable, Mapping
 
 HINT_LIMIT = 50
 HINT_BYTES = 4096
+# FaT-CV2 (2.6): the receipt caps the design hints and the expectation hints apart, so neither group pushes the other
+# out; two groups with their remainder entries stay within HINT_LIMIT and HINT_BYTES.
+GROUP_LIMIT = HINT_LIMIT // 2  # entries of a group, its remainder entry included
+GROUP_BYTES = HINT_BYTES // 2
+_EXPECTATION_CODES = frozenset({"TD_VAGUE_EXPECTATION", "TD_NEGATIVE_NO_STATE_CHECK", "TD_WEAK_SUCCESS"})
 DETAIL_LIMIT = 200  # the assembly receipt schema bound; no allowed input may exceed it
 PAIRS_PER_REQUIREMENT = 3
 # Important hints first, so many pairs never push a missing negative case out of the capped list.
@@ -125,18 +130,38 @@ def _pair_hints(requirement_id: str, parameters: Mapping[str, Mapping[str, Any]]
     return hints
 
 
-def capped(hints: list[dict[str, Any]], more: str = "TD_MORE") -> list[dict[str, Any]]:
-    """At most HINT_LIMIT hints and HINT_BYTES of compact JSON; the rest is counted in one ``more`` entry."""
+def capped(hints: list[dict[str, Any]], more: str = "TD_MORE", *, limit: int = HINT_LIMIT, byte_limit: int = HINT_BYTES,
+           label: str = "") -> list[dict[str, Any]]:
+    """At most ``limit`` entries and ``byte_limit`` of compact JSON; the rest is counted in one ``more`` entry."""
     kept: list[dict[str, Any]] = []
-    reserve = len(f'{{"code":"{more}","detail":"и ещё 00000"}}'.encode("utf-8")) + 2
+    suffix = f" ({label})" if label else ""
+    reserve = len(f'{{"code":"{more}","detail":"и ещё 00000{suffix}"}}'.encode("utf-8")) + 2
     for hint in hints:
         candidate = kept + [hint]
-        if len(candidate) > HINT_LIMIT or len(json.dumps(candidate, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + reserve > HINT_BYTES:
+        if len(candidate) > limit or len(json.dumps(candidate, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + reserve > byte_limit:
             break
         kept = candidate
     if len(kept) < len(hints):
-        kept.append({"code": more, "detail": f"и ещё {len(hints) - len(kept)}"})
+        kept.append({"code": more, "detail": f"и ещё {len(hints) - len(kept)}{suffix}"})
     return kept
+
+
+def capped_code_hints(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """FaT-CV2 (2.6): the assembly receipt hints — design and expectation groups capped apart, the order kept."""
+    if len(hints) <= HINT_LIMIT and len(json.dumps(hints, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= HINT_BYTES:
+        return list(hints)
+    groups = {"дизайн": [hint for hint in hints if hint["code"] not in _EXPECTATION_CODES],
+              "ожидания": [hint for hint in hints if hint["code"] in _EXPECTATION_CODES]}
+    kept: set[int] = set()
+    remainders: list[dict[str, Any]] = []
+    for label, rows in groups.items():  # GROUP_LIMIT entries per group: its hints and its one remainder entry
+        own = {id(hint) for hint in rows}
+        for hint in capped(rows, limit=GROUP_LIMIT - 1, byte_limit=GROUP_BYTES, label=label):
+            if id(hint) in own:
+                kept.add(id(hint))
+            else:
+                remainders.append(hint)
+    return [hint for hint in hints if id(hint) in kept] + remainders
 
 
 # --- FaT-Q: vague expectations on any document -------------------------------------------------------

@@ -46,9 +46,13 @@ mechanical fix). Notes of `ПРИНЯТО`/`AUTO_FIX_APPLIED` reach the person t
 Review every human Action/Test Data/Expected Result triple against the mandatory
 [human scenario rules](../../tc-generator/references/case-generation-contract.md#human-scenario-rules),
 which are the shared format authority for generator and reviewer. The canonical validator
-verifies machine operation/input/output/assertion ownership, previous-step data flow and
-manual/blocker branches; the compact view shows each step's checks in one line, so judge
-whether they assert the expected result. A violation needs a precise location and a concrete ambiguity, semantic error
+verifies the structure only: operation/input/output/assertion ownership and references,
+previous-step data flow and manual/blocker branches — not their meaning. Verify the meaning
+of the machine part from the compact view: each step's capability and action, method, path
+and literal inputs against its action, test data and requirement, its outputs against what
+its checks read, and each capability's test boundary; the view also shows each step's
+checks in one line, so judge whether they assert the expected result. A machine part that
+contradicts the human step is a semantic error (rework or a mechanical fix), not a note. A violation needs a precise location and a concrete ambiguity, semantic error
 or broken format rule; a preference for different Russian wording is not rework.
 Check that testing-work instructions remain in linked canonical requirements rather than
 human case fields, while necessary setup and actual product constraints remain testable.
