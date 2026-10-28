@@ -1280,6 +1280,40 @@ def append_event(run_root: Path, event_type: str, *, actor: str, attempt_id: str
     return _append_event(project, root, event_type, actor=actor, attempt_id=attempt_id, batch_id=batch_id, artifact_digest=artifact_digest, stage_instance_id=stage_instance_id, transport_attempts=transport_attempts)
 
 
+_REVIEW_STAGE = re.compile(r"^(?:tc-reviewer:canonical|autotest-reviewer:r[12])$")
+
+
+@closure_cached  # FaT-10b
+def request_review(run_root: Path, attempt_id: str, stage_instance_id: str, candidate_digest: str) -> Mapping[str, Any]:
+    """FaT-10b: the one REVIEW_REQUESTED of a reviewer stage, on the exact candidate it reviews.
+
+    tc-reviewer:canonical reviews the assembled candidate; autotest-reviewer:rN reviews the candidate of
+    tc-to-autotest:rN. The same digest again returns the recorded event; another digest is refused.
+    """
+    if not isinstance(stage_instance_id, str) or not _REVIEW_STAGE.fullmatch(stage_instance_id):
+        raise ValueError("REVIEW_STAGE_INVALID: review requests are for tc-reviewer:canonical and autotest-reviewer:r1|r2 only")
+    if not isinstance(candidate_digest, str) or not _DIGEST.fullmatch(candidate_digest):
+        raise ValueError("REVIEW_DIGEST_INVALID: the candidate digest must be sha256:<64 hex>")
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
+    if attempt is None or attempt["state"] == "TERMINAL":
+        raise ValueError("REVIEW_ATTEMPT_INVALID: no open attempt " + str(attempt_id))
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+    recorded = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
+    if recorded:
+        if recorded[0].get("artifact_digest") == candidate_digest:
+            return recorded[0]
+        raise ValueError(f"REVIEW_ALREADY_REQUESTED: {stage_instance_id} already reviews {recorded[0].get('artifact_digest')}")
+    source = "assembly" if stage_instance_id == "tc-reviewer:canonical" else stage_instance_id.replace("autotest-reviewer:", "tc-to-autotest:", 1)
+    candidates = [event for event in events if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == source]
+    if not any(event.get("artifact_digest") == candidate_digest for event in candidates):
+        published = [str(event.get("artifact_digest")) for event in candidates]
+        raise ValueError(f"REVIEW_CANDIDATE_NOT_PUBLISHED: {candidate_digest} is not the published {source} candidate {published}")
+    return _append_event(project, root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, batch_id=None,
+                         artifact_digest=candidate_digest, stage_instance_id=stage_instance_id)
+
+
 def claim_execution_start(run_root: Path, attempt_id: str, request_digest: str) -> Mapping[str, Any]:
     """Atomically reserve the one permitted project execution for an attempt."""
     project, root = _run_root(run_root)

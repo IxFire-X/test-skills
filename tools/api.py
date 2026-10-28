@@ -89,6 +89,10 @@ def _cmd_model_response(a):
                                                     raw_bytes=a.artifact.raw_bytes)
 
 
+def _cmd_review_requested(a):
+    return pilot_state.request_review(a.run_root, a.attempt, a.stage, a.digest)
+
+
 def _cmd_read_model_artifact(a):
     return pilot_state.read_model_stage_artifact(a.run_root, a.attempt, a.stage, a.digest)
 
@@ -176,6 +180,7 @@ def _not_runnable(result: Any) -> bool:
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
     "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", "append")), None, ()),
     "model-response": (_cmd_model_response, (*RUN, "--stage", ("--artifact", _answer), ("--transport-attempts", int, 1)), None, ()),
+    "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json)), None, ()),

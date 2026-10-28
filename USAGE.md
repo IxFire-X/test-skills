@@ -37,8 +37,8 @@ authorization.
 - профиль `cases-only-v1` или `local-pilot-v1`.
 
 Если проект многомодульный, укажите module ID или дайте pipeline выбрать его по
-доказанному exact path. При неоднозначности pipeline задаёт только один вопрос и
-переходит в `WAITING_FOR_INPUT`. Текстовый guess запрещён.
+доказанному exact path. При неоднозначности агент задаёт один вопрос о модуле и
+ждёт ответа; scan без точного `--module` не создаёт attempt, событие не пишется. Текстовый guess запрещён.
 
 `--target` или allowlist могут сузить read-only inventory. `.git`, dependencies,
 build outputs, binaries, generated artifacts и потенциальные secrets не передаются

@@ -135,8 +135,8 @@ reviewer. Это техническое доказательство, не но�
    остановка: продолжай без ответа и передай подсказку `hint` — лишнее исключение
    возвращает `.skillsrc` `paths.include` модуля.
 3. Выбери ровно один exact module. Автоматически выбирай только единственный module
-   или module, доказанно содержащий exact user path. При неоднозначности покажи один
-   вопрос и перейди в `WAITING_FOR_INPUT`.
+   или module, доказанно содержащий exact user path. При неоднозначности задай вопрос о модуле
+   и жди ответа; scan без точного `--module` не создаёт attempt, событие писать не нужно.
    `--module` принимает ID из inventory/`.skillsrc`, а не путь: например,
    корню `.` может соответствовать ID `root`. Сначала сопоставь user path с module,
    затем передавай его exact ID; при единственном module не подставляй `.` как ID.
@@ -222,8 +222,8 @@ Run остаётся связан с исходной project/module identity.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Persist/readback-проверь каждый complete fragment (`tools.api validate-fragment --fragment <f> --plan <f>
-   --header <f> --context-receipt <f>`, затем `model-response`) и сразу запиши
-   `CANDIDATE_PUBLISHED` для его exact digest.
+   --header <f> --context-receipt <f>`, затем `model-response`); `CANDIDATE_PUBLISHED` для его exact digest
+   `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.0.0` с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
    --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
@@ -245,7 +245,8 @@ Controller формирует immutable package из candidate, exact requiremen
 evidence и provenance. Открой одну fresh role-isolated reviewer session
 (`python -m tools.orchestrate_test_case_revision open-session …`) и вызови
 `tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …`. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
-candidate; сам вызов окружи stage-bound `MODEL_REQUESTED` и
+candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <boundary.canonical_branch_digest>`
+(повтор с тем же digest ничего не меняет, другой digest — отказ); сам вызов окружи stage-bound `MODEL_REQUESTED` и
 `MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
 Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
 boundary.package_digest]` из прочитанного `reviewer-session-boundary` и его exact
@@ -307,7 +308,8 @@ Exact transport input/output bytes сохраняются отдельно; их
 эти поля. Не переписывай опубликованный request после вызова модели.
 
 1. Вызови `tc-to-autotest` для effective canonical.
-2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`) и
+2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`), запиши
+   `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
    вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
 3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует
    execution-inputs и материализует принятую автоматизацию (generated delta) из ответов

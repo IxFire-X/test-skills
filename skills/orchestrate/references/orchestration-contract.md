@@ -25,9 +25,9 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api read-context`, `tools.api plan-batches`, `tools.api with-digest`, `tools.api publish-artifact` | independent plan и current receipt без truncation |
 | Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`; `tools.api validate-fragment` | fragment связан с marker/context/plan/header; code-owned digests |
 | Сборка | `tools.api assemble`, `tools.orchestrate_test_case_revision publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
-| Canonical review | `tools.orchestrate_test_case_revision open-session`; `model-request`/`model-response`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
+| Canonical review | `tools.orchestrate_test_case_revision open-session`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
 | Выбор | `tools.orchestrate_test_case_revision select`, `tools.api read-effective` | immutable selected document и receipt |
-| Автоматизация | `model-request`/`model-response`; `tools.api open-automation-boundary`, `tools.api read-receipt` | одна версия и независимое static review; максимум одна correction |
+| Автоматизация | `model-request`/`model-response`; `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
 | Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
 | Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |
 | Закрытие | `tools.run_pipeline exec` / `tools.run_pipeline finish` | trace/dispositions/finalization/terminal по выбранной ветке |
@@ -74,7 +74,8 @@ Inventory учитывает файлы выбранного модуля, paren
    bundle receipt и `CANDIDATE_PUBLISHED` stage `assembly`.
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
-   candidate digest получает `REVIEW_REQUESTED` до reviewer `MODEL_REQUESTED`.
+   candidate digest получает `REVIEW_REQUESTED` (`tools.api review-requested`) до reviewer `MODEL_REQUESTED`;
+   так же для `autotest-reviewer:rN` на digest кандидата `tc-to-autotest:rN`.
 8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
 9. Для `cases-only-v1` зафиксируй materialization/execution/dispositions как
