@@ -272,6 +272,25 @@ def _java_class(path: Path, text: str) -> tuple[str, str] | None:
     return class_fqn, "".join(body)
 
 
+# FaT-DN: Surefire writes a class display name that differs from the simple class name as the report classname,
+# so the report can no longer match the class FQN; a method display name leaves the testcase name alone.
+_CLASS_DISPLAY_ANNOTATION = re.compile(r"@\s*(?:[\w$]+\s*\.\s*)*(?:DisplayName|DisplayNameGeneration|IndicativeSentencesGeneration)\b")
+_CLASS_DISPLAY_NAME_FIX = (
+    "аннотация класса @DisplayName (@DisplayNameGeneration, @IndicativeSentencesGeneration) меняет classname в отчёте "
+    "Surefire — отчёт не сопоставится с классом теста: убери @DisplayName с класса; у методов можно"
+)
+
+
+def _java_class_display_name(class_name: str, text: str) -> bool:
+    """Whether the top-level test class carries an annotation that renames it in the Surefire report."""
+    masked = _mask_java_noncode(text)
+    declaration = re.search(r"\bclass\s+" + re.escape(class_name) + r"\b", masked)
+    if declaration is None:
+        return False
+    head = masked[:declaration.start()]
+    return _CLASS_DISPLAY_ANNOTATION.search(head[head.rfind(";") + 1:]) is not None
+
+
 def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | None:
     if locator["kind"] != "java_class_method" or parsed[0] != locator["class_fqn"]:
         return None
@@ -350,6 +369,9 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
             parsed[row["file_id"]] = ast.parse(text, filename=str(file)) if language == "python" else _java_class(file, text)
         except (UnicodeDecodeError, SyntaxError):
             parsed[row["file_id"]] = None
+            continue
+        if language == "java" and _java_class_display_name(file.stem, text):
+            diagnostics.append(_diag(pointer, "RUNNER_CLASS_DISPLAY_NAME", _CLASS_DISPLAY_NAME_FIX))
     symbol_map = {(row["file_id"], row["symbol_id"]): (index, row) for index, row in enumerate(symbols)}
     bindings: dict[tuple[str, str], Mapping[str, Any]] = {}
     for pair in sorted(pairs):

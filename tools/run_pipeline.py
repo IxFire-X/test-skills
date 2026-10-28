@@ -213,6 +213,44 @@ def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, st
         return {}
 
 
+def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
+    """FaT-DN: why an UNKNOWN run could not match its JUnit report, and the fix — never the report text.
+
+    A testcase whose method is selected but whose classname is none of that method's selected classes is what a class
+    display name does (Surefire writes it as the classname); the hint names the selected classes only."""
+    from tools import pilot_state as pilot
+    from tools.run_tests import parse_junit_bytes
+
+    try:
+        payload = pilot.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
+        if payload.get("verdict") != "UNKNOWN" or not any(row.get("kind") == "JUNIT_INVALID" for row in payload.get("process_evidence", [])):
+            return {}
+        execution = payload["execution"]
+        selected: dict[str, set[str]] = {}
+        for selector in execution["selectors"]:
+            class_fqn, _, method = str(selector).partition("#")
+            if method:
+                selected.setdefault(method, set()).add(class_fqn)
+        classes: set[str] = set()
+        for row in execution["artifact_evidence"]:
+            relative = Path(str(row.get("path", "")))
+            if row.get("kind") != "native_report" or relative.is_absolute() or relative.parts[:2] != ("artifacts", attempt_id) or ".." in relative.parts:
+                continue
+            for case in parse_junit_bytes((Path(run_root) / relative).read_bytes()).cases:
+                method = case.name.split("[", 1)[0].split("(", 1)[0]
+                if method in selected and case.classname not in selected[method]:
+                    classes |= selected[method]
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):  # a hint never fails the step
+        return {}
+    if not classes:
+        return {}
+    return {
+        "report_mismatch": (f"отчёт JUnit не сопоставлен с тестами: методы класса {', '.join(sorted(classes))} записаны в отчёт "
+                            "под другим classname — так делает @DisplayName на классе теста"),
+        "report_fix": "убери @DisplayName с класса теста (у методов можно) и начни новый прогон тем же scan",
+    }
+
+
 def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
@@ -1515,6 +1553,7 @@ def _execute(
         "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": result.get("verification"),
         "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
         **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+        **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
     })
     return int(closed["exit_code"])
 
@@ -1600,6 +1639,7 @@ def cmd_exec(args: Any) -> int:
             "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": terminal.get("verification"),
             "accepted": terminal.get("accepted"), "executor": "local", "finalization": "complete",
             **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+            **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return exit_code(terminal)
     execution_receipt_path = (
@@ -1679,6 +1719,7 @@ def cmd_exec(args: Any) -> int:
             "attempt_id": coordinates["attempt"]["attempt_id"], "verdict": result.get("verification"),
             "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
             **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+            **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return int(closed["exit_code"])
     try:
@@ -2029,6 +2070,7 @@ def cmd_finish(args: Any) -> int:
         **_quarantine_summary(root, attempt_id),
         **_review_notes_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),
+        **_report_mismatch(root, attempt_id),
         **({"fix": "только если человек согласен на ревью в той же сессии, повтори scan этого запроса с --accept-self-review: "
                    + (_scan_command(project, manifest["scan_request"], extra=() if manifest["scan_request"].get("accept_self_review")
                                     else ("--accept-self-review",))

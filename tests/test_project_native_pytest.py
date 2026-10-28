@@ -57,6 +57,56 @@ def test_inline_java_review_resolves_only_direct_class_methods(tmp_path: Path) -
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("annotation", [
+    '@DisplayName("Owner, pet and visit lifecycle")',
+    "@org.junit.jupiter.api.DisplayName(\"x\")",
+    "@DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)",
+    "@IndicativeSentencesGeneration(separator = \" -> \")",
+])
+def test_inline_java_review_rejects_class_display_name(tmp_path: Path, annotation: str) -> None:
+    """FaT-DN: a class display name becomes the Surefire classname — the report cannot match the class FQN."""
+    from tools.run_tests import validate_artifact_runner_compatibility
+
+    document = automated_document()
+    artifact = automation(document)
+    content = (
+        "package sample;\nimport org.junit.jupiter.api.*;\n"
+        f"@Tag(\"x\")\n{annotation}\nclass ProductsTest {{\n"
+        "  @Test\n  @DisplayName(\"TC-1 method name is fine\")\n  void products() {}\n}\n"
+    )
+    artifact["artifacts"]["generated_files"][0].update(
+        path="src/test/java/sample/ProductsTest.java", language="java", framework="junit5",
+        content=content, content_digest="sha256:" + hashlib.sha256(content.encode()).hexdigest(),
+    )
+    artifact["artifacts"]["generated_symbols"][0]["locator"] = {"kind": "java_class_method", "class_fqn": "sample.ProductsTest", "method_name": "products"}
+    result = validate_artifact_runner_compatibility(tmp_path, "java", document, artifact, materialized=False)
+    assert result.status == "NOT_RUNNABLE"
+    rows = [row for row in result.diagnostics if row["code"] == "RUNNER_CLASS_DISPLAY_NAME"]
+    assert len(rows) == 1 and rows[0]["path"] == "/artifacts/generated_files/0"
+    assert "убери" in rows[0]["message"] and "у методов можно" in rows[0]["message"]
+    assert "Owner, pet" not in rows[0]["message"]
+
+
+def test_inline_java_review_keeps_method_display_name_and_commented_class_annotation(tmp_path: Path) -> None:
+    from tools.run_tests import validate_artifact_runner_compatibility
+
+    document = automated_document()
+    artifact = automation(document)
+    content = (
+        "package sample;\nimport org.junit.jupiter.api.*;\n"
+        "// @DisplayName(\"commented out\")\n/** {@code @DisplayName} is not used here */\n"
+        "@Tag(\"@DisplayName(\\\"in a string\\\")\")\nclass ProductsTest {\n"
+        "  @Test\n  @DisplayName(\"TC-1 method\")\n  void products() {}\n"
+        "  @Nested\n  @DisplayName(\"nested\")\n  class Inner { @Test void hidden() {} }\n}\n"
+    )
+    artifact["artifacts"]["generated_files"][0].update(
+        path="src/test/java/sample/ProductsTest.java", language="java", framework="junit5",
+        content=content, content_digest="sha256:" + hashlib.sha256(content.encode()).hexdigest(),
+    )
+    artifact["artifacts"]["generated_symbols"][0]["locator"] = {"kind": "java_class_method", "class_fqn": "sample.ProductsTest", "method_name": "products"}
+    assert validate_artifact_runner_compatibility(tmp_path, "java", document, artifact, materialized=False).status == "READY"
+
+
 def _sealed_authorization(*, profile: str, execution_requested: bool) -> dict:
     body = {
         "schema_version": "1.0.0", "run_id": "a" * 32, "request_id": "request-1",
