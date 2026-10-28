@@ -295,9 +295,26 @@ def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | Non
     if locator["kind"] != "java_class_method" or parsed[0] != locator["class_fqn"]:
         return None
     method = locator["method_name"]
-    # Start at a token, not every space left by masked literals and comments.
-    pattern = r"\b(?=\w)(?:public|protected|private)?\s*(?:static\s+)?[\w<>\[\]., ?]+\s+" + re.escape(method) + r"\s*\([^;{}]*\)\s*(?:throws[^\{]+)?\{"
-    return method if len(re.findall(pattern, parsed[1])) == 1 else None
+    body = parsed[1]
+    # FaT-RC: the declaration `<type> <name>(…) [throws …] {` found from each occurrence of the name, not by one pattern
+    # tried at every token — `[\w<>\[\]., ?]+\s+name` backtracked quadratically on a long line of words (2 h on one file).
+    count = sum(_declared_after_type(body, match.start())
+                for match in re.finditer(r"\b" + re.escape(method) + r"\s*\([^;{}]*\)\s*(?:throws[^\{]+)?\{", body))
+    return method if count == 1 else None
+
+
+def _declared_after_type(body: str, start: int) -> bool:
+    """Whitespace before the name, and before it a run of type characters (``[\\w<>[]., ?]``) holding a word character."""
+    index = start
+    if index == 0 or not body[index - 1].isspace():
+        return False
+    while index > 0 and body[index - 1].isspace():
+        index -= 1
+    while index > 0 and (body[index - 1].isalnum() or body[index - 1] in "_<>[]., ?"):
+        if body[index - 1].isalnum() or body[index - 1] == "_":
+            return True
+        index -= 1
+    return False
 
 
 def _mask_java_noncode(text: str, *, keep_quotes: bool = False) -> str:
@@ -362,20 +379,26 @@ _JAVA_API_RULES = (
 _JAVA_TEXT_BLOCK = re.compile(r'"""[ \t]*\r?\n')
 
 
+_CALL_TOKENS = re.compile(r"[()\[\]{},;]")
+
+
 def _call_arguments(masked: str, start: int) -> int | None:
     """Top-level arguments of the call whose ``(`` ends at ``start``; None when the parenthesis never closes."""
-    depth, commas, empty = 0, 0, True
-    for char in masked[start:]:
+    # FaT-RC: only brackets, commas and semicolons matter, so the scan jumps between them — an unclosed call no longer walks
+    # the rest of the file character by character from every match; a ``;`` outside brackets ends the statement.
+    depth, commas = 0, 0
+    for token in _CALL_TOKENS.finditer(masked, start):
+        char = token.group()
         if char in "([{":
             depth += 1
         elif char in ")]}":
             if depth == 0:
-                return 0 if empty else commas + 1
+                return 0 if not masked[start:token.start()].strip() else commas + 1
             depth -= 1
         elif char == "," and depth == 0:
             commas += 1
-        if not char.isspace() and not (depth == 0 and char in ")]}"):
-            empty = False
+        elif char == ";" and depth == 0:
+            return None
     return None
 
 
@@ -384,7 +407,8 @@ def _java_api_level_diagnostics(pointer: str, text: str, level: Mapping[str, Any
     target, masked = int(level["level"]), _mask_java_noncode(text, keep_quotes=True)
     found = []
     for pattern, since, name, fix, receiver, arguments in _JAVA_API_RULES:
-        if since <= target or receiver and re.search(rf"^\s*import\s+(?!java\.)[\w.]+\.{receiver}\s*;", masked, re.MULTILINE):
+        # FaT-RC: [ \t]*, not \s* — from every line start \s* ran over a whole blank (masked) tail and back: quadratic
+        if since <= target or receiver and re.search(rf"^[ \t]*import\s+(?!java\.)[\w.]+\.{receiver}\s*;", masked, re.MULTILINE):
             continue
         if any(arguments is None or _call_arguments(masked, match.end()) == arguments for match in re.finditer(pattern, masked)):
             found.append((since, name, fix))
