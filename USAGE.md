@@ -139,7 +139,10 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 (код 0). С `--run` шаг (`--step`) и байты пишутся в `step-sizes.jsonl` прогона; `run_pipeline report`
 показывает их и предупреждение. Ответ каждого вызова модели тоже меряется: `output_bytes` в результате
 публикации и в отчёте; больше `limits.step_output_warn_bytes` (по умолчанию 128 000 Б) — предупреждение
-`STEP_OUTPUT_LARGE`, только замер, деление на пачки выключено.
+`STEP_OUTPUT_LARGE`, только замер, деление на пачки выключено. Меряются сырые байты файла `--artifact` у
+`tools.api model-response` (как ответила модель, с отступами), в отчёте `output_basis: raw`; при прямой
+публикации без файла — байты сохранённого компактного JSON (`compact`). Ответ, оборванный на середине (JSON не
+закрыт), — отказ `MODEL_OUTPUT_TRUNCATED` с байтами и подсказкой; повтор стадии — один, как при ошибке схемы.
 
 **Вид для ревью.** Ревьюер читает не полный канон, а компактный вид:
 `python -m tools.review_view --project <abs> --run <run_id> --candidate <r1.json>` пишет

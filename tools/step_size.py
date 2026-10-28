@@ -32,6 +32,10 @@ DEFAULT_BUDGET = 500_000
 OVER_BUDGET = "STEP_OVER_BUDGET"
 RECORD = "step-sizes.jsonl"
 OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
+OUTPUT_TRUNCATED = "MODEL_OUTPUT_TRUNCATED"
+OUTPUT_SIZES = "output-sizes.jsonl"
+TRUNCATED_HINT = ("похоже, ответ упёрся в лимит выхода модели; повтори стадию один раз (как при ошибке схемы) и попроси "
+                  "ответить тем же JSON целиком, компактно, без отступов и переносов — так ответ почти вдвое меньше")
 DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real output limit of the work model is not known yet
 TOKENS_PER_BYTE = 0.24
 _STAGE_ROLES = {"context-marker": "context-marker"}
@@ -48,6 +52,62 @@ def step_budget(project: Path) -> int:
 
     value = (load_skillsrc(path).get("limits") or {}).get("step_input_bytes")
     return int(value) if isinstance(value, int) and value > 0 else DEFAULT_BUDGET
+
+
+def looks_truncated(text: str) -> bool:
+    """FaT-O2: the JSON ends inside a string or with an open bracket — cut in the middle, not merely malformed."""
+    depth, in_string, escape = 0, False, False
+    for char in text:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+    return bool(text.strip()) and (in_string or depth > 0)
+
+
+def truncated_message(byte_count: int) -> str:
+    return f"{OUTPUT_TRUNCATED}: ответ модели оборван на {byte_count} Б (JSON не закрыт) — {TRUNCATED_HINT}"
+
+
+def record_output(project: Path, root: Path, step: str, response_digest: str, raw_bytes: int) -> None:
+    """FaT-O2: the raw answer size by its journal digest, for the report (only sizes; never fails the step)."""
+    from datetime import datetime, timezone
+
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+
+    try:
+        path = Path(root) / OUTPUT_SIZES
+        before = path.read_bytes() if path.is_file() else b""
+        row = {"step": step, "response_digest": response_digest, "raw_bytes": int(raw_bytes),
+               "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")}
+        atomic_write_confined_bytes_at_root(Path(project), Path(root), path, before + json.dumps(row, sort_keys=True).encode("utf-8") + b"\n")
+    except (OSError, ValueError):
+        pass
+
+
+def output_sizes(root: Path) -> dict[str, int]:
+    """FaT-O2: raw answer bytes by response digest (the last record of a digest wins)."""
+    sizes: dict[str, int] = {}
+    try:
+        lines = (Path(root) / OUTPUT_SIZES).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return sizes
+    for line in lines:
+        try:
+            row = json.loads(line)
+            sizes[str(row["response_digest"])] = int(row["raw_bytes"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return sizes
 
 
 def output_warning(project: Path, byte_count: int) -> str | None:

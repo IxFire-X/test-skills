@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 from tools import automation_validation, batch_assembly, canonical_document, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser
-from tools.schema_validation import load_json_strict
+from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
 
 def plain(value: Any) -> Any:
@@ -48,6 +48,26 @@ def _json(path: str) -> Any:
         raise argparse.ArgumentTypeError(f"{path}: {error}") from error
 
 
+@dataclasses.dataclass(frozen=True)
+class _Answer:
+    value: Any
+    raw_bytes: int
+
+
+def _answer(path: str) -> _Answer:
+    """FaT-O2: a model answer file — its strict JSON and its raw size; a JSON cut in the middle is MODEL_OUTPUT_TRUNCATED."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as error:
+        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
+    try:
+        return _Answer(loads_json_strict(raw.decode("utf-8")), len(raw))
+    except (UnicodeDecodeError, StrictJsonError) as error:
+        if step_size.looks_truncated(raw.decode("utf-8", "replace")):
+            raise argparse.ArgumentTypeError(step_size.truncated_message(len(raw))) from error
+        raise argparse.ArgumentTypeError(f"{path}: {error}") from error
+
+
 def _bytes(path: str) -> bytes:
     try:
         return Path(path).read_bytes()
@@ -65,7 +85,8 @@ def _cmd_model_request(a):
 
 
 def _cmd_model_response(a):
-    return pilot_state.publish_model_stage_artifact(a.run_root, a.attempt, a.stage, a.artifact, transport_attempts=a.transport_attempts)
+    return pilot_state.publish_model_stage_artifact(a.run_root, a.attempt, a.stage, a.artifact.value, transport_attempts=a.transport_attempts,
+                                                    raw_bytes=a.artifact.raw_bytes)
 
 
 def _cmd_read_model_artifact(a):
@@ -154,7 +175,7 @@ def _not_runnable(result: Any) -> bool:
 # name: (handler, options, invalid-when, named parts of a tuple result)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
     "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", "append")), None, ()),
-    "model-response": (_cmd_model_response, (*RUN, "--stage", ("--artifact", _json), ("--transport-attempts", int, 1)), None, ()),
+    "model-response": (_cmd_model_response, (*RUN, "--stage", ("--artifact", _answer), ("--transport-attempts", int, 1)), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json)), None, ()),

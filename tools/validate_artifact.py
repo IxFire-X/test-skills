@@ -32,6 +32,22 @@ def _report_error(message: str) -> tuple[int, dict[str, Any]]:
     return 2, {"status": "error", "errors": [{"path": "", "message": message}]}
 
 
+def _truncated(path: Path) -> tuple[int, dict[str, Any]] | None:
+    """FaT-O2: an answer cut in the middle (open string or bracket at the end) — its bytes, a hint and a retry prompt."""
+    from tools.step_size import OUTPUT_TRUNCATED, TRUNCATED_HINT, looks_truncated, truncated_message
+
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if not looks_truncated(raw.decode("utf-8", "replace")):
+        return None
+    return 2, {"status": "error", "errors": [{"path": "", "code": OUTPUT_TRUNCATED, "message": truncated_message(len(raw))}],
+               "retry_prompt": (f"Твой ответ оборван на {len(raw)} Б: JSON не закрыт. Верни тот же ответ целиком одним JSON, "
+                                "компактно, без отступов и переносов строк; ничего не сокращай и не опускай."),
+               "hint": TRUNCATED_HINT}
+
+
 def _root_for_schema(schema_path: Path) -> Path:
     return schema_path.resolve().parent.parent
 
@@ -51,7 +67,8 @@ def validate(schema_path: str, artifact_path: str) -> tuple[int, dict[str, Any]]
     try:
         artifact = load_json_strict(Path(artifact_path))
     except StrictJsonError as error:
-        return _report_error(f"artifact unreadable: {error}")
+        truncated = _truncated(Path(artifact_path))
+        return truncated if truncated is not None else _report_error(f"artifact unreadable: {error}")
     try:
         schema = load_json_strict(schema_file)
     except StrictJsonError as error:

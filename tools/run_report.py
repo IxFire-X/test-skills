@@ -218,7 +218,7 @@ def input_bytes(index: Mapping[str, int], digests: Sequence[str]) -> tuple[int, 
     return sum(found), len(digests) - len(found)
 
 
-def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, int]) -> None:
+def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, int], raw_sizes: Mapping[str, int] | None = None) -> None:
     from tools import pilot_state as pilot
     from tools.step_size import TOKENS_PER_BYTE, output_warning, role_files, step_budget
 
@@ -243,6 +243,10 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
     call["input_basis"] = basis
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
     answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))
+    # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
+    raw = (raw_sizes or {}).get(str(call.get("response_digest") or ""))
+    call["output_basis"] = None if answer is None and raw is None else ("raw" if raw is not None else "compact")
+    answer = raw if raw is not None else answer
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer) is not None)
     role = str(call["stage"]).split(":", 1)[0]
     try:
@@ -428,8 +432,11 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
 
     sizes = digest_index(root)
     calls = model_calls(events)
+    from tools.step_size import output_sizes
+
+    raw_sizes = output_sizes(root)
     for call in calls:
-        _size(project, root, call, sizes)
+        _size(project, root, call, sizes, raw_sizes)
     measured = step_sizes(root)
 
     terminal: Mapping[str, Any] = {}

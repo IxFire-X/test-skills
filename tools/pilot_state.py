@@ -2016,8 +2016,13 @@ def publish_model_stage_artifact(
     artifact: Mapping[str, Any],
     *,
     transport_attempts: int = 1,
+    raw_bytes: int | None = None,
 ) -> Mapping[str, Any]:
-    """Persist a requested model output, then bind its response/candidate events."""
+    """Persist a requested model output, then bind its response/candidate events.
+
+    FaT-O2: ``raw_bytes`` — the size of the answer as the model gave it (the ``--artifact`` file); the stored artifact is
+    compact JSON, so without it the measurement falls back to the stored bytes.
+    """
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
     project, root = _run_root(run_root)
@@ -2082,9 +2087,13 @@ def publish_model_stage_artifact(
         )
     published = dict(read_model_stage_artifact(root, attempt_id, stage_instance_id, content_digest))
     # FaT-O: the answer size of every call, and a warning (never a stop) when it is large
-    from tools.step_size import output_warning
+    from tools.step_size import output_warning, record_output
 
-    published.update(output_bytes=published["byte_count"], warning=output_warning(project, published["byte_count"]))
+    measured = int(raw_bytes) if raw_bytes is not None else published["byte_count"]
+    if raw_bytes is not None:
+        record_output(project, root, stage_instance_id, content_digest, measured)
+    published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
+                     warning=output_warning(project, measured))
     return published
 
 
