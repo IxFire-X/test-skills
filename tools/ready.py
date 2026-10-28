@@ -369,6 +369,20 @@ def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]
     return rows
 
 
+def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """FaT-JL: the Java level the module's build gives its tests — the generated tests use only that API."""
+    if ((module.get("stack") or {}) if isinstance(module.get("stack"), Mapping) else {}).get("language") != "java":
+        return []
+    from tools.discover_project import java_api_level
+
+    level = java_api_level(Path(project).resolve() / str(module.get("root") or "."))
+    if level is None:
+        return [_row("execution:java-level", EXECUTION, "OK", "уровень Java модуля в его сборке не задан (или задан во внешнем "
+                     "родительском pom) — пакет не ограничивает API автотестов; сборка проверит сама")]
+    return [_row("execution:java-level", EXECUTION, "OK", f"уровень Java модуля: {level['level']} ({'; '.join(level['evidence'])}); "
+                 f"автотесты — только API Java {level['level']}, новее отклонит runner-compat (RUNNER_API_LEVEL)")]
+
+
 def _probe_runner(argv: Sequence[str], cwd: Path, *, timeout: int) -> Any:
     from tools.run_tests import run_subprocess
 
@@ -468,6 +482,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                                  "сборка и тесты модуля готовы" if facts["ready"] else
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
                 rows.extend(style_rows(project, selected))
+                rows.extend(java_level_rows(project, selected))
                 probe = build_probe(project, selected) if facts["ready"] else None
                 if probe is not None:
                     rows.append(probe)

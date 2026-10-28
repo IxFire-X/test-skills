@@ -245,7 +245,16 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         else:
             targets = [path]
         files.extend({"digest": str(digest), "path": str(target), "bytes": target.stat().st_size} for target in targets)
-    return {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "unresolved": unresolved}
+    result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "unresolved": unresolved}
+    if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
+        # FaT-JL: the Java level of the module's build, so that the generator and its reviewer keep to its API
+        from tools.discover_project import java_api_level
+
+        module = str(state["attempts"][-1].get("module") or ".")
+        level = java_api_level(project if module == "." else project.joinpath(*module.split("/")))
+        if level is not None:
+            result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее отклонит runner-compat (RUNNER_API_LEVEL)"}
+    return result
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
@@ -321,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
         if requested is not None:
             report.update(input_files=requested["files"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
+            if "java_level" in requested:
+                report["java_level"] = requested["java_level"]
         report["recorded"] = False
         if args.run:
             stage = args.stage and (f"{args.stage}:batch-{args.batch:03d}" if args.batch is not None else args.stage)

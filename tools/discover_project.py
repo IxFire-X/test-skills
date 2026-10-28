@@ -143,6 +143,91 @@ def module_test_evidenced(project_dir: Path, module: Mapping[str, Any]) -> bool:
         if _ok(root, path) and path.is_file():
             texts[str(rel)] = _read(path).lower()
     return framework in _test_values(lang, texts)
+_COMPILER_LEVEL_FIELDS = ("release", "testRelease", "source", "testSource", "target", "testTarget")
+_GRADLE_LEVEL = (
+    (re.compile(r"\b(?:source|target)Compatibility\s*=\s*(?:JavaVersion\.VERSION_)?['\"]?(1[._]\d+|\d+)"), "{}"),
+    (re.compile(r"\blanguageVersion(?:\.set\(\s*|\s*=\s*)JavaLanguageVersion\.of\(\s*(\d+)\s*\)"), "toolchain {}"),
+    (re.compile(r"\bjvmToolchain\(\s*(\d+)\s*\)"), "jvmToolchain {}"),
+    (re.compile(r"\brelease(?:\.set\(\s*|\s*=\s*)(\d+)"), "options.release {}"),
+)
+def _java_version(value: str | None) -> int | None:
+    """``1.8``/``8``/``VERSION_1_8`` → 8; anything else (an unresolved property) → None."""
+    match = re.fullmatch(r"\s*(?:1[._])?(\d+)\s*", value or "")
+    return int(match.group(1)) if match and int(match.group(1)) >= 5 else None
+def _pom_levels(pom: Path, inherited: Mapping[str, str]) -> tuple[list[tuple[int, str]], dict[str, str]]:
+    """Java levels a pom states: compiler properties and plugin configuration, animal-sniffer java1N when it checks test classes."""
+    data = ET.fromstring(_read(pom))
+    own = {_xml_name(item): (item.text or "").strip() for block in data if _xml_name(block) == "properties" for item in block}
+    properties = {**inherited, **own}
+    def resolve(text: str | None) -> str | None:
+        for _ in range(3):
+            match = re.fullmatch(r"\s*\$\{([^}]+)\}\s*", text or "")
+            if not match: return text
+            text = properties.get(match.group(1))
+        return None
+    levels: list[tuple[int, str]] = []
+    for name in ("maven.compiler." + field for field in _COMPILER_LEVEL_FIELDS):
+        level = _java_version(resolve(own.get(name)))
+        if level is not None: levels.append((level, f"{pom.name}: {name}={properties[name]}"))
+    parent = next((child for child in data if _xml_name(child) == "parent"), None)
+    boot = parent is not None and any(_xml_name(child) == "artifactId" and (child.text or "").strip() == "spring-boot-starter-parent" for child in parent)
+    level = _java_version(resolve(properties.get("java.version"))) if boot else None
+    if level is not None: levels.append((level, f"{pom.name}: java.version={properties['java.version']} (spring-boot-starter-parent)"))
+    for plugin in (node for node in data.iter() if _xml_name(node) == "plugin"):
+        artifact = next(((child.text or "").strip() for child in plugin if _xml_name(child) == "artifactId"), "")
+        configurations = [node for node in plugin.iter() if _xml_name(node) == "configuration"]
+        if artifact == "maven-compiler-plugin":
+            for configuration in configurations:
+                for item in configuration:
+                    level = _java_version(resolve(item.text)) if _xml_name(item) in _COMPILER_LEVEL_FIELDS else None
+                    if level is not None: levels.append((level, f"{pom.name}: maven-compiler-plugin {_xml_name(item)}={(item.text or '').strip()}"))
+        elif artifact == "animal-sniffer-maven-plugin":
+            plugin_level = [item for item in plugin if _xml_name(item) == "configuration"]
+            for configuration in configurations:
+                for signature in (node for node in configuration.iter() if _xml_name(node) == "signature"):
+                    name = next(((child.text or "").strip() for child in signature if _xml_name(child) == "artifactId"), "")
+                    match = re.fullmatch(r"java1(\d)", name)
+                    tests = any((node.text or "").strip() == "true" for scope in [configuration, *plugin_level] for node in scope.iter() if _xml_name(node) == "checkTestClasses")
+                    if match and tests: levels.append((int(match.group(1)), f"{pom.name}: animal-sniffer {name} (checkTestClasses)"))
+    return levels, properties
+def java_api_level(module_root: Path) -> dict[str, Any] | None:
+    """FaT-JL: the Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
+
+    Read from the build files only, never by running them: Maven ``maven.compiler.release/source/target`` (and ``test*``)
+    in properties or the compiler plugin, an animal-sniffer ``java1N`` signature that checks test classes, the parent poms
+    of the reactor that list this module; Gradle ``sourceCompatibility``/``targetCompatibility``, toolchain, ``release``.
+    Several values (profiles, executions) give the lowest: an API allowed by it compiles under every one of them."""
+    root = Path(module_root).resolve()
+    levels: list[tuple[int, str]] = []
+    chain, pom = [], root / "pom.xml"
+    while pom.is_file() and len(chain) < 6:
+        chain.append(pom)
+        try: data = ET.fromstring(_read(pom))
+        except ET.ParseError: break
+        parent = next((child for child in data if _xml_name(child) == "parent"), None)
+        relative = next(((child.text or "").strip() for child in parent if _xml_name(child) == "relativePath"), "../pom.xml") if parent is not None else ""
+        candidate = (pom.parent / (relative or "../pom.xml")).resolve()
+        candidate = candidate / "pom.xml" if candidate.is_dir() else candidate
+        try: listed = {(candidate.parent / ref).resolve() for ref in _maven_refs(ET.fromstring(_read(candidate)))} if parent is not None and candidate.is_file() else set()
+        except ET.ParseError: listed = set()
+        if pom.parent.resolve() not in listed: break  # only a reactor parent of this project, never a pom outside it
+        pom = candidate
+    properties: dict[str, str] = {}
+    for index, pom in enumerate(reversed(chain)):
+        try: found, properties = _pom_levels(pom, properties)
+        except ET.ParseError: continue
+        prefix = "" if index == len(chain) - 1 else f"{pom.parent.name}/"
+        levels += [(level, prefix + evidence) for level, evidence in found]
+    for name in ("build.gradle", "build.gradle.kts"):
+        text = _read(root / name) if (root / name).is_file() else ""
+        for pattern, label in _GRADLE_LEVEL:
+            for match in pattern.finditer(text):
+                level = _java_version(match.group(1))
+                if level is not None: levels.append((level, f"{name}: {label.format(match.group(1))}"))
+    if not levels:
+        return None
+    lowest = min(level for level, _evidence in levels)
+    return {"level": lowest, "evidence": list(dict.fromkeys(evidence for level, evidence in levels if level == lowest))[:3]}
 def _source_dir_has_code(root: Path, directory: Path, suffixes: frozenset[str]) -> bool:
     for current, directories, files in os.walk(directory, followlinks=False):
         parent = Path(current)

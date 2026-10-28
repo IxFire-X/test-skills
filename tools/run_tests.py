@@ -300,8 +300,8 @@ def _java_node(parsed: tuple[str, str], locator: Mapping[str, Any]) -> str | Non
     return method if len(re.findall(pattern, parsed[1])) == 1 else None
 
 
-def _mask_java_noncode(text: str) -> str:
-    """Replace comments and quoted literals with spaces while preserving braces/newlines."""
+def _mask_java_noncode(text: str, *, keep_quotes: bool = False) -> str:
+    """Replace comments and quoted literals with spaces while preserving braces/newlines (``keep_quotes``: a string keeps its quotes)."""
     result = list(text)
     index, state, escaped = 0, "code", False
     while index < len(text):
@@ -311,7 +311,7 @@ def _mask_java_noncode(text: str) -> str:
                 result[index:index + 2] = "  "; index += 2; state = "line"; continue
             if text.startswith("/*", index):
                 result[index:index + 2] = "  "; index += 2; state = "block"; continue
-            if char == '"': result[index] = " "; state = "string"; escaped = False
+            if char == '"': result[index] = '"' if keep_quotes else " "; state = "string"; escaped = False
             elif char == "'": result[index] = " "; state = "char"; escaped = False
         elif state == "line":
             if char == "\n": state = "code"
@@ -323,10 +323,76 @@ def _mask_java_noncode(text: str) -> str:
             if char == "\n": state = "code"
             elif escaped: result[index] = " "; escaped = False
             elif char == "\\": result[index] = " "; escaped = True
-            elif (state == "string" and char == '"') or (state == "char" and char == "'"): result[index] = " "; state = "code"
+            elif (state == "string" and char == '"') or (state == "char" and char == "'"): result[index] = '"' if keep_quotes and state == "string" else " "; state = "code"
             else: result[index] = " "
         index += 1
     return "".join(result)
+
+
+# FaT-JL: a closed list of Java APIs newer than a module's level that a regular expression finds without a compiler —
+# (pattern on code without comments and literal contents, Java version, name, replacement, receiver class, argument count).
+# A rule names a JDK class as its receiver, so an explicit import of a same-named class from elsewhere (vavr ``List``,
+# Guava ``Files``/``Predicate``) turns it off; a method other libraries also have is narrowed by its argument count, and
+# one that cannot be narrowed (``isBlank()`` is an AssertJ assertion too, ``readAllBytes()``) is left to the build.
+_JAVA_API_RULES = (
+    (r"\bList\s*\.\s*of\s*\(", 9, "List.of", "Arrays.asList(...), Collections.singletonList/emptyList", "List", None),
+    (r"\bSet\s*\.\s*of\s*\(", 9, "Set.of", "new HashSet<>(Arrays.asList(...)), Collections.singleton/emptySet", "Set", None),
+    (r"\bMap\s*\.\s*(?:of|ofEntries|entry)\s*\(", 9, "Map.of/ofEntries/entry", "HashMap с put, AbstractMap.SimpleEntry", "Map", None),
+    (r"\bObjects\s*\.\s*requireNonNullElse(?:Get)?\s*\(", 9, "Objects.requireNonNullElse", "тернарный оператор", "Objects", None),
+    (r"\.\s*ifPresentOrElse\s*\(", 9, "Optional.ifPresentOrElse", "isPresent() и get()", None, 2),
+    (r"\bStream\s*\.\s*ofNullable\s*\(", 9, "Stream.ofNullable", "x == null ? Stream.empty() : Stream.of(x)", "Stream", None),
+    (r"\.\s*orElseThrow\s*\(", 10, "Optional.orElseThrow()", "orElseThrow(NoSuchElementException::new) или get()", None, 0),
+    (r"\b(?:List|Set|Map)\s*\.\s*copyOf\s*\(", 10, "List/Set/Map.copyOf", "Collections.unmodifiableList(new ArrayList<>(...))", None, None),
+    (r"(?<![\w$.])var\s+[A-Za-z_$][\w$]*\s*[=:]", 10, "var", "явный тип переменной", None, None),
+    (r"\bCollectors\s*\.\s*toUnmodifiable(?:List|Set|Map)\s*\(", 10, "Collectors.toUnmodifiable*", "Collectors.toList() и Collections.unmodifiableList", "Collectors", None),
+    (r"\.\s*strip(?:Leading|Trailing)?\s*\(", 11, "String.strip()", "trim()", None, 0),
+    (r"\.\s*repeat\s*\(", 11, "String.repeat", "цикл со StringBuilder", None, 1),
+    (r"\bFiles\s*\.\s*(?:readString|writeString)\s*\(", 11, "Files.readString/writeString", "new String(Files.readAllBytes(p), UTF_8), Files.write", "Files", None),
+    (r"\bPath\s*\.\s*of\s*\(", 11, "Path.of", "Paths.get", "Path", None),
+    (r"\bPredicate\s*\.\s*not\s*\(", 11, "Predicate.not", "лямбда с !", "Predicate", None),
+    (r"\bjava\s*\.\s*net\s*\.\s*http\b", 11, "java.net.http", "HttpURLConnection или клиент проекта", None, None),
+    (r"\bCollectors\s*\.\s*teeing\s*\(", 12, "Collectors.teeing", "два прохода по данным", "Collectors", None),
+    (r"\bcase\b[^:;{}]*->", 14, "switch с ->", "case ...: с break", None, None),
+    (r'"\s*\.\s*formatted\s*\(', 15, "String.formatted", "String.format", None, None),
+    (r"\binstanceof\s+[\w.]+(?:<[^<>]*>)?\s+[a-z_$][\w$]*\s*[)&|;?:]", 16, "instanceof с переменной", "instanceof и явное приведение", None, None),
+    (r"\brecord\s+[A-Z][\w$]*\s*[(<]", 16, "record", "обычный класс", None, None),
+    (r"\.\s*stream\s*\(\s*\)[^;]*\.\s*toList\s*\(\s*\)", 16, "Stream.toList()", "collect(Collectors.toList())", None, None),
+    (r"\bsealed\s+(?:class|interface)\b", 17, "sealed", "обычный класс", None, None),
+)
+_JAVA_TEXT_BLOCK = re.compile(r'"""[ \t]*\r?\n')
+
+
+def _call_arguments(masked: str, start: int) -> int | None:
+    """Top-level arguments of the call whose ``(`` ends at ``start``; None when the parenthesis never closes."""
+    depth, commas, empty = 0, 0, True
+    for char in masked[start:]:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return 0 if empty else commas + 1
+            depth -= 1
+        elif char == "," and depth == 0:
+            commas += 1
+        if not char.isspace() and not (depth == 0 and char in ")]}"):
+            empty = False
+    return None
+
+
+def _java_api_level_diagnostics(pointer: str, text: str, level: Mapping[str, Any]) -> list[dict[str, str]]:
+    """FaT-JL: RUNNER_API_LEVEL for each closed-list API newer than the module's Java level, with its replacement."""
+    target, masked = int(level["level"]), _mask_java_noncode(text, keep_quotes=True)
+    found = []
+    for pattern, since, name, fix, receiver, arguments in _JAVA_API_RULES:
+        if since <= target or receiver and re.search(rf"^\s*import\s+(?!java\.)[\w.]+\.{receiver}\s*;", masked, re.MULTILINE):
+            continue
+        if any(arguments is None or _call_arguments(masked, match.end()) == arguments for match in re.finditer(pattern, masked)):
+            found.append((since, name, fix))
+    if 15 > target and _JAVA_TEXT_BLOCK.search(text):
+        found.append((15, 'текстовый блок """', "конкатенация строк"))
+    source = "; ".join(level["evidence"])
+    return [_diag(pointer, "RUNNER_API_LEVEL", f"{name} — API Java {since}, а модуль собирает тесты под Java {target} ({source}): "
+                  f"замени на {fix}; используй только API Java {target}") for since, name, fix in found]
 
 
 def validate_artifact_runner_compatibility(project: Path, language: Literal["python", "java"], document: Mapping[str, Any], automation_artifact: Mapping[str, Any], *, materialized: bool = True) -> RunnerCompatibility:
@@ -350,6 +416,10 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
     files = automation_artifact["artifacts"]["generated_files"]
     file_map = {row["file_id"]: row for row in files}
     symbols = automation_artifact["artifacts"]["generated_symbols"]
+    if language == "java":
+        from tools.discover_project import java_api_level
+
+        api_level = java_api_level(root)
     for index, row in enumerate(files):
         file = _path(root, row["path"]) if materialized else root / row["path"]
         pointer = f"/artifacts/generated_files/{index}"
@@ -372,6 +442,8 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
             continue
         if language == "java" and _java_class_display_name(file.stem, text):
             diagnostics.append(_diag(pointer, "RUNNER_CLASS_DISPLAY_NAME", _CLASS_DISPLAY_NAME_FIX))
+        if language == "java" and api_level is not None:
+            diagnostics.extend(_java_api_level_diagnostics(pointer, text, api_level))
     symbol_map = {(row["file_id"], row["symbol_id"]): (index, row) for index, row in enumerate(symbols)}
     bindings: dict[tuple[str, str], Mapping[str, Any]] = {}
     for pair in sorted(pairs):
