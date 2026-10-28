@@ -476,7 +476,11 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                 rows.append(check_context(project, selected, docs, inventory, target))
             except Exception as error:
                 rows.append(_row("scan", CASES, "STOP", f"скан не прошёл: {type(error).__name__}: {error}", "исправьте причину и повторите ready"))
-            if profile == "local-pilot-v1":
+            if profile == "local-pilot-v1" and ((selected.get("stack") or {}) if isinstance(selected.get("stack"), Mapping) else {}).get("language") == "documents":
+                # FaT-DOC: the same refusal as scan — nothing to build, local-pilot is not lowered here
+                rows.append(_row("execution:build", CASES, "STOP", "в проекте только документы, сборки и тестов нет: local-pilot-v1 недоступен",
+                                 "ready и scan с --profile cases-only-v1 — кейсы по документам без автотестов"))
+            elif profile == "local-pilot-v1":
                 facts = execution_facts(project, selected)
                 rows.append(_row("execution:build", EXECUTION, "OK" if facts["ready"] else "WARN",
                                  "сборка и тесты модуля готовы" if facts["ready"] else

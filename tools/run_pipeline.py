@@ -523,6 +523,10 @@ def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
     module, _problem = select_module(modules, getattr(args, "module", None))
     if module is None:
         return None
+    if (module.get("stack") or {}).get("language") == "documents":
+        # FaT-DOC: a project of documents only has nothing to build — local-pilot is refused, not lowered
+        raise HostStop("NO_BUILD_MODULE", "в проекте только документы, сборки и тестов нет: local-pilot-v1 недоступен",
+                       "повтори scan с --profile cases-only-v1 — кейсы по документам без автотестов")
     facts = execution_facts(project, module)
     if not facts["ready"]:
         return {"reason": str(facts["reason"]), "fix": str(facts["fix"])}

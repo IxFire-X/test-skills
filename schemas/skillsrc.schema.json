@@ -325,7 +325,7 @@
         "output_contract": {"type": "string", "minLength": 1}
       }
     },
-    "language": {"enum": ["java", "python", "go", "typescript", "kotlin"]},
+    "language": {"enum": ["java", "python", "go", "typescript", "kotlin", "documents"]},
     "build_tool": {"enum": ["maven", "gradle", "pip", "poetry", "go-mod", "npm", "yarn"]},
     "test_framework": {"enum": ["junit5", "testng", "kotest", "pytest", "unittest", "jest", "mocha", "go-testing"]},
     "unique_strings": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

@@ -404,7 +404,9 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
         else: modules[mid]=module
     if unresolved_fields is None:
         required=("language","build_tool") if report.get("status")=="ready" else ("language",)
-        expected={f"modules.{mid}.stack.{field}" for mid,module in modules.items() for field in required if not isinstance(module.get("stack",{}).get(field),str) or not module["stack"][field].strip()}
+        expected={f"modules.{mid}.stack.{field}" for mid,module in modules.items() for field in required
+                  if not (field=="build_tool" and module.get("stack",{}).get("language")=="documents")  # FaT-DOC: nothing to build
+                  and (not isinstance(module.get("stack",{}).get(field),str) or not module["stack"][field].strip())}
         if report.get("status") == "ready":
             expected |= {
                 f"modules.{mid}.test.framework"
@@ -432,9 +434,26 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
     if status in {"needs_input","needs_source"} and not questions: errors.append(f"{status} report has no questions")
     return errors
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
+DOCUMENT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".adoc", ".rst"})
+def _documents_module(root: Path) -> dict[str, Any] | None:
+    """FaT-DOC: a project of requirement documents only — no build manifest and no source file — is one module `documents`
+    at the root: cases from its documents (cases-only-v1), nothing to build or run. Any source file keeps the old refusal."""
+    from tools.scan_rules import SOURCE_SUFFIXES as ANY_SOURCE
+
+    files = confined_files(root)
+    if any(path.suffix.lower() in ANY_SOURCE and path.suffix.lower() not in DOCUMENT_SUFFIXES for path in files):
+        return None
+    documents = sorted(_rel(root, path) for path in files if path.suffix.lower() in DOCUMENT_SUFFIXES)
+    if not documents:
+        return None
+    return {"id": "root", "root": ".", "stack": {"language": "documents"}, "detected_from": documents[:20], "readiness": "source_ready"}
 def discover_project(project_dir:Path)->dict[str,Any]:
     root=project_dir.resolve(); manifests=find_confined_manifests(root)
-    if not manifests:return build_report("error",root.name,[],[],[],["build manifests were not found"])
+    if not manifests:
+        documents = _documents_module(root)
+        if documents is not None:  # FaT-DOC
+            return build_report("ready", root.name, [documents], [], [], [], project_fingerprint(root, documents["detected_from"]))
+        return build_report("error",root.name,[],[],[],["build manifests were not found"])
     modules,qs,warnings,errors,unresolved=analyze_module_roots(root,manifests); evidence=[_rel(root,p) for p in manifests]
     if errors:return build_report("error",root.name,[],[],warnings,sorted(errors),project_fingerprint(root,evidence))
     if not modules:return build_report("error",root.name,[],[],warnings,["runnable modules were not found"],project_fingerprint(root,evidence))
