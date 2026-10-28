@@ -197,7 +197,13 @@ Run остаётся связан с исходной project/module identity.
 `TASK_DOC_OUTSIDE_CONTEXT`, передай человеку `fix`: модель без документа задачи пишет кейсы без
 требований.
 
-0. Разметка частями: `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и
+0. Повтор разметки (FaT-CR): поле `reuse` вывода scan называет прошлый прогон того же модуля с принятым ревью
+   кейсов, у которого входы разметки и skill_pack_digest пакета совпали байт в байт, и печатает по каждой стадии две команды:
+   `model-request … --reuse-from <run_id>` и `model-response --artifact <файл ответа источника>`. Решаешь ты:
+   повтори их как есть (merge частей — как обычно) или размечай заново. Ответ проходит те же проверки, что свежий,
+   и не меняется (`MODEL_REUSE_MISMATCH`); `reuse: null` с `reason` (и `differences` — какой вход иной) — повтора нет.
+   Не копируй ответы прошлых прогонов иначе: без `--reuse-from` источник не попадает в журнал.
+   Разметка частями: `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и
    `input_digests` (пока нет ответа `context-marker:requirements`, у частей вместо них пометка
    `waits`). Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
    `context-marker:requirements` (только документы; размер — `step_size --stage context-marker:requirements`) →

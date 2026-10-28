@@ -81,7 +81,7 @@ def _yes_no(value: str) -> bool:
 
 def _cmd_model_request(a):
     return pilot_state.publish_model_request(a.run_root, a.attempt, a.stage, model_id=a.model_id, invocation_id=a.invocation_id,
-                                             input_digests=a.input_digest)
+                                             input_digests=a.input_digest, reuse_from=a.reuse_from)
 
 
 def _cmd_model_response(a):
@@ -203,7 +203,7 @@ def _not_runnable(result: Any) -> bool:
 
 # name: (handler, options, invalid-when, named parts of a tuple result)
 COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = {
-    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", "append")), None, ()),
+    "model-request": (_cmd_model_request, (*RUN, "--stage", "--model-id", "--invocation-id", ("--input-digest", "append"), ("--reuse-from", str, None)), None, ()),
     "model-response": (_cmd_model_response, (*RUN, "--stage", ("--artifact", _answer), ("--transport-attempts", int, 1)), None, ()),
     "review-requested": (_cmd_review_requested, (*RUN, "--stage", "--digest"), None, ()),
     "read-model-artifact": (_cmd_read_model_artifact, (*RUN, "--stage", "--digest"), None, ()),

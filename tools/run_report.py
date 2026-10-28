@@ -191,11 +191,13 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
 
     inputs: list[str] = []
     by_code = False
+    reuse = None
     try:
         request = pilot.read_model_request(root, str(call["attempt_id"]), str(call["stage"]), str(call["request_digest"]))
         inputs = list(request.get("input_digests") or [])
         # FaT-6b: a controller step (the FaT-5 merge of the marker parts) is code, not a model call.
         by_code = str(request.get("model_id") or "").startswith("controller:")
+        reuse = request.get("reuse")  # FaT-CR: the answer of an earlier run, reused — no model call either
     except (KeyError, OSError, TypeError, ValueError):
         pass
     resolved, unresolved = input_bytes(sizes, inputs)
@@ -227,8 +229,10 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
     total = resolved + role_bytes
     budget = step_budget(project)
     call.update(input_bytes=resolved, role_bytes=role_bytes, unresolved_inputs=unresolved, size_complete=unresolved == 0,
-                by="code" if by_code else "model")
-    if by_code:  # code reads no prompt: no token estimate and no comparison with the step budget of a model
+                by="code" if by_code else "reuse" if isinstance(reuse, Mapping) else "model")
+    if isinstance(reuse, Mapping):  # FaT-CR: nothing was sent to a model; the input it would have read is the saving
+        call.update(reused_from=reuse.get("run_id"), saved_bytes=resolved + role_bytes, output_large=None)
+    if by_code or isinstance(reuse, Mapping):  # code reads no prompt: no token estimate and no comparison with the step budget of a model
         call.update(role_bytes=0, tokens_est=None, budget_bytes=None, fits=None)
     else:
         call.update(tokens_est=round(total * TOKENS_PER_BYTE), budget_bytes=budget, fits=total <= budget)
@@ -524,6 +528,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "execution": execution.get("verdict") or terminal.get("verification"),
             "execution_duration_sec": (execution.get("stats") or {}).get("duration_sec"),
             "completion": terminal.get("completion"), "coverage": terminal.get("coverage"), "accepted": terminal.get("accepted"),
+            # FaT-CR: calls a model made, and answers reused from an earlier run with the input bytes not sent
+            "model_calls": sum(1 for call in calls if call.get("by") == "model"),
+            "reused_calls": sum(1 for call in calls if call.get("by") == "reuse"),
+            "reused_input_bytes": sum(int(call.get("saved_bytes") or 0) for call in calls if call.get("by") == "reuse"),
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         "review_notes": {"count": notes["count"], "items": notes["items"]},
@@ -551,6 +559,8 @@ def _size_cell(call: Mapping[str, Any]) -> str:
 
 
 def _tokens_cell(call: Mapping[str, Any]) -> str:
+    if call.get("by") == "reuse":  # FaT-CR
+        return f"повтор {str(call.get('reused_from') or '')[:8]}"
     return "код" if call.get("by") == "code" else _dash(call.get("tokens_est"))
 
 
@@ -580,7 +590,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа |", "|---|---|---|---|---|---|---|---|---|",
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "
-          f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') == 'code' else _dash(c.get('fits'))} | "
+          f"{_size_cell(c)} | {_tokens_cell(c)} | {_dash(c.get('budget_bytes'))} | {'—' if c.get('by') in ('code', 'reuse') else _dash(c.get('fits'))} | "
           f"{_dash(c.get('output_bytes'))}{' (большой)' if c.get('output_large') else ''} |"
           for c in report["model_calls"]), "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),

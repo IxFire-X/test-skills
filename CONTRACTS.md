@@ -94,7 +94,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `pilot-common.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `False` | `-` |
 | `run-manifest.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `event.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
-| `model-request.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `model-request.schema.json` | `1` | `IMPLEMENTED` | `1.1.0` | `True` | `-` |
 | `attempt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `run-authorization-receipt.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `terminal-result.schema.json` | `1` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

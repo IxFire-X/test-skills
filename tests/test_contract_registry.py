@@ -12,7 +12,7 @@ from tools.contract_check import validate_pipeline_contract
 SCHEMA_ROWS = [
     ("pipeline.schema.json", 1, "IMPLEMENTED", "4.0"), ("pilot-common.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("run-manifest.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("event.schema.json", 1, "IMPLEMENTED", "1.0.0"),
-    ("model-request.schema.json", 1, "IMPLEMENTED", "1.0.0"),
+    ("model-request.schema.json", 1, "IMPLEMENTED", "1.1.0"),
     ("attempt.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("run-authorization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("terminal-result.schema.json", 1, "IMPLEMENTED", "1.0.0"), ("finalization-receipt.schema.json", 1, "IMPLEMENTED", "1.0.0"),
     ("skillsrc.schema.json", 2, "IMPLEMENTED", "5.0.0"), ("skillsrc-init-output.schema.json", 2, "IMPLEMENTED", "5.0.0"),

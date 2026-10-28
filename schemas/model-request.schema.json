@@ -17,7 +17,7 @@
     "digest"
   ],
   "properties": {
-    "schema_version": {"const": "1.0.0"},
+    "schema_version": {"enum": ["1.0.0", "1.1.0"], "description": "FaT-CR: 1.1.0 adds skill_pack_digest and reuse (context-marker)."},
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "stage_instance_id": {"type": "string", "pattern": "^(?:context-marker:(?:baseline|requirements|batch-[0-9]{3})|tc-generator:BATCH-[a-z0-9-]+|tc-reviewer:canonical|tc-to-autotest:r[12]|autotest-reviewer:r[12])$"},
@@ -36,6 +36,17 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    },
+    "skill_pack_digest": {"description": "FaT-CR: skill_pack_digest of the package the answer is made with (context-marker).", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "reuse": {
+      "description": "FaT-CR: the earlier run whose answer for the same stage and inputs this request reuses.",
+      "type": "object", "additionalProperties": false, "required": ["run_id", "attempt_id", "request_digest", "response_digest"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "request_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "response_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
     },
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
   }

@@ -168,6 +168,13 @@ ID (`O01`, `X02`), иначе раздел `#`/`##` документа. Груп
 `context-marker:baseline` (`python -m tools.context_marker_parts plan|merge --run-root <run>`). Журнал
 пересчитывает слияние при записи и чтении; генератор и ревью читают тот же baseline.
 
+**Повтор разметки (FaT-CR).** Если прошлый прогон того же модуля с принятым ревью кейсов (ПРИНЯТО или
+AUTO_FIX_APPLIED, без дрейфа) размечал ровно те же входы (requirements, inventory, квитанции контекста) тем же пакетом (`skill_pack_digest`
+из release/manifest.json: любая правка пакета отменяет повтор), scan печатает `reuse: {run_id, stages: [{stage, response_digest, artifact, commands}]}`.
+Команды — те же `model-request` (с `--reuse-from <run_id>`, источник пишется в квитанцию запроса) и
+`model-response` с файлом ответа источника; вызова модели нет, в отчёте это `повтор`, счётчики `reused_calls`
+и `reused_input_bytes`. Иначе `reuse: null` и причина; при иных входах — `differences` с именем входа и двумя digest.
+
 **Документ задачи.** Файл из `--docs`, лежащий в inventory модуля, всегда входит в выбор
 контекста — и с `--target`; файлы других задач в каталогах `to_do` при заданном `--docs` в
 контекст не идут. Документ вне inventory модуля (модуль-подкаталог, правило исключения) —

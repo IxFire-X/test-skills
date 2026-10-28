@@ -1096,9 +1096,20 @@ def _scan(args: Any) -> int:
         **({"warnings": context_warnings} if context_warnings else {}),
         **_skillsrc_defaults(project, module),
         **({"abandoned_runs": abandoned} if abandoned else {}),
+        reuse=_marker_reuse(run_root, str(attempt["attempt_id"])),
     )
     _print(payload)
     return 0
+
+
+def _marker_reuse(run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-CR: the scan suggests an earlier accepted run whose context marker has the very same inputs; the agent decides."""
+    from tools.pilot_state import marker_reuse_suggestion
+
+    try:
+        return marker_reuse_suggestion(run_root, attempt_id)
+    except (ValueError, OSError, KeyError, TypeError) as error:  # a suggestion never stops the scan
+        return {"run_id": None, "reason": f"поиск не удался: {error}"}
 
 
 def _skillsrc_defaults(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
