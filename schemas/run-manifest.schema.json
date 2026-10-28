@@ -15,7 +15,8 @@
       "properties": {
         "module": {"type": ["string", "null"], "minLength": 1}, "docs": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "target": {"type": ["string", "null"], "minLength": 1}, "profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
-        "accept_self_review": {"type": "boolean"}, "disposition_policy": {"enum": ["quarantine", "cleanup", null]}
+        "accept_self_review": {"type": "boolean"}, "disposition_policy": {"enum": ["quarantine", "cleanup", null]},
+        "reference": {"type": "string", "minLength": 1, "description": "FaT-REF: scan --reference, the Zephyr CSV of reference cases"}
       }},
     "project_state": {
       "oneOf": [

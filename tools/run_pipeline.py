@@ -441,26 +441,68 @@ def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
     return parse_skillsrc_bytes(data), _digest_bytes(data)
 
 
-def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+def _input_files(project: Path, paths: Sequence[str] | None, flag: str) -> list[tuple[str, bytes]]:
+    """The files a scan flag names (``--docs``, ``--reference``): inside the project, no reparse point, each path once."""
+    files: list[tuple[str, bytes]] = []
     seen: set[str] = set()
-    for raw in docs or []:
+    for raw in paths or []:
         candidate = Path(raw)
         confined = _confined(project, candidate if candidate.is_absolute() else project / candidate)
         if _is_reparse(confined) or not confined.is_file():
-            raise HostStop("SNAPSHOT_DOCS", f"docs path is missing or a reparse point: {raw}")
+            raise HostStop("SNAPSHOT_DOCS", f"{flag.removeprefix('--')} path is missing or a reparse point: {raw}")
         rel = confined.relative_to(project.resolve()).as_posix()
         if rel in seen:
             continue
         seen.add(rel)
-        data = confined.read_bytes()
+        files.append((rel, confined.read_bytes()))
+    return files
+
+
+def _is_zephyr_csv(data: bytes) -> bool:
+    """FaT-REF: the file is a Zephyr Scale test-case CSV — the shared reader knows its columns (rows may still be wrong)."""
+    from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv
+
+    try:
+        parse_zephyr_csv(data)
+    except ZephyrCsvError as error:
+        return error.code == "ZEPHYR_CSV_ROWS"
+    return True
+
+
+def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for rel, data in _input_files(project, docs, "--docs"):
+        if _is_zephyr_csv(data):  # FaT-REF: an export of cases is not a requirements document
+            raise HostStop("DOCS_ZEPHYR_CSV", f"{rel} — выгрузка тест-кейсов Zephyr, а не документ требований",
+                           fix=f"подайте её через scan --reference {rel} (эталон для сравнения), а в --docs — документ требований")
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError as error:
-            raise ValueError(f"docs file is not UTF-8: {raw}") from error
+            raise ValueError(f"docs file is not UTF-8: {rel}") from error
         entries.append({"path": rel, "sha256": _digest_bytes(data), "content": text})
     entries.sort(key=lambda row: row["path"])
     return entries
+
+
+def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, list[dict[str, Any]]] | None:
+    """FaT-REF: ``scan --reference <csv>`` read by the shared Zephyr reader; a reader refusal is the scan's refusal."""
+    if not reference:
+        return None
+    from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv
+
+    from tools.zephyr_csv import require_human_csv
+
+    rel, data = _input_files(project, [reference], "--reference")[0]
+    try:
+        cases = parse_zephyr_csv(data)
+    except ZephyrCsvError as error:
+        raise HostStop(error.code, f"{rel}: {error}", fix="--reference — экспорт тест-кейсов Zephyr Scale в CSV") from error
+    try:
+        require_human_csv(cases)  # FaT-REF: the v4 Test Data holds the machine model, not the human data of a case
+    except ZephyrCsvError as error:
+        raise HostStop(error.code, f"{rel}: {error}", fix="выгрузите кейсы в профиле v5 (по умолчанию) или экспортом из Zephyr — "
+                                                        "в Test Data должен быть текст человека") from error
+    return rel, data, cases
 
 
 def _docs_projection(snapshot: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -721,6 +763,7 @@ def _scan_request(args: Any) -> dict[str, Any]:
         "target": getattr(args, "target", None), "profile": getattr(args, "profile", "local-pilot-v1"),
         "accept_self_review": bool(getattr(args, "accept_self_review", False)),
         "disposition_policy": getattr(args, "disposition_policy", None),
+        **({"reference": str(args.reference)} if getattr(args, "reference", None) else {}),
     }
 
 
@@ -742,7 +785,7 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
             docs.append((path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix())
         except (OSError, ValueError):
             docs.append(str(raw).replace("\\", "/"))
-    return module, tuple(sorted(docs)), request.get("profile")
+    return module, tuple(sorted(docs)), request.get("profile"), request.get("reference")
 
 
 def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None, list[str]]:
@@ -830,6 +873,8 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
         parts.append("--accept-self-review")
     if request.get("disposition_policy"):
         parts.append(f"--disposition-policy {request['disposition_policy']}")
+    if request.get("reference"):
+        parts.append(f'--reference "{request["reference"]}"')
     return " ".join([*parts, *extra])
 
 
@@ -997,6 +1042,9 @@ def _scan(args: Any) -> int:
         selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
         selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
         by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
+        reference = _reference_cases(project, getattr(args, "reference", None))
+        if reference is not None:  # FaT-REF: the reference CSV is never context of a model
+            selected_ids = [opaque for opaque in selected_ids if by_id.get(opaque) != reference[0]]
         context_summary["code_files"] = sum(1 for opaque in selected_ids if opaque not in task_ids and "to_do" not in by_id[opaque].split("/"))
         budget = _scan_context_budget(frozen_inventory, project)
         selected_ids, skipped = _filtered_context(frozen_inventory, project, module_root, selected_ids, task_ids, budget)
@@ -1010,6 +1058,11 @@ def _scan(args: Any) -> int:
         )
         for batch in batches:
             publish_context_selection(run_root, str(attempt["attempt_id"]), batch["receipt"])
+        if reference is not None:  # FaT-REF: a receipt for the review hint; never context or generator input
+            from tools.pilot_state import publish_reference_cases
+
+            publish_reference_cases(run_root, str(attempt["attempt_id"]), *reference)
+            context_summary["reference_cases"] = len(reference[2])
     except ContextStop as stop:
         _print(_durable_status(project, run_root, stage="scan", status="error", reason=stop.code, detail=stop.detail, fix=stop.fix, scope=scope))
         return 2
@@ -2297,6 +2350,8 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--profile", choices=("local-pilot-v1", "cases-only-v1"), default="local-pilot-v1")
     scan_parser.add_argument("--accept-self-review", action="store_true",
                              help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
+    scan_parser.add_argument("--reference", default=None,
+                             help="FaT-REF: a Zephyr Scale CSV of reference cases — compared with the new cases as a review hint")
     scan_parser.add_argument("--new-run", action="store_true",
                              help="FaT-G: start a new run although an unfinished run of the same request exists.")
     scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),

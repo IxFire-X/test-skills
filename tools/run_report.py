@@ -269,7 +269,8 @@ _WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюдже�
                  "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)",
                  "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
                                      "(подсказка ревьюеру)",
-                 "CV_EXISTING_TEST": "кейсы повторяют тесты проекта — тот же эндпоинт и исход (справка ревьюеру, кейсы остаются)"}
+                 "CV_EXISTING_TEST": "кейсы повторяют тесты проекта — тот же эндпоинт и исход (справка ревьюеру, кейсы остаются)",
+                 "CV_REFERENCE": "сравнение с эталонными кейсами scan --reference: пробелы, новые без пары, возможные дубли (подсказка)"}
 
 
 def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
@@ -283,6 +284,21 @@ def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[
     try:
         existing = run_existing_tests(root, attempt_id)
         return {"repeating": repeats(document, existing), "cases": len(document["test_cases"])} if existing else None
+    except (KeyError, OSError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def reference(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+    """FaT-REF: ``CV_REFERENCE`` of the run's case document against its reference cases — IDs and counts only."""
+    from tools.pilot_state import read_reference_cases
+    from tools.review_view import _reference_counts
+    from tools.reference_match import reference_match
+
+    if not attempt_id or not isinstance(document, Mapping):
+        return None
+    try:
+        cases = read_reference_cases(root, attempt_id)
+        return None if cases is None else _reference_counts(reference_match(document, cases["cases"]))
     except (KeyError, OSError, TypeError, ValueError, AttributeError):
         return None
 
@@ -474,6 +490,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     mismatched = data_mismatch(document) if cases is not None else []
     path_hint = end_to_end(root, attempt_id, document) if cases is not None else None
     existing = existing_repeats(root, attempt_id, document) if cases is not None else None
+    compared = reference(root, attempt_id, document) if cases is not None else None
     notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
     autotest_notes = review_notes(root, attempt_id, "autotests") if attempt_id else {"count": 0, "items": []}
 
@@ -494,8 +511,9 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "model_calls": calls, "step_sizes": measured,
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
                     + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
-                    + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else []),
-        "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing,
+                    + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
+                    + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else []),
+        "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -570,6 +588,9 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),
         *([f"  - кейсов, повторяющих тесты проекта: {len(report['existing_tests']['repeating'])} из {report['existing_tests']['cases']}"
            f" ({', '.join(report['existing_tests']['repeating'][:10])})"] if report.get("existing_tests") and report["existing_tests"]["repeating"] else []),
+        *([f"  - эталонов {report['reference']['reference']}, пар {report['reference']['pairs']}, пробелов {len(report['reference']['gaps'])}, "
+           f"новых без пары {len(report['reference']['new'])}, возможных дублей {len(report['reference']['duplicates'])}"]
+          if report.get("reference") and "CV_REFERENCE" in report["warnings"] else []),
         *([] if report["warnings"] else ["- нет"]), "",
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),

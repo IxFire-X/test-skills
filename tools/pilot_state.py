@@ -2579,7 +2579,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases"}
     if kind.startswith(_PRIOR_KIND):  # FaT-BO: one receipt per batch, in its own folder
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_PRIOR_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -2908,6 +2908,18 @@ def _validate_factual_receipt(
             raise ValueError("invalid factual receipt")
         if set(receipt) != common | {"module_selection_digest", "baseline_digest"} or not isinstance(receipt.get("module_selection_digest"), str) or not isinstance(receipt.get("baseline_digest"), str) or receipt["module_selection_digest"] != module_selection_digest(project, attempt["module"]) or receipt["baseline_digest"] != attempt["baseline_digest"]:
             raise ValueError("invalid phase1 artifact")
+    elif kind == "reference-cases":  # FaT-REF: the parsed reference CSV of scan --reference, a hint source only
+        reference = receipt.get("reference")
+        if (
+            set(receipt) != common | {"reference"}
+            or not identity_matches
+            or not isinstance(reference, Mapping)
+            or set(reference) != {"path", "sha256", "cases"}
+            or not isinstance(reference.get("path"), str)
+            or not _DIGEST.fullmatch(str(reference.get("sha256", "")))
+            or not isinstance(reference.get("cases"), list)
+        ):
+            raise ValueError("invalid reference-cases receipt")
     elif kind in _GENERATOR_INPUT_KINDS.values():  # FaT-DG: the plan or the header with its one self-digest
         field = next(name for name, value in _GENERATOR_INPUT_KINDS.items() if value == kind)
         value = receipt.get(field)
@@ -4109,6 +4121,21 @@ def automation_boundary_facts(run_root: Path, attempt_id: str, revision: int, *,
 
 
 _GENERATOR_INPUT_KINDS = {"plan": "batch-plan", "header": "generator-header"}  # FaT-DG
+
+
+def publish_reference_cases(run_root: Path, attempt_id: str, path: str, data: bytes, cases: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """FaT-REF: the reference cases of ``scan --reference`` (parsed by ``zephyr_csv``) as a receipt of the attempt; they
+    never enter the context, the generator input or the canon."""
+    facts = {"reference": {"path": path, "sha256": "sha256:" + hashlib.sha256(bytes(data)).hexdigest(), "cases": [dict(case) for case in cases]}}
+    return _publish_bound_attempt_receipt(run_root, attempt_id, "reference-cases", facts)
+
+
+def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
+    """FaT-REF: the reference of the attempt, None when the scan had no ``--reference``."""
+    try:
+        return read_attempt_receipt(run_root, attempt_id, "reference-cases", "ARTIFACT_READ_BACK")["record"]["reference"]
+    except (ValueError, OSError, KeyError):
+        return None
 _PRIOR_KIND = "prior-capabilities-"  # FaT-BO: + batch_id — the fifth tc-generator input from batch 2
 
 

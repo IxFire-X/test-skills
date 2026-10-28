@@ -35,6 +35,7 @@ from typing import Any, Iterable, Mapping
 
 from tools.canonical_document import param_groups
 from tools.json_cli import JsonArgumentParser
+from tools.reference_match import reference_match
 from tools.test_case_projections import SLOT, template_texts
 
 VIEW_VERSION = "review-view-v2"
@@ -275,6 +276,26 @@ def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None
     return plan, read_context_selection(root, attempt_id, context_digest)
 
 
+def _ids(values: list[str]) -> str:
+    return ", ".join(values[:_SHOWN]) + (f" и ещё {len(values) - _SHOWN}" if len(values) > _SHOWN else "")
+
+
+def _reference_lines(match: Mapping[str, Any] | None) -> list[str]:
+    """FaT-REF: ``CV_REFERENCE`` — counts and IDs only, no case text."""
+    if match is None:
+        return []
+    line = (f"- {match['code']}: эталонов {match['reference']}, новых кейсов {match['cases']}, пар {len(match['pairs'])}; "
+            f"пробелы (эталон без пары) {len(match['gaps'])}" + (f": {_ids(match['gaps'])}" if match["gaps"] else "")
+            + f"; новые без пары {len(match['new'])}" + (f": {_ids(match['new'])}" if match["new"] else "")
+            + f"; возможные дубли {len(match['duplicates'])}" + (f": {_ids(match['duplicates'])}" if match["duplicates"] else ""))
+    return [line + " — справка: пробел проверь по требованиям, дубль — по шагам"]
+
+
+def _reference_counts(match: Mapping[str, Any]) -> dict[str, Any]:
+    return {"reference": match["reference"], "cases": match["cases"], "pairs": len(match["pairs"]), "gaps": match["gaps"],
+            "new": match["new"], "duplicates": match["duplicates"]}
+
+
 def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
     if hint is None:
         return []
@@ -374,11 +395,13 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
 
 
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
-           batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None) -> bytes:
+           batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
+           reference: Iterable[Mapping[str, Any]] | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
-    ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before."""
+    ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before.
+    FaT-REF: with the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
     if profile not in PROFILES:
@@ -393,6 +416,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
     hints = data_mismatches(document)
     path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(document, groups, batches))
     path_hint += _existing_lines(document, existing or {})
+    path_hint += _reference_lines(None if reference is None else reference_match(document, list(reference)))
     lines = [
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
@@ -528,7 +552,11 @@ def main(argv: list[str] | None = None) -> int:
             existing = None if profile == "autotest" or not state["attempts"] else run_existing_tests(root, str(state["attempts"][-1]["attempt_id"]))
         except (OSError, ValueError, KeyError, TypeError):
             existing = None
-        data = render(document, profile, *(grouping or (None, None)), existing=existing)
+        from tools.pilot_state import read_reference_cases
+
+        reference = None if profile == "autotest" or not state["attempts"] else read_reference_cases(root, str(state["attempts"][-1]["attempt_id"]))
+        data = render(document, profile, *(grouping or (None, None)), existing=existing,
+                      reference=None if reference is None else reference["cases"])
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
@@ -536,7 +564,9 @@ def main(argv: list[str] | None = None) -> int:
     view = AUTOTEST_VIEW_VERSION if profile == "autotest" else VIEW_VERSION
     print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
                       "data_mismatch": len(data_mismatches(document)),
-                      "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping)}, ensure_ascii=False, sort_keys=True))
+                      "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping),
+                      "reference": None if reference is None else _reference_counts(reference_match(document, reference["cases"]))},
+                     ensure_ascii=False, sort_keys=True))
     return 0
 
 

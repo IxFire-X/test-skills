@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any
+import re
+from typing import Any, Iterable
 
 from tools.test_case_projections import _CUSTOM_KEYS, _HEADERS, _PRIORITIES
 
@@ -100,3 +101,29 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
     if errors:
         raise ZephyrCsvError("ZEPHYR_CSV_ROWS", "; ".join(errors))
     return cases
+
+
+# FaT-REF: the first line the package's v4 profile puts into Test Data (``test_case_projections._operation_text``)
+_V4_FIRST_LINE = re.compile(r"^(?:(Операция:) не определена$|(HTTP:) [A-Z]+ \S.*; базовый URL: |(Действие проекта:) \S+; адаптер: )")
+
+
+def own_v4_marker(cells: Iterable[str]) -> str | None:
+    """FaT-REF: the marker of a CSV in the package's own v4 profile — the machine part as the first line of a Test Data
+    cell («Операция:», «HTTP:», «Действие проекта:»); None for a v5 or a plain Zephyr export.  One check for REF and IMP."""
+    for cell in cells:
+        match = _V4_FIRST_LINE.match(str(cell).split("\n", 1)[0])
+        if match:
+            return next(group for group in match.groups() if group)
+    return None
+
+
+def require_human_csv(cases: Iterable[dict[str, Any]]) -> None:
+    """FaT-REF/IMP: refuse a CSV of the package's v4 profile — its Test Data is the machine part, not the human data."""
+    rows = [(step["row"], str(step["test_data"]).split("\n", 1)[0]) for case in cases for step in case["steps"]
+            if own_v4_marker([step["test_data"]]) is not None]
+    if rows:
+        raise ZephyrCsvError(
+            "IMPORT_CSV_V4",
+            "это выгрузка пакета в профиле v4 — распознано по первой строке Test Data, она машинная ("
+            + "; ".join(f"строка {row}: «{line}»" for row, line in rows[:3]) + ")",
+        )
