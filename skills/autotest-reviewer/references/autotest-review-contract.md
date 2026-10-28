@@ -23,7 +23,9 @@ For each case retain the declared application boundary, the actual test/helper c
 absence of target substitution and the assertion observing Expected, with file and
 class/method references. A confirmed unit substitute is a blocking finding and requires
 `ТРЕБУЕТ ДОРАБОТКИ`; heuristic signals alone require inspection, not automatic rejection.
-At `ПРИНЯТО`, findings and corrections remain empty under the existing schema. Store
+At `ПРИНЯТО`, corrections remain empty; findings may hold only `WARNING`/`INFO` trifles, never
+`BLOCKING`. A weak assertion, a wrong expected value, «any exception» instead of the specific
+refusal, or a false PASS is `ТРЕБУЕТ ДОРАБОТКИ` (or `AUTO_FIX_APPLIED`), not a note. Store
 positive evidence in top-level `warnings`, for example the following shape, using actual
 reviewed identifiers and code (never copy the placeholders as evidence):
 

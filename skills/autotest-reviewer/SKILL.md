@@ -50,7 +50,13 @@ it is not terminal acceptance and cannot replace execution, trace, disposition, 
 finalization evidence.
 
 Record violations in existing findings with code evidence and affected case/relation IDs.
-For acceptance keep findings/corrections empty; retain concise answers to the three
+For acceptance keep corrections empty; findings may hold only `WARNING`/`INFO` trifles
+(naming, a comment, an imprecision that does not change what a test checks); `BLOCKING`
+with `ПРИНЯТО` is a schema error. A weak assertion, a wrong expected value, «any exception»
+instead of the specific refusal, or a false PASS (a test that passes on wrong behavior) is
+never a note: it is `ТРЕБУЕТ ДОРАБОТКИ` with a `BLOCKING` finding, or `AUTO_FIX_APPLIED`
+when the fix is mechanical. Code shows the notes to the person and never acts on them.
+Retain concise answers to the three
 questions in the existing top-level warnings as `REVIEW_EVIDENCE` notes (format below).
 These notes document source review, not execution or proof of complete semantic coverage.
 

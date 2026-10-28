@@ -17,7 +17,7 @@
   "allOf": [
     {
       "if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "ПРИНЯТО"}}}}}}},
-      "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"maxItems": 0}, "corrections": {"maxItems": 0}}}}}}}
+      "then": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"findings": {"not": {"contains": {"properties": {"severity": {"const": "BLOCKING"}}, "required": ["severity"]}}}, "corrections": {"maxItems": 0}}}}}}}
     },
     {
       "if": {"properties": {"artifacts": {"properties": {"autotest_review": {"properties": {"verdict": {"const": "AUTO_FIX_APPLIED"}}}}}}},

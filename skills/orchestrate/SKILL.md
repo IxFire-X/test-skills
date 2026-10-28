@@ -363,7 +363,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 В конце прогона (после закрытия или остановки) один раз запусти
 `python -m tools.run_pipeline report --project <abs> --run <id>`: он пишет в каталог run `report.md`,
 `report.json` и `questions-for-analyst.md` без кода и текста спеки — назови человеку эти пути.
-Если в выводе `finish`/`status` есть `review_notes` (ревью приняло кейсы с замечаниями-мелочами), назови человеку
+Если в выводе `finish`/`status` есть `review_notes` или `autotest_review_notes` (ревью приняло кейсы или автотесты с замечаниями-мелочами), назови человеку
 их число и путь одной строкой; кейсы не меняй и вердикт не пересматривай — текст замечаний в `questions-for-analyst.md`.
 
 ## Resume и дрейф

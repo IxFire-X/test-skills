@@ -164,14 +164,18 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _review_notes_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """FaT-RN: how many notes the accepted review left and where its answer is; nothing when there are none."""
+    """FaT-RN: how many notes the accepted case/autotest review left and where its answer is; nothing when there are none."""
     from tools.run_report import review_notes
 
-    try:
-        notes = review_notes(run_root, attempt_id)
-    except (KeyError, OSError, TypeError, ValueError):  # a hint never fails the step
-        return {}
-    return {"review_notes": {"count": notes["count"], "path": notes["path"]}} if notes["count"] else {}
+    summary: dict[str, Any] = {}
+    for field, review in (("review_notes", "cases"), ("autotest_review_notes", "autotests")):
+        try:
+            notes = review_notes(run_root, attempt_id, review)
+        except (KeyError, OSError, TypeError, ValueError):  # a hint never fails the step
+            continue
+        if notes["count"]:
+            summary[field] = {"count": notes["count"], "path": notes["path"]}
+    return summary
 
 
 _KEPT_DISPOSITIONS = frozenset({"RETAINED", "QUARANTINED", "PRESERVED_EXECUTION_UNKNOWN", "PRESERVED_CONTENT_CONFLICT",

@@ -172,3 +172,67 @@ def test_no_notes_no_section_and_no_field(tmp_path: Path, capsys: pytest.Capture
     write_report(tmp_path, run_root.name)
     assert "Замечания ревью" not in (run_root / "report.md").read_text(encoding="utf-8")
     assert "Замечания ревью" not in (run_root / "questions-for-analyst.md").read_text(encoding="utf-8")
+
+
+# --- the autotest review: the same rule ------------------------------------------------------------
+
+AUTOTEST_SCHEMA = ROOT / "schemas" / "autotest-reviewer-output.schema.json"
+
+
+def _autotest_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, findings: list):
+    from tests import test_automation_revision_budget as budget
+    from tests.test_finish import _automation_chain
+
+    original, captured = budget.review, []
+
+    def with_findings(*args, **kwargs):
+        reviewed = original(*args, **kwargs)
+        reviewed["artifacts"]["autotest_review"]["findings"] = copy.deepcopy(findings)
+        captured.append(reviewed)
+        return reviewed
+
+    monkeypatch.setattr(budget, "review", with_findings)
+    run_root, attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
+    return run_root, attempt_id, captured[0]
+
+
+def _autotest_note(severity: str = "WARNING") -> dict:
+    return {"severity": severity, "code": "ASSERT_WORDING", "message": MESSAGE, "evidence": ["tests/test_products.py"],
+            "related_ids": ["FILE-products", "FILE-not-generated"]}
+
+
+def test_an_accepted_autotest_review_may_carry_a_warning_but_never_a_blocking_finding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.schema_validation import schema_diagnostics
+
+    _run_root, _attempt_id, reviewed = _autotest_run(tmp_path, monkeypatch, [_autotest_note("WARNING"), _autotest_note("INFO")])
+    assert schema_diagnostics(reviewed, AUTOTEST_SCHEMA, ROOT) == []
+    blocking = copy.deepcopy(reviewed)
+    blocking["artifacts"]["autotest_review"]["findings"].append(_autotest_note("BLOCKING"))
+    assert schema_diagnostics(blocking, AUTOTEST_SCHEMA, ROOT)
+    clean = copy.deepcopy(reviewed)
+    clean["artifacts"]["autotest_review"]["findings"] = []
+    assert schema_diagnostics(clean, AUTOTEST_SCHEMA, ROOT) == []
+
+
+def test_autotest_notes_reach_the_report_the_questions_and_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    from tools.run_pipeline import cmd_status
+    from tools.run_report import review_notes, write_report
+
+    run_root, attempt_id, _reviewed = _autotest_run(tmp_path, monkeypatch, [_autotest_note()])
+    notes = review_notes(run_root, attempt_id, "autotests")
+    assert notes["count"] == 1 and notes["items"] == [
+        {"severity": "WARNING", "code": "ASSERT_WORDING", "related_ids": ["FILE-products"], "dropped_ids": 1}]
+    assert "autotest-reviewer" not in str(review_notes(run_root, attempt_id)["path"])
+    project = run_root.parents[1]
+    cmd_status(SimpleNamespace(project=str(project), run=run_root.name))
+    status = json.loads(capsys.readouterr().out)
+    assert status["autotest_review_notes"]["count"] == 1 and Path(status["autotest_review_notes"]["path"]).is_file()
+    write_report(project, run_root.name)
+    report_json = (run_root / "report.json").read_text(encoding="utf-8")
+    markdown = (run_root / "report.md").read_text(encoding="utf-8")
+    assert json.loads(report_json)["autotest_review_notes"]["count"] == 1 and "## Замечания ревью автотестов" in markdown
+    for text in (report_json, markdown):
+        assert MESSAGE not in text and "FILE-not-generated" not in text
+    questions = (run_root / "questions-for-analyst.md").read_text(encoding="utf-8")
+    assert "## Замечания ревью автотестов" in questions and MESSAGE in questions
