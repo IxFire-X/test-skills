@@ -6,7 +6,8 @@ test data, automation blockers, expected text and its assertions in one line —
 meaning only the reviewer judges: one line per step with its operation, inputs and outputs, and the list of
 capabilities with action, arguments, results and the first line of provenance (the test boundary).  The validator
 checks structure and references, not meaning.  A literal longer than ``LITERAL_LIMIT`` is cut with a mark; a sensitive
-input is ``***``.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
+input is ``***``.  FaT-PT: a parameter group is shown once at its first case — its lines with the IDs of the first
+case and ``<параметр>`` where the cases differ, then a table with a row per case ID.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
 step's action and data — a number of any length as a whole token, other text from ``MIN_LITERAL`` characters.
 
 ``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
@@ -31,7 +32,9 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from tools.canonical_document import param_groups
 from tools.json_cli import JsonArgumentParser
+from tools.test_case_projections import SLOT, template_texts
 
 VIEW_VERSION = "review-view-v2"
 AUTOTEST_VIEW_VERSION = "autotest-view-v1"
@@ -263,25 +266,73 @@ def render(document: Mapping[str, Any], profile: str = "review") -> bytes:
         "## Кейсы",
     ]
     actions = {row["capability_id"]: row["action"] for row in document.get("operation_capabilities") or []}
+    groups = {group["cases"][0]["case_id"]: group for group in param_groups(document)} if SLOT not in json.dumps(document, ensure_ascii=False) else {}
+    folded = {case["case_id"] for group in groups.values() for case in group["cases"][1:]}
     for case in document["test_cases"]:
-        facts = [f"требования {', '.join(case['requirement_ids'])}", f"приоритет {case['priority']}",
-                 f"категории {', '.join(case['categories'])}"]
-        if case.get("technique"):
-            facts.append(f"техника {case['technique']}")
-        lines += ["", f"### {case['case_id']} {case['title']}", "", "- " + "; ".join(facts), f"- Цель: {case['objective']}"]
-        lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
-        for step in case["steps"]:
-            manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
-            lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}",
-                      _operation(step, actions)]
-            # the reviewer judges whether a gap is justified (missing oracle, input, access or setup), so a blocker is shown
-            lines += [f"   Блокер автоматизации [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
-                      for blocker in step["automation_blockers"]]
-            for expectation in step["expectations"]:
-                lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
-                if expectation["assertions"]:
-                    lines.append("   Проверки: " + "; ".join(_assertion(item) for item in expectation["assertions"]))
+        if case["case_id"] in groups:
+            lines += _group_lines(groups[case["case_id"]], actions)
+        elif case["case_id"] not in folded:
+            lines += ["", f"### {case['case_id']} {case['title']}", *_case_lines(case, actions)]
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _case_lines(case: Mapping[str, Any], actions: Mapping[str, str]) -> list[str]:
+    facts = [f"требования {', '.join(case['requirement_ids'])}", f"приоритет {case['priority']}",
+             f"категории {', '.join(case['categories'])}"]
+    if case.get("technique"):
+        facts.append(f"техника {case['technique']}")
+    lines = ["", "- " + "; ".join(facts), f"- Цель: {case['objective']}"]
+    lines += [f"- Предусловие {index}: {text}" for index, text in enumerate(case["preconditions"])]
+    for step in case["steps"]:
+        manual = f" (ручной: {step.get('manual_reason') or '—'})" if step.get("manual_only") else ""
+        lines += [f"{step['display_order']}. [{step['step_id']}]{manual} {step['action']}", f"   Данные: {step.get('test_data') or '—'}",
+                  _operation(step, actions)]
+        # the reviewer judges whether a gap is justified (missing oracle, input, access or setup), so a blocker is shown
+        lines += [f"   Блокер автоматизации [{blocker['code']}] {blocker['field_path']}: {blocker['reason']}"
+                  for blocker in step["automation_blockers"]]
+        for expectation in step["expectations"]:
+            lines.append(f"   Ожидание [{expectation['expectation_id']}]: {expectation['text']}")
+            if expectation["assertions"]:
+                lines.append("   Проверки: " + "; ".join(_assertion(item) for item in expectation["assertions"]))
+    return lines
+
+
+def _as_first(case: Mapping[str, Any], first: Mapping[str, Any], line: str) -> str:
+    """A line of a group case with its step and expectation IDs written as those of the first case (same positions)."""
+    for own_step, base_step in zip(case["steps"], first["steps"]):
+        pairs = [(own_step["step_id"], base_step["step_id"])]
+        pairs += [(own["expectation_id"], base["expectation_id"]) for own, base in zip(own_step["expectations"], base_step["expectations"])]
+        for own, base in pairs:
+            line = re.sub(r"(?<![A-Za-z0-9_:-])" + re.escape(own) + r"(?![A-Za-z0-9_:-])", base, line)
+    return line
+
+
+def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[str]:
+    """FaT-PT: the lines of a group once — ``<параметр>`` where its cases differ — and a row per case ID."""
+    cases, parameter = group["cases"], group["parameter"]
+    per_case = [[_as_first(case, cases[0], line) for line in _case_lines(case, actions)] for case in cases]
+    values: list[list[str]] = [[] for _ in cases]
+    expected: list[list[str]] = [[] for _ in cases]
+    shown = []
+    for texts in zip(*per_case):
+        line, middles = template_texts(list(texts))
+        into = expected if line.lstrip().startswith(("Ожидание", "Проверки")) else values
+        for own, middle in zip(into, middles):
+            if middle.strip() and middle.strip() not in own:
+                own.append(middle.strip())
+        shown.append(line.replace(SLOT, f"<{parameter['name']}>"))
+    title, _ = template_texts([case["title"] for case in cases])
+    titled = len({case["title"] for case in cases}) > 1
+    rows = []
+    for index, case in enumerate(cases):
+        own = [item for item in expected[index] if item not in values[index]]
+        cells = [str(index + 1), "; ".join(values[index]) or "—", "; ".join(own) or "—", *([case["title"]] if titled else []), case["case_id"]]
+        rows.append("| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ") for cell in cells) + " |")
+    head = ["№", parameter["name"], "ожидаемое", *(["название"] if titled else []), "ID кейса"]
+    return ["", f"### {group['group_id']} {title.replace(SLOT, '<' + parameter['name'] + '>')}", "",
+            f"- Группа {group['group_id']}: кейсы {', '.join(case['case_id'] for case in cases)} — варианты параметра {parameter['id']}"
+            f" «{parameter['name']}», шаги одни; ниже ID шагов и ожиданий первого кейса, у остальных — те же позиции в JSON кандидата.",
+            *shown, "", "| " + " | ".join(head) + " |", "|" + "---|" * len(head), *rows]
 
 
 def main(argv: list[str] | None = None) -> int:

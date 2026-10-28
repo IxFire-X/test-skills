@@ -112,13 +112,13 @@ def _trailing_json(value: str) -> tuple[str, str | None]:
 
 # FaT-PT: a parameter group is shown once — the texts of its first case with a slot where the variants differ, and a
 # table with a row per case; the slot becomes ``<имя параметра>``. The canonical keeps one case per variant.
-_SLOT = "\ue000"
+SLOT = "\ue000"
 
 
 _TOKEN = re.compile(r"\d+(?:[.,]\d+)*|\w+|\W", re.S)
 
 
-def _template(texts: list[str]) -> tuple[str, list[str]]:
+def template_texts(texts: list[str]) -> tuple[str, list[str]]:
     """The common text of the variants with one slot, cut between whole words and numbers, and each variant's middle."""
     if len(set(texts)) == 1:
         return texts[0], []
@@ -127,7 +127,7 @@ def _template(texts: list[str]) -> tuple[str, list[str]]:
     rests = [own[head:] for own in tokens]
     tail = len(os.path.commonprefix([rest[::-1] for rest in rests]))
     middles = ["".join(rest[:len(rest) - tail]) for rest in rests]
-    return "".join(tokens[0][:head]) + _SLOT + "".join(tokens[0][len(tokens[0]) - tail:]), middles
+    return "".join(tokens[0][:head]) + SLOT + "".join(tokens[0][len(tokens[0]) - tail:]), middles
 
 
 def _group_view(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
@@ -138,14 +138,14 @@ def _group_view(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, s
     expected: list[list[str]] = [[] for _ in cases]
 
     def slot(texts: list[str], into: list[list[str]]) -> str:
-        text, middles = _template(texts)
+        text, middles = template_texts(texts)
         for own, middle in zip(into, middles):
             if middle.strip() and middle.strip() not in own:
                 own.append(middle.strip())
         return text
 
-    view["title"], _ = _template([case["title"] for case in cases])
-    view["objective"], _ = _template([case["objective"] for case in cases])
+    view["title"], _ = template_texts([case["title"] for case in cases])
+    view["objective"], _ = template_texts([case["objective"] for case in cases])
     for step_index, step in enumerate(view["steps"]):
         steps = [case["steps"][step_index] for case in cases]
         step["action"] = slot([item["action"] for item in steps], values)
@@ -166,7 +166,7 @@ def _group_view(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, s
 
 def _grouped_cases(document: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]]:
     """The cases as shown: a group at the place of its first case, its other cases folded into the group's table."""
-    groups = {group["cases"][0]["case_id"]: group for group in param_groups(document)} if _SLOT not in json.dumps(document, ensure_ascii=False) else {}
+    groups = {group["cases"][0]["case_id"]: group for group in param_groups(document)} if SLOT not in json.dumps(document, ensure_ascii=False) else {}
     folded = {case["case_id"] for group in groups.values() for case in group["cases"][1:]}
     shown = []
     for case in document["test_cases"]:
@@ -265,7 +265,7 @@ def _html_action(step: dict[str, Any]) -> str:
 
 
 def _html_test_data(step: dict[str, Any]) -> str:
-    if _SLOT in step["test_data"]:  # FaT-PT: a slotted request is no JSON any more; shown as it is
+    if SLOT in step["test_data"]:  # FaT-PT: a slotted request is no JSON any more; shown as it is
         data = step["test_data"]
         return f"<pre>{html.escape(data, quote=True)}</pre>" if "{" in data or "[" in data else f"<p>{_html_text(data)}</p>"
     marker = step["test_data"].strip()
@@ -336,7 +336,7 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
             rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step)}</td><td>{_html_test_data(step)}</td><td>{_html_expected(step)}</td></tr>")
         rows.append("</tbody></table>" + (_html_variants(group, variants) if group else "") + "</section>")
         if group:
-            rows[start:] = [row.replace(_SLOT, f"<code>&lt;{_html_text(group['parameter']['name'])}&gt;</code>") for row in rows[start:]]
+            rows[start:] = [row.replace(SLOT, f"<code>&lt;{_html_text(group['parameter']['name'])}&gt;</code>") for row in rows[start:]]
     rows.append("</body></html>\n")
     return Projection("".join(rows).encode("utf-8"), warnings)
 
@@ -413,7 +413,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
                     ])
         if group:
             slot = "<" + group["parameter"]["name"].replace("\n", " ") + ">"
-            lines[start:] = [line.replace(_SLOT, slot) for line in lines[start:]] + _markdown_variants(group, variants)
+            lines[start:] = [line.replace(SLOT, slot) for line in lines[start:]] + _markdown_variants(group, variants)
     return Projection(("\n".join(lines) + "\n").encode("utf-8"), warnings)
 
 

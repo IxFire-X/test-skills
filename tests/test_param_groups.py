@@ -218,3 +218,35 @@ def test_a_document_without_groups_renders_the_same_bytes() -> None:
     newer = dict(document, schema_version="1.1.0")
     assert render_html_preview(newer).payload == render_html_preview(document).payload
     assert render_markdown(newer).payload == render_markdown(document).payload
+
+
+# --- the reviewer view (step 2) ------------------------------------------------------------------
+
+def test_the_reviewer_view_shows_a_group_once_with_a_row_per_case() -> None:
+    from tools.review_view import render
+
+    plain = render(json.loads(EXAMPLE.read_text(encoding="utf-8"))).decode("utf-8")
+    view = render(grouped()).decode("utf-8")
+    assert view.count("\n### ") == plain.count("\n### ")
+    assert "reviewed_case_ids по порядку: TC-B1-001, TC-B1-001-V1, TC-B1-001-V2," in view
+    block = view[view.index("### PG-first-name"):]
+    block = block[:block.index("\n### ")]
+    assert "TC-B1-001-V1" in block and "STEP-B1-001-03-V1" not in block, "the steps once, with the IDs of the first case"
+    assert 'firstName="<имя>"' in block and '"firstName":"<имя>"' in block, "text and machine values slotted"
+    rows = [line for line in block.splitlines() if line.startswith("| ") and "TC-B1-001" in line]
+    assert len(rows) == 3 and all(name in row for row, name in zip(rows, NAMES))
+
+
+def test_the_reviewer_view_of_a_group_is_smaller_and_without_groups_unchanged() -> None:
+    from tools.review_view import render
+
+    document = grouped()
+    plain = copy.deepcopy(document)
+    for case in plain["test_cases"]:
+        case.pop("param_group", None)
+    assert len(render(document)) < len(render(plain))
+    example = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    def without_digest(view: bytes) -> list[bytes]:  # the version is part of the document digest in the header
+        return [line for line in view.splitlines() if b"document_sha256" not in line]
+
+    assert without_digest(render(dict(example, schema_version="1.1.0"))) == without_digest(render(example))
