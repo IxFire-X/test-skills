@@ -231,7 +231,7 @@ Run остаётся связан с исходной project/module identity.
    `validate-canonical` из п.4 на этом же файле (всех фрагментах). Отказ любой из трёх — ошибка ответа: на неё идёт
    единственный повтор стадии (`retry_prompt` — текст отказа); после `model-response` ответ стадии не заменить.
    `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
-4. Собери один bare canonical JSON `1.0.0` с explicit many-to-many traceability и
+4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
    --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
    `tools.api validate-canonical --document <run>/tmp/candidate.json`.

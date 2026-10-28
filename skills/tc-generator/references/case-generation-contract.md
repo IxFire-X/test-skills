@@ -1,6 +1,6 @@
 # 5.0.0 batch-fragment generation contract
 
-The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
+The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0/1.1.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
 
 The fragment preserves `SREQ-*` source requirements with exact provenance/digests,
 `CREQ-*` canonical requirements within the controller-owned batch namespace, and

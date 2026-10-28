@@ -372,6 +372,122 @@ def uncovered_requirements(requirements: Sequence[Mapping[str, Any]], cases: Seq
     return [index for index, requirement in enumerate(requirements) if requirement.get("requirement_id") not in covered]
 
 
+_GROUP_FREE_CASE_FIELDS = frozenset({"case_id", "display_order", "title", "objective", "design_refs", "param_group"})
+
+
+def _group_value(value: dict[str, Any], positions: dict[str, int]) -> dict[str, Any]:
+    """A value source or expected value as the group compares it: a literal without its value, a step by its position."""
+    if value["kind"] == "literal":
+        return {"kind": "literal"}
+    if value["kind"] == "step_output":
+        return {**value, "step_id": positions.get(value["step_id"], value["step_id"])}
+    return value
+
+
+def _group_shape(case: dict[str, Any]) -> dict[str, Any]:
+    """FaT-PT: the case without what its variants may differ in — literal values, human texts and document-global ids."""
+    positions = {step["step_id"]: index for index, step in enumerate(case["steps"])}
+    steps = []
+    for step in case["steps"]:
+        shape = {key: value for key, value in step.items() if key not in {"step_id", "action", "test_data"}}
+        shape["inputs"] = [{**{key: value for key, value in item.items() if key != "input_id"}, "source": _group_value(item["source"], positions)}
+                           for item in step["inputs"]]
+        shape["automation_blockers"] = [{key: value for key, value in item.items() if key != "blocker_id"} for item in step["automation_blockers"]]
+        # step references inside a case: input sources, assertion actual and expected (exists/not_exists has no expected)
+        shape["expectations"] = [{"display_order": expectation["display_order"], "assertions": [
+            {**{key: value for key, value in assertion.items() if key != "assertion_id"},
+             **{key: _group_value(assertion[key], positions) for key in ("actual", "expected") if key in assertion}}
+            for assertion in expectation["assertions"]]} for expectation in step["expectations"]]
+        steps.append(shape)
+    return {**{key: value for key, value in case.items() if key not in _GROUP_FREE_CASE_FIELDS}, "steps": steps}
+
+
+def _first_difference(left: Any, right: Any, path: tuple[object, ...] = ()) -> tuple[object, ...] | None:
+    if isinstance(left, dict) and isinstance(right, dict):
+        for key in sorted(set(left) | set(right)):
+            if key not in left or key not in right:
+                return (*path, key)
+            found = _first_difference(left[key], right[key], (*path, key))
+            if found is not None:
+                return found
+        return None
+    if isinstance(left, list) and isinstance(right, list):
+        for index, (one, other) in enumerate(zip(left, right)):
+            found = _first_difference(one, other, (*path, index))
+            if found is not None:
+                return found
+        return None if len(left) == len(right) else (*path, min(len(left), len(right)))
+    return None if type(left) is type(right) and left == right else path
+
+
+def _design_variants(cases: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, tuple[str, ...]]]]:
+    """The design parameters whose references differ between the cases, and each case's references by parameter."""
+    refs = []
+    for case in cases:
+        own: dict[str, list[str]] = {}
+        for ref in case.get("design_refs", []):
+            own.setdefault(ref["parameter"], []).append(json.dumps(ref, sort_keys=True, ensure_ascii=False))
+        refs.append({parameter: tuple(sorted(items)) for parameter, items in own.items()})
+    parameters = sorted({parameter for own in refs for parameter in own})
+    varying = [parameter for parameter in parameters if len({own.get(parameter) for own in refs}) > 1]
+    return varying, refs
+
+
+def _group_members(document: dict[str, Any]) -> dict[str, list[tuple[int, dict[str, Any]]]]:
+    members: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for case_index, case in sorted(enumerate(document["test_cases"]), key=lambda item: item[1]["display_order"]):
+        if "param_group" in case:
+            members.setdefault(case["param_group"], []).append((case_index, case))
+    return members
+
+
+def _design_parameter(document: dict[str, Any], case: dict[str, Any], parameter_id: str) -> dict[str, Any] | None:
+    for requirement in document["requirements"]:
+        if requirement["requirement_id"] in case["requirement_ids"]:
+            for parameter in requirement.get("design", {}).get("parameters", []):
+                if parameter["id"] == parameter_id:
+                    return parameter
+    return None
+
+
+def _param_group_diagnostics(document: dict[str, Any], diagnostics: list[dict[str, str]]) -> None:
+    """FaT-PT: cases of one ``param_group`` are the variants of one design parameter and differ only in values.
+
+    The generator declares the group; the code guesses nothing — it compares each case with the first one of the group
+    (all but literal values, human texts and ids) and checks through ``design_refs`` that exactly one declared design
+    parameter varies, a different variant in every case. Each case still passes every other check on its own.
+    """
+    for group_id, members in _group_members(document).items():
+        first_index, first = members[0]
+        if len(members) < 2:
+            diagnostics.append(_diagnostic(_pointer("test_cases", first_index, "param_group"), "SEMANTIC_PARAM_GROUP_SINGLE", f"{group_id}: a group needs at least two cases"))
+            continue
+        shape = _group_shape(first)
+        for case_index, case in members[1:]:
+            found = _first_difference(shape, _group_shape(case))
+            if found is not None:
+                diagnostics.append(_diagnostic(_pointer("test_cases", case_index, *found), "SEMANTIC_PARAM_GROUP_MISMATCH",
+                                               f"{group_id}: {case['case_id']} differs from {first['case_id']} beyond the values of its variant"))
+        varying, refs = _design_variants([case for _, case in members])
+        path = _pointer("test_cases", first_index, "design_refs")
+        if len(varying) != 1:
+            diagnostics.append(_diagnostic(path, "SEMANTIC_PARAM_GROUP_PARAMETER", f"{group_id}: exactly one design parameter must vary, not {varying or 'none'}"))
+        elif any(own.get(varying[0]) is None for own in refs) or len({own[varying[0]] for own in refs}) != len(refs):
+            diagnostics.append(_diagnostic(path, "SEMANTIC_PARAM_GROUP_PARAMETER", f"{group_id}: every case needs its own variant of {varying[0]}"))
+        elif _design_parameter(document, first, varying[0]) is None:
+            diagnostics.append(_diagnostic(path, "SEMANTIC_PARAM_GROUP_PARAMETER", f"{group_id}: {varying[0]} is not declared in the design of its requirements"))
+
+
+def param_groups(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """FaT-PT: the parameter groups of a valid document — id, the varying design parameter, the cases by display order."""
+    groups = []
+    for group_id, members in _group_members(document).items():
+        cases = [case for _, case in members]
+        varying, _ = _design_variants(cases)
+        groups.append({"group_id": group_id, "parameter": _design_parameter(document, cases[0], varying[0]), "cases": cases})
+    return sorted(groups, key=lambda group: group["cases"][0]["display_order"])
+
+
 def _source_requirement_traceability(document: dict[str, Any], diagnostics: list[dict[str, str]]) -> None:
     """Validate the explicit source -> canonical -> case relation for canonical 1.0."""
     sources = document["source_requirements"]
@@ -741,6 +857,7 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
     index = _build_index(document, diagnostics)
     _source_requirement_traceability(document, diagnostics)
     _requirement_coverage(index, document, diagnostics)
+    _param_group_diagnostics(document, diagnostics)
     _russian_human_corpus(document, diagnostics)
     handles = _secret_handles(document)
     _metadata_secret_handle_hygiene(document, handles, diagnostics)
@@ -761,7 +878,7 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]]:
-    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0."""
+    """Return deterministic schema followed by relational diagnostics for canonical 1.0.0 and 1.1.0."""
     diagnostics = schema_diagnostics(document, _CANONICAL_DOCUMENT_SCHEMA, _ROOT)
     if diagnostics:
         return diagnostics

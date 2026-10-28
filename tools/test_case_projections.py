@@ -6,12 +6,14 @@ import csv
 import html
 import io
 import json
+import os
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from tools.canonical_document import require_valid_canonical_document
+from tools.canonical_document import param_groups, require_valid_canonical_document
 
 
 _PROFILE_V1 = "zephyr-scale-step-row-24-v1"
@@ -108,6 +110,103 @@ def _trailing_json(value: str) -> tuple[str, str | None]:
     return "\n".join(lines).strip(), None
 
 
+# FaT-PT: a parameter group is shown once — the texts of its first case with a slot where the variants differ, and a
+# table with a row per case; the slot becomes ``<имя параметра>``. The canonical keeps one case per variant.
+_SLOT = "\ue000"
+
+
+_TOKEN = re.compile(r"\d+(?:[.,]\d+)*|\w+|\W", re.S)
+
+
+def _template(texts: list[str]) -> tuple[str, list[str]]:
+    """The common text of the variants with one slot, cut between whole words and numbers, and each variant's middle."""
+    if len(set(texts)) == 1:
+        return texts[0], []
+    tokens = [_TOKEN.findall(text) for text in texts]
+    head = len(os.path.commonprefix(tokens))
+    rests = [own[head:] for own in tokens]
+    tail = len(os.path.commonprefix([rest[::-1] for rest in rests]))
+    middles = ["".join(rest[:len(rest) - tail]) for rest in rests]
+    return "".join(tokens[0][:head]) + _SLOT + "".join(tokens[0][len(tokens[0]) - tail:]), middles
+
+
+def _group_view(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """The first case of a group with slotted texts, and a row per case: its values, its expected result, its title, its ID."""
+    cases = group["cases"]
+    view = json.loads(json.dumps(cases[0]))
+    values: list[list[str]] = [[] for _ in cases]
+    expected: list[list[str]] = [[] for _ in cases]
+
+    def slot(texts: list[str], into: list[list[str]]) -> str:
+        text, middles = _template(texts)
+        for own, middle in zip(into, middles):
+            if middle.strip() and middle.strip() not in own:
+                own.append(middle.strip())
+        return text
+
+    view["title"], _ = _template([case["title"] for case in cases])
+    view["objective"], _ = _template([case["objective"] for case in cases])
+    for step_index, step in enumerate(view["steps"]):
+        steps = [case["steps"][step_index] for case in cases]
+        step["action"] = slot([item["action"] for item in steps], values)
+        step["test_data"] = slot([item["test_data"] for item in steps], values)
+        for expectation_index, expectation in enumerate(step["expectations"]):
+            expectation["text"] = slot([item["expectations"][expectation_index]["text"] for item in steps], expected)
+    parameter = group["parameter"]["id"]
+    rows = []
+    for index, case in enumerate(cases):
+        if not values[index]:  # no text differs: the variant as the design names it
+            ref = next(ref for ref in case["design_refs"] if ref["parameter"] == parameter)
+            values[index] = [str(ref.get("value") or ref.get("bound") or ref.get("class"))]
+        own = [item for item in expected[index] if item not in values[index]]  # the value itself is no extra expectation
+        rows.append({"values": "; ".join(values[index]), "expected": "; ".join(own) or "—", "title": case["title"],
+                     "case_id": case["case_id"]})
+    return view, rows
+
+
+def _grouped_cases(document: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, str]]]]:
+    """The cases as shown: a group at the place of its first case, its other cases folded into the group's table."""
+    groups = {group["cases"][0]["case_id"]: group for group in param_groups(document)} if _SLOT not in json.dumps(document, ensure_ascii=False) else {}
+    folded = {case["case_id"] for group in groups.values() for case in group["cases"][1:]}
+    shown = []
+    for case in document["test_cases"]:
+        if case["case_id"] in groups:
+            view, rows = _group_view(groups[case["case_id"]])
+            shown.append((view, groups[case["case_id"]], rows))
+        elif case["case_id"] not in folded:
+            shown.append((case, None, []))
+    return shown
+
+
+def _variant_columns(rows: list[dict[str, str]]) -> tuple[bool, bool]:
+    """A title column only when titles differ, an expected column only when some row expects more than its value."""
+    return len({row["title"] for row in rows}) > 1, any(row["expected"] != "—" for row in rows)
+
+
+def _html_variants(group: dict[str, Any], rows: list[dict[str, str]]) -> str:
+    name = _html_text(group["parameter"]["name"])
+    titled, expects = _variant_columns(rows)
+    head = "<th>№</th><th>" + name + "</th>" + ("<th>Ожидаемый результат</th>" if expects else "") + ("<th>Вариант</th>" if titled else "") + "<th>ID кейса</th>"
+    body = "".join(
+        f"<tr><td>{number}</td><td>{_html_text(row['values'])}</td>" + (f"<td>{_html_text(row['expected'])}</td>" if expects else "")
+        + (f"<td>{_html_text(row['title'])}</td>" if titled else "") + f"<td>{html.escape(row['case_id'])}</td></tr>"
+        for number, row in enumerate(rows, 1))
+    return (f"<h3>Варианты данных</h3><p>Группа {html.escape(group['group_id'])}, параметр «{name}»: кейс на каждую строку.</p>"
+            f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")
+
+
+def _markdown_variants(group: dict[str, Any], rows: list[dict[str, str]]) -> list[str]:
+    name = _readable_table_cell(group["parameter"]["name"])
+    titled, expects = _variant_columns(rows)
+    head = ["№", name, *(["Ожидаемый результат"] if expects else []), *(["Вариант"] if titled else []), "ID кейса"]
+    lines = ["", "**Варианты данных**", "", f"Группа {group['group_id']}, параметр «{name}»: кейс на каждую строку.", "",
+             "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for number, row in enumerate(rows, 1):
+        cells = [str(number), row["values"], *([row["expected"]] if expects else []), *([row["title"]] if titled else []), row["case_id"]]
+        lines.append("| " + " | ".join(_readable_table_cell(cell) for cell in cells) + " |")
+    return lines
+
+
 def _html_text(value: str) -> str:
     return html.escape(value, quote=True).replace("\n", "<br>")
 
@@ -166,6 +265,9 @@ def _html_action(step: dict[str, Any]) -> str:
 
 
 def _html_test_data(step: dict[str, Any]) -> str:
+    if _SLOT in step["test_data"]:  # FaT-PT: a slotted request is no JSON any more; shown as it is
+        data = step["test_data"]
+        return f"<pre>{html.escape(data, quote=True)}</pre>" if "{" in data or "[" in data else f"<p>{_html_text(data)}</p>"
     marker = step["test_data"].strip()
     if marker in {"—", "Тело запроса отсутствует."}:
         return marker
@@ -222,7 +324,8 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         "<style>body{font:16px/1.45 system-ui,sans-serif;margin:2rem;max-width:1200px}table{border-collapse:collapse;table-layout:fixed;width:100%;margin:1rem 0 2rem}th,td{border:1px solid #bbb;padding:.75rem;vertical-align:top;text-align:left;overflow-wrap:anywhere}th{background:#f3f3f3}pre{margin:.5rem 0;white-space:pre-wrap}p{margin:.5rem 0}code{font-family:ui-monospace,monospace}</style></head><body>",
         f"<h1>{html.escape(title, quote=True)}</h1><p><strong>Проект:</strong> {_html_text(metadata['project'])}<br><strong>Автор:</strong> {_html_text(metadata['author'])}<br><strong>Дата:</strong> {_html_text(metadata['date'])}</p><h2>Документация</h2>{docs}",
     ]
-    for case_number, case in enumerate(document["test_cases"], 1):
+    for case_number, (case, group, variants) in enumerate(_grouped_cases(document), 1):
+        start = len(rows)
         rows.extend((
             f"<section><h2>ТК-{case_number}. {_html_text(case['title'])}</h2><p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
             + (f"<p>Техника: {html.escape(case['technique'])}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
@@ -231,7 +334,9 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         ))
         for step_number, step in enumerate(case["steps"], 1):
             rows.append(f"<tr><td><strong>Шаг {step_number}</strong><br>{_html_action(step)}</td><td>{_html_test_data(step)}</td><td>{_html_expected(step)}</td></tr>")
-        rows.append("</tbody></table></section>")
+        rows.append("</tbody></table>" + (_html_variants(group, variants) if group else "") + "</section>")
+        if group:
+            rows[start:] = [row.replace(_SLOT, f"<code>&lt;{_html_text(group['parameter']['name'])}&gt;</code>") for row in rows[start:]]
     rows.append("</body></html>\n")
     return Projection("".join(rows).encode("utf-8"), warnings)
 
@@ -266,7 +371,9 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
         f"**Автор:** {escape_inline(metadata['author'])}",
         f"**Дата:** {escape_inline(metadata['date'])}",
     ]
-    for case_number, case in enumerate(document["test_cases"], 1):
+    shown = _grouped_cases(document) if profile == _PROFILE_V4 else [(case, None, []) for case in document["test_cases"]]
+    for case_number, (case, group, variants) in enumerate(shown, 1):
+        start = len(lines)
         lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
         if "technique" in case:  # FaT-TD
@@ -304,6 +411,9 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
                         "**Тестовые данные / запрос**", "", *_markdown_human_blocks(data, literal=profile == _PROFILE_V4), "",
                         "**Ожидаемый результат**", "", *_markdown_human_blocks(expected, literal=profile == _PROFILE_V4),
                     ])
+        if group:
+            slot = "<" + group["parameter"]["name"].replace("\n", " ") + ">"
+            lines[start:] = [line.replace(_SLOT, slot) for line in lines[start:]] + _markdown_variants(group, variants)
     return Projection(("\n".join(lines) + "\n").encode("utf-8"), warnings)
 
 

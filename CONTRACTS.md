@@ -107,7 +107,7 @@ Generated from `contracts/pipeline.json`. Do not edit manually.
 | `execution-baseline.schema.json` | `2` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `context-marker-output.schema.json` | `3` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
 | `tc-generator-output.schema.json` | `3` | `IMPLEMENTED` | `5.0.0` | `True` | `-` |
-| `canonical-test-document.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
+| `canonical-test-document.schema.json` | `3` | `IMPLEMENTED` | `1.1.0` | `True` | `-` |
 | `batch-plan.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `candidate-fragment.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |
 | `assembly-receipt.schema.json` | `3` | `IMPLEMENTED` | `1.0.0` | `True` | `-` |

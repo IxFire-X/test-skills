@@ -25,7 +25,7 @@ SKILL_PATHS = {
 SCHEMA_ROWS = [
     ("pipeline.schema.json",1,"IMPLEMENTED","4.0"),("pilot-common.schema.json",1,"IMPLEMENTED","1.0.0"),("run-manifest.schema.json",1,"IMPLEMENTED","1.0.0"),("event.schema.json",1,"IMPLEMENTED","1.0.0"),("model-request.schema.json",1,"IMPLEMENTED","1.0.0"),("attempt.schema.json",1,"IMPLEMENTED","1.0.0"),("run-authorization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),("terminal-result.schema.json",1,"IMPLEMENTED","1.0.0"),("finalization-receipt.schema.json",1,"IMPLEMENTED","1.0.0"),
     ("skillsrc.schema.json",2,"IMPLEMENTED","5.0.0"),("skillsrc-init-output.schema.json",2,"IMPLEMENTED","5.0.0"),("inventory-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("exclusion-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("context-selection-receipt.schema.json",2,"IMPLEMENTED","1.0.0"),("execution-baseline.schema.json",2,"IMPLEMENTED","1.0.0"),
-    ("context-marker-output.schema.json",3,"IMPLEMENTED","5.0.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.0.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
+    ("context-marker-output.schema.json",3,"IMPLEMENTED","5.0.0"),("tc-generator-output.schema.json",3,"IMPLEMENTED","5.0.0"),("canonical-test-document.schema.json",3,"IMPLEMENTED","1.1.0"),("batch-plan.schema.json",3,"IMPLEMENTED","1.0.0"),("candidate-fragment.schema.json",3,"IMPLEMENTED","1.0.0"),("assembly-receipt.schema.json",3,"IMPLEMENTED","1.0.0"),
     ("tc-reviewer-output.schema.json",4,"IMPLEMENTED","5.0.0"),("orchestrator-output.schema.json",4,"IMPLEMENTED","5.0.0"),("reviewer-session.schema.json",4,"IMPLEMENTED","1.0.0"),
     ("tc-to-autotest-output.schema.json",5,"IMPLEMENTED","5.0.0"),("autotest-reviewer-output.schema.json",5,"IMPLEMENTED","5.0.0"),("execution-inputs-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("generated-delta.schema.json",5,"IMPLEMENTED","1.0.0"),("materialization-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),("disposition-receipt.schema.json",5,"IMPLEMENTED","1.0.0"),
     ("run-tests-output.schema.json",6,"IMPLEMENTED","5.0.0"),("resume-validation-receipt.schema.json",7,"IMPLEMENTED","1.0.0"),("trace-document.schema.json",7,"IMPLEMENTED","5.0.0"),("trace-audit-output.schema.json",7,"IMPLEMENTED","5.0.0"),("pre-finalization-trace.schema.json",7,"IMPLEMENTED","1.0.0"),("derived-terminal-trace.schema.json",7,"IMPLEMENTED","1.0.0"),
@@ -175,7 +175,10 @@ def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: l
             schema = _load_json(path)
             if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
                 errors.append(f"implemented schema draft mismatch: {name}")
-            if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and schema.get("properties", {}).get("schema_version", {}).get("const") != row.get("target_version"):
+            version = schema.get("properties", {}).get("schema_version", {})
+            # FaT-PT: a schema that still reads its older version lists them in an enum, the target last
+            current = version.get("const", (version.get("enum") or [None])[-1])
+            if name not in {"pipeline.schema.json", *VERSIONLESS_RECEIPT_SCHEMAS} and current != row.get("target_version"):
                 errors.append(f"implemented schema version mismatch: {name}")
             if not _known_object_boundaries_are_closed(schema):
                 errors.append(f"implemented schema closure mismatch: {name}")

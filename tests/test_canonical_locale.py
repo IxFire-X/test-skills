@@ -16,7 +16,7 @@ def test_canonical_document_requires_exact_v1_and_russian_human_corpus() -> None
 
     legacy = deepcopy(document)
     legacy["schema_version"] = "3.0.0"
-    assert any(item["code"] == "SCHEMA_CONST" for item in validate_canonical_document(legacy))
+    assert any(item["code"] == "SCHEMA_ENUM" for item in validate_canonical_document(legacy))  # FaT-PT: 1.0.0 or 1.1.0, nothing else
 
     english = deepcopy(document)
     english["metadata"]["subject"]["name"] = "Catalog"

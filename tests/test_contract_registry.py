@@ -19,7 +19,7 @@ SCHEMA_ROWS = [
     ("inventory-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("exclusion-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-selection-receipt.schema.json", 2, "IMPLEMENTED", "1.0.0"), ("execution-baseline.schema.json", 2, "IMPLEMENTED", "1.0.0"),
     ("context-marker-output.schema.json", 3, "IMPLEMENTED", "5.0.0"), ("tc-generator-output.schema.json", 3, "IMPLEMENTED", "5.0.0"),
-    ("canonical-test-document.schema.json", 3, "IMPLEMENTED", "1.0.0"), ("batch-plan.schema.json", 3, "IMPLEMENTED", "1.0.0"),
+    ("canonical-test-document.schema.json", 3, "IMPLEMENTED", "1.1.0"), ("batch-plan.schema.json", 3, "IMPLEMENTED", "1.0.0"),
     ("candidate-fragment.schema.json", 3, "IMPLEMENTED", "1.0.0"), ("assembly-receipt.schema.json", 3, "IMPLEMENTED", "1.0.0"),
     ("tc-reviewer-output.schema.json", 4, "IMPLEMENTED", "5.0.0"), ("orchestrator-output.schema.json", 4, "IMPLEMENTED", "5.0.0"),
     ("reviewer-session.schema.json", 4, "IMPLEMENTED", "1.0.0"), ("tc-to-autotest-output.schema.json", 5, "IMPLEMENTED", "5.0.0"),

@@ -46,6 +46,11 @@ A requirement without inputs gets no `design`. Every case gets `technique` (`EP`
 `PAIRWISE`, `OTHER`) and `design_refs`: which class or bound (`min`, `max`, `below_min`,
 `above_max`) it checks; a DT/PAIRWISE case names one class per parameter. Code compares the
 references with the design and gives the reviewer hints; do not add cases only to silence them.
+Variants of one design parameter whose cases share the steps, operations and checks and differ
+only in values (literal inputs, literal expected values, `test_data`, expectation texts, title)
+get one `param_group` (`PG-…`, canonical `1.1.0`): still one case per variant, each with its own
+`design_refs` variant of that one parameter. People then see one case with a data table, one row
+per case ID. Code checks the group and guesses none; do not group cases whose steps or checks differ.
 
 ## Projection rule
 
