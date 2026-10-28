@@ -75,10 +75,14 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
         for receipt in receipts:
-            parts.append(step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [*head, receipt["digest"], answer],
-                              {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
-                              "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
-                              + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else "")))
+            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [*head, receipt["digest"], answer],
+                        {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
+                        "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
+                        + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else ""))
+            if answer is None:  # FaT-M: no digest list with a null in it before the requirements answer
+                del part["input_digests"]
+                part["waits"] = "ждёт ответа context-marker:requirements"
+            parts.append(part)
         mode = "parts"
     pending = [part["stage"] for part in parts if not part["done"]]
     if "context-marker:baseline" in responses:

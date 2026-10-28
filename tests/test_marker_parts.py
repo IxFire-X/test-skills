@@ -256,3 +256,17 @@ def test_a_single_marker_must_bind_every_receipt(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="every context receipt"):
         pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="model-context", invocation_id="single-partial",
                                           input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"]])
+
+
+def test_a_part_plan_names_no_digests_until_the_requirements_answer(tmp_path: Path) -> None:
+    """FaT-M (1.10): before the requirements answer a part has no input_digests with null in them — a note instead."""
+    from tools.context_marker_parts import plan
+
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    parts = plan(root)["parts"][1:]
+    assert all("input_digests" not in part and part["waits"] == "ждёт ответа context-marker:requirements" for part in parts)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
+    parts = plan(root)["parts"][1:]
+    assert [part["input_digests"] for part in parts] == [[*head, receipt["digest"], requirements["content_digest"]] for receipt in receipts]
+    assert all("waits" not in part for part in parts)

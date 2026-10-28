@@ -182,7 +182,8 @@ Run остаётся связан с исходной project/module identity.
 требований.
 
 0. Разметка частями: `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и
-   `input_digests`. Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
+   `input_digests` (пока нет ответа `context-marker:requirements`, у частей вместо них пометка
+   `waits`). Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
    `context-marker:requirements` (только документы) → по каждой части `step_size --stage
    context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
    context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
