@@ -211,6 +211,27 @@ def test_different_bytes_in_an_existing_import_file_are_a_conflict(tmp_path: Pat
     assert caught.value.code == "ZEPHYR_EXPORT_CONFLICT" and target.read_bytes() == b"changed"
 
 
+def test_a_link_at_the_import_path_is_a_conflict_even_to_the_same_bytes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """FaT-WT: the ``is_symlink`` branch of ``_install`` — a link to a file with the very bytes of the export is refused."""
+    import os
+
+    from tools.zephyr_template_export import ZephyrTemplateError, export_import_csv
+
+    project, run_root, bundle_csv = _cases_only_run(tmp_path, capsys)
+    target = Path(export_import_csv(project, run_root.name, bundle_csv)["output"])
+    data = target.read_bytes()
+    elsewhere = tmp_path / "elsewhere.csv"
+    elsewhere.write_bytes(data)
+    target.unlink()
+    try:
+        os.symlink(elsewhere, target)
+    except OSError as error:  # pragma: no cover - a Windows host without the symlink privilege
+        pytest.skip(f"no symlink here: {error}")
+    with pytest.raises(ZephyrTemplateError) as caught:
+        export_import_csv(project, run_root.name, bundle_csv)
+    assert caught.value.code == "ZEPHYR_EXPORT_CONFLICT" and target.is_symlink() and elsewhere.read_bytes() == data
+
+
 def test_without_a_template_nothing_is_written_and_the_bundle_is_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.zephyr_template_export import export_import_csv
 

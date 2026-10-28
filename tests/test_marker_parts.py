@@ -86,6 +86,10 @@ def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path,
     artifact = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged["content_digest"])["artifact"]
     expected = merge_marker_artifacts(_marker(["шаг требований — код не анализировался"], ["док — требование без ожидаемого результата"]), answers)
     assert artifact == expected and len(artifact["artifacts"]["source_code_and_diff"]["sources"]) == 3
+    # FaT-WT: the merged answer by its rules, written out — not the same function again
+    assert artifact["artifacts"]["source_code_and_diff"]["sources"] == [f"src/part{index}.py — наблюдение части {index + 1}" for index in range(3)]
+    assert artifact["warnings"] == ["док — требование без ожидаемого результата"] + [f"часть {index} — код для SREQ-x не найден" for index in (1, 2, 3)]
+    assert artifact["artifacts"]["analytics_documentation"]["requirements"] == _requirements()
     assert artifact["warnings"].count("док — требование без ожидаемого результата") == 1
     request = next(event for event in pilot_state.derive_state(root)["events"]
                    if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_REQUESTED")
@@ -97,6 +101,24 @@ def test_three_batches_make_requirements_three_parts_and_a_merge(tmp_path: Path,
     plan_digest, header_digest = publish_fixture_generator_inputs(root, attempt_id, ["BATCH-fixture"], receipts[0]["digest"])  # FaT-DG
     pilot_state.publish_model_request(root, attempt_id, "tc-generator:BATCH-fixture", model_id="model-generator", invocation_id="invoke-generator",
                                       input_digests=[merged["content_digest"], receipts[0]["digest"], plan_digest, header_digest])
+
+
+def test_the_merge_rules_first_occurrence_whitespace_and_the_warning_key() -> None:
+    """FaT-WT: the rules of ``context_marker_merge`` on literal answers: part order, the first occurrence wins, sources
+    equal after whitespace normalisation are one, the requirements placeholder goes once a part saw code, and warnings are
+    one per (source, observation) split at the first « — »."""
+    from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER, merge_marker_artifacts
+
+    requirements = _marker([REQUIREMENTS_PLACEHOLDER], ["док — нет ожидаемого результата", "общее замечание"])
+    first = _marker([REQUIREMENTS_PLACEHOLDER, "src/a.py — читает  owners", "src/b.py — пишет"],
+                    ["док —   нет ожидаемого   результата", "src/a.py — нет теста"])
+    second = _marker(["  src/a.py — читает owners ", "src/c.py — удаляет"], ["src/a.py —нет теста", "общее  замечание", "src/c.py — нет теста"])
+    merged = merge_marker_artifacts(requirements, [first, second])
+    assert merged["artifacts"]["source_code_and_diff"]["sources"] == ["src/a.py — читает  owners", "src/b.py — пишет", "src/c.py — удаляет"]
+    assert merged["warnings"] == ["док — нет ожидаемого результата", "общее замечание", "src/a.py — нет теста", "src/c.py — нет теста"]
+    assert merged["artifacts"]["analytics_documentation"] == requirements["artifacts"]["analytics_documentation"]
+    only_placeholder = merge_marker_artifacts(requirements, [_marker([REQUIREMENTS_PLACEHOLDER])])
+    assert only_placeholder["artifacts"]["source_code_and_diff"]["sources"] == [REQUIREMENTS_PLACEHOLDER]
 
 
 def test_a_part_that_changes_the_requirements_is_rejected(tmp_path: Path) -> None:

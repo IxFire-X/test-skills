@@ -69,6 +69,16 @@ def test_a_run_without_the_flag_keeps_the_receipt_byte_for_byte(tmp_path: Path) 
     run_root, _attempt_id = _run(tmp_path, flag=False)
     assert set(read_run(run_root)["authorization"]) == RECEIPT_KEYS
     assert self_review_accepted(run_root) is False
+    # FaT-WT: the bytes themselves, rebuilt by hand — the keys alone pass a changed value or a changed format
+    import hashlib
+
+    def canonical(value: dict) -> bytes:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+
+    body = {"schema_version": "1.0.0", "run_id": run_root.name, "request_id": "self-review", "policy_profile": "local-pilot-v1",
+            "execution_requested": True}
+    expected = canonical({**body, "digest": "sha256:" + hashlib.sha256(canonical(body)).hexdigest()})
+    assert (run_root / "run-authorization-receipt.json").read_bytes() == expected
 
 
 def test_the_flag_is_sealed_in_the_receipt_and_survives_lowering(tmp_path: Path) -> None:

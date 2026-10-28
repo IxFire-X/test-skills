@@ -117,10 +117,16 @@ def test_the_report_has_steps_counts_and_no_project_content(tmp_path: Path) -> N
     blob = (run_root / "report.json").read_bytes() + markdown.encode("utf-8")
     for fragment in ("combine(plugin_value", "assert 1 == 1", "from-project-plugin", "expected: _2_ but was", "def test_other_one"):
         assert fragment.encode("utf-8") not in blob
-    for doc in (tmp_path / "openspec").rglob("*.md") if (tmp_path / "openspec").exists() else ():
-        for line in doc.read_text(encoding="utf-8").splitlines():
-            if len(line.strip()) > 30:
-                assert line.strip().encode("utf-8") not in blob
+    # FaT-WT: the texts of the run's own case document (requirements, titles, actions, expectations) — the fixture has
+    # no openspec folder, so the old loop over it never ran
+    document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
+    texts = [row["text"] for row in document["requirements"] + document["source_requirements"]]
+    for case in document["test_cases"]:
+        texts += [case["title"], case["objective"], *case["preconditions"]]
+        texts += [text for step in case["steps"] for text in (step["action"], step.get("test_data") or "", *(row["text"] for row in step["expectations"]))]
+    texts = [text.strip() for text in texts if len(text.strip()) > 12]
+    assert texts, document["document_id"]
+    assert [text for text in texts if text.encode("utf-8") in blob] == []
 
 
 def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path: Path) -> None:
@@ -221,6 +227,30 @@ def test_the_questions_write_never_raises_and_never_follows_a_link(tmp_path: Pat
     assert (cases / "questions-for-analyst.md").read_text(encoding="utf-8") == "чужой файл\n"
     assert write_questions_next_to(tmp_path / "missing", run_root) == (None, "ANALYST_QUESTIONS_WRITE_FAILED")
     assert sorted(path.name for path in cases.iterdir()) == ["questions-for-analyst.md"]
+
+
+def test_a_link_at_the_questions_path_is_a_conflict_even_to_the_same_bytes(tmp_path: Path) -> None:
+    """FaT-WT: the ``is_symlink`` branch — a link to a file with exactly the bytes the write would give is still refused,
+    and the link and its target stay as they were (a plain foreign file above is refused by its bytes alone)."""
+    import os
+
+    from tools.run_report import write_questions_next_to
+
+    run_root = _finished_run(tmp_path)
+    first = tmp_path / "first"
+    first.mkdir()
+    written, problem = write_questions_next_to(first, run_root)
+    assert problem is None, problem
+    elsewhere = tmp_path / "elsewhere.md"
+    elsewhere.write_bytes(Path(written).read_bytes())
+    cases = tmp_path / "cases"
+    cases.mkdir()
+    try:
+        os.symlink(elsewhere, cases / "questions-for-analyst.md")
+    except OSError as error:  # pragma: no cover - a Windows host without the symlink privilege
+        pytest.skip(f"no symlink here: {error}")
+    assert write_questions_next_to(cases, run_root) == (None, "ANALYST_QUESTIONS_CONFLICT")
+    assert (cases / "questions-for-analyst.md").is_symlink() and elsewhere.read_bytes() == Path(written).read_bytes()
 
 
 def test_publication_puts_the_questions_beside_the_case_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

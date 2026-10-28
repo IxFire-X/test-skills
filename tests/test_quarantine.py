@@ -295,6 +295,27 @@ def test_fail_with_quarantine_is_still_not_accepted(tmp_path: Path) -> None:
     assert (terminal["verification"], terminal["accepted"]) == ("FAIL", False)
 
 
+def test_finish_closes_a_failed_run_with_a_quarantined_method_end_to_end(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """FaT-WT: FAIL with ``retained > 0`` through ``finish`` — the closing reads the quarantined file and the receipt and
+    still never accepts the attempt (the unit test above builds the facts by hand, without quarantine)."""
+    from types import SimpleNamespace
+
+    from tools import pilot_state
+    from tools.run_pipeline import cmd_finish
+
+    run_root, attempt_id, delta = _fail(tmp_path, content=THREE_FUNCTIONS)
+    code = cmd_finish(SimpleNamespace(project=str(tmp_path), run=run_root.name))
+    output = json.loads(capsys.readouterr().out)
+    assert output["branch"] == "execution" and output["verification"] == "FAIL" and output["accepted"] is False, output
+    terminal = pilot_state.read_terminal_result(run_root, attempt_id)
+    assert (terminal["verification"], terminal["accepted"]) == ("FAIL", False), terminal
+    [row] = _receipt(run_root, attempt_id)["files"]
+    assert row["disposition"] == "QUARANTINED" and [item["method"] for item in row["quarantine"]] == ["test_selected"], row
+    text = (tmp_path / delta["files"][0]["path"]).read_text(encoding="utf-8")
+    assert text.count("test-skills quarantine: ASSERT-batch-a-001") == 1 and "def test_other_one" in text
+    assert code == 1, (code, output)  # a verdict other than PASS is not a green exit
+
+
 # --- the choice is made once, at scan ---------------------------------------------------------
 
 def _receipt_bytes(run: dict) -> bytes:

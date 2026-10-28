@@ -82,13 +82,21 @@ def test_a_changed_or_missing_secret_file_is_baseline_drift(tmp_path: Path) -> N
     assert check()["status"] == "DECLARED_INPUT_DRIFT"
 
 
-def test_the_drift_stop_names_no_secret_and_no_digest(tmp_path: Path) -> None:
-    """The exec stop text is fixed: it carries neither the file bytes nor its fingerprint."""
-    import inspect
-
-    source = inspect.getsource(run_pipeline._revalidate_execution_baseline)
-    assert "child attempt" not in source and "_drift_report" in source  # FaT-G: the stop names paths only
-    assert "secret_inputs" not in source and "content_digest" not in source
+def test_the_drift_stop_names_no_secret_and_no_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exec stop carries neither the file bytes nor its fingerprint, whatever else the baseline check returns
+    (FaT-WT: the stop itself, not the words of its source)."""
+    digest = "sha256:" + hashlib.sha256(SECRET.encode("utf-8")).hexdigest()
+    drift = {"status": "DECLARED_INPUT_DRIFT", "reason_code": "BASELINE_DRIFT", "changed": [SECRET_PATH],
+             "secret_inputs": [{"project_path": SECRET_PATH, "content_digest": digest}], "detail": f"password: {SECRET}"}
+    monkeypatch.setattr(run_pipeline, "_baseline_check", lambda *args, **kwargs: drift)
+    coordinates = {"manifest": {"project": str(tmp_path)}, "run_root": str(tmp_path / ".pilot-runs" / "r"), "attempt": {},
+                   "module_root": str(tmp_path)}
+    with pytest.raises(run_pipeline.HostStop) as caught:
+        run_pipeline._revalidate_execution_baseline(coordinates, None)
+    stop = caught.value
+    printed = json.dumps({"message": str(stop), "code": stop.code, "fix": stop.fix, "args": [str(item) for item in stop.args]}, ensure_ascii=False)
+    assert stop.code == "BASELINE_DRIFT" and SECRET_PATH in str(stop)  # FaT-G: the stop names the changed path
+    assert SECRET not in printed and digest not in printed and digest.removeprefix("sha256:") not in printed
 
 
 def test_the_report_carries_no_secret_fingerprint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

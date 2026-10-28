@@ -77,6 +77,30 @@ def test_a_forged_receipt_is_refused_even_after_a_cached_read(tmp_path: Path) ->
             pilot_state.read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
 
 
+def test_a_resealed_forged_receipt_is_validated_again_not_taken_from_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FaT-WT: a forgery with a valid seal passes ``_check_sealed``; only a cache key over the receipt bytes sends it to
+    ``_validate_factual_receipt`` again (the unsealed forgery above is refused by the seal before the cache)."""
+    from tools import pilot_state
+
+    root, attempt_id = _passed(tmp_path)
+    counts: collections.Counter = collections.Counter()
+    _count(monkeypatch, counts, "_validate_factual_receipt")
+    with pilot_state.closure_cache():
+        first = pilot_state.read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
+        validated = counts["_validate_factual_receipt"]
+        pilot_state.read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
+        assert counts["_validate_factual_receipt"] == validated, counts  # the second read is a cache hit
+        record = {key: value for key, value in first["record"].items() if key != "digest"}
+        delta = dict(record["delta"])
+        delta["baseline_digest"] = str(delta["baseline_digest"])[:-1] + ("0" if not str(delta["baseline_digest"]).endswith("0") else "1")
+        record["delta"] = delta
+        forged = pilot_state._sealed(record)
+        (root / first["path"]).write_bytes(pilot_state._canonical_bytes(forged))
+        with pytest.raises(ValueError):
+            pilot_state.read_attempt_receipt(root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
+        assert counts["_validate_factual_receipt"] > validated, counts  # new bytes: validated again
+
+
 def test_a_nested_execution_receipt_is_validated_on_every_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import pilot_state
 
