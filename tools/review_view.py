@@ -8,7 +8,8 @@ capabilities with action, arguments, results and the first line of provenance (t
 checks structure and references, not meaning.  A literal longer than ``LITERAL_LIMIT`` is cut with a mark; a sensitive
 input is ``***``.  FaT-PT: a parameter group is shown once at its first case — its lines with the IDs of the first
 case and ``<параметр>`` where the cases differ, then a table with a row per case ID.  ``CV_DATA_MISMATCH`` is a code hint, not a stop: a literal input value of a step is missing from the
-step's action and data — a number of any length as a whole token, other text from ``MIN_LITERAL`` characters.
+step's action and data — a number of any length as a whole token or (FaT-NW) a Russian numeral of the same value
+(«через три дня» names 3), other text from ``MIN_LITERAL`` characters.  The hint never changes the case text.
 
 ``python -m tools.review_view --project <abs> --run <id> --candidate <r1.json>`` writes
 ``<run>/review-views/<candidate sha>.md`` and prints ``{path, bytes, candidate_sha256, data_mismatch, …}``.
@@ -114,10 +115,52 @@ def _capability(capability: Mapping[str, Any]) -> str:
     return line + (f"; граница: {_cut(first)}" if first else "")
 
 
+def _soft_forms(word: str) -> tuple[str, ...]:
+    """Nominative, genitive/dative/prepositional and instrumental of a numeral in -ь (пять, пяти, пятью)."""
+    return word, word[:-1] + "и", word[:-1] + "ью"
+
+
+# FaT-NW: Russian cardinal numerals as the equal of a digit token ("через три дня" names 3), every case form
+_NUMBER_WORDS: dict[str, int] = {
+    **dict.fromkeys(("ноль", "нуль", "ноля", "нуля", "нолю", "нулю", "нолём", "нулём", "нолем", "нулем"), 0),
+    **dict.fromkeys(("один", "одна", "одно", "одни", "одного", "одной", "одному", "одним", "одном", "одну", "одною", "одних", "одними"), 1),
+    **dict.fromkeys(("два", "две", "двух", "двум", "двумя"), 2),
+    **dict.fromkeys(("три", "трёх", "трех", "трём", "трем", "тремя"), 3),
+    **dict.fromkeys(("четыре", "четырёх", "четырех", "четырём", "четырем", "четырьмя"), 4),
+    **{form: value for value, word in ((5, "пять"), (6, "шесть"), (7, "семь"), (9, "девять"), (10, "десять"), (11, "одиннадцать"),
+                                       (12, "двенадцать"), (13, "тринадцать"), (14, "четырнадцать"), (15, "пятнадцать"),
+                                       (16, "шестнадцать"), (17, "семнадцать"), (18, "восемнадцать"), (19, "девятнадцать"),
+                                       (20, "двадцать"), (30, "тридцать")) for form in _soft_forms(word)},
+    **dict.fromkeys(("восемь", "восьми", "восемью", "восьмью"), 8),
+    **dict.fromkeys(("сорок", "сорока"), 40),
+    **dict.fromkeys(("пятьдесят", "пятидесяти", "пятьюдесятью"), 50),
+    **dict.fromkeys(("шестьдесят", "шестидесяти", "шестьюдесятью"), 60),
+    **dict.fromkeys(("семьдесят", "семидесяти", "семьюдесятью"), 70),
+    **dict.fromkeys(("восемьдесят", "восьмидесяти", "восемьюдесятью"), 80),
+    **dict.fromkeys(("девяносто", "девяноста"), 90),
+    **dict.fromkeys(("сто", "ста"), 100),
+    # a date offset in days named by the day ("дата D (сегодня)" names the offset 0)
+    "позавчера": -2, "вчера": -1, "сегодня": 0, "завтра": 1, "послезавтра": 2,
+}
+_WORD = re.compile(r"[а-яё]+")
+
+
+def _numbers_in_words(text: str) -> set[int]:
+    """FaT-NW: the values the numerals of a text name — each word alone and a ten with its unit (двадцать пять = 25)."""
+    values = [_NUMBER_WORDS.get(word) for word in _WORD.findall(text.lower())]
+    named = {value for value in values if value is not None}
+    named |= {tens + unit for tens, unit in zip(values, values[1:])
+              if tens is not None and unit is not None and 20 <= tens <= 90 and tens % 10 == 0 and 1 <= unit <= 9}
+    return named
+
+
 def _named(leaf: str, text: str) -> bool:
-    """FaT-CV2 (2.10): a number is named only as a whole token (17 is not in 170 or 1.17); other text from MIN_LITERAL."""
+    """FaT-CV2 (2.10): a number of any length is named only as a whole token (17 is not in 170 or 1.17), FaT-NW: or as a
+    Russian numeral of the same integer value; other text from MIN_LITERAL."""
     if _NUMERIC.fullmatch(leaf):
-        return re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None
+        if re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None:
+            return True
+        return re.fullmatch(r"-?\d+", leaf) is not None and int(leaf) in _numbers_in_words(text)
     return len(leaf) < MIN_LITERAL or leaf in text
 
 

@@ -90,11 +90,7 @@ def test_a_literal_input_missing_from_the_step_data_is_a_hint_not_a_stop() -> No
     from tools.review_view import DATA_MISMATCH, data_mismatches, render
 
     document = _example()
-    # FaT-CV2 (2.10): the only number of the example not named as a token is «3» of «через три дня» (written as a word)
-    assert {value for hint in data_mismatches(document) for value in hint["values"]} == {"3"}
-    for hint_case in document["test_cases"]:
-        for hint_step in hint_case["steps"]:
-            hint_step["test_data"] = (hint_step.get("test_data") or "") + " (3)"
+    # FaT-NW: «3» of «через три дня» is named by the word — the example has no hint (before FaT-NW it was the only one)
     assert data_mismatches(document) == []
     case = document["test_cases"][0]
     step = next(step for step in case["steps"] if any(item["source"]["kind"] == "literal" for item in step["inputs"]))
@@ -415,6 +411,29 @@ def test_a_number_of_any_length_is_compared_as_a_whole_token(text: str, value, h
     item["target"]["sensitive"] = False
     step.update(action=text, test_data="—", inputs=[item])
     assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+
+
+@pytest.mark.parametrize(("text", "value", "hinted"), [
+    # FaT-NW: a Russian numeral names the same integer, in any case form; a ten with its unit is one number
+    ("Отправить запрос через три дня", 3, False), ("Создать двух питомцев", 2, False), ("Записать на приём через пять дней", 5, False),
+    ("Возраст — двадцать пять лет", 25, False), ("Ровно восемнадцати лет", 18, False), ("Дата D (сегодня)", 0, False),
+    ("Дата D (вчера)", -1, False), ("Сто записей", 100, False),
+    # still a hint: another number, a part of a word, a fraction, a short number not named
+    ("Отправить запрос через три дня", 4, True), ("Создать двух питомцев", 22, True), ("Три попытки", "3.5", True),
+    ("Отправить запрос через тридцать дней", 3, True), ("Ввести возраст", 17, True),
+])
+def test_a_russian_numeral_names_the_number(text: str, value, hinted: bool) -> None:
+    from tools.review_view import data_mismatches
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    item = copy.deepcopy(step["inputs"][0])
+    item["source"]["value"] = value
+    item["target"]["sensitive"] = False
+    step.update(action=text, test_data="—", inputs=[item])
+    before = copy.deepcopy(document)
+    assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted
+    assert document == before  # a hint only: the case text is never changed
 
 
 # --- FaT-AV: the view for the automation generator ------------------------------------------------
