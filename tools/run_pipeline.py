@@ -2095,8 +2095,19 @@ def cmd_report(args: Any) -> int:
 
 
 def cmd_status(args: Any) -> int:
+    from tools.pilot_state import closure_cache
+
     project = Path(args.project).resolve()
-    root, run, state = _read_run_coordinate(project, args.run)
+    # FaT-ST: one block, so the run manifest is validated and the journal derived once; the answer is printed after
+    # the block's final full journal check.
+    with closure_cache():
+        result = _status_result(project, args.run)
+    _print(result)
+    return 0
+
+
+def _status_result(project: Path, run_id: str) -> dict[str, Any]:
+    root, run, state = _read_run_coordinate(project, run_id)
     result = _durable_status(project, root, stage="status")
     attempt = state["attempts"][-1] if state["attempts"] else None
     if attempt is not None:
@@ -2110,8 +2121,7 @@ def cmd_status(args: Any) -> int:
             pass
     elif attempt is not None:
         result.update(_status_drift(project, root, run["manifest"], attempt))
-    _print(result)
-    return 0
+    return result
 
 
 def run_phase_one_spine(project: Path, policy_profile: str, authorization: Mapping[str, Any], identity: Mapping[str, Any], baseline: Mapping[str, Any], facts: Mapping[str, Any]) -> Mapping[str, Any]:
