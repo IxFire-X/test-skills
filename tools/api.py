@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, pilot_state, run_tests
+from tools import automation_validation, batch_assembly, canonical_document, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser
 from tools.schema_validation import load_json_strict
 
@@ -136,6 +136,10 @@ def _cmd_runner_compat(a):
     return run_tests.validate_artifact_runner_compatibility(a.module_root, a.language, a.canonical, a.automation, materialized=a.materialized)
 
 
+def _cmd_step_inputs(a):
+    return step_size.request_files(a.run_root, a.stage)
+
+
 RUN = ("--run-root", "--attempt")
 
 
@@ -169,6 +173,7 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "validate-automation": (_cmd_validate_automation, (("--automation", _json), ("--canonical", _json)), _diagnostics, ()),
     "runner-compat": (_cmd_runner_compat, (("--module-root", Path), ("--language", str), ("--canonical", _json), ("--automation", _json),
                                            ("--materialized", "flag")), _not_runnable, ()),
+    "step-inputs": (_cmd_step_inputs, ("--run-root", "--stage"), None, ()),
 }
 
 

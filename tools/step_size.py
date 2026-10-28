@@ -10,11 +10,17 @@ else 500 000 bytes: the window is shared with the session history.  Prints
 the stage or the role), sizes and the code, no file paths — is appended to ``<run>/step-sizes.jsonl`` for the report.
 FaT-O: ``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_output_warn_bytes`` (default
 ``DEFAULT_OUTPUT_WARN``) is the warning ``STEP_OUTPUT_LARGE``; only a measurement, nothing is split or rewritten.
+FaT-Q2: ``--stage context-marker:requirements`` is the requirements step of the marker in parts (the documents only);
+``--stage tc-generator:<batch>|tc-to-autotest:rN|autotest-reviewer:rN`` takes the files behind the ``input_digests`` of
+the published model request of that stage (``request_files``): an input that no file or more than one file of the run
+answers is ``unresolved`` (``STEP_INPUT_UNRESOLVED``, not a stop), nothing is chosen.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,6 +35,9 @@ OUTPUT_LARGE = "STEP_OUTPUT_LARGE"
 DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real output limit of the work model is not known yet
 TOKENS_PER_BYTE = 0.24
 _STAGE_ROLES = {"context-marker": "context-marker"}
+INPUT_UNRESOLVED = "STEP_INPUT_UNRESOLVED"
+_REQUEST_STAGES = ("tc-generator", "tc-to-autotest", "autotest-reviewer")
+_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def step_budget(project: Path) -> int:
@@ -66,7 +75,7 @@ def role_files(role: str) -> list[Path]:
 
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:
     """The input files of ``stage`` as the journal knows them before the call (context-marker only)."""
-    if stage != "context-marker":
+    if stage not in {"context-marker", "context-marker:requirements"}:
         raise ValueError("the journal knows the input of context-marker only; give --files for other steps")
     from tools.pilot_state import derive_state
     from tools.project_inventory import read_execution_baseline
@@ -86,12 +95,96 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
     answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
                    if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
+    if stage == "context-marker:requirements":
+        # FaT-Q2 (2.3): the requirements step of the marker in parts reads the requirement documents only
+        return list(dict.fromkeys(project / row["path"] for row in baseline["requirements"].get("docs", [])))
     if batch is not None and answer is not None:
         # FaT-5: a part of the marker reads the requirements answer, not the documents again.
         files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))
     else:
         files.extend(project / row["path"] for row in baseline["requirements"].get("docs", []))
     return list(dict.fromkeys(files))
+
+
+def _digest_paths(root: Path) -> tuple[dict[str, set[Path]], dict[str, set[Path]]]:
+    """``(whole, inside)``: the keys a run file answers to as a whole — its name, the sha256 of its bytes, its own
+    ``digest``, a canonical digest — and the keys of an object it carries one level inside."""
+    from tools.canonical_document import document_sha256
+
+    index: dict[str, set[Path]] = {}
+    inside: dict[str, set[Path]] = {}
+    for path in sorted(root.rglob("*.json")):
+        if path.relative_to(root).parts[0] == "tmp":
+            continue
+        try:
+            raw = path.read_bytes()
+            value = json.loads(raw.decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+        keys = {hashlib.sha256(raw).hexdigest()}
+        if _HEX.fullmatch(path.stem):
+            keys.add(path.stem)
+        if isinstance(value, dict):
+            if isinstance(value.get("digest"), str):
+                keys.add(value["digest"].removeprefix("sha256:"))
+            if isinstance(value.get("test_cases"), list):
+                try:
+                    keys.add(document_sha256(value).removeprefix("sha256:"))
+                except Exception:  # noqa: BLE001 - a non-canonical document only lacks this key
+                    pass
+            # a receipt kept inside its carrier (the effective bundle receipt in effective-canonicals/): its own
+            # ``digest`` or the sha256 of its canonical JSON, with and without the journal's trailing newline
+            for nested in value.values():
+                if isinstance(nested, dict):
+                    compact = json.dumps(nested, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    carried = {hashlib.sha256(compact).hexdigest(), hashlib.sha256(compact + b"\n").hexdigest()}
+                    if isinstance(nested.get("digest"), str):
+                        carried.add(nested["digest"].removeprefix("sha256:"))
+                    for key in carried:
+                        inside.setdefault(key, set()).add(path)
+        for key in keys:
+            index.setdefault(key, set()).add(path)
+    return index, inside
+
+
+def request_files(run_root: Path, stage: str) -> dict[str, Any]:
+    """FaT-Q2 (2.2): the files behind the ``input_digests`` of the published model request of ``stage``.
+
+    Only a measurement: a context-selection receipt opens into the project files it lists; a file that is the input as a
+    whole answers before a file that only carries it inside; an input digest that no file or more than one file of the
+    same kind answers is ``unresolved`` (``not-found``/``ambiguous``), never chosen."""
+    from tools.pilot_state import derive_state, read_model_request
+
+    root = Path(run_root).resolve()
+    project = root.parent.parent
+    state = derive_state(root)
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
+                 and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
+    if not requested:
+        raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
+    request_digest = str(requested[-1]["artifact_digest"])
+    request = read_model_request(root, attempt_id, stage, request_digest)
+    whole, inside = _digest_paths(root)
+    selections = root / "context-selections"
+    files: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+    for digest in request.get("input_digests") or []:
+        key = str(digest).removeprefix("sha256:")
+        paths = sorted(whole.get(key) or inside.get(key) or ())
+        if len(paths) != 1:
+            unresolved.append({"digest": str(digest), "reason": "not-found" if not paths else "ambiguous"})
+            continue
+        path = paths[0]
+        if selections in path.parents:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            targets = [project / item["project_path"] for item in receipt["files"]]
+        else:
+            targets = [path]
+        files.extend({"digest": str(digest), "path": str(target), "bytes": target.stat().st_size} for target in targets)
+    return {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "unresolved": unresolved}
 
 
 def measure(project: Path, files: Iterable[Path], role: str | None = None, *, tokens_per_byte: float = TOKENS_PER_BYTE,
@@ -140,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--files", nargs="+", default=[])
     parser.add_argument("--run")
-    parser.add_argument("--stage", choices=sorted(_STAGE_ROLES))
+    parser.add_argument("--stage", help="context-marker, context-marker:requirements, tc-generator:<batch>, tc-to-autotest:rN, autotest-reviewer:rN")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--role")
     parser.add_argument("--step", help="the step name recorded in the run (default: --stage, else --role)")
@@ -150,13 +243,23 @@ def main(argv: list[str] | None = None) -> int:
     project = Path(args.project).resolve()
     try:
         files = [Path(item) if Path(item).is_absolute() else project / item for item in args.files]
+        requested = None
+        stage_role = args.stage.split(":", 1)[0] if args.stage else None
+        if args.stage and stage_role not in _STAGE_ROLES and stage_role not in _REQUEST_STAGES:
+            raise ValueError(f"unknown --stage: {args.stage}")
         if args.run:
             if not args.stage and not files:
                 raise ValueError("--run needs --stage or --files")
-            if args.stage:
+            if stage_role in _REQUEST_STAGES:
+                requested = request_files(project / ".pilot-runs" / args.run, args.stage)
+                files += [Path(row["path"]) for row in requested["files"]]
+            elif args.stage:
                 files += journal_files(project, args.run, args.stage, args.batch)
-        role = args.role or (_STAGE_ROLES.get(args.stage) if args.stage else None)
-        report = measure(project, files, role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes)
+        role = args.role or stage_role
+        report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes)
+        if requested is not None:
+            report.update(input_files=requested["files"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
+                          input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
         report["recorded"] = False
         if args.run:
             stage = args.stage and (f"{args.stage}:batch-{args.batch:03d}" if args.batch is not None else args.stage)

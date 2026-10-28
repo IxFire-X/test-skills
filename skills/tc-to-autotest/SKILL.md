@@ -31,7 +31,7 @@ Each generated test must reach the real behavior named by its operation relation
 assert the corresponding observed value or state. Do not replace the subject under test
 with its expected answer, assert a constant against itself, swallow an unexpected
 exception, or add skip/xfail/disabled markers to hide an unimplemented scenario.
-Отказ — конкретный класс исключения и поле ошибки; точное значение вместо contains; без
+Отказ — конкретный класс исключения и поле ошибки (`assertThatThrownBy` — всегда с `isInstanceOf` точного класса); точное значение вместо contains; без
 проверок, которые всегда истинны (`>= 0`, единственный not-null). Mock only
 an external boundary when the selected canonical scenario and project conventions permit
 it; never mock the behavior the test claims to cover. Use deterministic data, explicit

@@ -173,7 +173,11 @@ Run остаётся связан с исходной project/module identity.
 
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
-для разметки, для остальных шагов — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
+для разметки одним батчем. Генератор и автоматизация — после `tools.api model-request` этого шага:
+`--run <run_id> --stage tc-generator:<batch>` (`tc-to-autotest:rN`, `autotest-reviewer:rN`); файлы входа код берёт
+из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` — тот же список). Вход,
+которого код не нашёл или нашёл в двух файлах, — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
+одной строкой). Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
 (роль добавляет её SKILL.md и references; `--run` записывает шаг и байты в run, их покажет
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить
@@ -190,8 +194,8 @@ Run остаётся связан с исходной project/module identity.
 0. Разметка частями: `python -m tools.context_marker_parts plan --run-root <run>` показывает шаги и
    `input_digests` (пока нет ответа `context-marker:requirements`, у частей вместо них пометка
    `waits`). Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
-   `context-marker:requirements` (только документы) → по каждой части `step_size --stage
-   context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
+   `context-marker:requirements` (только документы; размер — `step_size --stage context-marker:requirements`) →
+   по каждой части `step_size --stage context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
    context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
    status покажет `next_step`.
 1. Один раз вызови `context-marker` для authorized requirements/context и

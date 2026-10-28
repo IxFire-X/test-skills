@@ -32,6 +32,8 @@ _PATH_PREFIX = r"/[^\"'\s]*/"
 _JAVA_BROAD_THROWS = re.compile(
     r"\b(?:assertThrows|expectThrows|assertThatExceptionOfType)\s*\(\s*(?:java\.lang\.)?(?:Exception|Throwable|RuntimeException)\.class"
     r"|\.isInstanceOf\(\s*(?:java\.lang\.)?(?:Exception|Throwable|RuntimeException)\.class\s*\)")
+_JAVA_THROWN_BY = re.compile(r"\bassertThatThrownBy\s*\(")
+_JAVA_THROWN_TYPED = re.compile(r"\.\s*(?:isInstanceOf\w*|isExactlyInstanceOf|hasMessage\w*|hasCause\w*|hasRootCause\w*)\s*\(")
 _JAVA_CATCH = re.compile(r"\bcatch\s*\(\s*(?:final\s+)?([\w.]+(?:\s*\|\s*[\w.]+)*)\s+\w+\s*\)\s*\{")
 _JAVA_GE_ZERO = re.compile(rf"\bisGreaterThanOrEqualTo\(\s*{_ZERO}\s*\)|\bassert\w*\s*\([^;]*?>=\s*{_ZERO}\s*\)")
 _JAVA_ASSERT_TRUE = re.compile(r"\bassertTrue\(\s*true\s*\)|\bassertFalse\(\s*false\s*\)|\bassertThat\(\s*true\s*\)\s*\.isTrue\(\)")
@@ -94,10 +96,28 @@ def _block(code: str, brace: int) -> tuple[int, int]:
     return brace + 1, len(code)
 
 
+def _statement_end(code: str, start: int) -> int:
+    """The ``;`` that ends the statement at ``start``, outside parentheses and braces (lambda bodies)."""
+    depth = 0
+    for position in range(start, len(code)):
+        char = code[position]
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+        elif char == ";" and depth <= 0:
+            return position
+    return len(code)
+
+
 def _java(text: str) -> Iterator[tuple[str, int, str]]:
     code, plain = _mask_java(text, strings=True), _mask_java(text, strings=False)
     for match in _JAVA_BROAD_THROWS.finditer(code):
         yield "AT_ANY_EXCEPTION", match.start(), "broad-throws"
+    for match in _JAVA_THROWN_BY.finditer(code):
+        # FaT-Q2 (2.12): assertThatThrownBy without a type or a message in its chain passes on any exception
+        if not _JAVA_THROWN_TYPED.search(code, match.end(), _statement_end(code, match.start())):
+            yield "AT_ANY_EXCEPTION", match.start(), "thrown-by-untyped"
     for match in _JAVA_CATCH.finditer(code):
         types = {name.strip().rsplit(".", 1)[-1] for name in match.group(1).split("|")}
         start, end = _block(code, match.end() - 1)
@@ -123,7 +143,7 @@ def _java(text: str) -> Iterator[tuple[str, int, str]]:
         for piece in code[start:end].split(";"):
             statements.append((offset, piece, plain[offset:offset + len(piece)]))
             offset += len(piece) + 1
-        checks = [(at, piece) for at, piece, raw in statements if re.search(r"\b(?:assert\w*|verify\w*)\s*\(", piece) or _ASSERT_ID.search(raw)]
+        checks = [(at, piece) for at, piece, raw in statements if re.search(r"\b(?:assert\w*|verify\w*|andExpect\w*)\s*\(", piece) or _ASSERT_ID.search(raw)]
         not_null = [(at, piece) for at, piece in checks if _JAVA_NOT_NULL.match(piece)]
         if not_null and len(not_null) == len(checks):
             at, piece = not_null[0]

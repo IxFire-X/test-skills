@@ -132,7 +132,9 @@ test root, wrapper/interpreter/executable, adapter ID, build profile и typed ad
 
 **Бюджет шага модели** (`.skillsrc` `limits.step_input_bytes`, по умолчанию 500 000 Б).
 `python -m tools.step_size --project <abs> --files <файлы> [--role <роль>]` или
-`--run <run_id> --stage context-marker` оценивает вход шага (байты и токены при 0,24 ток/Б) до
+`--run <run_id> --stage context-marker` (части: `context-marker:requirements` — только документы, `--batch N`),
+`--run <run_id> --stage tc-generator:<batch>|tc-to-autotest:rN|autotest-reviewer:rN` (файлы — из `input_digests`
+опубликованного запроса; не найденный или неоднозначный вход — `STEP_INPUT_UNRESOLVED`) оценивает вход шага (байты и токены при 0,24 ток/Б) до
 вызова модели. Не влезает — предупреждение `STEP_OVER_BUDGET` с советом сузить контекст, не стоп
 (код 0). С `--run` шаг (`--step`) и байты пишутся в `step-sizes.jsonl` прогона; `run_pipeline report`
 показывает их и предупреждение. Ответ каждого вызова модели тоже меряется: `output_bytes` в результате

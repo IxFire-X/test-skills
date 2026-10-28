@@ -403,3 +403,42 @@ def test_reviewer_skills_name_every_hint_code_and_the_generators_say_what_a_refu
     generator = (root / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
     assert "что именно наблюдается" in generator and "из требований" in generator and "нет в документе" in generator
     assert "конкретный класс исключения" in (root / "tc-to-autotest" / "SKILL.md").read_text(encoding="utf-8")
+
+
+# FaT-Q2 (2.12): MockMvc andExpect is a check; assertThatThrownBy without a type is any exception
+MOCKMVC = '''class OwnerTest {
+    @Test
+    void createsOwner() throws Exception {
+        mockMvc.perform(post("/owners/new").param("firstName", "Ivan"))
+            .andExpect(status().is3xxRedirection());
+        assertNotNull(owner);
+    }
+
+    @Test
+    void findsOwner() {
+        assertNotNull(owner);
+    }
+
+    @Test
+    void rejects() {
+        assertThatThrownBy(() -> service.save(null));
+        assertThatThrownBy(() -> service.save(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.save(null)).hasMessage("owner is required");
+        assertThatThrownBy(() -> service.save(null)).isInstanceOf(Exception.class);
+    }
+}
+'''
+
+
+def test_and_expect_is_a_check_and_not_null_alone_still_is_weak() -> None:
+    hints = _file_hints(MOCKMVC, "java")
+    not_null = [line for code, line, rule in hints if rule == "not-null-only"]
+    assert not_null == [_line(MOCKMVC, "void findsOwner") + 1], hints
+
+
+def test_thrown_by_without_a_type_is_any_exception_once() -> None:
+    hints = _file_hints(MOCKMVC, "java")
+    untyped = [line for code, line, rule in hints if code == "AT_ANY_EXCEPTION" and rule == "thrown-by-untyped"]
+    assert untyped == [_line(MOCKMVC, "assertThatThrownBy(() -> service.save(null));")], hints
+    broad_line = _line(MOCKMVC, "isInstanceOf(Exception.class)")
+    assert [rule for code, line, rule in hints if line == broad_line] == ["broad-throws"], hints

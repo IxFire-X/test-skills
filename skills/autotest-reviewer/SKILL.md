@@ -37,7 +37,8 @@ insufficient. Do not inspect generator dialogue, transport logs or unrelated run
    Run the weak-assertion check on the artifact under review (its file name is the boundary
    `automation_digest` without `sha256:`):
    `python -m tools.autotest_hints --automation "<run_root>/model-stage-artifacts/<attempt_id>/<digest>.json"`
-   It prints JSON hints `AT_ANY_EXCEPTION`, `AT_ALWAYS_TRUE`, `AT_PARTIAL_MATCH` (`AT_MORE`) with
+   It prints JSON hints `AT_ANY_EXCEPTION` (incl. `assertThatThrownBy` without a type), `AT_ALWAYS_TRUE` (MockMvc
+   `andExpect` counts as a check), `AT_PARTIAL_MATCH` (`AT_MORE`) with
    file ID, line, rule and ASSERT ID. They are facts of code, not a verdict: check each against
    the canonical Expected and report it as an ordinary finding when you agree.
 3. `reviewed_files` equals all declared `(file_id, content_digest)` values in physical order; `reviewed_symbol_pairs` equals all distinct required `(file_id, symbol_id)` pairs exactly once in generated-symbol physical order.
