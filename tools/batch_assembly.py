@@ -240,7 +240,18 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
         notes.append(subject.format(", ".join(unplaced)) + " ни в одну группу: нет ID группы (.skillsrc requirements.id_pattern "
                      "с группой (?P<group>…) или буквенный префикс) и первая строка не найдена в разделе # / ## документа "
                      "контекста — каждое идёт своей группой")
+    notes.extend(_end_to_end_notes(batches, keys))
     return batches, notes
+
+
+def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> list[str]:
+    """FaT-E2E: a case cites only requirements of its batch, so a path through groups that sit in different batches
+    cannot be one case — the plan says so instead of a hint."""
+    grouped = [{keys[source] for source in members if keys.get(source)} for members in batches]
+    if len(set().union(*grouped)) < 2 or any(len(groups) >= 2 for groups in grouped):
+        return []
+    return ["сквозной кейс через пачки невозможен: каждая пачка держит одну группу требований, а кейс ссылается только на "
+            "требования своей пачки — сквозной путь строится внутри пачки"]
 
 
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
@@ -277,11 +288,24 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
                              input_files: list[Path], context_receipt: dict[str, Any]) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipt and the tc-generator role), the documents of the receipt."""
-    from tools.build_context import _project_id_pattern, compile_id_pattern
     from tools.step_size import measure, step_window
 
     project = Path(project).resolve()
     _validate_context_receipt(context_receipt, _evidence_digests(grouping_evidence)[1])
+    context_files, documents = _context_documents(project, context_receipt)
+    step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator")["bytes"]
+    return plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
+                        id_pattern=_grouping_pattern(project), documents=documents)
+
+
+def _grouping_pattern(project: Path) -> re.Pattern[str] | None:
+    from tools.build_context import _project_id_pattern, compile_id_pattern
+
+    return compile_id_pattern(_project_id_pattern(project))
+
+
+def _context_documents(project: Path, context_receipt: dict[str, Any]) -> tuple[list[Path], dict[str, str]]:
+    """The context files of a receipt and the text of its documents (the ``#``/``##`` sections groups come from)."""
     context_files: list[Path] = []
     documents: dict[str, str] = {}
     for item in context_receipt["files"]:
@@ -292,9 +316,14 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
             if "sha256:" + hashlib.sha256(data).hexdigest() != item["content_digest"]:
                 raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"context file changed after selection: {item['project_path']}")
             documents[item["project_path"]] = data.decode("utf-8", errors="replace")
-    step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator")["bytes"]
-    return plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
-                        id_pattern=compile_id_pattern(_project_id_pattern(project)), documents=documents)
+    return context_files, documents
+
+
+def requirement_groups(source_requirements: list[dict[str, Any]], project: Path, context_receipt: dict[str, Any]) -> dict[str, str | None]:
+    """FaT-E2E: the group of every source requirement exactly as plan-batches cuts batches (one rule for both): the
+    ``.skillsrc`` ID pattern group, else the letter prefix, else the document section; None — no group."""
+    project = Path(project).resolve()
+    return _group_keys(_source_requirements(source_requirements), _grouping_pattern(project), _context_documents(project, context_receipt)[1])[0]
 
 
 def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -41,6 +41,7 @@ VIEW_VERSION = "review-view-v2"
 AUTOTEST_VIEW_VERSION = "autotest-view-v1"
 PROFILES = ("review", "autotest")
 DATA_MISMATCH = "CV_DATA_MISMATCH"
+NO_END_TO_END = "CV_NO_END_TO_END"
 MIN_LITERAL = 3
 LITERAL_LIMIT = 200
 _NUMERIC = re.compile(r"^-?\d+(?:[.,]\d+)?$")
@@ -195,6 +196,75 @@ def data_mismatches(document: Mapping[str, Any]) -> list[dict[str, Any]]:
     return hints
 
 
+def end_to_end_hint(document: Mapping[str, Any], groups: Mapping[str, str | None],
+                    batches: Iterable[Iterable[str]] | None = None) -> dict[str, Any] | None:
+    """FaT-E2E: ``CV_NO_END_TO_END`` when the requirements form two or more process groups and no case links two of them.
+
+    *groups* — ``batch_assembly.requirement_groups`` (the rule plan-batches cuts by); a requirement without a group counts
+    for none.  A group every case cites (the common constraints of the document) is not a step of a process and is left
+    out.  *batches* — the owned source requirements of each batch: a case cites only its batch, so when no batch holds two
+    groups there is no hint (the plan notes say the path cannot cross batches).  A hint, not a verdict."""
+    cases, constraints = _case_groups(document, groups)
+    process = {group for group in groups.values() if group} - constraints
+    if len(process) < 2:
+        return None
+    if batches is not None and not any(len({groups.get(source) for source in members} - {None} - constraints) >= 2 for members in batches):
+        return None
+    if any(len(linked) >= 2 for _case_id, linked in cases):
+        return None
+    return {"code": NO_END_TO_END, "groups": len(process), "linking_cases": 0}
+
+
+def linking_cases(document: Mapping[str, Any], groups: Mapping[str, str | None]) -> list[str]:
+    """FaT-E2E: the cases that link two or more process groups (the constraint groups every case cites left out)."""
+    return [case_id for case_id, linked in _case_groups(document, groups)[0] if len(linked) >= 2]
+
+
+def _case_groups(document: Mapping[str, Any], groups: Mapping[str, str | None]) -> tuple[list[tuple[str, set[str]]], set[str]]:
+    """Each case with its process groups, and the constraint groups (cited by every case).  A canonical requirement belongs
+    to the group of its source requirements when they share one; one built from several groups (a common one) to none."""
+    sources: dict[str, set[str]] = {}
+    for mapping in document["source_to_canonical_mappings"]:
+        for requirement_id in mapping["canonical_requirement_ids"]:
+            sources.setdefault(requirement_id, set()).add(mapping["source_requirement_id"])
+    owner = {requirement_id: next(iter(found)) for requirement_id, members in sources.items()
+             if len(found := {groups.get(source) for source in members}) == 1 and None not in found}
+    cited = [(case["case_id"], {owner[requirement_id] for requirement_id in case["requirement_ids"] if requirement_id in owner})
+             for case in document["test_cases"]]
+    constraints = set.intersection(*(linked for _case_id, linked in cited)) if len(cited) >= 2 else set()
+    return [(case_id, linked - constraints) for case_id, linked in cited], constraints
+
+
+def run_requirement_groups(root: Path, attempt_id: str, document: Mapping[str, Any]) -> tuple[dict[str, str | None], list[list[str]] | None] | None:
+    """FaT-E2E: the requirement groups of a run's document (by the context receipt the plan was built from, else the last
+    context of the attempt) and the batches of its published plan (None before FaT-DG); None — nothing to group by."""
+    from tools.batch_assembly import requirement_groups
+    from tools.pilot_state import derive_state, read_attempt_receipt, read_context_selection
+
+    root = Path(root)
+    try:
+        plan = read_attempt_receipt(root, attempt_id, "batch-plan", "ARTIFACT_READ_BACK")["record"]["plan"]
+    except (KeyError, OSError, ValueError):
+        plan = None
+    if plan is not None:
+        context_digest = str(plan["context_receipt_digest"])
+    else:
+        selected = [event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
+        if not selected:
+            return None
+        context_digest = str(selected[-1]["artifact_digest"])
+    receipt = read_context_selection(root, attempt_id, context_digest)
+    groups = requirement_groups(list(document["source_requirements"]), root.parent.parent, dict(receipt))
+    return groups, None if plan is None else [list(batch["owned_source_requirement_ids"]) for batch in plan["batches"]]
+
+
+def _end_to_end_lines(hint: Mapping[str, Any] | None) -> list[str]:
+    if hint is None:
+        return []
+    return [f"- {hint['code']}: групп требований {hint['groups']}, кейсов, связывающих две и больше групп, — 0: если документ описывает "
+            "процесс, первым нужен сквозной позитивный кейс (для библиотеки — типичная цепочка использования); нет процесса — отклони"]
+
+
 def _hint_lines(hints: list[dict[str, Any]]) -> list[str]:
     lines = [f"- {hint['code']} {hint['case_id']} {hint['step_id']}: нет в действии и данных шага — "
              + ", ".join(_json(value) for value in hint["values"]) + (f" и ещё {hint['count'] - _SHOWN}" if hint["count"] > _SHOWN else "")
@@ -275,9 +345,11 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
     return lines
 
 
-def render(document: Mapping[str, Any], profile: str = "review") -> bytes:
+def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
+           batches: Iterable[Iterable[str]] | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
-    automation generator."""
+    automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
+    without them the bytes are the same as before."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
     if profile not in PROFILES:
@@ -290,6 +362,7 @@ def render(document: Mapping[str, Any], profile: str = "review") -> bytes:
         for requirement_id in mapping["canonical_requirement_ids"]:
             sources.setdefault(requirement_id, []).append(mapping["source_requirement_id"])
     hints = data_mismatches(document)
+    path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(document, groups, batches))
     lines = [
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
@@ -303,7 +376,7 @@ def render(document: Mapping[str, Any], profile: str = "review") -> bytes:
         "## Требования", "",
         *(f"- {row['requirement_id']} (из {', '.join(sources.get(row['requirement_id'], [])) or '—'}): {row['text']}"
           for row in document["requirements"]), "",
-        "## Подсказки кода", "", *(_hint_lines(hints) or ["- нет"]), "",
+        "## Подсказки кода", "", *(path_hint + _hint_lines(hints) or ["- нет"]), "",
         "## Операции (capabilities)", "",
         *([_capability(row) for row in document.get("operation_capabilities") or []] or ["- нет"]), "",
         "## Кейсы",
@@ -417,14 +490,19 @@ def main(argv: list[str] | None = None) -> int:
             if not published or published[-1].get("artifact_digest") != digest:
                 raise ValueError("the candidate is not the assembled candidate of the run")
             target = root / "review-views" / (digest.removeprefix("sha256:") + ".md")
-        data = render(document, profile)
+        try:  # FaT-E2E: the hint never stops the view — without groups the view is the one before FaT-E2E
+            grouping = None if profile == "autotest" or not state["attempts"] else run_requirement_groups(root, str(state["attempts"][-1]["attempt_id"]), document)
+        except (OSError, ValueError, KeyError, TypeError):
+            grouping = None
+        data = render(document, profile, *(grouping or (None, None)))
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
         return 2
     view = AUTOTEST_VIEW_VERSION if profile == "autotest" else VIEW_VERSION
     print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
-                      "data_mismatch": len(data_mismatches(document))}, ensure_ascii=False, sort_keys=True))
+                      "data_mismatch": len(data_mismatches(document)),
+                      "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping)}, ensure_ascii=False, sort_keys=True))
     return 0
 
 

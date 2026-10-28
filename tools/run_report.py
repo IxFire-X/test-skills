@@ -266,7 +266,22 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
 
 _WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
                  "STEP_OUTPUT_LARGE": "ответ модели больше порога limits.step_output_warn_bytes — только замер, деление выключено",
-                 "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)"}
+                 "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)",
+                 "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
+                                     "(подсказка ревьюеру)"}
+
+
+def end_to_end(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
+    """FaT-E2E: ``CV_NO_END_TO_END`` of the run's case document — counts only, no case text."""
+    from tools.review_view import end_to_end_hint, run_requirement_groups
+
+    if not attempt_id or not isinstance(document, Mapping):
+        return None
+    try:
+        grouping = run_requirement_groups(root, attempt_id, document)
+        return None if grouping is None else end_to_end_hint(document, *grouping)
+    except (KeyError, OSError, TypeError, ValueError, AttributeError):
+        return None
 
 
 def data_mismatch(document: Any) -> list[dict[str, Any]]:
@@ -441,6 +456,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         cases = len(document["test_cases"])
     automation = automation_artifact(root, events)
     mismatched = data_mismatch(document) if cases is not None else []
+    path_hint = end_to_end(root, attempt_id, document) if cases is not None else None
     notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
     autotest_notes = review_notes(root, attempt_id, "autotests") if attempt_id else {"count": 0, "items": []}
 
@@ -460,7 +476,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
         "model_calls": calls, "step_sizes": measured,
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
-                    + (["CV_DATA_MISMATCH"] if mismatched else []), "data_mismatch": mismatched,
+                    + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else []),
+        "data_mismatch": mismatched, "end_to_end": path_hint,
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -531,6 +548,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
           for c in report["model_calls"]), "",
         "## Предупреждения", "", *(f"- {code}: {_WARNING_TEXT.get(code, code)}" for code in report["warnings"]),
         *(f"  - {row['case_id']} {row['step_id']}: {row['count']}" for row in report.get("data_mismatch") or []),
+        *([f"  - групп требований {report['end_to_end']['groups']}, связывающих кейсов 0"] if report.get("end_to_end") else []),
         *([] if report["warnings"] else ["- нет"]), "",
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),
