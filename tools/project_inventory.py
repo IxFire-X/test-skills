@@ -63,6 +63,9 @@ _PASSWORD_KEY = rb"[\w.-]*(?:password|passwd|pwd|secret)[\w.-]*"
 _PASSWORD_LINE = re.compile(rb"(?im)^[ \t]*(?:-[ \t]+)?(['\"]?)" + _PASSWORD_KEY + rb"\1[ \t]*[:=][ \t]*(?P<value>[^\r\n]*)")
 _PASSWORD_JSON = re.compile(rb'(?i)"' + _PASSWORD_KEY + rb'"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*)"')
 _PASSWORD_XML = re.compile(rb"(?is)<(?P<tag>" + _PASSWORD_KEY + rb")(?:\s[^>]*)?(?<!/)>(?P<value>[^<]*)</(?P=tag)\s*>")
+# FaT-RL: a Spring XML bean property or map entry — <property name="password" value="…"/>, <entry key="secret" value="…"/>
+_PASSWORD_XML_ATTR = re.compile(
+    rb"(?is)<[\w:.-]+\s(?=[^>]*\b(?:name|key)\s*=\s*([\"'])" + _PASSWORD_KEY + rb"\1)[^>]*?\bvalue\s*=\s*([\"'])(?P<value>[^\"'>]*)\2")
 _PLACEHOLDER = re.compile(rb"\$\{\{[^}]*\}\}|\$\{[^}:]*(?::(?P<default>[^}]*))?\}")  # ${{ secrets.X }}: a CI reference
 _FLAG_VALUES = frozenset({b"true", b"false", b"yes", b"no", b"on", b"off"})
 _MESSAGE_BUNDLE = re.compile(r"(?i)^(?:validation)?messages[\w.-]*\.properties$")
@@ -326,7 +329,8 @@ def _has_password(path: Path, contents: bytes) -> bool:
     if suffix == ".json":
         return any(_secret_value(match.group("value")) for match in _PASSWORD_JSON.finditer(contents))
     if suffix == ".xml":
-        return any(_secret_value(match.group("value")) for match in _PASSWORD_XML.finditer(contents))
+        return any(_secret_value(match.group("value")) for pattern in (_PASSWORD_XML, _PASSWORD_XML_ATTR)
+                   for match in pattern.finditer(contents))
     return False
 
 

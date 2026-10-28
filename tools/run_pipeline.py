@@ -93,7 +93,8 @@ _NEXT_STEPS = (
     # FaT-H2b 2.8: after autotest-reviewer the verdict decides — exec, the next revision, or finish
     ("automation revision", "tc-to-autotest", "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5"),
     ("automation refused", "finish",
-     "автоматизация отклонена или заблокирована: finish закрывает попытку и печатает next_run — команду следующего захода; "
+     "автоматизация отклонена, заблокирована или не записывается в проект: finish закрывает попытку и печатает next_run — "
+     "команду следующего захода; "
      "нового ревью сверх лимита ревизий нет", "6"),
     (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
     ("context-marker parts merge", "context-marker:parts",
@@ -844,6 +845,7 @@ _SECOND_PASS = {
     "REWORK": "ревью вернуло кейсы на доработку: следующий заход — новый scan того же запроса",
     "AUTOMATION_REJECTED": "автоматизация отклонена ревью: следующий заход — новый scan того же запроса",
     "AUTOMATION_BLOCKED": "автоматизация заблокирована: следующий заход — новый scan того же запроса",
+    "AUTOMATION_NOT_MATERIALIZABLE": "принятую автоматизацию нельзя записать в проект: следующий заход — новый scan того же запроса",
 }
 
 
@@ -1564,17 +1566,23 @@ _NOT_PREPARED_FIX = ("exec запускает только принятую ав
 _REFUSED_FIX = ("статическое ревью не приняло автоматизацию, ревизий больше нет: закройте попытку командой finish — "
                 "она напечатает next_run, команду следующего захода")
 _REVISION_FIX = "ревью вернуло автоматизацию на правку: следующая ревизия tc-to-autotest:r2, её ревью autotest-reviewer:r2, затем exec"
+# FaT-RL: the review accepted the automation, but exec cannot write it into the project — no later step changes that
+_UNMATERIALIZABLE_FIX = ("ревью приняло автоматизацию, но exec не может записать её в проект (причина в message): закройте попытку "
+                         "командой finish — она закроет её отрицательно (AUTOMATION_NOT_MATERIALIZABLE) и напечатает next_run")
 
 
 def _not_prepared_fix(root: Path, attempt_id: str) -> str:
     from tools.finalize_attempt import automation_next
 
     try:
-        outcome = automation_next(root, attempt_id)[0]
+        outcome, detail = automation_next(root, attempt_id)
     except (KeyError, OSError, TypeError, ValueError):
         return _NOT_PREPARED_FIX
-    # reached only after a static review exists (no review is the stop above)
-    return _REFUSED_FIX if outcome in {"AUTOMATION_REJECTED", "AUTOMATION_BLOCKED"} else _REVISION_FIX if outcome == "PENDING" else _NOT_PREPARED_FIX
+    if outcome == "PENDING":
+        return _REVISION_FIX if detail == "tc-to-autotest:r2" else (
+            f"автоматизация не закончена: следующий шаг — {detail}, затем ревью автотестов (ПРИНЯТО) и снова exec")
+    return {"AUTOMATION_REJECTED": _REFUSED_FIX, "AUTOMATION_BLOCKED": _REFUSED_FIX,
+            "AUTOMATION_NOT_MATERIALIZABLE": _UNMATERIALIZABLE_FIX}.get(outcome, _NOT_PREPARED_FIX)
 
 
 def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
@@ -1583,8 +1591,8 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
     Inside the exec step, not a driver: the same ``materialize_delta`` the agent would call, from the journal's own
     tc-to-autotest:rN and autotest-reviewer:rN answers.  Its checks stay as they are; a repeat is a no-op.
     """
-    from tools.generated_delta import GeneratedDeltaError, materialize_delta
-    from tools.pilot_state import derive_state, read_attempt_receipt, read_effective_canonical, read_model_stage_artifact
+    from tools.generated_delta import GeneratedDeltaError, journal_automation, materialize_delta
+    from tools.pilot_state import read_attempt_receipt, read_effective_canonical
     from tools.project_inventory import read_execution_baseline
 
     root = Path(coordinates["run_root"])
@@ -1595,25 +1603,16 @@ def _prepare_execution(coordinates: Mapping[str, Any]) -> list[str]:
         return []
     except (KeyError, OSError, TypeError, ValueError):
         pass
-    answers: dict[str, dict[int, Mapping[str, Any]]] = {"tc-to-autotest": {}, "autotest-reviewer": {}}
-    for event in derive_state(root)["events"]:
-        stage = str(event.get("stage_instance_id") or "")
-        role, _, revision = stage.partition(":r")
-        if event.get("attempt_id") != attempt_id or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or role not in answers or not revision.isdigit():
-            continue
-        answers[role][int(revision)] = read_model_stage_artifact(root, attempt_id, stage, str(event["artifact_digest"]))["artifact"]
-    reviews, automations = answers["autotest-reviewer"], answers["tc-to-autotest"]
-    if not reviews or max(reviews) not in automations:
-        raise HostStop("EXECUTION_NOT_PREPARED", "no static review of the automation in this attempt", _NOT_PREPARED_FIX)
-    last = max(reviews)
+    inputs = journal_automation(root, attempt_id)
+    if inputs is None:
+        raise HostStop("EXECUTION_NOT_PREPARED", "no static review of the automation in this attempt", _not_prepared_fix(root, attempt_id))
     try:
         baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
         document = read_effective_canonical(root, attempt_id)["document"]
         materialize_delta(
-            Path(str(coordinates["manifest"]["project"])), Path(coordinates["module_root"]), baseline, automations[last], reviews[last],
+            Path(str(coordinates["manifest"]["project"])), Path(coordinates["module_root"]), baseline, inputs["automation"], inputs["review"],
             canonical_document=document, run_root=root, attempt_id=attempt_id,
-            automation_history=[automations[index] for index in range(1, last) if index in automations],
-            review_history=[reviews[index] for index in range(1, last) if index in reviews],
+            automation_history=inputs["automation_history"], review_history=inputs["review_history"],
         )
     except (GeneratedDeltaError, KeyError, TypeError, ValueError, OSError) as error:
         raise HostStop("EXECUTION_NOT_PREPARED", str(error), _not_prepared_fix(root, attempt_id)) from error
@@ -2040,6 +2039,11 @@ def cmd_rerun_retained(args: Any) -> int:
     return 0
 
 
+# FaT-RL: exec recovers a run whose controller died after the start claim (sparse UNKNOWN), finish does not
+_INTERRUPTED_FIX = ("запуск тестов начался, но квитанции исполнения нет (процесс прервался): снова вызови exec — он восстановит "
+                    "прерванный запуск как UNKNOWN и закроет попытку")
+
+
 def cmd_finish(args: Any) -> int:
     """FaT-4: close the current attempt in one command — the same order and checks as the manual sequence."""
     from tools.finalize_attempt import FinalizationError, finalize_durable_branch_attempt, finalize_durable_execution_attempt
@@ -2053,11 +2057,25 @@ def cmd_finish(args: Any) -> int:
     attempt_id = str(attempt["attempt_id"])
     executed = (root / "execution-receipts" / f"{attempt_id}.json").exists() or any(
         event.get("attempt_id") == attempt_id and event["event_type"] == "EXECUTION_STARTED" for event in derive_state(root)["events"])
+    refusal = None
+    if not executed and attempt.get("state") != "TERMINAL":
+        from tools.finalize_attempt import automation_next
+
+        try:
+            outcome, detail = automation_next(root, attempt_id)
+            refusal = detail if outcome == "AUTOMATION_NOT_MATERIALIZABLE" else None
+        except (KeyError, OSError, TypeError, ValueError):
+            refusal = None
     try:
         closed = finalize_durable_execution_attempt(root, attempt_id) if executed else finalize_durable_branch_attempt(root, attempt_id)
     except FinalizationError as error:
         code = str(error).split(":", 1)[0] if str(error).startswith("FINISH_") else "FINALIZATION"
-        raise HostStop(code, str(error)) from error
+        fix = getattr(error, "fix", None) or (_INTERRUPTED_FIX if executed and not (root / "execution-receipts" / f"{attempt_id}.json").exists() else None)
+        raise HostStop(code, str(error), fix) from error
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        if not executed or (root / "execution-receipts" / f"{attempt_id}.json").exists():
+            raise
+        raise HostStop("FINISH_FACT_UNDETERMINED", f"the started execution has no receipt yet ({error})", _INTERRUPTED_FIX) from error
     result = closed["result"]
     manifest = run["manifest"]
     _print({
@@ -2067,6 +2085,7 @@ def cmd_finish(args: Any) -> int:
         "exit_code": int(closed["exit_code"]), "policy_profile": manifest["policy_profile"],
         **{key: manifest[key] for key in ("requested_policy_profile", "execution_skipped") if key in manifest},
         **({"review_independence": result["review_independence"]} if "review_independence" in result else {}),
+        **({"materialization_refusal": refusal} if refusal else {}),
         **_quarantine_summary(root, attempt_id),
         **_review_notes_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),
@@ -2331,7 +2350,7 @@ def main(argv: list[str] | None = None) -> int:
         from tools.skillsrc_manifest import SkillsrcError
 
         if isinstance(error, HostStop):
-            _print({"status": "error", "reason": error.code, "message": str(error)})
+            _print({"status": "error", "reason": error.code, "message": str(error), **({"fix": error.fix} if error.fix else {})})
             return 2
         if isinstance(error, SkillsrcError):
             _print({"status": "error", "reason": error.code, "message": str(error)})

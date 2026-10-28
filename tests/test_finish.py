@@ -237,7 +237,8 @@ def _blocked_document() -> dict:
     return document
 
 
-def _automation_chain(tmp_path: Path, verdicts: list[str], *, blocked: bool = False, document: dict | None = None) -> tuple[Path, str]:
+def _automation_chain(tmp_path: Path, verdicts: list[str], *, blocked: bool = False, document: dict | None = None,
+                      edit_review=None) -> tuple[Path, str]:
     from tests.test_automation_revision_budget import automated_document, automation, durable_boundary, host_evidence, review
     from tools.automation_validation import automation_sha256, autotest_review_sha256
     from tools.pilot_state import append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt
@@ -269,6 +270,8 @@ def _automation_chain(tmp_path: Path, verdicts: list[str], *, blocked: bool = Fa
             reviewed["artifacts"]["autotest_review"].update(corrections=[], findings=[{
                 "severity": "BLOCKING", "code": "ASSERTION_MISSING", "message": "Проверка шага не реализована.",
                 "evidence": ["relation"], "related_ids": ["FILE-products"]}])
+        if edit_review is not None:
+            edit_review(reviewed)
         stage = f"autotest-reviewer:r{index}"
         append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id=stage,
                      artifact_digest=automation_sha256(artifact))

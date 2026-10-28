@@ -154,8 +154,10 @@ def _java_version(value: str | None) -> int | None:
     """``1.8``/``8``/``VERSION_1_8`` → 8; anything else (an unresolved property) → None."""
     match = re.fullmatch(r"\s*(?:1[._])?(\d+)\s*", value or "")
     return int(match.group(1)) if match and int(match.group(1)) >= 5 else None
-def _pom_levels(pom: Path, inherited: Mapping[str, str]) -> tuple[list[tuple[int, str]], dict[str, str]]:
-    """Java levels a pom states: compiler properties and plugin configuration, animal-sniffer java1N when it checks test classes."""
+def _pom_levels(pom: Path, inherited: Mapping[str, str], external: str | None = None) -> tuple[list[tuple[int, str]], dict[str, str]]:
+    """Java levels a pom states: compiler properties and plugin configuration, animal-sniffer java1N when it checks test classes;
+    under an external parent (``external``: its artifactId) also ``java.version``/``java.release.version`` — the convention of
+    spring-boot-starter-parent, mybatis-parent and their like, which pass it to the compiler."""
     data = ET.fromstring(_read(pom))
     own = {_xml_name(item): (item.text or "").strip() for block in data if _xml_name(block) == "properties" for item in block}
     properties = {**inherited, **own}
@@ -169,10 +171,9 @@ def _pom_levels(pom: Path, inherited: Mapping[str, str]) -> tuple[list[tuple[int
     for name in ("maven.compiler." + field for field in _COMPILER_LEVEL_FIELDS):
         level = _java_version(resolve(own.get(name)))
         if level is not None: levels.append((level, f"{pom.name}: {name}={properties[name]}"))
-    parent = next((child for child in data if _xml_name(child) == "parent"), None)
-    boot = parent is not None and any(_xml_name(child) == "artifactId" and (child.text or "").strip() == "spring-boot-starter-parent" for child in parent)
-    level = _java_version(resolve(properties.get("java.version"))) if boot else None
-    if level is not None: levels.append((level, f"{pom.name}: java.version={properties['java.version']} (spring-boot-starter-parent)"))
+    for name in ("java.version", "java.release.version") if external else ():
+        level = _java_version(resolve(own.get(name)))
+        if level is not None: levels.append((level, f"{pom.name}: {name}={own[name]} (родитель {external})"))
     for plugin in (node for node in data.iter() if _xml_name(node) == "plugin"):
         artifact = next(((child.text or "").strip() for child in plugin if _xml_name(child) == "artifactId"), "")
         configurations = [node for node in plugin.iter() if _xml_name(node) == "configuration"]
@@ -199,7 +200,7 @@ def java_api_level(module_root: Path) -> dict[str, Any] | None:
     Several values (profiles, executions) give the lowest: an API allowed by it compiles under every one of them."""
     root = Path(module_root).resolve()
     levels: list[tuple[int, str]] = []
-    chain, pom = [], root / "pom.xml"
+    chain, pom, external = [], root / "pom.xml", None
     while pom.is_file() and len(chain) < 6:
         chain.append(pom)
         try: data = ET.fromstring(_read(pom))
@@ -210,11 +211,13 @@ def java_api_level(module_root: Path) -> dict[str, Any] | None:
         candidate = candidate / "pom.xml" if candidate.is_dir() else candidate
         try: listed = {(candidate.parent / ref).resolve() for ref in _maven_refs(ET.fromstring(_read(candidate)))} if parent is not None and candidate.is_file() else set()
         except ET.ParseError: listed = set()
-        if pom.parent.resolve() not in listed: break  # only a reactor parent of this project, never a pom outside it
+        if pom.parent.resolve() not in listed:  # only a reactor parent of this project, never a pom outside it
+            external = next(((child.text or "").strip() for child in parent if _xml_name(child) == "artifactId"), None) if parent is not None else None
+            break
         pom = candidate
     properties: dict[str, str] = {}
     for index, pom in enumerate(reversed(chain)):
-        try: found, properties = _pom_levels(pom, properties)
+        try: found, properties = _pom_levels(pom, properties, external)
         except ET.ParseError: continue
         prefix = "" if index == len(chain) - 1 else f"{pom.parent.name}/"
         levels += [(level, prefix + evidence) for level, evidence in found]

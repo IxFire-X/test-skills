@@ -279,7 +279,12 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
         return notes
     scope = ("команда форматирует весь модуль, не только эти файлы — проверьте дифф чужих файлов перед коммитом"
              if whole else "команда форматирует только эти файлы")
-    action = "; ".join(filter(None, [(f"отформатируйте ({scope}): " + "; ".join(commands)) if commands else None,
+    # FaT-RL: a license goal rewrites the header of every file of the module, say it in so many words
+    goals = [row[3] for row in rows if row[0] in {"license-mycila", "license-codehaus"} and row[3] and adapter_id != GRADLE]
+    if goals:
+        scope += f"; {', '.join(goals)} переписывает заголовки лицензий во всех файлах модуля, а не только в этих"
+    action = "; ".join(filter(None, [(f"отформатируйте ({scope}): " + "; ".join(commands)) if commands else
+                                     "команды автоформатирования для этих проверок нет — поправьте файлы по отчёту проверки",
                                      f"затем проверьте: {check}" if check else None]))
     notes["format_hint"] = (f"оставленные в проекте файлы ({', '.join(kept_files)}) проект проверяет на стиль "
                             f"({', '.join(checks)}): {action}")

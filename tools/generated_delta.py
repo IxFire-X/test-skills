@@ -264,81 +264,22 @@ def _read_durable_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any
     return dict(durable)
 
 
-@_closure_cached  # FaT-9b
-def materialize_delta(
-    project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
-    canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,
-    automation_history: Sequence[Mapping[str, Any]] = (), review_history: Sequence[Mapping[str, Any]] = (),
-    fail_after: int | None = None, interrupt_after: int | None = None,
-) -> dict[str, Any]:
-    """Materialize a complete, reviewed generated file set exactly once.
-
-    ``fail_after`` and ``interrupt_after`` are injected test seams only.  The
-    latter models a process stop after project writes but before a final delta.
-    """
-    project, module = Path(project).resolve(), Path(module_root).resolve()
-    frozen, _run = _frozen_attempt(project, module, baseline, canonical_document or {}, run_root, attempt_id)
-    effective = _effective_selection(run_root, attempt_id, canonical_document or {})
-    _accepted_chain(automation, review, canonical_document or {}, run_root, attempt_id, automation_history, review_history)
-    try:
-        from tools.pilot_state import publish_execution_inputs
-
-        durable_inputs = publish_execution_inputs(run_root, attempt_id, automation, review)["record"]
-    except (KeyError, TypeError, ValueError, OSError) as error:
-        raise GeneratedDeltaError(
-            "MATERIALIZATION_CONFLICT", "reviewed execution inputs are not durable/read-back",
-        ) from error
-    if (
-        durable_inputs.get("automation_artifact") != dict(automation)
-        or durable_inputs.get("autotest_review") != dict(review)
-    ):
-        raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "durable execution inputs differ")
-    generated, automation_digest, review_digest = _reviewed_generated_files(automation, review)
+def _test_root(module: Path, frozen: Mapping[str, Any], generated: Any) -> tuple[str, Path]:
     test_root = frozen.get("test_root")
     if not isinstance(test_root, str) or not test_root or not isinstance(generated, list) or not generated:
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "selected module test root or generated file set is invalid")
     root = module / test_root
     if not root.is_dir() or root.is_symlink():
         raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "selected native test root is unavailable or unsafe")
-    baseline_paths = _baseline_test_paths(frozen)
-    # A retry is safe only when immutable ownership proves the exact same first
-    # materialization and the bytes are still unchanged.  Any other existing path
-    # remains a conflict; it is never silently reclassified as not materialized.
-    receipt_path = Path(run_root) / "generated-deltas" / f"{attempt_id}.json"
-    if receipt_path.exists():
-        try:
-            existing = _read_durable_delta(run_root, attempt_id)
-        except GeneratedDeltaError as error:
-            try:
-                from tools.pilot_state import recover_phase5_receipt_events
+    return test_root, root
 
-                existing = recover_phase5_receipt_events(run_root, attempt_id, "generated-delta")["record"]["delta"]
-            except (KeyError, TypeError, ValueError) as recovery_error:
-                raise error from recovery_error
-        if (
-            existing.get("module") != _module_name(project, module)
-            or existing.get("test_root") != test_root
-            or existing.get("baseline_digest") != frozen.get("digest")
-            or existing.get("automation_digest") != automation_digest
-            or existing.get("review_digest") != review_digest
-            or existing.get("effective_canonical_digest") != effective.get("document_digest")
-            or existing.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest")
-        ):
-            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta differs from requested materialization")
-        expected = [(item.get("file_id"), item.get("path"), item.get("content_digest")) for item in generated]
-        actual = [(item.get("file_id"), item.get("path"), item.get("content_digest")) for item in existing.get("files", []) if isinstance(item, Mapping)]
-        if expected != actual:
-            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta cannot be safely reused")
-        if existing.get("facts", {}).get("completion") == "PARTIAL":
-            requested = {
-                row["path"]: ("CLEANED" if row.get("materialization") == "MATERIALIZED" else "NOT_MATERIALIZED")
-                for row in existing.get("files", []) if isinstance(row, Mapping) and isinstance(row.get("path"), str)
-            }
-            apply_dispositions(project, existing, requested, run_root=run_root, attempt_id=attempt_id, verification="NOT_APPLICABLE")
-            return existing
-        if existing.get("facts", {}).get("completion") != "COMPLETE" or inspect_delta(project, existing) != {"valid": True}:
-            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta cannot be safely reused")
-        return existing
+
+def _plan_files(
+    project: Path, module: Path, root: Path, test_root: str, frozen: Mapping[str, Any], generated: Sequence[Any],
+    run_root: Path, attempt_id: str,
+) -> tuple[list[tuple[str, str, bytes, Path]], Any]:
+    """Every check of the generated files before the first write; only reads (FaT-RL: shared with the precheck)."""
+    baseline_paths = _baseline_test_paths(frozen)
     planned: list[tuple[str, str, bytes, Path]] = []
     seen_paths: set[str] = set()
     seen_components: list[tuple[str, ...]] = []
@@ -377,6 +318,146 @@ def materialize_delta(
             planned.append((file_id, path, content, target))
     except OutputConfinementError as error:
         raise _conflict(error) from error
+    return planned, ownership
+
+
+@_closure_cached  # FaT-RL
+def materialization_precheck(
+    project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
+    canonical_document: Mapping[str, Any], run_root: Path, attempt_id: str,
+    automation_history: Sequence[Mapping[str, Any]] = (), review_history: Sequence[Mapping[str, Any]] = (),
+) -> None:
+    """FaT-RL: every check materialize_delta makes before its first write, in the same order, without writing.
+
+    A GeneratedDeltaError here is exec's own answer for this accepted automation, and no later step changes it: the
+    answers of the attempt are final once the review accepted them."""
+    project, module = Path(project).resolve(), Path(module_root).resolve()
+    frozen, _run = _frozen_attempt(project, module, baseline, canonical_document, run_root, attempt_id)
+    _effective_selection(run_root, attempt_id, canonical_document)
+    _accepted_chain(automation, review, canonical_document, run_root, attempt_id, automation_history, review_history)
+    generated, _automation_digest, _review_digest = _reviewed_generated_files(automation, review)
+    test_root, root = _test_root(module, frozen, generated)
+    if (Path(run_root) / "generated-deltas" / f"{attempt_id}.json").exists():
+        return  # an earlier exec materialized: reusing it is exec's own check
+    _plan_files(project, module, root, test_root, frozen, generated, run_root, attempt_id)
+
+
+def journal_automation(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
+    """FaT-RL: the last reviewed automation of the attempt and its earlier revisions, from the journal answers of
+    tc-to-autotest:rN and autotest-reviewer:rN — what exec materializes; None while no review answers the last one."""
+    from tools.pilot_state import derive_state, read_model_stage_artifact
+
+    answers: dict[str, dict[int, Mapping[str, Any]]] = {"tc-to-autotest": {}, "autotest-reviewer": {}}
+    for event in derive_state(run_root)["events"]:
+        stage = str(event.get("stage_instance_id") or "")
+        role, _, revision = stage.partition(":r")
+        if event.get("attempt_id") != attempt_id or event["event_type"] != "MODEL_RESPONSE_RECEIVED" or role not in answers or not revision.isdigit():
+            continue
+        answers[role][int(revision)] = read_model_stage_artifact(run_root, attempt_id, stage, str(event["artifact_digest"]))["artifact"]
+    reviews, automations = answers["autotest-reviewer"], answers["tc-to-autotest"]
+    if not reviews or max(reviews) not in automations:
+        return None
+    last = max(reviews)
+    return {
+        "automation": automations[last], "review": reviews[last],
+        "automation_history": [automations[index] for index in range(1, last) if index in automations],
+        "review_history": [reviews[index] for index in range(1, last) if index in reviews],
+    }
+
+
+def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
+    """FaT-RL: exec's refusal to materialize the accepted automation of an open attempt, or None (only reads)."""
+    from tools.pilot_state import derive_state, read_effective_canonical, read_run
+    from tools.project_inventory import read_execution_baseline
+
+    inputs = journal_automation(run_root, attempt_id)
+    if inputs is None:
+        return None
+    root = Path(run_root).resolve()
+    project = Path(str(read_run(root)["manifest"]["project"])).resolve()
+    attempt = next(row for row in derive_state(root)["attempts"] if row["attempt_id"] == attempt_id)
+    module = project if attempt["module"] == "." else project.joinpath(*str(attempt["module"]).split("/"))
+    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    try:
+        materialization_precheck(project, module, baseline, inputs["automation"], inputs["review"],
+                                 canonical_document=read_effective_canonical(root, attempt_id)["document"], run_root=root,
+                                 attempt_id=attempt_id, automation_history=inputs["automation_history"],
+                                 review_history=inputs["review_history"])
+    except GeneratedDeltaError as error:
+        return str(error)
+    return None
+
+
+@_closure_cached  # FaT-9b
+def materialize_delta(
+    project: Path, module_root: Path, baseline: Mapping[str, Any], automation: Mapping[str, Any], review: Mapping[str, Any], *,
+    canonical_document: Mapping[str, Any] | None = None, run_root: Path | None = None, attempt_id: str | None = None,
+    automation_history: Sequence[Mapping[str, Any]] = (), review_history: Sequence[Mapping[str, Any]] = (),
+    fail_after: int | None = None, interrupt_after: int | None = None,
+) -> dict[str, Any]:
+    """Materialize a complete, reviewed generated file set exactly once.
+
+    ``fail_after`` and ``interrupt_after`` are injected test seams only.  The
+    latter models a process stop after project writes but before a final delta.
+    """
+    project, module = Path(project).resolve(), Path(module_root).resolve()
+    frozen, _run = _frozen_attempt(project, module, baseline, canonical_document or {}, run_root, attempt_id)
+    effective = _effective_selection(run_root, attempt_id, canonical_document or {})
+    _accepted_chain(automation, review, canonical_document or {}, run_root, attempt_id, automation_history, review_history)
+    try:
+        from tools.pilot_state import publish_execution_inputs
+
+        durable_inputs = publish_execution_inputs(run_root, attempt_id, automation, review)["record"]
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        raise GeneratedDeltaError(
+            "MATERIALIZATION_CONFLICT", "reviewed execution inputs are not durable/read-back",
+        ) from error
+    if (
+        durable_inputs.get("automation_artifact") != dict(automation)
+        or durable_inputs.get("autotest_review") != dict(review)
+    ):
+        raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "durable execution inputs differ")
+    generated, automation_digest, review_digest = _reviewed_generated_files(automation, review)
+    test_root, root = _test_root(module, frozen, generated)
+    # A retry is safe only when immutable ownership proves the exact same first
+    # materialization and the bytes are still unchanged.  Any other existing path
+    # remains a conflict; it is never silently reclassified as not materialized.
+    receipt_path = Path(run_root) / "generated-deltas" / f"{attempt_id}.json"
+    if receipt_path.exists():
+        try:
+            existing = _read_durable_delta(run_root, attempt_id)
+        except GeneratedDeltaError as error:
+            try:
+                from tools.pilot_state import recover_phase5_receipt_events
+
+                existing = recover_phase5_receipt_events(run_root, attempt_id, "generated-delta")["record"]["delta"]
+            except (KeyError, TypeError, ValueError) as recovery_error:
+                raise error from recovery_error
+        if (
+            existing.get("module") != _module_name(project, module)
+            or existing.get("test_root") != test_root
+            or existing.get("baseline_digest") != frozen.get("digest")
+            or existing.get("automation_digest") != automation_digest
+            or existing.get("review_digest") != review_digest
+            or existing.get("effective_canonical_digest") != effective.get("document_digest")
+            or existing.get("effective_bundle_receipt_digest") != effective.get("effective_bundle_receipt_digest")
+        ):
+            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta differs from requested materialization")
+        expected = [(item.get("file_id"), item.get("path"), item.get("content_digest")) for item in generated]
+        actual = [(item.get("file_id"), item.get("path"), item.get("content_digest")) for item in existing.get("files", []) if isinstance(item, Mapping)]
+        if expected != actual:
+            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta cannot be safely reused")
+        if existing.get("facts", {}).get("completion") == "PARTIAL":
+            requested = {
+                row["path"]: ("CLEANED" if row.get("materialization") == "MATERIALIZED" else "NOT_MATERIALIZED")
+                for row in existing.get("files", []) if isinstance(row, Mapping) and isinstance(row.get("path"), str)
+            }
+            apply_dispositions(project, existing, requested, run_root=run_root, attempt_id=attempt_id, verification="NOT_APPLICABLE")
+            return existing
+        if existing.get("facts", {}).get("completion") != "COMPLETE" or inspect_delta(project, existing) != {"valid": True}:
+            raise GeneratedDeltaError("MATERIALIZATION_CONFLICT", "existing attempt-owned delta cannot be safely reused")
+        return existing
+    planned, ownership = _plan_files(project, module, root, test_root, frozen, generated, run_root, attempt_id)
 
     intent = {
         "schema_version": "1.0.0", "stage": "materialization-ownership",

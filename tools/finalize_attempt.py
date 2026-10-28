@@ -18,7 +18,11 @@ from tools.pilot_state import closure_cached as _closure_cached
 
 
 class FinalizationError(ValueError):
-    """A closure input is incomplete, contradictory, or not safely readable."""
+    """A closure input is incomplete, contradictory, or not safely readable; ``fix`` names the way out (FaT-RL)."""
+
+    def __init__(self, message: str = "", fix: str | None = None):
+        super().__init__(message)
+        self.fix = fix
 
 
 _DIGEST = "sha256:" + "0" * 64
@@ -1133,6 +1137,8 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
     """FaT-4: the automation outcome of a local-pilot attempt, read from the r1/r2 model stages (only reads).
 
     ``("AUTOMATION_BLOCKED" | "AUTOMATION_REJECTED", None)`` — final, finish closes the attempt;
+    ``("AUTOMATION_NOT_MATERIALIZABLE", "<exec's refusal>")`` — final: the review accepted an automation exec cannot write
+    (FaT-RL: the same checks materialize_delta makes before its first write);
     ``("ACCEPTED", None)`` — exec closes it; ``("PENDING", "<stage>:rN")`` — the next model stage of the chain.
     BLOCKED is final only with blockers in the canonical (every revision must then be BLOCKED); without them it is an
     invalid answer that the review may still send to a correction.
@@ -1157,7 +1163,10 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
             if status_blocked or canonical_blockers:
                 # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
                 return "AUTOMATION_BLOCKED", None
-            return "ACCEPTED", None
+            from tools.generated_delta import materialization_refusal
+
+            refusal = materialization_refusal(run_root, attempt_id)
+            return ("AUTOMATION_NOT_MATERIALIZABLE", refusal) if refusal is not None else ("ACCEPTED", None)
         if verdict != "AUTO_FIX_APPLIED":
             return "AUTOMATION_REJECTED", None
     return "AUTOMATION_REJECTED", None
@@ -1171,7 +1180,8 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
     if outcome == "PENDING":
         name, revision = str(stage).split(":")
         what = "следующая ревизия" if name == "tc-to-autotest" else "ревью ревизии"
-        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: {what} {revision} ({name})")
+        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: {what} {revision} ({name})",
+                                fix=f"следующий шаг — {stage}; после принятого ревью попытку закрывает exec, после отказа — finish")
     return outcome
 
 
@@ -1189,6 +1199,15 @@ def finish_closes(run_root: Path, attempt_id: str) -> bool:
     except (FinalizationError, KeyError, StopIteration, TypeError, ValueError, OSError):
         return False
     return True
+
+
+# FaT-RL: the ways out of an attempt finish cannot close yet
+_OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрывающего состояния: следующий шаг покажет run_pipeline status (next_step); "
+                    "ревью кейсов, которое не может закончиться, закрой python -m tools.api review-abort --run-root <run> "
+                    "--attempt <attempt_id> --reason <код> — затем finish закроет попытку отрицательно")
+_UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: выбери его (шаг 4, выбор effective canonical, "
+                   "проверка — python -m tools.api read-effective) или закрой ревью python -m tools.api review-abort "
+                   "--run-root <run> --attempt <attempt_id> --reason <код>; затем снова finish")
 
 
 def finalize_durable_branch_attempt(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
@@ -1223,7 +1242,8 @@ def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str,
         reviewer = pilot_state.terminal_reviewer_evidence(run_root, attempt_id)
         effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
     except (KeyError, StopIteration, TypeError, ValueError) as error:
-        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})") from error
+        raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})",
+                                fix=_OPEN_REVIEW_FIX) from error
     profile = str(attempt["policy_profile"])
     verdict = reviewer["authoritative_verdict"]
     base = {
@@ -1258,7 +1278,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str) -> tuple[Mapping[str,
             cause = "INDEPENDENCE_UNVERIFIED"
         if cause is None:
             raise FinalizationError("FINISH_FACT_UNDETERMINED: the review neither selected an effective canonical nor ended in rework "
-                                    f"or an abort (verdict {verdict}, isolation {reviewer['isolation']})")
+                                    f"or an abort (verdict {verdict}, isolation {reviewer['isolation']})", fix=_UNSELECTED_FIX)
         facts = {**base, "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": cause,
                  "blocker_count": 0, "mixed_manual_traceable": False, "prior_stage_cause": cause}
         branch = {"attempt_id": attempt_id, "evidence": {}, "stage_causes": [cause]}

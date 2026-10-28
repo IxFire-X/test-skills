@@ -305,6 +305,11 @@ def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, 
     receipt = _read_artifact(project, root, root / "run-authorization-receipt.json", "authorization receipt")
     if manifest.get("run_id") != root.name or manifest.get("project") != str(project):
         raise ValueError("invalid run boundary")
+    # FaT-RL: unique dirty paths are checked here, not by the schema's uniqueItems — quadratic on a large dirty tree
+    state = manifest.get("project_state")
+    if isinstance(state, Mapping) and state.get("kind") == "GIT_TREE" and any(
+            len(set(values)) != len(values) for values in (state["status"], [row["path"] for row in state["files"]])):
+        raise ValueError("invalid run boundary")
     if receipt.get("run_id") != manifest["run_id"] or receipt.get("policy_profile") != manifest.get("policy_profile") or receipt.get("digest") != manifest.get("authorization_digest"):
         raise ValueError("invalid run boundary")
     auth = {key: receipt[key] for key in _AUTH_KEYS if key in receipt}
