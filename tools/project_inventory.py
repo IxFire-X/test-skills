@@ -1225,7 +1225,8 @@ _LONG_LINE_SUFFIXES = frozenset({".js", ".css", ".svg"})
 MINIFIED_MIN_BYTES = 20 * 1024
 MINIFIED_LINE_CHARS = 5000
 _SIZE_FIX = ("исключите файл из контекста модели (.skillsrc paths.exclude модуля), сузьте контекст (--target) "
-             "или поднимите .skillsrc limits.context_batch_bytes, не выше бюджета шага limits.step_input_bytes")
+             "или поднимите .skillsrc limits.context_batch_bytes: бюджет шага limits.step_input_bytes — только предупреждение, "
+             "предел даёт окно модели (≈ 1 МБ на DeepSeek)")
 
 
 def _read_context_file(project_root: Path, project_path: str) -> bytes:

@@ -260,7 +260,8 @@ Run остаётся связан с исходной project/module identity.
    `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты). До `model-response` пачки — только
    `validate-fragment`: `assemble` на части пачек всегда отказывает (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет).
    Отказ `validate-fragment` — ошибка ответа: на неё идёт единственный повтор стадии (`retry_prompt` — текст отказа);
-   после `model-response` ответ стадии не заменить, третьего ответа нет. `assemble` и `validate-canonical` из п.4 —
+   после `model-response` ответ стадии не заменить. Повтор один: код отказывает при `--transport-attempts` больше 2 и при замене
+   записанного ответа; отказанные ответы журнал пока не считает (учёт — FaT-AB2), лимит держишь ты. `assemble` и `validate-canonical` из п.4 —
    после ответа последней пачки, на всех фрагментах.
    `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и

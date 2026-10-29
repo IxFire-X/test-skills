@@ -334,3 +334,10 @@ def test_a_pom_with_a_literal_password_leaves_the_context_but_binds_the_baseline
     assert "pom.xml" not in json.dumps(scan.get("exclusion_summary"), ensure_ascii=False)
     [baseline_path] = list((Path(scan["run_root"]) / "baselines").glob("*.json"))
     assert not json.loads(baseline_path.read_text(encoding="utf-8")).get("secret_inputs")
+
+
+def test_the_context_size_fixes_call_the_step_budget_only_a_warning() -> None:
+    """FaT-HT (hunt 3, 3.13): since FaT-RV the step budget only warns — no refusal text calls it a ceiling."""
+    from tools import project_inventory
+
+    assert "не выше бюджета шага" not in project_inventory._SIZE_FIX and "только предупреждение" in project_inventory._SIZE_FIX

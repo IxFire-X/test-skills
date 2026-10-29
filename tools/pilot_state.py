@@ -2102,10 +2102,11 @@ def publish_model_stage_artifact(
     value = dict(artifact)
     if attempt is None or attempt["state"] == "TERMINAL":
         raise ValueError("unknown model stage artifact attempt")
-    # FaT-AB C5: one answer per stage, at most the one retry — a third answer is refused by name before anything is written
+    # FaT-AB C5: one answer per stage, at most the one retry — --transport-attempts above 2 is refused before anything is
+    # written (and so is replacing a recorded answer); refused answers are not counted yet (FaT-AB2), the agent keeps the limit
     if type(transport_attempts) is int and transport_attempts > 2:
         raise ValueError(f"MODEL_STAGE_RETRY_EXHAUSTED: {stage_instance_id}: у стадии один ответ и единственный повтор "
-                         f"(--transport-attempts 1 или 2), третьего ответа нет; ничего не записано; " + _RETRY_EXHAUSTED_FIX)
+                         f"(--transport-attempts 1 или 2): --transport-attempts больше 2 отказан; ничего не записано; " + _RETRY_EXHAUSTED_FIX)
     data = _model_stage_artifact_bytes(value)
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     requests = [
