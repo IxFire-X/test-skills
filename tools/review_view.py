@@ -394,6 +394,11 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
     return lines
 
 
+def _cells(number: int) -> str:
+    tail = "ячейка" if number % 10 == 1 and number % 100 != 11 else "ячейки" if 2 <= number % 10 <= 4 and not 12 <= number % 100 <= 14 else "ячеек"
+    return f"{number} {tail}"
+
+
 IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предусловия, действие, данные и ожидаемый результат кейсов взяты из CSV человека"
                " дословно, код сверил их байт в байт. Их текст не оценивай и вердикт из-за него не снижай — замечание к нему только"
                " для человека. Проверяй машинную часть против этого текста: операция соответствует действию, входы — данным шага,"
@@ -402,7 +407,7 @@ IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предус
 
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
-           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False) -> bytes:
+           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
@@ -431,6 +436,8 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
         " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
         *(["- " + IMPORT_NOTE] if imported else []),  # FaT-IMP: one line, the view of other runs keeps its bytes
+        *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
+           " сверка человеческих полей идёт с ними"] if imported and normalized else []),
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
         "## Исходные требования", "",
         *(f"- {row['source_requirement_id']}: {row['text']}" for row in document["source_requirements"]), "",
@@ -512,6 +519,17 @@ def _group_lines(group: Mapping[str, Any], actions: Mapping[str, str]) -> list[s
             *shown, "", "| " + " | ".join(head) + " |", "|" + "---|" * len(head), *rows]
 
 
+def _normalized(root: Path, state: Mapping[str, Any]) -> int:
+    """FaT-IMP2: how many cells code normalized in the skeleton of the import (0 when it is not published)."""
+    from tools.pilot_state import read_attempt_receipt
+
+    try:
+        imported = read_attempt_receipt(root, str(state["attempts"][-1]["attempt_id"]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    except (KeyError, IndexError, OSError, ValueError):
+        return 0
+    return len(imported.get("normalized") or [])
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -565,7 +583,8 @@ def main(argv: list[str] | None = None) -> int:
         reference = None if profile == "autotest" or not state["attempts"] else read_reference_cases(root, str(state["attempts"][-1]["attempt_id"]))
         data = render(document, profile, *(grouping or (None, None)), existing=existing,
                       reference=None if reference is None else reference["cases"],
-                      imported=profile == "review" and cases_path(root) is not None)
+                      imported=profile == "review" and cases_path(root) is not None,
+                      normalized=_normalized(root, state) if profile == "review" and cases_path(root) is not None else 0)
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))

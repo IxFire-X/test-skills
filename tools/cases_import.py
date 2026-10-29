@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,7 +23,10 @@ _FIXES = {
     "IMPORT_WITH_DOCS_LATER": "в ступени 1 импорт кейсов идёт без --docs: требования прогона — сами кейсы; уберите --docs",
     "IMPORT_CSV_V4": "выгрузите кейсы в профиле v5 (по умолчанию) или экспортом из Zephyr — в Test Data должен быть текст человека",
     "ZEPHYR_CSV_COLUMNS": "нужен экспорт тест-кейсов Zephyr Scale в CSV с колонками шаблона; лишние колонки уберите из выгрузки",
-    "ZEPHYR_CSV_ROWS": "исправьте названные строки CSV: у каждого кейса строка с Name и хотя бы один шаг",
+    "ZEPHYR_CSV_ROWS": "заполните названные ячейки CSV: у кейса Name и хотя бы один шаг, у каждого шага Step и Expected Result — "
+                       "наблюдаемый результат системы, не «успешно», «ok» или «—»; потом повторите scan --cases",
+    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе) — замените его ссылкой на переменную окружения "
+                         "или фикстуру — и повторите scan --cases; файл с секретом модель не увидит",
     "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
     "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
@@ -37,13 +41,46 @@ class CasesImportError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
+_HTTP_LINE = re.compile(r"HTTP [1-5]\d\d ")
+_BLANK = "\n\n"  # v5 joins the expectations of a step with one blank line
+
+
+def split_expected(text: str) -> list[str]:
+    """The expectations of a v5 Expected Result cell: v5 joins them with a blank line; an ``HTTP <code> <reason>`` part
+    belongs to the expectation before it (the canonical HTTP form «result, blank line, status»)."""
+    parts: list[str] = []
+    for part in text.split(_BLANK):
+        if parts and _HTTP_LINE.match(part):
+            parts[-1] += _BLANK + part
+        elif part.strip():
+            parts.append(part)
+    return parts
+
+
 def read_cases(data: bytes) -> list[dict[str, Any]]:
-    """The cases of the CSV; a v4 export of the package is refused by the one check of REF and IMP (``require_human_csv``)."""
+    """The cases of the CSV; a v4 export of the package is refused by the one check of REF and IMP (``require_human_csv``).
+
+    FaT-IMP2: a cell no faithful answer could keep is refused by row — an empty Step or Expected Result, a service mark
+    as the expected result (the canonical rule ``service_expected``)."""
+    from tools.canonical_document import service_expected
+
     try:
         cases = parse_zephyr_csv(data)
         require_human_csv(cases)
     except ZephyrCsvError as error:
         raise CasesImportError(error.code, str(error).split(": ", 1)[1]) from None
+    errors: list[str] = []
+    for case in cases:
+        for step in case["steps"]:
+            if not step["action"].strip():
+                errors.append(f"строка {step['row']}: пустой Step")
+            expectations = split_expected(step["expected"])
+            if not expectations:
+                errors.append(f"строка {step['row']}: пустой Expected Result")
+            errors += [f"строка {step['row']}: служебный ожидаемый результат «{text.split(_BLANK)[0].strip()}»"
+                       for text in expectations if service_expected(text.split(_BLANK)[0])]
+    if errors:
+        raise CasesImportError("ZEPHYR_CSV_ROWS", "; ".join(errors))
     return cases
 
 
@@ -64,17 +101,22 @@ def imported_value(path: str, data: bytes) -> dict[str, Any]:
 
     cases = read_cases(data)
     rows = []
+    normalized: list[dict[str, Any]] = []  # FaT-IMP2: the cells code fills in one way only; the check compares with them
     for requirement, case in zip(source_requirements(path, data, cases), cases):
+        if not case["objective"].strip():
+            normalized.append({"row": case["row"], "field": "objective"})
+        normalized += [{"row": step["row"], "field": "test_data"} for step in case["steps"] if not step["test_data"].strip()]
         rows.append({
             "source_requirement_id": requirement["source_requirement_id"], "row": case["row"], "key": case["key"],
-            "title": case["title"], "objective": case["objective"],
+            "title": case["title"], "objective": case["objective"] if case["objective"].strip() else case["title"],
             "preconditions": [case["preconditions"]] if case["preconditions"].strip() else [],
             "priority": case["priority"] or "MEDIUM", "management": case["management"],
-            "steps": [{"row": step["row"], "action": step["action"], "test_data": step["test_data"],
-                       "expectations": [text for text in step["expected"].split("\n\n") if text.strip()]}
+            "steps": [{"row": step["row"], "action": step["action"], "test_data": step["test_data"] if step["test_data"].strip() else "—",
+                       "expectations": split_expected(step["expected"])}
                       for step in case["steps"]],
         })
-    return with_digest({"schema_version": "1.0.0", "csv": path, "csv_digest": "sha256:" + hashlib.sha256(data).hexdigest(), "cases": rows})
+    return with_digest({"schema_version": "1.0.0", "csv": path, "csv_digest": "sha256:" + hashlib.sha256(data).hexdigest(), "cases": rows,
+                        **({"normalized": normalized} if normalized else {})})
 
 
 def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
@@ -88,6 +130,9 @@ def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     row = next((item for item in inventory["files"] if item["project_path"] == path), None)  # bytes bound by the inventory
+    secret = next((item for item in inventory.get("exclusions") or [] if item.get("project_path") == path and item.get("reason_code") == "SECRET_SUSPECTED"), None)
+    if row is None and secret is not None:  # FaT-IMP2: left out by a secret rule — not a changed file
+        raise CasesImportError("IMPORT_CSV_SECRET", f"{path}: правило секретов {secret.get('rule_id')} — файл не вошёл в опись")
     data = (root.parents[1] / path).read_bytes()
     if row is None or row["content_digest"] != "sha256:" + hashlib.sha256(data).hexdigest():
         raise CasesImportError("IMPORT_CSV_CHANGED", path)

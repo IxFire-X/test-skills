@@ -151,14 +151,14 @@ def _manual_fragment(plan: dict, context: dict, imported: dict, index: int) -> d
     return with_digest(fragment)
 
 
-def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str = CSV) -> dict:
     """scan --cases → cases-import → the code part of the marker → merge → header and plan published."""
     from tests.test_batch_assembly import _header
     from tools import api, context_marker_parts, pilot_state
     from tools.batch_assembly import plan_batches
     from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
 
-    project = _project(tmp_path)
+    project = _project(tmp_path, csv_text)
     _code, scan = _scan(project, monkeypatch)
     root, attempt_id = Path(scan["run_root"]), scan["attempt_id"]
     assert api.main(["cases-import", "--run-root", str(root), "--attempt", attempt_id]) == 0
@@ -416,3 +416,72 @@ def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path
     assert "/test_cases/0/requirement_ids" in refused["message"] and "SREQ-0001" in refused["message"] and _journal(run["root"]) == before
     code, answered = _api(*response, "--artifact", _put(tmp / "good.json", good), "--transport-attempts", "2")
     assert code == 0, answered
+
+
+# --- FaT-IMP2: findings 3.1, 3.3, 3.8 of bug hunt 3 -------------------------------------------------------------------
+
+ROW = "Склейка двух значений,{objective},,High,{step},{data},{expected}\r\n"
+
+
+def _row(objective: str = "Проверить склейку через двоеточие", step: str = "Вызвать combine с «a» и «b»", data: str = "—",
+         expected: str = "Возвращена строка «a:b»") -> str:
+    return HEADER + "\r\n" + ROW.format(objective=objective, step=step, data=data, expected=expected)
+
+
+@pytest.mark.parametrize(("csv_text", "named"), [
+    (_row(step=""), "пустой Step"),
+    (_row(expected=""), "пустой Expected Result"),
+    (_row(expected="Успешно"), "служебный ожидаемый результат «Успешно»"),
+])
+def test_cells_no_answer_can_keep_are_refused_on_scan_by_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str, named: str) -> None:
+    project = _project(tmp_path, csv_text)
+    code, refused = _scan(project, monkeypatch)
+    assert code == 2 and refused["reason"] == "ZEPHYR_CSV_ROWS" and "строка 2" in refused["detail"] and named in refused["detail"], refused
+    assert "заполните" in refused["fix"]
+    assert not (project / ".pilot-runs").exists() or not any((project / ".pilot-runs").iterdir())
+
+
+def test_an_empty_test_data_and_objective_are_normalized_in_the_skeleton_and_the_fragment_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_review_requested import _api, _put
+    from tools.run_report import build_report
+
+    run = _to_generator(tmp_path, monkeypatch, _row(objective="", data=""))
+    [case] = run["imported"]["cases"]
+    assert case["objective"] == case["title"] == "Склейка двух значений" and case["steps"][0]["test_data"] == "—"
+    assert run["imported"]["normalized"] == [{"row": 2, "field": "objective"}, {"row": 2, "field": "test_data"}]
+    fragment = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
+    tmp = run["root"] / "tmp"
+    code, validated = _api("validate-fragment", "--fragment", _put(tmp / "f.json", fragment), "--plan", _put(tmp / "plan.json", run["plan"]),
+                           "--header", _put(tmp / "header.json", run["header"]), "--context-receipt", _put(tmp / "ctx.json", run["context"]),
+                           "--imported", _put(tmp / "imported.json", run["imported"]))
+    assert code == 0, validated
+    report, _rows = build_report(run["project"], run["root"].name)
+    assert report["import"] == {"csv": "cases/zephyr.csv", "cases": 1, "normalized": 2}
+
+
+def test_the_review_view_says_how_many_cells_code_normalized() -> None:
+    from tests.test_requirement_traceability import canonical_fixture
+    from tools.review_view import render
+
+    document = canonical_fixture()
+    assert "нормализовано: 2 ячейки" in render(document, imported=True, normalized=2).decode("utf-8")
+    assert "нормализовано" not in render(document, imported=True).decode("utf-8")
+
+
+def test_an_http_expectation_survives_v5_and_the_import_whole() -> None:
+    from tests.test_automation_revision_budget import automated_document
+    from tools.cases_import import imported_value
+    from tools.test_case_projections import render_zephyr_csv
+
+    document = automated_document()
+    data = render_zephyr_csv(document).payload
+    [case] = imported_value("cases/zephyr.csv", data)["cases"]
+    assert case["steps"][0]["expectations"] == [item["text"] for item in document["test_cases"][0]["steps"][0]["expectations"]]
+    assert case["steps"][0]["expectations"] == ["Отображается список доступных товаров.\n\nHTTP 200 OK"]
+
+
+def test_a_csv_with_a_secret_is_refused_on_scan_with_the_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path, _row(data="https://tester:Secr3t9@stand.local/login"))
+    code, refused = _scan(project, monkeypatch)
+    assert code == 2 and refused["reason"] == "IMPORT_CSV_SECRET" and "url-credentials-v1" in refused["detail"], refused
+    assert "Secr3t9" not in json.dumps(refused, ensure_ascii=False) and "секрет" in refused["fix"]

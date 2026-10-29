@@ -439,6 +439,22 @@ def _zephyr_import(root: Path) -> Any:
         return None
 
 
+def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """FaT-IMP2: the CSV of an import run, its cases and how many cells code normalized; None for other runs."""
+    from tools import pilot_state
+    from tools.cases_import import cases_path
+
+    path = cases_path(root)
+    attempts = [event.get("attempt_id") for event in events if event.get("attempt_id")]
+    if path is None or not attempts:
+        return None
+    try:
+        imported = pilot_state.read_attempt_receipt(root, str(attempts[-1]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    except (KeyError, OSError, ValueError):
+        return {"csv": path, "cases": None, "normalized": None}
+    return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or [])}
+
+
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
     """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
     from tools import pilot_state as pilot
@@ -518,6 +534,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
+        "import": _import_summary(root, events),
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -610,6 +627,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
           f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), "",
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
+    if report.get("import"):
+        summary = report["import"]
+        lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "
+                  f"{_dash(summary['normalized'])} ячеек кодом (пустая Test Data → «—», пустой Objective → Name)", ""]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]
     if report.get("expectations"):

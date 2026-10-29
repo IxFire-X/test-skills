@@ -89,6 +89,12 @@ _SERVICE_EXPECTED = re.compile(
 _HTTP_RESULT = re.compile(r"^(.+?)\n[ \t]*\nHTTP ([1-5]\d\d) ([^\n]+)(?:\n|$)", re.S)
 
 
+def service_expected(text: str) -> bool:
+    """A service mark («успешно», «ok», «—», «проверено автотестом» …) as the whole expected result — not a system result.
+    One rule for the canonical validator and the import of ready cases (FaT-IMP2)."""
+    return _SERVICE_EXPECTED.fullmatch(text.strip()) is not None
+
+
 def _trailing_json(text: str) -> Any:
     """Return a trailing JSON object/array from a human field, if present."""
     decoder = json.JSONDecoder()
@@ -868,7 +874,7 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
             for expectation_index, expectation in enumerate(step["expectations"]):
                 http_result = _HTTP_RESULT.match(expectation["text"]) if step["operation"] and step["operation"]["kind"] == "http" else None
                 observable_text = http_result[1] if http_result else expectation["text"]
-                if _SERVICE_EXPECTED.fullmatch(observable_text.strip()):
+                if service_expected(observable_text):
                     diagnostics.append(_diagnostic(_pointer(*step_path, "expectations", expectation_index, "text"), "SEMANTIC_HUMAN_EXPECTED_PLACEHOLDER", f"{case['case_id']} / {step['step_id']}: describe the observable system result instead of a test execution mark"))
             _blocker_and_readiness(step, step_path, diagnostics)
             capability = _data_flow_targets_and_contracts(index, case_index, step_index, step, diagnostics)
