@@ -47,12 +47,29 @@ class Projection:
     warnings: tuple[str, ...]
 
 
-def escape_inline(value: str) -> str:
-    """Escape one user-originated value for its Markdown inline position."""
-    value = value.replace("\r\n", "\n").replace("\r", "\n").replace("\\", "\\\\")
+_CODE_SPAN = re.compile(r"`[^`\n]+`")
+
+
+def _escape_plain(value: str) -> str:
+    value = value.replace("\\", "\\\\")
     for marker in "`*_[]<>#|":
         value = value.replace(marker, "\\" + marker)
-    return value.replace("\n", "<br>")
+    return value
+
+
+def escape_inline(value: str) -> str:
+    """Escape one user-originated value for its Markdown inline position.
+
+    FaT-MD: a paired backtick span (`Range.of`) is code in the human text and stays a code span — only its ``|`` is
+    escaped for a table cell; an unpaired backtick and the text around the spans are escaped as before."""
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    parts: list[str] = []
+    last = 0
+    for span in _CODE_SPAN.finditer(value):
+        parts += [_escape_plain(value[last:span.start()]), span.group(0).replace("|", "\\|")]
+        last = span.end()
+    parts.append(_escape_plain(value[last:]))
+    return "".join(parts).replace("\n", "<br>")
 
 
 def _readable_table_cell(value: str) -> str:
