@@ -319,3 +319,43 @@ def test_a_repeated_init_keeps_the_declared_context_and_stand_address(tmp_path: 
     (root / ".skillsrc").write_bytes(_payload(document))
     again = ensure_skillsrc(root, {key: value for key, value in answers.items() if key.endswith(":test.framework")}, False)
     assert again["status"] == "unchanged", again.get("proposal") or again
+
+
+@pytest.mark.parametrize(("address", "reason"), [
+    (None, "никто не слушает порт"),  # a closed loopback port
+    ("http://stand.invalid:8080/api", "хост не найден"),  # RFC 6761: .invalid never resolves
+])
+def test_the_stop_names_why_the_stand_did_not_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, address: str | None, reason: str) -> None:
+    """FaT-SU: one attempt, no retry — the message says a closed port from an unknown host; the code stays SERVICE_UNREACHABLE."""
+    import socket
+
+    from tools.run_pipeline import _service_stop
+
+    root = _stand(tmp_path)
+    _declare(root, ["app"], service="STAND_URL")
+    if address is None:
+        with socket.socket() as probe:  # a port nobody listens on
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        address = _local(port, "/api")
+    monkeypatch.setenv("STAND_URL", address)
+    stop = _service_stop(root, "autotests")
+    assert stop["code"] == "SERVICE_UNREACHABLE" and reason in stop["message"] and "не ответил" not in stop["message"], stop
+
+
+@pytest.mark.parametrize(("error", "reason"), [
+    ("timeout", "не ответил за"),
+    ("tls", "ошибка TLS"),
+    ("other", "соединение не удалось (BrokenPipeError)"),
+])
+def test_a_timeout_and_tls_have_their_own_reason(error: str, reason: str) -> None:
+    import socket
+    import ssl
+    import urllib.error
+
+    from tools.run_pipeline import _unreachable_reason
+
+    cause = {"timeout": socket.timeout("timed out"), "tls": ssl.SSLCertVerificationError(1, "certificate verify failed"),
+             "other": BrokenPipeError()}[error]
+    assert _unreachable_reason(urllib.error.URLError(cause)).startswith(reason)
+    assert _unreachable_reason(cause).startswith(reason)

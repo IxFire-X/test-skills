@@ -609,10 +609,28 @@ def _service_stop(project: Path, module_root: str) -> dict[str, str] | None:
             pass
     except urllib.error.HTTPError:
         return None  # the stand answered: an HTTP error status is an answer
-    except (urllib.error.URLError, OSError, ValueError):
-        return stop("SERVICE_UNREACHABLE", f"стенд {shown} (из {variable}) не ответил за {SERVICE_TIMEOUT_SECONDS} с; "
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return stop("SERVICE_UNREACHABLE", f"стенд {shown} (из {variable}): {_unreachable_reason(error)}; "
                     "тесты не запускались, файлы не записаны", shown)
     return None
+
+
+def _unreachable_reason(error: BaseException) -> str:
+    """FaT-SU: why the stand gave no answer — a closed port, an unknown host, a timeout or TLS — from the one attempt."""
+    import socket
+    import ssl
+    import urllib.error
+
+    cause = error.reason if isinstance(error, urllib.error.URLError) and isinstance(error.reason, BaseException) else error
+    if isinstance(cause, (socket.timeout, TimeoutError)) or "timed out" in str(cause):
+        return f"не ответил за {SERVICE_TIMEOUT_SECONDS} с"
+    if isinstance(cause, ssl.SSLError):
+        return "ошибка TLS"
+    if isinstance(cause, socket.gaierror):
+        return "хост не найден"
+    if isinstance(cause, ConnectionRefusedError):
+        return "никто не слушает порт"
+    return f"соединение не удалось ({type(cause).__name__})"
 
 
 def _baseline_blockers(project: Path, module: Mapping[str, Any]) -> list[dict[str, str]]:
