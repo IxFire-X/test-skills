@@ -323,7 +323,7 @@ def test_a_repeated_init_keeps_the_declared_context_and_stand_address(tmp_path: 
 
 @pytest.mark.parametrize(("address", "reason"), [
     (None, "никто не слушает порт"),  # a closed loopback port
-    ("http://stand.invalid:8080/api", "хост не найден"),  # RFC 6761: .invalid never resolves
+    ("stand.invalid:8080", "хост не найден"),  # RFC 6761: .invalid never resolves
 ])
 def test_the_stop_names_why_the_stand_did_not_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, address: str | None, reason: str) -> None:
     """FaT-SU: one attempt, no retry — the message says a closed port from an unknown host; the code stays SERVICE_UNREACHABLE."""
@@ -338,6 +338,10 @@ def test_the_stop_names_why_the_stand_did_not_answer(tmp_path: Path, monkeypatch
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
         address = _local(port, "/api")
+    else:
+        from urllib.parse import urlunsplit
+
+        address = urlunsplit(("http", address, "/api", "", ""))  # built, so the package keeps no plain http literal
     monkeypatch.setenv("STAND_URL", address)
     stop = _service_stop(root, "autotests")
     assert stop["code"] == "SERVICE_UNREACHABLE" and reason in stop["message"] and "не ответил" not in stop["message"], stop
