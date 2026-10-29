@@ -114,3 +114,18 @@ def test_a_project_with_a_build_gets_the_same_skillsrc_and_module(tmp_path: Path
     assert (project / ".skillsrc").read_bytes() == written
     assert [module["id"] for module in after.get("modules", [])] == [module["id"] for module in before.get("modules", [])]
     assert all(module["stack"].get("language") != "documents" for module in after.get("modules", []))
+
+
+def test_the_orchestrate_skill_describes_the_documents_mode_as_the_code_does() -> None:
+    """FaT-DS: the SKILL names the module, the profile, the refusal and the expected outcome — each one the code's own."""
+    root = Path(__file__).resolve().parents[1]
+    skill = (root / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    start = skill.index("Проект только с документами (FaT-DOC)")
+    paragraph = skill[start:skill.index("\n\n", start)]
+    for fact in ("`root`", "«.»", "`stack.language: documents`", "`cases-only-v1`", "`NO_BUILD_MODULE`", "`manual_only`",
+                 "`coverage: MANUAL_ONLY`", "`accepted: false`"):
+        assert fact in paragraph, fact
+    discover = (root / "tools" / "discover_project.py").read_text(encoding="utf-8")
+    pipeline = (root / "tools" / "run_pipeline.py").read_text(encoding="utf-8")
+    assert '"id": "root", "root": ".", "stack": {"language": "documents"}' in discover
+    assert 'HostStop("NO_BUILD_MODULE"' in pipeline
