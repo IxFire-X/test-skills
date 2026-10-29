@@ -303,18 +303,26 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
                              input_files: list[Path], context_receipt: dict[str, Any], imported: Mapping[str, Any] | None = None) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
-    it (the given files, the context files of the receipt, the map of existing project tests — FaT-EC — and the tc-generator
-    role), the documents of the receipt."""
+    it (the given files, the context files of the receipt, the map of existing project tests — FaT-EC — the skeleton of an
+    import — FaT-SK — and the tc-generator role), the documents of the receipt.
+
+    ``imported`` is the imported-cases receipt (or its value): every batch reads the whole receipt as its last input, so
+    its bytes are part of the step input of every batch, not of one."""
     from tools.existing_tests import for_context, view_bytes
     from tools.step_size import measure, step_window
 
     project = Path(project).resolve()
     _validate_context_receipt(context_receipt, _evidence_digests(grouping_evidence)[1])
     context_files, documents = _context_documents(project, context_receipt)
+    skeleton = len(canonical_bytes(imported)) if imported is not None else 0
+    value = imported.get("imported", imported) if imported is not None else None
     step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator",
-                         extra_bytes=len(view_bytes(for_context(project, context_receipt))))["bytes"]
-    return plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
-                        id_pattern=_grouping_pattern(project), documents=documents, imported=imported)
+                         extra_bytes=len(view_bytes(for_context(project, context_receipt))) + skeleton)["bytes"]
+    plan = plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
+                        id_pattern=_grouping_pattern(project), documents=documents, imported=value)
+    if skeleton:
+        plan.notes.append(f"вход шага включает скелет импорта {skeleton} Б: его читает каждая пачка целиком")
+    return plan
 
 
 def _grouping_pattern(project: Path) -> re.Pattern[str] | None:

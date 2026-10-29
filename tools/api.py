@@ -106,7 +106,7 @@ def _cmd_cases_import(a):
 
 
 def _cmd_plan_batches(a):
-    imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value
+    imported = a.imported if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value; FaT-SK: its bytes
     return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, a.context_receipt, imported)
 
 
