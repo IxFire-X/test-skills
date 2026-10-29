@@ -485,3 +485,39 @@ def test_a_csv_with_a_secret_is_refused_on_scan_with_the_rule(tmp_path: Path, mo
     code, refused = _scan(project, monkeypatch)
     assert code == 2 and refused["reason"] == "IMPORT_CSV_SECRET" and "url-credentials-v1" in refused["detail"], refused
     assert "Secr3t9" not in json.dumps(refused, ensure_ascii=False) and "секрет" in refused["fix"]
+
+
+# --- FaT-PW: a password as plain text in a cell of an import is refused on scan --------------------------------------
+
+@pytest.mark.parametrize(("cells", "column"), [
+    ({"data": "логин anna пароль: Qwerty123"}, "Test Data"),
+    ({"step": "Войти с password=Qwerty123"}, "Step"),
+    ({"expected": "Возвращён token: abc123def"}, "Expected Result"),
+])
+def test_a_plain_password_in_a_cell_is_refused_on_scan_without_its_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cells: dict, column: str) -> None:
+    project = _project(tmp_path, _row(**cells))
+    code, refused = _scan(project, monkeypatch)
+    assert code == 2 and refused["reason"] == "IMPORT_CSV_SECRET", refused
+    assert "строка 2" in refused["detail"] and f"колонка {column}" in refused["detail"] and "похоже на пароль" in refused["detail"], refused
+    text = json.dumps(refused, ensure_ascii=False)
+    assert "Qwerty123" not in text and "abc123def" not in text
+    assert "переменн" in refused["fix"] and "фикстур" in refused["fix"]
+
+
+def test_a_password_in_the_preconditions_is_refused_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    csv_text = HEADER + "\r\n" + "Вход,Проверить вход,\"Есть учётная запись, пароль: Qwerty123\",High,Открыть форму,—,Форма открыта\r\n"
+    code, refused = _scan(_project(tmp_path, csv_text), monkeypatch)
+    assert code == 2 and refused["reason"] == "IMPORT_CSV_SECRET" and "колонка Precondition" in refused["detail"], refused
+    assert "Qwerty123" not in json.dumps(refused, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("data", ["Ввести пароль", "password=${PWD}", "пароль: <пароль тестовой учётной записи>", "пароль: ***", "пароль: —"])
+def test_a_mention_or_a_placeholder_is_no_password(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, data: str) -> None:
+    code, scan = _scan(_project(tmp_path, _row(data=data)), monkeypatch)
+    assert code == 0, scan
+
+
+def test_the_csv_of_the_import_fixtures_have_no_false_password() -> None:
+    from tools.cases_import import password_cells, read_cases
+
+    assert password_cells(read_cases(CSV.encode("utf-8"))) == []

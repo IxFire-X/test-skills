@@ -25,8 +25,8 @@ _FIXES = {
     "ZEPHYR_CSV_COLUMNS": "нужен экспорт тест-кейсов Zephyr Scale в CSV с колонками шаблона; лишние колонки уберите из выгрузки",
     "ZEPHYR_CSV_ROWS": "заполните названные ячейки CSV: у кейса Name и хотя бы один шаг, у каждого шага Step и Expected Result — "
                        "наблюдаемый результат системы, не «успешно», «ok» или «—»; потом повторите scan --cases",
-    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе) — замените его ссылкой на переменную окружения "
-                         "или фикстуру — и повторите scan --cases; файл с секретом модель не увидит",
+    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе): замените значение ссылкой на переменную "
+                         "окружения или фикстуру и повторите scan --cases; файл с секретом модель не увидит",
     "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
     "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
@@ -55,6 +55,29 @@ def split_expected(text: str) -> list[str]:
         elif part.strip():
             parts.append(part)
     return parts
+
+
+# FaT-PW: a password as plain text in a cell of an import — key, «:» or «=», a value; only for the CSV of --cases
+_CELL_PASSWORD = re.compile(r"(?i)(?<![\w-])(?P<key>пароль|password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*(?P<value>[^\s,;]+)")
+_NOT_A_VALUE = re.compile(r"^(?:—|-|\*+|<[^<>]*>?)$")
+
+
+def password_cells(cases: list[dict[str, Any]]) -> list[str]:
+    """«строка N, колонка X: похоже на пароль (ключ …)» for each cell with an explicit secret value — never the value.
+    A placeholder (``${VAR}``, ``<…>``, asterisks, «—») or a mention without a value («ввести пароль») is no secret; the
+    value rule is the inventory's ``_secret_value``."""
+    from tools.project_inventory import _secret_value
+
+    found: list[str] = []
+    cells = [(case["row"], "Precondition", case["preconditions"]) for case in cases]
+    cells += [(step["row"], column, step[field]) for case in cases for step in case["steps"]
+              for column, field in (("Step", "action"), ("Test Data", "test_data"), ("Expected Result", "expected"))]
+    for row, column, text in sorted(cells, key=lambda cell: cell[0]):
+        keys = [match.group("key") for match in _CELL_PASSWORD.finditer(text or "")
+                if not _NOT_A_VALUE.match(match.group("value")) and _secret_value(match.group("value").encode("utf-8"))]
+        if keys:
+            found.append(f"строка {row}, колонка {column}: похоже на пароль (ключ «{keys[0]}»)")
+    return found
 
 
 def read_cases(data: bytes) -> list[dict[str, Any]]:

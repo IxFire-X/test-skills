@@ -1116,12 +1116,15 @@ def _scan_cases(project: Path, args: Any) -> int | None:
             raise CasesImportError("IMPORT_WITH_DOCS_LATER", "--cases вместе с --docs — ступень 2 (кейсы сопоставляет с требованиями модель)")
         [(rel, data)] = _input_files(project, [cases], "--cases",
                                      outside_fix="CSV кейсов должен лежать внутри проекта: укажите --cases путём от корня проекта")
+        from tools.cases_import import password_cells
         from tools.project_inventory import _secret_rule
 
+        passwords = password_cells(read_cases(data))  # FaT-PW: a plain password in a cell, by row and column, never the value
+        if passwords:
+            raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: " + "; ".join(passwords[:5]))
         secret = _secret_rule(project / rel, data, rel)  # FaT-IMP2: the rule the inventory would leave the CSV out by
         if secret is not None:
             raise CasesImportError("IMPORT_CSV_SECRET", f"{rel}: правило секретов {secret[0]} ({secret[1]}) — файл не войдёт в опись")
-        read_cases(data)
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
         return 2
