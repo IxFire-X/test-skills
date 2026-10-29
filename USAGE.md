@@ -180,7 +180,10 @@ AUTO_FIX_APPLIED, без дрейфа) размечал ровно те же в�
 контекст не идут. Документ вне inventory модуля (модуль-подкаталог, правило исключения) —
 стоп `TASK_DOC_OUTSIDE_CONTEXT`; без `--docs` уходят все документы `to_do`, и scan об этом
 предупреждает. `context_summary` вывода scan: файлы кода, документы задачи, пропущенные файлы
-других задач. Продолжение после `/clear` — «продолжай test-skills <run_id>», дальше
+других задач. CSV-выгрузка тест-кейсов Zephyr в `--docs` — отказ `DOCS_ZEPHYR_CSV`: эталонные кейсы для сравнения
+подаются `scan --reference <csv>` (подсказка ревьюеру `CV_REFERENCE`, во вход генератора не идут), готовые кейсы для
+автотестов — `scan --cases <csv>` без `--docs`. Проект только с документами — модуль `root`, профиль `cases-only-v1`
+(`local-pilot-v1` отвечает `NO_BUILD_MODULE`), все шаги ручные. Продолжение после `/clear` — «продолжай test-skills <run_id>», дальше
 `run_pipeline status` и его `next_step`.
 
 **Закрытие.** `python -m tools.run_pipeline exec --project <abs> --module <ID> --run <id>` исполняет
