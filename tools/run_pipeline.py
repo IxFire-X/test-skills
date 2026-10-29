@@ -687,8 +687,19 @@ def _resolve_scan_module(project: Path, module_id: str | None, skillsrc_document
     """Select one exact existing module without constructing an execution adapter."""
     from tools.skillsrc_manifest import normalize_skillsrc, resolve_module_root, select_module
 
+    from tools.skillsrc_manifest import SkillsrcError
+
     normalized = normalize_skillsrc(skillsrc_document)
-    module = select_module(normalized, module_id)
+    try:
+        module = select_module(normalized, module_id)
+    except SkillsrcError as error:
+        if error.code != "module_unknown":
+            raise
+        # FaT-ER: --module takes the id of .skillsrc, not the folder; a root is no synonym
+        known = ", ".join(f"{row['id']} (root {row.get('root')})" for row in normalized["modules"])
+        ids = [str(row["id"]) for row in normalized["modules"]]
+        raise HostStop("MODULE_UNKNOWN", f"модуля {module_id} нет в .skillsrc: --module — id модуля, не папка; модули: {known}",
+                       f"--module {ids[0]}" if len(ids) == 1 else "--module <id>: " + " | ".join(ids)) from error
     return resolve_module_root(project, module), module
 
 

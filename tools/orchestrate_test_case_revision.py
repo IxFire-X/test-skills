@@ -126,7 +126,13 @@ def _receipt_rows(receipt: Any, document: Mapping[str, Any], output_dir: str | o
         if field in {"preview_sha256", "csv_sha256"} and (not isinstance(value, str) or not _DIGEST.fullmatch(value)):
             return [_diag(f"/receipt/{field}", "ORCHESTRATION_RECEIPT")]
     if expected_paths is not None and (receipt.json_path, receipt.preview_path, receipt.csv_path) != expected_paths:
-        return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
+        # FaT-ER: select got another --output-dir than publish — name both directories; same directory, other files: as before
+        published = Path(str(receipt.json_path)).parent
+        if Path(output_dir).resolve() == published:
+            return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
+        return [_diag("/receipt", "ORCHESTRATION_OUTPUT_DIR",
+                      f"--output-dir {Path(output_dir).resolve()} не совпадает с каталогом publish {published}; "
+                      f"fix: повтори с --output-dir {published}")]
     if expected_paths is None and any(not isinstance(getattr(receipt, field), str) or not getattr(receipt, field) for field in ("json_path", "preview_path", "csv_path")):
         return [_diag("/receipt", "ORCHESTRATION_RECEIPT")]
     return []

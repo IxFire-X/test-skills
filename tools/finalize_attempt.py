@@ -1267,6 +1267,25 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: s
     return {**closed, "exit_code": pilot_state.exit_code(closed["result"])}
 
 
+_SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api complete-review --run-root <run> --attempt <attempt_id> "
+               "--out <run>/tmp/session.json, затем python -m tools.orchestrate_test_case_revision select с теми же --candidate, "
+               "--candidate-receipt, --assembly-receipt, --inventory-receipt, --context-receipt, --context-marker-output и "
+               "--generator-fragment, что у open-session, и --reviewer-session <run>/tmp/session.json --review {review} "
+               "--run-root <run> --attempt-id <attempt_id> --output-dir <каталог publish>; затем снова finish")
+
+
+def _reviewer_answer(run_root: Path, attempt_id: str) -> str | None:
+    """The stored answer of tc-reviewer:canonical when the reviewer has answered (its file, for --review), else None."""
+    try:
+        events = [event for event in pilot_state.derive_state(run_root)["events"] if event.get("attempt_id") == attempt_id
+                  and event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("stage_instance_id") == "tc-reviewer:canonical"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    if not events:
+        return None
+    return str(Path(run_root).resolve() / "model-stage-artifacts" / attempt_id / (str(events[-1]["artifact_digest"]).removeprefix("sha256:") + ".json"))
+
+
 def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None = None) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any]]:
     """``(attempt, branch, facts)`` of a closing point without tests, or FinalizationError naming the missing fact; only reads.
 
@@ -1280,6 +1299,10 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
         reviewer = pilot_state.terminal_reviewer_evidence(run_root, attempt_id)
         effective = pilot_state.read_effective_canonical_if_present(run_root, attempt_id)
     except (KeyError, StopIteration, TypeError, ValueError) as error:
+        answered = _reviewer_answer(run_root, attempt_id)
+        if answered is not None:  # FaT-ER: the reviewer answered, the selection is the missing step — say so, with its command
+            raise FinalizationError(f"FINISH_FACT_UNDETERMINED: ревью кейсов ответило, но select не выполнен ({error})",
+                                    fix=_SELECT_FIX.format(review=answered)) from error
         raise FinalizationError(f"FINISH_FACT_UNDETERMINED: the canonical review of the attempt is not closed yet ({error})",
                                 fix=_OPEN_REVIEW_FIX) from error
     profile = str(attempt["policy_profile"])

@@ -282,7 +282,7 @@ exact. Не ограничивай число requirements/cases искусст�
 Controller формирует immutable package из candidate, exact requirements/context/source
 evidence и provenance. Открой одну fresh role-isolated reviewer session
 (`python -m tools.orchestrate_test_case_revision open-session … --session-start <run>/tmp/session-start.json`) и вызови
-`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …` с
+`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …` (у `select` — тот же `--output-dir`, что у `publish`) с
 `--reviewer-session` из `tools.api complete-review --out <run>/tmp/session.json` (сессию с вердиктом строит код из
 журнала и ответа ревьюера после `model-response`; руками её не собирай) и `--review` — тем же ответом ревьюера. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
 candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <boundary.canonical_branch_digest>`
