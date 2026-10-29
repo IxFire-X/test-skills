@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from tools.canonical_document import param_groups, require_valid_canonical_document
+from tools.test_design_hints import technique_name
 
 
 _PROFILE_V1 = "zephyr-scale-step-row-24-v1"
@@ -370,7 +371,7 @@ def _render_html_preview_validated(document: dict[str, Any], profile: str = _PRO
         start = len(rows)
         rows.extend((
             f"<section><h2>ТК-{case_number}. {_html_text(case['title'])}</h2><p><strong>Цель:</strong> {_html_text(case['objective'])}</p>"
-            + (f"<p>Техника: {html.escape(case['technique'])}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
+            + (f"<p>Техника: {html.escape(technique_name(case['technique']))}</p>" if "technique" in case else "") + "<h3>Предусловия</h3>",
             "<ul>" + "".join(f"<li>{_html_text(item)}</li>" for item in case["preconditions"]) + "</ul>" if case["preconditions"] else "<p>Не требуются.</p>",
             "<table><colgroup><col style=\"width:27%\"><col style=\"width:41%\"><col style=\"width:32%\"></colgroup><thead><tr><th>Шаг</th><th>Тестовые данные / запрос</th><th>Ожидаемый результат</th></tr></thead><tbody>",
         ))
@@ -422,7 +423,7 @@ def _render_markdown_validated(document: dict[str, Any], profile: str) -> Projec
         lines.extend(["", "---", "", f"## ТК-{case_number}. {escape_inline(case['title'])}", ""])
         lines.extend([f"**Цель:** {escape_inline(case['objective'])}", ""])
         if "technique" in case:  # FaT-TD
-            lines.extend([f"Техника: {case['technique']}", ""])
+            lines.extend([f"Техника: {technique_name(case['technique'])}", ""])
         lines.append("**Предусловия:**")
         if case["preconditions"]:
             lines.extend("- " + escape_inline(item) for item in case["preconditions"])

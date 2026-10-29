@@ -220,8 +220,8 @@ def test_projections_show_the_technique_and_the_csv_does_not_change() -> None:
     from tools.test_case_projections import render_html_preview, render_markdown, render_zephyr_csv
 
     designed, plain = _designed(), canonical_fixture()
-    assert "Техника: BVA" in render_markdown(designed).payload.decode("utf-8")
-    assert "Техника: BVA" in render_html_preview(designed).payload.decode("utf-8")
+    assert "Техника: Граничные значения" in render_markdown(designed).payload.decode("utf-8")
+    assert "Техника: Граничные значения" in render_html_preview(designed).payload.decode("utf-8")
     assert "Техника" not in render_markdown(plain).payload.decode("utf-8")
     assert render_zephyr_csv(designed).payload == render_zephyr_csv(plain).payload
 

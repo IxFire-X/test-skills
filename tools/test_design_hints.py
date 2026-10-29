@@ -31,6 +31,14 @@ PAIRS_PER_REQUIREMENT = 3
 _SEVERITY = {"TD_NEGATIVE_MISSING": 0, "TD_VAGUE_EXPECTATION": 1, "TD_NEGATIVE_NO_STATE_CHECK": 2, "TD_BOUNDARY_MISSING": 3,
              "TD_BOUNDARY_UNDECLARED": 4, "TD_WEAK_SUCCESS": 5, "TD_REF_UNKNOWN": 6, "TD_PAIR_UNCOVERED": 7}
 TECHNIQUES = ("EP", "BVA", "DT", "PAIRWISE", "OTHER")
+# FaT-TN: the Russian name of a technique in human projections; the machine field keeps the code
+TECHNIQUE_NAMES = {"EP": "Классы эквивалентности", "BVA": "Граничные значения", "DT": "Таблица решений",
+                   "PAIRWISE": "Попарное тестирование", "OTHER": "Другая техника"}
+
+
+def technique_name(code: str) -> str:
+    """FaT-TN: the human name of a ``technique`` code (an unknown code as it is)."""
+    return TECHNIQUE_NAMES.get(code, code)
 _COMBINING = {"DT", "PAIRWISE"}
 _BOUND_SIDES = {"min": ("min", "below_min"), "max": ("max", "above_max")}
 # A leading requirement ID or section number ("3.1", "O01.", "REQ-7") is not a bound.
