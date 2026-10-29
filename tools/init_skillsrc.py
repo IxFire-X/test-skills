@@ -60,7 +60,7 @@ def _set_field(module: dict[str, Any], field: str, value: object) -> None:
     target[parts[-1]] = value
 
 
-def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], project_dir: Path) -> dict[str, Any]:
+def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], project_dir: Path, notes: list[str] | None = None) -> dict[str, Any]:
     questions = discovery.get("questions", [])
     if not isinstance(questions, list):
         raise InitError("discovery_invalid", "discovery questions are invalid")
@@ -107,17 +107,45 @@ def compile_skillsrc(discovery: Mapping[str, Any], answers: Mapping[str, str], p
     for module in modules:
         if isinstance(module, dict):
             module.pop("readiness", None)
-            _close_discovered_test(module, project_dir)
+            missing = _close_discovered_test(module, project_dir)
+            if missing is not None and notes is not None:  # FaT-NB: init says why the test block is not written
+                notes.append(f"{missing[0]}; fix: {missing[1]}")
     return {"schema_version": "5.0.0", "version": "3.0", "project": {"name": discovery.get("project_name", "project")}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"}, "modules": modules}
 
 
-def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
-    """Emit only the frozen closed execution tuple, or omit execution config."""
+BUILD_TOOL_NOT_FOUND = "BUILD_TOOL_NOT_FOUND"
+
+
+def build_tool_missing(module: Mapping[str, Any], project_dir: Path) -> tuple[str, str] | None:
+    """FaT-NB: ``(reason, fix)`` when the package cannot find the build tool of a Java module — no Maven wrapper and no
+    ``mvn`` on PATH, or no Gradle wrapper (a system gradle is not supported); None otherwise.  One check for init and ready."""
+    stack = module.get("stack") if isinstance(module.get("stack"), Mapping) else {}
+    build_tool = stack.get("build_tool")
+    if stack.get("language") != "java" or build_tool not in {"maven", "gradle"}:
+        return None
+    wrapper = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}[build_tool][os.name == "nt"]
+    if (Path(project_dir).resolve() / str(module.get("root") or ".") / wrapper).is_file():
+        return None
+    if build_tool == "gradle":
+        return (f"{BUILD_TOOL_NOT_FOUND}: у модуля нет wrapper {wrapper}, системный gradle не поддерживается — блок test не записан",
+                "добавьте gradle wrapper (gradlew) в модуль и повторите init")
+    from tools.project_inventory import InventoryError, system_maven_path
+
+    try:
+        system_maven_path("mvn")
+    except (InventoryError, OSError):
+        return (f"{BUILD_TOOL_NOT_FOUND}: mvn не найден в PATH и wrapper {wrapper} в модуле нет — блок test не записан",
+                "добавьте mvn в PATH или wrapper mvnw в модуль и повторите init")
+    return None
+
+
+def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[str, str] | None:
+    """Emit only the frozen closed execution tuple, or omit execution config; FaT-NB: a missing build tool is named."""
     test = module.get("test")
     stack = module.get("stack")
     if not isinstance(test, Mapping) or not isinstance(stack, Mapping):
         module.pop("test", None)
-        return
+        return build_tool_missing(module, project_dir)
     framework = test.get("framework")
     language = stack.get("language")
     build_tool = stack.get("build_tool")
@@ -129,7 +157,7 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
             "build_profile": "default",
             "adapter_parameters": {},
         }
-        return
+        return None
     wrapper_names = {"maven": ("mvnw", "mvnw.cmd"), "gradle": ("gradlew", "gradlew.bat")}
     names = wrapper_names.get(build_tool)
     wrapper = names[os.name == "nt"] if names else None
@@ -147,7 +175,7 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
             "build_profile": "default",
             "adapter_parameters": {},
         }
-        return
+        return None
     if language == "java" and framework == "junit5" and build_tool == "maven":
         from tools.project_inventory import InventoryError, system_maven_path
 
@@ -160,8 +188,9 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> None:
                 "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
                 "executable": str(executable), "build_profile": "default", "adapter_parameters": {},
             }
-            return
+            return None
     module.pop("test", None)
+    return build_tool_missing(module, project_dir)
 
 
 def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
@@ -748,7 +777,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     notes.extend(note for key, note in zip(defaults, default_notes) if key not in answers)
     effective_answers = _existing_discovery_answers(existing, working_discovery, {**defaults, **answers})
     try:
-        proposed = compile_skillsrc(working_discovery, effective_answers, root)
+        proposed = compile_skillsrc(working_discovery, effective_answers, root, notes)
         for module in proposed.get("modules") or []:  # FaT-2R: the answered context roots of a tests-only module
             if isinstance(module, dict) and module.get("id") in context_paths:
                 module.setdefault("paths", {})["context"] = list(context_paths[module["id"]])

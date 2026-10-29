@@ -69,9 +69,11 @@ def _microservices(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     return project, ids
 
 
-def test_a_question_of_a_module_that_is_not_selected_answers_itself(tmp_path: Path) -> None:
+def test_a_question_of_a_module_that_is_not_selected_answers_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_first_run import _fake_mvn
     from tools.init_skillsrc import ensure_skillsrc
 
+    _fake_mvn(tmp_path, monkeypatch)  # FaT-NB: with the build tool found init adds no BUILD_TOOL_NOT_FOUND note
     project, ids = _microservices(tmp_path)
     assert ensure_skillsrc(project, {}, write=False)["status"] == "needs_input"
     receipt = ensure_skillsrc(project, {}, write=True, selected_module=ids["customers"])

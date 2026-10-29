@@ -285,7 +285,10 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     language = (module.get("stack") or {}).get("language") if isinstance(module.get("stack"), Mapping) else None
     problems: list[tuple[str, str]] = []
     if test is None:
-        problems.append(("у модуля нет тестового адаптера в .skillsrc", _init_command(project)))
+        from tools.init_skillsrc import build_tool_missing
+
+        # FaT-NB: the reason init gave (no build tool), else the general one
+        problems.append(build_tool_missing(module, root) or ("у модуля нет тестового адаптера в .skillsrc", _init_command(project)))
     else:
         adapter = str(test.get("adapter_id"))
         if adapter in {"maven-wrapper:selected-symbols-v1", "gradle-wrapper:selected-symbols-v1"}:
