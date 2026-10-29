@@ -295,14 +295,24 @@ def for_context(project: Path, context_receipt: Mapping[str, Any]) -> dict[str, 
     return build_map(project, inventory, [str(row["project_path"]) for row in context_receipt.get("files") or []])
 
 
+def context_view(run_root: Path, context_digest: str, attempt_id: str | None = None) -> bytes:
+    """The map bytes of one batch context, built from the frozen inputs; empty when the digest is no context selection of
+    the attempt or the project has no hits.  FaT-RE: the one source of these bytes for step-inputs and the run report."""
+    from tools.pilot_state import _context_selection_target, derive_state, read_context_selection
+
+    root = Path(run_root).resolve()
+    attempt_id = attempt_id or str(derive_state(root)["attempts"][-1]["attempt_id"])
+    if not _context_selection_target(root, attempt_id, str(context_digest)).is_file():
+        return b""
+    return view_bytes(for_context(root.parent.parent, read_context_selection(root, attempt_id, str(context_digest))))
+
+
 def ensure_view(run_root: Path, context_digest: str) -> Path | None:
     """Write (or rewrite, when the bytes differ) the map file of one batch context; None when the project has no hits."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
-    from tools.pilot_state import derive_state, read_context_selection
 
     root = Path(run_root).resolve()
-    attempt_id = str(derive_state(root)["attempts"][-1]["attempt_id"])
-    data = view_bytes(for_context(root.parent.parent, read_context_selection(root, attempt_id, str(context_digest))))
+    data = context_view(root, context_digest)
     target = map_path(root, context_digest)
     if not data:
         return None

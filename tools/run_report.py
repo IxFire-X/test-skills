@@ -213,6 +213,16 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
         if view.is_file():
             rest, unresolved = input_bytes(sizes, inputs[1:])
             resolved, basis = rest + view.stat().st_size, "вид"
+    if str(call["stage"]).startswith("tc-generator:"):
+        # FaT-RE (hunt 3, 3.12): the generator also reads the map of existing project tests of its context — the same
+        # bytes step-inputs gives it (FaT-EC); the skeleton of an import is an input digest of its own already
+        from tools.existing_tests import context_view
+
+        for digest in inputs:
+            try:
+                resolved += len(context_view(root, str(digest), str(call["attempt_id"])))
+            except (KeyError, OSError, TypeError, ValueError):
+                pass
     call["input_basis"] = basis
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
     answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))

@@ -222,3 +222,18 @@ def test_the_map_of_a_campaign_project_keeps_the_worst_batch_in_the_window(proje
     receipts = sorted(glob.glob(os.path.join(run, "context-selections", "*", "*.json")), key=os.path.getmtime)
     data = view_bytes(for_context(CAMPAIGN / project, json.loads(Path(receipts[-1]).read_text(encoding="utf-8"))))
     assert len(data) <= 16_500 and WORST_BATCH_TOKENS + len(data) * TOKENS_PER_BYTE <= WINDOW_TOKENS
+
+
+@pytest.mark.parametrize("with_tests", [True, False])
+def test_the_report_counts_the_map_in_the_generator_input_as_step_inputs_do(tmp_path: Path, with_tests: bool) -> None:
+    """FaT-RE (hunt 3, 3.12): the report measured the batch input without the map that step-inputs give the generator."""
+    from tools.run_report import build_report
+    from tools.step_size import request_files
+
+    root, _context = _generator_run_with_tests(tmp_path, with_tests=with_tests)
+    found = request_files(root, "tc-generator:BATCH-fixture")
+    report, _rest = build_report(root.parent.parent, root.name)
+    [call] = [row for row in report["model_calls"] if row["stage"] == "tc-generator:BATCH-fixture"]
+    maps = sum(row["bytes"] for row in found["files"] if row.get("basis") == "карта")
+    assert (maps > 0) is with_tests
+    assert call["input_bytes"] == sum(row["bytes"] for row in found["files"]) + sum(row["bytes"] for row in found["bindings"]), (call, found)
