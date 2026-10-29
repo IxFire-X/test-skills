@@ -207,3 +207,54 @@ def test_the_scan_prints_the_reuse_suggestion(tmp_path: Path, monkeypatch: pytes
 
     code, payload = _scan(_python_project(tmp_path, runtime=False), monkeypatch)
     assert code == 0 and payload["reuse"] == {"run_id": None, "reason": "нет прошлого прогона с разметкой"}
+
+
+def _parts_source(project: Path, monkeypatch: pytest.MonkeyPatch, inputs: list[str], module: str, requirements_by: str, parts: int = 2) -> str:
+    """A source marked in parts (requirements, batch-001.., merged baseline), stubbed at the seam _marker_source.
+
+    Its parts all bind the one context receipt of the fresh run, so the callers stub _marker_base to the fresh inputs."""
+    from tools import pilot_state
+
+    source_id = "f" * 32
+    (project / ".pilot-runs" / source_id).mkdir(parents=True)
+    (project / ".pilot-runs" / source_id / "events.jsonl").write_text("", encoding="utf-8")
+    pack = pilot_state.skill_pack_digest()
+    req, inv, ctx = inputs
+    answer = "sha256:" + "a" * 64
+    stages = {"context-marker:requirements": ({"input_digests": [req, inv], "model_id": requirements_by, "skill_pack_digest": pack}, answer)}
+    for number in range(parts, 0, -1):  # recorded out of order on purpose: the order is the code's
+        stages[f"context-marker:batch-{number:03d}"] = ({"input_digests": [req, inv, ctx, answer], "model_id": "m", "skill_pack_digest": pack},
+                                                        f"sha256:{number:064x}")
+    stages["context-marker:baseline"] = ({"input_digests": [req, inv, ctx], "model_id": "controller:context-marker-merge"}, "sha256:" + "c" * 64)
+    fake = {"run_id": source_id, "root": project / ".pilot-runs" / source_id, "state": {}, "attempt": {"attempt_id": "e" * 32, "module": module},
+            "stages": stages, "verdict": "ПРИНЯТО", "drift": False}
+    monkeypatch.setattr(pilot_state, "_marker_source", lambda project, run_id: fake if run_id == source_id else (_ for _ in ()).throw(ValueError()))
+    return source_id
+
+
+@pytest.mark.parametrize("parts", [2, 11])
+def test_the_commands_of_a_marker_in_parts_come_in_the_order_the_journal_accepts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parts: int) -> None:
+    from tools import pilot_state
+
+    run_root, attempt_id, inputs = _fresh(tmp_path)
+    module = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)["module"]
+    source_id = _parts_source(tmp_path, monkeypatch, inputs, module, "m", parts)
+    monkeypatch.setattr(pilot_state, "_marker_base", lambda source: inputs)
+    reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    assert reuse["run_id"] == source_id
+    assert [row["stage"] for row in reuse["stages"]] == ["context-marker:requirements", *(f"context-marker:batch-{n:03d}" for n in range(1, parts + 1))]
+    assert reuse["then"].endswith(f"context_marker_parts merge --run-root {run_root}")
+
+
+def test_an_import_source_starts_with_cases_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state
+
+    run_root, attempt_id, inputs = _fresh(tmp_path)
+    module = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)["module"]
+    _parts_source(tmp_path, monkeypatch, inputs, module, "controller:cases-import")
+    monkeypatch.setattr(pilot_state, "_marker_base", lambda source: inputs)
+    reuse = pilot_state.marker_reuse_suggestion(run_root, attempt_id)
+    first, *rest = reuse["stages"]
+    assert first == {"stage": "context-marker:requirements", "by": "cases-import",
+                     "commands": [f"python -m tools.api cases-import --run-root {run_root} --attempt {attempt_id}"]}
+    assert [row["stage"] for row in rest] == ["context-marker:batch-001", "context-marker:batch-002"]

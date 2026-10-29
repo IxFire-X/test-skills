@@ -4394,6 +4394,15 @@ def _reuse_source(
     return {"run_id": run_id, "attempt_id": attempt_id, "request_digest": str(request["digest"]), "response_digest": response}
 
 
+def _marker_stage_order(stage: str) -> tuple[int, int]:
+    """FaT-CR2: the order the journal accepts — requirements, the parts by number, then the baseline."""
+    if stage == "context-marker:requirements":
+        return 0, 0
+    if stage.startswith("context-marker:batch-"):
+        return 1, int(stage.rsplit("-", 1)[1])
+    return 2, 0
+
+
 def _marker_base(source: Mapping[str, Any]) -> list[str]:
     """requirements, inventory and the context receipts a marker of the source bound, in order."""
     stages = source["stages"]
@@ -4432,7 +4441,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
                        if given != other]
         if len(base) != len(current):
             differences.append({"input": "число квитанций контекста", "given": len(current) - 2, "source": len(base) - 2})
-        model_stages = [stage for stage in sorted(source["stages"], key=lambda item: (item == "context-marker:baseline", item))
+        model_stages = [stage for stage in sorted(source["stages"], key=_marker_stage_order)
                         if not str(source["stages"][stage][0].get("model_id") or "").startswith("controller:")]
         if refusal is None and differences:
             refusal = "входы иные"
@@ -4444,6 +4453,10 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
             continue
         source_attempt = str(source["attempt"]["attempt_id"])
         rows = []
+        made_by = {stage: str(source["stages"][stage][0].get("model_id") or "") for stage in source["stages"]}
+        if made_by.get("context-marker:requirements") == "controller:cases-import":  # FaT-CR2: an import makes it by code
+            rows.append({"stage": "context-marker:requirements", "by": "cases-import",
+                         "commands": [f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}"]})
         for stage in model_stages:
             request, response = source["stages"][stage]
             artifact = _model_stage_artifact_target(source["root"], source_attempt, response)
@@ -4452,9 +4465,10 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
                 head.format(kind="request") + f" --model-id reuse --invocation-id reuse-{path.name[:8]}-{stage.replace(':', '-')} "
                 + " ".join(f"--input-digest {digest}" for digest in request["input_digests"]) + f" --reuse-from {path.name}",
                 head.format(kind="response") + f" --artifact {artifact}"]})
-        merged = len(model_stages) < len(source["stages"])
+        merged = made_by.get("context-marker:baseline") == "controller:context-marker-merge"
         return {"run_id": path.name, "stages": rows,
-                **({"then": "слияние частей — тем же merge, что и всегда (код, не вызов модели)"} if merged else {})}
+                **({"then": "слияние частей кодом, не вызов модели: python -m tools.context_marker_parts merge "
+                            f"--run-root {root}"} if merged else {})}
     return first_refusal or {"run_id": None, "reason": _REUSE_FREE}
 
 
