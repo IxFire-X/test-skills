@@ -121,7 +121,8 @@ pipeline в этом run. Наличие папки, scan или запрос te
 `run-authorization-receipt.json`, `run-manifest.json`, readback-проверь оба и запиши
 `RUN_CREATED`. State хранится под `<project>/.pilot-runs/<run_id>/`; `run_id` — последняя строка вывода scan.
 Если scan ответил `SCAN_RUN_IN_PROGRESS`, у этого запроса уже есть незавершённый прогон: продолжи его по `fix`
-(`status`), а `--new-run` — только если человек просит ещё один прогон рядом. Не создавай clone,
+(`status`), а `--new-run` — только если человек просит ещё один прогон рядом или когда `fix`/`next_run` сами называют
+команду с `--new-run` (прогон не закрыть, следующий заход): её выполняй как есть. Не создавай clone,
 worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
 
 ## 2. Выбери exact module и заморозь baseline

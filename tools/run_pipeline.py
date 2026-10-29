@@ -870,7 +870,8 @@ def _scan_request(args: Any) -> dict[str, Any]:
 
 
 def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
-    """The same request: the module (resolved by .skillsrc when not given), the --docs paths and the requested profile."""
+    """The same request: the module (resolved by .skillsrc when not given), the --docs paths, the requested profile, the
+    --reference and (FaT-CK) the --cases CSV; a request without --cases (and every journal before FaT-CK) has ``None``."""
     module = request.get("module")
     if module is None:
         try:
@@ -880,14 +881,16 @@ def _request_key(project: Path, request: Mapping[str, Any]) -> tuple[Any, ...]:
             module = modules[0].get("id") if len(modules) == 1 else None
         except Exception:  # an unreadable .skillsrc: the scan itself will say so
             module = None
-    docs = []
-    for raw in request.get("docs") or []:
+    def relative(raw: Any) -> str:
         path = Path(str(raw))
         try:
-            docs.append((path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix())
+            return (path if path.is_absolute() else project / path).resolve().relative_to(project).as_posix()
         except (OSError, ValueError):
-            docs.append(str(raw).replace("\\", "/"))
-    return module, tuple(sorted(docs)), request.get("profile"), request.get("reference")
+            return str(raw).replace("\\", "/")
+
+    docs = [relative(raw) for raw in request.get("docs") or []]
+    cases = relative(request["cases"]) if request.get("cases") else None
+    return module, tuple(sorted(docs)), request.get("profile"), request.get("reference"), cases
 
 
 def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None, list[str]]:
@@ -978,6 +981,8 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
         parts.append(f"--disposition-policy {request['disposition_policy']}")
     if request.get("reference"):
         parts.append(f'--reference "{request["reference"]}"')
+    if request.get("cases"):  # FaT-CK: the import of the same CSV, never a run of cases from code
+        parts.append(f'--cases "{request["cases"]}"')
     return " ".join([*parts, *extra])
 
 
