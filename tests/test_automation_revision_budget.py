@@ -163,6 +163,14 @@ def test_accepts_initial_and_one_complete_controller_bound_correction(tmp_path: 
     first_evidence = host_evidence("session-1")
     run_root, attempt_id, first_boundary = durable_boundary(tmp_path, first, "session-1", first_evidence, policy_profile="local-pilot-v1", document=document)
     first_review = review(document, first, first_boundary, "AUTO_FIX_APPLIED", session_id="session-1")
+    # FaT-RQ: r2 is the next stage only after the r1 review is in the journal
+    from tools.pilot_state import append_event, publish_model_request, publish_model_stage_artifact
+
+    append_event(run_root, "REVIEW_REQUESTED", actor="controller", attempt_id=attempt_id, stage_instance_id="autotest-reviewer:r1",
+                 artifact_digest=automation_sha256(first))
+    publish_model_request(run_root, attempt_id, "autotest-reviewer:r1", model_id="model-review", invocation_id="reviewer-1",
+                          input_digests=[first_boundary["automation_digest"], first_boundary["digest"]])
+    publish_model_stage_artifact(run_root, attempt_id, "autotest-reviewer:r1", first_review)
     second_evidence = host_evidence("session-2")
     second = automation(document, 2, predecessor=automation_sha256(first), correction_review=autotest_review_sha256(first_review), effective_bundle_receipt_digest=bundle_digest)
     _run_root, _attempt_id, second_boundary = durable_boundary(tmp_path, second, "session-2", second_evidence, run_root=run_root, attempt_id=attempt_id, reviewer="reviewer-2", document=document)

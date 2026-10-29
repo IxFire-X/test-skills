@@ -1901,6 +1901,7 @@ def publish_model_request(
         raise _inputs_mismatch(stage_instance_id, inputs, expected)
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
+        _require_next_automation_stage(run_root, attempt_id, stage_instance_id)  # FaT-RQ: publish time only
         if stage == "tc-to-autotest":
             binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
             expected_inputs = [binding["document_digest"], binding["effective_bundle_receipt_digest"]]
@@ -4289,6 +4290,25 @@ class ModelInputsMismatch(ValueError):
     """FaT-DG: a model request whose input digests are not the ones the journal fixes."""
 
     code = "MODEL_INPUTS_MISMATCH"
+
+
+class ModelRequestOutOfOrder(ValueError):
+    """FaT-RQ: a request of the automation chain that is not its next stage (an orphan r2 before r1)."""
+
+    code = "MODEL_REQUEST_OUT_OF_ORDER"
+
+
+def _require_next_automation_stage(run_root: Path, attempt_id: str, stage_instance_id: str) -> None:
+    """The chain's next stage is what finish reads (automation_next); a final chain is left to the existing checks."""
+    from tools.finalize_attempt import automation_next
+
+    try:
+        outcome, expected = automation_next(run_root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return
+    if outcome == "PENDING" and expected != stage_instance_id:
+        raise ModelRequestOutOfOrder(f"MODEL_REQUEST_OUT_OF_ORDER: {stage_instance_id} — следующая стадия цепочки автоматизации {expected}; "
+                                     f"fix: model-request --stage {expected}, ничего не записано")
 
 
 class ModelReuseRefused(ValueError):
