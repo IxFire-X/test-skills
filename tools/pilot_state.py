@@ -2148,6 +2148,13 @@ def publish_model_stage_artifact(
             + "; ".join(f"{pointer}: дан {given}, ожидается {expected} — {source}" for pointer, given, expected, source in mismatches)
             + "; fix: это ошибка ответа — исправь поля и отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано"
         )
+    # FaT-SN: source requirements follow their documents; only a new answer is checked, journals already written read as before
+    misplaced = _requirement_order_rows(stage_instance_id, value)
+    if misplaced:
+        raise ValueError(
+            f"SOURCE_REQUIREMENT_ORDER: {stage_instance_id}: {misplaced}; fix: display_order и номера SREQ — требования одного "
+            "документа подряд, внутри документа по номеру строки как числу (…md:4 раньше …md:12); отдай исправленный ответ единственным повтором стадии (--transport-attempts 2), "
+            "ничего не записано")
     _validate_model_stage_artifact(stage_instance_id, value)
     if stage_instance_id.startswith("tc-generator:"):
         from tools.batch_assembly import BatchAssemblyError, require_batch_coverage, validate_fragment
@@ -4606,6 +4613,45 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
     order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
     return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + f"; fix: повтори model-request с {order}")
+
+
+_PROVENANCE_LINE = re.compile(r"^(?P<path>[^\s:]+):(?P<line>\d+)(?!\d)")
+
+
+def _requirement_order_rows(stage_instance_id: str, value: Mapping[str, Any]) -> str | None:
+    """FaT-SN: the first source requirement out of document order, or None.  In display_order the requirements of one
+    document come together (the documents in the answer's own order — of --docs or the task first, never forced by path)
+    and its lines grow as numbers (`…md:4` before `…md:12`), by the first provenance `path:line` of each; the SREQ numbers
+    follow display_order.  A row whose first reference names no line leaves the whole order to the model."""
+    if not stage_instance_id.startswith("context-marker"):
+        return None
+    artifacts = value.get("artifacts") if isinstance(value, Mapping) else None
+    documentation = artifacts.get("analytics_documentation") if isinstance(artifacts, Mapping) else None
+    rows = documentation.get("requirements") if isinstance(documentation, Mapping) else None
+    if not isinstance(rows, list) or not rows:
+        return None
+    keyed = []
+    for row in rows:
+        provenance = row.get("provenance") if isinstance(row, Mapping) else None
+        found = _PROVENANCE_LINE.match(provenance[0]) if isinstance(provenance, list) and provenance and isinstance(provenance[0], str) else None
+        if found is None or not isinstance(row.get("display_order"), int):
+            return None  # without a line reference the order is the model's
+        keyed.append(((found.group("path"), int(found.group("line"))), row))
+    by_display = sorted(keyed, key=lambda item: item[1]["display_order"])
+    finished: set[str] = set()
+    for (previous, _), ((path, line), row) in zip(by_display, by_display[1:]):
+        name = f"{row.get('source_requirement_id')} ({path}:{line}, display_order {row['display_order']})"
+        if path != previous[0]:
+            finished.add(previous[0])
+            if path in finished:
+                return f"{name}: требования документа {path} идут не подряд — после строк {previous[0]}"
+        elif line < previous[1]:
+            return f"{name} стоит после строки {previous[0]}:{previous[1]} того же документа"
+    # the number at the end of each ID as a number (SREQ-9 before SREQ-10); an ID without one leaves the numbering alone
+    numbers = [re.search(r"(\d+)$", str(row.get("source_requirement_id") or "")) for _key, row in by_display]
+    if all(numbers) and [int(found.group(1)) for found in numbers] != sorted(int(found.group(1)) for found in numbers):
+        return "номера SREQ идут не в порядке display_order"
+    return None
 
 
 def _response_digest_rows(
