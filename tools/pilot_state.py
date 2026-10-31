@@ -1693,6 +1693,17 @@ def _context_marker_parts(state: Mapping[str, Any], attempt_id: str) -> tuple[tu
     return (None if requirements is None else (requirements, responses.get("context-marker:requirements"))), batches
 
 
+def _published_context_receipts(state: Mapping[str, Any], attempt_id: str, stage_instance_id: str) -> list[str]:
+    """Every context receipt the attempt published, once each, in publication order: batch-NNN is the N-th of them.
+
+    FaT-10c: a recorded request binds the receipts published before it; reviewer evidence published later is not its input."""
+    cutoff = next((event["seq"] for event in state["events"] if event.get("attempt_id") == attempt_id
+                   and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage_instance_id), None)
+    return list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
+                              if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"
+                              and (cutoff is None or event["seq"] < cutoff)))
+
+
 def _context_marker_receipt_digests(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str, inputs: Sequence[str],
 ) -> list[str]:
@@ -1704,13 +1715,7 @@ def _context_marker_receipt_digests(
     receipts only, as before.
     """
     requirements, batches = _context_marker_parts(state, attempt_id)
-    # Every context receipt the attempt published, once each, in publication order: batch-NNN is the N-th of them.
-    # FaT-10c: a recorded request binds the receipts published before it; reviewer evidence published later is not its input.
-    cutoff = next((event["seq"] for event in state["events"] if event.get("attempt_id") == attempt_id
-                   and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage_instance_id), None)
-    published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
-                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"
-                                   and (cutoff is None or event["seq"] < cutoff)))
+    published = _published_context_receipts(state, attempt_id, stage_instance_id)
     if stage_instance_id == "context-marker:requirements":
         if len(inputs) != 2:
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")
@@ -1739,7 +1744,9 @@ def _context_marker_receipt_digests(
 
 def _context_marker_snapshots(
     project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], stage_instance_id: str, inputs: Sequence[str],
+    receipts: Sequence[str] | None = None,
 ) -> list[dict[str, str]]:
+    """The OpenSpec sources of the receipts the request binds (or of ``receipts``), each checked against its bytes."""
     from tools.build_context import _OPENSPEC_PATH
     from tools.project_inventory import read_execution_baseline
 
@@ -1748,7 +1755,9 @@ def _context_marker_snapshots(
     if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < minimum:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
     snapshots: dict[str, dict[str, str]] = {}
-    for digest in _context_marker_receipt_digests(project, root, state, str(attempt["attempt_id"]), stage_instance_id, inputs):
+    if receipts is None:
+        receipts = _context_marker_receipt_digests(project, root, state, str(attempt["attempt_id"]), stage_instance_id, inputs)
+    for digest in receipts:
         receipt = read_context_selection(root, str(attempt["attempt_id"]), digest)
         if receipt["inventory_digest"] != baseline["inventory_digest"]:
             raise ValueError("context-marker receipt must bind the attempt inventory")
@@ -1756,7 +1765,7 @@ def _context_marker_snapshots(
             path = item["project_path"].replace("\\", "/")
             if not _OPENSPEC_PATH.fullmatch(path) and not path.startswith("openspec/changes/archive/"):
                 continue
-            raw = read_confined_bytes(project, project, project / path)
+            raw = read_confined_bytes(project, project / "openspec", project / path)  # FaT-AU5: the project itself is no confined root
             if raw is None or "sha256:" + hashlib.sha256(raw).hexdigest() != item["content_digest"]:
                 raise ValueError("context-marker OpenSpec source bytes drifted")
             try:
@@ -1783,7 +1792,7 @@ def _validate_context_marker_sources(
             raise ValueError("CONTEXT_MARKER_REQUIREMENTS_CHANGED: a part may add code observations only, not change the requirements")
         return
     if stage_instance_id != "context-marker:baseline":
-        return  # the requirements step: OpenSpec is reconciled on the merged marker, against every receipt
+        return  # the requirements step: OpenSpec is reconciled on its write (_reconcile_requirements_openspec) and on the merged marker
     if batches:
         # The merged marker is a pure function of the recorded answers: it is recomputed on every write and read.
         answer = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:requirements", str(requirements[1]))["artifact"]
@@ -1795,6 +1804,24 @@ def _validate_context_marker_sources(
         diagnostics = openspec_diagnostics(dict(value), snapshots)
         if diagnostics:
             raise ValueError("context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
+
+
+def _reconcile_requirements_openspec(
+    project: Path, root: Path, state: Mapping[str, Any], attempt: Mapping[str, Any], request: Mapping[str, Any], value: Mapping[str, Any],
+) -> None:
+    """FaT-AU5 (audit D4): the merged marker keeps the requirements of this answer and adds the part warnings, so its OpenSpec
+    reconciliation is decided here, against every receipt of the attempt — before the write, while the stage keeps its retry.
+    Write time only: a journal written before reads as before; the merge keeps its own check."""
+    from tools.build_context import openspec_diagnostics
+
+    stage_instance_id = str(request["stage_instance_id"])
+    receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
+    snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
+    diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
+    if diagnostics:
+        raise ValueError(f"context-marker OpenSpec reconciliation failed: {stage_instance_id}: " + json.dumps(diagnostics, ensure_ascii=False)
+                         + "; fix: требования ответа — по OpenSpec из квитанций контекста; отдай исправленный ответ единственным "
+                         "повтором стадии (--transport-attempts 2), ничего не записано")
 
 
 def _validate_model_request_predecessors(
@@ -1921,18 +1948,10 @@ def publish_model_request(
     _validate_model_request_predecessors(project, root, state, attempt, stage_instance_id, invocation_id, inputs)
     if stage in {"tc-to-autotest", "autotest-reviewer"}:
         _require_next_automation_stage(run_root, attempt_id, stage_instance_id)  # FaT-RQ: publish time only
-        if stage == "tc-to-autotest":
-            binding = _read_effective_canonical_with_state(project, root, state, attempt_id)
-            expected_inputs = [binding["document_digest"], binding["effective_bundle_receipt_digest"]]
-        else:
-            binding = _read_attempt_receipt_with_state(
-                project, root, state, attempt_id,
-                f"automation-review-boundary-{stage_instance_id.split(':', 1)[1]}",
-                "ARTIFACT_READ_BACK",
-            )["record"]
-            expected_inputs = [binding["automation_digest"], binding["digest"]]
-        if inputs != expected_inputs:
-            raise ValueError(f"{stage} input digests must match its exact ordered artifact bindings")
+        if expected is None:  # FaT-AU5 (U1): FaT-DG named a wrong input above; a predecessor it could not read is refused by that read
+            pairs = _automation_inputs(project, root, state, attempt_id, stage_instance_id)
+            if inputs != [digest for digest, _source in pairs]:
+                raise _inputs_mismatch(stage_instance_id, inputs, pairs)
     run_id = read_run(root)["manifest"]["run_id"]
     role, role_policy = declaration
     extra: dict[str, Any] = {}
@@ -2205,6 +2224,8 @@ def publish_model_stage_artifact(
                                      "повтором стадии (--transport-attempts 2), ничего не записано") from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
+    if stage_instance_id == "context-marker:requirements":
+        _reconcile_requirements_openspec(project, root, state, attempt, request, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
@@ -4754,17 +4775,23 @@ def _expected_model_inputs(
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
             return [(str(boundary["canonical_branch_digest"]), "boundary.canonical_branch_digest (read-receipt reviewer-session-boundary)"),
                     (str(boundary["package_digest"]), "boundary.package_digest (read-receipt reviewer-session-boundary)")]
-        if stage == "tc-to-autotest":
-            effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
-            return [(str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)"),
-                    (str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")]
-        if stage == "autotest-reviewer":
-            boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
-            return [(str(boundary["automation_digest"]), f"boundary.automation_digest (read-receipt automation-review-boundary-{instance})"),
-                    (str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")]
+        if stage in {"tc-to-autotest", "autotest-reviewer"}:
+            return _automation_inputs(project, root, state, attempt_id, stage_instance_id)
     except (ValueError, OSError, KeyError, TypeError):
         return None
     return None
+
+
+def _automation_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str) -> list[tuple[str, str]]:
+    """The two inputs of tc-to-autotest / autotest-reviewer read from the journal; an unreadable predecessor raises its read error."""
+    stage, _, instance = stage_instance_id.partition(":")
+    if stage == "tc-to-autotest":
+        effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
+        return [(str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)"),
+                (str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")]
+    boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
+    return [(str(boundary["automation_digest"]), f"boundary.automation_digest (read-receipt automation-review-boundary-{instance})"),
+            (str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")]
 
 
 def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Sequence[tuple[str, str]]) -> ModelInputsMismatch:
