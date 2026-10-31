@@ -222,7 +222,7 @@ AUTO_FIX_APPLIED, без дрейфа) размечал ровно те же в�
 Один run получает одну project/module identity и последовательную append-only lineage
 child attempts. Одновременно разрешён максимум один nonterminal attempt.
 
-`WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages можно
+Interruption между model stages можно
 продолжить из новой CLI session после snapshot/config validation. Изменение файлов
 проекта после scan — дрейф (раздел 3): вернуть файлы или начать новый прогон. Terminal attempt не меняется.
 

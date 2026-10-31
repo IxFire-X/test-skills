@@ -148,10 +148,8 @@ flowchart LR
 | Внутри задания корпоративного CI | Те же возможности внутри среды CI; отдельный корпоративный адаптер сам по себе не обязателен |
 | Программа отправляет тесты отдельному сервису компании | Подключение к API этого сервиса: отправить задание и получить результат |
 
-Файл `company_runner.py` оставлен для последнего варианта. **Сейчас это
-заготовка, а не готовое подключение к корпоративному сервису.** По умолчанию он
-сообщает, что такой исполнитель недоступен. Для обычного локального запуска
-пайплайн его не использует.
+**Для последнего варианта адаптера в пакете нет.** Обычному локальному запуску
+он не нужен.
 
 ## Что уже проверено, а что требует отдельной проверки
 
@@ -573,22 +571,6 @@ flowchart TD
 общими помощниками для нескольких шагов.
 
 
-### `tools/assertion_dsl.py`
-
-**Общий смысл проверок.**
-
-Описывает, как сравнить ожидаемое значение с полученным: например, проверить равенство, наличие данных или соответствие заданному образцу. Различает ситуации «значение не получено» и «значение получено, но оно пустое». Это нужно, чтобы одинаковая проверка не меняла смысл при переходе между языками и тестовыми инструментами.
-
-[Открыть файл](../tools/assertion_dsl.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `ValueState`, `EvaluationContext`, `AssertionResult`, `portable_fullmatch`, `evaluate_assertion`.
-
-</details>
-
-
 ### `tools/automation_validation.py`
 
 **Проверка кода перед запуском.**
@@ -681,22 +663,6 @@ flowchart TD
 <summary>Технические подробности</summary>
 
 **Основные определения в коде:** `main`.
-
-</details>
-
-
-### `tools/company_runner.py`
-
-**Заготовка подключения к сервису компании.**
-
-Нужен для случая, когда тесты требуется отправить отдельному корпоративному сервису и получить от него результат. Здесь уже описаны запрос, ответ и проверки того, что полученный отчёт относится к нужному заданию. Само подключение ещё не реализовано: по умолчанию файл сообщает, что сервис недоступен. Локальный запуск pytest, Maven и Gradle от него не зависит.
-
-[Открыть файл](../tools/company_runner.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `CompanyRunnerError`, `CompanyExecutionError`, `CompanyRunRequest`, `CompanyRunResult`, `validate_company_result`, `execution_report_digest`, `validate_company_execution_receipt`, `CompanyRunner`, `UnavailableCompanyRunner`, `resolve_company_runner`, `ScriptedCompanyRunner`, `request_from_artifacts`, `result_as_dict`, `matching_result`, `execute_company_details`, `execute_company`.
 
 </details>
 
@@ -797,22 +763,6 @@ flowchart TD
 </details>
 
 
-### `tools/execution_preflight.py`
-
-**Проверка необходимых данных до действия.**
-
-Проверяет, доступны ли значения и способы обращения к системе, которые требуются для описанных проверок. Например, можно ли получить адрес сервиса и подходят ли переданные входные значения. Сам сетевых запросов и тестовых процессов не запускает. Для запуска сгенерированного кода также нужны отдельное ревью и проверки среды проекта.
-
-[Открыть файл](../tools/execution_preflight.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `ProviderResolver`, `AdapterRegistry`, `PreflightResult`, `EnvironmentOnlyProviderResolver`, `RejectingAdapterRegistry`, `ExactAdapterRegistry`, `is_reviewed_adapter_registry`, `reviewed_adapter_registry`, `preflight_execution`.
-
-</details>
-
-
 ### `tools/export_test_cases_xml.py`
 
 **Выгрузка кейсов в XML для Zephyr.**
@@ -857,22 +807,6 @@ flowchart TD
 <summary>Технические подробности</summary>
 
 **Основные определения в коде:** `GeneratedDeltaError`, `materialize_delta`, `inspect_delta`, `inspect_attempt_delta`, `execution_readiness`, `resolve_disposition_policy`, `apply_dispositions`.
-
-</details>
-
-
-### `tools/http_binding_v1.py`
-
-**Единые правила HTTP-проверок.**
-
-Описывает, как из данных проверки составить HTTP-запрос и как разобрать полученный ответ. Например, какие значения отправить и где искать нужное значение в ответе. Способ передачи запроса предоставляет вызывающий код: своей сетевой библиотеки этот файл не выбирает. Это правила проверки HTTP, а не подключение к корпоративному исполнителю.
-
-[Открыть файл](../tools/http_binding_v1.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `AbstractRequest`, `RawResponse`, `ExecutionError`, `Transport`, `build_request`, `execute_once`, `observe_response`, `validate_preflight_base_url`, `validate_preflight_input_value`, `validate_preflight_typed_value`.
 
 </details>
 
@@ -1076,22 +1010,6 @@ Markdown сверяется при публикации, но не входит 
 он возвращает `NOT_RUNNABLE` с `RUNNER_LEGACY_DISABLED` и не может запустить код.
 Рабочая ветка — `run_tests_v5` с разрешением и доказательствами текущего протокола.
 Это не второй работающий executor.
-
-</details>
-
-
-### `tools/scan_project.py`
-
-**Сведения о выбранном участке кода.**
-
-Определяет технологии проекта по файлам сборки и собирает выбранный исходник вместе с нужными соседними файлами. Например, это помогает увидеть не только обработчик запроса, но и связанные с ним части реализации. Возвращает технический контекст для дальнейшей работы; настройки .skillsrc не меняет и требований из кода не придумывает.
-
-[Открыть файл](../tools/scan_project.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `build_parser`, `detect_stack`, `resolve_target`, `extract_companions`, `render_source_block`, `render_analytics_block`, `build_report`, `main`.
 
 </details>
 
@@ -1343,22 +1261,6 @@ Markdown сверяется при публикации, но не входит 
 <summary>Технические подробности</summary>
 
 **Обязательные поля верхнего уровня:** `schema_version`, `content_locale`, `document_id`, `revision`, `parent_sha256`, `metadata`, `operation_capabilities`, `source_requirements`, `requirements`, `source_to_canonical_mappings`, `test_cases`. Ограничения вложенных объектов и веток заданы в самой схеме.
-
-</details>
-
-
-### `schemas/company-execution-receipt.schema.json`
-
-**Ответ корпоративного исполнителя.**
-
-Описывает запись о внешнем запуске: какое задание отправили, какой код и ревью использовали, что вернул сервис и была ли ошибка. Связана с заготовкой company_runner.py. Обычному локальному запуску такая запись не нужна; готового подключения к сервису этот файл не создаёт.
-
-[Открыть файл](../schemas/company-execution-receipt.schema.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Обязательные поля верхнего уровня:** `version`, `status`, `input_snapshot_digest`, `autotest_commit_digest`, `source_digest`, `automation_digest`, `review_digest`, `runner_profile`, `request_digest`, `execution_report_digest`, `result`, `error`. Ограничения вложенных объектов и веток заданы в самой схеме.
 
 </details>
 
@@ -1807,22 +1709,6 @@ Markdown сверяется при публикации, но не входит 
 <summary>Технические подробности</summary>
 
 **Обязательные поля верхнего уровня:** `schema_version`, `stage`, `source`, `automation_sha256`, `autotest_review_sha256`, `verdict`, `target`, `environment`, `execution`, `stats`, `failed_methods`, `root_cause`, `raw_output_excerpt`, `ran_at`, `exit_code`, `run_id`, `execution_evidence`, `process_evidence`, `evidence_authoritative`, `diagnostics`. Ограничения вложенных объектов и веток заданы в самой схеме.
-
-</details>
-
-
-### `schemas/scan-project-output.schema.json`
-
-**Отчёт о выбранном участке проекта.**
-
-Описывает найденные технологии и извлечённые файлы, результат сканирования и подготовленные сведения для следующих шагов. Позволяет явно показать нехватку информации вместо выдуманного описания проекта.
-
-[Открыть файл](../schemas/scan-project-output.schema.json)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Обязательные поля верхнего уровня:** `status`, `stack`, `files_extracted`, `skillsrc_updated`, `scanned_at`, `artifact`. Ограничения вложенных объектов и веток заданы в самой схеме.
 
 </details>
 
@@ -2495,14 +2381,13 @@ Markdown сверяется при публикации, но не входит 
 
 Основные схемы в начале документа показывают последовательность работы.
 Ниже находится более подробная карта для тех, кто разбирается в исходниках:
-в ней перечислены все **40 Python-файлов** из tools/ и evals/ и **123 связи**.
+в ней перечислены все **35 Python-файлов** из tools/ и evals/ и **111 связей**.
 
 Стрелка от A к B означает, что в программе A есть импорт кода из B. Это может
 быть общий помощник, проверка данных или действие, вызываемое только в особой
 ситуации. Стрелка не означает, что B обязательно выполняется сразу после A.
 
-Например, company_runner.py использует несколько общих проверок, но другие
-программы этой карты его не импортируют. А ci_gate.py запускает проверочные
+Например, ci_gate.py запускает проверочные
 команды отдельными процессами — таких связей на карте импортов нет. Порядок
 этих действий показан в начале справочника.
 
@@ -2513,25 +2398,21 @@ Markdown сверяется при публикации, но не входит 
 flowchart LR
     m0["evals/__init__.py"]
     m1["evals/release_eval.py"]
-    m2["tools/assertion_dsl.py"]
     m3["tools/automation_validation.py"]
     m4["tools/batch_assembly.py"]
     m5["tools/build_context.py"]
     m6["tools/build_trace_document.py"]
     m7["tools/canonical_document.py"]
     m8["tools/ci_gate.py"]
-    m9["tools/company_runner.py"]
     m10["tools/compatibility_contract.py"]
     m11["tools/confined_output.py"]
     m12["tools/contract_check.py"]
     m13["tools/discover_project.py"]
     m14["tools/doctor.py"]
     m15["tools/execution_adapters.py"]
-    m16["tools/execution_preflight.py"]
     m17["tools/export_test_cases_xml.py"]
     m18["tools/finalize_attempt.py"]
     m19["tools/generated_delta.py"]
-    m20["tools/http_binding_v1.py"]
     m21["tools/human_scenario.py"]
     m22["tools/init_skillsrc.py"]
     m23["tools/json_cli.py"]
@@ -2544,7 +2425,6 @@ flowchart LR
     m30["tools/revision_selection.py"]
     m31["tools/run_pipeline.py"]
     m32["tools/run_tests.py"]
-    m33["tools/scan_project.py"]
     m34["tools/schema_validation.py"]
     m35["tools/skillsrc_manifest.py"]
     m36["tools/stack_catalog.py"]
@@ -2570,9 +2450,6 @@ flowchart LR
     m6 --> m32
     m6 --> m34
     m7 --> m34
-    m9 --> m3
-    m9 --> m32
-    m9 --> m34
     m10 --> m3
     m10 --> m25
     m10 --> m26
@@ -2589,10 +2466,6 @@ flowchart LR
     m14 --> m23
     m14 --> m28
     m15 --> m26
-    m16 --> m2
-    m16 --> m3
-    m16 --> m7
-    m16 --> m20
     m17 --> m7
     m17 --> m23
     m17 --> m34
@@ -2604,7 +2477,6 @@ flowchart LR
     m19 --> m11
     m19 --> m25
     m19 --> m26
-    m20 --> m2
     m21 --> m23
     m21 --> m34
     m22 --> m11
@@ -2664,10 +2536,6 @@ flowchart LR
     m32 --> m26
     m32 --> m34
     m32 --> m35
-    m33 --> m11
-    m33 --> m13
-    m33 --> m23
-    m33 --> m36
     m37 --> m7
     m38 --> m6
     m38 --> m23
@@ -2688,25 +2556,21 @@ flowchart LR
 |---|---|
 | [evals/__init__.py](../evals/__init__.py) | Нет |
 | [evals/release_eval.py](../evals/release_eval.py) | [compatibility_contract](../tools/compatibility_contract.py), [confined_output](../tools/confined_output.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [release_manifest](../tools/release_manifest.py), [schema_validation](../tools/schema_validation.py) |
-| [tools/assertion_dsl.py](../tools/assertion_dsl.py) | Нет |
 | [tools/automation_validation.py](../tools/automation_validation.py) | [canonical_document](../tools/canonical_document.py), [pilot_state](../tools/pilot_state.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/batch_assembly.py](../tools/batch_assembly.py) | [canonical_document](../tools/canonical_document.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/build_context.py](../tools/build_context.py) | [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/build_trace_document.py](../tools/build_trace_document.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [json_cli](../tools/json_cli.py), [run_tests](../tools/run_tests.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/canonical_document.py](../tools/canonical_document.py) | [schema_validation](../tools/schema_validation.py) |
 | [tools/ci_gate.py](../tools/ci_gate.py) | Нет |
-| [tools/company_runner.py](../tools/company_runner.py) | [automation_validation](../tools/automation_validation.py), [run_tests](../tools/run_tests.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/compatibility_contract.py](../tools/compatibility_contract.py) | [automation_validation](../tools/automation_validation.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [release_manifest](../tools/release_manifest.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/confined_output.py](../tools/confined_output.py) | Нет |
 | [tools/contract_check.py](../tools/contract_check.py) | [json_cli](../tools/json_cli.py), [pilot_state](../tools/pilot_state.py), [release_manifest](../tools/release_manifest.py), [render_contract_docs](../tools/render_contract_docs.py) |
 | [tools/discover_project.py](../tools/discover_project.py) | [confined_output](../tools/confined_output.py), [schema_validation](../tools/schema_validation.py), [stack_catalog](../tools/stack_catalog.py) |
 | [tools/doctor.py](../tools/doctor.py) | [contract_check](../tools/contract_check.py), [json_cli](../tools/json_cli.py), [release_manifest](../tools/release_manifest.py) |
 | [tools/execution_adapters.py](../tools/execution_adapters.py) | [project_inventory](../tools/project_inventory.py) |
-| [tools/execution_preflight.py](../tools/execution_preflight.py) | [assertion_dsl](../tools/assertion_dsl.py), [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [http_binding_v1](../tools/http_binding_v1.py) |
 | [tools/export_test_cases_xml.py](../tools/export_test_cases_xml.py) | [canonical_document](../tools/canonical_document.py), [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py), [test_case_projections](../tools/test_case_projections.py) |
 | [tools/finalize_attempt.py](../tools/finalize_attempt.py) | [generated_delta](../tools/generated_delta.py), [pilot_state](../tools/pilot_state.py) |
 | [tools/generated_delta.py](../tools/generated_delta.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [confined_output](../tools/confined_output.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py) |
-| [tools/http_binding_v1.py](../tools/http_binding_v1.py) | [assertion_dsl](../tools/assertion_dsl.py) |
 | [tools/human_scenario.py](../tools/human_scenario.py) | [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/init_skillsrc.py](../tools/init_skillsrc.py) | [confined_output](../tools/confined_output.py), [discover_project](../tools/discover_project.py), [schema_validation](../tools/schema_validation.py), [skillsrc_manifest](../tools/skillsrc_manifest.py), [stack_catalog](../tools/stack_catalog.py) |
 | [tools/json_cli.py](../tools/json_cli.py) | Нет |
@@ -2719,7 +2583,6 @@ flowchart LR
 | [tools/revision_selection.py](../tools/revision_selection.py) | [canonical_document](../tools/canonical_document.py) |
 | [tools/run_pipeline.py](../tools/run_pipeline.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [execution_adapters](../tools/execution_adapters.py), [finalize_attempt](../tools/finalize_attempt.py), [init_skillsrc](../tools/init_skillsrc.py), [json_cli](../tools/json_cli.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [run_tests](../tools/run_tests.py), [schema_validation](../tools/schema_validation.py), [skillsrc_manifest](../tools/skillsrc_manifest.py) |
 | [tools/run_tests.py](../tools/run_tests.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [execution_adapters](../tools/execution_adapters.py), [generated_delta](../tools/generated_delta.py), [json_cli](../tools/json_cli.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py), [schema_validation](../tools/schema_validation.py), [skillsrc_manifest](../tools/skillsrc_manifest.py) |
-| [tools/scan_project.py](../tools/scan_project.py) | [confined_output](../tools/confined_output.py), [discover_project](../tools/discover_project.py), [json_cli](../tools/json_cli.py), [stack_catalog](../tools/stack_catalog.py) |
 | [tools/schema_validation.py](../tools/schema_validation.py) | Нет |
 | [tools/skillsrc_manifest.py](../tools/skillsrc_manifest.py) | Нет |
 | [tools/stack_catalog.py](../tools/stack_catalog.py) | Нет |
@@ -2775,7 +2638,7 @@ flowchart LR
 | Команду запуска и разбор отчёта | execution_adapters.py и run_tests.py |
 | Продолжение после обрыва | pilot_state.py и run_pipeline.py |
 | Окончательный статус работы | finalize_attempt.py, pilot_state.py и общие правила |
-| Подключение отдельного сервиса компании | Сначала узнать API и правила этого сервиса, затем оценить company_runner.py |
+| Подключение отдельного сервиса компании | Сначала узнать API и правила этого сервиса; готового адаптера в пакете нет |
 | Проверку другой модели или среды | compatibility_contract.py и evals/release_eval.py |
 
 У каждого из этих участков уже есть проверки в tests/. Их назначение описано

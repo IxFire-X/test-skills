@@ -45,7 +45,6 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "tools/build_trace_document.py",
         "tools/run_tests.py",
         "tools/execution_adapters.py",
-        "tools/scan_project.py",
         "tools/skillsrc_manifest.py",
         "tools/discover_project.py",
         "tools/init_skillsrc.py",

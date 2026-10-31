@@ -448,8 +448,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 `next_step` (стадия, действие, раздел этого SKILL; при `pending_request_path` — ответ на этот
 запрос). Ничего уже подтверждённого журналом не повторяй.
 
-`WAITING_FOR_INPUT`, `WAITING_FOR_MODEL` и interruption между model stages остаются
-nonterminal. Продолжай их в новой CLI session только после snapshot/config validation.
+Interruption между model stages оставляет попытку nonterminal. Продолжай её в новой CLI session только после snapshot/config validation.
 После scan файлы проекта и `.skillsrc` не меняются до закрытия попытки. Если `status` показал `drift`,
 передай человеку пути из `drift.changed` и `drift.fix` как есть: вернуть файлы или начать новый прогон
 командой `drift.command`; сам файлы не правь и прогон не начинай. После `finish` с `next_run`
