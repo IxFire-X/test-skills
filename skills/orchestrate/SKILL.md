@@ -273,7 +273,8 @@ Run остаётся связан с исходной project/module identity.
    context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.
 5. Немедленно опубликуй revision 1 как `UNREVIEWED` с V4 derived bundle и прочитай exact
    bytes обратно (`python -m tools.orchestrate_test_case_revision publish --candidate <f> --output-dir <dir>
-   --run-root <run> --attempt-id <id>`); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
+   --run-root <run> --attempt-id <id> --out <run>/tmp/candidate-receipt.json`); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
+   `--out` — квитанция кандидата для `--candidate-receipt`; потерял её (после `/clear`) — повтори тот же publish: тот же кандидат даёт ту же квитанцию.
    HTML/CSV никогда не становятся downstream model input.
 
 Human-facing canonical поля обязательны на русском; technical tokens сохраняются

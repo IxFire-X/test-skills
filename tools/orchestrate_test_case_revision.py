@@ -634,16 +634,24 @@ def publish_unreviewed_candidate(
     verifier=verify_bundle,
 ) -> Receipt:
     value = _plain(candidate); require_valid_canonical_document(value)
+    from tools.pilot_state import append_event, derive_state
+
+    # FaT-AU2: the same candidate again (after a lost stdout) gives the same receipt and writes no event; another one is
+    # refused as before — now before any bundle file is written
+    digest = document_sha256(value)
+    recorded = [str(event.get("artifact_digest")) for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
+                and event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
+    if recorded and recorded[0] != digest:
+        raise ValueError(f"assembled candidate already published: {recorded[0]}, not {digest}")
     receipt = publisher(value, output_dir, csv_profile)
     if _receipt_rows(receipt, value, output_dir, csv_profile) or verifier(value, output_dir, csv_profile) != receipt:
         raise OrchestrationError("ORCHESTRATION_RECEIPT", [_diag("/receipt", "ORCHESTRATION_VERIFY_RECEIPT")])
-    from tools.pilot_state import append_event
-
-    append_event(
-        run_root, "CANDIDATE_PUBLISHED", actor="controller",
-        attempt_id=attempt_id, stage_instance_id="assembly",
-        artifact_digest=document_sha256(value),
-    )
+    if not recorded:
+        append_event(
+            run_root, "CANDIDATE_PUBLISHED", actor="controller",
+            attempt_id=attempt_id, stage_instance_id="assembly",
+            artifact_digest=digest,
+        )
     return _receipt_copy(receipt)
 
 
@@ -895,6 +903,7 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--run-root", required=True, type=Path)
     publish.add_argument("--attempt-id", required=True)
     publish.add_argument("--csv-profile", default=_PROFILE)
+    publish.add_argument("--out", type=Path, default=None, help="FaT-AU2: write the candidate receipt (--candidate-receipt) to <run>/tmp/<file>")
     evidence = commands.add_parser("publish-evidence", help="Persist and read back one reviewer C-lite evidence receipt.")
     evidence.add_argument("--context-receipt", required=True, type=Path)
     evidence.add_argument("--run-root", required=True, type=Path)
@@ -938,6 +947,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         candidate = load_json_strict(args.candidate)
         if args.command == "publish":
+            from tools.api import _out_target, _write  # FaT-AU2: the one --out policy and writer of the package
+
+            out = _out_target(str(args.out)) if args.out is not None else None  # refused before anything is published
+            from tools.pilot_state import derive_state
+
+            again = any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == args.attempt_id
+                        and event.get("stage_instance_id") == "assembly" for event in derive_state(args.run_root)["events"])
             receipt = publish_unreviewed_candidate(
                 candidate, args.output_dir, args.csv_profile,
                 run_root=args.run_root, attempt_id=args.attempt_id,
@@ -948,7 +964,8 @@ def main(argv: list[str] | None = None) -> int:
             questions, code = write_questions_next_to(args.output_dir, args.run_root)
             print(json.dumps({
                 "candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
-                "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [],
+                "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [], "idempotent": again,
+                **({"out": _write(out, _receipt_json(receipt))} if out is not None else {}),
             }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
         receipt = _load_receipt(args.candidate_receipt)
