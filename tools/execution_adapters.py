@@ -314,19 +314,6 @@ def invoke_request(request: ExecutionRequest, runner: Any) -> Any:
     return runner(request.argv, cwd=request.cwd, timeout=request.timeout_seconds, shell=False)
 
 
-def _case_selector(case: ET.Element) -> tuple[str, ...]:
-    classname, name = case.attrib.get("classname", ""), case.attrib.get("name", "")
-    if not classname:
-        return ("", f"#{name}")
-    parts = classname.split(".")
-    python_function = classname.replace(".", "/") + ".py::" + name
-    values = [python_function, f"{classname}#{name}"]
-    if len(parts) >= 2:
-        module, class_name = ".".join(parts[:-1]), parts[-1]
-        values.append(module.replace(".", "/") + f".py::{class_name}::{name}")
-    return tuple(values)
-
-
 def _declared_test_count(root: ET.Element) -> int | None:
     """Return the report's declared test count, or None if the document is not process-bound."""
     declared = root.get("tests")
@@ -373,41 +360,13 @@ def is_zero_test_report(report_bytes: bytes | None) -> bool:
         return False
 
 
-def classify_execution(*, controller_timed_out: bool, process_returncode: int | None, report_bytes: bytes | None, selectors: Sequence[str]) -> Literal["PASS", "FAIL", "UNKNOWN"]:
-    """Give authoritative exact framework evidence priority over controller timeout."""
-    if process_returncode is not None and process_returncode < 0:
+def classify_zero_report(*, controller_timed_out: bool, process_returncode: int | None) -> Literal["FAIL", "UNKNOWN"]:
+    """A framework report that proves zero collected tests (``is_zero_test_report``): FAIL when the process ended by itself,
+    UNKNOWN after a controller timeout, a crash or an unknown end.  Audit U4: the reports with tests are matched by
+    ``tools.run_tests.match_junit_cases`` alone and classified by ``tools.run_tests.classify_evidence``."""
+    if controller_timed_out or process_returncode is None or process_returncode < 0:
         return "UNKNOWN"
-    if not report_bytes:
-        return "UNKNOWN"
-    try:
-        root = ET.fromstring(report_bytes)
-        cases = list(root.iter("testcase"))
-    except ET.ParseError:
-        return "UNKNOWN"
-    if _is_zero_test_root(root):
-        if controller_timed_out or process_returncode is None:
-            return "UNKNOWN"
-        return "FAIL"
-    expected = set(selectors)
-    matched: dict[str, ET.Element] = {}
-    for case in cases:
-        for name in _case_selector(case):
-            if name in expected:
-                if name in matched:
-                    return "UNKNOWN"
-                matched[name] = case
-    if set(matched) != expected:
-        return "UNKNOWN"
-    for case in matched.values():
-        if case.find("failure") is not None or case.find("error") is not None:
-            return "FAIL"
-        if case.find("skipped") is not None:
-            return "UNKNOWN"
-    # A framework-reported exact failure is authoritative; a clean report is not
-    # sufficient after controller termination because process completion is unknown.
-    if controller_timed_out:
-        return "UNKNOWN"
-    return "PASS"
+    return "FAIL"
 
 
 def unknown_allows_automatic_retry(verification: str) -> bool:

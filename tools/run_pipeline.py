@@ -221,27 +221,20 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
     A testcase whose method is selected but whose classname is none of that method's selected classes is what a class
     display name does (Surefire writes it as the classname); the hint names the selected classes only."""
     from tools import pilot_state as pilot
-    from tools.run_tests import junit_method_name, parse_junit_bytes
+    from tools.run_tests import parse_junit_bytes, selected_classes_renamed
 
     try:
         payload = pilot.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
         if payload.get("verdict") != "UNKNOWN" or not any(row.get("kind") == "JUNIT_INVALID" for row in payload.get("process_evidence", [])):
             return {}
         execution = payload["execution"]
-        selected: dict[str, set[str]] = {}
-        for selector in execution["selectors"]:
-            class_fqn, _, method = str(selector).partition("#")
-            if method:
-                selected.setdefault(method, set()).add(class_fqn)
         classes: set[str] = set()
         for row in execution["artifact_evidence"]:
             relative = Path(str(row.get("path", "")))
             if row.get("kind") != "native_report" or relative.is_absolute() or relative.parts[:2] != ("artifacts", attempt_id) or ".." in relative.parts:
                 continue
-            for case in parse_junit_bytes((Path(run_root) / relative).read_bytes()).cases:
-                method = junit_method_name(case.name)
-                if method in selected and case.classname not in selected[method]:
-                    classes |= selected[method]
+            # audit U4: the reading of run_tests, the one of the verdict
+            classes |= selected_classes_renamed(parse_junit_bytes((Path(run_root) / relative).read_bytes()), execution["selectors"])
     except (AttributeError, KeyError, OSError, TypeError, ValueError):  # a hint never fails the step
         return {}
     if not classes:

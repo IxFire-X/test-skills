@@ -792,7 +792,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `classify_prestart`, `invoke_request`, `is_zero_test_report`, `classify_execution`, `unknown_allows_automatic_retry`.
+**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `classify_prestart`, `invoke_request`, `is_zero_test_report`, `classify_zero_report`, `unknown_allows_automatic_retry`.
 
 </details>
 

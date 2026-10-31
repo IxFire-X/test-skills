@@ -1136,6 +1136,32 @@ def _group_pair(case: JUnitCase, bindings: Mapping[tuple[str, str], Mapping[str,
             and found.group(2) in binding["param_rows"]]
 
 
+def classify_evidence(evidence: Sequence[Mapping[str, Any]], *, controller_timed_out: bool) -> str:
+    """The verdict of the rows ``match_junit_cases`` gave for every required pair: an exact framework failure is authoritative
+    even after a controller timeout; a clean report after it is not (the process end is unknown), nor is a skipped test."""
+    if any(row["status"] in {"FAILED", "ERROR"} for row in evidence):
+        return "FAIL"
+    if controller_timed_out or any(row["status"] == "SKIPPED" for row in evidence):
+        return "UNKNOWN"
+    return "PASS"
+
+
+def selected_classes_renamed(parsed: JUnitParseResult, selectors: Sequence[str]) -> set[str]:
+    """FaT-DN, audit U4: the selected Java classes whose selected methods the report writes under another classname (what a
+    class display name does) — read with the same ``junit_method_name`` as ``match_junit_cases``."""
+    selected: dict[str, set[str]] = {}
+    for selector in selectors:
+        class_fqn, _, method = str(selector).partition("#")
+        if method:
+            selected.setdefault(method, set()).add(class_fqn)
+    classes: set[str] = set()
+    for case in parsed.cases:
+        method = junit_method_name(case.name)
+        if method in selected and case.classname not in selected[method]:
+            classes |= selected[method]
+    return classes
+
+
 def match_junit_cases(
     parsed: JUnitParseResult,
     compatibility: RunnerCompatibility,
@@ -1817,7 +1843,7 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     """Execute exactly one closed project-native adapter request after authorization."""
     from tools.automation_validation import automation_sha256, autotest_review_sha256, validate_accepted_autotest_review
     from tools.execution_adapters import (
-        GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, classify_execution, invoke_request, is_zero_test_report,
+        GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, classify_zero_report, invoke_request, is_zero_test_report,
     )
 
     artifacts = automation_artifact.get("artifacts", {}) if isinstance(automation_artifact, Mapping) else {}
@@ -1885,19 +1911,12 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
     )
     if zero_report:
         report_bytes = next(iter(snapshots.values()))
-        classified = classify_execution(
+        classified = classify_zero_report(
             controller_timed_out=outcome.kind == "TIMEOUT",
             process_returncode=outcome.exit_code if outcome.kind == "EXIT" else None,
-            report_bytes=report_bytes,
-            selectors=request.selectors,
         )
     elif len(evidence) == len(compatibility.required_pairs) and not match_errors:
-        if any(row["status"] in {"FAILED", "ERROR"} for row in evidence):
-            classified = "FAIL"
-        elif outcome.kind == "TIMEOUT" or any(row["status"] == "SKIPPED" for row in evidence):
-            classified = "UNKNOWN"
-        else:
-            classified = "PASS"
+        classified = classify_evidence(evidence, controller_timed_out=outcome.kind == "TIMEOUT")
         report_bytes = b"framework-evidence"
     else:
         classified, report_bytes = "UNKNOWN", None
