@@ -1138,13 +1138,10 @@ def _scan_cases(project: Path, args: Any) -> int | None:
 def cmd_scan(args: Any) -> int:
     """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
     _PRINTED.clear()
-    from tools.project_inventory import inventory_cache
-
     refused = _scan_cases(Path(args.project).resolve(), args)
     if refused is not None:
         return refused
-    with inventory_cache():  # FaT-AU4: one inventory per module for the scan and every unfinished run it compares
-        code = _scan(args)
+    code = _scan(args)
     run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
     if run_id:
         print(f"run_id: {run_id}")
@@ -1156,7 +1153,13 @@ def _scan(args: Any) -> int:
     request = _scan_request(args)
     abandoned: list[str] = []
     if not getattr(args, "new_run", False):
-        open_root, abandoned = _open_run_of(project, request)
+        from tools.project_inventory import inventory_cache
+
+        # FaT-AU4: one inventory per module for every unfinished run the scan compares.  Only around the comparison: the
+        # scan then writes project files (.skillsrc, the cases document) and a rewrite of the same size within one
+        # timestamp tick (Windows) keeps the stamp, so the inventory of the new run is never taken from this cache.
+        with inventory_cache():
+            open_root, abandoned = _open_run_of(project, request)
         if open_root is not None:
             _print(_run_in_progress(project, open_root, request))
             return 2

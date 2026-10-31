@@ -77,3 +77,22 @@ def test_a_file_changed_inside_the_block_builds_afresh(tmp_path: Path) -> None:
     assert {row["project_path"]: row for row in after["files"]}["services/api/src/app.py"] != \
         {row["project_path"]: row for row in again["files"]}["services/api/src/app.py"]
     assert {"changed": "a caller edits its copy"} not in again["files"]  # each caller gets its own copy
+
+
+def test_the_scan_builds_the_inventory_of_its_new_run_outside_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cache covers only the comparison with unfinished runs: the scan then writes project files (.skillsrc, the cases
+    document of --cases), and a same-size rewrite within one timestamp tick keeps the stamp — the new run's inventory and
+    its freeze are built afresh, so they bind the same bytes (FaT-AU4 fix; scan --cases was INVENTORY_INVALID)."""
+    from tests.test_first_run import _python_project
+    from tests.test_scan_guard import _scan
+    from tools import project_inventory
+
+    project = _python_project(tmp_path, runtime=False)
+    cached: list[bool] = []
+    real = project_inventory.build_inventory
+    monkeypatch.setattr(project_inventory, "build_inventory",
+                        lambda *args, **kwargs: cached.append(project_inventory._INVENTORY_CACHE.get() is not None) or real(*args, **kwargs))
+    monkeypatch.setattr("tools.run_pipeline.build_inventory", project_inventory.build_inventory, raising=False)
+    code, payload = _scan(project, monkeypatch, accept_self_review=True)
+    assert code == 0, payload
+    assert cached and not any(cached), cached
