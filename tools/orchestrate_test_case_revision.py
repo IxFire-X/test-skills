@@ -869,7 +869,9 @@ def _load_receipt(path: Path) -> Receipt:
     value = load_json_strict(path)
     fields = tuple(Receipt.__dataclass_fields__)
     if not isinstance(value, Mapping) or set(value) != set(fields):
-        raise ValueError("candidate receipt has an invalid shape")
+        missing = sorted(set(fields) - set(value)) if isinstance(value, Mapping) else list(fields)
+        extra = sorted(set(value) - set(fields)) if isinstance(value, Mapping) else []
+        raise ValueError(f"ORCHESTRATION_RECEIPT_SHAPE: candidate receipt has an invalid shape (missing {missing}, extra {extra})")
     return Receipt(*(value[field] for field in fields))
 
 
@@ -890,6 +892,7 @@ _FIXES = {  # FaT-10d
     "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
                             "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови select без --review; вердикт уже записан — "
                             "начни новый прогон (scan --new-run) и строй session-start командой `tools.api session-start`",
+    "ORCHESTRATION_RECEIPT_SHAPE": "--candidate-receipt — файл candidate_bundle_receipt из вывода publish (его поля как есть)",
     "REVIEWER_PROTOCOL": "входы не совпадают с журналом: передай те же файлы, что open-session, и сессию из `tools.api complete-review`",
 }
 

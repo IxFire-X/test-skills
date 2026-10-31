@@ -1878,18 +1878,25 @@ def publish_model_request(
     stage = stage_instance_id.split(":", 1)[0]
     declaration = _MODEL_STAGE_REGISTRY.get(stage)
     inputs = list(input_digests) if not isinstance(input_digests, (str, bytes)) else []
-    if (
-        attempt is None
-        or attempt["state"] == "TERMINAL"
-        or _MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is None
-        or declaration is None
-        or model_id is not None and not _safe_model_label(model_id)
-        or not _safe_model_label(invocation_id)
-        or not inputs
-        or len(inputs) != len(set(inputs))
-        or any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs)
-    ):
-        raise ValueError("invalid model request")
+    broken = next((reason for failed, reason in (
+        (attempt is None, f"no attempt {attempt_id} in this run"),
+        (attempt is not None and attempt["state"] == "TERMINAL", "the attempt is closed (TERMINAL); a new request needs a new run"),
+        (_MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is None, f"stage {stage_instance_id!r} is not <stage>:<instance>"),
+        (declaration is None, f"unknown stage {stage!r}; known: {', '.join(sorted(_MODEL_STAGE_REGISTRY))}"),
+        (model_id is not None and not _safe_model_label(model_id), "--model-id is not a safe label (letters, digits, . _ -, no secret-like value)"),
+        (not _safe_model_label(invocation_id), "--invocation-id is not a safe label (letters, digits, . _ -, no secret-like value)"),
+        (not inputs, "no --input-digest"),
+        (len(inputs) != len(set(inputs)), "an --input-digest is repeated"),
+        (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>"),
+    ) if failed), None)
+    if broken is not None:  # FaT-AU1: the condition, not only «invalid model request»
+        raise ModelRequestInvalid(f"invalid model request: {broken}")
+    if any(event["event_type"] == "MODEL_REQUESTED" and event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id
+           for event in state["events"]):
+        raise ModelRequestDuplicate(
+            f"duplicate model request: {stage_instance_id} already has its request; fix: do not repeat model-request — the answer "
+            "goes to model-response, its one retry is model-response --transport-attempts 2"
+        )
     if reuse_from is not None and stage != "context-marker":
         raise ValueError("MODEL_REUSE_REFUSED: only a context-marker answer is reused")
     if stage == "context-marker":
@@ -2058,8 +2065,17 @@ def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, A
             raise ValueError("invalid automation reviewer artifact")
     else:
         raise ValueError("unsupported model stage artifact")
-    if schema_diagnostics(dict(value), _SCHEMA_ROOT / schema_name, _PACK_ROOT):
-        raise ValueError("invalid model stage artifact")
+    diagnostics = schema_diagnostics(dict(value), _SCHEMA_ROOT / schema_name, _PACK_ROOT)
+    if diagnostics:  # FaT-AU1: the same retry_prompt validate_artifact gives, so the one retry needs no second command
+        from tools.validate_artifact import retry_prompt
+
+        raise ModelStageArtifactInvalid(
+            f"invalid model stage artifact: {stage_instance_id} does not pass {schema_name}: "
+            + "; ".join(f"{row['path'] or '/'} {row['code']}" for row in diagnostics[:3])
+            + (f" and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else "")
+            + "; fix: give the role its original input and this retry_prompt, then model-response --transport-attempts 2 — "
+            "nothing is written; retry_prompt:\n" + retry_prompt(dict(value), diagnostics)
+        )
 
 
 def _model_stage_artifact_target(root: Path, attempt_id: str, content_digest: str) -> Path:
@@ -2132,6 +2148,9 @@ def publish_model_stage_artifact(
         if len(requests) == 1 and len(responses) == 1:
             raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
+        if not requests:  # FaT-AU1
+            raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
+                             "the stage has none; fix: tools.api model-request for this stage first, then model-response")
         raise ValueError("model stage artifact requires its exact prior request")
     request = read_model_request(
         root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")),
@@ -4285,6 +4304,24 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
     _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
     return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(value["operation_capabilities"]),
             "path": target.relative_to(root).as_posix()}
+
+
+class ModelRequestInvalid(ValueError):
+    """FaT-AU1: a model request that breaks one of its basic conditions, named in the message."""
+
+    code = "MODEL_REQUEST_INVALID"
+
+
+class ModelRequestDuplicate(ValueError):
+    """FaT-AU1: a second request of one stage of the attempt."""
+
+    code = "MODEL_REQUEST_DUPLICATE"
+
+
+class ModelStageArtifactInvalid(ValueError):
+    """FaT-AU1: a model answer that does not pass its schema; the message carries the retry_prompt."""
+
+    code = "MODEL_STAGE_ARTIFACT_INVALID"
 
 
 class ModelInputsMismatch(ValueError):
