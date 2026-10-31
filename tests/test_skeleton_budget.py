@@ -1,5 +1,5 @@
-"""FaT-SK (hunt 3, 3.4): the skeleton of an import is the last input of every tc-generator batch, so plan-batches counts its
-bytes in the step input of every batch — a large skeleton splits the plan or says plainly that it does not fit."""
+"""FaT-SK → FaT-SKB (hunt 3, 3.4): a tc-generator batch of an import reads the skeleton of its own cases only, so plan-batches
+puts no whole skeleton into the step input of every batch — the skeleton bytes of each case join the share of its batch."""
 from __future__ import annotations
 
 import json
@@ -40,30 +40,21 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return run
 
 
-def test_the_skeleton_receipt_counts_in_the_step_input_by_its_file_bytes(run: dict) -> None:
+def test_the_whole_skeleton_is_no_part_of_the_step_input_of_every_batch(run: dict) -> None:
     plain = _plan(run, None)
     counted = _plan(run, run["receipt"])
-    skeleton = run["receipt_path"].stat().st_size
-    # the receipt file is its canonical JSON and a closing newline
-    assert _step_input(counted) - _step_input(plain) == skeleton - 1, (plain.notes, counted.notes)
-    assert f"скелет импорта {skeleton - 1} Б" in counted.notes[-1]
-    assert not any("скелет" in note for note in plain.notes)  # without the skeleton the plan bytes are as before
+    assert _step_input(counted) == _step_input(plain), (plain.notes, counted.notes)
+    assert "её часть скелета импорта" in counted.notes[-1]
+    assert not any("скелет" in note for note in plain.notes)  # without an import the plan bytes are as before
 
 
-def test_a_large_skeleton_splits_the_plan_or_says_it_does_not_fit(run: dict) -> None:
-    from tools.batch_assembly import WINDOW_SHARE
+def test_the_share_of_a_batch_includes_the_skeleton_bytes_of_its_cases(run: dict) -> None:
+    from tools.batch_assembly import IMPORT_ANSWER_PER_HUMAN_BYTE, _human_bytes, canonical_bytes
 
-    skeleton = run["receipt_path"].stat().st_size - 1
-    wide = _plan(run, run["receipt"], window=100_000_000)
-    step, answer = _step_input(wide), int(re.search(r"оценка ответа (\d+) Б", wide.notes[0]).group(1))
-    # without the skeleton in the step input the answer would fit (cap + skeleton >= answer); with it the plan splits
-    window = int((step + answer - skeleton // 2) / WINDOW_SHARE)
-    split = _plan(run, run["receipt"], window=window)
-    assert len(split["batches"]) == 2, split.notes
-    # the skeleton leaves no room for any answer: one batch and the plain reason, not «fits»
-    window = int((step - skeleton // 2) / WINDOW_SHARE)
-    tight = _plan(run, run["receipt"], window=window)
-    assert len(tight["batches"]) == 1 and "не оставляет места ответу" in tight.notes[0], tight.notes
+    plan = _plan(run, run["receipt"], window=100_000_000)
+    estimate = int(re.search(r"оценка ответа (\d+) Б", plan.notes[0]).group(1))
+    cases = run["receipt"]["imported"]["cases"]
+    assert estimate == sum(_human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case)) for case in cases)
 
 
 def test_plan_batches_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -78,16 +69,18 @@ def test_plan_batches_takes_the_receipt_file_as_it_is(run: dict, tmp_path: Path,
     assert api.main(["plan-batches", "--requirements", str(files["req"]), "--grouping", str(files["grouping"]),
                      "--project", str(run["project"]), "--input-file", str(files["req"]), "--context-receipt", str(files["context"]),
                      "--imported", str(run["receipt_path"])]) == 0
-    assert f"скелет импорта {run['receipt_path'].stat().st_size - 1} Б" in capsys.readouterr().out
+    assert "её часть скелета импорта" in capsys.readouterr().out
 
 
-def test_step_inputs_of_a_batch_read_the_whole_skeleton_receipt(run: dict) -> None:
-    from tests.test_cases_import import _generator_request
+def test_step_inputs_of_a_batch_read_the_skeleton_of_that_batch(run: dict) -> None:
+    from tests.test_cases_import import _generator_request, _skeleton
+    from tools.pilot_state import _receipt_target
     from tools.step_size import request_files
 
     four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
-    assert _generator_request(run, *four, run["imported"]["digest"])[0] == 0
+    assert _generator_request(run, *four, _skeleton(run))[0] == 0
     batch_id = run["plan"]["batches"][0]["batch_id"]
     files = request_files(run["root"], f"tc-generator:{batch_id}")
-    [row] = [row for row in files["files"] if row["digest"] == run["imported"]["digest"]]
-    assert Path(row["path"]) == run["receipt_path"] and row["bytes"] == run["receipt_path"].stat().st_size, files
+    [row] = [row for row in files["files"] if row["digest"] == _skeleton(run)]
+    assert Path(row["path"]) == _receipt_target(run["root"], run["attempt_id"], "imported-cases-" + batch_id), files
+    assert not any(row["digest"] == run["imported"]["digest"] for row in files["files"])  # the whole skeleton is no input

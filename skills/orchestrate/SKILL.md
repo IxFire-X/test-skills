@@ -224,9 +224,10 @@ Run остаётся связан с исходной project/module identity.
    context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
    status покажет `next_step`.
    Импорт готовых кейсов (`scan --cases <csv>`, без `--docs`): шаг `context-marker:requirements` делает код —
-   `python -m tools.api cases-import --run-root <run> --attempt <attempt_id>` (план частей называет его в `by_code`); его
-   `imported.digest` — последний `--input-digest` каждой пачки `tc-generator`, файл `<run>/imported-cases/<attempt_id>.json`
-   передай в `plan-batches --imported` и `validate-fragment --imported`. Человеческие поля кейсов не меняются.
+   `python -m tools.api cases-import --run-root <run> --attempt <attempt_id>` (план частей называет его в `by_code`). Файл
+   `<run>/imported-cases/<attempt_id>.json` передай в `plan-batches --imported` и `validate-fragment --imported`. Последний
+   `--input-digest` пачки `tc-generator` — `batch_skeletons[<batch_id>]` из вывода `publish-generator-input --kind plan`:
+   скелет только её кейсов. Человеческие поля кейсов не меняются.
 1. Один раз вызови `context-marker` для authorized requirements/context и
    persist/readback-проверь полный normalized source-requirement artifact. До вызова
    persist/readback-проверь `model-request` с exact stage/role/policy, model,

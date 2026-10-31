@@ -2187,7 +2187,7 @@ def publish_model_stage_artifact(
             else:  # FaT-DG: the whole fragment check (coverage inside) against the journal, before the write
                 validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))),
                                   _accepted_earlier_fragments(project, root, state, attempt_id, published[0], stage_instance_id.split(":", 1)[1]),
-                                  imported=_imported_cases(project, root, state, attempt_id))
+                                  imported=_imported_for_answer(project, root, state, attempt_id, stage_instance_id.split(":", 1)[1], request))
         except BatchAssemblyError as error:
             raise BatchAssemblyError(error.code, str(error).split(": ", 1)[1] + "; fix: исправь фрагмент и отдай его единственным "
                                      "повтором стадии (--transport-attempts 2), ничего не записано") from error
@@ -2641,6 +2641,10 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
     directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases"}
+    if kind.startswith(_SKELETON_KIND):  # FaT-SKB: the skeleton of one batch, next to the whole one
+        if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+            raise ValueError("invalid factual receipt")
+        return root / "imported-cases" / f"{attempt_id}.{kind[len(_SKELETON_KIND):]}.json"
     if kind == "imported-cases":  # FaT-IMP: the skeleton of an import, one per attempt
         if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -3002,6 +3006,13 @@ def _validate_factual_receipt(
         found = run_csv(root, attempt)
         if set(receipt) != common | {"imported"} or not identity_matches or found is None or receipt.get("imported") != imported_value(*found):
             raise ValueError("invalid imported-cases receipt")
+    elif kind.startswith(_SKELETON_KIND):  # FaT-SKB: the slice the whole skeleton and the published plan give, nothing else
+        if (
+            set(receipt) != common | {"imported"}
+            or not identity_matches
+            or receipt.get("imported") != _batch_skeleton_value(project, root, state, str(attempt["attempt_id"]), kind[len(_SKELETON_KIND):])
+        ):
+            raise ValueError(f"invalid {kind} receipt")
     elif kind.startswith(_PRIOR_KIND):  # FaT-BO: the value is the one the journal gives, nothing else
         if (
             set(receipt) != common | {"prior_capabilities"}
@@ -4208,6 +4219,7 @@ def read_reference_cases(run_root: Path, attempt_id: str) -> Mapping[str, Any] |
     except (ValueError, OSError, KeyError):
         return None
 _PRIOR_KIND = "prior-capabilities-"  # FaT-BO: + batch_id — the fifth tc-generator input from batch 2
+_SKELETON_KIND = "imported-cases-"  # FaT-SKB: + batch_id — the skeleton of the batch, its last tc-generator input
 
 
 def _batch_ordinal(batch: Mapping[str, Any]) -> int:
@@ -4266,6 +4278,50 @@ def _imported_cases(project: Path, root: Path, state: Mapping[str, Any], attempt
     except (ValueError, OSError, KeyError) as error:
         raise ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: the cases of the import are not published; fix: tools.api cases-import "
                                   f"--run-root <run> --attempt {attempt_id}") from error
+
+
+def _batch_skeleton_value(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str) -> Mapping[str, Any]:
+    """FaT-SKB: the skeleton of *batch_id* as the whole skeleton and the published plan give it."""
+    from tools.cases_import import slice_value
+
+    whole = _imported_cases(project, root, state, attempt_id)
+    if whole is None:
+        raise ValueError("IMPORT_NOT_CASES_RUN: the run has no --cases")
+    return slice_value(whole, _generator_input(project, root, state, attempt_id, "plan"), batch_id)
+
+
+def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
+    """FaT-SKB: publish the skeleton of every batch of the published plan — bookkeeping inside the plan publication the
+    agent called; the same plan again changes nothing.  ``{batch_id: digest}``; empty for a run without --cases."""
+    from tools.cases_import import cases_path
+
+    project, root = _run_root(run_root)
+    if cases_path(root) is None:
+        return {}
+    state = derive_state(root)
+    plan = _generator_input(project, root, state, attempt_id, "plan")
+    published: dict[str, str] = {}
+    for row in plan["batches"]:
+        kind = _SKELETON_KIND + row["batch_id"]
+        value = _batch_skeleton_value(project, root, state, attempt_id, row["batch_id"])
+        if _receipt_target(root, attempt_id, kind).exists():
+            prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["imported"]
+            if prior != value:
+                raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {row['batch_id']} already has another skeleton")
+        else:
+            _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"imported": dict(value)})
+        published[row["batch_id"]] = str(value["digest"])
+    return published
+
+
+def _imported_for_answer(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, batch_id: str,
+                         request: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """FaT-SKB: what model-response checks the human fields against — the skeleton the request took as its last input:
+    the batch's own one, or the whole one for a request published before FaT-SKB.  None for a run without --cases."""
+    whole = _imported_cases(project, root, state, attempt_id)
+    if whole is None or (request.get("input_digests") or [None])[-1] == whole["digest"]:
+        return whole
+    return _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + batch_id, "ARTIFACT_READ_BACK")["record"]["imported"]
 
 
 @closure_cached  # FaT-IMP
@@ -4598,8 +4654,10 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
         raise ValueError(f"GENERATOR_INPUT_CONFLICT: this attempt already has the {kind} {prior.get('digest')}; "
                          "another one needs a new run (scan --new-run)")
     _publish_bound_attempt_receipt(run_root, attempt_id, receipt_kind, {kind: item})
+    skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # FaT-SKB: the last input of each batch
     return {"kind": kind, "digest": item["digest"],
-            "path": str(_receipt_target(root, attempt_id, receipt_kind).relative_to(root)).replace("\\", "/")}
+            "path": str(_receipt_target(root, attempt_id, receipt_kind).relative_to(root)).replace("\\", "/"),
+            **({"batch_skeletons": skeletons} if skeletons else {})}
 
 
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
@@ -4656,9 +4714,15 @@ def _expected_model_inputs(
                     f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — пятый вход"
                 ) from error
             expected.append((str(prior["digest"]), f"result.digest команды tools.api prior-capabilities --batch-id {instance}"))
-        imported = _imported_cases(project, root, state, attempt_id)
-        if imported is not None:  # FaT-IMP: the skeleton of the import is the last input of every batch
-            expected.append((str(imported["digest"]), "imported.digest — результат команды tools.api cases-import"))
+        if _imported_cases(project, root, state, attempt_id) is not None:  # FaT-SKB: the skeleton of this batch is its last input
+            try:
+                skeleton = _read_attempt_receipt_with_state(project, root, state, attempt_id, _SKELETON_KIND + instance, "ARTIFACT_READ_BACK")["record"]["imported"]
+            except (ValueError, OSError, KeyError) as error:
+                raise ModelInputsMismatch(
+                    f"MODEL_INPUTS_MISMATCH: скелет пачки {instance} не опубликован; fix: повтори tools.api publish-generator-input --kind plan "
+                    "тем же планом — он опубликует скелеты пачек (batch_skeletons)"
+                ) from error
+            expected.append((str(skeleton["digest"]), f"batch_skeletons[{instance}] — результат команды publish-generator-input --kind plan"))
         return expected
     try:
         if stage == "tc-reviewer":

@@ -187,10 +187,12 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
                 documents: dict[str, str], imported: Mapping[str, Any] | None = None) -> tuple[list[list[str]] | None, list[str]]:
     """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
 
-    FaT-IMP: in an import the answer is the human fields of a case with its machine part (× 5), a case is its own group."""
+    FaT-IMP: in an import the answer is the human fields of a case with its machine part (× 5), a case is its own group.
+    FaT-SKB: the skeleton of a batch holds its own cases only, so the skeleton bytes of a case join its share as well."""
     if imported is not None:
-        human = {case["source_requirement_id"]: _human_bytes(case) for case in imported["cases"]}
-        expected = {item["source_requirement_id"]: human.get(item["source_requirement_id"], 0) * IMPORT_ANSWER_PER_HUMAN_BYTE for item in source}
+        share = {case["source_requirement_id"]: _human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case))
+                 for case in imported["cases"]}
+        expected = {item["source_requirement_id"]: share.get(item["source_requirement_id"], 0) for item in source}
     else:
         expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
     total = sum(expected.values())
@@ -306,22 +308,21 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     it (the given files, the context files of the receipt, the map of existing project tests — FaT-EC — the skeleton of an
     import — FaT-SK — and the tc-generator role), the documents of the receipt.
 
-    ``imported`` is the imported-cases receipt (or its value): every batch reads the whole receipt as its last input, so
-    its bytes are part of the step input of every batch, not of one."""
+    ``imported`` is the imported-cases receipt (or its value).  FaT-SKB: a batch reads the skeleton of its own cases only, so
+    the skeleton is no part of the common step input — the bytes of each case join the share of its batch (``_size_split``)."""
     from tools.existing_tests import for_context, view_bytes
     from tools.step_size import measure, step_window
 
     project = Path(project).resolve()
     _validate_context_receipt(context_receipt, _evidence_digests(grouping_evidence)[1])
     context_files, documents = _context_documents(project, context_receipt)
-    skeleton = len(canonical_bytes(imported)) if imported is not None else 0
     value = imported.get("imported", imported) if imported is not None else None
     step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator",
-                         extra_bytes=len(view_bytes(for_context(project, context_receipt))) + skeleton)["bytes"]
+                         extra_bytes=len(view_bytes(for_context(project, context_receipt))))["bytes"]
     plan = plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
                         id_pattern=_grouping_pattern(project), documents=documents, imported=value)
-    if skeleton:
-        plan.notes.append(f"вход шага включает скелет импорта {skeleton} Б: его читает каждая пачка целиком")
+    if value is not None:
+        plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
     return plan
 
 

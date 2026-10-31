@@ -142,6 +142,22 @@ def imported_value(path: str, data: bytes) -> dict[str, Any]:
                         **({"normalized": normalized} if normalized else {})})
 
 
+def slice_value(imported: Mapping[str, Any], plan: Mapping[str, Any], batch_id: str) -> dict[str, Any]:
+    """FaT-SKB: the skeleton of one batch — the imported cases it owns, in the order of the plan, and the normalized cells
+    of their rows only.  The last tc-generator input of that batch; the whole skeleton is no batch's input."""
+    from tools.batch_assembly import with_digest
+
+    batch = next((row for row in plan.get("batches") or [] if row.get("batch_id") == batch_id), None)
+    if batch is None:
+        raise ValueError(f"{batch_id} is not a batch of the plan {plan.get('digest')}")
+    by_source = {case["source_requirement_id"]: case for case in imported["cases"]}
+    cases = [by_source[source] for source in batch["owned_source_requirement_ids"] if source in by_source]
+    rows = {case["row"] for case in cases} | {step["row"] for case in cases for step in case["steps"]}
+    normalized = [cell for cell in imported.get("normalized") or [] if cell["row"] in rows]
+    return with_digest({"schema_version": "1.0.0", "csv": imported["csv"], "csv_digest": imported["csv_digest"], "plan_digest": plan["digest"],
+                        "batch_id": batch_id, "cases": cases, **({"normalized": normalized} if normalized else {})})
+
+
 def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     """``(path, bytes)`` of the CSV of an import run, the bytes as the inventory of the attempt binds them; None otherwise."""
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt

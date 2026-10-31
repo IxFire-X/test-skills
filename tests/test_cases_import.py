@@ -151,7 +151,7 @@ def _manual_fragment(plan: dict, context: dict, imported: dict, index: int) -> d
     return with_digest(fragment)
 
 
-def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str = CSV) -> dict:
+def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str = CSV, **plan_options) -> dict:
     """scan --cases → cases-import → the code part of the marker → merge → header and plan published."""
     from tests.test_batch_assembly import _header
     from tools import api, context_marker_parts, pilot_state
@@ -175,12 +175,19 @@ def _to_generator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, csv_text: str
     context = next(pilot_state.read_context_selection(root, attempt_id, event["artifact_digest"]) for event in pilot_state.derive_state(root)["events"]
                    if event["event_type"] == "CONTEXT_SELECTED")
     header = pilot_state.publish_generator_input(root, attempt_id, "header", _header())
-    plan = plan_batches(answer["artifacts"]["analytics_documentation"]["requirements"],
-                        {"header_digest": header["digest"], "context_receipt_digest": context["digest"]})
-    published_plan = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
     imported = pilot_state.read_attempt_receipt(root, attempt_id, "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
+    plan = plan_batches(answer["artifacts"]["analytics_documentation"]["requirements"],
+                        {"header_digest": header["digest"], "context_receipt_digest": context["digest"]},
+                        **({"imported": imported} if plan_options else {}), **plan_options)
+    published_plan = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
     return {"project": project, "root": root, "attempt_id": attempt_id, "marker": marker["content_digest"], "context": context,
-            "header": _header(), "header_digest": header["digest"], "plan": plan, "plan_digest": published_plan["digest"], "imported": imported}
+            "header": _header(), "header_digest": header["digest"], "plan": plan, "plan_digest": published_plan["digest"], "imported": imported,
+            "batch_skeletons": published_plan.get("batch_skeletons", {}), "published_plan": published_plan}
+
+
+def _skeleton(run: dict, index: int = 0) -> str:
+    """FaT-SKB: the digest of the skeleton of batch *index* — the last generator input of that batch."""
+    return run["batch_skeletons"][run["plan"]["batches"][index]["batch_id"]]
 
 
 def test_the_skeleton_keeps_the_human_fields_of_the_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,9 +216,9 @@ def test_the_skeleton_is_the_last_generator_input_and_the_human_fields_are_check
     run = _to_generator(tmp_path, monkeypatch)
     four = (run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"])
     code, refused = _generator_request(run, *four)
-    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and run["imported"]["digest"] in refused["message"], refused
-    assert "cases-import" in refused["message"]
-    code, requested = _generator_request(run, *four, run["imported"]["digest"])
+    assert code == 2 and refused["code"] == "MODEL_INPUTS_MISMATCH" and _skeleton(run) in refused["message"], refused
+    assert "publish-generator-input --kind plan" in refused["message"]
+    code, requested = _generator_request(run, *four, _skeleton(run))
     assert code == 0, requested
 
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
@@ -346,7 +353,7 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
 
     run = _to_generator(tmp_path, monkeypatch)
     root, attempt_id, tmp = run["root"], run["attempt_id"], run["root"] / "tmp"
-    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], run["imported"]["digest"])[0] == 0
+    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], _skeleton(run))[0] == 0
     fragment = _automated_fragment(run)
     code, answered = _api("model-response", "--run-root", str(root), "--attempt", attempt_id, "--stage", f"tc-generator:{fragment['batch_id']}",
                           "--artifact", _put(tmp / "fragment.json", fragment))
@@ -403,7 +410,7 @@ def test_a_case_of_the_import_traces_only_to_its_own_source_requirement(tmp_path
     from tools.batch_assembly import with_digest
 
     run = _to_generator(tmp_path, monkeypatch)
-    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], run["imported"]["digest"])[0] == 0
+    assert _generator_request(run, run["marker"], run["context"]["digest"], run["plan_digest"], run["header_digest"], _skeleton(run))[0] == 0
     good = _manual_fragment(run["plan"], run["context"], run["imported"], 0)
     crossed = {key: value for key, value in good.items() if key != "digest"}
     first, second = crossed["test_cases"]
