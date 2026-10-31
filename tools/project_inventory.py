@@ -7,6 +7,9 @@ caller an opportunity to nominate an arbitrary filesystem path for model context
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import copy
 import hashlib
 import json
 import os
@@ -412,7 +415,66 @@ def _exclusion(project_path: str, reason_code: str, scanner_rule_id: str, safe_l
     }
 
 
+# FaT-AU4: within one command (scan, status) the inventory of the same module is built once — scan used to build it again
+# for every unfinished run of the request.  The key is the call and the (path, mtime, size) of every project file outside
+# .git, the package and the run roots, so any change of a file between two calls builds afresh; no cache between commands.
+_INVENTORY_CACHE: contextvars.ContextVar[dict[Any, dict[str, Any]] | None] = contextvars.ContextVar("inventory_cache", default=None)
+
+
+@contextlib.contextmanager
+def inventory_cache():
+    """One command's cache of build_inventory; a nested block shares the outer one."""
+    if _INVENTORY_CACHE.get() is not None:
+        yield
+        return
+    token = _INVENTORY_CACHE.set({})
+    try:
+        yield
+    finally:
+        _INVENTORY_CACHE.reset(token)
+
+
+def _tree_stamp(project_root: Path, skip: Iterable[Path]) -> tuple[tuple[str, int, int], ...]:
+    root = Path(project_root).resolve()
+    skipped = {Path(path).resolve() for path in skip}
+    stamp: list[tuple[str, int, int]] = []
+    for current, directories, files in os.walk(root, followlinks=False):
+        base = Path(current)
+        directories[:] = sorted(name for name in directories if name != ".git" and (base / name).resolve() not in skipped)
+        for name in sorted(files):
+            try:
+                stat = (base / name).stat(follow_symlinks=False)
+            except OSError:
+                continue
+            stamp.append(((base / name).relative_to(root).as_posix(), stat.st_mtime_ns, stat.st_size))
+    return tuple(stamp)
+
+
 def build_inventory(
+    project_root: Path,
+    module_root: Path,
+    *,
+    skill_pack_root: Path | None = None,
+    generated_roots: Iterable[Path] = (),
+    proved_dependency_files: Iterable[Path] = (),
+    include: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Return a complete metadata-only inventory for one controller-selected module (once per command, FaT-AU4)."""
+    generated_roots, proved_dependency_files = tuple(generated_roots), tuple(proved_dependency_files)
+    cache = _INVENTORY_CACHE.get()
+    if cache is None:
+        return _build_inventory(project_root, module_root, skill_pack_root=skill_pack_root, generated_roots=generated_roots,
+                                proved_dependency_files=proved_dependency_files, include=include)
+    skip = (*generated_roots, *((skill_pack_root,) if skill_pack_root is not None else ()))
+    key = (str(Path(project_root).resolve()), str(Path(module_root).resolve()), str(skill_pack_root), tuple(map(str, generated_roots)),
+           tuple(sorted(map(str, proved_dependency_files))), None if include is None else tuple(include), _tree_stamp(project_root, skip))
+    if key not in cache:
+        cache[key] = _build_inventory(project_root, module_root, skill_pack_root=skill_pack_root, generated_roots=generated_roots,
+                                      proved_dependency_files=proved_dependency_files, include=include)
+    return copy.deepcopy(cache[key])
+
+
+def _build_inventory(
     project_root: Path,
     module_root: Path,
     *,

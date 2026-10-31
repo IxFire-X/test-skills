@@ -1138,10 +1138,13 @@ def _scan_cases(project: Path, args: Any) -> int | None:
 def cmd_scan(args: Any) -> int:
     """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
     _PRINTED.clear()
+    from tools.project_inventory import inventory_cache
+
     refused = _scan_cases(Path(args.project).resolve(), args)
     if refused is not None:
         return refused
-    code = _scan(args)
+    with inventory_cache():  # FaT-AU4: one inventory per module for the scan and every unfinished run it compares
+        code = _scan(args)
     run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
     if run_id:
         print(f"run_id: {run_id}")
@@ -2415,11 +2418,12 @@ def cmd_report(args: Any) -> int:
 
 def cmd_status(args: Any) -> int:
     from tools.pilot_state import closure_cache
+    from tools.project_inventory import inventory_cache
 
     project = Path(args.project).resolve()
     # FaT-ST: one block, so the run manifest is validated and the journal derived once; the answer is printed after
-    # the block's final full journal check.
-    with closure_cache():
+    # the block's final full journal check.  FaT-AU4: and the module's inventory built once.
+    with closure_cache(), inventory_cache():
         result = _status_result(project, args.run)
     _print(result)
     return 0

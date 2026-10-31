@@ -61,3 +61,26 @@ def test_the_lookup_finds_the_same_declarations_as_before(body: str) -> None:
     parsed = _java_class(Path("T.java"), text)
     old = "target" if len(re.findall(_OLD.format(name=re.escape("target")), parsed[1])) == 1 else None
     assert _java_node(parsed, {"kind": "java_class_method", "class_fqn": "p.T", "method_name": "target"}) == old
+
+
+def test_too_much_generated_code_is_refused_before_any_parsing(tmp_path: Path) -> None:
+    """FaT-AU4 (audit F6): one runner-compat call reads at most RUNNER_INPUT_MAX_BYTES of generated code.  The canonical
+    `{}` is invalid: the one diagnostic being RUNNER_INPUT_TOO_LARGE shows nothing was parsed before the limit."""
+    from tools import run_tests
+
+    big = "x" * (run_tests.RUNNER_INPUT_MAX_BYTES + 1)
+    artifact = {"artifacts": {"generated_files": [{"path": "src/test/java/p/T.java", "content": big}]}}
+    result = run_tests.validate_artifact_runner_compatibility(tmp_path, "java", {}, artifact, materialized=False)
+    assert result.status == "NOT_RUNNABLE"
+    [row] = result.diagnostics
+    assert row["code"] == "RUNNER_INPUT_TOO_LARGE" and "fix:" in row["message"] and str(run_tests.RUNNER_INPUT_MAX_BYTES) in row["message"]
+    (tmp_path / "src/test/java/p").mkdir(parents=True)
+    (tmp_path / "src/test/java/p/T.java").write_text(big, encoding="utf-8")  # on disk, as exec checks it
+    artifact["artifacts"]["generated_files"][0].pop("content")
+    assert run_tests.validate_artifact_runner_compatibility(tmp_path, "java", {}, artifact).diagnostics[0]["code"] == "RUNNER_INPUT_TOO_LARGE"
+
+
+def test_the_campaign_size_is_well_under_the_limit() -> None:
+    from tools.run_tests import RUNNER_INPUT_MAX_BYTES
+
+    assert RUNNER_INPUT_MAX_BYTES >= 5 * 184 * 1000  # the largest automation of the campaign: 184 KB of code

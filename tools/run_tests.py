@@ -598,6 +598,35 @@ def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: M
     return diagnostics, rows_by_pair
 
 
+# FaT-AU4 (audit F6): the bytes of generated code one runner-compat call reads.  The campaign's largest automation had
+# 184 KB of code (spring-petclinic, one file of 62 methods); 1 MiB is ~5.7x that, and the checks stay linear up to it
+# (FaT-RC: the Java parsing; FaT-AU4: the @ParameterizedTest rows — 800 KB of rows in ~1 s).
+RUNNER_INPUT_MAX_BYTES = 1024 * 1024
+
+
+def _runner_input_size(project: Path, automation_artifact: Mapping[str, Any], materialized: bool) -> dict[str, str] | None:
+    """RUNNER_INPUT_TOO_LARGE when the generated files hold more than RUNNER_INPUT_MAX_BYTES; checked before anything is parsed."""
+    files = (automation_artifact.get("artifacts") or {}).get("generated_files") if isinstance(automation_artifact, Mapping) else None
+    if not isinstance(files, list):
+        return None  # the shape is the automation validation's own refusal
+    total = 0
+    for row in files:
+        if not isinstance(row, Mapping):
+            continue
+        if materialized:
+            try:
+                total += (Path(project) / str(row.get("path"))).stat().st_size
+            except (OSError, ValueError):
+                continue
+        elif isinstance(row.get("content"), str):
+            total += len(row["content"].encode("utf-8"))
+    if total <= RUNNER_INPUT_MAX_BYTES:
+        return None
+    return _diag("/artifacts/generated_files", "RUNNER_INPUT_TOO_LARGE",
+                 f"сгенерированный код {total} Б больше предела {RUNNER_INPUT_MAX_BYTES} Б одной проверки; fix: раздели автоматизацию "
+                 "— меньше кейсов на прогон (scan с более узким --target) или кейсы по нескольким файлам меньшего размера")
+
+
 def validate_artifact_runner_compatibility(project: Path, language: Literal["python", "java"], document: Mapping[str, Any], automation_artifact: Mapping[str, Any], *, materialized: bool = True) -> RunnerCompatibility:
     """Check inline proposals before review, or exact on-disk bytes before execution.
 
@@ -607,6 +636,9 @@ def validate_artifact_runner_compatibility(project: Path, language: Literal["pyt
     """
     from tools.automation_validation import AutomationArtifactError, required_symbol_pairs
     from tools.canonical_document import validate_canonical_document
+    too_large = _runner_input_size(project, automation_artifact, materialized)
+    if too_large is not None:
+        return _compat("NOT_RUNNABLE", diagnostics=[too_large])
     canonical = validate_canonical_document(dict(document))
     if canonical:
         return _compat("NOT_RUNNABLE", diagnostics=[_diag(row["path"], row["code"], "Canonical document is invalid.") for row in canonical])
