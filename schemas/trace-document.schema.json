@@ -12,6 +12,7 @@
     "assertions": {"type": "array", "items": {"$ref": "#/$defs/assertion"}}, "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
     "symbols": {"type": "array", "items": {"$ref": "#/$defs/symbol"}}, "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
     "manual_dispositions": {"type": "array", "items": {"$ref": "#/$defs/manual"}}, "automation_diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}},
+    "excluded_cases": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["case_id"], "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}}}},
     "execution": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/execution"}]}, "lifecycle": {"$ref": "#/$defs/lifecycle"}
   },
   "$defs": {

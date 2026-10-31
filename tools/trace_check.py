@@ -158,6 +158,13 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
         if pair not in required: rows.append(_diag("/symbols", "TRACE_ORPHAN_SYMBOL"))
     for file_id in files:
         if not any(pair[0] == file_id for pair in required): rows.append(_diag("/files", "TRACE_ORPHAN_FILE"))
+    # FaT-PA: the cases with blockers left manual as a whole by the automation
+    excluded = {row["case_id"] for row in trace.get("excluded_cases") or []}
+    blocked_case_ids = {key[0] for key, step in steps.items() if step["blocker_ids"]}
+    if any(row["case_id"] in excluded for row in trace["implementation_relations"]) or any(row["case_id"] in excluded for row in trace["manual_dispositions"]):
+        rows.append(_diag("/excluded_cases", "TRACE_EXCLUDED_CASE"))
+    if excluded - blocked_case_ids:
+        rows.append(_diag("/excluded_cases", "TRACE_EXCLUSION_WITHOUT_BLOCKER"))
     manual: set[tuple[str, str]] = set()
     for row in trace["manual_dispositions"]:
         key = (row["case_id"], row["step_id"])
@@ -167,21 +174,27 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
     manual_order = [(case_order.get(row["case_id"], 10**9), step_order.get((row["case_id"], row["step_id"]), 10**9)) for row in trace["manual_dispositions"]]
     if manual_order != sorted(manual_order): rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_ORDER"))
     for key, step in steps.items():
+        if key[0] in excluded:
+            continue
         if step["manual_only"] and key not in manual: rows.append(_diag("/manual_dispositions", "TRACE_MANUAL_COVERAGE"))
         if not step["manual_only"] and not step["blocker_ids"]:
             if not any(row["kind"] == "operation" and (row["case_id"], row["step_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_OPERATION_COVERAGE"))
     for key in assertions:
         step = steps.get((key[0], key[1]))
-        if step is None:
+        if step is None or key[0] in excluded:
             continue
         if not step["manual_only"] and not step["blocker_ids"] and not any(row["kind"] == "assertion" and (row["case_id"], row["step_id"], row["expectation_id"], row["assertion_id"]) == key for row in trace["implementation_relations"]): rows.append(_diag("/implementation_relations", "TRACE_ASSERTION_COVERAGE"))
     for key in expectations:
         step = steps.get((key[0], key[1]))
-        if step is not None and not step["manual_only"] and not step["blocker_ids"] and not any(assertion[:3] == key for assertion in assertions):
+        if step is not None and key[0] not in excluded and not step["manual_only"] and not step["blocker_ids"] and not any(assertion[:3] == key for assertion in assertions):
             rows.append(_diag("/assertions", "TRACE_ASSERTION_TOPOLOGY"))
     if trace["automation_status"] == "BLOCKED":
         if not any(step["blocker_ids"] for step in steps.values()) or not trace["automation_diagnostics"] or any((trace["files"], trace["symbols"], trace["implementation_relations"], trace["manual_dispositions"])): rows.append(_diag("/automation_status", "TRACE_BLOCKED_BRANCH"))
-    elif any(step["blocker_ids"] for step in steps.values()) or trace["automation_diagnostics"]:
+    elif (
+        (blocked_case_ids != excluded if "excluded_cases" in trace else any(step["blocker_ids"] for step in steps.values()))
+        or (excluded and excluded == {key[0] for key in steps})
+        or trace["automation_diagnostics"]
+    ):
         rows.append(_diag("/automation_status", "TRACE_GENERATED_BRANCH"))
     execution = trace["execution"]
     blocked_or_manual = trace["automation_status"] == "BLOCKED" or not required
@@ -230,12 +243,30 @@ def _internal(trace: Any, require_execution: bool) -> list[dict[str, str]]:
     return sorted(rows, key=lambda row: (row["path"], row["code"], row["message"]))
 
 
-def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, automation: Mapping[str, Any] | None = None, autotest_review: Mapping[str, Any] | None = None, run_result: Mapping[str, Any] | None = None, require_execution: bool = False) -> dict[str, Any]:
-    """Audit a trace alone or prove it exactly matches upstream pre-finalization artifacts."""
+def _exclusion_rows(trace: Any, canonical: Mapping[str, Any] | None) -> list[dict[str, str]]:
+    """FaT-PA: a non-empty ``excluded_cases`` is never taken on the trace's word — it must be exactly the canon's
+    ``blocked_cases`` in canonical order, and without the canon it is unverified."""
+    if not isinstance(trace, Mapping) or not trace.get("excluded_cases"):
+        return []
+    if canonical is None:
+        return [_diag("/excluded_cases", "TRACE_EXCLUSION_UNVERIFIED")]
+    from tools.canonical_document import blocked_cases
+
+    listed = [row.get("case_id") for row in trace["excluded_cases"] if isinstance(row, Mapping)]
+    if listed != [row["case_id"] for row in blocked_cases(canonical)]:
+        return [_diag("/excluded_cases", "TRACE_EXCLUSION_MISMATCH")]
+    return []
+
+
+def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, automation: Mapping[str, Any] | None = None, autotest_review: Mapping[str, Any] | None = None, run_result: Mapping[str, Any] | None = None, require_execution: bool = False, *, canonical: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Audit a trace alone or prove it exactly matches upstream pre-finalization artifacts.
+
+    FaT-PA: ``canonical`` — the effective document the exclusions are checked against when no full external set is
+    supplied (the controller's own audit)."""
     supplied = (document is not None, automation is not None, autotest_review is not None, run_result is not None)
     # The audit always enforces the branch's exact obligation; this flag preserves the
     # public CLI spelling without forcing a fabricated run for BLOCKED/MANUAL_ONLY.
-    rows = _internal(trace, require_execution)
+    rows = _internal(trace, require_execution) + _exclusion_rows(trace, document if document is not None else canonical)
     if any(supplied) and not (document is not None and automation is not None and autotest_review is not None):
         rows.append(_diag("", "TRACE_EXTERNAL_SET", "External trace inputs must be supplied as a complete branch."))
     elif document is not None and automation is not None and autotest_review is not None:

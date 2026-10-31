@@ -46,7 +46,7 @@ def _rendered_files(contract: Mapping[str, Any]) -> dict[str, str]:
         else:
             pipeline.append(f"- `{name}`: `{', '.join(axis['values'])}`; nullable `{axis['nullable']}`")
     pipeline.extend(["", "## Normative result tuples", ""])
-    pipeline.extend(f"- `{name}`: `{json.dumps(contract['result_tuples'][name], ensure_ascii=False, sort_keys=True)}`" for name in ("complete_fail", "execution_unknown", "pre_execution_rework", "early_fatal", "review_context_limit", "invalid_finalization"))
+    pipeline.extend(f"- `{name}`: `{json.dumps(contract['result_tuples'][name], ensure_ascii=False, sort_keys=True)}`" for name in ("complete_fail", "execution_unknown", "pre_execution_rework", "early_fatal", "review_context_limit", "invalid_finalization", "partial_automation"))
     policies = {row["id"]: row for row in contract["policy_profiles"]}
     adapters = {row["id"]: row for row in contract["adapter_registry"]}
     pipeline.extend(["", "## Policies", "", *_table([policies[name] for name in POLICY_ORDER], [("Policy", "id"), ("Version", "version"), ("Semantic ready", "semantic_ready")]), "", "## Adapters", "", *_table([adapters[name] for name in ADAPTER_ORDER], [("Adapter", "id"), ("Phase", "phase"), ("Status", "implementation_status"), ("Version", "version")]), "", "## Acceptance predicates", ""])

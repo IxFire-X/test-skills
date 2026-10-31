@@ -410,8 +410,17 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
         "## Требования", "", *(f"- {row['requirement_id']}: {row['text']}" for row in document["requirements"]), "",
         "## Операции (capabilities)", "",
         *([line for row in document["operation_capabilities"] for line in _autotest_capability(row)] or ["- нет"]), "",
-        "## Кейсы",
     ]
+    from tools.canonical_document import blocked_cases
+
+    blocked = blocked_cases(document)
+    if blocked:  # FaT-PA: these cases stay manual — the automation lists them in excluded_cases, the reviewer sees why
+        lines += ["## Кейсы с блокерами — вручную, в excluded_cases", "",
+                  f"- автоматизируется {len(document['test_cases']) - len(blocked)} из {len(document['test_cases'])} кейсов;"
+                  " блокер, который выражается операторами проверок, — замечание BLOCKING", "",
+                  *(f"- {row['case_id']}: " + "; ".join(f"{step['step_id']} {', '.join(str(code) for code in step['codes'])}" for step in row["steps"])
+                    for row in blocked), ""]
+    lines.append("## Кейсы")
     for case in document["test_cases"]:
         lines += ["", f"### {case['case_id']} {case['title']}", "", f"- требования {', '.join(case['requirement_ids'])}",
                   f"- Цель: {case['objective']}"]

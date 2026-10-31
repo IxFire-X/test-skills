@@ -63,6 +63,7 @@ Version: `4.0`
 - `early_fatal`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "FATAL", "coverage": null}`
 - `review_context_limit`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "PARTIAL", "reason_code": "REVIEW_CONTEXT_LIMIT", "verification": "NOT_APPLICABLE"}`
 - `invalid_finalization`: `{"accepted": false, "attempt_state": "TERMINAL", "coverage": "PRESERVED", "reason_code": "FINALIZATION_INVALID", "verification": "PRESERVED"}`
+- `partial_automation`: `{"accepted": false, "attempt_state": "TERMINAL", "completion": "PARTIAL", "reason_code": "AUTOMATION_PARTIAL", "verification": "PASS"}`
 
 ## Policies
 

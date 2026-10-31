@@ -150,7 +150,16 @@ def _automation_facts(run_root: Path) -> tuple[bool, set[str]]:
     if not state["attempts"] or state["attempts"][-1]["state"] != "TERMINAL":
         return False, set()
     attempt_id = state["attempts"][-1]["attempt_id"]
-    if pilot.read_terminal_result(run_root, attempt_id).get("accepted") is not True:
+    result = pilot.read_terminal_result(run_root, attempt_id)
+    if result.get("accepted") is not True:
+        # FaT-PA: a partial automation that passed — «да» only for the cases its retained code covers
+        evidence = result.get("evidence") or {}
+        if (result.get("reason_code") == "AUTOMATION_PARTIAL" and result.get("verification") == "PASS"
+                and evidence.get("generated_retained_count") == evidence.get("generated_required_count")):
+            from tools.finalize_attempt import automation_split
+
+            split = automation_split(run_root, attempt_id)
+            return True, set(split["automated"]) if split else set()
         return True, set()
     try:
         artifacts = pilot.read_execution_inputs(run_root, attempt_id)["automation_artifact"]["artifacts"]

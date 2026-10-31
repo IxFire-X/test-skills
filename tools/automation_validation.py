@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import document_sha256, validate_canonical_document
+from tools.canonical_document import blocked_cases, document_sha256, validate_canonical_document
 from tools.schema_validation import classify_version, schema_diagnostics
 
 
@@ -57,6 +57,11 @@ _MESSAGES = {
     "AUTOMATION_MISSING_MANUAL_DISPOSITION": "manual-only step requires one manual disposition",
     "AUTOMATION_MANUAL_ORDER": "manual dispositions must use canonical case and step order",
     "AUTOMATION_BLOCKER_REQUIRES_BLOCKED": "canonical blockers require BLOCKED automation status",
+    "AUTOMATION_EXCLUSION_MISSING": "a case with canonical blockers must be listed in excluded_cases",
+    "AUTOMATION_EXCLUSION_WITHOUT_BLOCKER": "excluded_cases may list only cases with canonical blockers",
+    "AUTOMATION_EXCLUSION_ORDER": "excluded_cases must use canonical case order without repeats",
+    "AUTOMATION_EXCLUDED_CASE_TARGET": "an excluded case may have no relations or manual dispositions",
+    "AUTOMATION_NOTHING_TO_AUTOMATE": "every case is excluded: the automation is BLOCKED",
     "AUTOMATION_BLOCKED_WITHOUT_BLOCKER": "BLOCKED status requires a canonical blocker",
     "AUTOMATION_BLOCKED_CONTENT": "BLOCKED artifacts require diagnostics and four empty coverage arrays",
     "AUTOMATION_GENERATED_DIAGNOSTICS": "GENERATED artifacts require empty diagnostics",
@@ -235,6 +240,10 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
                 diagnostics.append(_diagnostic("AUTOMATION_INVALID_JAVA_IDENTIFIER", base + "/locator/method_name"))
 
     cases, steps = _document_index(document)
+    # FaT-PA: a case with canonical blockers stays manual as a whole; the list is the canon's, the generator repeats it
+    blocked_ids = [str(row["case_id"]) for row in blocked_cases(document)]
+    excluded_rows = artifacts.get("excluded_cases")
+    excluded = {str(row["case_id"]) for row in excluded_rows or []}
     relations = artifacts["implementation_relations"]
     relation_keys: set[tuple[Any, ...]] = set()
     valid_relation_rows: list[tuple[tuple[Any, ...], Mapping[str, Any]]] = []
@@ -260,6 +269,9 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         step_index, step = step_data
         if step["manual_only"] or step["automation_blockers"]:
             diagnostics.append(_diagnostic("AUTOMATION_NONREADY_TARGET", base + "/step_id"))
+            row_valid = False
+        elif row["case_id"] in excluded:
+            diagnostics.append(_diagnostic("AUTOMATION_EXCLUDED_CASE_TARGET", base + "/case_id"))
             row_valid = False
         expectation_index = assertion_index = -1
         expectation_id = assertion_id = None
@@ -313,7 +325,9 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
             continue
         step_index, step = step_data
         manual_order.append((case[0], step_index))
-        if step["automation_blockers"]:
+        if row["case_id"] in excluded:
+            diagnostics.append(_diagnostic("AUTOMATION_EXCLUDED_CASE_TARGET", base + "/case_id"))
+        elif step["automation_blockers"]:
             diagnostics.append(_diagnostic("AUTOMATION_MANUAL_DISPOSITION_BLOCKED", base))
         elif not step["manual_only"]:
             diagnostics.append(_diagnostic("AUTOMATION_MANUAL_DISPOSITION_READY", base))
@@ -323,7 +337,27 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
     blocked = any(step["automation_blockers"] for _, step in steps.values())
     status = artifacts["automation_status"]
     arrays = ("generated_files", "generated_symbols", "implementation_relations", "manual_dispositions")
-    if blocked:
+    partial = status == "GENERATED" and excluded_rows is not None and bool(blocked_ids)
+    if excluded_rows is not None:
+        listed = [str(row["case_id"]) for row in excluded_rows]
+        for index, case_id in enumerate(listed):
+            if case_id not in blocked_ids:
+                diagnostics.append(_diagnostic("AUTOMATION_EXCLUSION_WITHOUT_BLOCKER", _pointer("artifacts", "excluded_cases", index, "case_id")))
+        if [case_id for case_id in listed if case_id in blocked_ids] != [case_id for case_id in blocked_ids if case_id in listed]:
+            diagnostics.append(_diagnostic("AUTOMATION_EXCLUSION_ORDER", "/artifacts/excluded_cases"))
+        elif len(set(listed)) != len(listed):
+            diagnostics.append(_diagnostic("AUTOMATION_EXCLUSION_ORDER", "/artifacts/excluded_cases"))
+        if status == "BLOCKED" and listed:
+            diagnostics.append(_diagnostic("AUTOMATION_BLOCKED_CONTENT", "/artifacts/excluded_cases"))
+    if partial:
+        for case_id in blocked_ids:
+            if case_id not in excluded:
+                diagnostics.append(_diagnostic("AUTOMATION_EXCLUSION_MISSING", _pointer("test_cases", cases[case_id][0])))
+        if set(blocked_ids) == set(cases):
+            diagnostics.append(_diagnostic("AUTOMATION_NOTHING_TO_AUTOMATE", "/artifacts/excluded_cases"))
+        if artifacts["diagnostics"]:
+            diagnostics.append(_diagnostic("AUTOMATION_GENERATED_DIAGNOSTICS", "/artifacts/diagnostics"))
+    elif blocked:
         if status != "BLOCKED":
             diagnostics.append(_diagnostic("AUTOMATION_BLOCKER_REQUIRES_BLOCKED", "/artifacts/automation_status"))
         if not artifacts["diagnostics"] or any(artifacts[name] for name in arrays):
@@ -333,8 +367,10 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
     elif artifacts["diagnostics"]:
         diagnostics.append(_diagnostic("AUTOMATION_GENERATED_DIAGNOSTICS", "/artifacts/diagnostics"))
 
-    if status == "GENERATED" and not blocked:
+    if status == "GENERATED" and (not blocked or partial):
         for (case_id, step_id), (step_index, step) in steps.items():
+            if case_id in excluded:
+                continue
             case_index = cases[case_id][0]
             step_path = _pointer("test_cases", case_index, "steps", step_index)
             if step["manual_only"]:

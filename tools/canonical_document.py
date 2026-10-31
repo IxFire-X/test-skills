@@ -883,6 +883,28 @@ def _semantic_diagnostics(document: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(diagnostics, key=lambda item: (item["path"], item["code"], item["message"]))
 
 
+def blocked_cases(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """FaT-PA: the cases with automation blockers, in canonical order, each with its blocked steps and their codes.
+
+    The one reading of canonical blockers: ``blocker_count`` is its sum, and an automation leaves exactly these cases
+    manual (``excluded_cases``)."""
+    rows: list[dict[str, Any]] = []
+    for case in document.get("test_cases", []) if isinstance(document.get("test_cases"), list) else []:
+        if not isinstance(case, Mapping):
+            continue
+        steps = [{"step_id": step.get("step_id"), "codes": [blocker.get("code") if isinstance(blocker, Mapping) else None for blocker in step["automation_blockers"]]}
+                 for step in case.get("steps", []) if isinstance(step, Mapping)
+                 and isinstance(step.get("automation_blockers"), list) and step["automation_blockers"]]
+        if steps:
+            rows.append({"case_id": case.get("case_id"), "steps": steps})
+    return rows
+
+
+def blocker_count(document: Mapping[str, Any]) -> int:
+    """The number of canonical automation blockers (terminal evidence ``blocker_count``)."""
+    return sum(len(step["codes"]) for case in blocked_cases(document) for step in case["steps"])
+
+
 def validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]]:
     """Return deterministic schema followed by relational diagnostics for canonical 1.0.0 and 1.1.0."""
     diagnostics = schema_diagnostics(document, _CANONICAL_DOCUMENT_SCHEMA, _ROOT)

@@ -3524,7 +3524,7 @@ def _validate_factual_receipt(
             effective = _read_effective_canonical_with_state(
                 project, root, state, str(attempt["attempt_id"]),
             )
-            expected_audit = check(trace_record["payload"], require_execution=True)
+            expected_audit = check(trace_record["payload"], require_execution=True, canonical=effective["document"])
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("invalid trace audit receipt") from error
         if (
@@ -3881,7 +3881,7 @@ def publish_execution_trace_pair(
         "trace_sha256": trace_sha256(trace),
         "payload": trace,
     })
-    audit = check(trace, require_execution=True)
+    audit = check(trace, require_execution=True, canonical=effective["document"])
     audit_receipt = _publish_bound_attempt_receipt(root, attempt_id, "trace-audit", {
         "execution_trace_receipt_digest": trace_receipt["digest"],
         "trace_sha256": trace_receipt["record"]["trace_sha256"],
@@ -5087,6 +5087,10 @@ def _result_facts(facts: Mapping[str, Any], policy_profile: str, *, external_cau
         raise ValueError("rework requires one rejected reviewer verdict")
     if reason == "EXECUTION_UNKNOWN" and (facts["completion"] != "PARTIAL" or facts["verification"] != "UNKNOWN"):
         raise ValueError("invalid result reason tuple")
+    # FaT-PA: the automated subset passed, the cases with blockers stayed manual
+    if reason == "AUTOMATION_PARTIAL" and (policy_profile != "local-pilot-v1" or facts["completion"] != "PARTIAL"
+                                           or facts["verification"] != "PASS" or e["blocker_count"] == 0):
+        raise ValueError("invalid result reason tuple")
     if reason == "REVIEW_CONTEXT_LIMIT" and (
         facts["completion"] != "PARTIAL"
         or facts["verification"] != "NOT_APPLICABLE"
@@ -5631,7 +5635,9 @@ def _validate_accepted_terminal_closure(
         ]
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("accepted terminal result lacks an effective canonical") from error
-    blocker_count = sum(len(step["automation_blockers"]) for _case_id, step in steps)
+    from tools.canonical_document import blocker_count as canonical_blocker_count
+
+    blocker_count = canonical_blocker_count(document)
     manual_steps = sum(step["manual_only"] is True for _case_id, step in steps)
     coverage = "MANUAL_ONLY" if manual_steps == len(steps) else "MIXED" if manual_steps else "FULL"
     if (

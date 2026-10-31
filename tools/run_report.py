@@ -464,6 +464,18 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
     return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or [])}
 
 
+def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
+    """FaT-PA: automated N of M cases, manual K with their blocker codes — the same split exec and finish print."""
+    if not attempt_id:
+        return None
+    from tools.finalize_attempt import automation_split
+
+    try:
+        return automation_split(root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+
+
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
     """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
     from tools import pilot_state as pilot
@@ -544,6 +556,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
+        "automation_split": _split(root, attempt_id),  # FaT-PA
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
@@ -612,7 +625,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
         f"- Профиль: {report['policy_profile']}", f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
-        "## Числа", "", *(f"- {key}: {_dash(value)}" for key, value in counts.items()), "",
+        "## Числа", "", *(f"- {key}: {_dash(value)}" for key, value in counts.items()),
+        *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа |", "|---|---|---|---|---|---|---|---|---|",
         *(f"| {_dash(c['stage'])} | {_dash(c['requested_at'])} | {_dash(c['step_sec'])} | {_dash(c['transport_attempts'])} | "

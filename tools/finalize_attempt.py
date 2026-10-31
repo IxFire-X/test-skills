@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 
 from tools.generated_delta import GeneratedDeltaError, apply_dispositions, inspect_attempt_delta, resolve_disposition_policy
 from tools import pilot_state
+from tools.canonical_document import blocker_count as canonical_blocker_count
 from tools.pilot_state import closure_cached as _closure_cached
 
 
@@ -623,11 +624,7 @@ def _durable_branch(
         ]
         manual_count = sum(step.get("manual_only") is True for step in steps)
         coverage = "MANUAL_ONLY" if steps and manual_count == len(steps) else "MIXED" if manual_count else "FULL"
-        blocker_count = sum(
-            len(step.get("automation_blockers", []))
-            for step in steps
-            if isinstance(step.get("automation_blockers"), list)
-        )
+        blocker_count = canonical_blocker_count(effective["document"])
         derived_acceptance_facts = {
             "canonical_schema_valid": True,
             "canonical_semantics_valid": True,
@@ -1045,11 +1042,7 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
     ]
     manual_count = sum(step.get("manual_only") is True for step in steps)
     coverage = "MANUAL_ONLY" if steps and manual_count == len(steps) else "MIXED" if manual_count else "FULL"
-    blocker_count = sum(
-        len(step.get("automation_blockers", []))
-        for step in steps
-        if isinstance(step.get("automation_blockers"), list)
-    )
+    blocker_count = canonical_blocker_count(effective["document"])
     files = _files(disposed)
     materialized_count = sum(row.get("materialization") == "MATERIALIZED" for row in files)
     retained_count = sum(row.get("disposition") == "RETAINED" for row in files)
@@ -1075,9 +1068,14 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
         else "BASELINE_INCOMPLETE" if "BASELINE_INCOMPLETE" in diagnostic_codes
         else operational_reason_code
     )
+    # FaT-PA: the cases with blockers stayed manual — a PASS of the rest is partial and never accepted as the whole
+    partial_automation = (verification == "PASS" and reason_code is None
+                          and bool(automation_artifact.get("artifacts", {}).get("excluded_cases")))
+    if partial_automation:
+        reason_code = "AUTOMATION_PARTIAL"
     facts = {
         "run_id": attempt["run_id"], "attempt_id": attempt_id, "attempt_state": "TERMINAL",
-        "completion": "PARTIAL" if verification == "UNKNOWN" else "COMPLETE",
+        "completion": "PARTIAL" if verification == "UNKNOWN" or partial_automation else "COMPLETE",
         "verification": verification, "coverage": coverage, "reason_code": reason_code,
         "canonical_schema_valid": True, "canonical_semantics_valid": True,
         "canonical_provenance_valid": True,
@@ -1129,8 +1127,7 @@ def _coverage_and_blockers(document: Mapping[str, Any]) -> tuple[str, int]:
     ]
     manual_count = sum(step.get("manual_only") is True for step in steps)
     coverage = "MANUAL_ONLY" if steps and manual_count == len(steps) else "MIXED" if manual_count else "FULL"
-    blockers = sum(len(step.get("automation_blockers", [])) for step in steps if isinstance(step.get("automation_blockers"), list))
-    return coverage, blockers
+    return coverage, canonical_blocker_count(document)
 
 
 def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int) -> tuple[str, str | None]:
@@ -1160,7 +1157,10 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
             run_root, attempt_id, f"autotest-reviewer:r{revision}", str(reviewer["MODEL_RESPONSE_RECEIVED"]["artifact_digest"]))["artifact"]
         verdict = reviewed["artifacts"]["autotest_review"]["verdict"]
         if verdict == "ПРИНЯТО":
-            if status_blocked or canonical_blockers:
+            # FaT-PA: GENERATED over canonical blockers is valid only with the blocked cases excluded (the validator
+            # checked the list against the canon before the answer was written)
+            partial = generated["artifacts"].get("excluded_cases") is not None
+            if status_blocked or (canonical_blockers and not partial):
                 # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
                 return "AUTOMATION_BLOCKED", None
             from tools.generated_delta import materialization_refusal
@@ -1213,6 +1213,27 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
         raise FinalizationError(f"ABANDON_NOT_NEEDED: автоматизация уже закончена ({outcome}) — попытку закрывает finish без --abandon",
                                 fix="python -m tools.run_pipeline finish --project <project> --run <run_id>")
     return outcome
+
+
+def automation_split(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
+    """FaT-PA: the automated and the manual cases of a partial automation (only reads); None when nothing is excluded.
+
+    The manual cases are ``blocked_cases`` of the effective canonical — the same reading as ``blocker_count`` and as the
+    validator's check of ``excluded_cases``; the automated ones are the cases the reviewed automation relates code to."""
+    from tools.canonical_document import blocked_cases
+    from tools.generated_delta import journal_automation
+
+    inputs = journal_automation(run_root, attempt_id)
+    if inputs is None or not inputs["automation"]["artifacts"].get("excluded_cases"):
+        return None
+    document = pilot_state.read_effective_canonical(run_root, attempt_id)["document"]
+    related = {str(row["case_id"]) for row in inputs["automation"]["artifacts"]["implementation_relations"]}
+    order = [str(case["case_id"]) for case in document["test_cases"]]
+    manual = blocked_cases(document)
+    automated = [case_id for case_id in order if case_id in related]
+    reasons = "; ".join(f"{row['case_id']} — {', '.join(dict.fromkeys(code for step in row['steps'] for code in step['codes']))}" for row in manual)
+    return {"automated": automated, "manual": manual, "total": len(order),
+            "summary": f"автоматизировано {len(automated)} из {len(order)} кейсов, вручную {len(manual)}: {reasons}"}
 
 
 def automation_next(run_root: Path, attempt_id: str) -> tuple[str, str | None]:

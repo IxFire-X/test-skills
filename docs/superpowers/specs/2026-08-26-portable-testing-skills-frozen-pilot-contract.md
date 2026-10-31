@@ -627,6 +627,14 @@ traceable. `FAIL`, `UNKNOWN`, `NOT_RUNNABLE`, `MANUAL_ONLY`, unresolved blockers
 unverified independence, a non-retained required file, or invalid finalization is not
 accepted.
 
+FaT-PA (2026-11-01). Was: any canonical blocker made the automation `BLOCKED` with no
+generated tests. Now: the automation may list exactly the cases with blockers in
+`excluded_cases` (checked against the canon); the other cases are automated, and their
+`PASS` closes `PARTIAL` with `reason_code = AUTOMATION_PARTIAL` and `accepted = false` —
+the rule above is unchanged. Why: one blocked step disabled every autotest of the run;
+the automated subset is reported (automated N of M, manual K with blocker codes), never
+claimed as the whole.
+
 `accepted` is calculated by a versioned policy profile and never replaces the factual
 axes.
 

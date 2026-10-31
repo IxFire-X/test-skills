@@ -1061,6 +1061,17 @@ _SECOND_PASS = {
 }
 
 
+def _automation_split(root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-PA: «автоматизировано N из M, вручную K» of a partial automation, for the human — not the whole set."""
+    from tools.finalize_attempt import automation_split
+
+    try:
+        split = automation_split(root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        split = None
+    return {"automation_split": split} if split else {}
+
+
 def _next_run(project: Path, manifest: Mapping[str, Any], reason_code: Any) -> dict[str, Any]:
     """FaT-G: after a closed negative outcome, the scan command of the same request — printed, never run here."""
     request = manifest.get("scan_request")
@@ -1830,6 +1841,7 @@ def _execute(
         "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
         **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+        **_automation_split(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
     })
     return int(closed["exit_code"])
 
@@ -1937,6 +1949,7 @@ def cmd_exec(args: Any) -> int:
             "accepted": terminal.get("accepted"), "executor": "local", "finalization": "complete",
             **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
             **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+            **_automation_split(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return exit_code(terminal)
     execution_receipt_path = (
@@ -2024,6 +2037,7 @@ def cmd_exec(args: Any) -> int:
             "accepted": result.get("accepted"), "executor": "local", "finalization": "complete",
             **_style_notes(project, Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
             **_report_mismatch(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
+            **_automation_split(Path(coordinates["run_root"]), str(coordinates["attempt"]["attempt_id"])),
         })
         return int(closed["exit_code"])
     try:
@@ -2435,6 +2449,7 @@ def cmd_finish(args: Any) -> int:
         **_review_notes_summary(root, attempt_id),
         **_style_notes(project, root, attempt_id),
         **_report_mismatch(root, attempt_id),
+        **_automation_split(root, attempt_id),
         **({"fix": "только если человек согласен на ревью в той же сессии, повтори scan этого запроса с --accept-self-review: "
                    + (_scan_command(project, manifest["scan_request"], extra=() if manifest["scan_request"].get("accept_self_review")
                                     else ("--accept-self-review",))

@@ -71,6 +71,11 @@
       "required": ["case_id", "step_id"],
       "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}, "step_id": {"type": "string", "pattern": "^STEP-[A-Za-z0-9_.:-]+$"}}
     },
+    "excluded_case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["case_id"],
+      "properties": {"case_id": {"type": "string", "pattern": "^TC-[A-Za-z0-9_.:-]+$"}}
+    },
     "diagnostic": {
       "type": "object", "additionalProperties": false,
       "required": ["path", "code", "message"],
@@ -88,6 +93,7 @@
         "generated_symbols": {"type": "array", "items": {"$ref": "#/$defs/generated_symbol"}},
         "implementation_relations": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/operation_relation"}, {"$ref": "#/$defs/assertion_relation"}]}},
         "manual_dispositions": {"type": "array", "items": {"$ref": "#/$defs/manual_disposition"}},
+        "excluded_cases": {"type": "array", "items": {"$ref": "#/$defs/excluded_case"}},
         "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
       },
       "allOf": [
