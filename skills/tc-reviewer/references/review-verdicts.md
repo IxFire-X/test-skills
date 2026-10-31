@@ -24,7 +24,7 @@ the affected canonical requirement and case/step. Do not claim full coverage fro
 the number of conditions, cases or relations. This audit belongs to the same single
 authoritative review; no additional reviewer role or user-supplied checklist is required.
 
-`tools.revision_selection` validates candidate digest, full successor lineage, source/canonical/case traceability, and identity preservation; `tools.canonical_document` validates canonical semantics. Canonical review has revision 1 and at most one complete mechanical successor revision 2; revision 3, destructive, partial, and choice-bearing changes are `ТРЕБУЕТ ДОРАБОТКИ`.
+`select` checks the candidate digest, full successor lineage, source/canonical/case traceability and identity preservation; `validate-canonical` checks canonical semantics. Canonical review has revision 1 and at most one complete mechanical successor revision 2; revision 3, destructive, partial, and choice-bearing changes are `ТРЕБУЕТ ДОРАБОТКИ`.
 
 The verdict is canonical evidence, not the terminal pipeline result. Acceptance remains a
 versioned policy decision after branch-valid trace and finalization; local execution also
