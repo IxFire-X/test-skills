@@ -10,6 +10,7 @@
     "source_requirements": {"type": "array", "minItems": 1, "items": {"$ref": "canonical-test-document.schema.json#/$defs/source_requirement"}},
     "header_digest": {"$ref": "#/$defs/digest"},
     "context_receipt_digest": {"$ref": "#/$defs/digest"},
+    "context_receipt_digests": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}, "description": "FaT-AU3: every context receipt each batch reads, in batch_index order; the first is context_receipt_digest; absent for one context batch"},
     "batches": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/batch"}},
     "digest": {"$ref": "#/$defs/digest"}
   },

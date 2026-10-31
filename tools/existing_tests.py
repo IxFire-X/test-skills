@@ -27,6 +27,7 @@ SUFFIX = ".existing-tests.md"
 
 _TEST_ANNOTATION = re.compile(r"@\s*(?:Test|ParameterizedTest|RepeatedTest)\b")
 _METHOD_NAME = re.compile(r"\b(\w+)\s*\(")
+_DIGEST_TEXT = re.compile(r"sha256:[0-9a-f]{64}")
 _HTTP_CALL = re.compile(r"\b(get|post|put|delete|patch)\s*\(\s*\"(/[^\"]*)\"", re.IGNORECASE)
 _STATUS = re.compile(r"status\(\)\s*\.\s*(is\w+)\s*\(\s*(\d{3})?\s*\)|HttpStatus\s*\.\s*([A-Z_]+)|statusCode\s*\(\s*(\d{3})\s*\)"
                      r"|status_code\s*==\s*(\d{3})")
@@ -282,38 +283,50 @@ def hint_line(case_ids: list[str]) -> str | None:
             "снижаются; дубль без нового условия — замечание.")
 
 
-def for_context(project: Path, context_receipt: Mapping[str, Any]) -> dict[str, Any]:
-    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files."""
+def for_context(project: Path, context_receipt: Mapping[str, Any] | list[Mapping[str, Any]]) -> dict[str, Any]:
+    """The map for one context receipt: its frozen inventory (by digest, from the run that froze it) and its files.
+
+    FaT-AU3: for the context receipts of one plan (one inventory) the one map of all their files — the HTTP keys of the
+    tests do not depend on the context, so a map per receipt would repeat them."""
     from tools.project_inventory import read_inventory_receipt
 
     project = Path(project).resolve()
-    name = str(context_receipt.get("inventory_digest", "")).removeprefix("sha256:") + ".json"
+    receipts = list(context_receipt) if isinstance(context_receipt, list) else [context_receipt]
+    if not receipts:
+        return {}
+    name = str(receipts[0].get("inventory_digest", "")).removeprefix("sha256:") + ".json"
     frozen = sorted((project / ".pilot-runs").glob("*/inventories/" + name))
     if not frozen:
         return {}
     inventory = read_inventory_receipt(frozen[0])
-    return build_map(project, inventory, [str(row["project_path"]) for row in context_receipt.get("files") or []])
+    return build_map(project, inventory, [str(row["project_path"]) for receipt in receipts for row in receipt.get("files") or []])
 
 
-def context_view(run_root: Path, context_digest: str, attempt_id: str | None = None) -> bytes:
-    """The map bytes of one batch context, built from the frozen inputs; empty when the digest is no context selection of
-    the attempt or the project has no hits.  FaT-RE: the one source of these bytes for step-inputs and the run report."""
+def context_view(run_root: Path, context_digests: str | list[str], attempt_id: str | None = None) -> bytes:
+    """The map bytes of the context of one generator batch, built from the frozen inputs; the digests that are no context
+    selection of the attempt are skipped, empty when none is or the project has no hits.  FaT-RE: the one source of these
+    bytes for step-inputs and the run report; FaT-AU3: one map for all the context receipts the batch reads."""
     from tools.pilot_state import _context_selection_target, derive_state, read_context_selection
 
     root = Path(run_root).resolve()
     attempt_id = attempt_id or str(derive_state(root)["attempts"][-1]["attempt_id"])
-    if not _context_selection_target(root, attempt_id, str(context_digest)).is_file():
+    digests = [context_digests] if isinstance(context_digests, str) else list(context_digests)
+    selected = [str(digest) for digest in digests if _DIGEST_TEXT.fullmatch(str(digest))
+                and _context_selection_target(root, attempt_id, str(digest)).is_file()]
+    if not selected:
         return b""
-    return view_bytes(for_context(root.parent.parent, read_context_selection(root, attempt_id, str(context_digest))))
+    return view_bytes(for_context(root.parent.parent, [dict(read_context_selection(root, attempt_id, digest)) for digest in selected]))
 
 
-def ensure_view(run_root: Path, context_digest: str) -> Path | None:
-    """Write (or rewrite, when the bytes differ) the map file of one batch context; None when the project has no hits."""
+def ensure_view(run_root: Path, context_digests: str | list[str]) -> Path | None:
+    """Write (or rewrite, when the bytes differ) the map file of one batch context — named by its first context receipt;
+    None when the project has no hits."""
     from tools.confined_output import atomic_write_confined_bytes_at_root
 
     root = Path(run_root).resolve()
-    data = context_view(root, context_digest)
-    target = map_path(root, context_digest)
+    data = context_view(root, context_digests)
+    first = context_digests if isinstance(context_digests, str) else context_digests[0]
+    target = map_path(root, first)
     if not data:
         return None
     try:

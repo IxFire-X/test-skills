@@ -253,9 +253,36 @@ def run_existing_tests(root: Path, attempt_id: str) -> dict[str, Any]:
     """FaT-EC: the map of existing project tests for the context the generator's plan was built from (the one of
     ``step-inputs``); empty when the project has none."""
     from tools.existing_tests import for_context
+    from tools.pilot_state import read_context_selection
 
     found = _plan_context(Path(root), attempt_id)
-    return {} if found is None else for_context(Path(root).parent.parent, found[1])
+    if found is None:
+        return {}
+    plan, receipt = found
+    if plan is None or not isinstance(plan.get("context_receipt_digests"), list):
+        return for_context(Path(root).parent.parent, receipt)
+    # FaT-AU3: the one map of all the context receipts the generator read
+    return for_context(Path(root).parent.parent, [dict(read_context_selection(Path(root), attempt_id, str(digest)))
+                                                 for digest in plan["context_receipt_digests"]])
+
+
+def run_context_note(root: Path, attempt_id: str) -> str | None:
+    """FaT-AU3: with more than one context batch, which of them the generator saw — the line of plan-batches; None with one
+    context batch (the view keeps its bytes) or before a plan."""
+    from tools.batch_assembly import context_digests, context_note
+    from tools.pilot_state import derive_state, read_context_selection
+
+    found = _plan_context(Path(root), attempt_id)
+    if found is None or found[0] is None:
+        return None
+    selected = list(dict.fromkeys(str(event["artifact_digest"]) for event in derive_state(Path(root))["events"]
+                                  if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+    if len(selected) < 2:
+        return None
+    receipts = sorted((read_context_selection(Path(root), attempt_id, digest) for digest in selected), key=lambda item: int(item["batch_index"]))
+    seen = set(context_digests(found[0]))
+    taken = [receipt for receipt in receipts if receipt["digest"] in seen]
+    return context_note([*taken, *(receipt for receipt in receipts if receipt["digest"] not in seen)], len(taken))
 
 
 def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None, Mapping[str, Any]] | None:
@@ -407,7 +434,8 @@ IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предус
 
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
-           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0) -> bytes:
+           reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
+           context: str | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
@@ -436,6 +464,7 @@ def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping
         " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
         " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
         *(["- " + IMPORT_NOTE] if imported else []),  # FaT-IMP: one line, the view of other runs keeps its bytes
+        *([f"- {context[:1].upper()}{context[1:]}."] if context else []),  # FaT-AU3: one line with more than one context batch
         *([f"- Импорт: нормализовано: {_cells(normalized)} кодом (пустая Test Data → «—», пустой Objective → Name);"
            " сверка человеческих полей идёт с ними"] if imported and normalized else []),
         "- reviewed_case_ids по порядку: " + ", ".join(case["case_id"] for case in document["test_cases"]), "",
@@ -577,6 +606,10 @@ def main(argv: list[str] | None = None) -> int:
             existing = None if profile == "autotest" or not state["attempts"] else run_existing_tests(root, str(state["attempts"][-1]["attempt_id"]))
         except (OSError, ValueError, KeyError, TypeError):
             existing = None
+        try:  # FaT-AU3: which context batches the generator saw — a hint too, never a stop
+            context = None if profile == "autotest" or not state["attempts"] else run_context_note(root, str(state["attempts"][-1]["attempt_id"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            context = None
         from tools.cases_import import cases_path
         from tools.pilot_state import read_reference_cases
 
@@ -584,7 +617,8 @@ def main(argv: list[str] | None = None) -> int:
         data = render(document, profile, *(grouping or (None, None)), existing=existing,
                       reference=None if reference is None else reference["cases"],
                       imported=profile == "review" and cases_path(root) is not None,
-                      normalized=_normalized(root, state) if profile == "review" and cases_path(root) is not None else 0)
+                      normalized=_normalized(root, state) if profile == "review" and cases_path(root) is not None else 0,
+                      context=context)
         atomic_write_confined_bytes_at_root(project, root, target, data)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))

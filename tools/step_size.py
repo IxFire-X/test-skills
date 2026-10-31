@@ -276,6 +276,7 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         for carrier, _field, _size in rows:
             carried.setdefault(carrier, set()).add(key)
     files: list[dict[str, Any]] = []
+    contexts: list[str] = []
     bindings: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
     for position, (digest, key) in enumerate(zip(digests, keys)):
@@ -304,13 +305,16 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
             targets = [path]
         files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
         if stage.startswith("tc-generator:") and selections in path.parents:
-            # FaT-EC: the map of existing project tests for this context — built (again, when its bytes differ) from the
-            # frozen inventory and the receipt; no input digest of its own, like the autotest view
-            from tools.existing_tests import ensure_view
+            contexts.append(digest)
+    if contexts:
+        # FaT-EC: the map of existing project tests for the context — built (again, when its bytes differ) from the
+        # frozen inventory and the receipts; no input digest of its own, like the autotest view.  FaT-AU3: one map for
+        # all the context receipts of the batch, named by the first
+        from tools.existing_tests import ensure_view
 
-            existing = ensure_view(root, digest)
-            if existing is not None:
-                files.append({"digest": digest, "path": str(existing), "bytes": existing.stat().st_size, "basis": "карта"})
+        existing = ensure_view(root, contexts)
+        if existing is not None:
+            files.append({"digest": contexts[0], "path": str(existing), "bytes": existing.stat().st_size, "basis": "карта"})
     result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
               "unresolved": unresolved}
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):

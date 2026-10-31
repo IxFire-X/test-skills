@@ -218,11 +218,10 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
         # bytes step-inputs gives it (FaT-EC); the skeleton of an import is an input digest of its own already
         from tools.existing_tests import context_view
 
-        for digest in inputs:
-            try:
-                resolved += len(context_view(root, str(digest), str(call["attempt_id"])))
-            except (KeyError, OSError, TypeError, ValueError):
-                pass
+        try:  # FaT-AU3: one map for all the context receipts of the batch
+            resolved += len(context_view(root, [str(digest) for digest in inputs], str(call["attempt_id"])))
+        except (KeyError, OSError, TypeError, ValueError):
+            pass
     call["input_basis"] = basis
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
     answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))

@@ -1814,7 +1814,8 @@ def _validate_model_request_predecessors(
 
         markers = [event for event in events if event.get("stage_instance_id") == "context-marker:baseline" and event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
         # FaT-BO: from batch 2 a fifth input — the capabilities of the earlier batches (prior-capabilities)
-        if len(inputs) not in (4, 5, 6) or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
+        # the exact list (FaT-DG, FaT-AU3: M context receipts) is checked at publish time by _expected_model_inputs
+        if len(inputs) < 4 or len(markers) != 1 or markers[0]["seq"] >= cutoff or inputs[0] != markers[0].get("artifact_digest"):
             raise ValueError("tc-generator input digests must bind its prior marker, context, plan, and header")
         _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:baseline", inputs[0])
         context = read_context_selection(root, attempt_id, inputs[1])
@@ -1842,13 +1843,24 @@ def _validate_model_request_predecessors(
             raise ValueError("tc-reviewer input digests and invocation must bind its prior candidate and reviewer boundary")
 
 
+def _is_context_selection(root: Path, attempt_id: str, digest: str) -> bool:
+    try:
+        read_context_selection(root, attempt_id, digest)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: Mapping[str, Any], value: Mapping[str, Any]) -> None:
     if request["stage"] != "tc-generator":
         return
     inputs = request["input_digests"]
     context = read_context_selection(root, attempt_id, inputs[1])
+    # FaT-AU3: plan and header follow the context receipts of the plan — one, or its list
+    after = inputs.index(value.get("plan_digest"), 2) if value.get("plan_digest") in inputs[2:] else 2
     if (
-        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != inputs[1:4]
+        [value.get("context_receipt_digest"), value.get("plan_digest"), value.get("header_digest")] != [inputs[1], *inputs[after:after + 2]]
+        or any(not _is_context_selection(root, attempt_id, digest) for digest in inputs[2:after])
         or value.get("context_receipt") != context
     ):
         raise ValueError("generator fragment must match its request and stored context receipt")
@@ -4598,6 +4610,16 @@ def _generator_input_digest(value: Mapping[str, Any]) -> str:
     return with_digest({key: item for key, item in value.items() if key != "digest"})["digest"]
 
 
+def _plan_contexts(plan: Mapping[str, Any]) -> list[str]:
+    """FaT-AU3: the context receipts every generator batch of the plan reads, in order (one before the list)."""
+    from tools.batch_assembly import context_digests
+
+    if isinstance(plan.get("context_receipt_digests"), list) or "context_receipt_digest" in plan:
+        return context_digests(plan)
+    batches = plan.get("batches") or []
+    return [str(batches[0]["context_receipt_digest"])] if batches and isinstance(batches[0], Mapping) else []
+
+
 def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
     batches = plan.get("batches")
     return isinstance(batches, list) and bool(batches) and all(
@@ -4638,14 +4660,15 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
             if row["header_digest"] != header["digest"]:
                 raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
                                  f"header is {header['digest']}; fix: put {header['digest']} as header_digest in the grouping and rerun plan-batches")
-            try:
-                read_context_selection(root, attempt_id, str(row["context_receipt_digest"]))
-            except ValueError as error:
-                selected = sorted({str(event["artifact_digest"]) for event in state["events"]
-                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
-                raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {row['context_receipt_digest']}, which "
-                                 f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
-                                 "(tools.api read-context --digest <d>)") from error
+            for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # FaT-AU3: and the list
+                try:
+                    read_context_selection(root, attempt_id, context)
+                except ValueError as error:
+                    selected = sorted({str(event["artifact_digest"]) for event in state["events"]
+                                       if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
+                    raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
+                                     f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
+                                     "(tools.api read-context --digest <d>)") from error
     try:
         prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, receipt_kind, "ARTIFACT_READ_BACK")["record"][kind]
     except (ValueError, OSError, KeyError):
@@ -4701,6 +4724,8 @@ def _expected_model_inputs(
         expected = [
             (str(markers[0]["artifact_digest"]), "result.content_digest ответа context-marker:baseline (model-response)"),
             (str(batch["context_receipt_digest"]), f"context_receipt_digest батча {instance} в опубликованном плане"),
+            # FaT-AU3: the further context receipts of the plan, in its order
+            *((context, f"context_receipt_digests[{index}] опубликованного плана") for index, context in enumerate(_plan_contexts(plan)) if index),
             (str(plan["digest"]), "result.digest команды publish-generator-input --kind plan"),
             (str(header["digest"]), "result.digest команды publish-generator-input --kind header"),
         ]
@@ -4711,7 +4736,7 @@ def _expected_model_inputs(
             except (ValueError, OSError, KeyError) as error:
                 raise ModelInputsMismatch(
                     f"MODEL_INPUTS_MISMATCH: capabilities прошлых пачек для {instance} не опубликованы; fix: tools.api prior-capabilities "
-                    f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — пятый вход"
+                    f"--run-root <run> --attempt {attempt_id} --batch-id {instance}, его result.digest — вход сразу после header"
                 ) from error
             expected.append((str(prior["digest"]), f"result.digest команды tools.api prior-capabilities --batch-id {instance}"))
         if _imported_cases(project, root, state, attempt_id) is not None:  # FaT-SKB: the skeleton of this batch is its last input
@@ -4814,7 +4839,11 @@ def _response_digest_rows(
     try:
         if stage == "tc-generator":
             inputs = request["input_digests"]
-            for pointer, index, name in (("/context_receipt_digest", 1, "context"), ("/plan_digest", 2, "plan"), ("/header_digest", 3, "header")):
+            try:  # FaT-AU3: further context receipts of the published plan shift plan and header
+                more = len(_plan_contexts(_generator_input(project, root, state, attempt_id, "plan"))) - 1
+            except ModelInputsMismatch:
+                more = 0
+            for pointer, index, name in (("/context_receipt_digest", 1, "context"), ("/plan_digest", 2 + more, "plan"), ("/header_digest", 3 + more, "header")):
                 check(pointer, value.get(pointer[1:]), str(inputs[index]), f"вход {index + 1} запроса ({name})")
             check("/digest", value.get("digest"), _model_stage_artifact_digest({key: item for key, item in value.items() if key != "digest"}),
                   "самодайджест фрагмента (без поля digest)")

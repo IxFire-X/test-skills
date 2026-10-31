@@ -107,7 +107,9 @@ def _cmd_cases_import(a):
 
 def _cmd_plan_batches(a):
     imported = a.imported if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value; FaT-SK: its bytes
-    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, a.context_receipt, imported)
+    # FaT-AU3: one --context-receipt per context batch of the attempt; one is the receipt itself, as before
+    contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
+    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts, imported)
 
 
 def _cmd_validate_fragment(a):
@@ -216,7 +218,7 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "read-context": (_cmd_read_context, (*RUN, "--digest"), None, ()),
     "cases-import": (_cmd_cases_import, RUN, None, ()),
     "plan-batches": (_cmd_plan_batches, (("--requirements", _json), ("--grouping", _json), ("--project", Path),
-                                         ("--input-file", Path, "append"), ("--context-receipt", _json), ("--imported", _json, None)), None, ()),
+                                         ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None)), None, ()),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
                                                    ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),

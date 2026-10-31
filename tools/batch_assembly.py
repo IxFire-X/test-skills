@@ -91,8 +91,16 @@ def _evidence_digests(grouping_evidence: dict[str, Any]) -> tuple[str, str]:
     return _digest_value(grouping_evidence, "header_digest"), _digest_value(grouping_evidence, "context_receipt_digest")
 
 
+def context_digests(value: Mapping[str, Any]) -> list[str]:
+    """FaT-AU3: the context receipts every batch of a plan (or a grouping) reads, in batch_index order — the list
+    ``context_receipt_digests`` or, before it and for one context batch, the one ``context_receipt_digest``."""
+    listed = value.get("context_receipt_digests")
+    return [str(item) for item in listed] if isinstance(listed, list) and listed else [str(value.get("context_receipt_digest"))]
+
+
 ANSWER_PER_TEXT_BYTE = 42  # FaT-BO: the largest "fragment bytes / source requirement text bytes" of the 28.10 campaign (23–41)
 IMPORT_ANSWER_PER_HUMAN_BYTE = 5  # FaT-IMP: a full case of the campaign is 3.9–4.5 times its human fields
+NO_ROOM = "не оставляет места ответу"  # FaT-AU3: the note of a step input that leaves the answer no room; the ceiling of the context reads it
 WINDOW_SHARE = 0.85  # FaT-BO: input + expected answer of one batch stay under this share of the model window
 _LETTER_ID = re.compile(r"(?:#{1,6}[^\n]*\n\s*)?(?:[-*]\s+)?([^\W\d_]{1,4})[-_.]?\d")
 _HEADING = re.compile(r"#{1,2}\s+(\S.*)")
@@ -204,7 +212,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
     if total <= cap:
         return None, [f"одна пачка: оценка ответа {total} Б ≤ {budget}"]
     if cap <= 0:
-        return None, [f"одна пачка: вход шага {step_input} Б не оставляет места ответу в окне {window_bytes} Б — сузьте контекст"]
+        return None, [f"одна пачка: вход шага {step_input} Б {NO_ROOM} в окне {window_bytes} Б — сузьте контекст"]
     if imported is not None:
         keys: dict[str, str | None] = {item["source_requirement_id"]: "case:" + item["source_requirement_id"] for item in source}
         counts = {"imported": len(source)}
@@ -275,9 +283,15 @@ def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> 
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
                  documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None) -> BatchPlan:
-    """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO)."""
+    """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO).
+
+    FaT-AU3: a grouping with more than one context receipt (``context_receipt_digests``, the first one is
+    ``context_receipt_digest``) gives a plan with the same list: every batch reads all of them."""
     source = _source_requirements(source_requirements)
     header_digest, context_digest = _evidence_digests(grouping_evidence)
+    contexts = context_digests(grouping_evidence)
+    if contexts[0] != context_digest or len(set(contexts)) != len(contexts):
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "grouping context_receipt_digests must be unique and start with context_receipt_digest")
     groups, notes = _size_split(source, window_bytes, input_bytes, id_pattern, documents or {}, imported)
     physical_order = {item["source_requirement_id"]: item["display_order"] for item in source}
     batches = []
@@ -293,7 +307,10 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
             "context_receipt_digest": context_digest,
             "completeness": "COMPLETE",
         })
-    plan = BatchPlan(_with_digest({"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}))
+    body: dict[str, Any] = {"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}
+    if len(contexts) > 1:  # one context batch: the plan bytes as before FaT-AU3
+        body["context_receipt_digests"] = contexts
+    plan = BatchPlan(_with_digest(body))
     _schema_valid(plan, _PLAN_SCHEMA, "batch plan")
     plan.notes = notes
     return plan
@@ -303,27 +320,78 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 
 
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
-                             input_files: list[Path], context_receipt: dict[str, Any], imported: Mapping[str, Any] | None = None) -> BatchPlan:
+                             input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
+                             imported: Mapping[str, Any] | None = None) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
-    it (the given files, the context files of the receipt, the map of existing project tests — FaT-EC — the skeleton of an
-    import — FaT-SK — and the tc-generator role), the documents of the receipt.
+    it (the given files, the context files of the receipts, the map of existing project tests — FaT-EC — the skeleton of an
+    import — FaT-SK — and the tc-generator role), the documents of the receipts.
 
     ``imported`` is the imported-cases receipt (or its value).  FaT-SKB: a batch reads the skeleton of its own cases only, so
-    the skeleton is no part of the common step input — the bytes of each case join the share of its batch (``_size_split``)."""
+    the skeleton is no part of the common step input — the bytes of each case join the share of its batch (``_size_split``).
+
+    FaT-AU3: ``context_receipt`` may be every context receipt of the attempt (the grouping lists them in
+    ``context_receipt_digests``).  Every batch reads the receipts of the plan, so the plan takes them in ``batch_index``
+    order while they add no batch (no model call more) to the plan with the first one alone; the first is always taken
+    (as before), the rest the plan names in a note."""
     from tools.existing_tests import for_context, view_bytes
     from tools.step_size import measure, step_window
 
     project = Path(project).resolve()
-    _validate_context_receipt(context_receipt, _evidence_digests(grouping_evidence)[1])
-    context_files, documents = _context_documents(project, context_receipt)
+    receipts = list(context_receipt) if isinstance(context_receipt, list) else [context_receipt]
+    given = context_digests(grouping_evidence)
+    for receipt in receipts:
+        if not isinstance(receipt, dict) or receipt.get("digest") not in given:
+            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding")
+        _validate_context_receipt(receipt, str(receipt["digest"]))
+    if sorted(str(receipt["digest"]) for receipt in receipts) != sorted(given) or len(receipts) != len(given):
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "plan-batches needs every context receipt of the grouping, "
+                                 "one --context-receipt each: " + ", ".join(given))
+    if len(receipts) > 1:
+        receipts.sort(key=lambda receipt: int(receipt["batch_index"]))
+        if receipts[0]["digest"] != _evidence_digests(grouping_evidence)[1]:
+            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "grouping context_receipt_digest must be the context receipt with the "
+                                     f"lowest batch_index: {receipts[0]['digest']}")
     value = imported.get("imported", imported) if imported is not None else None
-    step_input = measure(project, [*map(Path, input_files), *context_files], "tc-generator",
-                         extra_bytes=len(view_bytes(for_context(project, context_receipt))))["bytes"]
-    plan = plan_batches(source_requirements, grouping_evidence, window_bytes=step_window(project), input_bytes=step_input,
-                        id_pattern=_grouping_pattern(project), documents=documents, imported=value)
+    window, pattern = step_window(project), _grouping_pattern(project)
+
+    def plan_with(taken: list[dict[str, Any]]) -> BatchPlan:
+        files: list[Path] = []
+        documents: dict[str, str] = {}
+        for receipt in taken:
+            context_files, texts = _context_documents(project, receipt)
+            files.extend(context_files)
+            documents.update(texts)
+        maps = len(view_bytes(for_context(project, taken)))  # FaT-AU3: one map of all the receipts the batch reads
+        step_input = measure(project, [*map(Path, input_files), *files], "tc-generator", extra_bytes=maps)["bytes"]
+        evidence = {key: item for key, item in grouping_evidence.items() if key != "context_receipt_digests"}
+        if len(taken) > 1:
+            evidence["context_receipt_digests"] = [str(receipt["digest"]) for receipt in taken]
+        return plan_batches(source_requirements, evidence, window_bytes=window, input_bytes=step_input, id_pattern=pattern,
+                            documents=documents, imported=value)
+
+    plan, taken = plan_with(receipts[:1]), 1
+    while taken < len(receipts):
+        wider = plan_with(receipts[:taken + 1])
+        # the context the window has room for free: no batch more (no more model calls), never «no room for the answer»
+        if len(wider["batches"]) > len(plan["batches"]) or any(NO_ROOM in note for note in wider.notes):
+            break
+        plan, taken = wider, taken + 1
+    if len(receipts) > 1:
+        plan.notes.append(context_note(receipts, taken))
     if value is not None:
         plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
     return plan
+
+
+def context_note(receipts: list[Mapping[str, Any]], taken: int) -> str:
+    """FaT-AU3: which context batches every generator batch sees — for the plan-batches output and the reviewer view."""
+    seen = sum(int(receipt["byte_count"]) for receipt in receipts[:taken])
+    total = sum(int(receipt["byte_count"]) for receipt in receipts)
+    line = f"контекст: генератор видит {taken} из {len(receipts)} батчей контекста ({seen} из {total} Б)"
+    if taken == len(receipts):
+        return line
+    hidden = ", ".join(f"{receipt['batch_index']} ({receipt['byte_count']} Б)" for receipt in receipts[taken:])
+    return (line + f"; не видит батчи {hidden}: с ними пачек стало бы больше — по ним у генератора только сводка маркера")
 
 
 def _grouping_pattern(project: Path) -> re.Pattern[str] | None:

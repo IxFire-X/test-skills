@@ -242,15 +242,18 @@ Run остаётся связан с исходной project/module identity.
    каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
    `tools.api read-context --digest <d>`. Сначала header: `tools.api publish-generator-input --kind header --value <f>`
    (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. План — `tools.api plan-batches
-   --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f>`, затем
+   --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f>` — по одному
+   `--context-receipt` на каждый receipt попытки; при нескольких в grouping — `context_receipt_digests` (все digests,
+   первым — receipt с наименьшим `batch_index`, он же `context_receipt_digest`). Затем
    `tools.api publish-generator-input --kind plan --value <план>`. У plan и header один digest — `result.digest` этой
    команды; sha256 байтов файла входом не бывает. Пачки делит код по оценке ответа и окну `.skillsrc
    limits.step_window_bytes`, группы требований не рвёт; `notes` в выводе — сколько пачек и почему, покажи их человеку как есть.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs — пачки строго по очереди (`ordinal`),
    пачка k после принятого ответа пачки k−1, не параллельно.
-   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; с пачки 2 — пятый вход,
+   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; если в плане есть
+   `context_receipt_digests`, вместо одного `context.digest` идут все они по порядку плана. С пачки 2 — ещё вход,
    capabilities прошлых пачек: `tools.api prior-capabilities --run-root <run> --attempt <attempt_id> --batch-id <id>`
-   (код строит его из журнала), его `result.digest` — пятый `--input-digest`. Неверный вход `model-request`
+   (код строит его из журнала), его `result.digest` — следующий `--input-digest` после header. Неверный вход `model-request`
    отклоняет (`MODEL_INPUTS_MISMATCH`) и называет правильный digest и его источник. Digest-поля ответов (фрагмента,
    ревьюеров, автотестов) `model-response` сверяет с журналом до записи (`MODEL_RESPONSE_DIGEST_MISMATCH`) — это ошибка
    ответа, на неё идёт единственный повтор стадии.
