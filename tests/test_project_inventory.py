@@ -128,7 +128,7 @@ def test_inventory_does_not_drop_a_user_requirements_to_do_directory(tmp_path: P
 
 @pytest.mark.parametrize(("text", "found"), [
     (b"https://tester:Secr3t9@stand.local/login", True),
-    (b"1http://u:p@host", True),  # a run that starts with a digit but holds a letter
+    (b"1http" + b"://u:p@host", True),  # a run that starts with a digit but holds a letter
     (b"x" * 40 + b"://u:p@host", True),  # a scheme longer than 32 characters
     (b"jdbc:postgresql://admin:Pa55word@db:5432/app", True),
     (b"-.+://u:p@host", False),  # no letter before «://»
