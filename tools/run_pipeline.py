@@ -45,8 +45,19 @@ _PRINTED: list[dict[str, Any]] = []
 
 
 def _print(payload: dict[str, Any]) -> None:
+    if payload.get("status") == "error":
+        payload = _envelope(payload)
     _PRINTED[:] = [payload]
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """FaT-U5: the one refusal envelope {status, code, message, fix, next}; ``reason`` stays beside ``code``."""
+    next_step = payload.get("next_step")
+    command = next_step.get("command") if isinstance(next_step, Mapping) else None
+    reason = payload.get("reason") or payload.get("code") or "ERROR"
+    return {**payload, "code": payload.get("code") or reason, "message": payload.get("message") or payload.get("detail") or reason,
+            "fix": payload.get("fix"), "next": payload.get("next", command)}
 
 
 def _digest_bytes(data: bytes) -> str:

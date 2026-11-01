@@ -47,7 +47,8 @@ def _api(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], er
 def test_api_prints_the_prefixed_code_of_a_pilot_state_refusal(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     code, output = _api(monkeypatch, capsys, ValueError("GENERATOR_INPUT_DIGEST: the header digest x is not its self-digest y"))
     assert code == 2 and output["status"] == "error" and output["code"] == "GENERATOR_INPUT_DIGEST"
-    assert output["message"] == "GENERATOR_INPUT_DIGEST: the header digest x is not its self-digest y" and "fix" not in output
+    # FaT-U5: the one envelope always carries fix (null when the refusal names none)
+    assert output["message"] == "GENERATOR_INPUT_DIGEST: the header digest x is not its self-digest y" and output["fix"] is None
 
 
 def test_api_gives_the_fix_tail_as_its_own_field_too(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

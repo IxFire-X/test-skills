@@ -282,9 +282,8 @@ Run остаётся связан с исходной project/module identity.
    Передай reviewer исходные authorized requirement bytes через существующие immutable
    context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.
 5. Немедленно опубликуй revision 1 как `UNREVIEWED` с V4 derived bundle и прочитай exact
-   bytes обратно (`python -m tools.orchestrate_test_case_revision publish --candidate <f> --output-dir <dir>
-   --run-root <run> --attempt-id <id> --out <run>/tmp/candidate-receipt.json`); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`.
-   `--out` — квитанция кандидата для `--candidate-receipt`; потерял её (после `/clear`) — повтори тот же publish: тот же кандидат даёт ту же квитанцию.
+   bytes обратно (`tools.api review-publish --run-root <run> --attempt <id> --output-dir <dir>`; кандидата код собирает
+   из журнала); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`. Повтор даёт ту же квитанцию.
    HTML/CSV никогда не становятся downstream model input.
 
 Human-facing canonical поля обязательны на русском; technical tokens сохраняются
@@ -294,25 +293,26 @@ exact. Не ограничивай число requirements/cases искусст�
 
 Controller формирует immutable package из candidate, exact requirements/context/source
 evidence и provenance. Открой одну fresh role-isolated reviewer session
-(`python -m tools.orchestrate_test_case_revision open-session … --session-start <run>/tmp/session-start.json`) и вызови
-`tc-reviewer`; выбор ревизии по вердикту — `python -m tools.orchestrate_test_case_revision select …` (у `select` — тот же `--output-dir`, что у `publish`) с
-`--reviewer-session` из `tools.api complete-review --out <run>/tmp/session.json` (сессию с вердиктом строит код из
-журнала и ответа ревьюера после `model-response`; руками её не собирай) и `--review` — тем же ответом ревьюера. До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
+(`tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --session-start <run>/tmp/session-start.json`)
+и вызови `tc-reviewer`; выбор ревизии — `tools.api review-select … --output-dir <dir>` с `--reviewer-session` из
+`tools.api complete-review --out <run>/tmp/session.json` (сессию строит код из журнала; руками не собирай). Входы пакета
+(кандидат, квитанции, разметка, ответы пачек, ответ ревьюера, evidence) review-* берут из журнала; переданный файл код
+только сверяет (`REVIEW_INPUT_MISMATCH` — поле и источник). Старые имена `tools.orchestrate_test_case_revision
+publish|open-session|select` ещё работают (`COMMAND_RENAMED`). До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
 candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <boundary.canonical_branch_digest>`
 (повтор с тем же digest ничего не меняет, другой digest — отказ); сам вызов окружи stage-bound `MODEL_REQUESTED` и
 `MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
 Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
 boundary.package_digest]` из прочитанного `reviewer-session-boundary` и его exact
 `reviewer_invocation_id`. Request проверяет существующие boundary/ledger и порядок.
-Файл `--session-start` строит код, руками его не собирай: `tools.api session-start` с теми же `--candidate`,
-`--candidate-receipt`, `--assembly-receipt`, `--inventory-receipt`, `--context-receipt`, `--context-marker-output`,
-`--generator-fragment`, что у `open-session`, и `--out <run>/tmp/session-start.json`, плюс два твоих заявления:
+Файл `--session-start` строит код, руками его не собирай: `tools.api session-start --run-root <run> --attempt <id>
+--output-dir <dir> --out <run>/tmp/session-start.json`, плюс два твоих заявления:
 `--reviewer-invocation-id <id вызова ревьюера>` (тот же id потом в его `model-request`) и `--fresh-context yes|no`.
 Называй честно: `yes` — только если ревьюер отдельный субагент или вызов без истории генерации; ревью в этой же
 сессии — `no`, и оно допустимо только при флаге из §1 (иначе отказ `INDEPENDENCE_UNVERIFIED` с fix). Бюджет сессии
 `context_budget_bytes` = `base_package_byte_count` пакета ревью + `.skillsrc limits.context_batch_bytes` (256 КиБ по
 умолчанию: место под C-lite evidence); бюджет, `distinct_invocations` (твой id против id генератора из журнала) и
-`evidence_digest` считает код. Бюджет меньше пакета — `open-session` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
+`evidence_digest` считает код. Бюджет меньше пакета — `review-open` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
 
 Ревью без свежего контекста допускается только по флагу из §1 (вопрос задаётся до scan).
 
@@ -333,10 +333,9 @@ boundary.package_digest]` из прочитанного `reviewer-session-bounda
 Successful session содержит ровно один verdict; explicit terminal pre-verdict abort,
 включая `REVIEW_CONTEXT_LIMIT`, содержит ноль.
 Ревьюер просит файлы проекта — `tools.api review-evidence --path <путь в проекте> [--path …]`: код публикует receipt
-и дописывает пару в ledger (digest считает код); `result.evidence_receipt.digest` потом в `select --evidence-receipt`
-(файл — `tools.api read-context --digest <d> --out <run>/tmp/evidence-N.json`). Не хватает бюджета — отказ
+и дописывает пару в ledger (digest считает код; `review-select` берёт evidence из ledger). Не хватает бюджета — отказ
 `REVIEW_CONTEXT_LIMIT`: закрой сессию `tools.api review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json`
-и вызови `select` с этим `--reviewer-session` без `--review`. Ответ ревьюера дважды не прошёл проверку или `select`
+и вызови `review-select` с этим `--reviewer-session`. Ответ ревьюера дважды не прошёл проверку или `review-select`
 отказал, а сессия ждёт вердикта — то же с `--reason REVIEW_UNUSABLE`.
 
 Ревьюер читает кандидата в компактном виде, не полный JSON (FaT-CV):

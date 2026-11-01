@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, pilot_state, run_tests, step_size
-from tools.json_cli import JsonArgumentParser, error_fields
+from tools.json_cli import JsonArgumentParser, error_envelope
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
 
@@ -137,12 +137,32 @@ def _cmd_validate_canonical(a):
     return canonical_document.validate_canonical_document(a.document)
 
 
+def _review_files(a):
+    """FaT-U5: the reviewer-package files the agent passed — compared with the journal, never the source."""
+    return {"candidate": a.candidate, "candidate_receipt": getattr(a, "candidate_receipt", None), "assembly_receipt": getattr(a, "assembly_receipt", None),
+            "inventory_receipt": getattr(a, "inventory_receipt", None), "context_receipts": getattr(a, "context_receipt", None),
+            "context_marker_output": getattr(a, "context_marker_output", None), "generator_fragments": getattr(a, "generator_fragment", None)}
+
+
 def _cmd_session_start(a):
-    return orchestrate_test_case_revision.reviewer_session_start(
-        a.run_root, a.attempt, candidate=a.candidate, candidate_receipt=a.candidate_receipt, assembly_receipt=a.assembly_receipt,
-        inventory_receipt=a.inventory_receipt, context_receipts=a.context_receipt, context_marker_output=a.context_marker_output,
-        generator_fragments=a.generator_fragment, fresh_context=a.fresh_context, reviewer_invocation_id=a.reviewer_invocation_id,
-    )
+    return orchestrate_test_case_revision.review_step("session-start", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
+                                                      csv_profile=a.csv_profile, fresh_context=a.fresh_context,
+                                                      reviewer_invocation_id=a.reviewer_invocation_id)
+
+
+def _cmd_review_publish(a):
+    return orchestrate_test_case_revision.review_step("publish", a.run_root, a.attempt, files={"candidate": a.candidate},
+                                                      output_dir=a.output_dir, csv_profile=a.csv_profile)
+
+
+def _cmd_review_open(a):
+    return orchestrate_test_case_revision.review_step("open", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
+                                                      csv_profile=a.csv_profile, session_start=a.session_start)
+
+
+def _cmd_review_select(a):
+    return orchestrate_test_case_revision.review_step("select", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
+                                                      csv_profile=a.csv_profile, reviewer_session=a.reviewer_session, review=a.review)
 
 
 def _cmd_complete_review(a):
@@ -199,6 +219,11 @@ def _cmd_step_inputs(a):
 
 
 RUN = ("--run-root", "--attempt")
+# FaT-U5: the reviewer-package files — optional, compared with the journal when given
+REVIEW_FILES = (("--candidate", _json, None), ("--candidate-receipt", Path, None), ("--assembly-receipt", _json, None),
+                ("--inventory-receipt", _json, None), ("--context-receipt", _json, "append", "optional"),
+                ("--context-marker-output", _json, None), ("--generator-fragment", _json, "append", "optional"))
+PROFILE = orchestrate_test_case_revision._PROFILE
 
 
 def _diagnostics(result: Any) -> bool:
@@ -227,10 +252,15 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     "document-digest": (_cmd_document_digest, (("--document", _json),), None, ()),
     "validate-canonical": (_cmd_validate_canonical, (("--document", _json),), _diagnostics, ()),
     "read-ledger": (_cmd_read_ledger, (*RUN, ("--digest", str, None)), None, ()),
-    "session-start": (_cmd_session_start, (*RUN, ("--candidate", _json), ("--candidate-receipt", Path), ("--assembly-receipt", _json),
-                                           ("--inventory-receipt", _json), ("--context-receipt", _json, "append"),
-                                           ("--context-marker-output", _json), ("--generator-fragment", _json, "append"),
+    "session-start": (_cmd_session_start, (*RUN, *REVIEW_FILES, ("--output-dir", Path, None), ("--csv-profile", str, PROFILE),
                                            ("--fresh-context", _yes_no), "--reviewer-invocation-id"), None, ()),
+    # FaT-U5: the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
+    "review-publish": (_cmd_review_publish, (*RUN, ("--candidate", _json, None), ("--output-dir", Path),
+                                             ("--csv-profile", str, PROFILE)), None, ()),
+    "review-open": (_cmd_review_open, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
+                                       ("--session-start", _json)), None, ()),
+    "review-select": (_cmd_review_select, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
+                                           ("--reviewer-session", _json), ("--review", _json, None)), None, ()),
     "complete-review": (_cmd_complete_review, RUN, None, ()),
     "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
     "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None, ()),
@@ -314,7 +344,9 @@ def main(argv: list[str] | None = None) -> int:
         out = _out_target(args.out) if not parts and args.out is not None else None
         result = handler(args)
     except Exception as error:
-        _print({"status": "error", "command": args.command, **error_fields(error)})  # FaT-U6: the refusal's own code and fix
+        # FaT-U6: the refusal's own code and fix; FaT-U5: the one envelope {status, code, message, fix, next}
+        _print({**error_envelope(error), "command": args.command,
+                **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})})
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}

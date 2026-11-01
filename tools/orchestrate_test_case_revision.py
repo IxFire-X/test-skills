@@ -19,7 +19,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
-from tools.json_cli import error_code_prefix, error_fields
+from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
 from tools.review_edits import reviewer_successor
@@ -281,7 +281,7 @@ def reviewer_session_start(
     attempt_id: str,
     *,
     candidate: Mapping[str, Any],
-    candidate_receipt: Path,
+    candidate_receipt: Path | Receipt,
     assembly_receipt: Mapping[str, Any],
     inventory_receipt: Mapping[str, Any],
     context_receipts: Sequence[Mapping[str, Any]],
@@ -301,7 +301,8 @@ def reviewer_session_start(
 
     require_fresh_context_statement(Path(run_root), fresh_context)
     package = reviewer_package_binding(
-        candidate, _load_receipt(Path(candidate_receipt)), assembly_receipt, inventory_receipt, context_receipts,
+        candidate, candidate_receipt if isinstance(candidate_receipt, Receipt) else _load_receipt(Path(candidate_receipt)),
+        assembly_receipt, inventory_receipt, context_receipts,
         context_marker_output=context_marker_output, generator_fragments=generator_fragments,
         run_root=Path(run_root), attempt_id=attempt_id,
     )
@@ -770,12 +771,205 @@ def _readback_rows(receipt: Any, document: Mapping[str, Any]) -> list[dict[str, 
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_ARGUMENT")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_ARGUMENT")], "status": "error", "successor_bundle_receipt": None,
+                          "message": f"argument error: {message}", "fix": None, "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         raise SystemExit(2)
 
 
 def _receipt_json(receipt: Receipt | None) -> dict[str, Any] | None:
     return None if receipt is None else {field: getattr(receipt, field) for field in ("document_id", "revision", "csv_profile", "json_path", "preview_path", "csv_path", "document_sha256", "preview_sha256", "csv_sha256")}
+
+
+def publish_command(candidate: Mapping[str, Any], output_dir: Path, csv_profile: str, *, run_root: Path, attempt_id: str) -> dict[str, Any]:
+    """`review-publish` (and the old `publish`): r1 as UNREVIEWED, the analyst questions beside it; the printed fields."""
+    from tools.pilot_state import derive_state
+    from tools.run_report import write_questions_next_to
+
+    again = any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt_id
+                and event.get("stage_instance_id") == "assembly" for event in derive_state(run_root)["events"])
+    receipt = publish_unreviewed_candidate(candidate, output_dir, csv_profile, run_root=run_root, attempt_id=attempt_id)
+    # FaT-6: the analyst questions beside the case set; a failed write only warns, the set is published.
+    questions, code = write_questions_next_to(output_dir, run_root)
+    return {"candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
+            "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [], "idempotent": again}
+
+
+def review_package(run_root: Path, attempt_id: str, inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """The reviewer package binding of ``review_inputs``."""
+    return reviewer_package_binding(
+        inputs["candidate"], inputs["candidate_receipt"], inputs["assembly_receipt"], inputs["inventory_receipt"],
+        inputs["context_receipts"], context_marker_output=inputs["context_marker_output"],
+        generator_fragments=inputs["generator_fragments"], run_root=Path(run_root), attempt_id=attempt_id)
+
+
+def journal_review_artifact(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """FaT-U5: the tc-reviewer answer of a completed session, from the journal; None for an aborted or waiting one."""
+    from tools.pilot_state import derive_state, read_model_stage_artifact
+
+    if _plain(session).get("status") != "COMPLETED":
+        return None
+    digest = next((str(event["artifact_digest"]) for event in derive_state(Path(run_root))["events"]
+                   if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
+                   and event.get("stage_instance_id") == "tc-reviewer:canonical"), None)
+    return None if digest is None else read_model_stage_artifact(Path(run_root), attempt_id, "tc-reviewer:canonical", digest)["artifact"]
+
+
+def journal_evidence_receipts(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """FaT-U5: the C-lite evidence receipts the session's ledger records as provided, in order."""
+    from tools.pilot_state import read_context_selection
+
+    return [read_context_selection(Path(run_root), attempt_id, str(event["provided_digest"]))
+            for event in _plain(session).get("events", []) if event.get("event_type") == "EVIDENCE_PROVIDED"]
+
+
+def select_output(result: OrchestrationResult) -> dict[str, Any]:
+    return {"candidate_bundle_receipt": _receipt_json(result.candidate_bundle_receipt), "diagnostics": [],
+            "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt),
+            "effective_source": None if result.effective_document is None else _source(result.effective_document),
+            "facts": _plain(result.facts), "status": result.status, "successor_bundle_receipt": _receipt_json(result.successor_bundle_receipt)}
+
+
+def review_step(step: str, run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path | None = None,
+                csv_profile: str = _PROFILE, **values: Any) -> Any:
+    """FaT-U5: one tools.api command of the review layer — ``publish``, ``session-start``, ``open`` or ``select`` — over the
+    journal inputs; ``files`` are the reviewer-package files the agent passed (compared, never the source)."""
+    if step == "publish":
+        candidate = files.get("candidate")
+        candidate = candidate if candidate is not None else journal_assembly(run_root, attempt_id)[0]
+        return publish_command(candidate, output_dir, csv_profile, run_root=run_root, attempt_id=attempt_id)
+    receipt = files.get("candidate_receipt")
+    given = {**files, "candidate_receipt": _load_receipt(Path(receipt)) if receipt else None}
+    inputs = review_inputs(run_root, attempt_id, output_dir=output_dir, csv_profile=csv_profile, given=given)
+    if step == "session-start":
+        return reviewer_session_start(
+            run_root, attempt_id, candidate=inputs["candidate"], candidate_receipt=inputs["candidate_receipt"],
+            assembly_receipt=inputs["assembly_receipt"], inventory_receipt=inputs["inventory_receipt"],
+            context_receipts=inputs["context_receipts"], context_marker_output=inputs["context_marker_output"],
+            generator_fragments=inputs["generator_fragments"], fresh_context=values["fresh_context"],
+            reviewer_invocation_id=values["reviewer_invocation_id"])
+    package = review_package(run_root, attempt_id, inputs)
+    if step == "open":
+        return {"package_binding": package,
+                "reviewer_session_boundary": open_reviewer_session(run_root, attempt_id, package, values["session_start"])}
+    session = values["reviewer_session"]
+    review = values.get("review")
+    review = review if review is not None else journal_review_artifact(run_root, attempt_id, session)
+    return select_output(orchestrate_revision(
+        inputs["candidate"], inputs["candidate_receipt"], package, session, review, output_dir, csv_profile,
+        run_root=run_root, attempt_id=attempt_id, reviewer_evidence_receipts=journal_evidence_receipts(run_root, attempt_id, session)))
+
+
+REVIEW_INPUT_FIELDS = ("candidate", "candidate_receipt", "assembly_receipt", "inventory_receipt", "context_receipts",
+                       "context_marker_output", "generator_fragments")
+
+
+def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = None, csv_profile: str = _PROFILE,
+                  given: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """FaT-U5: the seven reviewer-package inputs of the attempt, read from the journal (only reads).
+
+    candidate and assembly receipt — ``assemble_candidate`` over the published plan, header and the tc-generator answers
+    (the bytes ``tools.api assemble`` gave); candidate receipt — ``verify_bundle`` of that candidate in ``output_dir``;
+    inventory — the attempt baseline's; context receipts — the package's when a session is open, else every receipt the
+    attempt published; marker — the context-marker:baseline answer.  A value in ``given`` (a file the agent passed) is
+    compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
+    cannot give (a run before FaT-DG) comes from ``given`` as before, else REVIEW_INPUTS_UNAVAILABLE."""
+    from tools.batch_assembly import BatchAssemblyError
+    from tools.pilot_state import derive_state, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
+    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
+    from tools.publish_test_case_bundle import verify_bundle
+
+    given = {key: value for key, value in (given or {}).items() if value not in (None, [])}
+    root = Path(run_root)
+    project, resolved = _run_root(root)
+    state = derive_state(root)
+    attempt = next((row for row in state["attempts"] if row["attempt_id"] == attempt_id), None)
+    if attempt is None:
+        raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: no attempt {attempt_id} in the run")
+    answers = {str(event.get("stage_instance_id")): str(event["artifact_digest"]) for event in state["events"]
+               if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"}
+    journal: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    missing: dict[str, str] = {}
+    try:
+        candidate, assembly, fragments = journal_assembly(root, attempt_id)
+        journal.update(candidate=candidate, assembly_receipt=assembly, generator_fragments=fragments)
+        sources.update(candidate="assemble над plan, header и ответами tc-generator журнала", assembly_receipt="assemble того же",
+                       generator_fragments="ответы tc-generator:<batch> журнала по порядку плана")
+    except (ValueError, KeyError, BatchAssemblyError, TypeError) as error:
+        for key in ("candidate", "assembly_receipt", "generator_fragments"):
+            missing[key] = str(error).removeprefix("MODEL_INPUTS_MISMATCH: ").removeprefix("REVIEW_INPUTS_UNAVAILABLE: candidate: ")
+    baseline = read_execution_baseline(resolved / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    journal["inventory_receipt"] = read_inventory_receipt(resolved / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
+    sources["inventory_receipt"] = "опись baseline попытки"
+    try:
+        digests = list(read_reviewer_session_ledger(root, attempt_id)["package_binding"]["context_receipt_digests"])
+        sources["context_receipts"] = "квитанции пакета открытой сессии ревьюера"
+    except (KeyError, TypeError, ValueError):
+        digests = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
+                                     if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
+        sources["context_receipts"] = "квитанции контекста, опубликованные попыткой"
+    journal["context_receipts"] = [read_context_selection(root, attempt_id, digest) for digest in digests]
+    if "context-marker:baseline" in answers:
+        journal["context_marker_output"] = read_model_stage_artifact(root, attempt_id, "context-marker:baseline", answers["context-marker:baseline"])["artifact"]
+        sources["context_marker_output"] = "ответ context-marker:baseline журнала"
+    else:
+        missing["context_marker_output"] = "нет ответа context-marker:baseline"
+    candidate = journal.get("candidate", given.get("candidate"))
+    if output_dir is not None and candidate is not None:
+        try:
+            journal["candidate_receipt"] = verify_bundle(_plain(candidate), output_dir, csv_profile)
+            sources["candidate_receipt"] = f"проверка опубликованного bundle в {output_dir}"
+        except (OSError, ValueError) as error:
+            missing["candidate_receipt"] = f"bundle кандидата в {output_dir} не проверен ({error})"
+    else:
+        missing["candidate_receipt"] = "нужен --output-dir — каталог, куда review-publish положил кандидата"
+    result: dict[str, Any] = {}
+    for field in REVIEW_INPUT_FIELDS:
+        if field in journal:
+            if field in given and _review_key(field, given[field]) != _review_key(field, journal[field]):
+                raise ValueError(f"REVIEW_INPUT_MISMATCH: {field}: переданный файл не совпадает с журналом "
+                                 f"({sources[field]}); fix: не передавай {field} — код возьмёт его из журнала")
+            result[field] = journal[field]
+        elif field in given:
+            result[field] = given[field]
+        else:
+            raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: {field}: {missing.get(field, 'нет в журнале')}; fix: сначала этот шаг"
+                             " (или передай файл явно, для прогона до FaT-DG)")
+    return result
+
+
+def journal_assembly(run_root: Path, attempt_id: str) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
+    """FaT-U5: ``(candidate, assembly receipt, fragments)`` — ``assemble_candidate`` over the published plan and header
+    and the tc-generator answers of the journal in plan order: the bytes ``tools.api assemble`` gives (only reads)."""
+    from tools.batch_assembly import assemble_candidate
+    from tools.pilot_state import _generator_input, _run_root, derive_state, read_model_stage_artifact
+
+    project, root = _run_root(Path(run_root))
+    state = derive_state(root)
+    plan, header = (_generator_input(project, root, state, attempt_id, kind) for kind in ("plan", "header"))
+    answers = {str(event.get("stage_instance_id")): str(event["artifact_digest"]) for event in state["events"]
+               if event.get("attempt_id") == attempt_id and event["event_type"] == "MODEL_RESPONSE_RECEIVED"}
+    stages = [f"tc-generator:{batch['batch_id']}" for batch in plan["batches"]]
+    absent = [stage for stage in stages if stage not in answers]
+    if absent:
+        raise ValueError(f"REVIEW_INPUTS_UNAVAILABLE: candidate: нет ответа {absent[0]}; fix: сначала model-response этой пачки")
+    fragments = [read_model_stage_artifact(root, attempt_id, stage, answers[stage])["artifact"] for stage in stages]
+    candidate, assembly = assemble_candidate(_plain(header), _plain(plan), [_plain(item) for item in fragments])
+    return candidate, assembly, fragments
+
+
+def _review_key(field: str, value: Any) -> bytes:
+    if field == "context_receipts":  # a context file may be the receipt or its digest pointer: the digests decide
+        value = [_plain(item).get("digest") if isinstance(_plain(item), dict) else None for item in value]
+    return _review_bytes(value)
+
+
+def _review_bytes(value: Any) -> bytes:
+    if isinstance(value, Receipt):
+        value = _receipt_json(value)
+    elif isinstance(value, (list, tuple)):
+        value = [_plain(item) for item in value]
+    return canonical_bytes(_plain(value))
 
 
 def _load_receipt(path: Path) -> Receipt:
@@ -810,6 +1004,11 @@ _FIXES = {  # FaT-10d
 }
 
 
+# FaT-U5: the old command names stay until the release to testers; tools.api is the one CLI of the review layer
+_RENAMED = {name: {"code": "COMMAND_RENAMED", "message": f"tools.api {new}"}
+            for name, new in (("publish", "review-publish"), ("open-session", "review-open"), ("select", "review-select"))}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _Parser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -820,10 +1019,6 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--attempt-id", required=True)
     publish.add_argument("--csv-profile", default=_PROFILE)
     publish.add_argument("--out", type=Path, default=None, help="FaT-AU2: write the candidate receipt (--candidate-receipt) to <run>/tmp/<file>")
-    evidence = commands.add_parser("publish-evidence", help="Persist and read back one reviewer C-lite evidence receipt.")
-    evidence.add_argument("--context-receipt", required=True, type=Path)
-    evidence.add_argument("--run-root", required=True, type=Path)
-    evidence.add_argument("--attempt-id", required=True)
     open_session = commands.add_parser("open-session", help="Reserve the attempt's only host-owned canonical reviewer session.")
     open_session.add_argument("--candidate", required=True, type=Path)
     open_session.add_argument("--candidate-receipt", required=True, type=Path)
@@ -853,36 +1048,19 @@ def main(argv: list[str] | None = None) -> int:
     select.add_argument("--csv-profile", default=_PROFILE)
     args = parser.parse_args(argv)
     if hasattr(args, "csv_profile") and args.csv_profile not in _PROFILES:
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("/csv_profile", "ORCHESTRATION_PROFILE")], "status": "error", "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
+        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("/csv_profile", "ORCHESTRATION_PROFILE")], "status": "error", "successor_bundle_receipt": None,
+                          "message": f"unknown csv profile {args.csv_profile}", "fix": f"one of {sorted(_PROFILES)}", "next": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     try:
-        if args.command == "publish-evidence":
-            from tools.pilot_state import publish_context_selection
-
-            receipt = publish_context_selection(args.run_root, args.attempt_id, load_json_strict(args.context_receipt))
-            print(json.dumps({"context_receipt": receipt, "status": "published"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-            return 0
         candidate = load_json_strict(args.candidate)
         if args.command == "publish":
             from tools.api import _out_target, _write  # FaT-AU2: the one --out policy and writer of the package
 
             out = _out_target(str(args.out)) if args.out is not None else None  # refused before anything is published
-            from tools.pilot_state import derive_state
-
-            again = any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == args.attempt_id
-                        and event.get("stage_instance_id") == "assembly" for event in derive_state(args.run_root)["events"])
-            receipt = publish_unreviewed_candidate(
-                candidate, args.output_dir, args.csv_profile,
-                run_root=args.run_root, attempt_id=args.attempt_id,
-            )
-            from tools.run_report import write_questions_next_to
-
-            # FaT-6: the analyst questions beside the case set; a failed write only warns, the set is published.
-            questions, code = write_questions_next_to(args.output_dir, args.run_root)
-            print(json.dumps({
-                "candidate_bundle_receipt": _receipt_json(receipt), "candidate_publication_status": "UNREVIEWED", "status": "published",
-                "questions_for_analyst": questions, "warnings": [{"code": code}] if code else [], "idempotent": again,
-                **({"out": _write(out, _receipt_json(receipt))} if out is not None else {}),
-            }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            published = publish_command(candidate, args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
+            published["warnings"] = [*published["warnings"], _RENAMED["publish"]]
+            if out is not None:
+                published["out"] = _write(out, published["candidate_bundle_receipt"])
+            print(json.dumps(published, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
         receipt = _load_receipt(args.candidate_receipt)
         base_contexts = [load_json_strict(path) for path in args.context_receipt]
@@ -905,7 +1083,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.command == "open-session":
             boundary = open_reviewer_session(args.run_root, args.attempt_id, package, load_json_strict(args.session_start))
-            print(json.dumps({"package_binding": package, "reviewer_session_boundary": boundary, "status": "opened"}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            print(json.dumps({"package_binding": package, "reviewer_session_boundary": boundary, "status": "opened",
+                              "warnings": [_RENAMED["open-session"]]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
         result = orchestrate_revision(
             candidate,
@@ -921,14 +1100,17 @@ def main(argv: list[str] | None = None) -> int:
         )
     except OrchestrationError as error:
         exit_code = 2 if error.code in {"ORCHESTRATION_PUBLICATION", "ORCHESTRATION_VERIFICATION"} else 1
-        print(json.dumps({"candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt), "code": error.code, "diagnostics": [dict(row) for row in error.diagnostics], "status": "error", "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
+        print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt),
+                          "diagnostics": [dict(row) for row in error.diagnostics], "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)},
+                         ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
     except (StrictJsonError, OSError, ValueError) as error:
-        # FaT-10d: the inner refusal code and its fix, not only ORCHESTRATION_IO
-        fields = error_fields(error)  # FaT-U6: the same reading as tools.api
-        reason_code = error_code_prefix(fields["message"])
-        print(json.dumps({"candidate_bundle_receipt": None, "code": "ORCHESTRATION_INPUT", "diagnostics": [_diag("", "ORCHESTRATION_IO")], "status": "error", "successor_bundle_receipt": None,
-                          "reason_code": reason_code, "message": fields["message"], "fix": _FIXES.get(reason_code) or fields.get("fix")}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    output = {"candidate_bundle_receipt": _receipt_json(result.candidate_bundle_receipt), "diagnostics": [], "effective_bundle_receipt": _receipt_json(result.effective_bundle_receipt), "effective_source": None if result.effective_document is None else _source(result.effective_document), "facts": _plain(result.facts), "status": result.status, "successor_bundle_receipt": _receipt_json(result.successor_bundle_receipt)}
+        # FaT-10d: the inner refusal code and its fix; FaT-U5: the one envelope, the code is the refusal's own
+        envelope = error_envelope(error)  # FaT-U6: the same reading as tools.api
+        reason_code = error_code_prefix(envelope["message"])
+        print(json.dumps({**envelope, "code": reason_code or "ORCHESTRATION_INPUT", "fix": _FIXES.get(reason_code) or envelope["fix"],
+                          "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")], "successor_bundle_receipt": None,
+                          "reason_code": reason_code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
+    output = {**select_output(result), "warnings": [_RENAMED["select"]]}
     print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0
 

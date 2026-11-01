@@ -48,7 +48,8 @@ def _plain(value):
 def test_the_docs_name_the_api_commands() -> None:
     named = _named_commands()
     assert ("api", "model-request") in named and ("api", "model-response") in named and ("api", "read-effective") in named, named
-    assert ("orchestrate_test_case_revision", "open-session") in named and ("orchestrate_test_case_revision", "select") in named, named
+    # FaT-U5: the review layer is one CLI — the docs name tools.api review-open/review-select
+    assert ("api", "review-open") in named and ("api", "review-select") in named, named
 
 
 @pytest.mark.parametrize("module,sub", _named_commands())

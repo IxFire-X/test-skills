@@ -24,9 +24,9 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Контекст | `tools.api model-request` → model call → `tools.api model-response` | schema, exact authorized context; marker OpenSpec reconciliation |
 | Батчи | receipts выбора контекста публикует `scan`; `tools.api read-context`, `tools.api publish-generator-input` (header, plan), `tools.api plan-batches` | independent plan и current receipt без truncation |
 | Генерация | те же `model-request`/`model-response` для `tc-generator:<batch>`, пачки по очереди; `tools.api validate-fragment`, с пачки 2 `tools.api prior-capabilities` | fragment связан с marker/context/plan/header, с пачки 2 — и с capabilities прошлых пачек; code-owned digests |
-| Сборка | `tools.api assemble`, `tools.orchestrate_test_case_revision publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
-| Canonical review | `tools.api session-start`; `tools.orchestrate_test_case_revision open-session`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api review-evidence`, `tools.api review-abort`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
-| Выбор | `tools.api complete-review` (сессия ревьюера с вердиктом), `tools.orchestrate_test_case_revision select`, `tools.api read-effective` | immutable selected document и receipt |
+| Сборка | `tools.api assemble`, `tools.api review-publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
+| Canonical review | `tools.api session-start`; `tools.api review-open`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api review-evidence`, `tools.api review-abort`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
+| Выбор | `tools.api complete-review` (сессия ревьюера с вердиктом), `tools.api review-select`, `tools.api read-effective` | immutable selected document и receipt |
 | Автоматизация | `model-request`/`model-response`; `tools.api automation-boundary-facts`, `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
 | Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
 | Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |

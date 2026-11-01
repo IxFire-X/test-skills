@@ -446,7 +446,8 @@ def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPa
              "--attempt-id", "a1", "--output-dir", str(tmp_path / "out")]
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert printed["code"] == "ORCHESTRATION_INPUT" and printed["reason_code"] == "REVIEW_CONTEXT_LIMIT", printed
+    # FaT-U5: the envelope's code is the refusal's own code, not ORCHESTRATION_INPUT over it
+    assert printed["code"] == "REVIEW_CONTEXT_LIMIT" and printed["reason_code"] == "REVIEW_CONTEXT_LIMIT", printed
     assert "review-abort" in printed["fix"] and "session-start" in printed["fix"], printed
 
 

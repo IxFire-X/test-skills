@@ -31,6 +31,12 @@ def error_fields(error: BaseException) -> dict[str, str]:
     return {"code": str(code), "message": message, **({"fix": str(fix)} if fix else {})}
 
 
+def error_envelope(error: BaseException, next_step: str | None = None) -> dict[str, object]:
+    """FaT-U5: the one refusal envelope of every CLI — ``{status, code, message, fix, next}`` (fix/next may be null)."""
+    fields = error_fields(error)
+    return {"status": "error", "code": fields["code"], "message": fields["message"], "fix": fields.get("fix"), "next": next_step}
+
+
 def emit_error(message: str) -> None:
     """Emit the one machine-readable response allowed for usage/input errors."""
     if hasattr(sys.stdout, "reconfigure"):

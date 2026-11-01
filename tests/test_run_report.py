@@ -265,7 +265,8 @@ def test_publication_puts_the_questions_beside_the_case_set(tmp_path: Path, monk
     monkeypatch.setattr(revision, "_receipt_json", lambda _receipt: None)
     code = revision.main(["publish", "--candidate", str(candidate), "--output-dir", str(cases), "--run-root", str(run_root), "--attempt-id", "a" * 32])
     out = json.loads(capsys.readouterr().out)
-    assert code == 0 and out["status"] == "published" and out["warnings"] == []
+    # FaT-U5: the old command name still works and says it is renamed
+    assert code == 0 and out["status"] == "published" and out["warnings"] == [{"code": "COMMAND_RENAMED", "message": "tools.api review-publish"}]
     assert out["questions_for_analyst"] == str((cases / "questions-for-analyst.md").resolve())
     assert (cases / "questions-for-analyst.md").is_file()
 
