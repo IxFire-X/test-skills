@@ -1159,8 +1159,13 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
     module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
     try:
         result = _baseline_check(project, root, attempt, module_root)
-    except Exception:  # an unreadable baseline is the status's own evidence error, not a drift
-        return {}
+    except Exception as error:  # FaT-HARD (F2): not a drift — but said, with its code and fix; the hint never fails status
+        from tools.json_cli import error_fields
+
+        fields = error_fields(error)
+        return {"drift_check_error": {"code": fields["code"], "message": fields["message"][:500], "fix": fields.get("fix") or (
+            "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, exec остановится "
+            "на той же сверке: начни новый прогон тем же scan с --new-run (команда — next_step.command)")}}
     if result.get("status") == "UNCHANGED":
         return {}
     return {"drift": _drift_report(project, manifest, result.get("changed") or [])}

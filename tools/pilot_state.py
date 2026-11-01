@@ -2323,8 +2323,10 @@ def _publish_model_stage_artifact(
 
         try:
             published = _published_generator_inputs(project, root, state, attempt_id)
-            if published is None:  # a run from before FaT-DG: no published plan/header to check against
-                require_batch_coverage(value)  # FaT-DG: the coverage rule of assemble, on this batch, before the write
+            if published is None:
+                # reachable only for a request published before FaT-DG: a new model-request without the published plan and
+                # header is refused by _expected_model_inputs (FaT-HARD, audit 1, 5g); such a run keeps the coverage rule
+                require_batch_coverage(value)
             else:  # FaT-DG: the whole fragment check (coverage inside) against the journal, before the write
                 validate_fragment(value, dict(published[0]), dict(published[1]), dict(read_context_selection(root, attempt_id, str(request["input_digests"][1]))),
                                   _accepted_earlier_fragments(project, root, state, attempt_id, published[0], stage_instance_id.split(":", 1)[1]),
