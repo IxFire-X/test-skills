@@ -58,3 +58,38 @@ def test_an_exact_value_never_falls_into_the_model_response_row() -> None:
     """Before D5 a substring search sent «context-marker response» to the right row only by the order of the rows."""
     assert _next_step({"next_expected_artifact": "context-marker response"})["code"] == "MARKER"
     assert _next_step({"next_expected_artifact": "context-marker:baseline response"})["code"] == "MODEL_RESPONSE"
+
+
+def _check_with_parser(command: str) -> None:
+    """The full command of a step: its subcommand and every flag in the real --help of its tool."""
+    import shlex
+
+    words = shlex.split(command, posix=False)
+    assert words[1:3] == ["-m", "tools.run_pipeline"], command
+    module = importlib.import_module(words[2])
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), pytest.raises(SystemExit) as stopped:
+        module.main([words[3], "--help"])
+    assert stopped.value.code == 0, command
+    for flag in (word for word in words[4:] if word.startswith("--")):
+        assert re.search(rf"(?<![\w-]){re.escape(flag)}(?![\w-])", out.getvalue()), (command, flag)
+
+
+def test_on_drift_the_next_step_is_the_new_scan_of_drift_command(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hunt 4, 4.7 (FaT-D5b): the new scan of next_step keeps --docs, --profile and the other flags of the request."""
+    from tests.test_scan_guard import DOCS, _python_project, _scan, _status, _write
+
+    project = _python_project(tmp_path, runtime=True)
+    code, scan = _scan(project, monkeypatch, accept_self_review=True, disposition_policy="cleanup")
+    assert code == 0, scan
+    _write(project, "services/api/src/app.py", "X = 2\n")
+    status = _status(project, scan["run_id"], monkeypatch)
+    step = status["next_step"]
+    assert step["code"] == "DRIFT" and step["command"] == status["drift"]["command"], (step, status["drift"])
+    assert f'--docs "{DOCS}"' in step["command"] and "--new-run" in step["command"]
+    _check_with_parser(step["command"])
+
+
+def test_without_a_scan_request_the_new_scan_stays_a_template_and_names_drift_command() -> None:
+    step = _next_step({"next_expected_artifact": "validated inputs or new scan"})
+    assert step["command"].startswith("python -m tools.run_pipeline scan") and "drift.command" in step["action"], step

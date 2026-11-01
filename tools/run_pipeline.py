@@ -155,9 +155,13 @@ _TERMINAL = ("TERMINAL", "terminal", "передать человеку резу
              _PIPELINE + "report --project <project> --run <run_id>")
 
 
-def _next_step(status: Mapping[str, Any]) -> dict[str, Any]:
+_NEW_SCAN_CODES = {"CONTEXT_SELECTION", "DRIFT"}
+
+
+def _next_step(status: Mapping[str, Any], project: Path | None = None, request: Any = None) -> dict[str, Any]:
     """FaT-3: what to do next after /clear, from the same facts status shows (only reads).  Audit D5: the code of the state
-    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL."""
+    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL.  FaT-D5b: the
+    new scan of a run with its *request* is the command of drift.command and next_run, with all the flags of the request."""
     expected = status.get("next_expected_artifact")
     if expected is None:
         code, stage, action, section, command = _TERMINAL
@@ -169,6 +173,11 @@ def _next_step(status: Mapping[str, Any]) -> dict[str, Any]:
         command = command.replace("<stage>", stage)
     else:
         return {"code": "UNKNOWN", "stage": "unknown", "action": f"следующий артефакт: {expected}", "skill_section": "Stop conditions"}
+    if code in _NEW_SCAN_CODES:
+        if project is not None and isinstance(request, Mapping):
+            command = _scan_command(project, request, extra=("--new-run",))
+        else:
+            action += "; полная команда с флагами прогона — drift.command в status"
     return {"code": code, "stage": stage, "action": action, "skill_section": section, "command": command}
 
 
@@ -187,9 +196,15 @@ def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, 
 
 
 def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = "ok", **extra: Any) -> dict[str, Any]:
+    from tools.pilot_state import read_run
+
     result = _durable_status_facts(project, run_root, stage=stage, status=status, **extra)
     if result.get("attempt_id") is not None:
-        result["next_step"] = _next_step(result)
+        try:  # FaT-D5b: the scan request of the run, for the full command of a new scan
+            request = read_run(Path(run_root))["manifest"].get("scan_request")
+        except (KeyError, OSError, TypeError, ValueError):
+            request = None
+        result["next_step"] = _next_step(result, project, request)
     return result
 
 
