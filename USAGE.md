@@ -352,6 +352,8 @@ attempt_state  completion  verification  coverage  reason_code  accepted
 Поля completion/verification/coverage могут отсутствовать, пока факт не установлен.
 `COMPLETE + FAIL` допустим. `EXECUTION_UNKNOWN` означает
 `TERMINAL + PARTIAL + UNKNOWN + accepted=false`.
+`AUTOMATION_PARTIAL` — `TERMINAL + PARTIAL + PASS + accepted=false`: часть кейсов ручные (блокеры канона), разбивка —
+`automation_split.summary` в выводе exec; передайте её человеку как есть.
 
 Exit projection:
 

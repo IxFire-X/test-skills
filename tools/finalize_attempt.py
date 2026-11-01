@@ -1173,7 +1173,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
 
 
 # FaT-AB: the closed list of `finish --abandon` codes and the state each one closes
-ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE")
+ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE", "STAND_UNAVAILABLE")
 _PENDING_ABANDON = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID")
 
 
@@ -1189,6 +1189,15 @@ def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
             and not (root / "generated-deltas" / f"{attempt_id}.json").exists())
 
 
+def _stand_down(run_root: Path, attempt_id: str) -> bool:
+    """FaT-O12 O2: the module's stand (FaT-2R ``service_url_env``) does not answer now — the same check as exec's."""
+    from tools.run_pipeline import _service_stop
+
+    attempt = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
+    project = Path(str(pilot_state.read_run(run_root)["manifest"]["project"]))
+    return _service_stop(project, str(attempt["module"])) is not None
+
+
 def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int, abandon: str | None = None) -> str:
     """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
 
@@ -1197,6 +1206,8 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
     outcome, stage = automation_outcome(run_root, attempt_id, canonical_blockers)
     if outcome == "ACCEPTED":
         if abandon == "AUTOMATION_NOT_MATERIALIZABLE" and _accepted_unprepared(run_root, attempt_id):
+            return abandon
+        if abandon == "STAND_UNAVAILABLE" and _stand_down(run_root, attempt_id):  # FaT-O12 O2: the code checks it again
             return abandon
         raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec",
                                 fix="python -m tools.run_pipeline exec --project <project> --run <run_id>")

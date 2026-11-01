@@ -999,7 +999,7 @@ def _open_run_of(project: Path, request: Mapping[str, Any]) -> tuple[Path | None
             selected = any(event["event_type"] == "CONTEXT_SELECTED" and event.get("attempt_id") == attempt["attempt_id"]
                            for event in state["events"])
             if selected and attempt.get("state") != "TERMINAL":
-                why = _abandoned(project, root, attempt)
+                why = _left_mark(root) or _abandoned(project, root, attempt)
                 if why is None:
                     return root, abandoned
                 abandoned.append(f"{root.name} ({why})")
@@ -1084,6 +1084,7 @@ _SECOND_PASS = {
     "STAGE_RETRY_EXHAUSTED": "стадия автоматизации исчерпала единственный повтор: следующий заход — новый scan того же запроса",
     "ASSEMBLY_INVALID": "сборка или публикация ревизии автоматизации не прошла: следующий заход — новый scan того же запроса",
     "REVIEW_UNUSABLE": "ревью кейсов не может закончиться вердиктом: следующий заход — новый scan того же запроса",
+    "STAND_UNAVAILABLE": "стенд приложения не поднять: следующий заход — новый scan того же запроса, когда стенд будет",
 }
 
 
@@ -2003,7 +2004,11 @@ def cmd_exec(args: Any) -> int:
         # A stop here leaves the attempt open: the person brings the stand up and runs exec again (no files, no quarantine).
         stand = _service_stop(project, str(coordinates["attempt"]["module"]))
         if stand is not None:
-            _print({"status": "error", **stand, "attempt_id": coordinates["attempt"]["attempt_id"]})
+            # FaT-O12 O2: the stand that cannot be brought up closes the attempt negatively — the agent's call, checked by finish
+            closing = (f'"{sys.executable}" -m tools.run_pipeline finish --project "{project}" --run {Path(coordinates["run_root"]).name} '
+                       "--abandon STAND_UNAVAILABLE")
+            _print({"status": "error", **stand, "fix": f"{stand['fix']}; стенд не поднять — {closing}",
+                    "attempt_id": coordinates["attempt"]["attempt_id"]})
             return 2
     if execution_receipt_path.exists() or started:
         try:
@@ -2399,6 +2404,30 @@ _INTERRUPTED_FIX = ("запуск тестов начался, но квитан
                     "прерванный запуск как UNKNOWN и закроет попытку")
 
 
+_LEFT = "left-before-review.json"
+
+
+def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
+    """FaT-O12 O1: the mark «оставлен» of a run stopped before the canonical review — outside the journal, the attempt is
+    not closed (that is FaT-AB2); only the same-request check of scan skips the run.  Written once; a repeat reads it."""
+    from tools.confined_output import create_confined_bytes_exclusive, read_confined_bytes
+
+    target = root / _LEFT
+    value = {"attempt_id": attempt_id, "reason": "LEFT_BEFORE_REVIEW"}
+    data = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    if read_confined_bytes(project, root, target) is None:
+        create_confined_bytes_exclusive(project, root, target, data)
+    return json.loads(read_confined_bytes(project, root, target) or data)
+
+
+def _left_mark(root: Path) -> str | None:
+    try:
+        value = json.loads((root / _LEFT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return "оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW)" if value.get("reason") == "LEFT_BEFORE_REVIEW" else None
+
+
 def _before_canonical_review(root: Path, attempt_id: str) -> bool:
     """FaT-AB tier C: the attempt has no reviewer session yet — no closing command exists before the canonical review."""
     from tools.pilot_state import read_reviewer_session_ledger
@@ -2418,8 +2447,9 @@ def _closed_before_review(project: Path, manifest: Mapping[str, Any], detail: st
     return {
         "status": "error", "stage": "finish", "reason": "FINISH_FACT_UNDETERMINED", "run_id": manifest["run_id"],
         "message": "попытку нельзя закрыть до ревью кейсов: стадии до ревью не дают закрывающего состояния (" + detail + ")",
-        "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — прогон оставлен "
-               "как есть, следующий заход: " + command,
+        "fix": "если стадия до ревью ещё может ответить — продолжи по run_pipeline status (next_step); если нет — "
+               f'"{sys.executable}" -m tools.run_pipeline finish --project "{project}" --run {manifest["run_id"]} --abandon '
+               "LEFT_BEFORE_REVIEW оставит прогон, и простой scan начнёт новый; следующий заход: " + command,
         "next_run": {"why": "попытка остановилась до ревью кейсов: следующий заход — новый прогон того же запроса", "command": command},
     }
 
@@ -2457,6 +2487,14 @@ def cmd_finish(args: Any) -> int:
     if abandon is not None and (executed or attempt.get("state") == "TERMINAL"):
         raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает exec или она уже закрыта: --abandon не нужен",
                        _exact_fix("python -m tools.run_pipeline exec --project <project> --run <run_id>", project, root, attempt_id))
+    if abandon == "LEFT_BEFORE_REVIEW":  # FaT-O12 O1: the run stays as it is; a plain scan of the request starts a new one
+        if not _before_canonical_review(root, attempt_id):
+            raise HostStop("ABANDON_NOT_NEEDED", "попытка уже дошла до ревью кейсов: LEFT_BEFORE_REVIEW только до него",
+                           _exact_fix("python -m tools.run_pipeline finish --project <project> --run <run_id>", project, root, attempt_id))
+        closed = _closed_before_review(project, run["manifest"], "прогон оставлен")
+        _print({"status": "ok", "stage": "finish", "run_id": run["manifest"]["run_id"], "left": _leave(project, root, attempt_id),
+                "message": "прогон оставлен до ревью кейсов; простой scan того же запроса начнёт новый", "next_run": closed["next_run"]})
+        return 0
     try:
         closed = (finalize_durable_execution_attempt(root, attempt_id) if executed
                   else finalize_durable_branch_attempt(root, attempt_id, abandon))
@@ -2703,7 +2741,8 @@ def build_parser() -> JsonArgumentParser:
     status_parser = sub.add_parser("status", parents=[shared])
     finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
     finish_parser.add_argument("--run", required=True)
-    finish_parser.add_argument("--abandon", choices=("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE"),
+    finish_parser.add_argument("--abandon", choices=("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE",
+                                                     "STAND_UNAVAILABLE", "LEFT_BEFORE_REVIEW"),
                                help="FaT-AB: close an automation chain that cannot go on, only where no other command closes it.")
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
     exec_parser = sub.add_parser("exec", parents=[shared])

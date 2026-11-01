@@ -104,7 +104,8 @@ Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сб�
 Допустимы только:
 
 - `cases-only-v1`: draft canonical cases/review без выполнения project code; `accepted=false`, не full-pipeline exit 0;
-- `local-pilot-v1`: полный pipeline с run-scoped project-native execution; `accepted=true` только после live PASS.
+- `local-pilot-v1`: полный pipeline с run-scoped project-native execution; `accepted=true` только после live PASS всех
+  кейсов — с ручными кейсами (блокеры канона) PASS даёт `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
 
 Для `local-pilot-v1` execution разрешён только явным пользовательским запросом полного
 pipeline в этом run. Наличие папки, scan или запрос test cases не разрешают execution.
@@ -420,6 +421,8 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
 называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную. Цепочка автоматизации не может
 продолжиться — `finish --abandon <код>` из fix; список кодов закрытый, и `finish` сам откажет, если выход другой.
+Частичная автоматизация (кейсы с блокерами канона ручные): `exec` печатает `automation_split` — передай человеку его
+`summary` как есть («автоматизировано N из M, вручную K: …»); итог `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
 
 Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` —
 карантин: упавшие методы помечаются `@Disabled`/`xfail`, прошедшие остаются (`QUARANTINED`); если
