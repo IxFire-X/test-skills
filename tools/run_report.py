@@ -1,4 +1,4 @@
-"""FaT-6: a run report that may leave the workplace, and the analyst questions of the run (only reads the journal).
+"""FaT-6: a run report without project code or case texts (what may leave — by the company's rules), and the analyst questions of the run (only reads the journal).
 
 ``python -m tools.run_pipeline report --project <abs> --run <id>`` writes ``report.md``, ``report.json`` and
 ``questions-for-analyst.md`` into the run directory.  The report holds step names, times, sizes, counts and codes;

@@ -395,7 +395,7 @@ registry/digest, pipeline contract, profiles, adapters и release-eval suite. О
 `2` означает единственный повтор после ошибки схемы или валидации ответа (по `retry_prompt`
 из `validate_artifact`). C-lite cardinality читается из evidence pairs reviewer ledger.
 
-Отчёт прогона, который можно вынести с работы: `python -m tools.run_pipeline report --project <abs>
+Отчёт прогона без кода проекта и текстов кейсов (что выносить — по правилам компании): `python -m tools.run_pipeline report --project <abs>
 --run <id>` пишет в каталог прогона `report.md`, `report.json` и `questions-for-analyst.md`. В отчёте
 шаги со временем (часы машины, не проверяются), длительность и размер входа каждого вызова модели
 против бюджета шага, `transport_attempts`, коды остановок, числа, карантин (файл, метод, ref) и

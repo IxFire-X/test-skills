@@ -6073,7 +6073,8 @@ def _project_state_snapshot(
 
     completed = subprocess.run(
         [
-            "git", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
+            # FaT-SEC1: core.fsmonitor=false — a hook the project's .git/config names is never run
+            "git", "-c", "core.fsmonitor=false", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
             "status", "--porcelain=v1", "-z", "--untracked-files=all",
         ],
         stdout=subprocess.PIPE,

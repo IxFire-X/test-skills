@@ -40,7 +40,16 @@ def _row(check_id: str, block: str, level: str, message: str, fix: str | None = 
 
 
 def pip_command() -> str:
-    return f'"{sys.executable}" -m pip install --no-cache-dir --require-hashes -r "{PACK / "requirements.txt"}"'
+    """FaT-SEC1: the install command shown to the person — never into a system Python: the running venv, else the package's own
+    ``.venv`` (created first when it is missing)."""
+    install = f'-m pip install --no-cache-dir --require-hashes -r "{PACK / "requirements.txt"}"'
+    if sys.prefix != sys.base_prefix:
+        return f'"{sys.executable}" {install}'
+    venv = PACK / ".venv"
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if python.is_file():
+        return f'"{python}" {install}'
+    return f'"{sys.executable}" -m venv "{venv}" && "{python}" {install}'
 
 
 def check_python() -> dict[str, Any]:
@@ -82,7 +91,8 @@ def check_git(project: Path) -> dict[str, Any]:
     if not (project / ".git").exists():
         return _row("git", CASES, "OK", "не git-проект: git не нужен")
     try:
-        completed = subprocess.run(["git", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
+        # FaT-SEC1: core.fsmonitor=false — a hook the project's .git/config names is never run
+        completed = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
                                     "status", "--porcelain=v1", "-z", "--untracked-files=all"],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     except OSError as error:
@@ -399,7 +409,7 @@ PROBE_LINE_CHARS = 200
 
 def _scrub(line: str) -> str:
     """FaT-H2a: an [ERROR] line of the probe goes to the agent — no URL userinfo, no secret values, at most 200 chars."""
-    line = _SECRET_VALUE.sub(r"***", _URL_USERINFO.sub("://***@", line))
+    line = _SECRET_VALUE.sub(r"\1***", _URL_USERINFO.sub("://***@", line))
     return line if len(line) <= PROBE_LINE_CHARS else line[:PROBE_LINE_CHARS - 1] + "…"
 
 
