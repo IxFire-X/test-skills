@@ -247,7 +247,8 @@ Run остаётся связан с исходной project/module identity.
    первым — receipt с наименьшим `batch_index`, он же `context_receipt_digest`). Затем
    `tools.api publish-generator-input --kind plan --value <план>`. У plan и header один digest — `result.digest` этой
    команды; sha256 байтов файла входом не бывает. Пачки делит код по оценке ответа и окну `.skillsrc
-   limits.step_window_bytes`, группы требований не рвёт; `notes` в выводе — сколько пачек и почему, покажи их человеку как есть.
+   limits.step_window_bytes`, группы требований не рвёт; `notes` в выводе — сколько пачек и почему, покажи их человеку
+   как есть, и `context` из вывода `publish-generator-input --kind plan`, когда он есть.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs — пачки строго по очереди (`ordinal`),
    пачка k после принятого ответа пачки k−1, не параллельно.
    Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; если в плане есть
@@ -260,7 +261,8 @@ Run остаётся связан с исходной project/module identity.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
-   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>` (с пачки 2 —
+   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>` (`--context-receipt` — один receipt:
+   `context_receipt_digest` плана, первый по `batch_index`; с пачки 2 —
    `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты). До `model-response` пачки — только
    `validate-fragment`: `assemble` на части пачек всегда отказывает (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет).
    Отказ `validate-fragment` — ошибка ответа: на неё идёт единственный повтор стадии (`retry_prompt` — текст отказа);

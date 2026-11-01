@@ -341,7 +341,8 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     given = context_digests(grouping_evidence)
     for receipt in receipts:
         if not isinstance(receipt, dict) or receipt.get("digest") not in given:
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding")
+            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding; fix: add "  # FaT-H4a
+                                     "context_receipt_digests to the grouping with every digest, the lowest batch_index first")
         _validate_context_receipt(receipt, str(receipt["digest"]))
     if sorted(str(receipt["digest"]) for receipt in receipts) != sorted(given) or len(receipts) != len(given):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "plan-batches needs every context receipt of the grouping, "

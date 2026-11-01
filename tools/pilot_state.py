@@ -4716,6 +4716,19 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
                     raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
                                      f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
                                      "(tools.api read-context --digest <d>)") from error
+        # FaT-H4a (hunt 4.1): the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
+        # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
+        ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(
+            str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")),
+            key=lambda receipt: int(receipt["batch_index"]))
+        contexts, prefix = _plan_contexts(item), [str(receipt["digest"]) for receipt in ordered]
+        if contexts != prefix[:len(contexts)]:
+            index = next(index for index, (given, wanted) in enumerate(zip(contexts, prefix)) if given != wanted)
+            raise ValueError(
+                f"GENERATOR_INPUT_CONTEXT: the plan reads the context receipts {', '.join(contexts)}; position {index + 1} must be "
+                f"{prefix[index]} (batch_index {ordered[index]['batch_index']}) — the plan takes the receipts of the attempt in batch_index "
+                f"order from the first, none skipped: {', '.join(prefix)}; fix: put every digest in the grouping context_receipt_digests "
+                "(the lowest batch_index first, also as context_receipt_digest), one --context-receipt each, and rerun plan-batches")
     try:
         prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, receipt_kind, "ARTIFACT_READ_BACK")["record"][kind]
     except (ValueError, OSError, KeyError):
@@ -4725,9 +4738,15 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
                          "another one needs a new run (scan --new-run)")
     _publish_bound_attempt_receipt(run_root, attempt_id, receipt_kind, {kind: item})
     skeletons = _publish_batch_skeletons(run_root, attempt_id) if kind == "plan" else {}  # FaT-SKB: the last input of each batch
+    if kind == "plan":  # FaT-H4a (hunt 4.1): which context batches of the attempt the generator sees — the line of the reviewer view
+        from tools.review_view import run_context_note
+
+        context = run_context_note(root, attempt_id)
+    else:
+        context = None
     return {"kind": kind, "digest": item["digest"],
             "path": str(_receipt_target(root, attempt_id, receipt_kind).relative_to(root)).replace("\\", "/"),
-            **({"batch_skeletons": skeletons} if skeletons else {})}
+            **({"batch_skeletons": skeletons} if skeletons else {}), **({"context": context} if context else {})}
 
 
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
