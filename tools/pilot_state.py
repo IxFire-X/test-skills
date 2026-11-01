@@ -1917,19 +1917,29 @@ def publish_model_request(
     stage = stage_instance_id.split(":", 1)[0]
     declaration = _MODEL_STAGE_REGISTRY.get(stage)
     inputs = list(input_digests) if not isinstance(input_digests, (str, bytes)) else []
-    broken = next((reason for failed, reason in (
-        (attempt is None, f"no attempt {attempt_id} in this run"),
-        (attempt is not None and attempt["state"] == "TERMINAL", "the attempt is closed (TERMINAL); a new request needs a new run"),
-        (_MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is None, f"stage {stage_instance_id!r} is not <stage>:<instance>"),
-        (declaration is None, f"unknown stage {stage!r}; known: {', '.join(sorted(_MODEL_STAGE_REGISTRY))}"),
-        (model_id is not None and not _safe_model_label(model_id), "--model-id is not a safe label (letters, digits, . _ -, no secret-like value)"),
-        (not _safe_model_label(invocation_id), "--invocation-id is not a safe label (letters, digits, . _ -, no secret-like value)"),
-        (not inputs, "no --input-digest"),
-        (len(inputs) != len(set(inputs)), "an --input-digest is repeated"),
-        (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>"),
+    label_fix = ("метка из букв, цифр и . _ : / - (до 256 знаков), например deepseek-v4 или context-1; "
+                 "без ключей, токенов и паролей")
+    broken = next(((reason, fix) for failed, reason, fix in (
+        (attempt is None, f"no attempt {attempt_id} in this run", "--attempt — attempt_id этого прогона из run_pipeline status"),
+        (attempt is not None and attempt["state"] == "TERMINAL", "the attempt is closed (TERMINAL); a new request needs a new run",
+         lambda: _new_run_fix(root)),  # only on this refusal: it reads the run manifest
+        (_MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is None, f"stage {stage_instance_id!r} is not <stage>:<instance>",
+         "--stage <stage>:<instance>, например " + _STAGE_EXAMPLES),
+        (declaration is None, f"unknown stage {stage!r}; known: {', '.join(sorted(_MODEL_STAGE_REGISTRY))}",
+         "--stage одной из стадий " + ", ".join(sorted(_MODEL_STAGE_REGISTRY)) + ", например " + _STAGE_EXAMPLES),
+        (model_id is not None and not _safe_model_label(model_id), "--model-id is not a safe label (letters, digits, . _ -, no secret-like value)",
+         "--model-id — " + label_fix),
+        (not _safe_model_label(invocation_id), "--invocation-id is not a safe label (letters, digits, . _ -, no secret-like value)",
+         "--invocation-id — " + label_fix),
+        (not inputs, "no --input-digest", "--input-digest на каждый вход стадии, в её порядке (SKILL orchestrate; при неверном входе "
+         "отказ MODEL_INPUTS_MISMATCH называет верный digest и его источник)"),
+        (len(inputs) != len(set(inputs)), "an --input-digest is repeated", "каждый вход один раз, в порядке стадии"),
+        (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>",
+         "digest целиком, как его отдала команда публикации входа (sha256:<64 hex>, поле digest или content_digest её result)"),
     ) if failed), None)
-    if broken is not None:  # FaT-AU1: the condition, not only «invalid model request»
-        raise ModelRequestInvalid(f"invalid model request: {broken}")
+    if broken is not None:  # FaT-AU1: the condition, not only «invalid model request»; FaT-H4b: and the way out
+        fix = broken[1]() if callable(broken[1]) else broken[1]
+        raise ModelRequestInvalid(f"invalid model request: {broken[0]}; fix: {fix}")
     if any(event["event_type"] == "MODEL_REQUESTED" and event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id
            for event in state["events"]):
         raise ModelRequestDuplicate(
@@ -4393,6 +4403,22 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
     _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
     return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(value["operation_capabilities"]),
             "path": target.relative_to(root).as_posix()}
+
+
+_STAGE_EXAMPLES = "context-marker:baseline, tc-generator:BATCH-<id>, tc-reviewer:canonical, tc-to-autotest:r1, autotest-reviewer:r1"
+
+
+def _new_run_fix(root: Path) -> str:
+    """FaT-H4b: the scan of this run's request with --new-run, as other refusals of a closed attempt give it."""
+    try:
+        from tools.run_pipeline import _scan_command
+
+        request = read_run(root)["manifest"].get("scan_request")
+        if isinstance(request, Mapping):
+            return "новый прогон того же запроса: " + _scan_command(root.parents[1], request, extra=("--new-run",))
+    except (ImportError, KeyError, OSError, TypeError, ValueError):
+        pass
+    return "новый прогон: scan с теми же --module, --docs и --profile, что у этого прогона, и --new-run"
 
 
 class ModelRequestInvalid(ValueError):

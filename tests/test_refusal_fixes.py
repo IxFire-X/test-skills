@@ -99,3 +99,40 @@ def test_a_bad_candidate_receipt_has_a_reason_code_and_a_fix(tmp_path: Path, cap
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert printed["reason_code"] == "ORCHESTRATION_RECEIPT_SHAPE" and "missing" in printed["message"] and "publish" in printed["fix"], printed
+
+
+@pytest.mark.parametrize(("stage", "extra", "fixed"), [
+    ("tc-generator:BATCH-x", {"input_digests": []}, "--input-digest на каждый вход"),
+    ("tc-generator:BATCH-x", {"input_digests": ["sha256:" + "1" * 64, "sha256:" + "1" * 64]}, "каждый вход один раз"),
+    ("tc-generator:BATCH-x", {"input_digests": ["sha256:short"]}, "sha256:<64 hex>"),
+    ("tc-generator:BATCH-x", {"invocation_id": "bad id with spaces"}, "--invocation-id — метка"),
+    ("tc-generator:BATCH-x", {"model_id": "sk-live-0123456789abcdefABCDEF0123456789"}, "--model-id — метка"),
+    ("tc-unknown:x", {}, "--stage <stage>:<instance>, например context-marker:baseline"),
+])
+def test_every_invalid_model_request_carries_a_fix_field(tmp_path: Path, stage: str, extra: dict, fixed: str) -> None:
+    """FaT-H4b (hunt 4, 4.2): each branch of MODEL_REQUEST_INVALID ends in «; fix: …», which error_fields gives apart."""
+    from tools.json_cli import error_fields
+    from tools.pilot_state import ModelRequestInvalid, publish_model_request
+
+    run = _generated_run(tmp_path, generated=False)
+    arguments = {"model_id": "model-generator", "invocation_id": "invoke-x", "input_digests": ["sha256:" + "1" * 64], **extra}
+    with pytest.raises(ModelRequestInvalid) as refused:
+        publish_model_request(run["run_root"], run["attempt_id"], stage, **arguments)
+    fields = error_fields(refused.value)
+    assert fields["code"] == "MODEL_REQUEST_INVALID" and fixed in fields["fix"], fields
+    assert "sk-live" not in fields["fix"], "a secret-like value is never echoed in the fix"
+
+
+def test_a_closed_attempt_names_the_scan_of_a_new_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import pilot_state
+
+    run = _generated_run(tmp_path, generated=False)
+    root = Path(run["run_root"])
+    real = pilot_state.derive_state
+    monkeypatch.setattr(pilot_state, "derive_state", lambda path: {**real(path), "attempts": [
+        {**attempt, "state": "TERMINAL"} for attempt in real(path)["attempts"]]})
+    with pytest.raises(pilot_state.ModelRequestInvalid) as refused:
+        pilot_state.publish_model_request(root, run["attempt_id"], "tc-generator:BATCH-x", model_id="m", invocation_id="i",
+                                          input_digests=["sha256:" + "1" * 64])
+    fix = str(refused.value).split("; fix: ", 1)[1]
+    assert "--new-run" in fix and ("run_pipeline scan" in fix or "scan с теми же" in fix), fix
