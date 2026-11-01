@@ -2198,6 +2198,29 @@ _RETRY_EXHAUSTED_FIX = ("fix: python -m tools.run_pipeline finish --project <pro
                         "для стадии автоматизации finish --abandon STAGE_RETRY_EXHAUSTED, до ревью кейсов — scan --new-run")
 
 
+def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: str, value: Mapping[str, Any]) -> None:
+    """FaT-R1: the reviewer's decision against the requested candidate before the answer is written — select would refuse
+    it after the ledger is closed, with no way out; here the stage keeps its one retry.  A run whose candidate the journal
+    cannot assemble (before FaT-DG) is left to select as before."""
+    from tools.canonical_document import document_sha256
+    from tools.orchestrate_test_case_revision import OrchestrationError, _run_imported, journal_assembly, review_decision
+
+    requested = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id
+                      and event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == "tc-reviewer:canonical"), None)
+    try:
+        candidate = journal_assembly(root, attempt_id)[0]
+    except (KeyError, OSError, TypeError, ValueError):
+        return
+    if requested is None or document_sha256(candidate) != requested:
+        return
+    try:
+        review_decision(candidate, value, imported=_run_imported(root, attempt_id))
+    except OrchestrationError as error:
+        rows = "; ".join(f"{row.get('path') or '/'} {row.get('code')}" for row in error.diagnostics[:8])
+        raise ValueError(f"REVIEW_DECISION_INVALID: {rows}; fix: это ошибка ответа ревьюера — исправь решение и отдай его "
+                         "единственным повтором стадии (--transport-attempts 2), ничего не записано") from None
+
+
 _RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "
 
 
@@ -2341,6 +2364,8 @@ def _publish_model_stage_artifact(
         from tools.cases_import import check_requirements_answer
 
         check_requirements_answer(root, attempt, value)  # FaT-IMP3: the links of an import with documents (by the run, not a label)
+    if stage_instance_id == "tc-reviewer:canonical":
+        _validate_review_decision(root, state, attempt_id, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:

@@ -1266,9 +1266,12 @@ _OPEN_REVIEW_FIX = ("попытка ещё не дошла до закрываю
                     "ревью кейсов, которое не может закончиться, закрой: кончился бюджет контекста — "
                     + _REVIEW_ABORT.format(code="REVIEW_CONTEXT_LIMIT") + "; ответ ревьюера дважды не прошёл проверку или "
                     "select отказал — " + _REVIEW_ABORT.format(code="REVIEW_UNUSABLE") + "; затем finish")
-_UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: выбери его (шаг 4, выбор effective canonical, "
-                   "проверка — python -m tools.api read-effective), затем снова finish; сессия с вердиктом закрыта, "
-                   "review-abort её не закроет — select отказывает всегда: прогон оставь, scan с --new-run начнёт новый")
+# FaT-R1: select checks the decision before it closes the ledger, so a closed session without an effective document is
+# an interrupted select — the same session and answer again is safe
+_UNSELECTED_FIX = ("ревью кейсов приняло документ, но effective canonical не выбран: повтори python -m tools.api review-select "
+                   "--run-root <run> --attempt <attempt_id> --output-dir <dir> --reviewer-session <run>/tmp/session.json — "
+                   "сессия закрыта с тем же ответом, повтор безопасен (проверка — python -m tools.api read-effective), затем finish; "
+                   "review-select отказывает и после повтора — прогон оставь, scan с --new-run начнёт новый")
 
 
 def finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: str | None = None) -> Mapping[str, Any]:

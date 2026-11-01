@@ -656,6 +656,84 @@ def publish_unreviewed_candidate(
     return _receipt_copy(receipt)
 
 
+def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
+                    candidate_receipt: Receipt | None = None) -> tuple[Any, Any]:
+    """FaT-R1: ``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
+    decision, writing nothing: the review shape, the successor edits, the decision against the candidate, the successor
+    document and (FaT-IMP) the human fields of an import.  select runs it before it publishes the ledger, model-response
+    of tc-reviewer before it writes the answer, so a wrong answer keeps the stage's one retry."""
+    candidate_value, review_value = _plain(candidate), _plain(review_value)
+    rows = _review_rows(review_value)
+    if rows:
+        raise OrchestrationError("ORCHESTRATION_INPUT", rows, candidate_receipt) from None
+    report = review_value["artifacts"]["validation_report"]
+    try:
+        successor = reviewer_successor(candidate_value, review_value["artifacts"])  # FaT-CV: a document or exact edits
+    except SelectionError as error:
+        raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
+    decision_rows = validate_review_decision(candidate_value, report, successor)
+    if decision_rows:
+        raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(decision_rows, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
+    verdict = report["verdict"]
+    if verdict == "AUTO_FIX_APPLIED":
+        try:
+            require_valid_canonical_document(successor)
+        except CanonicalDocumentError as error:
+            raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_SUCCESSOR"), candidate_receipt) from None
+        changed = _imported_human_changes(candidate_value, _plain(successor)) if imported else []
+        if changed:
+            raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag(path, "IMPORT_HUMAN_FIELD_CHANGED") for path in changed[:12]],
+                                     candidate_receipt) from None
+    elif successor is not None:
+        raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/successor_document", "ORCHESTRATION_SUCCESSOR")], candidate_receipt) from None
+    effective = None
+    if verdict != "ТРЕБУЕТ ДОРАБОТКИ":
+        try:
+            effective = select_effective_document(candidate_value, _plain(report), _plain(successor) if verdict == "AUTO_FIX_APPLIED" else None)
+        except SelectionError as error:
+            raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
+    return successor, effective
+
+
+_IMPORTED_CASE_FIELDS = ("title", "objective", "preconditions", "priority")
+
+
+def _imported_human_changes(candidate: Mapping[str, Any], successor: Mapping[str, Any]) -> list[str]:
+    """FaT-R1: in an import the reviewer's fix may not touch the human fields the import fixed (the fields
+    batch_assembly.require_imported_human_fields keeps): case title/objective/preconditions/priority, step action,
+    test data and expectation texts — the machine part only."""
+    before = {case["case_id"]: case for case in candidate.get("test_cases", [])}
+    changed: list[str] = []
+    for index, case in enumerate(successor.get("test_cases", [])):
+        source = before.get(case.get("case_id"))
+        if source is None:
+            changed.append(f"/test_cases/{index}")
+            continue
+        changed += [f"/test_cases/{index}/{field}" for field in _IMPORTED_CASE_FIELDS if case.get(field) != source.get(field)]
+        steps, original = case.get("steps") or [], source.get("steps") or []
+        if len(steps) != len(original):
+            changed.append(f"/test_cases/{index}/steps")
+            continue
+        for number, (step, row) in enumerate(zip(steps, original)):
+            changed += [f"/test_cases/{index}/steps/{number}/{field}" for field in ("action", "test_data") if step.get(field) != row.get(field)]
+            if [item.get("text") for item in step.get("expectations") or []] != [item.get("text") for item in row.get("expectations") or []]:
+                changed.append(f"/test_cases/{index}/steps/{number}/expectations")
+    if len(successor.get("test_cases", [])) != len(before):
+        changed.append("/test_cases")
+    return changed
+
+
+def _run_imported(run_root: Path, attempt_id: str) -> bool:
+    """Whether the attempt is an import of cases (FaT-IMP): its published cases are the human part."""
+    from tools.pilot_state import _imported_cases, _run_root, derive_state
+
+    try:
+        project, root = _run_root(Path(run_root))
+        return _imported_cases(project, root, derive_state(root), attempt_id) is not None
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+
+
 @_closure_cached  # FaT-9b
 def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receipt, package_binding: Mapping[str, Any], reviewer_session: Mapping[str, Any], review_artifact: Mapping[str, Any] | None, output_dir: str | os.PathLike[str], csv_profile: str = _PROFILE, *, run_root: Path, attempt_id: str, reviewer_evidence_receipts: Sequence[Mapping[str, Any]] = (), publisher=publish_bundle, verifier=verify_bundle) -> OrchestrationResult:
     """Select the published r1 and publish reviewer-produced r2 only when needed."""
@@ -676,14 +754,10 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
         if facts.get("completion") == "PARTIAL":
             return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, str(facts.get("reason_code", "REWORK")), _freeze(facts), ())
         raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/review_artifact", "REVIEWER_PROTOCOL")], candidate_receipt)
-    rows = _review_rows(review_value)
-    if rows:
-        raise OrchestrationError("ORCHESTRATION_INPUT", rows, candidate_receipt) from None
+    # FaT-R1: every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
+    successor, effective = review_decision(candidate_value, review_value, imported=_run_imported(run_root, attempt_id),
+                                           candidate_receipt=candidate_receipt)
     report = review_value["artifacts"]["validation_report"]
-    try:
-        successor = reviewer_successor(candidate_value, review_value["artifacts"])  # FaT-CV: a document or exact edits
-    except SelectionError as error:
-        raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
     verdict = report["verdict"]
     facts = validate_reviewer_session(
         reviewer_session, package_binding, review_value,
@@ -693,18 +767,8 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
     )
     if not facts["acceptance_eligible"]:
         raise OrchestrationError("ORCHESTRATION_SELECTION", [_diag("/reviewer_session", "INDEPENDENCE_UNVERIFIED")], candidate_receipt)
-    decision_rows = validate_review_decision(candidate_value, report, successor)
-    if decision_rows:
-        raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(decision_rows, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
+    successor_receipt = None
     if verdict == "AUTO_FIX_APPLIED":
-        try:
-            require_valid_canonical_document(successor)
-        except CanonicalDocumentError as error:
-            raise OrchestrationError("ORCHESTRATION_INPUT", _safe(error.diagnostics, "ORCHESTRATION_SUCCESSOR"), candidate_receipt) from None
-        try:
-            effective = select_effective_document(_plain(candidate_value), _plain(report), _plain(successor))
-        except SelectionError as error:
-            raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
         try:
             published_successor = publisher(_plain(effective), output_dir, csv_profile)
         except Exception:
@@ -713,16 +777,6 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
         rows = _receipt_rows(published_successor, effective, output_dir, csv_profile)
         if rows:
             raise OrchestrationError("ORCHESTRATION_RECEIPT", rows, candidate_receipt, successor_receipt) from None
-    else:
-        successor_receipt = None
-        if successor is not None:
-            raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/successor_document", "ORCHESTRATION_SUCCESSOR")], candidate_receipt) from None
-        effective = None
-        if verdict != "ТРЕБУЕТ ДОРАБОТКИ":
-            try:
-                effective = select_effective_document(_plain(candidate_value), _plain(report), None)
-            except SelectionError as error:
-                raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
     if verdict == "ТРЕБУЕТ ДОРАБОТКИ":
         rework_facts = {"attempt_state": "TERMINAL", "completion": "PARTIAL", "verification": "NOT_APPLICABLE", "coverage": None, "reason_code": "REWORK", "accepted": False, "reviewer_session_digest": facts["reviewer_session_digest"]}
         return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, "REWORK", _freeze(rework_facts), ())
