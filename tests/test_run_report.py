@@ -311,16 +311,6 @@ def _real_shaped_run(tmp_path: Path) -> tuple[Path, dict]:
                   "bundle_bytes": len(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")), "document": document}
 
 
-def test_inputs_are_resolved_by_file_digest_receipt_digest_and_context_byte_count(tmp_path: Path) -> None:
-    from tools.run_report import input_bytes
-    from tools.step_size import digest_index
-
-    root, facts = _real_shaped_run(tmp_path)
-    index = digest_index(root)
-    resolved, unresolved = input_bytes(index, [facts["doc"], facts["context"], facts["bundle"], "sha256:" + "f" * 64])
-    assert resolved == facts["doc_bytes"] + 90000 + facts["bundle_bytes"] and unresolved == 1
-
-
 def test_the_case_document_is_found_in_the_case_sets(tmp_path: Path) -> None:
     from tools.run_report import case_document
 
@@ -499,7 +489,7 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
     from tools.canonical_document import document_sha256
     from tools.review_view import render
     from tools.run_report import build_report, render_markdown
-    from tools.step_size import digest_index
+    from tools.step_size import stage_inputs
 
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)
     document = automated_document()
@@ -511,7 +501,8 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
 
     before, _report = reviewer_call()
     candidate = document_sha256(document).removeprefix("sha256:")
-    candidate_bytes = digest_index(run_root).get(candidate, 0)
+    candidate_bytes = sum(row["bytes"] for row in stage_inputs(run_root, "tc-reviewer:canonical", write_views=False)["files"]
+                          if row["digest"] == "sha256:" + candidate)
     view = render(document)
     (run_root / "review-views").mkdir(exist_ok=True)
     (run_root / "review-views" / f"{candidate}.md").write_bytes(view)
@@ -522,29 +513,13 @@ def test_the_reviewer_input_is_the_view_it_read_not_the_full_canonical(tmp_path:
     assert "(вид)" in render_markdown(report)
 
 
-# --- FaT-AV: one digest index, the effective receipt, the view of the automation generator --------
+# --- FaT-AV: the effective receipt, the view of the automation generator; FaT-U7: no digest index at all --------
 
-def test_the_report_has_no_digest_index_of_its_own() -> None:
+def test_there_is_no_digest_index_any_more() -> None:
     from tools import run_report, step_size
 
-    assert not hasattr(run_report, "digest_index") and callable(step_size.digest_index)
-
-
-def test_the_effective_receipt_without_its_own_digest_is_found_inside_its_carrier(tmp_path: Path) -> None:
-    """FaT-AV: a real effective-canonicals record keeps the bundle receipt without a ``digest`` field; the request binds
-    the sha256 of its canonical JSON. The report counts the receipt's bytes (the report said «размер неполный»)."""
-    import hashlib
-
-    from tools.run_report import input_bytes
-    from tools.step_size import digest_index
-
-    root, facts = _real_shaped_run(tmp_path)
-    receipt = {"document_id": "TCDOC-x", "revision": 1, "json_path": "case-sets/r1/TCDOC-x.r1.json"}
-    compact = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    (root / "effective-canonicals" / "b.json").write_text(json.dumps({"document": facts["document"], "effective_bundle_receipt": receipt}),
-                                                          encoding="utf-8")
-    resolved, unresolved = input_bytes(digest_index(root), [facts["doc"], "sha256:" + hashlib.sha256(compact).hexdigest()])
-    assert (resolved, unresolved) == (facts["doc_bytes"] + len(compact), 0)
+    assert not any(hasattr(step_size, name) for name in ("digest_index", "_digest_paths")) and not hasattr(run_report, "input_bytes")
+    assert callable(step_size.stage_inputs)
 
 
 def test_the_automation_input_is_the_autotest_view_and_the_receipt_not_the_carrier(tmp_path: Path) -> None:

@@ -11,19 +11,19 @@ the stage or the role), sizes and the code, no file paths — is appended to ``<
 FaT-O: ``output_warning`` — an answer larger than ``.skillsrc`` ``limits.step_output_warn_bytes`` (default
 ``DEFAULT_OUTPUT_WARN``) is the warning ``STEP_OUTPUT_LARGE``; only a measurement, nothing is split or rewritten.
 FaT-Q2: ``--stage context-marker:requirements`` is the requirements step of the marker in parts (the documents only);
-``--stage tc-generator:<batch>|tc-to-autotest:rN|autotest-reviewer:rN`` takes the files behind the ``input_digests`` of
-the published model request of that stage (``request_files``): an input that no file or more than one file of the run
-answers is ``unresolved`` (``STEP_INPUT_UNRESOLVED``, not a stop), nothing is chosen.
+``--stage tc-generator:<batch>|tc-reviewer:canonical|tc-to-autotest:rN|autotest-reviewer:rN`` takes the files behind the
+``input_digests`` of the published model request of that stage (``stage_inputs``, FaT-U7: by the journal of the attempt, the
+same answer as ``step-inputs`` and the run report): an input the journal does not bind is ``unresolved``
+(``STEP_INPUT_UNRESOLVED``, not a stop), nothing is guessed.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from tools.json_cli import JsonArgumentParser
 
@@ -41,8 +41,7 @@ DEFAULT_OUTPUT_WARN = 128_000  # ≈ 31 000 tokens at 0.24 tok/B; the real outpu
 TOKENS_PER_BYTE = 0.24
 _STAGE_ROLES = {"context-marker": "context-marker"}
 INPUT_UNRESOLVED = "STEP_INPUT_UNRESOLVED"
-_REQUEST_STAGES = ("tc-generator", "tc-to-autotest", "autotest-reviewer")
-_HEX = re.compile(r"[0-9a-f]{64}")
+_REQUEST_STAGES = ("tc-generator", "tc-reviewer", "tc-to-autotest", "autotest-reviewer")
 
 
 def _limit(project: Path, key: str, default: int, *, zero: bool = False) -> int:
@@ -143,12 +142,22 @@ def role_files(role: str) -> list[Path]:
     return [base / "SKILL.md", *sorted(path for folder in ("references", "assets") for path in (base / folder).rglob("*") if path.is_file())]
 
 
+def _requirement_files(project: Path, root: Path) -> list[Path]:
+    """The documents a requirements digest stands for: ``--docs`` of the run's scan request (the baseline keeps only the
+    digest of their projection, ``run_pipeline`` requirement) and, in an import with documents, the CSV whose cases the
+    requirements step links (FaT-IMP3; without documents that step is answered by code from the CSV)."""
+    from tools.cases_import import cases_path, docs_run
+
+    request = json.loads((root / "run-manifest.json").read_text(encoding="utf-8")).get("scan_request") or {}
+    paths = [*(request.get("docs") or []), *([str(cases_path(root))] if docs_run(root) else [])]
+    return list(dict.fromkeys(Path(path) if Path(path).is_absolute() else project / path for path in paths))
+
+
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:
     """The input files of ``stage`` as the journal knows them before the call (context-marker only)."""
     if stage not in {"context-marker", "context-marker:requirements"}:
         raise ValueError("the journal knows the input of context-marker only; give --files for other steps")
     from tools.pilot_state import derive_state
-    from tools.project_inventory import read_execution_baseline
 
     project = Path(project).resolve()
     root = project / ".pilot-runs" / run_id
@@ -161,22 +170,17 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if batch is None or receipt.get("batch_index") == batch:
             files.extend(project / item["project_path"] for item in receipt["files"])
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     answer = next((str(event["artifact_digest"]) for event in derive_state(root)["events"]
                    if event.get("attempt_id") == attempt["attempt_id"] and event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
     if stage == "context-marker:requirements":
         # FaT-Q2 (2.3): the requirements step of the marker in parts reads the requirement documents only
-        # FaT-IMP3: and, in an import with documents, the CSV whose cases it links
-        from tools.cases_import import cases_path, docs_run
-
-        csv = [project / str(cases_path(root))] if docs_run(root) else []
-        return list(dict.fromkeys([*(project / row["path"] for row in baseline["requirements"].get("docs", [])), *csv]))
+        return _requirement_files(project, root)
     if batch is not None and answer is not None:
         # FaT-5: a part of the marker reads the requirements answer, not the documents again.
         files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))
     else:
-        files.extend(project / row["path"] for row in baseline["requirements"].get("docs", []))
+        files.extend(_requirement_files(project, root))
     return list(dict.fromkeys(files))
 
 
@@ -184,60 +188,204 @@ def _compact(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _digest_paths(root: Path, *, scratch: bool = False) -> tuple[dict[str, set[Path]], dict[str, set[tuple[Path, str, int]]], dict[Path, int]]:
-    """``(whole, inside, sizes)``: the keys a run file answers to as a whole — its name, the sha256 of its bytes, its own
-    ``digest``, a canonical digest —, the keys of an object it carries one level inside as ``(carrier, field, bytes of the
-    object)``, and the bytes a model reads behind each file (a context receipt counts its ``byte_count``, FaT-6b).  The
-    agent's scratch ``tmp/`` counts only with ``scratch`` (the report: a run may keep its candidate only there)."""
-    from tools.canonical_document import document_sha256
+_RECEIPT_SLOTS = ("batch-plans/{a}.json", "generator-headers/{a}.json", "prior-capabilities/{a}.*.json", "imported-cases/{a}.*.json",
+                  "imported-cases/{a}.json", "reviewer-session-boundaries/{a}.json", "automation-review-boundaries/{a}.*.json",
+                  "artifacts/{a}/*")  # FaT-10d: run artifacts of the attempt (publish_run_artifact_bytes), also without a suffix
+_BUNDLES = ("cases", "candidate-bundle")  # where publish_test_case_bundle writes the document of the run
 
-    index: dict[str, set[Path]] = {}
-    inside: dict[str, set[tuple[Path, str, int]]] = {}
-    sizes: dict[Path, int] = {}
-    # FaT-10d: run artifacts (artifacts/<attempt>/batch-plan, batch-header) are JSON files without a suffix
-    for path in sorted(root.rglob("*")):
-        if (path.relative_to(root).parts[0] == "tmp" and not scratch) or path.suffix not in {".json", ""} or not path.is_file():
-            continue
-        try:
-            raw = path.read_bytes()
-            value = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError):
-            continue
-        receipt = isinstance(value, dict) and isinstance(value.get("byte_count"), int) and "files" in value
-        sizes[path] = int(value["byte_count"]) if receipt else len(raw)
-        keys = {hashlib.sha256(raw).hexdigest()}
-        if _HEX.fullmatch(path.stem):
-            keys.add(path.stem)
-        if isinstance(value, dict):
-            if isinstance(value.get("digest"), str):
-                keys.add(value["digest"].removeprefix("sha256:"))
-            if isinstance(value.get("test_cases"), list):
+
+class _Journal:
+    """FaT-U7: what the journal of one attempt binds, by digest — files that are an input as a whole (more than one is
+    ``ambiguous``), objects kept inside a carrier ``(carrier, key, bytes)``, inputs that stand for project files (the
+    requirement documents; the files of a context receipt, ``context``) and the canonical documents the run keeps only by
+    digest (the assembled candidate; the effective document, with its carrier).  Only the attempt's own slots are read —
+    never the agent's ``tmp/``, never a walk of the run."""
+
+    def __init__(self, project: Path, root: Path, state: Any, attempt_id: str) -> None:
+        self.root = root
+        self.project = project
+        self.files: dict[str, list[Path]] = {}
+        self.carried: dict[str, tuple[Path, str, int]] = {}
+        self.expands: dict[str, tuple[list[Path], bool]] = {}
+        self.documents: dict[str, Path | None] = {}
+        self.bundled: dict[str, Path] = {}
+        attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+        baseline = json.loads((root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")).read_text(encoding="utf-8"))
+        self.expands[str(baseline["requirements"]["digest"])] = (_requirement_files(project, root), False)
+        inventory = str(baseline["inventory_digest"])
+        self._file(inventory, root / "inventories" / (inventory.removeprefix("sha256:") + ".json"))
+        events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
+        for event in events:
+            digest = str(event.get("artifact_digest"))
+            if event["event_type"] == "CONTEXT_SELECTED":
+                receipt = json.loads((root / "context-selections" / attempt_id / (digest.removeprefix("sha256:") + ".json")).read_text(encoding="utf-8"))
+                self.expands[digest] = ([project / item["project_path"] for item in receipt["files"]], True)
+            elif event["event_type"] in {"MODEL_RESPONSE_RECEIVED", "CANDIDATE_PUBLISHED"} and event.get("stage_instance_id") != "assembly":
+                self._file(digest, root / "model-stage-artifacts" / attempt_id / (digest.removeprefix("sha256:") + ".json"))
+            elif event["event_type"] == "CANDIDATE_PUBLISHED":
+                self.documents[digest] = None
+        for pattern in _RECEIPT_SLOTS:
+            for path in sorted(root.glob(pattern.format(a=attempt_id))):
+                if not path.is_file() or path.suffix not in {".json", ""}:
+                    continue
+                raw = path.read_bytes()
+                if pattern.startswith("artifacts/"):  # publish_run_artifact_bytes names a run artifact by the sha256 of its bytes
+                    self._file("sha256:" + hashlib.sha256(raw).hexdigest(), path)
                 try:
-                    keys.add(document_sha256(value).removeprefix("sha256:"))
-                except Exception:  # noqa: BLE001 - a non-canonical document only lacks this key
-                    pass
-            # a receipt kept inside its carrier (the effective bundle receipt in effective-canonicals/): its own
-            # ``digest`` or the sha256 of its canonical JSON, with and without the journal's trailing newline
-            for field, nested in value.items():
-                if isinstance(nested, dict):
-                    compact = _compact(nested)
-                    carried = {hashlib.sha256(compact).hexdigest(), hashlib.sha256(compact + b"\n").hexdigest()}
-                    if isinstance(nested.get("digest"), str):
-                        carried.add(nested["digest"].removeprefix("sha256:"))
-                    for key in carried:
-                        inside.setdefault(key, set()).add((path, field, len(compact)))
-        for key in keys:
-            index.setdefault(key, set()).add(path)
-    return index, inside, sizes
+                    value = json.loads(raw.decode("utf-8"))
+                except ValueError:  # a run artifact that is no JSON names no other digest
+                    continue
+                if isinstance(value, dict):
+                    for nested in (value, *(item for item in value.values() if isinstance(item, dict))):
+                        if isinstance(nested.get("digest"), str):
+                            self._file(nested["digest"], path)
+        effective = root / "effective-canonicals" / f"{attempt_id}.json"
+        if effective.is_file():
+            value = json.loads(effective.read_text(encoding="utf-8"))
+            self.documents[str(value["document_digest"])] = effective  # read-effective gives the document with its carrier
+            receipt = value["effective_bundle_receipt"]
+            if isinstance(receipt.get("json_path"), str) and receipt.get("document_sha256") == value["document_digest"]:
+                self.bundled[str(value["document_digest"])] = Path(receipt["json_path"])  # the bundle file the receipt names
+            self.carried[str(value["effective_bundle_receipt_digest"])] = (effective, "effective_bundle_receipt", len(_compact(value["effective_bundle_receipt"])))
+        ledgers = [event for event in events if event.get("batch_id") == "reviewer-ledger-v1" and event["event_type"] == "ARTIFACT_READ_BACK"]
+        if ledgers:
+            ledger = root / "reviewer-session-ledgers" / attempt_id / (str(ledgers[0]["artifact_digest"]).removeprefix("sha256:") + ".json")
+            package = json.loads(ledger.read_text(encoding="utf-8"))["package_binding"]
+            self.carried[str(package["package_digest"])] = (ledger, "package_binding", len(_compact(package)))
+
+    def _file(self, digest: str, path: Path) -> None:
+        paths = self.files.setdefault(digest, [])
+        if path not in paths:
+            paths.append(path)
+
+    def outside(self, digest: str) -> bool:
+        """The bundle file a receipt names is the agent's data: a path that leaves the project is never measured."""
+        named = self.bundled.get(digest)
+        if named is None:
+            return False
+        target = (named if named.is_absolute() else self.root / named).resolve()
+        return not target.is_relative_to(self.project.resolve())
+
+    def document(self, digest: str) -> Path | None:
+        """A canonical document the run keeps by digest: the bundle file its receipt names (inside the project, see
+        :meth:`outside`), else its file in the bundle folder of the run, else its carrier."""
+        from tools.canonical_document import document_sha256
+
+        named = self.bundled.get(digest)
+        if named is not None and not self.outside(digest) and (named if named.is_absolute() else self.root / named).is_file():
+            return named if named.is_absolute() else self.root / named
+        for path in sorted(path for folder in _BUNDLES for path in (self.root / folder).rglob("*.json")):
+            try:
+                if document_sha256(json.loads(path.read_text(encoding="utf-8"))) == digest:
+                    return path
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):  # a projection that is no canonical document
+                continue
+        return self.documents.get(digest)
 
 
-def digest_index(root: Path) -> dict[str, int]:
-    """FaT-6b/FaT-AV: the bytes a model reads behind each digest of the run, for the report — the one index of the
-    package (``request_files`` reads the same): a file as a whole first, else the object a carrier holds inside."""
-    whole, inside, sizes = _digest_paths(Path(root), scratch=True)
-    index = {key: min(rows)[2] for key, rows in inside.items()}
-    index.update({key: sizes[min(paths)] for key, paths in whole.items()})
-    return index
+def _requested(root: Path, state: Any, attempt_id: str, stage: str) -> tuple[str, list[str]]:
+    """The digest and the input digests of the last published request of ``stage``, from its journal slot (a measurement:
+    the request was checked when it was published; the full predecessor check of ``read_model_request`` is not repeated)."""
+    from tools.pilot_state import _model_request_target
+
+    requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
+                 and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
+    if not requested:
+        raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
+    request_digest = str(requested[-1]["artifact_digest"])
+    request = json.loads(_model_request_target(root, attempt_id, request_digest).read_text(encoding="utf-8"))
+    if request.get("digest") != request_digest or request.get("stage_instance_id") != stage:
+        raise ValueError(f"the model request of {stage} does not match its journal event")
+    return request_digest, [str(digest) for digest in request.get("input_digests") or []]
+
+
+def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, write_views: bool = True,
+                 state: Any = None, journals: dict[str, Any] | None = None) -> dict[str, Any]:
+    """FaT-U7 (audit U7, F5): the files and bytes behind the ``input_digests`` of the published model request of ``stage``,
+    from the journal — the one answer of ``step-inputs``, ``tools.step_size --run --stage`` and the run report.
+
+    A context receipt or a requirements digest opens into the project files it stands for; an object kept inside a carrier
+    is a ``binding`` with its own bytes, or 0 when the step reads the carrier anyway.  The view of the document replaces it
+    (``basis: вид``: the reviewer's candidate, the autotest view of ``tc-to-autotest``); a generator batch also reads the map
+    of existing project tests (``basis: карта``, FaT-EC).  ``tc-to-autotest:r2`` also reads the answers of r1 and of its
+    review (``basis: r1``/``ревью r1``) — they bind the correction, not the request.  An input the journal does not bind is
+    ``unresolved`` (``not-in-journal``), never guessed.  ``write_views=False`` (the report) measures the map without
+    writing it; the report also passes its ``state`` and one ``journals`` cache for all its calls."""
+    from tools.pilot_state import derive_state
+
+    root = Path(run_root).resolve()
+    project = root.parent.parent
+    state = state if state is not None else derive_state(root)
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    attempt_id = attempt_id or str(state["attempts"][-1]["attempt_id"])
+    request_digest, digests = _requested(root, state, attempt_id, stage)
+    journals = {} if journals is None else journals
+    journal = journals.get(attempt_id) or journals.setdefault(attempt_id, _Journal(project, root, state, attempt_id))
+    views: dict[int, Path] = {}
+    if digests and stage.startswith("tc-to-autotest:") and autotest_view(root, digests[0]).is_file():
+        views[0] = autotest_view(root, digests[0])
+    elif digests and stage.startswith("tc-reviewer:") and (root / "review-views" / (digests[0].removeprefix("sha256:") + ".md")).is_file():
+        views[0] = root / "review-views" / (digests[0].removeprefix("sha256:") + ".md")  # FaT-CV2: the reviewer reads the view
+    files: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+    contexts: list[str] = []
+    for position, digest in enumerate(digests):
+        if position in views:
+            files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
+        elif digest in journal.expands:
+            targets, context = journal.expands[digest]
+            files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
+            if context and stage.startswith("tc-generator:"):
+                contexts.append(digest)
+        elif len(paths := [path for path in journal.files.get(digest, []) if path.is_file()]) == 1:
+            files.append({"digest": digest, "path": str(paths[0]), "bytes": paths[0].stat().st_size})
+        elif paths:
+            unresolved.append({"digest": digest, "reason": "ambiguous"})  # two journal files claim one digest: none is chosen
+        elif journal.outside(digest):
+            unresolved.append({"digest": digest, "reason": "outside-project"})  # the receipt names a file outside the project
+        elif digest in journal.documents and (document := journal.document(digest)) is not None:
+            files.append({"digest": digest, "path": str(document), "bytes": document.stat().st_size})
+        elif digest in journal.carried:
+            carrier, key, size = journal.carried[digest]
+            read = any(row["path"] == str(carrier) for row in files)
+            bindings.append({"digest": digest, "carrier": str(carrier), "key": key, "bytes": 0 if read else size})
+        else:
+            unresolved.append({"digest": digest, "reason": "not-in-journal"})
+    if stage == "tc-to-autotest:r2":
+        for basis, source, event_type in (("r1", "tc-to-autotest:r1", "CANDIDATE_PUBLISHED"), ("ревью r1", "autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")):
+            answer = next((str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id
+                           and event.get("stage_instance_id") == source and event["event_type"] == event_type), None)
+            paths = [path for path in journal.files.get(answer or "", []) if path.is_file()]
+            if len(paths) == 1:
+                files.append({"digest": answer, "path": str(paths[0]), "bytes": paths[0].stat().st_size, "basis": basis})
+            else:
+                unresolved.append({"digest": answer, "source": source, "reason": "not-in-journal"})  # e.g. an r2 requested before r1
+    if contexts:
+        # FaT-EC: the map of existing project tests for the context — built (again, when its bytes differ) from the
+        # frozen inventory and the receipts; no input digest of its own, like the autotest view.  FaT-AU3: one map for
+        # all the context receipts of the batch, named by the first
+        from tools.existing_tests import context_view, ensure_view, map_path
+
+        try:  # the map is a hint: a context the code cannot read back leaves it out, the step stays measured (as the report did)
+            if write_views:
+                existing = ensure_view(root, contexts)
+                size = existing.stat().st_size if existing is not None else 0
+            else:
+                size = len(context_view(root, contexts, attempt_id))
+                existing = map_path(root, contexts[0]) if size else None
+        except (KeyError, OSError, TypeError, ValueError):
+            existing = None
+        if existing is not None:
+            files.append({"digest": contexts[0], "path": str(existing), "bytes": size, "basis": "карта"})
+    return {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
+            "unresolved": unresolved}
+
+
+def input_size(found: Mapping[str, Any]) -> int:
+    """The bytes a step reads behind :func:`stage_inputs`: each file once (as ``measure`` counts them) and the bindings."""
+    return sum({row["path"]: int(row["bytes"]) for row in found["files"]}.values()) + sum(int(row["bytes"]) for row in found["bindings"])
 
 
 def autotest_view(root: Path, document_digest: str) -> Path:
@@ -246,86 +394,19 @@ def autotest_view(root: Path, document_digest: str) -> Path:
 
 
 def request_files(run_root: Path, stage: str) -> dict[str, Any]:
-    """FaT-Q2 (2.2): the files behind the ``input_digests`` of the published model request of ``stage``.
-
-    Only a measurement: a context-selection receipt opens into the project files it lists; a file that is the input as a
-    whole answers before a file that only carries it inside; an input digest that no file or more than one file of the
-    same kind answers is ``unresolved`` (``not-found``/``ambiguous``), never chosen.  FaT-AV: the document of
-    ``tc-to-autotest`` is its autotest view when the view is built (``basis: вид``); an input only carried inside another
-    file is a ``binding`` with its own bytes when that carrier repeats an input the step reads anyway (the effective bundle
-    receipt next to the whole document in ``effective-canonicals/``), else the step reads the carrier once."""
-    from tools.pilot_state import derive_state, read_model_request
+    """FaT-Q2 (2.2): ``step-inputs`` — :func:`stage_inputs` of the published model request of ``stage``, plus for the
+    automation stages the Java level of the module's build and whether it has junit-jupiter-params."""
+    from tools.pilot_state import derive_state
 
     root = Path(run_root).resolve()
     project = root.parent.parent
-    state = derive_state(root)
-    if not state["attempts"]:
-        raise ValueError("the run has no attempt yet")
-    attempt_id = str(state["attempts"][-1]["attempt_id"])
-    requested = [event for event in state["events"] if event.get("attempt_id") == attempt_id
-                 and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == stage]
-    if not requested:
-        raise ValueError(f"no model request of {stage} yet: publish it first with tools.api model-request")
-    request_digest = str(requested[-1]["artifact_digest"])
-    request = read_model_request(root, attempt_id, stage, request_digest)
-    whole, inside, _sizes = _digest_paths(root)
-    selections = root / "context-selections"
-    digests = [str(digest) for digest in request.get("input_digests") or []]
-    keys = [digest.removeprefix("sha256:") for digest in digests]
-    views = {0: autotest_view(root, keys[0])} if stage.startswith("tc-to-autotest:") and keys and autotest_view(root, keys[0]).is_file() else {}
-    # the inputs the step reads as a file of their own (or as the view): a carrier of one of them repeats it
-    read = {key for position, key in enumerate(keys) if position in views or len(whole.get(key) or ()) == 1}
-    carried: dict[Path, set[str]] = {}
-    for key, rows in inside.items():
-        for carrier, _field, _size in rows:
-            carried.setdefault(carrier, set()).add(key)
-    files: list[dict[str, Any]] = []
-    contexts: list[str] = []
-    bindings: list[dict[str, Any]] = []
-    unresolved: list[dict[str, str]] = []
-    for position, (digest, key) in enumerate(zip(digests, keys)):
-        if position in views:
-            view = views[position]
-            files.append({"digest": digest, "path": str(view), "bytes": view.stat().st_size, "basis": "вид"})
-            continue
-        paths = sorted(whole.get(key) or ())
-        if not paths and len(inside.get(key) or ()) == 1:
-            carrier, field, size = next(iter(inside[key]))
-            if carried[carrier] & (read - {key}):
-                bindings.append({"digest": digest, "carrier": str(carrier), "key": field, "bytes": size})
-                continue
-            if any(row["path"] == str(carrier) for row in files):
-                bindings.append({"digest": digest, "carrier": str(carrier), "key": field, "bytes": 0})  # read with its carrier
-                continue
-            paths = [carrier]
-        if len(paths) != 1:
-            unresolved.append({"digest": digest, "reason": "ambiguous" if paths or inside.get(key) else "not-found"})
-            continue
-        path = paths[0]
-        if selections in path.parents:
-            receipt = json.loads(path.read_text(encoding="utf-8"))
-            targets = [project / item["project_path"] for item in receipt["files"]]
-        else:
-            targets = [path]
-        files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
-        if stage.startswith("tc-generator:") and selections in path.parents:
-            contexts.append(digest)
-    if contexts:
-        # FaT-EC: the map of existing project tests for the context — built (again, when its bytes differ) from the
-        # frozen inventory and the receipts; no input digest of its own, like the autotest view.  FaT-AU3: one map for
-        # all the context receipts of the batch, named by the first
-        from tools.existing_tests import ensure_view
-
-        existing = ensure_view(root, contexts)
-        if existing is not None:
-            files.append({"digest": contexts[0], "path": str(existing), "bytes": existing.stat().st_size, "basis": "карта"})
-    result = {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
-              "unresolved": unresolved}
+    result = stage_inputs(root, stage)
     if stage.startswith(("tc-to-autotest:", "autotest-reviewer:")):
         # FaT-JL: the Java level of the module's build, so that the generator and its reviewer keep to its API
         from tools.discover_project import java_api_level, junit_params_available
 
-        module = str(state["attempts"][-1].get("module") or ".")
+        attempt = next(item for item in derive_state(root)["attempts"] if item["attempt_id"] == result["attempt_id"])
+        module = str(attempt.get("module") or ".")
         module_root = project if module == "." else project.joinpath(*module.split("/"))
         level = java_api_level(module_root)
         if level is not None:

@@ -189,15 +189,17 @@ def model_calls(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def input_bytes(index: Mapping[str, int], digests: Sequence[str]) -> tuple[int, int]:
-    """``(resolved bytes, unresolved count)`` of a model request's input digests."""
-    found = [index[str(digest).removeprefix("sha256:")] for digest in digests if str(digest).removeprefix("sha256:") in index]
-    return sum(found), len(digests) - len(found)
+def _answer_bytes(root: Path, call: Mapping[str, Any]) -> int | None:
+    """FaT-U7: the stored answer behind ``response_digest`` — its journal slot, not a search."""
+    digest = str(call.get("response_digest") or "")
+    path = root / "model-stage-artifacts" / str(call.get("attempt_id")) / (digest.removeprefix("sha256:") + ".json")
+    return path.stat().st_size if digest.startswith("sha256:") and path.is_file() else None
 
 
-def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, int], raw_sizes: Mapping[str, int] | None = None) -> None:
+def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[str, int] | None = None, *,
+          state: Any = None, journals: dict[str, Any] | None = None) -> None:
     from tools import pilot_state as pilot
-    from tools.step_size import TOKENS_PER_BYTE, output_warning, role_files, step_budget
+    from tools.step_size import TOKENS_PER_BYTE, input_size, output_warning, role_files, stage_inputs, step_budget
 
     inputs: list[str] = []
     by_code = False
@@ -210,31 +212,19 @@ def _size(project: Path, root: Path, call: dict[str, Any], sizes: Mapping[str, i
         reuse = request.get("reuse")  # FaT-CR: the answer of an earlier run, reused — no model call either
     except (KeyError, OSError, TypeError, ValueError):
         pass
-    resolved, unresolved = input_bytes(sizes, inputs)
+    # FaT-U7: the same files and bytes as step-inputs — from the journal, the map of existing tests measured, not written
+    try:
+        found = stage_inputs(root, str(call["stage"]), attempt_id=str(call["attempt_id"]), write_views=False, state=state, journals=journals)
+        resolved, unresolved = input_size(found), len(found["unresolved"])
+    except (KeyError, OSError, TypeError, ValueError):
+        found, resolved, unresolved = None, 0, len(inputs)
     basis = None
     if str(call["stage"]).startswith(("tc-reviewer:", "tc-to-autotest:")) and inputs:
-        # FaT-CV2 (2.13): the reviewer reads the view of the candidate (its first input), not the full canonical JSON;
-        # FaT-AV: the automation generator reads the autotest view of the effective document the same way
-        from tools.step_size import autotest_view
-
-        view = (autotest_view(root, inputs[0]) if str(call["stage"]).startswith("tc-to-autotest:")
-                else root / "review-views" / (str(inputs[0]).removeprefix("sha256:") + ".md"))
-        basis = "канон"
-        if view.is_file():
-            rest, unresolved = input_bytes(sizes, inputs[1:])
-            resolved, basis = rest + view.stat().st_size, "вид"
-    if str(call["stage"]).startswith("tc-generator:"):
-        # FaT-RE (hunt 3, 3.12): the generator also reads the map of existing project tests of its context — the same
-        # bytes step-inputs gives it (FaT-EC); the skeleton of an import is an input digest of its own already
-        from tools.existing_tests import context_view
-
-        try:  # FaT-AU3: one map for all the context receipts of the batch
-            resolved += len(context_view(root, [str(digest) for digest in inputs], str(call["attempt_id"])))
-        except (KeyError, OSError, TypeError, ValueError):
-            pass
+        # FaT-CV2 (2.13) / FaT-AV: the view of the document when it is built, else the canonical JSON
+        basis = "вид" if found and any(row.get("basis") == "вид" for row in found["files"]) else "канон"
     call["input_basis"] = basis
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
-    answer = sizes.get(str(call.get("response_digest") or "").removeprefix("sha256:"))
+    answer = _answer_bytes(root, call)
     # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
     raw = (raw_sizes or {}).get(str(call.get("response_digest") or ""))
     call["output_basis"] = None if answer is None and raw is None else ("raw" if raw is not None else "compact")
@@ -502,14 +492,14 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     attempt_id = attempt["attempt_id"] if attempt else None
     status = _durable_status_facts(project, root, stage="report")
 
-    from tools.step_size import digest_index, output_sizes
+    from tools.step_size import output_sizes
 
-    sizes = digest_index(root)
     calls = model_calls(events)
+    journals: dict[str, Any] = {}  # FaT-U7: the journal of an attempt is read once for all its calls
 
     raw_sizes = output_sizes(root)
     for call in calls:
-        _size(project, root, call, sizes, raw_sizes)
+        _size(project, root, call, raw_sizes, state=state, journals=journals)
     measured = step_sizes(root)
 
     terminal: Mapping[str, Any] = {}

@@ -188,9 +188,9 @@ Run остаётся связан с исходной project/module identity.
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
 для разметки одним батчем. Генератор и автоматизация — после `tools.api model-request` этого шага:
-`--run <run_id> --stage tc-generator:<batch>` (`tc-to-autotest:rN`, `autotest-reviewer:rN`); файлы входа код берёт
-из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` — тот же список). Вход,
-которого код не нашёл или нашёл в двух файлах, — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
+`--run <run_id> --stage tc-generator:<batch>` (`tc-reviewer:canonical`, `tc-to-autotest:rN`, `autotest-reviewer:rN`); файлы входа код берёт
+по журналу прогона из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` и отчёт — те же байты). Вход,
+которого нет в журнале (или два файла журнала с одним digest), — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
 одной строкой). Для `tc-to-autotest:rN` и `autotest-reviewer:rN` там же `java_level` — уровень Java модуля по его сборке — и `junit_params` (есть ли junit-jupiter-params для групп `param_group`);
 передай его генератору и ревьюеру как ограничение API. Для `tc-generator:<batch>` там же может быть файл
 `existing-tests.md` (basis «карта», FaT-EC) — карта существующих тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`

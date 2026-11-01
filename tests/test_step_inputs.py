@@ -148,7 +148,7 @@ def test_an_unknown_digest_is_unresolved_and_a_warning_not_a_stop(tmp_path: Path
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], unknown])
     code = step_size.main(["--project", str(root.parent.parent), "--run", root.name, "--stage", "tc-generator:BATCH-fixture"])
     report = json.loads(capsys.readouterr().out)
-    assert code == 0 and report["unresolved"] == [{"digest": unknown, "reason": "not-found"}], report
+    assert code == 0 and report["unresolved"] == [{"digest": unknown, "reason": "not-in-journal"}], report
     assert report["size_complete"] is False and report["input_warning"] == "STEP_INPUT_UNRESOLVED" and report["role"] == "tc-generator"
 
 
