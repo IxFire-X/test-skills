@@ -492,6 +492,13 @@ def test_a_csv_with_a_secret_is_refused_on_scan_with_the_rule(tmp_path: Path, mo
     code, refused = _scan(project, monkeypatch)
     assert code == 2 and refused["reason"] == "IMPORT_CSV_SECRET" and "url-credentials-v1" in refused["detail"], refused
     assert "Secr3t9" not in json.dumps(refused, ensure_ascii=False) and "секрет" in refused["fix"]
+    # FaT-H4c: the cell is named by row and column, as for a password (FaT-PW)
+    assert "строка 2, колонка Test Data" in refused["detail"], refused
+
+
+def test_a_secret_in_the_objective_is_named_by_its_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    code, refused = _scan(_project(tmp_path, _row(objective="Войти на https://tester:Secr3t9@stand.local/login")), monkeypatch)
+    assert code == 2 and "строка 2, колонка Objective" in refused["detail"] and "Secr3t9" not in refused["detail"], refused
 
 
 # --- FaT-PW: a password as plain text in a cell of an import is refused on scan --------------------------------------

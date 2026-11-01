@@ -69,15 +69,30 @@ def password_cells(cases: list[dict[str, Any]]) -> list[str]:
     from tools.project_inventory import _secret_value
 
     found: list[str] = []
-    cells = [(case["row"], "Precondition", case["preconditions"]) for case in cases]
-    cells += [(step["row"], column, step[field]) for case in cases for step in case["steps"]
-              for column, field in (("Step", "action"), ("Test Data", "test_data"), ("Expected Result", "expected"))]
-    for row, column, text in sorted(cells, key=lambda cell: cell[0]):
+    for row, column, text in _cells(cases, ("Precondition",)):
         keys = [match.group("key") for match in _CELL_PASSWORD.finditer(text or "")
                 if not _NOT_A_VALUE.match(match.group("value")) and _secret_value(match.group("value").encode("utf-8"))]
         if keys:
             found.append(f"строка {row}, колонка {column}: похоже на пароль (ключ «{keys[0]}»)")
     return found
+
+
+def secret_cell(cases: list[dict[str, Any]], rule_id: str) -> str | None:
+    """FaT-H4c: «строка N, колонка X» of the first cell the inventory's signature rule ``rule_id`` finds — never the value."""
+    from tools.project_inventory import token_signature_rule
+
+    for row, column, text in _cells(cases, ("Name", "Objective", "Precondition")):
+        if token_signature_rule((text or "").encode("utf-8")) == rule_id:
+            return f"строка {row}, колонка {column}"
+    return None
+
+
+def _cells(cases: list[dict[str, Any]], case_columns: tuple[str, ...]) -> list[tuple[int, str, str]]:
+    fields = {"Name": "title", "Objective": "objective", "Precondition": "preconditions"}
+    cells = [(case["row"], column, case[fields[column]]) for case in cases for column in case_columns]
+    cells += [(step["row"], column, step[field]) for case in cases for step in case["steps"]
+              for column, field in (("Step", "action"), ("Test Data", "test_data"), ("Expected Result", "expected"))]
+    return sorted(cells, key=lambda cell: cell[0])
 
 
 def read_cases(data: bytes) -> list[dict[str, Any]]:
