@@ -2079,6 +2079,17 @@ def read_model_request(
     )
 
 
+def check_merged_marker(run_root: Path, attempt_id: str, input_digests: Sequence[str], value: Mapping[str, Any]) -> None:
+    """FaT-O3: every check the write of the merged ``context-marker:baseline`` makes that needs no write — the schema and
+    order, the inputs, the merge of the parts and OpenSpec — run by ``merge`` before it writes the request."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
+    check_model_stage_artifact("context-marker:baseline", value)
+    _validate_context_marker_sources(project, root, state, attempt, {"stage_instance_id": "context-marker:baseline",
+                                                                     "input_digests": list(input_digests)}, value)
+
+
 def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
     """FaT-R2: the checks of an answer that need no journal — the requirement order and the schema of the stage — for code
     that builds an answer itself (cases-import), before it writes the request."""

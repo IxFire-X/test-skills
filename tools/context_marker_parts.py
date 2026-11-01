@@ -117,9 +117,15 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     inputs = [baseline["requirements"]["digest"], baseline["inventory_digest"], *(receipt["digest"] for receipt in receipts),
               responses[stages[0]], *dict.fromkeys(responses[stage] for stage in stages[1:])]
+    try:  # FaT-O3: the merged marker is built and checked before its request is written — a refusal leaves no orphan request
+        merged = merge_marker_artifacts(answer, parts)
+        pilot_state.check_merged_marker(root, attempt_id, inputs, merged)
+    except ValueError as error:
+        raise ValueError(f"CONTEXT_MARKER_MERGE_INVALID: {str(error).split('; fix: ')[0]}; fix: слияние — код, его повтор даст то же: "
+                         "исправить можно только ответы частей — начните разметку заново (scan --new-run); запрос слияния не записан") from None
     pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id=MERGE_MODEL_ID,
                                       invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)
-    published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merge_marker_artifacts(answer, parts)))
+    published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged))
     published["warning"] = None  # FaT-O: the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
     return published
 
