@@ -1,0 +1,442 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Устройство Трассы v0.1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column (~780px) under a sticky section bar; diagrams widen to ~1040px.
+   Colour encodes who does the work (same system as the page of the driver line): the agent and its model roles (violet),
+   the reviewer (orange), the project's own build (green), the package's Python tools (graphite); humans get an outline. */
+:root {
+  --bg: #f2f4f5; --surface: #fcfcfb; --ink: #15202b; --ink-2: #455361; --muted: #6b7884;
+  --line: #d6dce1; --soft: #e8ecef;
+  --model: #4a3aa7; --review: #d65a24; --project: #16956a; --code: #5b6670;
+  --pass: #1f7a3a; --warn: #a35a00;
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --col: 780px; --wide: 1040px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+    --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+    --pass: #5cc97a; --warn: #e8ad52;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
+  --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+  --pass: #5cc97a; --warn: #e8ad52;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { max-width: var(--col); margin-inline: auto; }
+.wide { max-width: var(--wide); margin-inline: auto; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 5vw, 44px); letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-weight: 500; font-size: clamp(22px, 3vw, 28px); }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--soft); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+strong { font-weight: 600; }
+
+header.top { padding-block: 48px 28px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lead { font-size: 19px; color: var(--ink-2); max-width: 64ch; margin-top: 18px; }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 28px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.flow > div { padding: 14px 16px; min-width: 0; }
+.flow > div + div { border-left: 1px solid var(--line); }
+.flow .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.flow .v { font-family: var(--font-mono); font-size: 12.5px; margin-top: 6px; overflow-wrap: anywhere; line-height: 1.45; }
+.flow .d { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+@media (max-width: 720px) { .flow { grid-template-columns: minmax(0, 1fr); } .flow > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+.toc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 28px; }
+.toc > div { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.toc .k { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.toc ol { margin: 8px 0 0; padding-left: 22px; font-size: 14.5px; color: var(--ink-2); display: grid; gap: 3px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 11; background: var(--bg); }
+nav.bar ul { list-style: none; margin: 0 auto; padding: 0; max-width: var(--wide); display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+nav.bar a { display: block; padding: 10px 12px; font-size: 14px; white-space: nowrap; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; }
+nav.bar a:hover { color: var(--ink); border-bottom-color: var(--line); }
+nav.bar li.grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; padding: 12px 6px 10px 2px; white-space: nowrap; }
+
+section { padding-block: 52px 8px; scroll-margin-top: 48px; }
+.part { padding-block: 60px 0; }
+.part .pt { font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.part h2 { font-size: clamp(26px, 4vw, 36px); margin-top: 10px; }
+.sec-head { display: grid; gap: 10px; margin-bottom: 22px; }
+.sec-head .n { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.prose { display: grid; gap: 14px; max-width: 68ch; }
+.note { font-size: 14.5px; color: var(--ink-2); }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: 999px; background: var(--soft); color: var(--ink); white-space: nowrap; }
+.chip::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--code)); }
+.chip.model { --c: var(--model); } .chip.review { --c: var(--review); } .chip.project { --c: var(--project); } .chip.code { --c: var(--code); }
+.chip.human { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.chip.human::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.chip.pain::before { background: var(--warn); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.who { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+.who > div { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.who p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 24px; }
+.cap { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cap h3 { font-size: 16.5px; }
+.cap p { font-size: 14.5px; color: var(--ink-2); line-height: 1.5; }
+.cap .pf { font-size: 13.5px; color: var(--ink); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+.cap .pf b { color: var(--pass); font-weight: 600; }
+.cap .pf b.no { color: var(--warn); }
+.pros { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 24px; }
+.pros > div { min-width: 0; }
+.pros h3 { padding-bottom: 10px; border-bottom: 2px solid var(--c, var(--line)); }
+.pros ul { list-style: none; margin: 0; padding: 0; }
+.pros li { padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.pros li b { display: block; font-weight: 600; }
+.pros li span { display: block; color: var(--ink-2); font-size: 14.5px; margin-top: 3px; line-height: 1.5; }
+.pros li .fix { display: inline-block; margin-top: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--model); }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 24px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.kpi .v { font-family: var(--font-display); font-size: clamp(22px, 3vw, 30px); font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi .k { font-size: 13.5px; color: var(--ink-2); margin-top: 8px; line-height: 1.45; }
+.kpi.good .v { color: var(--pass); }
+.kpi.hot .v { color: var(--review); }
+@media (max-width: 820px) { .caps, .pros, .toc { grid-template-columns: minmax(0, 1fr); } .who { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 440px) { .kpis { grid-template-columns: minmax(0, 1fr); } }
+
+.roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.role { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.role p { font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 980px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .roles { grid-template-columns: minmax(0, 1fr); } }
+
+figure { margin: 26px 0 0; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 16px 12px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 680px; color: var(--ink); }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; max-width: 72ch; }
+svg text { font-family: var(--font-body); }
+svg .mono { font-family: var(--font-mono); }
+
+.tbl { overflow-x: auto; margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; background: var(--soft); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 1px 7px; border-radius: 5px; white-space: nowrap; background: transparent; }
+.tag.ok { color: var(--pass); box-shadow: inset 0 0 0 1px var(--pass); }
+.tag.wn { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.tag.rv { color: var(--review); box-shadow: inset 0 0 0 1px var(--review); }
+.tag.md { color: var(--model); box-shadow: inset 0 0 0 1px var(--model); }
+.tag.mu { color: var(--muted); box-shadow: inset 0 0 0 1px var(--muted); }
+
+.steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; }
+.steps li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 12.5px; box-shadow: inset 0 0 0 1.5px var(--c, var(--code)); }
+.steps .h { font-weight: 600; }
+.steps .s { font-size: 14.5px; color: var(--ink-2); margin-top: 2px; }
+.steps .now { font-size: 14px; color: var(--warn); margin-top: 4px; }
+.steps .now::before { content: "Сейчас: "; font-weight: 600; }
+.c-model { --c: var(--model); } .c-review { --c: var(--review); } .c-project { --c: var(--project); } .c-code { --c: var(--code); } .c-human { --c: var(--ink-2); }
+
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.panel h3 { font-size: 16.5px; color: var(--c, var(--ink)); }
+.panel ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14.5px; color: var(--ink-2); }
+@media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.closing { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 18px; font-family: var(--font-mono); font-size: 12.5px; }
+.closing span { background: var(--soft); color: var(--ink); padding: 4px 8px; border-radius: 6px; }
+.closing i { color: var(--muted); font-style: normal; }
+.qa { margin-top: 30px; padding: 16px 18px 18px; border: 1px solid var(--line); border-left: 3px solid var(--model); border-radius: 10px; background: var(--surface); display: grid; gap: 12px; }
+.qa h3 { font-size: 17px; }
+.qa .tbl { margin-top: 0; }
+.callout { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--surface); border: 1px dashed var(--ink-2); font-size: 14.5px; color: var(--ink-2); max-width: 72ch; }
+
+.queue { list-style: none; padding: 0; margin: 22px 0 0; display: grid; }
+.queue li { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+.queue li:last-child { border-bottom: 1px solid var(--line); }
+.queue .id { font-family: var(--font-mono); font-size: 14px; font-weight: 500; }
+.queue .h { font-weight: 600; }
+.queue .s { font-size: 14.5px; color: var(--ink-2); margin-top: 2px; }
+@media (max-width: 600px) { .queue li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.queue .s ul { margin: 6px 0; padding-left: 20px; }
+.queue .s ul li, .queue .s ul li:last-child { display: list-item; padding: 2px 0; border: 0; }
+
+dl.gloss { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px 20px; margin: 22px 0 0; }
+dl.gloss dt { font-weight: 600; }
+dl.gloss dd { margin: 0; color: var(--ink-2); min-width: 0; }
+@media (max-width: 600px) { dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; } dl.gloss dd { margin-bottom: 10px; } }
+footer { padding-block: 48px 64px; color: var(--muted); font-size: 13.5px; }
+
+/* SVG classes from page tokens */
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.bx.model { stroke: var(--model); stroke-width: 2; }
+.bx.review { stroke: var(--review); stroke-width: 2; }
+.bx.project { stroke: var(--project); stroke-width: 2; }
+.bx.code { stroke: var(--code); stroke-width: 2; }
+.bx.human { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.bx.opt { stroke-dasharray: 5 3; }
+.ln { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.ln.ret { stroke-dasharray: 5 4; }
+.bound { stroke: var(--ink-2); stroke-width: 1.2; stroke-dasharray: 2 4; }
+.tt { font-size: 14px; font-weight: 600; fill: var(--ink); }
+.ts { font-size: 12px; fill: var(--ink-2); }
+.tl { font-size: 12px; fill: var(--ink-2); }
+.tm { font-size: 12px; fill: var(--muted); }
+.th { font-size: 12px; fill: var(--muted); font-weight: 600; letter-spacing: 0.06em; }
+.pain-dot { fill: var(--warn); }
+.pain-tx { font-size: 12px; font-weight: 700; fill: var(--surface); }
+.grid { stroke: var(--line); stroke-width: 1; }
+.axis { font-size: 12px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-over { fill: var(--review); }
+.bar-ok { fill: var(--model); }
+.limit { stroke: var(--ink); stroke-width: 1.5; }
+.limit.budget { stroke: var(--project); stroke-dasharray: 5 4; }
+.val { font-size: 12.5px; fill: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+.rlab { font-size: 13px; fill: var(--ink); }
+.rsub { font-size: 11.5px; fill: var(--muted); }
+.ev { fill: var(--surface); stroke: var(--code); stroke-width: 1.5; }
+.ev.loop { stroke-dasharray: 5 3; }
+@media (prefers-reduced-motion: no-preference) { nav.bar a { transition: color .15s, border-color .15s; } }
+</style>
+<style>
+/* Additions for the «Трасса v0.1» page: route diagram boxes and the footer; the rest is the Fix-and-Test page system. */
+.rt text { fill: currentColor; font-size: 13px; }
+.rt .t2 { fill: var(--ink-2); font-size: 11.5px; }
+.rt .lane { fill: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
+.rt rect.b { fill: var(--surface); stroke-width: 1.6; }
+.rt .m rect.b { stroke: var(--model); } .rt .r rect.b { stroke: var(--review); }
+.rt .p rect.b { stroke: var(--project); } .rt .c rect.b { stroke: var(--code); }
+.rt .h rect.b { stroke: var(--ink-2); stroke-dasharray: 4 3; }
+.rt path.a { fill: none; stroke: var(--muted); stroke-width: 1.4; marker-end: url(#ah); }
+.rt #ah path { fill: var(--muted); }
+.rt line.sep { stroke: var(--line); stroke-width: 1; }
+footer.end { padding-block: 56px 64px; color: var(--muted); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top col">
+  <div class="eyebrow">Трасса v0.1 · линия Fix-and-Test · тег v0.1 = bdd6cc9 · 01.11.2026</div>
+  <h1 style="margin-top:12px">Трасса: от требования до теста — по одной трассе</h1>
+  <p class="lead">Трасса — набор инструкций для модели и Python-инструментов к ним. Прогон ведёт агент вашей программы с моделью: он читает инструкцию шаг за шагом и вызывает инструменты. Инструменты считают, проверяют и ведут журнал, но сами модель не запускают и следующий шаг не выбирают.</p>
+  <div class="flow">
+    <div><div class="k">Вход</div><div class="v">docs/feature.md</div><div class="d">документ требований к одной функции; или CSV-выгрузка кейсов из Zephyr</div></div>
+    <div><div class="k">Кейсы</div><div class="v">*.r2.html · .md · .json</div><div class="d">прошли ревью; каждый связан с требованием; CSV для Zephyr</div></div>
+    <div><div class="k">Автотесты · режим Б</div><div class="v">src/test/…</div><div class="d">пишет модель, проверяет ревью, запускает сборка проекта</div></div>
+    <div><div class="k">Итог</div><div class="v">report.md</div><div class="d">отчёт прогона и вопросы аналитику</div></div>
+  </div>
+  <div class="legend">
+    <span class="chip model">агент и модель</span><span class="chip review">ревьюер</span><span class="chip project">сборка проекта</span><span class="chip code">инструменты Трассы</span><span class="chip human">человек</span>
+  </div>
+</header>
+</div>
+
+<nav class="bar" aria-label="Разделы"><ul>
+  <li><a href="#what">Что это</a></li><li><a href="#can">Что умеет</a></li><li><a href="#modes">Режимы</a></li><li><a href="#who">Кто что делает</a></li>
+  <li><a href="#route">Маршрут</a></li><li><a href="#checks">Журнал и проверки</a></li><li><a href="#out">Результаты</a></li>
+  <li><a href="#numbers">Цифры</a></li><li><a href="#stops">Остановки</a></li><li><a href="#next">Что дальше</a></li><li><a href="#words">Словарь</a></li>
+</ul></nav>
+
+<div class="wrap">
+<section id="what" class="col">
+  <div class="sec-head"><div class="n">01</div><h2>Что это</h2></div>
+  <div class="prose">
+    <p>Вы кладёте папку Трассы в свой проект и даёте модели короткий запрос: «выполни инструкцию, проект такой-то, требования — такой-то файл, режим такой-то». Дальше агент сам проходит маршрут: размечает контекст, пишет кейсы пачками, отдаёт их на ревью, а в режиме Б ещё пишет автотесты и запускает их сборкой проекта.</p>
+    <p>Всё, что можно посчитать или проверить без модели, делает код: связи кейсов с требованиями, отпечатки (digest) входов, схемы ответов, размер шага, решение ревьюера, разбор отчёта JUnit, карантин упавших тестов. Каждый шаг пишется в журнал прогона. Поэтому прогон можно прервать и продолжить в чистой сессии, а результату можно верить: упавший тест остаётся упавшим.</p>
+    <p class="note">Граница простая: код считает и проверяет внутри шага, который вызвал агент. Модель он не запускает, своего цикла не держит, следующий шаг не выбирает: это делает агент по инструкции.</p>
+  </div>
+</section>
+
+<section id="can" class="col">
+  <div class="sec-head"><div class="n">02</div><h2>Что умеет</h2></div>
+  <div class="caps">
+    <div class="cap"><h3>Пишет кейсы по требованиям</h3><p>Пачками, по одному батчу контекста за раз: большой документ не упирается в окно модели. У каждого кейса — шаги, ожидаемый результат и ссылка на требование.</p><p class="pf">Связь «требование → кейс» проверяет код: <b>непокрытое требование видно сразу</b></p></div>
+    <div class="cap"><h3>Отдаёт кейсы на ревью</h3><p>Проверяющий читает компактный вид кейсов и выносит вердикт: принять, принять с механическими правками или вернуть на доработку.</p><p class="pf">Решение ревьюера код проверяет <b>до того, как ревью закрыто</b></p></div>
+    <div class="cap"><h3>Пишет автотесты · режим Б</h3><p>Из принятых кейсов — JUnit 5 или pytest с учётом уровня Java в сборке проекта и параметризованных групп. Автотесты проходят своё ревью.</p><p class="pf">Совместимость с раннером проверяется <b>до запуска</b></p></div>
+    <div class="cap"><h3>Запускает их сборкой проекта</h3><p>Maven Wrapper, системный Maven, Gradle Wrapper или pytest. Отчёт JUnit разбирает код, а не модель.</p><p class="pf">Упавший метод — в карантин <code>@Disabled</code> с причиной; <b>прошедшие остаются</b></p></div>
+    <div class="cap"><h3>Работает с Zephyr</h3><p>Выгружает CSV для Zephyr Scale и CSV по шаблону вашего проекта. Принимает выгрузку из Zephyr: как эталон для сравнения, как готовые кейсы для автотестов, вместе с документами требований.</p><p class="pf">Человеческие поля импортированных кейсов <b>не меняются</b></p></div>
+    <div class="cap"><h3>Продолжается после перерыва</h3><p>После <code>/clear</code> или в новой сессии: «продолжай test-skills &lt;run_id&gt;». Агент читает <code>status</code> и поле <code>next_step</code> и идёт с первого незавершённого шага.</p><p class="pf">Если файлы проекта изменились после scan, это <b>видно как drift</b></p></div>
+  </div>
+</section>
+
+<section id="modes" class="col">
+  <div class="sec-head"><div class="n">03</div><h2>Два режима</h2></div>
+  <div class="tbl"><table>
+    <thead><tr><th></th><th>А — только кейсы</th><th>Б — кейсы и автотесты</th></tr></thead>
+    <tbody>
+      <tr><td>Профиль</td><td><code>cases-only-v1</code></td><td><code>local-pilot-v1</code></td></tr>
+      <tr><td>Что делает</td><td>кейсы и их ревью</td><td>то же, затем автотесты, их ревью и запуск</td></tr>
+      <tr><td>Код проекта</td><td>не запускается</td><td>запускается сборкой проекта</td></tr>
+      <tr><td>Что пишет в проект</td><td><code>.pilot-runs/</code>, <code>.skillsrc</code></td><td>плюс новые файлы тестов в тестовой папке модуля</td></tr>
+      <tr><td>Что нужно</td><td>Python 3.11–3.13 и документ требований</td><td>плюс тестовая среда проекта; стенд, если тесты ходят на сервис</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:12px">Профиль называете вы — в запросе модели и в команде проверки готовности <code>ready</code>. Если сборка проекта не готова, прогон Б идёт как «только кейсы» и говорит, что исправить для автотестов.</p>
+</section>
+
+<section id="who" class="col">
+  <div class="sec-head"><div class="n">04</div><h2>Кто что делает</h2></div>
+  <div class="roles" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+    <div class="role"><span class="chip human">человек</span><p>Кладёт папку, ставит venv и зависимости, выбирает режим, даёт запрос. Отвечает на вопросы модели, поднимает стенд для режима Б.</p></div>
+    <div class="role"><span class="chip model">агент и модель</span><p>Ведёт маршрут по <code>orchestrate/SKILL.md</code>. Роли: <code>context-marker</code> — разметка контекста; <code>tc-generator</code> — кейсы; <code>tc-to-autotest</code> — автотесты.</p></div>
+    <div class="role"><span class="chip review">ревьюер</span><p><code>tc-reviewer</code> проверяет кейсы, <code>autotest-reviewer</code> — автотесты. Лучше в отдельном контексте; если программа не умеет — в той же сессии.</p></div>
+    <div class="role"><span class="chip code">инструменты Трассы</span><p>49 модулей Python и 43 схемы: журнал, отпечатки входов, схемы ответов, сборка кандидата, публикация, разбор JUnit, отчёт.</p></div>
+    <div class="role"><span class="chip project">сборка проекта</span><p>Режим Б: компилирует и запускает принятые автотесты штатными средствами проекта.</p></div>
+  </div>
+</section>
+
+<section id="route" class="wide">
+  <div class="col"><div class="sec-head"><div class="n">05</div><h2>Маршрут прогона</h2></div>
+  <p class="prose">Каждый шаг модели начинается с запроса, который публикует код (<code>model-request</code>), и кончается ответом, который код проверяет и записывает (<code>model-response</code>). Между ними модель читает только входы шага.</p></div>
+  <figure>
+    <div class="fig">
+      <svg class="rt" viewBox="0 0 1000 300" role="img" aria-label="Маршрут прогона Трассы: готовность и scan, разметка, кейсы пачками, ревью кейсов, затем в режиме Б автотесты, их ревью, запуск сборкой и закрытие с отчётом">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+        <text class="lane" x="10" y="22">Кейсы · режимы А и Б</text>
+        <g class="h"><rect class="b" x="10" y="36" width="140" height="64" rx="9"/><text x="80" y="62" text-anchor="middle">ready</text><text class="t2" x="80" y="82" text-anchor="middle">все проблемы сразу</text></g>
+        <g class="c"><rect class="b" x="180" y="36" width="140" height="64" rx="9"/><text x="250" y="62" text-anchor="middle">scan</text><text class="t2" x="250" y="82" text-anchor="middle">опись, baseline, журнал</text></g>
+        <g class="m"><rect class="b" x="350" y="36" width="140" height="64" rx="9"/><text x="420" y="62" text-anchor="middle">разметка</text><text class="t2" x="420" y="82" text-anchor="middle">context-marker</text></g>
+        <g class="m"><rect class="b" x="520" y="36" width="140" height="64" rx="9"/><text x="590" y="62" text-anchor="middle">кейсы пачками</text><text class="t2" x="590" y="82" text-anchor="middle">tc-generator</text></g>
+        <g class="r"><rect class="b" x="690" y="36" width="140" height="64" rx="9"/><text x="760" y="62" text-anchor="middle">ревью кейсов</text><text class="t2" x="760" y="82" text-anchor="middle">tc-reviewer</text></g>
+        <g class="c"><rect class="b" x="860" y="36" width="130" height="64" rx="9"/><text x="925" y="62" text-anchor="middle">публикация</text><text class="t2" x="925" y="82" text-anchor="middle">HTML · MD · CSV</text></g>
+        <path class="a" d="M150,68 H176"/><path class="a" d="M320,68 H346"/><path class="a" d="M490,68 H516"/><path class="a" d="M660,68 H686"/><path class="a" d="M830,68 H856"/>
+        <line class="sep" x1="10" y1="140" x2="990" y2="140"/>
+        <text class="lane" x="10" y="172">Автотесты · только режим Б</text>
+        <g class="m"><rect class="b" x="180" y="186" width="140" height="64" rx="9"/><text x="250" y="212" text-anchor="middle">автотесты</text><text class="t2" x="250" y="232" text-anchor="middle">tc-to-autotest r1</text></g>
+        <g class="r"><rect class="b" x="350" y="186" width="140" height="64" rx="9"/><text x="420" y="212" text-anchor="middle">ревью автотестов</text><text class="t2" x="420" y="232" text-anchor="middle">r2 — одна правка</text></g>
+        <g class="p"><rect class="b" x="520" y="186" width="140" height="64" rx="9"/><text x="590" y="212" text-anchor="middle">exec</text><text class="t2" x="590" y="232" text-anchor="middle">сборка проекта</text></g>
+        <g class="c"><rect class="b" x="690" y="186" width="140" height="64" rx="9"/><text x="760" y="212" text-anchor="middle">разбор JUnit</text><text class="t2" x="760" y="232" text-anchor="middle">карантин упавших</text></g>
+        <g class="c"><rect class="b" x="860" y="186" width="130" height="64" rx="9"/><text x="925" y="212" text-anchor="middle">finish · report</text><text class="t2" x="925" y="232" text-anchor="middle">итог и отчёт</text></g>
+        <path class="a" d="M925,100 V160 H250 V182"/><path class="a" d="M320,218 H346"/><path class="a" d="M490,218 H516"/><path class="a" d="M660,218 H686"/><path class="a" d="M830,218 H856"/>
+        <text class="t2" x="10" y="284">В режиме А прогон закрывается после публикации кейсов: finish и report.</text>
+      </svg>
+    </div>
+    <figcaption>Цвет рамки — кто делает шаг. Пунктир — шаг человека: <code>ready</code> запускает он сам перед запросом модели.</figcaption>
+  </figure>
+  <div class="col">
+  <ol class="steps">
+    <li style="--c:var(--ink-2)"><span class="num">1</span><div><div class="h">Готовность — <code>ready</code></div><div class="s">Python и зависимости, целостность пакета, git, документы, <code>.skillsrc</code>, модуль, будущий скан; для Б — сборка. Каждая проблема — с готовой командой исправления.</div></div></li>
+    <li style="--c:var(--code)"><span class="num">2</span><div><div class="h">Scan</div><div class="s">Опись файлов модуля с исключениями: секреты, бинарники, шрифты, сгенерированное. Baseline проекта. Журнал прогона в <code>.pilot-runs/&lt;run_id&gt;</code>.</div></div></li>
+    <li style="--c:var(--model)"><span class="num">3</span><div><div class="h">Разметка контекста</div><div class="s">Сначала требования, потом батчи кода, потом сводный маркер. Размер каждого шага сверяется с бюджетом окна модели.</div></div></li>
+    <li style="--c:var(--model)"><span class="num">4</span><div><div class="h">Кейсы пачками</div><div class="s">План пачек и заголовок публикует код. Генератор пишет фрагменты, код проверяет схему и привязки и собирает кандидата.</div></div></li>
+    <li style="--c:var(--review)"><span class="num">5</span><div><div class="h">Ревью кейсов</div><div class="s"><code>review-publish</code> → <code>review-open</code> → вердикт → <code>review-select</code>. Неверный ответ ревьюера отклоняется до записи, у шага остаётся один повтор.</div></div></li>
+    <li style="--c:var(--model)"><span class="num">6</span><div><div class="h">Автотесты · Б</div><div class="s">Из принятых кейсов. Уровень Java и параметризованные группы берутся из сборки проекта. Ревью автотестов; одна правка r2.</div></div></li>
+    <li style="--c:var(--project)"><span class="num">7</span><div><div class="h">Запуск · Б</div><div class="s"><code>exec</code> кладёт принятые тесты в проект и запускает точный набор. Код разбирает JUnit и сверяет методы с кейсами.</div></div></li>
+    <li style="--c:var(--code)"><span class="num">8</span><div><div class="h">Закрытие и отчёт</div><div class="s"><code>finish</code> закрывает попытку, <code>report</code> пишет <code>report.md</code>, <code>report.json</code>, <code>questions-for-analyst.md</code>.</div></div></li>
+  </ol>
+  </div>
+</section>
+
+<section id="checks" class="col">
+  <div class="sec-head"><div class="n">06</div><h2>Журнал и проверки</h2></div>
+  <div class="pros">
+    <div style="--c:var(--pass)"><h3>Что проверяет код</h3><ul>
+      <li><b>Схема каждого ответа модели</b><span>Ошибка схемы — один повтор шага с точным списком ошибок.</span></li>
+      <li><b>Привязки и отпечатки входов</b><span>Ответ относится ровно к тому запросу и тем входам, что опубликованы в журнале. Отпечатки, которые знает код, он ставит сам.</span></li>
+      <li><b>Трасса «требование → кейс → тест»</b><span>Покрытие требований, пробелы, кейсы вне документа.</span></li>
+      <li><b>Решение ревьюера</b><span>Вердикт сверяется с кандидатом до закрытия ревью. Человеческие поля импорта ревьюер не меняет.</span></li>
+      <li><b>Совместимость автотестов</b><span>Раннер, уровень Java, имена методов — до запуска.</span></li>
+      <li><b>Точный запуск и честный итог</b><span>FAIL остаётся FAIL: упавший метод в карантине с причиной, а не «починен».</span></li>
+    </ul></div>
+    <div style="--c:var(--model)"><h3>Что даёт журнал</h3><ul>
+      <li><b>Продолжение после перерыва</b><span><code>status</code> и <code>next_step</code> показывают первый незавершённый шаг и шаблон команды.</span></li>
+      <li><b>Дрейф</b><span>Файлы проекта изменились после scan — <code>status</code> показывает пути и команду нового захода.</span></li>
+      <li><b>Повтор того же запроса</b><span>Пока прогон жив, второй scan не создаётся молча: <code>SCAN_RUN_IN_PROGRESS</code>.</span></li>
+      <li><b>Выходы из тупиков</b><span><code>finish --abandon</code> с названной причиной, если шаг дальше не пойдёт.</span></li>
+      <li><b>Отчёт без кода</b><span>Шаги, время, размеры входов, коды остановок — без кода проекта и текстов кейсов.</span></li>
+    </ul></div>
+  </div>
+</section>
+
+<section id="out" class="col">
+  <div class="sec-head"><div class="n">07</div><h2>Результаты</h2></div>
+  <p class="prose">Всё лежит в <code>&lt;проект&gt;/.pilot-runs/&lt;run_id&gt;/</code>. Принятые автотесты — в тестовой папке модуля.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Файл</th><th>Зачем</th></tr></thead>
+    <tbody>
+      <tr><td><code>&lt;документ&gt;.r&lt;N&gt;.html</code> · <code>.md</code></td><td>читать кейсы</td></tr>
+      <tr><td><code>&lt;документ&gt;.r&lt;N&gt;.json</code></td><td>исходный документ кейсов со связями с требованиями</td></tr>
+      <tr><td><code>&lt;документ&gt;.r&lt;N&gt;.zephyr-scale.csv</code></td><td>импорт в Zephyr Scale</td></tr>
+      <tr><td><code>questions-for-analyst.md</code></td><td>пробелы и неясности требований</td></tr>
+      <tr><td><code>report.md</code> · <code>report.json</code></td><td>отчёт прогона</td></tr>
+      <tr><td><code>terminal-results/&lt;attempt&gt;.json</code></td><td>итог закрытой попытки: <code>accepted</code>, <code>verification</code>, <code>coverage</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="numbers" class="col">
+  <div class="sec-head"><div class="n">08</div><h2>Цифры</h2></div>
+  <div class="kpis">
+    <div class="kpi good"><div class="v">1563 / 0</div><div class="k">тестов пакета прошло / упало на версии v0.1 (свежий клон)</div></div>
+    <div class="kpi good"><div class="v">72 из 73</div><div class="k">автотестов Petclinic прошли; упавший — настоящий дефект приложения (<code>Visit.date</code> без <code>@NotNull</code>)</div></div>
+    <div class="kpi"><div class="v">2–3 мин</div><div class="k">до первого вызова модели на шести Java-проектах (кампания 28.10)</div></div>
+    <div class="kpi"><div class="v">287</div><div class="k">кейсов и 248 исполненных автотестов в кампании 28.10; 196 прошли, 52 упавших — в карантине с причиной</div></div>
+    <div class="kpi good"><div class="v">77 → 5,5 с</div><div class="k">закрытие прогона после ускорения журнала</div></div>
+    <div class="kpi"><div class="v">116 файлов</div><div class="k">в поставке v0.1: только то, что нужно для работы, и две инструкции</div></div>
+  </div>
+</section>
+
+<section id="stops" class="col">
+  <div class="sec-head"><div class="n">09</div><h2>Частые остановки</h2></div>
+  <p class="prose">Каждая остановка — JSON с кодом и подсказкой <code>fix</code>. Начинать всегда с <code>fix</code>. Полная таблица — в <code>HOW-TO-USE.md</code>.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Код</th><th>Что делать</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag wn">SCAN_RUN_IN_PROGRESS</span></td><td>продолжить прогон (<code>status</code>), закрыть (<code>finish</code>) или осознанно начать второй (<code>--new-run</code>)</td></tr>
+      <tr><td><span class="tag wn">DOCS_ENCODING</span></td><td>сохранить документ требований в UTF-8</td></tr>
+      <tr><td><span class="tag mu">RUN_LEFT</span></td><td>прогон оставлен до ревью — простой scan того же запроса начнёт новый</td></tr>
+      <tr><td><span class="tag mu">STEP_OUTPUT_LARGE</span></td><td>только замер, ничего делать не нужно</td></tr>
+      <tr><td><span class="tag wn">SERVICE_UNREACHABLE</span></td><td>поднять стенд, сказать модели «стенд поднят»</td></tr>
+      <tr><td><span class="tag rv">INTERNAL</span></td><td>передать разработчикам вывод команды</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="next" class="col">
+  <div class="sec-head"><div class="n">10</div><h2>Что дальше, после пилота</h2></div>
+  <ol class="steps">
+    <li style="--c:var(--project)"><span class="num">1</span><div><div class="h">Запуск автотестов человеком</div><div class="s">Трасса пишет тесты и печатает готовую команду сборки; человек запускает её и отдаёт отчёт JUnit; карантин и итог — как сейчас.</div></div></li>
+    <li style="--c:var(--code)"><span class="num">2</span><div><div class="h">Без внешних зависимостей пакета</div><div class="s">Чтобы Трассе не нужен был <code>pip</code>.</div></div></li>
+    <li style="--c:var(--pass)"><span class="num">3</span><div><div class="h">Линейка качества</div><div class="s">Проект с подложенными дефектами и свой мутатор кода: сколько дефектов ловят кейсы и автотесты — числом, а не мнением.</div></div></li>
+    <li style="--c:var(--model)"><span class="num">4</span><div><div class="h">Проверки ожиданий в автотестах</div><div class="s">Расплывчатый отказ, проверка подстрокой, всегда истинное утверждение, негатив без «данные не изменились» — код находит, модель исправляет в r2.</div></div></li>
+    <li style="--c:var(--review)"><span class="num">5</span><div><div class="h">Контроль ревьюера</div><div class="s">Подложенные ошибки, которые он обязан найти, и проверка свежего контекста кодовым словом.</div></div></li>
+    <li style="--c:var(--ink-2)"><span class="num">6</span><div><div class="h">Второе ревью кейсов человеком</div><div class="s">После ревью модели весь список кейсов — человеку, правки сразу в документ.</div></div></li>
+  </ol>
+</section>
+
+<section id="words" class="col">
+  <div class="sec-head"><div class="n">11</div><h2>Словарь</h2></div>
+  <div class="tbl"><table>
+    <tbody>
+      <tr><td><b>Прогон (run)</b></td><td>папка <code>.pilot-runs/&lt;run_id&gt;</code> с журналом одного запроса</td></tr>
+      <tr><td><b>Попытка (attempt)</b></td><td>один проход маршрута внутри прогона, один модуль</td></tr>
+      <tr><td><b>Журнал</b></td><td><code>events.jsonl</code> и записанные артефакты; по нему код знает, что уже сделано</td></tr>
+      <tr><td><b>Профиль</b></td><td><code>cases-only-v1</code> (А) или <code>local-pilot-v1</code> (Б)</td></tr>
+      <tr><td><b>Отпечаток (digest)</b></td><td>sha256 входа или ответа; связывает ответ модели с его запросом</td></tr>
+      <tr><td><b>SELF</b></td><td>ревью в той же сессии модели, если отдельный контекст недоступен</td></tr>
+      <tr><td><b>Effective</b></td><td>редакция кейсов, выбранная ревью (r1 или исправленная r2)</td></tr>
+      <tr><td><b>Карантин</b></td><td>упавший метод помечен <code>@Disabled</code> / <code>xfail</code> с причиной и остаётся в проекте</td></tr>
+      <tr><td><b>Drift</b></td><td>файлы проекта изменились после scan</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer class="end col">Трасса v0.1 · тег <code>v0.1</code> = <code>bdd6cc9</code> · ветка <code>trassa-v0.1</code> — состав папки поставки · инструкции: <code>README.md</code>, <code>HOW-TO-USE.md</code></footer>
+</div>
+</body>
+</html>
