@@ -1800,10 +1800,14 @@ def _validate_context_marker_sources(
                  for stage, _request, response in batches]
         if dict(value) != merge_marker_artifacts(answer, parts):
             raise ValueError("merged context-marker artifact differs from the merge of its parts")
+        from tools.cases_import import is_code_requirements
+
+        if is_code_requirements(root, attempt, answer):
+            return  # FaT-R2: the requirements of an import without documents are its cases, not an OpenSpec reading
     if snapshots:
         diagnostics = openspec_diagnostics(dict(value), snapshots)
         if diagnostics:
-            raise ValueError("context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
+            raise ValueError("CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
 
 
 def _reconcile_requirements_openspec(
@@ -1814,12 +1818,17 @@ def _reconcile_requirements_openspec(
     Write time only: a journal written before reads as before; the merge keeps its own check."""
     from tools.build_context import openspec_diagnostics
 
+    from tools.cases_import import is_code_requirements
+
     stage_instance_id = str(request["stage_instance_id"])
+    if is_code_requirements(root, attempt, value):  # FaT-R2: the requirements of an import are its cases, by the CSV bytes
+        return
     receipts = _published_context_receipts(state, str(attempt["attempt_id"]), stage_instance_id)
     snapshots = _context_marker_snapshots(project, root, state, attempt, stage_instance_id, request["input_digests"], receipts)
     diagnostics = openspec_diagnostics(dict(value), snapshots) if snapshots else []
     if diagnostics:
-        raise ValueError(f"context-marker OpenSpec reconciliation failed: {stage_instance_id}: " + json.dumps(diagnostics, ensure_ascii=False)
+        raise ValueError(f"CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: {stage_instance_id}: "  # FaT-R2: a code
+                         + json.dumps(diagnostics, ensure_ascii=False)
                          + "; fix: требования ответа — по OpenSpec из квитанций контекста; отдай исправленный ответ единственным "
                          "повтором стадии (--transport-attempts 2), ничего не записано")
 
@@ -2068,6 +2077,15 @@ def read_model_request(
     return _read_model_request_with_state(
         project, root, derive_state(root), attempt_id, stage_instance_id, request_digest,
     )
+
+
+def check_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:
+    """FaT-R2: the checks of an answer that need no journal — the requirement order and the schema of the stage — for code
+    that builds an answer itself (cases-import), before it writes the request."""
+    misplaced = _requirement_order_rows(stage_instance_id, value)
+    if misplaced:
+        raise ValueError(f"SOURCE_REQUIREMENT_ORDER: {stage_instance_id}: {misplaced}")
+    _validate_model_stage_artifact(stage_instance_id, value)
 
 
 def _validate_model_stage_artifact(stage_instance_id: str, value: Mapping[str, Any]) -> None:

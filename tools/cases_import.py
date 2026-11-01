@@ -32,6 +32,8 @@ _FIXES = {
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
     "IMPORT_NOT_CASES_RUN": "cases-import — для прогона scan --cases; у этого прогона требования размечает модель",
     "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
+    "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
+                                   "ячейки CSV и повторите scan --cases --new-run",
 }
 
 
@@ -199,6 +201,32 @@ def cases_path(root: Path) -> str | None:
     return str(value) if value else None
 
 
+def requirements_artifact(path: str, data: bytes) -> dict[str, Any]:
+    """The answer of ``context-marker:requirements`` code builds from the CSV of an import: one requirement per case."""
+    return {
+        "schema_version": "5.0.0", "stage": "context-marker",
+        "artifacts": {"analytics_documentation": {"requirements": source_requirements(path, data, read_cases(data))},
+                      "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}},
+        "warnings": [],
+    }
+
+
+def is_code_requirements(root: Path, attempt: Mapping[str, Any], value: Mapping[str, Any]) -> bool:
+    """FaT-R2: a fact of the journal, not a label — an import without documents whose requirements answer is byte for
+    byte the one code builds from the CSV the inventory binds.  Such requirements are the cases, not an OpenSpec reading."""
+    root = Path(root).resolve()
+    if cases_path(root) is None:
+        return False
+    manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    if (manifest.get("scan_request") or {}).get("docs"):
+        return False
+    try:
+        found = run_csv(root, attempt)
+    except (CasesImportError, OSError, ValueError):
+        return False
+    return found is not None and dict(value) == requirements_artifact(*found)
+
+
 def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Answer ``context-marker:requirements`` by code from the CSV of the run; again on an answered step changes nothing."""
     from tools import pilot_state
@@ -219,12 +247,11 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     path, data = run_csv(root, attempt)
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the last tc-generator input
-    artifact = {
-        "schema_version": "5.0.0", "stage": "context-marker",
-        "artifacts": {"analytics_documentation": {"requirements": source_requirements(path, data, read_cases(data))},
-                      "source_code_and_diff": {"sources": [REQUIREMENTS_PLACEHOLDER]}},
-        "warnings": [],
-    }
+    artifact = requirements_artifact(path, data)
+    try:  # FaT-R2: the answer is checked before its request is written — a refusal leaves no orphan request behind
+        pilot_state.check_model_stage_artifact("context-marker:requirements", artifact)
+    except ValueError as error:
+        raise CasesImportError("IMPORT_REQUIREMENTS_INVALID", str(error)) from None
     pilot_state.publish_model_request(root, attempt_id, stage, model_id=IMPORT_MODEL_ID, invocation_id=f"cases-import-{attempt_id[:12]}",
                                       input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, stage, artifact))
