@@ -234,7 +234,8 @@ Run остаётся связан с исходной project/module identity.
    invocation и ordered artifact `input_digests`; `MODEL_REQUESTED` ссылается на digest
    этого envelope. После schema-valid ответа запиши `MODEL_RESPONSE_RECEIVED` с exact
    output digest. Команды: `tools.api model-request --stage <stage> --model-id <id> --invocation-id <id>
-   --input-digest <d1> --input-digest <d2> …` (порядок флагов = порядок входов) и `tools.api model-response
+   --input-digest <d1> --input-digest <d2> …` (порядок флагов = порядок входов; у стадий после разметки флаги можно
+   опустить — входы из журнала) и `tools.api model-response
    --stage <stage> --artifact <ответ.json>` — ответ передаётся как есть; `result.content_digest` — его digest.
    Порядок `input_digests`: `[baseline.requirements.digest, baseline.inventory_digest,
    ...authorized_context_receipt_digests]`; нужен минимум один current/readback receipt.
@@ -251,13 +252,11 @@ Run остаётся связан с исходной project/module identity.
    как есть, и `context` из вывода `publish-generator-input --kind plan`, когда он есть.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs — пачки строго по очереди (`ordinal`),
    пачка k после принятого ответа пачки k−1, не параллельно.
-   Порядок входов: `[marker.content_digest, context.digest, plan.digest, header.digest]`; если в плане есть
-   `context_receipt_digests`, вместо одного `context.digest` идут все они по порядку плана. С пачки 2 — ещё вход,
-   capabilities прошлых пачек: `tools.api prior-capabilities --run-root <run> --attempt <attempt_id> --batch-id <id>`
-   (код строит его из журнала), его `result.digest` — следующий `--input-digest` после header. Неверный вход `model-request`
-   отклоняет (`MODEL_INPUTS_MISMATCH`) и называет правильный digest и его источник. Digest-поля ответов (фрагмента,
-   ревьюеров, автотестов) `model-response` сверяет с журналом до записи (`MODEL_RESPONSE_DIGEST_MISMATCH`) — это ошибка
-   ответа, на неё идёт единственный повтор стадии.
+   `model-request` без `--input-digest` берёт входы пачки из журнала (marker, context-receipts плана, plan, header,
+   с пачки 2 — capabilities прошлых пачек: сначала `tools.api prior-capabilities --run-root <run> --attempt <attempt_id>
+   --batch-id <id>`); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров,
+   автотестов) не считай: пропущенные ставит `model-response` (`filled`), неверные отказывает до записи
+   (`MODEL_RESPONSE_DIGEST_MISMATCH`, с верным значением) — это ошибка ответа, на неё единственный повтор стадии.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
@@ -373,8 +372,8 @@ FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается та�
 Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
 эти поля. Не переписывай опубликованный request после вызова модели.
 
-1. Вызови `tc-to-autotest` для effective canonical. `content_digest` файлов сам не считай: отказ `AUTOMATION_CONTENT_DIGEST`
-   называет файл и верное значение — поставь его в `content_digest` как есть.
+1. Вызови `tc-to-autotest` для effective canonical. `content_digest`, `source.*` и digest предшественника не считай:
+   пропущенные ставит `model-response`.
 2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
    код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
    `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no

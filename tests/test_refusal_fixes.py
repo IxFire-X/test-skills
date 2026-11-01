@@ -18,7 +18,6 @@ def _request(run: dict, **extra):
 
 
 @pytest.mark.parametrize(("extra", "named"), [
-    ({"input_digests": []}, "no --input-digest"),
     ({"input_digests": ["sha256:" + "1" * 64, "sha256:" + "1" * 64]}, "an --input-digest is repeated"),
     ({"input_digests": ["sha256:short"]}, "an --input-digest is not sha256:<64 hex>"),
     ({"invocation_id": "bad id with spaces"}, "--invocation-id is not a safe label"),
@@ -102,7 +101,8 @@ def test_a_bad_candidate_receipt_has_a_reason_code_and_a_fix(tmp_path: Path, cap
 
 
 @pytest.mark.parametrize(("stage", "extra", "fixed"), [
-    ("tc-generator:BATCH-x", {"input_digests": []}, "--input-digest на каждый вход"),
+    # audit U2: without --input-digest a later stage takes the journal's inputs; a stage the journal does not fix still needs them
+    ("context-marker:baseline", {"input_digests": []}, "--input-digest на каждый вход"),
     ("tc-generator:BATCH-x", {"input_digests": ["sha256:" + "1" * 64, "sha256:" + "1" * 64]}, "каждый вход один раз"),
     ("tc-generator:BATCH-x", {"input_digests": ["sha256:short"]}, "sha256:<64 hex>"),
     ("tc-generator:BATCH-x", {"invocation_id": "bad id with spaces"}, "--invocation-id — метка"),

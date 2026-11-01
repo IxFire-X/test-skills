@@ -572,12 +572,30 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
                                  + " — требования каждого кейса должны отображаться только в source requirement его строки")
 
 
+def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
+    plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given
+    with another value stays for the refusal."""
+    batch = next((row for row in plan.get("batches") or [] if isinstance(row, Mapping) and row.get("batch_id") == fragment.get("batch_id")), None)
+    if batch is None:
+        return fragment
+    value = deepcopy(fragment)
+    for key, expected in (("plan_digest", plan.get("digest")), ("header_digest", batch.get("header_digest")),
+                          ("context_receipt_digest", batch.get("context_receipt_digest"))):
+        if value.get(key) in (None, ""):
+            value[key] = expected
+    if value.get("digest") in (None, ""):
+        value["digest"] = _digest({key: item for key, item in value.items() if key != "digest"})
+    return value
+
+
 def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], context_receipt: dict[str, Any],
                       prior_fragments: list[dict[str, Any]] | None = None, imported: Mapping[str, Any] | None = None) -> None:
     """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches)."""
     batches = _plan_batches(plan)
     if not isinstance(fragment, dict):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment must be an object")
+    fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
     _schema_valid(fragment, _FRAGMENT_SCHEMA, "candidate fragment")
     _self_digest_valid(fragment, "candidate fragment")
     batch = batches.get(fragment.get("batch_id"))

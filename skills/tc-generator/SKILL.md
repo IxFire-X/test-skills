@@ -5,7 +5,7 @@ description: Use when a 5.0.0 source-requirement context batch must become one c
 
 # Canonical test-case generation
 
-Consume valid 5.0.0 context and emit JSON-only bare candidate fragment: the top-level object is the fragment of `schemas/candidate-fragment.schema.json` itself, with its own `digest`, no `artifacts` envelope (`tools.api model-response` accepts only that). Read the [generation contract](references/case-generation-contract.md); `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
+Consume valid 5.0.0 context and emit JSON-only bare candidate fragment: the top-level object is the fragment of `schemas/candidate-fragment.schema.json` itself, no `artifacts` envelope; the code puts its `digest` and plan/header/context digests. Read the [generation contract](references/case-generation-contract.md); `schemas/candidate-fragment.schema.json`, `schemas/canonical-test-document.schema.json`, and `tools.canonical_document` define the machine source.
 
 The controller invokes this role once per deterministic batch with declared immutable
 inputs and persists/readback-checks the complete fragment before assembly. Do not create

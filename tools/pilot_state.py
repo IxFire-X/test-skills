@@ -1926,6 +1926,15 @@ def publish_model_request(
     stage = stage_instance_id.split(":", 1)[0]
     declaration = _MODEL_STAGE_REGISTRY.get(stage)
     inputs = list(input_digests) if not isinstance(input_digests, (str, bytes)) else []
+    journal_inputs = (not inputs and attempt is not None and attempt["state"] != "TERMINAL" and declaration is not None
+                      and _MODEL_STAGE_INSTANCE.fullmatch(stage_instance_id) is not None)
+    if journal_inputs:
+        # audit U2: without --input-digest the inputs the journal fixes (FaT-DG); its refusals about an unpublished
+        # predecessor stay as they are
+        known = _expected_model_inputs(project, root, state, attempt, stage_instance_id)
+        if known is None and stage in {"tc-to-autotest", "autotest-reviewer"}:
+            known = _automation_inputs(project, root, state, attempt_id, stage_instance_id)
+        inputs = [digest for digest, _source in known or ()]
     label_fix = ("метка из букв, цифр и . _ : / - (до 256 знаков), например deepseek-v4 или context-1; "
                  "без ключей, токенов и паролей")
     broken = next(((reason, fix) for failed, reason, fix in (
@@ -1940,7 +1949,8 @@ def publish_model_request(
          "--model-id — " + label_fix),
         (not _safe_model_label(invocation_id), "--invocation-id is not a safe label (letters, digits, . _ -, no secret-like value)",
          "--invocation-id — " + label_fix),
-        (not inputs, "no --input-digest", "--input-digest на каждый вход стадии, в её порядке (SKILL orchestrate; при неверном входе "
+        (not inputs, f"MODEL_INPUTS_REQUIRED: the journal does not fix the inputs of {stage_instance_id}, no --input-digest given",
+         "--input-digest на каждый вход стадии, в её порядке (для context-marker — из context_marker_parts plan; при неверном входе "
          "отказ MODEL_INPUTS_MISMATCH называет верный digest и его источник)"),
         (len(inputs) != len(set(inputs)), "an --input-digest is repeated", "каждый вход один раз, в порядке стадии"),
         (any(not isinstance(item, str) or _DIGEST.fullmatch(item) is None for item in inputs), "an --input-digest is not sha256:<64 hex>",
@@ -2163,8 +2173,39 @@ _RETRY_EXHAUSTED_FIX = ("fix: python -m tools.run_pipeline finish --project <pro
                         "для стадии автоматизации finish --abandon STAGE_RETRY_EXHAUSTED, до ревью кейсов — scan --new-run")
 
 
+_RETRY_SPENT = "повтор стадии исчерпан: ответ уже подан с --transport-attempts 2, третьего вызова модели нет; "
+
+
 @closure_cached  # FaT-9b
 def publish_model_stage_artifact(
+    run_root: Path,
+    attempt_id: str,
+    stage_instance_id: str,
+    artifact: Mapping[str, Any],
+    *,
+    transport_attempts: int = 1,
+    raw_bytes: int | None = None,
+) -> Mapping[str, Any]:
+    """Persist a requested model output, then bind its response/candidate events.
+
+    Audit 2 (FaT-AB): a refused answer given as the one retry (--transport-attempts 2) never advises that retry again — its
+    fix is the way out of the stage.  The code does not count refused answers yet (AB2, after the release)."""
+    try:
+        return _publish_model_stage_artifact(run_root, attempt_id, stage_instance_id, artifact,
+                                             transport_attempts=transport_attempts, raw_bytes=raw_bytes)
+    except Exception as error:
+        if transport_attempts == 2 and "--transport-attempts 2" in str(error):
+            error.args = tuple(_retry_spent(arg) if isinstance(arg, str) and "--transport-attempts 2" in arg else arg for arg in error.args)
+            if isinstance(getattr(error, "fix", None), str):
+                error.fix = _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
+        raise
+
+
+def _retry_spent(text: str) -> str:
+    return text.split("; fix: ", 1)[0] + "; fix: " + _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
+
+
+def _publish_model_stage_artifact(
     run_root: Path,
     attempt_id: str,
     stage_instance_id: str,
@@ -2193,14 +2234,19 @@ def publish_model_stage_artifact(
     if type(transport_attempts) is int and transport_attempts > 2:
         raise ValueError(f"MODEL_STAGE_RETRY_EXHAUSTED: {stage_instance_id}: у стадии один ответ и единственный повтор "
                          f"(--transport-attempts 1 или 2): --transport-attempts больше 2 отказан; ничего не записано; " + _RETRY_EXHAUSTED_FIX)
-    data = _model_stage_artifact_bytes(value)
-    content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     requests = [
         event for event in state["events"]
         if event.get("attempt_id") == attempt_id
         and event.get("stage_instance_id") == stage_instance_id
         and event.get("event_type") == "MODEL_REQUESTED"
     ]
+    filled: list[str] = []
+    if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
+        prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
+        if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
+            value, filled = _fill_response_bindings(project, root, state, attempt_id, stage_instance_id, prior, value)
+    data = _model_stage_artifact_bytes(value)
+    content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     responses = [
         event for event in state["events"]
         if event.get("attempt_id") == attempt_id
@@ -2297,6 +2343,8 @@ def publish_model_stage_artifact(
         record_output(project, root, stage_instance_id, content_digest, measured)
     published.update(output_bytes=measured, output_basis="raw" if raw_bytes is not None else "compact",
                      warning=output_warning(project, measured))
+    if filled:  # audit U2: what the code put into the answer
+        published["filled"] = filled
     return published
 
 
@@ -4919,21 +4967,25 @@ def _requirement_order_rows(stage_instance_id: str, value: Mapping[str, Any]) ->
     return None
 
 
-def _response_digest_rows(
+_SELF_DIGEST = "самодайджест фрагмента (без поля digest)"
+
+
+def _response_bindings(
     project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
     request: Mapping[str, Any], value: Mapping[str, Any],
-) -> list[tuple[str, Any, str, str]]:
-    """FaT-DG: the digest fields of a model answer against the journal — (pointer, given, expected, source) per mismatch.
+) -> list[tuple[str, str | None, str]]:
+    """FaT-DG, audit U2: the digest fields of a model answer the journal fixes — (pointer, expected, source).  The one list
+    both for the check (``_response_digest_rows``) and for the fill (``_fill_response_bindings``); the expected value of the
+    fragment self-digest is None — it is the digest of the answer itself, taken last.
 
-    A shape the schema refuses yields what it could check; the schema and the later checks stay the backstop."""
+    A shape the schema refuses yields what it could read; the schema and the later checks stay the backstop."""
     from tools.automation_validation import automation_sha256, autotest_review_sha256, implementation_relations_sha256
 
     stage, _, instance = stage_instance_id.partition(":")
-    rows: list[tuple[str, Any, str, str]] = []
+    rows: list[tuple[str, str | None, str]] = []
 
-    def check(pointer: str, given: Any, expected: str, source: str) -> None:
-        if given != expected:
-            rows.append((pointer, given, expected, source))
+    def add(pointer: str, expected: str | None, source: str) -> None:
+        rows.append((pointer, expected, source))
 
     def answer(stage_id: str, event_type: str) -> Mapping[str, Any]:
         events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_id
@@ -4948,55 +5000,118 @@ def _response_digest_rows(
             except ModelInputsMismatch:
                 more = 0
             for pointer, index, name in (("/context_receipt_digest", 1, "context"), ("/plan_digest", 2 + more, "plan"), ("/header_digest", 3 + more, "header")):
-                check(pointer, value.get(pointer[1:]), str(inputs[index]), f"вход {index + 1} запроса ({name})")
-            check("/digest", value.get("digest"), _model_stage_artifact_digest({key: item for key, item in value.items() if key != "digest"}),
-                  "самодайджест фрагмента (без поля digest)")
+                add(pointer, str(inputs[index]), f"вход {index + 1} запроса ({name})")
+            add("/digest", None, _SELF_DIGEST)
         elif stage == "tc-reviewer":
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
             report = value["artifacts"]["validation_report"]
             candidate = str(boundary["canonical_branch_digest"])
-            check("/artifacts/validation_report/candidate/document_sha256", report["candidate"]["document_sha256"], candidate,
-                  "boundary.canonical_branch_digest")
+            add("/artifacts/validation_report/candidate/document_sha256", candidate, "boundary.canonical_branch_digest")
             if report["verdict"] == "ПРИНЯТО" and isinstance(report.get("effective"), Mapping):
-                check("/artifacts/validation_report/effective/document_sha256", report["effective"]["document_sha256"], candidate,
-                      "ПРИНЯТО выбирает кандидата: boundary.canonical_branch_digest")
+                add("/artifacts/validation_report/effective/document_sha256", candidate, "ПРИНЯТО выбирает кандидата: boundary.canonical_branch_digest")
         elif stage == "tc-to-autotest":
             effective = _read_effective_canonical_with_state(project, root, state, attempt_id)
             artifacts = value["artifacts"]
-            check("/artifacts/source/source_digest", artifacts["source"]["source_digest"], str(effective["document_digest"]),
-                  "effective.document_digest (tools.api read-effective)")
-            check("/artifacts/source/effective_bundle_receipt_digest", artifacts["source"]["effective_bundle_receipt_digest"],
-                  str(effective["effective_bundle_receipt_digest"]), "effective.effective_bundle_receipt_digest (tools.api read-effective)")
+            add("/artifacts/source/source_digest", str(effective["document_digest"]), "effective.document_digest (tools.api read-effective)")
+            add("/artifacts/source/effective_bundle_receipt_digest", str(effective["effective_bundle_receipt_digest"]),
+                "effective.effective_bundle_receipt_digest (tools.api read-effective)")
             for index, row in enumerate(artifacts["generated_files"]):
-                check(f"/artifacts/generated_files/{index}/content_digest", row["content_digest"],
-                      "sha256:" + hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest(), "sha256 поля content этого файла (UTF-8)")
+                add(f"/artifacts/generated_files/{index}/content_digest", "sha256:" + hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest(),
+                    "sha256 поля content этого файла (UTF-8)")
             if instance == "r2":
-                check("/artifacts/predecessor_automation_sha256", artifacts["predecessor_automation_sha256"],
-                      automation_sha256(answer("tc-to-autotest:r1", "CANDIDATE_PUBLISHED")), "tools.api automation-digest ответа tc-to-autotest:r1")
-                check("/artifacts/correction_review_sha256", artifacts["correction_review_sha256"],
-                      autotest_review_sha256(answer("autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")), "digest ответа autotest-reviewer:r1")
+                add("/artifacts/predecessor_automation_sha256", automation_sha256(answer("tc-to-autotest:r1", "CANDIDATE_PUBLISHED")),
+                    "tools.api automation-digest ответа tc-to-autotest:r1")
+                add("/artifacts/correction_review_sha256", autotest_review_sha256(answer("autotest-reviewer:r1", "MODEL_RESPONSE_RECEIVED")),
+                    "digest ответа autotest-reviewer:r1")
         elif stage == "autotest-reviewer":
             review = value["artifacts"]["autotest_review"]
             automation = answer(f"tc-to-autotest:{instance}", "CANDIDATE_PUBLISHED")
             boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, f"automation-review-boundary-{instance}", "ARTIFACT_READ_BACK")["record"]
-            check("/artifacts/autotest_review/automation_sha256", review["automation_sha256"], automation_sha256(automation),
-                  f"tools.api automation-digest ответа tc-to-autotest:{instance}")
-            check("/artifacts/autotest_review/reviewed_relations_sha256", review["reviewed_relations_sha256"],
-                  implementation_relations_sha256(automation["artifacts"]["implementation_relations"]),
-                  f"tools.api relations-digest массива implementation_relations ответа tc-to-autotest:{instance} (не digest артефакта)")
-            check("/artifacts/autotest_review/host_isolation_sha256", review["host_isolation_sha256"], str(boundary["digest"]),
-                  f"boundary.digest (read-receipt automation-review-boundary-{instance})")
+            add("/artifacts/autotest_review/automation_sha256", automation_sha256(automation), f"tools.api automation-digest ответа tc-to-autotest:{instance}")
+            add("/artifacts/autotest_review/reviewed_relations_sha256", implementation_relations_sha256(automation["artifacts"]["implementation_relations"]),
+                f"tools.api relations-digest массива implementation_relations ответа tc-to-autotest:{instance} (не digest артефакта)")
+            add("/artifacts/autotest_review/host_isolation_sha256", str(boundary["digest"]), f"boundary.digest (read-receipt automation-review-boundary-{instance})")
             for key in ("source_digest", "effective_bundle_receipt_digest"):
-                check(f"/artifacts/autotest_review/source/{key}", review["source"][key], str(automation["artifacts"]["source"][key]),
-                      f"source.{key} ответа tc-to-autotest:{instance}")
+                add(f"/artifacts/autotest_review/source/{key}", str(automation["artifacts"]["source"][key]), f"source.{key} ответа tc-to-autotest:{instance}")
             files = {row["file_id"]: row["content_digest"] for row in automation["artifacts"]["generated_files"]}
             for index, row in enumerate(review["reviewed_files"]):
                 if row["file_id"] in files:
-                    check(f"/artifacts/autotest_review/reviewed_files/{index}/content_digest", row["content_digest"], files[row["file_id"]],
-                          f"content_digest файла {row['file_id']} в ответе tc-to-autotest:{instance}")
+                    add(f"/artifacts/autotest_review/reviewed_files/{index}/content_digest", files[row["file_id"]],
+                        f"content_digest файла {row['file_id']} в ответе tc-to-autotest:{instance}")
     except (KeyError, TypeError, IndexError, ValueError, AttributeError):
         return rows
     return rows
+
+
+def _pointer_tokens(pointer: str) -> list[str | int]:
+    return [int(token) if token.isdigit() else token for token in pointer.strip("/").split("/")]
+
+
+def _pointer_get(value: Any, pointer: str) -> Any:
+    for token in _pointer_tokens(pointer):
+        if isinstance(token, int) and isinstance(value, list) and token < len(value):
+            value = value[token]
+        elif isinstance(token, str) and isinstance(value, Mapping):
+            value = value.get(token)
+        else:
+            return None
+    return value
+
+
+def _self_digest(value: Mapping[str, Any]) -> str:
+    return _model_stage_artifact_digest({key: item for key, item in value.items() if key != "digest"})
+
+
+def _response_digest_rows(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+    request: Mapping[str, Any], value: Mapping[str, Any],
+) -> list[tuple[str, Any, str, str]]:
+    """FaT-DG: the digest fields of a model answer against the journal — (pointer, given, expected, source) per mismatch."""
+    rows = []
+    for pointer, expected, source in _response_bindings(project, root, state, attempt_id, stage_instance_id, request, value):
+        expected = _self_digest(value) if expected is None else expected
+        given = _pointer_get(value, pointer)
+        if given != expected:
+            rows.append((pointer, given, expected, source))
+    return rows
+
+
+def _fill_response_bindings(
+    project: Path, root: Path, state: Mapping[str, Any], attempt_id: str, stage_instance_id: str,
+    request: Mapping[str, Any], value: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Audit U2: the digest fields of ``_response_bindings`` the answer leaves out (no key, null or "") — the code puts the
+    journal value there, the fragment self-digest last.  Only these fields; a field given with another value is left as it
+    is for the refusal (MODEL_RESPONSE_DIGEST_MISMATCH) — never mended silently."""
+    filled: list[str] = []
+    value = json.loads(json.dumps(value, ensure_ascii=False))
+    self_digest = None
+    for pointer, expected, _source in _response_bindings(project, root, state, attempt_id, stage_instance_id, request, value):
+        if _pointer_get(value, pointer) not in (None, ""):
+            continue
+        if expected is None:
+            self_digest = pointer
+            continue
+        tokens = _pointer_tokens(pointer)
+        parent: Any = value
+        for token in tokens[:-1]:
+            if isinstance(token, int):
+                if not isinstance(parent, list) or token >= len(parent):
+                    parent = None
+                    break
+                parent = parent[token]
+            else:
+                if not isinstance(parent, dict):
+                    parent = None
+                    break
+                parent = parent.setdefault(token, {})
+        if isinstance(parent, dict):
+            parent[str(tokens[-1])] = expected
+            filled.append(pointer)
+    if self_digest is not None:
+        value["digest"] = _self_digest(value)
+        filled.append(self_digest)
+    return value, filled
 
 
 def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str, Any]) -> Mapping[str, Any]:
