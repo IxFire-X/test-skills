@@ -6,12 +6,13 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Unbounded:wght@500;600&display=swap">
 <style>
 /* Layout: one reading column (~780px) under a sticky section bar; diagrams widen to ~1040px.
-   Colour encodes who does the work (same system as the page of the driver line): the agent and its model roles (violet),
-   the reviewer (orange), the project's own build (green), the package's Python tools (graphite); humans get an outline. */
+   Colour encodes who does the work: the agent and its model roles (blue), the reviewer (orange), the project's own build
+   (aqua), the package's Python tools (graphite, a neutral); humans get an outline. Hues are slots 1-3 of the dataviz
+   reference palette, light and dark steps each validated (OKLCH band, chroma, CVD and normal-vision separation). */
 :root {
   --bg: #f2f4f5; --surface: #fcfcfb; --ink: #15202b; --ink-2: #455361; --muted: #6b7884;
   --line: #d6dce1; --soft: #e8ecef;
-  --model: #4a3aa7; --review: #d65a24; --project: #16956a; --code: #5b6670;
+  --model: #2a78d6; --review: #eb6834; --project: #1baf7a; --code: #5b6670;
   --pass: #1f7a3a; --warn: #a35a00;
   --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
   --font-body: "Golos Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -21,14 +22,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
-    --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+    --line: #2a343d; --soft: #1b232a; --model: #3987e5; --review: #d95926; --project: #199e70; --code: #9aa6b1;
     --pass: #5cc97a; --warn: #e8ad52;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1418; --surface: #141a1f; --ink: #e7ecef; --ink-2: #b4bfc8; --muted: #8a96a1;
-  --line: #2a343d; --soft: #1b232a; --model: #9d92ee; --review: #f08453; --project: #3fc493; --code: #9aa6b1;
+  --line: #2a343d; --soft: #1b232a; --model: #3987e5; --review: #d95926; --project: #199e70; --code: #9aa6b1;
   --pass: #5cc97a; --warn: #e8ad52;
   color-scheme: dark;
 }
@@ -302,7 +303,7 @@ footer.end { padding-block: 56px 64px; color: var(--muted); font-size: 13.5px; }
 
 <section id="route" class="wide">
   <div class="col"><div class="sec-head"><div class="n">05</div><h2>Маршрут прогона</h2></div>
-  <p class="prose">Каждый шаг модели начинается с запроса, который публикует код (<code>model-request</code>), и кончается ответом, который код проверяет и записывает (<code>model-response</code>). Между ними модель читает только входы шага.</p></div>
+  <p style="max-width:68ch">Каждый шаг модели начинается с запроса, который публикует код (<code>model-request</code>), и кончается ответом, который код проверяет и записывает (<code>model-response</code>). Между ними модель читает только входы шага.</p></div>
   <figure>
     <div class="fig">
       <svg class="rt" viewBox="0 0 1000 300" role="img" aria-label="Маршрут прогона Трассы: готовность и scan, разметка, кейсы пачками, ревью кейсов, затем в режиме Б автотесты, их ревью, запуск сборкой и закрытие с отчётом">
@@ -365,7 +366,7 @@ footer.end { padding-block: 56px 64px; color: var(--muted); font-size: 13.5px; }
 
 <section id="out" class="col">
   <div class="sec-head"><div class="n">07</div><h2>Результаты</h2></div>
-  <p class="prose">Всё лежит в <code>&lt;проект&gt;/.pilot-runs/&lt;run_id&gt;/</code>. Принятые автотесты — в тестовой папке модуля.</p>
+  <p style="max-width:68ch">Всё лежит в <code>&lt;проект&gt;/.pilot-runs/&lt;run_id&gt;/</code>. Принятые автотесты — в тестовой папке модуля.</p>
   <div class="tbl"><table>
     <thead><tr><th>Файл</th><th>Зачем</th></tr></thead>
     <tbody>
@@ -393,7 +394,7 @@ footer.end { padding-block: 56px 64px; color: var(--muted); font-size: 13.5px; }
 
 <section id="stops" class="col">
   <div class="sec-head"><div class="n">09</div><h2>Частые остановки</h2></div>
-  <p class="prose">Каждая остановка — JSON с кодом и подсказкой <code>fix</code>. Начинать всегда с <code>fix</code>. Полная таблица — в <code>HOW-TO-USE.md</code>.</p>
+  <p style="max-width:68ch">Каждая остановка — JSON с кодом и подсказкой <code>fix</code>. Начинать всегда с <code>fix</code>. Полная таблица — в <code>HOW-TO-USE.md</code>.</p>
   <div class="tbl"><table>
     <thead><tr><th>Код</th><th>Что делать</th></tr></thead>
     <tbody>
