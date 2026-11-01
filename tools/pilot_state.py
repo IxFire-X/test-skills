@@ -1798,16 +1798,41 @@ def _validate_context_marker_sources(
         answer = _read_model_stage_artifact_with_state(project, root, state, attempt_id, "context-marker:requirements", str(requirements[1]))["artifact"]
         parts = [_read_model_stage_artifact_with_state(project, root, state, attempt_id, stage, str(response))["artifact"]
                  for stage, _request, response in batches]
-        if dict(value) != merge_marker_artifacts(answer, parts):
+        from tools.cases_import import run_marker_requirements
+
+        derived = run_marker_requirements(root, attempt, answer)  # FaT-IMP3: an import with documents
+        if dict(value) != merge_marker_artifacts(answer, parts, derived):
             raise ValueError("merged context-marker artifact differs from the merge of its parts")
         from tools.cases_import import is_code_requirements
 
         if is_code_requirements(root, attempt, answer):
             return  # FaT-R2: the requirements of an import without documents are its cases, not an OpenSpec reading
+        tolerated = _gap_marks(answer, derived)
+    else:
+        tolerated = set()
     if snapshots:
-        diagnostics = openspec_diagnostics(dict(value), snapshots)
+        diagnostics = _openspec_refusals(openspec_diagnostics(dict(value), snapshots), tolerated)
         if diagnostics:
             raise ValueError("CONTEXT_MARKER_OPENSPEC: context-marker OpenSpec reconciliation failed: " + json.dumps(diagnostics, ensure_ascii=False))
+
+
+_OPENSPEC_MISSING_TAIL = " — missing from normalized requirement/scenario set"
+
+
+def _gap_marks(answer: Mapping[str, Any], derived: Sequence[Mapping[str, Any]] | None) -> set[str]:
+    """FaT-IMP3: the provenance marks of the requirements of the answer the merged marker of an import leaves out — the gaps
+    (a document requirement no case of the CSV links), named in the report; nothing for any other marker."""
+    if derived is None:
+        return set()
+    kept = {item["source_requirement_id"] for item in derived}
+    return {str(mark) for item in answer["artifacts"]["analytics_documentation"]["requirements"]
+            if item["source_requirement_id"] not in kept for mark in item.get("provenance") or []}
+
+
+def _openspec_refusals(diagnostics: Sequence[Mapping[str, str]], tolerated: set[str]) -> list[Mapping[str, str]]:
+    """FaT-IMP3: the OpenSpec diagnostics that refuse the marker — every one but OPENSPEC_MISSING of a gap mark."""
+    return [item for item in diagnostics if not (item["code"] == "OPENSPEC_MISSING" and item["message"].endswith(_OPENSPEC_MISSING_TAIL)
+                                                 and item["message"][:-len(_OPENSPEC_MISSING_TAIL)] in tolerated)]
 
 
 def _reconcile_requirements_openspec(
@@ -2311,6 +2336,9 @@ def _publish_model_stage_artifact(
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     if stage_instance_id == "context-marker:requirements":
         _reconcile_requirements_openspec(project, root, state, attempt, request, value)
+        from tools.cases_import import check_requirements_answer
+
+        check_requirements_answer(root, attempt, value)  # FaT-IMP3: the links of an import with documents (by the run, not a label)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
@@ -3120,11 +3148,11 @@ def _validate_factual_receipt(
             or field == "plan" and not _plan_batches_listed(value)
         ):
             raise ValueError(f"invalid {kind} receipt")
-    elif kind == "imported-cases":  # FaT-IMP: the skeleton is the one the CSV bound by the inventory gives
-        from tools.cases_import import imported_value, run_csv
+    elif kind == "imported-cases":  # FaT-IMP: the skeleton is the one the CSV bound by the inventory gives (FaT-IMP3: and the links)
+        from tools.cases_import import run_skeleton
 
-        found = run_csv(root, attempt)
-        if set(receipt) != common | {"imported"} or not identity_matches or found is None or receipt.get("imported") != imported_value(*found):
+        found = run_skeleton(root, attempt)
+        if set(receipt) != common | {"imported"} or not identity_matches or found is None or receipt.get("imported") != found:
             raise ValueError("invalid imported-cases receipt")
     elif kind.startswith(_SKELETON_KIND):  # FaT-SKB: the slice the whole skeleton and the published plan give, nothing else
         if (
@@ -4447,14 +4475,13 @@ def _imported_for_answer(project: Path, root: Path, state: Mapping[str, Any], at
 @closure_cached  # FaT-IMP
 def publish_imported_cases(run_root: Path, attempt_id: str) -> dict[str, Any]:
     """Publish the skeleton of an import run from its CSV; the same value again changes nothing."""
-    from tools.cases_import import imported_value, run_csv
+    from tools.cases_import import run_skeleton
 
     project, root = _run_root(run_root)
     attempt = next(item for item in derive_state(root)["attempts"] if item["attempt_id"] == attempt_id)
-    found = run_csv(root, attempt)
-    if found is None:
+    value = run_skeleton(root, attempt)
+    if value is None:
         raise ValueError("IMPORT_NOT_CASES_RUN: the run has no --cases")
-    value = imported_value(*found)
     _publish_bound_attempt_receipt(run_root, attempt_id, "imported-cases", {"imported": value})
     target = _receipt_target(root, attempt_id, "imported-cases")
     return {"digest": value["digest"], "cases": len(value["cases"]), "path": target.relative_to(root).as_posix()}

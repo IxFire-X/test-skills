@@ -1174,8 +1174,6 @@ def _scan_cases(project: Path, args: Any) -> int | None:
     if not cases:
         return None
     try:
-        if getattr(args, "docs", None):
-            raise CasesImportError("IMPORT_WITH_DOCS_LATER", "--cases вместе с --docs — ступень 2 (кейсы сопоставляет с требованиями модель)")
         [(rel, data)] = _input_files(project, [cases], "--cases",
                                      outside_fix="CSV кейсов должен лежать внутри проекта: укажите --cases путём от корня проекта")
         from tools.cases_import import password_cells, secret_cell

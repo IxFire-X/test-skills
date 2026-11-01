@@ -18,6 +18,11 @@ A module whose context does not fit one call is marked in parts (`python -m tool
 
 - `context-marker:requirements` — the documents of the run only, no code. Produce the complete normalized requirement
   set as below, with the one source `шаг требований — код не анализировался`.
+  Import with documents (FaT-IMP3, `scan --cases` with `--docs`): the step also reads the CSV of ready cases. Add
+  `analytics_documentation.case_links` — one row per case of the CSV (`row` = the CSV row of its Name): the
+  `source_requirement_ids` of the documents that case checks, or `[]` with a `reason` when it checks none. The cases are
+  never requirements: no SREQ from the CSV. The controller refuses a missing, repeated or unknown link before the write
+  (`IMPORT_CASE_LINKS`).
 - `context-marker:batch-NNN` — the requirements answer and the files of one context batch. Copy the requirements
   unchanged (a changed requirement rejects the part: `CONTEXT_MARKER_REQUIREMENTS_CHANGED`) and add only the code
   observations of this batch in `sources` and `warnings`. A requirement whose code is not in this batch is the warning

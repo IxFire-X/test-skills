@@ -191,6 +191,26 @@ def _human_bytes(case: Mapping[str, Any]) -> int:
     return len(canonical_bytes({key: case[key] for key in ("title", "objective", "preconditions", "steps")}))
 
 
+def _imported_groups(source: list[dict[str, Any]], imported: Mapping[str, Any]) -> dict[str, str | None]:
+    """FaT-IMP: a case is its own group; FaT-IMP3: the cases that share a source requirement and their requirements are one
+    group (connected components), so a case and every requirement it traces to stay in one batch."""
+    from tools.cases_import import case_sources
+
+    parent = {item["source_requirement_id"]: item["source_requirement_id"] for item in source}
+
+    def find(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    for case in imported["cases"]:
+        members = [item for item in case_sources(case) if item in parent]
+        for item in members[1:]:
+            parent[find(item)] = find(members[0])
+    return {key: "case:" + find(key) for key in parent}
+
+
 def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: int, id_pattern: re.Pattern[str] | None,
                 documents: dict[str, str], imported: Mapping[str, Any] | None = None) -> tuple[list[list[str]] | None, list[str]]:
     """FaT-BO: batches by the expected answer; None is one batch.  Code only splits the list of owned requirements.
@@ -198,8 +218,12 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
     FaT-IMP: in an import the answer is the human fields of a case with its machine part (× 5), a case is its own group.
     FaT-SKB: the skeleton of a batch holds its own cases only, so the skeleton bytes of a case join its share as well."""
     if imported is not None:
-        share = {case["source_requirement_id"]: _human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case))
-                 for case in imported["cases"]}
+        from tools.cases_import import case_sources
+
+        share: dict[str, int] = {}
+        for case in imported["cases"]:  # FaT-IMP3: a case counts once, on its first source requirement
+            first = case_sources(case)[0]
+            share[first] = share.get(first, 0) + _human_bytes(case) * IMPORT_ANSWER_PER_HUMAN_BYTE + len(canonical_bytes(case))
         expected = {item["source_requirement_id"]: share.get(item["source_requirement_id"], 0) for item in source}
     else:
         expected = {item["source_requirement_id"]: len(item["text"].encode("utf-8")) * ANSWER_PER_TEXT_BYTE for item in source}
@@ -214,7 +238,7 @@ def _size_split(source: list[dict[str, Any]], window_bytes: int, input_bytes: in
     if cap <= 0:
         return None, [f"одна пачка: вход шага {step_input} Б {NO_ROOM} в окне {window_bytes} Б — сузьте контекст"]
     if imported is not None:
-        keys: dict[str, str | None] = {item["source_requirement_id"]: "case:" + item["source_requirement_id"] for item in source}
+        keys: dict[str, str | None] = _imported_groups(source, imported)
         counts = {"imported": len(source)}
     else:
         keys, counts = _group_keys(source, id_pattern, documents)
@@ -537,8 +561,12 @@ def _require_prior_capabilities(fragment: dict[str, Any], earlier: list[dict[str
 def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any], imported: Mapping[str, Any]) -> None:
     """FaT-IMP: the cases of the batch keep the human fields of the import byte for byte — one case per imported case of
     the batch, in its order; the model completes only the machine part.  A difference names its path."""
-    owned = set(batch["owned_source_requirement_ids"])
-    expected = [case for case in imported["cases"] if case["source_requirement_id"] in owned]
+    from tools.cases_import import canonical_management, case_sources
+
+    owned = batch["owned_source_requirement_ids"]
+    order = {source: index for index, source in enumerate(owned)}
+    expected = sorted((case for case in imported["cases"] if set(case_sources(case)) & set(owned)),  # the order of slice_value
+                      key=lambda case: (min(order.get(source, len(order)) for source in case_sources(case)), case["row"]))
     cases = sorted(fragment["test_cases"], key=lambda case: case.get("display_order", 0))
     differences: list[str] = []
     if len(cases) != len(expected):
@@ -547,6 +575,8 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
         for field in ("title", "objective", "preconditions", "priority"):
             if case.get(field) != source[field]:
                 differences.append(f"/test_cases/{index}/{field}")
+        if case.get("management") != canonical_management(source):  # FaT-IMP3 (hunt 3.10): Key, folder, labels, custom fields
+            differences.append(f"/test_cases/{index}/management")
         steps = case.get("steps") or []
         if len(steps) != len(source["steps"]):
             differences.append(f"/test_cases/{index}/steps: шагов {len(steps)}, в импорте {len(source['steps'])}")
@@ -564,9 +594,9 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
     for mapping in fragment.get("source_to_canonical_mappings") or []:
         for requirement_id in mapping.get("canonical_requirement_ids") or []:
             sources.setdefault(requirement_id, set()).add(mapping.get("source_requirement_id"))
-    traced = [f"/test_cases/{index}/requirement_ids: ведут к {', '.join(sorted(found)) or 'ничему'}, у кейса импорта {source['source_requirement_id']}"
+    traced = [f"/test_cases/{index}/requirement_ids: ведут к {', '.join(sorted(found)) or 'ничему'}, у кейса импорта {', '.join(case_sources(source))}"
               for index, (case, source) in enumerate(zip(cases, expected))
-              if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) != {source["source_requirement_id"]}]
+              if (found := set().union(*(sources.get(item, set()) for item in case.get("requirement_ids") or []))) != set(case_sources(source))]
     if traced:
         raise BatchAssemblyError("IMPORT_TRACE_CHANGED", "трассировка кейсов импорта ведёт не к их строке CSV: " + "; ".join(traced[:12])
                                  + " — требования каждого кейса должны отображаться только в source requirement его строки")

@@ -167,7 +167,11 @@ def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> 
                    and event.get("stage_instance_id") == "context-marker:requirements"), None)
     if stage == "context-marker:requirements":
         # FaT-Q2 (2.3): the requirements step of the marker in parts reads the requirement documents only
-        return list(dict.fromkeys(project / row["path"] for row in baseline["requirements"].get("docs", [])))
+        # FaT-IMP3: and, in an import with documents, the CSV whose cases it links
+        from tools.cases_import import cases_path, docs_run
+
+        csv = [project / str(cases_path(root))] if docs_run(root) else []
+        return list(dict.fromkeys([*(project / row["path"] for row in baseline["requirements"].get("docs", [])), *csv]))
     if batch is not None and answer is not None:
         # FaT-5: a part of the marker reads the requirements answer, not the documents again.
         files.append(root / "model-stage-artifacts" / str(attempt["attempt_id"]) / (answer.removeprefix("sha256:") + ".json"))

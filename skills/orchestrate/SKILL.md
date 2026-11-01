@@ -228,6 +228,11 @@ Run остаётся связан с исходной project/module identity.
    `<run>/imported-cases/<attempt_id>.json` передай в `plan-batches --imported` и `validate-fragment --imported`. Последний
    `--input-digest` пачки `tc-generator` — `batch_skeletons[<batch_id>]` из вывода `publish-generator-input --kind plan`:
    скелет только её кейсов. Человеческие поля кейсов не меняются.
+   Импорт с документами (`scan --cases <csv> --docs <док>`, FaT-IMP3): шаг `context-marker:requirements` делает модель —
+   по документам и CSV, со связями кейсов `case_links` (отказ связей — `IMPORT_CASE_LINKS`, единственный повтор стадии). После
+   его ответа — `cases-import` (он только публикует скелет), дальше части и `merge`, как выше. Маркер слияния берёт
+   требования со связью с кейсом и добавляет кодом `SREQ-CSV-<строка>` на кейс вне документов; требование без кейса
+   в CSV — пробел: кейс для него не пишется, отчёт и `questions-for-analyst.md` называют его.
 1. Один раз вызови `context-marker` для authorized requirements/context и
    persist/readback-проверь полный normalized source-requirement artifact. До вызова
    persist/readback-проверь `model-request` с exact stage/role/policy, model,

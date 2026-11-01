@@ -33,11 +33,15 @@ _ROLES = ("context-marker", "tc-generator", "tc-reviewer", "tc-to-autotest", "au
 # --- questions for the analyst ----------------------------------------------------------------
 
 def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]] = (),
-                      autotest_notes: Sequence[Mapping[str, Any]] = ()) -> str:
+                      autotest_notes: Sequence[Mapping[str, Any]] = (), imported: Mapping[str, Any] | None = None) -> str:
     """Group the four-field gap warnings (context-artifact-contract.md) by requirement; the rest goes to «Прочее».
 
     FaT-RN: ``notes``/``autotest_notes`` — the WARNING/INFO findings of the accepted case/autotest review, with text.
+    FaT-IMP3: ``imported`` — the import summary: the document requirements without a case of the CSV, the cases outside
+    the documents.
     """
+    gap_rows = list((imported or {}).get("gaps") or [])
+    outside = list((imported or {}).get("outside") or [])
     groups: dict[str, list[list[str]]] = {}
     loose: list[str] = []
     for warning in warnings:
@@ -47,9 +51,15 @@ def analyst_questions(warnings: Iterable[Any], notes: Sequence[Mapping[str, Any]
             groups.setdefault(parts[0].split(" ", 1)[0], []).append(parts)
         elif text:
             loose.append(text)
-    if not groups and not loose and not notes and not autotest_notes:
+    if not groups and not loose and not notes and not autotest_notes and not gap_rows and not outside:
         return NO_QUESTIONS
     lines = ["# Вопросы аналитику", ""]
+    if gap_rows:  # FaT-IMP3: a requirement of the documents no imported case checks — no case is made for it
+        lines += ["## Требования без кейса в CSV", "",
+                  *(f"- {row['source_requirement_id']}: {row['text']} — в CSV нет кейса; нужен ли он?" for row in gap_rows), ""]
+    if outside:
+        lines += ["## Кейсы CSV вне документов", "",
+                  *(f"- строка {row} — кейс не проверяет ни одно требование документов; оставить его?" for row in outside), ""]
     for requirement, items in groups.items():
         lines += [f"## {requirement}", ""]
         for source, missing, blocked, question in items:
@@ -461,7 +471,10 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
         imported = pilot_state.read_attempt_receipt(root, str(attempts[-1]), "imported-cases", "ARTIFACT_READ_BACK")["record"]["imported"]
     except (KeyError, OSError, ValueError):
         return {"csv": path, "cases": None, "normalized": None}
-    return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or [])}
+    from tools.cases_import import outside_rows
+
+    return {"csv": path, "cases": len(imported["cases"]), "normalized": len(imported.get("normalized") or []),
+            **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}  # FaT-IMP3
 
 
 def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
@@ -653,7 +666,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "
-                  f"{_dash(summary['normalized'])} ячеек кодом (пустая Test Data → «—», пустой Objective → Name)", ""]
+                  f"{_dash(summary['normalized'])} ячеек кодом (пустая Test Data → «—», пустой Objective → Name)",
+                  *([f"- требований без кейса в CSV: {len(summary['gaps'])}"
+                     + (" (" + ", ".join(row["source_requirement_id"] for row in summary["gaps"]) + ")" if summary["gaps"] else "")
+                     + f"; кейсов вне документов: {len(summary['outside'])}"
+                     + (" (строки " + ", ".join(map(str, summary["outside"])) + ")" if summary["outside"] else "")]
+                    if "gaps" in summary else []), ""]
     if report.get("test_design"):
         lines += [render_test_design(report["test_design"]), ""]
     if report.get("expectations"):
@@ -689,7 +707,7 @@ def _write_report(project: Path, run_id: str) -> list[str]:
     outputs = {
         "report.json": json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "report.md": render_markdown(report).encode("utf-8"),
-        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root)).encode("utf-8"),
+        "questions-for-analyst.md": analyst_questions(warnings, *_attempt_notes(root), imported=report.get("import")).encode("utf-8"),
     }
     written = []
     for name, data in outputs.items():

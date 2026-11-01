@@ -71,7 +71,6 @@ def test_scan_cases_makes_the_csv_the_requirement_document_of_the_run(tmp_path: 
 
 
 @pytest.mark.parametrize(("flags", "csv_text", "code", "named"), [
-    ({"docs": ["docs/req.md"]}, CSV, "IMPORT_WITH_DOCS_LATER", "--docs"),
     ({"cases": "../outside.csv"}, CSV, "SNAPSHOT_DOCS", "outside.csv"),
     ({}, HEADER + "\r\nКейс,Цель,,High,Шаг,\"Операция: не определена\",Итог\r\n", "IMPORT_CSV_V4", "Test Data"),
     ({}, "Name,Чужая колонка,Test Script (Step-by-Step) - Step\r\nА,Б,В\r\n", "ZEPHYR_CSV_COLUMNS", "Чужая колонка"),

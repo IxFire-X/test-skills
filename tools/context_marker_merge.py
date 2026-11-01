@@ -50,8 +50,12 @@ def requirements_of(artifact: Mapping[str, Any]) -> Any:
     return artifact["artifacts"]["analytics_documentation"]["requirements"]
 
 
-def merge_marker_artifacts(requirements: Mapping[str, Any], parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """One marker artifact from the requirements answer and the part answers, in part order."""
+def merge_marker_artifacts(requirements: Mapping[str, Any], parts: Sequence[Mapping[str, Any]],
+                           derived: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """One marker artifact from the requirements answer and the part answers, in part order.
+
+    FaT-IMP3: ``derived`` — the requirements code derives for an import with documents (the linked ones and those of the
+    cases outside the documents) in place of the answer's own."""
     if not parts:
         raise ValueError("context-marker merge needs at least one part answer")
     if {artifact.get("stage") for artifact in (requirements, *parts)} != {"context-marker"}:
@@ -64,7 +68,8 @@ def merge_marker_artifacts(requirements: Mapping[str, Any], parts: Sequence[Mapp
     return {
         "schema_version": str(requirements["schema_version"]),
         "stage": "context-marker",
-        "artifacts": {"analytics_documentation": copy.deepcopy(dict(requirements["artifacts"]["analytics_documentation"])),
+        "artifacts": {"analytics_documentation": {**copy.deepcopy(dict(requirements["artifacts"]["analytics_documentation"])),
+                                                  **({"requirements": copy.deepcopy(list(derived))} if derived is not None else {})},
                       "source_code_and_diff": {**copy.deepcopy(dict(parts[0]["artifacts"]["source_code_and_diff"])), "sources": sources}},
         "warnings": _union([requirements.get("warnings") or [], *(part.get("warnings") or [] for part in parts)], _warning_key),
     }

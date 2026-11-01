@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools import pilot_state
-from tools.cases_import import cases_path
+from tools.cases_import import cases_path, docs_run
 from tools.json_cli import JsonArgumentParser
 
 MERGE_MODEL_ID = "controller:context-marker-merge"
@@ -76,7 +76,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
                               if answer else documents)
         parts = [step("context-marker:requirements", head, {"requirements": documents, "role": role},
                       "документы задачи с инструкциями роли больше бюджета шага: сузьте --docs")]
-        if imported:  # code, not a model call: no prompt, no budget
+        if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (FaT-IMP3: with --docs the model)
             parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}")
         for receipt in receipts:
             part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [*head, receipt["digest"], answer],
@@ -118,7 +118,10 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
     inputs = [baseline["requirements"]["digest"], baseline["inventory_digest"], *(receipt["digest"] for receipt in receipts),
               responses[stages[0]], *dict.fromkeys(responses[stage] for stage in stages[1:])]
     try:  # FaT-O3: the merged marker is built and checked before its request is written — a refusal leaves no orphan request
-        merged = merge_marker_artifacts(answer, parts)
+        from tools.cases_import import run_marker_requirements
+
+        derived = run_marker_requirements(root, attempt, answer)  # FaT-IMP3: an import with documents
+        merged = merge_marker_artifacts(answer, parts, derived)
         pilot_state.check_merged_marker(root, attempt_id, inputs, merged)
     except ValueError as error:
         raise ValueError(f"CONTEXT_MARKER_MERGE_INVALID: {str(error).split('; fix: ')[0]}; fix: слияние — код, его повтор даст то же: "
