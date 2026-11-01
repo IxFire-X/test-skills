@@ -31,7 +31,10 @@ class ZephyrCsvError(ValueError):
 def detect_delimiter(text: str) -> str:
     """``,`` or ``;`` — the one under which the header has more Zephyr columns; a tie or no CSV is a ``ValueError``."""
     first = text.splitlines()[0] if text.strip() else ""
-    splits = {delimiter: next(csv.reader([first], delimiter=delimiter), []) for delimiter in (",", ";")}
+    try:
+        splits = {delimiter: next(csv.reader([first], delimiter=delimiter), []) for delimiter in (",", ";")}
+    except csv.Error:  # FaT-R3: e.g. a first line over the field limit — not a CSV (a minified JSON in --docs)
+        raise ValueError("ZEPHYR_CSV_NOT_CSV") from None
     if max(len(cells) for cells in splits.values()) < 2:
         raise ValueError("ZEPHYR_CSV_NOT_CSV")
     known = {delimiter: len({cell.strip() for cell in cells} & set(_HEADERS)) for delimiter, cells in splits.items()}
@@ -64,7 +67,10 @@ def parse_zephyr_csv(data: bytes) -> list[dict[str, Any]]:
         delimiter = detect_delimiter(text)
     except ValueError as error:
         raise ZephyrCsvError(str(error), "нужен экспорт тест-кейсов Zephyr Scale в CSV с разделителем «,» или «;»") from None
-    records = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+    try:
+        records = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+    except csv.Error as error:  # FaT-R3: a field over the csv limit is a refusal, not a traceback
+        raise ZephyrCsvError("ZEPHYR_CSV_NOT_CSV", f"CSV не читается: {error}") from None
     header = [cell.strip() for cell in records[0]]
     unknown = [cell for cell in header if cell not in _HEADERS]
     if unknown or "Name" not in header or _STEP not in header:

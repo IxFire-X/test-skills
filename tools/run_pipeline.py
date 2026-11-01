@@ -1209,6 +1209,13 @@ def cmd_scan(args: Any) -> int:
     refused = _scan_cases(Path(args.project).resolve(), args)
     if refused is not None:
         return refused
+    # FaT-R3: --docs and --reference are read before the run is created, as --cases: a refusal leaves no orphan run
+    try:
+        _docs_entries(Path(args.project).resolve(), getattr(args, "docs", None))
+        _reference_cases(Path(args.project).resolve(), getattr(args, "reference", None))
+    except HostStop as stop:
+        _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
+        return 2
     code = _scan(args)
     run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
     if run_id:
@@ -2757,7 +2764,11 @@ def main(argv: list[str] | None = None) -> int:
             fields = error_fields(error)
             _print({"status": "error", "reason": fields["code"], **fields})
             return 2
-        raise
+        # FaT-R3: any other error is still a JSON answer, never a traceback the agent cannot read
+        # the message is cut: an exception may carry a piece of a file, and the package prints no more than it needs
+        _print({"status": "error", "reason": "INTERNAL", "message": f"{type(error).__name__}: {str(error)[:500]}",
+                "fix": "сообщите разработчикам пакета вывод этой команды"})
+        return 2
 
 
 if __name__ == "__main__":
