@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = sorted([*ROOT.glob("skills/*/SKILL.md"), *ROOT.glob("skills/*/references/*.md"), ROOT / "USAGE.md", ROOT / "QUICKSTART.md"])
+DOCS = sorted([*ROOT.glob("skills/*/SKILL.md"), *ROOT.glob("skills/*/references/*.md"), ROOT / "USAGE.md", ROOT / "README.md", ROOT / "HOW-TO-USE.md"])
 NAMED = re.compile(r"python -m tools\.([a-z_]+)(?: ([a-z][a-z-]+)(?![\w/.-]))?")
 SUBCOMMAND = re.compile(r"(?<![\w.])tools\.(api|orchestrate_test_case_revision|run_pipeline|context_marker_parts) ([a-z][a-z-]+)")
 

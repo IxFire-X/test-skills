@@ -1,151 +1,93 @@
-# Test Skills Portable Pilot
+# Трасса v0.1
 
-**[Быстрый старт: подключить пакет, запустить и открыть результаты](QUICKSTART.md).** Готовые запросы для модели и пояснение к выходным файлам; читать внутренние модули для первого запуска не требуется.
+**От требования до теста — по одной трассе.**
 
-## Презентация и обзор
+Трасса — набор инструкций для модели и Python-инструментов к ним. По документу требований к одной
+функции она готовит тест-кейсы, отдаёт их на ревью и, если вы попросите, пишет автотесты,
+проверяет их и запускает средствами вашего проекта.
 
-- [Настоящие тест-кейсы Spring Petclinic: 64 кейса, 290 шагов](docs/examples/petclinic-owner-lifecycle/cases.md) — [HTML, исходный JSON и пояснение к результатам](docs/examples/petclinic-owner-lifecycle/README.md).
-- [Подробный справочник всех файлов и схемы взаимодействия модулей](docs/pipeline-file-guide-ru.md).
-- [Презентация на русском: 16 слайдов, около 20 минут](docs/portable-testing-pipeline-ru.pptx).
-- [Заметки докладчика](docs/presentation-notes-ru.md).
-- [Что сделано, структура пакета и причины попробовать](docs/portable-pipeline-overview-ru.md).
-- [Результаты большого пилота и границы подтверждённого](docs/pilot-evidence.md).
+Для кого: тестировщики и разработчики Java- и Python-проектов, которые работают в программе с доступом
+к модели (CLI компании или похожей).
 
-В этом репозитории опубликован переносимый пакет тестирования. Старые версии
-сохранены в истории Git.
+**Как начать — [HOW-TO-USE.md](HOW-TO-USE.md)**: подключение, проверка готовности, запросы для модели,
+результаты, продолжение после перерыва и частые остановки.
 
-Портативный skill-pack для проектирования тест-кейсов, независимого ревью,
-генерации автотестов, project-native выполнения и проверяемой трассировки.
-Пакет не является самостоятельным LLM runner: моделью управляет совместимая CLI,
-а Python tools только читают, проверяют, публикуют и исполняют закрытые операции.
+## Что вы получаете
 
-## Точка входа
+- **Тест-кейсы** — в HTML и Markdown для чтения и в JSON как исходный документ. Каждый кейс связан
+  с требованием, из которого он вырос.
+- **CSV для Zephyr Scale** — файл `<документ>.r<ревизия>.zephyr-scale.csv`; по шаблону выгрузки вашего
+  проекта Трасса заполнит и CSV для импорта без ручных правок.
+- **Отчёт ревью** — приняты ли кейсы и что проверяющий потребовал исправить.
+- **Автотесты** (режим Б) — код тестов в тестовой папке проекта и отчёт их запуска.
+- **Отчёт прогона** — шаги, время, размеры входа модели, коды остановок; без кода проекта и текстов кейсов.
+- **Вопросы аналитику** — `questions-for-analyst.md`: пробелы и неясности требований, найденные по дороге.
 
-Скопируйте пакет целиком в обычный рабочий проект и явно попросите model-enabled
-CLI выполнить `skills/orchestrate/SKILL.md`. Совместимая CLI обязана прочитать exact
-Skills, references, schemas и `contracts/pipeline.json`, сохранять и читать обратно
-артефакты, создавать отдельный fresh reviewer invocation и уметь продолжить
-nonterminal attempt из durable state.
+## Два режима
 
-Первичный вход — один документ требований для новой или изменяемой фичи. Project,
-module, path или `--target` могут только сузить scope. Сам путь к проекту не разрешает
-придумать фичу.
+| | А — только кейсы | Б — кейсы и автотесты |
+| --- | --- | --- |
+| Профиль | `cases-only-v1` | `local-pilot-v1` |
+| Что делает | пишет кейсы и проводит их ревью | то же, затем пишет автотесты, проводит их ревью и запускает |
+| Код проекта | не запускается | запускается сборкой проекта |
+| Что нужно | Python 3.11+ и документ требований | плюс готовая тестовая среда проекта |
 
-## Два профиля
+Профиль называете вы — в запросе модели и в команде проверки готовности. Режим Б работает только по вашему
+явному разрешению и только в пределах текущего прогона. Если сборка проекта не готова, прогон Б честно
+понижается до кейсов и говорит, что исправить.
 
-- `cases-only-v1` создаёт и независимо проверяет canonical test cases. Код проекта не
-  запускается; materialization и execution имеют `NOT_APPLICABLE`.
-- `local-pilot-v1` после accepted canonical и automation review материализует exact
-  generated file set и запускает только reviewed targets через project-native
-  pytest, Maven Wrapper, системный Maven или Gradle Wrapper.
+## Что запускается и куда идёт
 
-Явный запрос полного pipeline даёт run-scoped разрешение на такое выполнение только
-для текущего run. Простое наличие папки или запрос тест-кейсов код не запускают.
-Пайплайн не создаёт clone/worktree/sandbox, не ставит JDK, Python, зависимости или
-plugins и не меняет CI, cron, Git history или remote.
+**Режим А.** Инструменты Трассы только читают файлы проекта и пишут свои. Ни сборка, ни тесты, ни код
+проекта не запускаются, сетевых запросов инструменты не делают.
 
-## Как идёт run
+**Режим Б** — дополнительно, и только после того, как ревью приняло кейсы и автотесты:
 
-```text
-explicit Skill invocation
-  -> run manifest + authorization + RUN_CREATED
-  -> read-only inventory -> exact module -> frozen execution baseline
-  -> append-only attempt
-  -> deterministic requirement batches
-  -> canonical candidate -> one fresh authoritative review
-  -> cases-only finalization
-     или
-     automation -> static review -> generated delta -> materialization
-       -> project-native execution -> trace -> file dispositions
-       -> finalization -> terminal result
-```
+- проверка готовности один раз запускает фазу Maven `validate` офлайн;
+- сборка проекта (Maven Wrapper, системный Maven, Gradle Wrapper или pytest) компилирует и запускает
+  принятые тесты. Maven и Gradle при этом могут обращаться к репозиториям зависимостей, которые настроены
+  в проекте;
+- процессы сборки получают ваше окружение целиком — как если бы вы запустили сборку сами;
+- если тесты ходят на стенд, Трасса берёт его адрес из переменной окружения, имя которой стоит
+  в `.skillsrc`, проверяет запросом `HEAD`, что стенд отвечает, и тесты шлют на него запросы. Сценарии вида
+  «создать → изменить → прочитать → удалить» меняют данные стенда: используйте только тестовый стенд.
 
-Один run навсегда связан с одной exact project/module identity. Он может содержать
-последовательную append-only lineage child attempts, но одновременно nonterminal
-может быть только один. `WAITING_FOR_INPUT` и `WAITING_FOR_MODEL` продолжаются через
-resume; terminal attempt неизменяем.
+**В обоих режимах:**
 
-Canonical JSON — единственный семантический источник. HTML, Markdown и
-CSV — derived human projections. Профиль CSV по умолчанию —
-`zephyr-scale-step-row-24-v5`; прежний `zephyr-scale-step-row-24-v4` доступен только по
-явному `--csv-profile zephyr-scale-step-row-24-v4`. Опциональный
-`zephyr-scale-xml-observed-v1` остаётся observed/unverified: реальный Zephyr tenant
-import/re-export не доказан.
+- документы требований, CSV и нужная часть кода проекта уходят в модель вашей программы — так же, как
+  при любой работе с ней;
+- файл, похожий на секрет (`.env`, ключи, пароли в настройках), целиком исключается из того, что видит
+  модель;
+- Трасса пишет только в проект: папку прогонов `.pilot-runs/`, файл настроек `.skillsrc` и — в режиме Б —
+  новые файлы тестов в тестовой папке модуля. Исходный код приложения, существующие тесты, настройки
+  сборки и зависимости она не меняет, не ставит JDK, Python и пакеты, не трогает CI, git-историю и remote.
 
-При публикации кейсов рядом с `<document_id>.r<revision>.html` автоматически
-создаётся `<document_id>.r<revision>.md`: цель, предусловия и шаги с данными и
-ожидаемыми результатами. Markdown строится из того же JSON и не служит входом
-автоматизации. Повторная публикация сверяет его байты и не перезаписывает изменённую
-вручную копию. Формат существующих receipts сохранён: `--verify-only` проверяет
-JSON/HTML/CSV, а Markdown проверяется при публикации и не входит в receipt.
+Упавшие автотесты помечаются в карантин (`@Disabled` / `xfail`), прошедшие остаются в проекте.
 
-## Execution и generated files
+## Что нужно на машине
 
-Executor получает закрытый adapter ID, exact interpreter/wrapper/executable path, build profile
-и typed parameters — не shell string. Он запускается из выбранного module cwd и не
-исправляет тест после FAIL без отдельного доказанного решения.
+- **Программа с доступом к модели**, которая умеет читать и писать файлы и выполнять команды. Лучше, если
+  она умеет запускать проверяющего в отдельном контексте; если нет — ревью идёт в той же сессии.
+- **Python 3.11–3.13** для инструментов Трассы. Окружение (venv) и зависимости ставите вы, один раз —
+  команды в [HOW-TO-USE.md](HOW-TO-USE.md).
+- **Для режима Б** — готовая тестовая среда проекта: Java и JUnit 5 с Maven Wrapper, системным Maven
+  (`mvn` в PATH) или Gradle Wrapper либо Python с pytest. Зависимости проекта и доступ к тестовым
+  ресурсам настраиваются заранее.
+- **git** — только если проект в git: Трасса читает `git status`.
 
-Generated output — множество файлов, и у каждого есть materialization и disposition
-receipt. Основные правила:
+## Чем всё закончилось
 
-- authoritative `PASS` и valid trace позволяют записать pre-finalization
-  `RETAINED`; acceptance дополнительно требует valid finalization;
-- `FAIL` и `NOT_RUNNABLE` очищают только byte-identical pipeline-owned files;
-- `UNKNOWN` никогда не очищает generated delta;
-- partial materialization запрещает execution и безопасно закрывается как
-  `PARTIAL/NOT_APPLICABLE`.
+В режиме А главное — вердикт ревью кейсов. `verification=NOT_APPLICABLE` и `accepted=false` здесь
+ожидаемы: запуска автотестов в этом режиме нет, ревью кейсы при этом не отвергло.
 
-## Результат
+В режиме Б полный принятый результат — `accepted=true` и `verification=PASS`. Иначе:
 
-Результат не является одним старым status. Он содержит независимые оси:
+| Что видим | Как понимать |
+| --- | --- |
+| `FAIL` | Тесты упали: разберите отчёт — проблема в приложении, тесте или сборке |
+| `UNKNOWN` | Надёжного результата нет: сначала выясните причину |
+| `NOT_RUNNABLE` | Запустить нельзя при текущих условиях; причина — в отчёте |
 
-- lifecycle: `ACTIVE`, `WAITING_FOR_INPUT`, `WAITING_FOR_MODEL`, `TERMINAL`;
-- completion: `COMPLETE`, `PARTIAL`, `FATAL` или ещё не установлен;
-- verification: `PASS`, `FAIL`, `UNKNOWN`, `NOT_RUNNABLE`, `NOT_APPLICABLE` или ещё
-  не установлен;
-- coverage: `FULL`, `MIXED`, `MANUAL_ONLY` или ещё не установлено;
-- terminal `reason_code` и вычисленное `accepted`.
+## Для разработчиков пакета
 
-Invalid finalization всё равно завершает attempt, но даёт `accepted=false` и
-`FINALIZATION_INVALID`. Фактические verification/coverage при этом не переписываются.
-
-## Секреты и границы
-
-Файл с потенциальным secret целиком исключается из model context. Артефакты содержат
-только safe labels или opaque runtime handles, никогда raw values или обычный hash
-секрета. Окружение хранит только allowlisted safe key IDs/labels без values.
-
-Пайплайн может создавать только свои новые generated-test files и собственные evidence
-artifacts. Application source, существующие тесты, настройки, lock files и зависимости
-не меняются.
-
-## Проверка пакета
-
-Linux и Windows — целевые платформы реализации. CI этого репозитория запускает один
-и тот же implementation gate на Ubuntu и Windows; он проверяет пакет, а не квалификацию
-всех CLI/моделей/проектов. Настройка CI целевого проекта остаётся за его владельцем.
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE = '1'
-python -m tools.ci_gate --root .
-python -m tools.doctor --root .
-```
-
-На Linux используйте `export PYTHONDONTWRITEBYTECODE=1`, затем те же команды Python.
-`tools.ci_gate` уже включает contract check, проверку проекций и весь pytest; отдельно
-повторять их не требуется. Сама команда не создаёт CI-сервис или workflow.
-Весь этот раздел предназначен для maintainer/release-проверки и автоматически из
-обычного production pipeline run не вызывается.
-
-`contracts/pipeline.json` — machine truth. `CONTRACTS.md` и `PIPELINE.md` — generated
-projections. `release/manifest.json` связывает package `0.5.0-pilot` с exact runtime
-bytes и сейчас честно имеет `implemented_unverified`; readiness допустима только как
-`core-pilot-ready for <exact verified tuple>` после внешнего adaptive release eval.
-Release eval запускается только отдельной явной командой квалификации и не входит в
-обычный production pipeline run. Пакет не создаёт и не изменяет CI целевого проекта.
-
-Company runner, production rollback и реальный Zephyr tenant round-trip не входят в
-core pilot readiness и остаются `N/A`, пока не появится отдельное evidence.
-
-Подробнее: [USAGE.md](USAGE.md), [HOW-IT-WORKS.md](HOW-IT-WORKS.md) и
-[RELEASE.md](RELEASE.md).
+Справочник разработчика, контракт и тесты — в репозитории пакета, в поставку не входят.
