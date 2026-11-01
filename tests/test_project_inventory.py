@@ -122,3 +122,30 @@ def test_inventory_does_not_drop_a_user_requirements_to_do_directory(tmp_path: P
     inventory = build_inventory(project, project)
 
     assert [item["project_path"] for item in inventory["files"]] == ["to_do/feature.md"]
+
+
+# --- FaT-S1: url-credentials-v1 is linear and finds what it found before --------------------------------------------
+
+@pytest.mark.parametrize(("text", "found"), [
+    (b"https://tester:Secr3t9@stand.local/login", True),
+    (b"1http://u:p@host", True),  # a run that starts with a digit but holds a letter
+    (b"x" * 40 + b"://u:p@host", True),  # a scheme longer than 32 characters
+    (b"jdbc:postgresql://admin:Pa55word@db:5432/app", True),
+    (b"-.+://u:p@host", False),  # no letter before «://»
+    (b"ftp://anonymous@host", False),  # no password
+    (b"https://host/path?a=b:c@d", False),
+])
+def test_url_credentials_finds_the_same_as_before(text: bytes, found: bool) -> None:
+    from tools.project_inventory import token_signature_rule
+
+    assert (token_signature_rule(text) == "url-credentials-v1") is found
+
+
+def test_url_credentials_on_a_long_run_without_a_scheme_is_fast() -> None:
+    import time
+
+    from tools.project_inventory import token_signature_rule
+
+    started = time.perf_counter()
+    assert token_signature_rule(b"a" * 280_000) is None
+    assert time.perf_counter() - started < 2

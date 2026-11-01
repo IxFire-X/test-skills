@@ -50,7 +50,9 @@ _TOKEN_SIGNATURES = (
     ("aws-key-v1", re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("google-key-v1", re.compile(rb"\bAIza[A-Za-z0-9_-]{20,}")),
     ("jwt-v1", re.compile(rb"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")),
-    ("url-credentials-v1", re.compile(rb"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")),
+    # FaT-S1: the same matches as ``[A-Za-z][A-Za-z0-9+.-]*://…`` (a run before «://» that holds a letter), tried once per
+    # run: the old pattern re-read a long run of letters without «://» from each of its letters (140 KB — 28 s).
+    ("url-credentials-v1", re.compile(rb"(?<![A-Za-z0-9+.-])(?>[0-9+.-]*)[A-Za-z][A-Za-z0-9+.-]*+://[^/\s:@]+:[^/\s@]+@")),
     ("private-key-pem-v1", re.compile(rb"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),  # FaT-B
 )
 # FaT-H2a P5: token-assignment-v1 in a source file — the same keys, a quoted literal of 8+ characters on one line.
