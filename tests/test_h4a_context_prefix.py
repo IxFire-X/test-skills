@@ -46,3 +46,15 @@ def test_publish_of_the_plan_says_which_context_batches_of_the_attempt_the_gener
     plan = pilot_state._generator_input(root.parents[1], root, pilot_state.derive_state(root), attempt_id, "plan")
     again = pilot_state.publish_generator_input(root, attempt_id, "plan", plan)  # the same plan again: the same result
     assert again["context"] == context_note(receipts, 2) and "видит 2 из 3" in again["context"], again
+
+
+def test_a_failing_context_hint_never_stops_the_publish_of_the_plan(three, monkeypatch) -> None:
+    from tools import review_view
+
+    def broken(*_args):
+        raise KeyError("context_receipt_digest")
+
+    monkeypatch.setattr(review_view, "run_context_note", broken)
+    receipts = three[4]
+    _root, _attempt, _marker, plan, _header = _generator_journal(three, receipts[:2])
+    assert plan.startswith("sha256:")

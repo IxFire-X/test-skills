@@ -4741,7 +4741,10 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
     if kind == "plan":  # FaT-H4a (hunt 4.1): which context batches of the attempt the generator sees — the line of the reviewer view
         from tools.review_view import run_context_note
 
-        context = run_context_note(root, attempt_id)
+        try:  # FaT-H4a2: a hint, never a stop — as in the reviewer view
+            context = run_context_note(root, attempt_id)
+        except (KeyError, OSError, ValueError, TypeError):
+            context = None
     else:
         context = None
     return {"kind": kind, "digest": item["digest"],

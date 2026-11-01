@@ -294,7 +294,8 @@ def _plan_context(root: Path, attempt_id: str) -> tuple[Mapping[str, Any] | None
     except (KeyError, OSError, ValueError):
         plan = None
     if plan is not None:
-        context_digest = str(plan["context_receipt_digest"])
+        # FaT-H4a2: a plan without the top-level field names its context in the batches (as _plan_contexts reads it)
+        context_digest = str(plan.get("context_receipt_digest") or plan["batches"][0]["context_receipt_digest"])
     else:
         selected = [event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"]
         if not selected:
