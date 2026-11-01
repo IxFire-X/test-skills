@@ -53,7 +53,6 @@ def test_canonical_document_has_no_fixed_case_count_ceiling() -> None:
 
 def test_short_native_case_remains_valid_and_renders_observable_expected() -> None:
     from tests.test_automation_revision_budget import automated_document
-    from tools.human_scenario import check_canonical
     from tools.publish_test_case_bundle import build_bundle
 
     assert validate_canonical_document(automated_document()) == []
@@ -73,7 +72,6 @@ def test_short_native_case_remains_valid_and_renders_observable_expected() -> No
         "operator": "equals", "expected": {"kind": "literal", "value": True},
     }]})
     assert validate_canonical_document(document) == []
-    assert check_canonical(document)["status"] == "ok"
     bundle = build_bundle(document)
     assert expected in bundle.preview_bytes.decode("utf-8")
     assert step["action"] in bundle.csv_bytes.decode("utf-8")

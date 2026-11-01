@@ -261,44 +261,6 @@ def openspec_diagnostics(context: dict[str, Any], docs_snapshot: list[dict[str, 
     return diagnostics
 
 
-def grounding_diagnostics(context: dict[str, Any], canonical: dict[str, Any]) -> list[dict[str, str]]:
-    ctx = list((context.get("artifacts") or {}).get("analytics_documentation", {}).get("requirements") or [])
-    can = list(canonical.get("source_requirements") or [])
-    rows: list[dict[str, str]] = []
-
-    def tuple_of(item: dict[str, Any]) -> tuple[str, str, tuple[str, ...], str]:
-        return (
-            str(item.get("source_requirement_id") or ""),
-            str(item.get("text") or ""),
-            tuple(item.get("provenance") or []),
-            str(item.get("digest") or ""),
-        )
-
-    if [tuple_of(item) for item in ctx] != [tuple_of(item) for item in can]:
-        rows.append({"path": "/source_requirements", "code": "UNGROUNDED", "message": "canonical source requirements must match context id, text, provenance, and order"})
-    allowed = {item.get("source_requirement_id") for item in ctx}
-    mapped: set[str] = set()
-    for mapping in canonical.get("source_to_canonical_mappings") or []:
-        source_id = mapping.get("source_requirement_id")
-        if source_id not in allowed:
-            rows.append({"path": "/source_to_canonical_mappings", "code": "UNGROUNDED", "message": f"unknown source requirement {source_id}"})
-        else:
-            mapped.add(source_id)
-    for index, case in enumerate(canonical.get("test_cases") or []):
-        for req in case.get("requirement_ids") or []:
-            if req not in {item.get("requirement_id") for item in canonical.get("requirements") or []}:
-                rows.append({"path": f"/test_cases/{index}/requirement_ids", "code": "UNGROUNDED", "message": f"unknown canonical requirement {req}"})
-    for item in ctx:
-        req = item.get("source_requirement_id")
-        if req and req not in mapped:
-            rows.append({"path": f"/source_requirements/{req}", "code": "UNGROUNDED", "message": f"{req} is not mapped to a canonical requirement"})
-    return rows
-
-
-def uncovered_requirements(context: dict[str, Any], canonical: dict[str, Any]) -> list[str]:
-    return sorted({row["message"].split()[0] for row in grounding_diagnostics(context, canonical) if row["code"] == "UNGROUNDED" and row["message"].endswith("is not mapped to a canonical requirement")})
-
-
 def build_context(
     project: Path,
     docs: list[Path] | None = None,

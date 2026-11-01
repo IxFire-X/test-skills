@@ -20,7 +20,6 @@ from types import MappingProxyType
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 if __package__:
-    from .json_cli import JsonArgumentParser
     from .skillsrc_manifest import (
         SkillsrcError,
         load_skillsrc,
@@ -32,7 +31,6 @@ else:
     _bootstrap_root = str(Path(__file__).resolve().parents[1])
     if _bootstrap_root not in sys.path:
         sys.path.insert(0, _bootstrap_root)
-    from json_cli import JsonArgumentParser
     from skillsrc_manifest import (
         SkillsrcError,
         load_skillsrc,
@@ -1982,101 +1980,3 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
         )
     failed_methods = _failed_methods(snapshots, compatibility, evidence, java=language == "java") if classified == "FAIL" and authoritative else None
     return _report(classified, project, language, source, automation_digest, review_digest, (), run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, failed_methods=failed_methods)
-
-
-def run_tests_v3(project: Path, language: Literal["python", "java"], canonical_document: Mapping[str, Any], automation_artifact: Mapping[str, Any], autotest_review_artifact: Mapping[str, Any], provider_resolver: Any | None = None, adapter_registry: Any | None = None, *, runner_profile: str | None = None) -> dict[str, Any]:
-    """Deprecated V3 entry point; it is intentionally incapable of starting code."""
-    artifacts = automation_artifact.get("artifacts", {}) if isinstance(automation_artifact, Mapping) else {}
-    source = artifacts.get("source", {"document_id": canonical_document.get("document_id", ""), "revision": canonical_document.get("revision", 1), "source_digest": "sha256:" + "0" * 64})
-    return _report(
-        "NOT_RUNNABLE", Path(project), language, source,
-        "sha256:" + "0" * 64, "sha256:" + "0" * 64,
-        [_diag("/runner", "RUNNER_LEGACY_DISABLED", "V3 execution is disabled; use the run-authorized V5 path.")],
-    )
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = JsonArgumentParser(description="V5 closed project-native generated-test runner.")
-    parser.add_argument("--project", required=True)
-    parser.add_argument("--skillsrc", help="Path to .skillsrc; defaults to <project>/.skillsrc when present.")
-    parser.add_argument("--module", help="Module ID from a version 3 .skillsrc manifest.")
-    parser.add_argument("--language", choices=["python", "java"])
-    parser.add_argument("--canonical-document", required=True)
-    parser.add_argument("--automation-artifact", required=True)
-    parser.add_argument("--autotest-review", required=True)
-    parser.add_argument("--authorization-receipt", required=True, help="Sealed full-pipeline run authorization receipt.")
-    parser.add_argument("--host-isolation-receipt", required=True, help="Host-verified fresh reviewer isolation receipt.")
-    parser.add_argument("--generated-delta-receipt", required=True, help="Attempt-owned generated-delta readback receipt.")
-    parser.add_argument("--run-root", required=True, help="Pipeline-owned run root that stores the reviewer boundary.")
-    parser.add_argument("--attempt-id", required=True, help="Exact active attempt ID bound to the reviewer boundary.")
-    args = parser.parse_args(argv)
-    try:
-        from tools.canonical_document import load_canonical_document
-
-        project_root = Path(args.project).resolve()
-        execution_root = project_root
-        language = args.language
-        module = None
-        skillsrc_path = Path(args.skillsrc).resolve() if args.skillsrc else project_root / ".skillsrc"
-        if skillsrc_path.is_file():
-            execution_root, language, module = resolve_execution_context(
-                project_root,
-                skillsrc_path,
-                args.module,
-                language,
-            )
-        elif args.skillsrc is not None or args.module is not None:
-            raise SkillsrcError(
-                "skillsrc_required",
-                "explicit module selection requires an available .skillsrc",
-            )
-        else:
-            raise SkillsrcError("skillsrc_required", "V5 execution requires a selected module with closed adapter configuration")
-        if language not in {"python", "java"}:
-            raise SkillsrcError(
-                "language_unsupported",
-                "selected module language is unsupported by the V5 runner",
-            )
-        document = load_canonical_document(Path(args.canonical_document))
-        automation = load_automation_artifact(Path(args.automation_artifact))
-        review = load_autotest_review_artifact(Path(args.autotest_review))
-        from tools.schema_validation import load_json_strict
-
-        authorization = load_json_strict(Path(args.authorization_receipt))
-        host_isolation = load_json_strict(Path(args.host_isolation_receipt))
-        generated_delta = load_json_strict(Path(args.generated_delta_receipt))
-        assert module is not None
-        request, _compatibility = build_closed_execution_request(
-            execution_root, language, module, document, automation
-        )
-        from tools.execution_adapters import request_digest
-        from tools.pilot_state import claim_execution_start
-
-        def claim_start(exact_request: Any) -> None:
-            claim_execution_start(Path(args.run_root), args.attempt_id, request_digest(exact_request))
-
-        report = run_tests_v5(
-            request, authorization, document, automation, review,
-            host_isolation_receipt=host_isolation, generated_delta_receipt=generated_delta,
-            run_root=Path(args.run_root), attempt_id=args.attempt_id, on_execution_start=claim_start,
-        )
-        print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
-        return {"PASS": 0, "FAIL": 1, "UNKNOWN": 2, "NOT_RUNNABLE": 2}[report["verdict"]]
-    except Exception as error:
-        print(
-            json.dumps(
-                {
-                    "error": {
-                        "code": getattr(error, "code", "RUNNER_INPUT"),
-                        "message": "Runner input is invalid.",
-                    }
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-        )
-        return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main())

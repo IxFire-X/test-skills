@@ -281,19 +281,3 @@ def check(trace: Mapping[str, Any], document: Mapping[str, Any] | None = None, a
     lifecycle = trace.get("lifecycle") if isinstance(trace, Mapping) and isinstance(trace.get("lifecycle"), Mapping) else {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE"}
     digest = trace_sha256(trace) if isinstance(trace, Mapping) else "sha256:" + "0" * 64
     return {"schema_version": "5.0.0", "stage": "trace-check", "valid": not rows, "trace_audit": {"verdict": "PASS" if not rows else "FAIL", "trace_sha256": digest, "source": source, "lifecycle": dict(lifecycle), "required_symbol_pairs": required, "relation_count": _summary(trace)["relations"], "errors": [row["code"] for row in rows]}, "errors": rows, "warnings": [], "summary": _summary(trace)}
-
-
-def main(argv: list[str] | None = None) -> int:
-    from tools.schema_validation import StrictJsonError, load_json_strict
-    parser = _TraceArgumentParser(description=__doc__); parser.add_argument("document", type=Path); parser.add_argument("--require-execution", action="store_true")
-    args = parser.parse_args(argv)
-    try:
-        report = check(load_json_strict(args.document), require_execution=args.require_execution)
-    except (StrictJsonError, OSError):
-        report = {"schema_version": "5.0.0", "stage": "trace-check", "valid": False, "trace_audit": {"verdict": "FAIL", "trace_sha256": "sha256:" + "0" * 64, "source": {"document_id": "TCDOC-invalid", "revision": 1, "source_digest": "sha256:" + "0" * 64}, "lifecycle": {"projection": "PRE_FINALIZATION", "verification": "NOT_APPLICABLE"}, "required_symbol_pairs": [], "relation_count": 0, "errors": ["TRACE_IO"]}, "errors": [_diag("", "TRACE_IO", "Trace input is unavailable.")], "warnings": [], "summary": _summary({})}
-        print(json.dumps(report, ensure_ascii=False, separators=(",", ":"))); return 2
-    print(json.dumps(report, ensure_ascii=False, separators=(",", ":"))); return 0 if report["valid"] else 2 if any(row["code"].startswith("SCHEMA_") or row["code"] == "V2_1_BREAKING_CHANGE" for row in report["errors"]) else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

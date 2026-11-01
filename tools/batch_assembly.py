@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections import defaultdict
 from copy import deepcopy
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.canonical_document import validate_canonical_document
-from tools.schema_validation import loads_json_strict, schema_diagnostics
+from tools.schema_validation import schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
 from tools.test_design_hints import capped_code_hints, code_hints
 
@@ -820,50 +819,3 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     _schema_valid(receipt, _ASSEMBLY_SCHEMA, "assembly receipt")
     _self_digest_valid(receipt, "assembly receipt")
     return document, receipt
-
-
-def _publish_immutable_json(root: Path, directory_name: str, batch_id: str, value: dict[str, Any], label: str) -> dict[str, Any]:
-    directory = root / directory_name
-    directory.mkdir(exist_ok=True)
-    if directory.is_symlink():
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} directory is unsafe")
-    target = directory / f"{batch_id}.json"
-    payload = canonical_bytes(value)
-    try:
-        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
-    except FileExistsError as error:
-        raise BatchAssemblyError("BATCH_ID_CONFLICT", f"immutable {label} already exists") from error
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        raw = target.read_bytes()
-        readback = loads_json_strict(raw.decode("utf-8"))
-        if raw != payload or readback != value:
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"{label} readback differs from published bytes")
-    except BaseException:
-        target.unlink(missing_ok=True)
-        raise
-    return {"path": str(target), "digest": value["digest"], "byte_digest": "sha256:" + hashlib.sha256(payload).hexdigest(), "bytes": payload, "readback": readback}
-
-
-def publish_fragment(attempt_artifact_dir: Path, fragment: dict[str, Any]) -> dict[str, Any]:
-    """Create/read back a fragment and its failed-model receipt under a caller-owned attempt root."""
-    _schema_valid(fragment, _FRAGMENT_SCHEMA, "candidate fragment")
-    _self_digest_valid(fragment, "candidate fragment")
-    root = Path(attempt_artifact_dir).resolve(strict=True)
-    if not root.is_dir() or root.is_symlink():
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "attempt artifact directory is unsafe")
-    model_publication = None
-    if fragment["status"] == "FAILED":
-        failure = fragment["failure"]
-        model_receipt = failure["model_receipt"]
-        _self_digest_valid(model_receipt, "model receipt")
-        if failure["evidence_digest"] != model_receipt["digest"]:
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "failure evidence digest does not bind model receipt")
-        model_publication = _publish_immutable_json(root, "model-receipts", fragment["batch_id"], model_receipt, "model receipt")
-    fragment_publication = _publish_immutable_json(root, "fragments", fragment["batch_id"], fragment, "fragment")
-    if model_publication is not None:
-        fragment_publication["model_receipt"] = model_publication
-    return fragment_publication

@@ -434,13 +434,3 @@ def slice_file(generated_file: Mapping[str, Any], symbols: Sequence[Mapping[str,
     header = "\n".join(lines[:max(0, header_end)])
     return FileSlices(file_id=str(generated_file["file_id"]), path=str(generated_file.get("path", "")), lines=lines, members=list(members),
                       header_end=header_end, symbols=by_symbol, helpers=helpers, shared_state=_shared_state(members, language, header))
-
-
-def shared_state_text(slices: FileSlices) -> str:
-    if not slices.shared_state:
-        return "Общих изменяемых полей нет (только константы и поля экземпляра с жизненным циклом PER_METHOD)."
-    out = ["поле | где | строка | область | пишут | читают"]
-    for row in slices.shared_state:
-        out.append(f"{row['name']} | {row['owner'] or 'модуль'} | L{row['line']} | {row['scope']}{' final' if row['final'] else ''} | "
-                   f"{', '.join(row['written_by']) or '—'} | {', '.join(row['read_by']) or '—'}")
-    return "\n".join(out)

@@ -16,11 +16,6 @@ else:  # direct CLI execution of discover_project / init_skillsrc
 SEARCH_ONLY_DIRS = frozenset({"to_do"})
 
 
-def is_ignored_dir_name(name: str) -> bool:
-    """The name alone, judged as outside a src tree (FaT-2: inside src/ use is_ignored_dir)."""
-    return is_ignored_dir((), name)
-
-
 def is_ignored_dir(parents: tuple[str, ...], name: str) -> bool:
     return name.casefold() in SEARCH_ONLY_DIRS or directory_reason(parents, name) is not None
 
@@ -87,14 +82,5 @@ GO_TEST_MARKERS: list[tuple[str, str]] = []
 BUILD_TOOL_NORMALIZE = {"uv": "pip", "conda": "pip", "pipenv": "pip", "setuptools": "pip", "kotlin": "gradle"}
 
 
-def match_marker(text: str, markers: list[tuple[str, str]]) -> str | None:
-    lowered = text.lower()
-    return next((value for needle, value in markers if needle in lowered), None)
-
-
 def manifest_language(name: str) -> str | None:
     return MANIFEST_LANGUAGES.get(name)
-
-
-def normalize_build_tool(value: str) -> str:
-    return BUILD_TOOL_NORMALIZE.get(value, value)

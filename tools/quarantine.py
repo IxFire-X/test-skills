@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Mapping, Sequence
 
-from tools.code_slices import SliceError, slice_file
+from tools.code_slices import slice_file
 
 MARK = "test-skills quarantine"
 EXPLICIT_RUN = {"junit5": "-Djunit.jupiter.conditions.deactivate=org.junit.*DisabledCondition", "pytest": "--runxfail"}
@@ -124,27 +124,3 @@ def _python_import_line(lines: Sequence[str]) -> int:
             continue
         break
     return after
-
-
-def release(path: str, content: str, locators: Sequence[Mapping[str, object]]) -> str:
-    """Remove the package's mark above each method (a mark a person wrote differently stays)."""
-    lines, newline, trailing = _split(content)
-    try:
-        members, _language = _members(path, content, locators)
-    except SliceError:
-        return content
-    drop = set()
-    for member in members:
-        for number in range(member.start - 1, member.end):
-            if is_marked(lines[number]):
-                drop.add(number)
-        if member.start >= 2 and is_marked(lines[member.start - 2]):
-            drop.add(member.start - 2)
-    return _join([line for number, line in enumerate(lines) if number not in drop], newline, trailing)
-
-
-def marked(path: str, content: str, locators: Sequence[Mapping[str, object]]) -> list[bool]:
-    """Whether each method carries the package's quarantine mark."""
-    lines, _newline, _trailing = _split(content)
-    members, _language = _members(path, content, locators)
-    return [any(is_marked(line) for line in lines[max(0, member.start - 2):member.end]) for member in members]

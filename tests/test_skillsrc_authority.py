@@ -240,3 +240,24 @@ def test_creation_and_replacement_receipts_require_readback_and_proposal(pack_ro
         validator.validate(created)
     with pytest.raises(ValidationError):
         validator.validate(updated)
+
+
+@pytest.mark.parametrize(("raised", "code"), [(OSError("disk full"), "write_error"), (init_skillsrc.InitError("write_conflict", "changed"), "write_conflict")])
+def test_a_failed_skillsrc_write_is_the_same_error_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raised: Exception, code: str) -> None:
+    """FaT-DEAD2 F3: a write failure (OS or the package's own refusal) stays an error receipt; a bug is no longer one."""
+    _patch_discovery(monkeypatch)
+
+    def fail(*_args, **_kwargs):
+        raise raised
+
+    monkeypatch.setattr(init_skillsrc, "atomic_write_skillsrc", fail)
+    receipt = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
+    assert receipt["status"] == "error" and receipt["errors"] == [code], receipt
+    assert not (tmp_path / ".skillsrc").exists()
+
+
+def test_a_bug_in_the_skillsrc_write_is_not_hidden_as_a_write_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_discovery(monkeypatch)
+    monkeypatch.setattr(init_skillsrc, "atomic_write_skillsrc", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyError("bug")))
+    with pytest.raises(KeyError):
+        init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)

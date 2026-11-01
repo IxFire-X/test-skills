@@ -227,33 +227,3 @@ def validate_trace_document(trace: Mapping[str, Any], document: Mapping[str, Any
     except TraceBuildError as error:
         return [dict(row) for row in error.diagnostics]
     return [] if dict(trace) == expected else [_diag("", "TRACE_MISMATCH", "Trace does not exactly match validated source artifacts.")]
-
-
-def _write_new(path: Path, trace: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="\n") as handle:
-        json.dump(trace, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-
-
-def main(argv: list[str] | None = None) -> int:
-    from tools.schema_validation import StrictJsonError, load_json_strict
-    parser = _TraceArgumentParser(description=__doc__)
-    parser.add_argument("--canonical-document", required=True, type=Path)
-    parser.add_argument("--automation-artifact", required=True, type=Path)
-    parser.add_argument("--autotest-review", required=True, type=Path)
-    parser.add_argument("--run-result", type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args(argv)
-    try:
-        trace = build_trace(load_json_strict(args.canonical_document), load_json_strict(args.automation_artifact), load_json_strict(args.autotest_review), None if args.run_result is None else load_json_strict(args.run_result))
-        _write_new(args.output, trace)
-    except TraceBuildError as error:
-        print(json.dumps({"status": "invalid", "errors": [dict(row) for row in error.diagnostics]}, ensure_ascii=False, separators=(",", ":"))); return 1
-    except (StrictJsonError, OSError, FileExistsError):
-        print(json.dumps({"status": "error", "errors": [{"path": "", "code": "TRACE_IO", "message": "Trace input or output is unavailable."}]}, ensure_ascii=False, separators=(",", ":"))); return 2
-    print(json.dumps({"status": "valid", "output": str(args.output.resolve())}, ensure_ascii=False, separators=(",", ":"))); return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

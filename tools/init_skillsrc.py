@@ -44,12 +44,6 @@ class NeedsInput(InitError):
         self.questions = questions
 
 
-class Conflict(InitError):
-    def __init__(self, questions: list[dict[str, Any]]):
-        super().__init__("conflict", "existing manifest requires an explicit decision")
-        self.questions = questions
-
-
 def _set_field(module: dict[str, Any], field: str, value: object) -> None:
     parts = field.split(".")
     if len(parts) < 4 or parts[0] != "modules":
@@ -810,7 +804,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
                 original,
                 before_replace=lambda: _preserve_immutable_evidence(root, immutable_evidence_dir, original),
             )
-        except Exception as error:
+        except (OSError, ValueError) as error:  # FaT-DEAD2 F3: OS errors and the package's refusals (InitError, OutputConfinementError)
             return _receipt("error", root, False, normalize_skillsrc(existing)["modules"], [], [getattr(error, "code", "write_error")], fingerprint, 1, proposal=proposal)
         return _receipt("updated", root, True, normalize_skillsrc(proposed)["modules"], [], [], fingerprint, proposal=proposal, read_back=read_back)
     try:
@@ -829,7 +823,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
     if not write: return _receipt("preview", root, False, actual_modules, [], [], fingerprint)
     try:
         read_back = atomic_write_skillsrc(root, destination, reconciled["document"], fingerprint, original)
-    except Exception as error:
+    except (OSError, ValueError) as error:  # FaT-DEAD2 F3: OS errors and the package's refusals (InitError, OutputConfinementError)
         return _receipt("error", root, False, _modules_on_disk(destination), [], [getattr(error, "code", "write_error")], fingerprint, 1)
     return _receipt(reconciled["status"], root, True, actual_modules, [], [], fingerprint, read_back=read_back)
 

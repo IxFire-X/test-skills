@@ -82,7 +82,7 @@ def test_context_assigns_source_ids_after_stable_snapshot_sorting() -> None:
 
 
 def test_context_keeps_plain_prose_and_multiline_requirements_with_mixed_headings() -> None:
-    from tools.build_context import extract_inventory, grounding_diagnostics
+    from tools.build_context import extract_inventory
 
     sections = [
         "Пользователь может отменить заказ. Вернуть точное значение `a  b`.",
@@ -97,12 +97,6 @@ def test_context_keeps_plain_prose_and_multiline_requirements_with_mixed_heading
     digest = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
     context = build_context(Path.cwd(), docs_snapshot=[{"path": "docs/requirements.md", "content": content, "sha256": digest}])
     assert {row["text"] for row in context["artifacts"]["analytics_documentation"]["requirements"]} == set(sections)
-    canonical = canonical_fixture()
-    canonical["source_requirements"][0]["text"] = sections[0]
-    source_context = {"artifacts": {"analytics_documentation": {"requirements": deepcopy(canonical["source_requirements"])}}}
-    assert grounding_diagnostics(source_context, canonical) == []
-    canonical["source_requirements"][0]["text"] = sections[0].replace("a  b", "a b")
-    assert any(row["code"] == "UNGROUNDED" for row in grounding_diagnostics(source_context, canonical))
 
 
 def test_context_uses_sequential_source_ids_even_when_evidence_has_req_labels() -> None:

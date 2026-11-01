@@ -291,19 +291,6 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
     return notes
 
 
-def classify_prestart(module: Mapping[str, Any]) -> Literal["READY", "NOT_RUNNABLE"]:
-    """Conservative prestart classification without launching a project process."""
-    try:
-        test = module.get("test")
-        if not isinstance(test, Mapping):
-            return "NOT_RUNNABLE"
-        adapter = test.get("adapter_id")
-        _runtime(_module_root(module), _test_config(module, adapter), adapter)
-    except (AdapterRequestError, TypeError):
-        return "NOT_RUNNABLE"
-    return "READY"
-
-
 def invoke_request(request: ExecutionRequest, runner: Any) -> Any:
     """Invoke an injected process primitive with the only permitted launch shape.
 
@@ -367,8 +354,3 @@ def classify_zero_report(*, controller_timed_out: bool, process_returncode: int 
     if controller_timed_out or process_returncode is None or process_returncode < 0:
         return "UNKNOWN"
     return "FAIL"
-
-
-def unknown_allows_automatic_retry(verification: str) -> bool:
-    """The frozen contract categorically forbids automatic UNKNOWN retry."""
-    return verification != "UNKNOWN"

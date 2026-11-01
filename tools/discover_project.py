@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Read-only deterministic inventory of runnable project modules."""
 from __future__ import annotations
-import argparse, hashlib, json, os, re, tomllib, xml.etree.ElementTree as ET
+import hashlib, json, os, re, tomllib, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 if __package__:
-    from .confined_output import atomic_write_confined_bytes
     from .stack_catalog import (
         GO_FRAMEWORK_MARKERS,
         GO_TEST_MARKERS,
@@ -24,7 +23,6 @@ if __package__:
     )
     from .schema_validation import StrictJsonError, load_json_strict
 else:
-    from confined_output import atomic_write_confined_bytes
     from stack_catalog import (
         GO_FRAMEWORK_MARKERS,
         GO_TEST_MARKERS,
@@ -471,10 +469,3 @@ def discover_project(project_dir:Path)->dict[str,Any]:
     report=build_report(status,root.name,modules,questions,warnings,[],fingerprint); semantic=validate_report(report,expected)
     if semantic: return build_report("error",root.name,[],[],warnings,semantic,report["fingerprint"])
     return report
-def main()->int:
-    p=argparse.ArgumentParser(description="Read-only project module discovery; never updates .skillsrc.");p.add_argument("--project",required=True);p.add_argument("--output");a=p.parse_args();root=Path(a.project).resolve();r=discover_project(root) if root.is_dir() else build_report("error",root.name,[],[],[],["--project does not exist"])
-    if a.output:
-        try: atomic_write_confined_bytes(root,a.output,json.dumps(r,ensure_ascii=False,indent=2).encode("utf-8"))
-        except (OSError, ValueError) as error:p.error(str(error))
-    print(json.dumps(r,ensure_ascii=False,indent=2));return 0 if r["status"]!="error" else 1
-if __name__=="__main__":raise SystemExit(main())

@@ -14,7 +14,7 @@ from typing import Any
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, require_valid_canonical_document
 from tools.json_cli import JsonArgumentParser
-from tools.schema_validation import StrictJsonError, classify_version, load_json_strict
+from tools.schema_validation import classify_version
 from tools.test_case_projections import (
     _reject_unknown_profile as _reject_projection_profile,
     _render_html_preview_validated,
@@ -310,14 +310,6 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-def _invalid_payload(error: CanonicalDocumentError) -> dict[str, Any]:
-    errors = []
-    for diagnostic in error.diagnostics:
-        message = diagnostic["message"] if diagnostic["code"] == "V2_1_BREAKING_CHANGE" else "Canonical document is invalid."
-        errors.append({"path": diagnostic["path"], "code": diagnostic["code"], "message": message})
-    return {"status": "invalid", "errors": errors}
-
-
 def _parser() -> JsonArgumentParser:
     parser = JsonArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
@@ -325,38 +317,3 @@ def _parser() -> JsonArgumentParser:
     parser.add_argument("--csv-profile", default=_PROFILE)
     parser.add_argument("--verify-only", action="store_true")
     return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the publisher CLI and emit exactly one compact JSON response."""
-    args = _parser().parse_args(argv)
-    try:
-        _reject_unknown_profile(args.csv_profile, allow_historical=args.verify_only)
-    except ValueError:
-        _emit({"status": "error", "errors": [{"path": "", "code": "TARGET_INSTALL_FAILED", "message": _MESSAGES["TARGET_INSTALL_FAILED"]}]})
-        return 2
-    try:
-        document = load_json_strict(args.input)
-    except StrictJsonError:
-        _emit({"status": "error", "errors": [{"path": "", "code": "INPUT_JSON_UNREADABLE", "message": _MESSAGES["INPUT_JSON_UNREADABLE"]}]})
-        return 2
-    try:
-        receipt = verify_bundle(document, args.output_dir, args.csv_profile) if args.verify_only else publish_bundle(document, args.output_dir, args.csv_profile)
-    except CanonicalDocumentError as error:
-        _emit(_invalid_payload(error))
-        return 1
-    except BundleMismatchError as error:
-        _emit({"status": "mismatch", "mismatches": list(error.mismatches)})
-        return 1
-    except BundlePublicationError as error:
-        _emit({"status": "error", "errors": [{"path": "", "code": error.code, "message": error.safe_message}]})
-        return 2
-    except (OSError, ValueError):
-        _emit({"status": "error", "errors": [{"path": "", "code": "TARGET_INSTALL_FAILED", "message": _MESSAGES["TARGET_INSTALL_FAILED"]}]})
-        return 2
-    _emit({field: getattr(receipt, field) for field in Receipt.__dataclass_fields__})
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

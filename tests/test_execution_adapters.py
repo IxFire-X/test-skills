@@ -58,10 +58,9 @@ def test_adapter_rejects_unknown_runtime_escape_shell_fields_and_unreviewed_targ
 
 
 def test_prestart_runtime_or_configuration_failure_is_not_runnable(tmp_path: Path):
-    from tools.execution_adapters import build_request, classify_prestart
+    from tools.execution_adapters import build_request
 
     missing = {"module_root": str(tmp_path), "test": {"adapter_id": "pytest:selected-symbols-v1", "interpreter": "missing/python", "build_profile": "default", "adapter_parameters": {}}}
-    assert classify_prestart(missing) == "NOT_RUNNABLE"
     with pytest.raises(Exception):
         build_request("pytest:selected-symbols-v1", missing, [{"selector": "tests/test_a.py::test_a"}])
 
@@ -161,21 +160,6 @@ def test_request_digest_binds_every_closed_launch_fact(tmp_path: Path):
     request = build_request(PYTEST, _module(tmp_path, PYTEST, ".venv/python"), [{"selector": "tests/test_a.py::test_a"}])
     assert request_digest(request) != request_digest(replace(request, timeout_seconds=request.timeout_seconds + 1))
     assert request_digest(request).startswith("sha256:")
-
-
-def test_legacy_v3_entrypoint_is_process_free(tmp_path: Path, monkeypatch):
-    """The unbound legacy API cannot bypass V5's run authorization gate."""
-    from tools import run_tests
-
-    monkeypatch.setattr(run_tests, "run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy process launch")))
-    result = run_tests.run_tests_v3(
-        tmp_path, "python",
-        {"document_id": "TCDOC-legacy", "revision": 1},
-        {}, {},
-    )
-
-    assert result["verdict"] == "NOT_RUNNABLE"
-    assert result["diagnostics"][0]["code"] == "RUNNER_LEGACY_DISABLED"
 
 
 def test_system_maven_resolves_path_and_preserves_exact_selectors(tmp_path: Path, monkeypatch):

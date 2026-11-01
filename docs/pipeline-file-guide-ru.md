@@ -571,6 +571,21 @@ flowchart TD
 общими помощниками для нескольких шагов.
 
 
+### `tools/api.py`
+
+**Команды пакета для агента.**
+
+Тонкие JSON-команды `python -m tools.api <команда>` над функциями пакета, которые называют SKILL: одна команда вызывает одну функцию и печатает её результат. Отказ функции — отказ команды (код 2) с тем же кодом и текстом; диагностики проверки — `invalid` (код 1). Следующий шаг команда не выбирает и ничего не запускает.
+
+[Открыть файл](../tools/api.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `COMMANDS`, `plain`, `main`.
+
+</details>
+
 ### `tools/automation_validation.py`
 
 **Проверка кода перед запуском.**
@@ -587,6 +602,21 @@ flowchart TD
 </details>
 
 
+### `tools/autotest_hints.py`
+
+**Подсказки о слабых проверках в автотестах.**
+
+Читает код сгенерированных тестов (Java и pytest) и отмечает проверки, которые почти ничего не проверяют: любое исключение, всегда истинное условие, префикс вместо точного значения. Подсказка называет файл и строку; шаг она не останавливает и код не переписывает.
+
+[Открыть файл](../tools/autotest_hints.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `autotest_hints`, `capped_autotest_hints`, `counts`.
+
+</details>
+
 ### `tools/batch_assembly.py`
 
 **Сборка кейсов из нескольких частей.**
@@ -598,7 +628,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `BatchAssemblyError`, `canonical_bytes`, `plan_batches`, `validate_fragment`, `assemble_candidate`, `publish_fragment`.
+**Основные определения в коде:** `BatchAssemblyError`, `canonical_bytes`, `plan_batches`, `validate_fragment`, `assemble_candidate`.
 
 </details>
 
@@ -614,7 +644,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `extract_inventory`, `extract_handles`, `RequirementConflict`, `grounding_diagnostics`, `uncovered_requirements`, `build_context`, `main`.
+**Основные определения в коде:** `extract_inventory`, `extract_handles`, `RequirementConflict`, `build_context`, `main`.
 
 </details>
 
@@ -699,6 +729,21 @@ flowchart TD
 </details>
 
 
+### `tools/context_marker_parts.py`
+
+**Разметка контекста по частям.**
+
+Строит план шагов разметки контекста: при одной пачке — один шаг, при нескольких — шаг требований, по шагу на пачку и слияние. Слияние частей делает код, а не модель.
+
+[Открыть файл](../tools/context_marker_parts.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `plan`, `merge_parts`.
+
+</details>
+
 ### `tools/contract_check.py`
 
 **Проверка согласованности правил.**
@@ -758,23 +803,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `classify_prestart`, `invoke_request`, `is_zero_test_report`, `classify_zero_report`, `unknown_allows_automatic_retry`.
-
-</details>
-
-
-### `tools/export_test_cases_xml.py`
-
-**Выгрузка кейсов в XML для Zephyr.**
-
-По явной команде создаёт XML-файл из основного документа с кейсами. Такой файл нужен, если команда хочет перенести кейсы в Zephyr через импорт. Формат построен по наблюдавшемуся образцу; успешный импорт и обратная выгрузка в реальной рабочей системе пока требуют отдельной проверки.
-
-[Открыть файл](../tools/export_test_cases_xml.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `main`.
+**Основные определения в коде:** `AdapterRequestError`, `ExecutionRequest`, `request_digest`, `build_request`, `command_for`, `invoke_request`, `is_zero_test_report`, `classify_zero_report`.
 
 </details>
 
@@ -806,23 +835,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `GeneratedDeltaError`, `materialize_delta`, `inspect_delta`, `inspect_attempt_delta`, `execution_readiness`, `resolve_disposition_policy`, `apply_dispositions`.
-
-</details>
-
-
-### `tools/human_scenario.py`
-
-**Проверка понятности тест-кейса.**
-
-Помогает отличить содержательный сценарий от короткого списка названий вроде «проверить создание». Проверяет, что документ содержит нужное описание действий и ожидаемых результатов. Дополняет проверку формы JSON: файл может быть технически правильным, но всё ещё бесполезным для человека, который должен выполнить или объяснить тест.
-
-[Открыть файл](../tools/human_scenario.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `check_canonical`, `main`.
+**Основные определения в коде:** `GeneratedDeltaError`, `materialize_delta`, `inspect_delta`, `inspect_attempt_delta`, `resolve_disposition_policy`, `apply_dispositions`.
 
 </details>
 
@@ -870,7 +883,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `OrchestrationResult`, `OrchestrationError`, `reviewer_package_binding`, `open_reviewer_session`, `validate_reviewer_session`, `publish_unreviewed_candidate`, `orchestrate_revision`, `finalize_orchestration`, `main`.
+**Основные определения в коде:** `OrchestrationResult`, `OrchestrationError`, `reviewer_package_binding`, `open_reviewer_session`, `validate_reviewer_session`, `publish_unreviewed_candidate`, `orchestrate_revision`, `main`.
 
 </details>
 
@@ -925,6 +938,21 @@ Markdown сверяется при публикации, но не входит 
 </details>
 
 
+### `tools/ready.py`
+
+**Готовность проекта к первому запуску.**
+
+Проверяет всё сразу — Python и зависимости, пакет, git, документы, `.skillsrc`, модуль и сборку — и для каждой проблемы печатает команду, которая её исправит. На первой проблеме не останавливается.
+
+[Открыть файл](../tools/ready.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `check`, `check_python`, `check_deps`, `check_skillsrc`, `check_module`, `build_probe`.
+
+</details>
+
 ### `tools/release_manifest.py`
 
 **Список файлов конкретного выпуска.**
@@ -958,6 +986,36 @@ Markdown сверяется при публикации, но не входит 
 
 </details>
 
+
+### `tools/review_edits.py`
+
+**Правки ревьюера списком.**
+
+Исправления ревьюера (AUTO_FIX) приходят как список точных правок человеческих полей кейса: что было и что стало. Код применяет их сам и ничего не переписывает за пределами списка.
+
+[Открыть файл](../tools/review_edits.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `apply_edits`, `edits_rebuild`, `reviewer_successor`.
+
+</details>
+
+### `tools/review_view.py`
+
+**Компактный вид кандидата для ревьюера.**
+
+Строит из кандидата короткий текст, который ревьюер читает вместо полного JSON: требования, кейсы, шаги, данные и ожидаемые результаты. Один и тот же кандидат всегда даёт одни и те же байты.
+
+[Открыть файл](../tools/review_view.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `render`, `data_mismatches`, `linking_cases`.
+
+</details>
 
 ### `tools/revision_selection.py`
 
@@ -997,19 +1055,15 @@ Markdown сверяется при публикации, но не входит 
 
 **Исполнение тестов и разбор результата.**
 
-Проверяет готовность запуска, выполняет принятые тестовые методы и читает отчёт тестового инструмента. Сопоставляет результат с точными файлами и проверками, которые прошли ревью. Отличает провал теста от невозможности запуска и от неизвестного результата. Старое имя run_tests_v3 оставлено только для явного отказа от устаревшего способа запуска; код оно не исполняет.
+Проверяет готовность запуска, выполняет принятые тестовые методы и читает отчёт тестового инструмента. Сопоставляет результат с точными файлами и проверками, которые прошли ревью. Отличает провал теста от невозможности запуска и от неизвестного результата.
 
 [Открыть файл](../tools/run_tests.py)
 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `consume_controller_process_stop_proof`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `run_subprocess`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `run_tests_v5`, `run_tests_v3`, `main`.
+**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `consume_controller_process_stop_proof`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `run_subprocess`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `run_tests_v5`, `main`.
 
-**Историческое имя.** `run_tests_v3` сохранён как явно отключённая точка входа:
-он возвращает `NOT_RUNNABLE` с `RUNNER_LEGACY_DISABLED` и не может запустить код.
-Рабочая ветка — `run_tests_v5` с разрешением и доказательствами текущего протокола.
-Это не второй работающий executor.
 
 </details>
 
@@ -1062,6 +1116,21 @@ Markdown сверяется при публикации, но не входит 
 </details>
 
 
+### `tools/step_size.py`
+
+**Размер входа шага модели.**
+
+До вызова модели считает, сколько байт прочитает шаг, и сравнивает с бюджетом шага. Файлы берёт из командной строки или из журнала прогона.
+
+[Открыть файл](../tools/step_size.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `measure`, `step_budget`, `request_files`, `record`.
+
+</details>
+
 ### `tools/test_case_projections.py`
 
 **Представление кейсов в удобных форматах.**
@@ -1109,6 +1178,21 @@ Markdown сверяется при публикации, но не входит 
 
 </details>
 
+
+### `tools/zephyr_template_export.py`
+
+**CSV для импорта в Zephyr по шаблону проекта.**
+
+Заполняет CSV импорта по шаблону выгрузки Zephyr из `.skillsrc` и кладёт его рядом с опубликованным набором кейсов. Сам набор и его квитанция не меняются.
+
+[Открыть файл](../tools/zephyr_template_export.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `read_template`, `build_import_csv`, `export_import_csv`.
+
+</details>
 
 ## Проверка работы в разных средах
 
@@ -2381,7 +2465,7 @@ Markdown сверяется при публикации, но не входит 
 
 Основные схемы в начале документа показывают последовательность работы.
 Ниже находится более подробная карта для тех, кто разбирается в исходниках:
-в ней перечислены все **35 Python-файлов** из tools/ и evals/ и **111 связей**.
+в ней перечислены все **33 Python-файла** из tools/ и evals/ и **105 связей**.
 
 Стрелка от A к B означает, что в программе A есть импорт кода из B. Это может
 быть общий помощник, проверка данных или действие, вызываемое только в особой
@@ -2410,10 +2494,8 @@ flowchart LR
     m13["tools/discover_project.py"]
     m14["tools/doctor.py"]
     m15["tools/execution_adapters.py"]
-    m17["tools/export_test_cases_xml.py"]
     m18["tools/finalize_attempt.py"]
     m19["tools/generated_delta.py"]
-    m21["tools/human_scenario.py"]
     m22["tools/init_skillsrc.py"]
     m23["tools/json_cli.py"]
     m24["tools/orchestrate_test_case_revision.py"]
@@ -2466,10 +2548,6 @@ flowchart LR
     m14 --> m23
     m14 --> m28
     m15 --> m26
-    m17 --> m7
-    m17 --> m23
-    m17 --> m34
-    m17 --> m37
     m18 --> m19
     m18 --> m25
     m19 --> m3
@@ -2477,8 +2555,6 @@ flowchart LR
     m19 --> m11
     m19 --> m25
     m19 --> m26
-    m21 --> m23
-    m21 --> m34
     m22 --> m11
     m22 --> m13
     m22 --> m34
@@ -2568,10 +2644,8 @@ flowchart LR
 | [tools/discover_project.py](../tools/discover_project.py) | [confined_output](../tools/confined_output.py), [schema_validation](../tools/schema_validation.py), [stack_catalog](../tools/stack_catalog.py) |
 | [tools/doctor.py](../tools/doctor.py) | [contract_check](../tools/contract_check.py), [json_cli](../tools/json_cli.py), [release_manifest](../tools/release_manifest.py) |
 | [tools/execution_adapters.py](../tools/execution_adapters.py) | [project_inventory](../tools/project_inventory.py) |
-| [tools/export_test_cases_xml.py](../tools/export_test_cases_xml.py) | [canonical_document](../tools/canonical_document.py), [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py), [test_case_projections](../tools/test_case_projections.py) |
 | [tools/finalize_attempt.py](../tools/finalize_attempt.py) | [generated_delta](../tools/generated_delta.py), [pilot_state](../tools/pilot_state.py) |
 | [tools/generated_delta.py](../tools/generated_delta.py) | [automation_validation](../tools/automation_validation.py), [canonical_document](../tools/canonical_document.py), [confined_output](../tools/confined_output.py), [pilot_state](../tools/pilot_state.py), [project_inventory](../tools/project_inventory.py) |
-| [tools/human_scenario.py](../tools/human_scenario.py) | [json_cli](../tools/json_cli.py), [schema_validation](../tools/schema_validation.py) |
 | [tools/init_skillsrc.py](../tools/init_skillsrc.py) | [confined_output](../tools/confined_output.py), [discover_project](../tools/discover_project.py), [schema_validation](../tools/schema_validation.py), [skillsrc_manifest](../tools/skillsrc_manifest.py), [stack_catalog](../tools/stack_catalog.py) |
 | [tools/json_cli.py](../tools/json_cli.py) | Нет |
 | [tools/orchestrate_test_case_revision.py](../tools/orchestrate_test_case_revision.py) | [automation_validation](../tools/automation_validation.py), [build_trace_document](../tools/build_trace_document.py), [canonical_document](../tools/canonical_document.py), [pilot_state](../tools/pilot_state.py), [publish_test_case_bundle](../tools/publish_test_case_bundle.py), [revision_selection](../tools/revision_selection.py), [schema_validation](../tools/schema_validation.py), [trace_check](../tools/trace_check.py) |
@@ -2627,7 +2701,7 @@ flowchart LR
 
 | Что хотим улучшить | Где начать |
 |---|---|
-| Понятность целей, шагов и ожидаемых результатов | Инструкции генератора кейсов, правила ревью и human_scenario.py |
+| Понятность целей, шагов и ожидаемых результатов | Инструкции генератора кейсов, правила ревью |
 | Вид кейсов в Markdown, HTML или выгрузке | test_case_projections.py и publish_test_case_bundle.py |
 | Потерю требований или неудачное разделение задачи | build_context.py и batch_assembly.py |
 | Определение технологий и выбор модуля проекта | stack_catalog.py, discover_project.py и init_skillsrc.py |

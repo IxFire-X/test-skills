@@ -67,7 +67,7 @@ dependencies, build outputs, binaries, generated artifacts и потенциал
 
 Baseline публикуется и читается обратно до `ATTEMPT_CREATED`. Поздно найденный
 undeclared execution input не добавляется в текущий attempt: branch закрывается как
-`NOT_RUNNABLE/BASELINE_INCOMPLETE`, продолжение возможно только child attempt.
+`NOT_RUNNABLE/BASELINE_INCOMPLETE`, продолжение — только новый прогон (`scan --new-run`).
 
 ## 4. Requirement batches и canonical
 
@@ -84,8 +84,8 @@ Mapping many-to-many связывает source requirements с canonical require
 steps, expectations, assertions и последующим execution evidence. `out-of-scope`
 разрешён только относительно заранее выбранного feature/module scope.
 
-Canonical JSON `1.0.0` — semantic source. Stage envelopes имеют version `5.0.0`.
-HTML и CSV V4 строятся только из canonical JSON и никогда не становятся downstream
+Canonical JSON `1.0.0` — semantic source. Ответ генератора — candidate fragment `1.0.0`;
+ответы marker, ревью и автоматизации — envelopes `5.0.0`. HTML и CSV V5 строятся только из canonical JSON и никогда не становятся downstream
 model input.
 
 ## 5. Одна authoritative reviewer session

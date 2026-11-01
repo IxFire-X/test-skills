@@ -42,17 +42,6 @@ def test_partial_materialization_publishes_readback_delta_and_plan_before_cleanu
     assert schema_diagnostics(dispositions, Path("schemas/disposition-receipt.schema.json"), Path.cwd()) == []
 
 
-def test_execution_readiness_requires_exact_complete_readback_bytes(tmp_path: Path):
-    from tools.generated_delta import execution_readiness, materialize_delta
-
-    inputs = _inputs(tmp_path)
-    baseline, automation, review, document, run_root, attempt_id = inputs
-    complete = materialize_delta(tmp_path, tmp_path, baseline, automation, review, canonical_document=document, run_root=run_root, attempt_id=attempt_id)
-    assert execution_readiness(tmp_path, complete, run_root, attempt_id) == {"ready": True}
-    (tmp_path / "tests" / "test_products.py").write_bytes(b"user drift")
-    assert execution_readiness(tmp_path, complete, run_root, attempt_id)["ready"] is False
-
-
 def test_unbound_generated_delta_cannot_authorize_disposition_plan(tmp_path: Path):
     from tools.generated_delta import GeneratedDeltaError, _delta, _file_row, _reviewed_generated_files, materialize_delta
     from tools.pilot_state import _sealed, publish_attempt_receipt, publish_phase5_receipt, read_effective_canonical

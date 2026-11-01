@@ -612,23 +612,6 @@ def inspect_attempt_delta(project: Path, delta: Mapping[str, Any], *, run_root: 
     return {"valid": True, "generated_delta_digest": owned["digest"], "files": files}
 
 
-def execution_readiness(project: Path, delta: Mapping[str, Any], run_root: Path, attempt_id: str) -> dict[str, Any]:
-    """Fail closed unless a complete attempt-owned delta still has exact bytes."""
-    try:
-        durable = _read_durable_delta(run_root, attempt_id, delta)
-    except (GeneratedDeltaError, ValueError):
-        return {"ready": False, "reason_code": "DURABLE_DELTA_UNAVAILABLE"}
-    facts = durable.get("facts")
-    if not isinstance(facts, Mapping) or facts.get("completion") != "COMPLETE":
-        return {"ready": False, "reason_code": "DELTA_NOT_COMPLETE"}
-    files = durable.get("files")
-    if not isinstance(files, list) or not files or any(not isinstance(row, Mapping) or row.get("materialization") != "MATERIALIZED" for row in files):
-        return {"ready": False, "reason_code": "MATERIALIZATION_INCOMPLETE"}
-    if inspect_delta(project, durable) != {"valid": True}:
-        return {"ready": False, "reason_code": "MATERIALIZATION_BYTES_MISMATCH"}
-    return {"ready": True}
-
-
 def _method_name(locator: Mapping[str, Any]) -> str:
     if locator.get("kind") == "java_class_method":
         return f"{str(locator['class_fqn']).rsplit('.', 1)[-1]}.{locator['method_name']}"

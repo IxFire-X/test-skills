@@ -194,8 +194,8 @@ def test_validate_fragment_fails_closed_for_schema_drift_namespace_and_tampered_
         validate_fragment(fragment, plan, header, tampered)
 
 
-def test_duplicate_mapping_is_partition_conflict_and_failed_fragment_publication_is_immutable(tmp_path: Path):
-    from tools.batch_assembly import BatchAssemblyError, publish_fragment, validate_fragment
+def test_duplicate_mapping_is_partition_conflict(tmp_path: Path):
+    from tools.batch_assembly import BatchAssemblyError, validate_fragment
 
     header, context = _header(), _context_receipt()
     plan = _plan(header, context)
@@ -211,22 +211,4 @@ def test_duplicate_mapping_is_partition_conflict_and_failed_fragment_publication
     with pytest.raises(BatchAssemblyError, match="BATCH_SEMANTIC_CONFLICT"):
         validate_fragment(conflicting, plan, header, context)
 
-    failed = _fragment(plan, context, 0)
-    failed["status"] = "FAILED"
-    model_receipt = {"schema_version": "1.0.0", "status": "FAILED", "diagnostics": [{"code": "MODEL_TRANSPORT_INVALID", "message": "response was not a complete JSON artifact"}]}
-    model_receipt["digest"] = _self_digest(model_receipt)
-    failed["failure"] = {"reason_code": "MODEL_TRANSPORT_INVALID", "evidence_digest": model_receipt["digest"], "model_receipt": model_receipt}
-    failed["requirements"] = []
-    failed["source_to_canonical_mappings"] = []
-    failed["operation_capabilities"] = []
-    failed["test_cases"] = []
-    _refresh(failed)
-    published = publish_fragment(tmp_path, failed)
-    assert published["readback"] == failed
-    assert published["bytes"] == (tmp_path / "fragments" / f"{failed['batch_id']}.json").read_bytes()
-    assert published["byte_digest"] != published["digest"]
-    assert published["model_receipt"]["readback"] == model_receipt
-    assert published["model_receipt"]["bytes"] == (tmp_path / "model-receipts" / f"{failed['batch_id']}.json").read_bytes()
-    with pytest.raises(BatchAssemblyError, match="BATCH_ID_CONFLICT"):
-        publish_fragment(tmp_path, failed)
     validate_fragment(_fragment(plan, context, 1), plan, header, context, [_fragment(plan, context, 0)])

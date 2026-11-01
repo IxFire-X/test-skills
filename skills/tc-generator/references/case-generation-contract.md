@@ -1,4 +1,4 @@
-# 5.0.0 batch-fragment generation contract
+# Batch-fragment generation contract (candidate fragment 1.0.0)
 
 The generator emits one schema-valid immutable candidate fragment for its controller-owned batch, never the assembled document. The controller deterministically assembles fragments into the bare canonical 1.0.0/1.1.0 document validated by `tools.canonical_document`; only that assembled document feeds review and projections.
 
@@ -177,7 +177,7 @@ Expected describes a criterion before execution. «Проверено автот
 in the last step. Mentioning an autotest inside a substantive observable result is not
 itself a violation. Actual PASS/FAIL remains in the execution report. The shared
 canonical validator applies these rules before assembly, successor selection and
-publication; the standalone `human_scenario` recommendations are not an acceptance gate.
+publication.
 A valid single-action case needs no extra CRUD cycle or ID transfer. Review its oracle
 and requirement coverage rather than its length.
 
