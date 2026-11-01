@@ -199,8 +199,12 @@ def validate_automation_artifact(artifact: Any, document: dict[str, Any]) -> lis
         path_seen.add(path_key)
         if not _portable(path):
             diagnostics.append(_diagnostic("AUTOMATION_PORTABLE_PATH", _pointer("artifacts", "generated_files", index, "path")))
-        if row["content_digest"] != "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest():
-            diagnostics.append(_diagnostic("AUTOMATION_CONTENT_DIGEST", _pointer("artifacts", "generated_files", index, "content_digest")))
+        content_digest = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
+        if row["content_digest"] != content_digest:
+            # FaT-CD: no command gives this digest, so the refusal names the exact value (as MODEL_INPUTS_MISMATCH does)
+            diagnostic = _diagnostic("AUTOMATION_CONTENT_DIGEST", _pointer("artifacts", "generated_files", index, "content_digest"))
+            diagnostic["message"] += f": {path} — {content_digest} (SHA-256 UTF-8 байтов content); поставьте это значение в content_digest"
+            diagnostics.append(diagnostic)
         if languages and row["language"] not in languages:
             diagnostics.append(_diagnostic("AUTOMATION_MIXED_LANGUAGE", _pointer("artifacts", "generated_files", index, "language")))
         languages.add(row["language"])

@@ -373,7 +373,8 @@ FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается та�
 Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
 эти поля. Не переписывай опубликованный request после вызова модели.
 
-1. Вызови `tc-to-autotest` для effective canonical.
+1. Вызови `tc-to-autotest` для effective canonical. `content_digest` файлов сам не считай: отказ `AUTOMATION_CONTENT_DIGEST`
+   называет файл и верное значение — поставь его в `content_digest` как есть.
 2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
    код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
    `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no

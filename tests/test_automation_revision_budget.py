@@ -293,3 +293,17 @@ def test_generated_file_binds_exact_utf8_content_bytes() -> None:
 
     row["content"] = "def test_products():\n    assert False\n"
     assert "AUTOMATION_CONTENT_DIGEST" in codes(validate_automation_artifact(artifact, document))
+
+
+def test_a_wrong_content_digest_names_the_file_and_the_digest_to_put() -> None:
+    """FaT-CD: no command of the package gives content_digest, so the refusal names the exact value and where it goes."""
+    from tools.automation_validation import validate_automation_artifact
+
+    document = automated_document()
+    artifact = automation(document)
+    row = artifact["artifacts"]["generated_files"][0]
+    row["content"] = "def test_products():\n    assert False\n"
+    expected = "sha256:" + hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
+    [diagnostic] = [item for item in validate_automation_artifact(artifact, document) if item["code"] == "AUTOMATION_CONTENT_DIGEST"]
+    assert row["path"] in diagnostic["message"] and expected in diagnostic["message"], diagnostic
+    assert "поставьте это значение в content_digest" in diagnostic["message"], diagnostic
