@@ -446,7 +446,8 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 сделать `/clear` (или открыть новую сессию) и написать «продолжай test-skills <run_id>». Затем
 выполни `python -m tools.run_pipeline status --project <abs> --run <run_id>` и продолжи с
 `next_step` (стадия, действие, раздел этого SKILL; при `pending_request_path` — ответ на этот
-запрос). Ничего уже подтверждённого журналом не повторяй.
+запрос). `next_step.command` — подсказка: шаблон команды шага с `<…>` вместо значений; шаг выбираешь ты по этому
+SKILL, значения берёшь из результатов tools. Ничего уже подтверждённого журналом не повторяй.
 
 Interruption между model stages оставляет попытку nonterminal. Продолжай её в новой CLI session только после snapshot/config validation.
 После scan файлы проекта и `.skillsrc` не меняются до закрытия попытки. Если `status` показал `drift`,

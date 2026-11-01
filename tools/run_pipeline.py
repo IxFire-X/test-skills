@@ -77,56 +77,99 @@ def _confined(project: Path, candidate: Path) -> Path:
     return resolved
 
 
-_NEXT_STEPS = (
-    # (substring of next_expected_artifact, stage, action, section of skills/orchestrate/SKILL.md)
-    # FaT-B: every value _durable_status_facts sets must match a row (tests/test_fat3.py walks them all).
-    ("authorized context", "context", "выбор контекста: опубликовать квитанцию выбора по baseline", "3"),
-    ("context-marker response", "context-marker",
-     "сначала context_marker_parts plan --run-root <run>: single — запрос context-marker:baseline и вызов модели; "
-     "parts — context-marker:requirements, затем части по плану", "3"),
-    ("generator fragments", "tc-generator", "запрос генератора на первую пачку плана и его ответ", "3"),
-    ("remaining fragments or assembled candidate", "tc-generator",
-     "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3"),
-    ("reviewer ledger and effective selection or negative closure", "canonical-review",
-     "завершить журнал ревью и выбрать effective canonical или закрыть отрицательную ветку", "4"),
-    ("static automation review", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5"),
+_API = "python -m tools.api "
+_PIPELINE = "python -m tools.run_pipeline "
+_PARTS = "python -m tools.context_marker_parts "
+_REVIEW = "python -m tools.orchestrate_test_case_revision "
+_FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
+_EXEC = _PIPELINE + "exec --project <project> --run <run_id>"
+_NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
+# FaT-3, audit D5: the exact next_expected_artifact of _durable_status_facts -> (code, stage, action, section of
+# skills/orchestrate/SKILL.md, command template).  The command only names the tool of the step: the agent picks the step
+# by the SKILL and runs it, status never does.  FaT-B: every value _durable_status_facts sets has a row
+# (tests/test_fat3.py walks them all); tests/test_next_step_commands.py checks each command against the real parsers.
+_NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
+    "module selection, inventory and profile baseline": (
+        "SCAN", "scan", "scan: выбрать модуль и заморозить baseline", "2", _PIPELINE + "scan --project <project> --module <module>"),
+    "authorized context": (
+        "CONTEXT_SELECTION", "context", "квитанции выбора контекста публикует только scan: начни новый прогон тем же scan", "2",
+        _NEW_SCAN),
+    "context-marker response": (
+        "MARKER", "context-marker",
+        "сначала context_marker_parts plan --run-root <run>: single — запрос context-marker:baseline и вызов модели; "
+        "parts — context-marker:requirements, затем части по плану", "3", _PARTS + "plan --run-root <run>"),
+    "context-marker parts merge": (
+        "MARKER_PARTS", "context-marker:parts",
+        "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели",
+        "3", _PARTS + "plan --run-root <run>"),
+    "generator fragments": (
+        "GENERATOR_PLAN", "tc-generator", "header и план пачек, затем запрос генератора на первую пачку плана и его ответ", "3",
+        _API + "plan-batches --requirements <f> --grouping <f> --project <project> --input-file <f> --context-receipt <f>"),
+    "remaining fragments or assembled candidate": (
+        "GENERATOR_NEXT", "tc-generator", "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3",
+        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-generator:<batch> --input-digest <d> ..."),
+    "canonical reviewer package and boundary": (
+        "REVIEW_SESSION", "canonical-review", "собрать пакет ревью и начать независимое ревью", "4", _API + "session-start ..."),
+    "reviewer evidence or verdict": (
+        "REVIEW_CONTINUE", "canonical-review", "продолжить ревью: следующая часть или вердикт", "4",
+        _API + "review-evidence --run-root <run> --attempt <attempt> --path <путь в проекте>"),
+    "reviewer ledger and effective selection or negative closure": (
+        "REVIEW_SELECT", "canonical-review", "завершить журнал ревью и выбрать effective canonical или закрыть отрицательную ветку",
+        "4", _REVIEW + "select ..."),
+    "effective canonical": (
+        "REVIEW_EFFECTIVE", "canonical-review", "завершить ревью и опубликовать effective canonical", "4", _REVIEW + "select ..."),
+    "negative branch trace and finalization": (
+        "FINISH_NEGATIVE", "finish", "отрицательная ветка ревью: finish закрывает попытку", "6", _FINISH),
+    "automation artifact": (
+        "AUTOMATION", "automation", "автоматизация принятых кейсов: запрос tc-to-autotest:r1", "5",
+        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-to-autotest:r1 --input-digest <d> ..."),
+    "static automation review": (
+        "AUTOMATION_REVIEW", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5",
+        _API + "open-automation-boundary ..."),
     # FaT-H2b 2.8: after autotest-reviewer the verdict decides — exec, the next revision, or finish
-    ("automation revision", "tc-to-autotest", "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5"),
-    ("automation refused", "finish",
-     "автоматизация отклонена, заблокирована или не записывается в проект: finish закрывает попытку и печатает next_run — "
-     "команду следующего захода; "
-     "нового ревью сверх лимита ревизий нет", "6"),
-    (" response", "model", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3"),
-    ("context-marker parts merge", "context-marker:parts",
-     "следующая часть разметки по context_marker_parts plan; когда все части есть — слияние частей кодом (merge), не вызов модели", "3"),
-    ("module selection", "scan", "scan: выбрать модуль и заморозить baseline", "2"),
-    ("context-marker", "context-marker", "разметка контекста по квитанциям выбора", "3"),
-    ("canonical reviewer package", "canonical-review", "собрать пакет ревью и начать независимое ревью", "4"),
-    ("reviewer evidence or verdict", "canonical-review", "продолжить ревью: следующая часть или вердикт", "4"),
-    ("effective canonical", "canonical-review", "завершить ревью и опубликовать effective canonical", "4"),
-    ("automation artifact", "automation", "автоматизация принятых кейсов", "5"),
-    ("materialization", "exec", "материализация автотестов", "5"),
-    ("execution receipt", "exec", "exec: запуск тестов", "5"),
-    ("execution trace", "closure", "трасса исполнения и диспозиции", "6"),
-    ("disposition", "closure", "диспозиции и финализация", "6"),
-    ("finalization", "closure", "линейное закрытие и финализация", "6"),
-    ("terminal", "closure", "терминальный результат", "6"),
-    ("validated inputs or new scan", "resume", "файлы проекта изменились после scan: верните их или начните новый прогон (status: drift)", "Resume и дрейф"),
-)
+    "automation revision": (
+        "AUTOMATION_REVISION", "tc-to-autotest",
+        "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5",
+        _API + "model-request --run-root <run> --attempt <attempt> --stage tc-to-autotest:r2 --input-digest <d> ..."),
+    "automation refused": (
+        "FINISH_REFUSED", "finish",
+        "автоматизация отклонена, заблокирована или не записывается в проект: finish закрывает попытку и печатает next_run — "
+        "команду следующего захода; нового ревью сверх лимита ревизий нет", "6", _FINISH),
+    "review disposition and materialization": ("EXEC", "exec", "exec: материализация и запуск принятых автотестов", "5", _EXEC),
+    "materialization": ("EXEC", "exec", "материализация автотестов", "5", _EXEC),
+    "execution receipt": ("EXEC", "exec", "exec: запуск тестов", "5", _EXEC),
+    "execution trace and dispositions": ("FINISH", "closure", "трасса исполнения и диспозиции", "6", _FINISH),
+    "disposition receipt": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
+    "disposition and finalization": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
+    "pre-finalization trace": ("FINISH", "closure", "линейное закрытие и финализация", "6", _FINISH),
+    "finalization receipt": ("FINISH", "closure", "линейное закрытие и финализация", "6", _FINISH),
+    "terminal result and trace": ("FINISH", "closure", "терминальный результат", "6", _FINISH),
+    "terminal event": ("FINISH", "closure", "терминальный результат", "6", _FINISH),
+    "validated inputs or new scan": (
+        "DRIFT", "resume", "файлы проекта изменились после scan: верните их или начните новый прогон (status: drift)",
+        "Resume и дрейф", _NEW_SCAN),
+}
+_MODEL_RESPONSE = ("MODEL_RESPONSE", "выполнить запрос модели из pending_request_path и опубликовать ответ", "3",
+                   _API + "model-response --run-root <run> --attempt <attempt> --stage <stage> --artifact <ответ.json>")
+_TERMINAL = ("TERMINAL", "terminal", "передать человеку результат попытки и отчёт", "6",
+             _PIPELINE + "report --project <project> --run <run_id>")
 
 
 def _next_step(status: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-3: what to do next after /clear, from the same facts status shows (only reads)."""
+    """FaT-3: what to do next after /clear, from the same facts status shows (only reads).  Audit D5: the code of the state
+    and the template of the command of the step — a hint for the agent, which picks the step by the SKILL."""
     expected = status.get("next_expected_artifact")
     if expected is None:
-        return {"stage": "terminal", "action": "передать человеку результат попытки", "skill_section": "5"}
-    for needle, stage, action, section in _NEXT_STEPS:
-        if needle in str(expected):
-            step = {"stage": stage, "action": action, "skill_section": section}
-            if stage == "model":
-                step["stage"] = str(expected).removesuffix(" response")
-            return step
-    return {"stage": "unknown", "action": f"следующий артефакт: {expected}", "skill_section": "Stop conditions"}
+        code, stage, action, section, command = _TERMINAL
+    elif str(expected) in _NEXT_STEPS:
+        code, stage, action, section, command = _NEXT_STEPS[str(expected)]
+    elif str(expected).endswith(" response"):
+        stage = str(expected).removesuffix(" response")
+        code, action, section, command = _MODEL_RESPONSE
+        command = command.replace("<stage>", stage)
+    else:
+        return {"code": "UNKNOWN", "stage": "unknown", "action": f"следующий артефакт: {expected}", "skill_section": "Stop conditions"}
+    return {"code": code, "stage": stage, "action": action, "skill_section": section, "command": command}
 
 
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
