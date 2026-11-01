@@ -417,7 +417,8 @@ def _autotest(document: Mapping[str, Any], digest: str) -> list[str]:
     if blocked:  # FaT-PA: these cases stay manual — the automation lists them in excluded_cases, the reviewer sees why
         lines += ["## Кейсы с блокерами — вручную, в excluded_cases", "",
                   f"- автоматизируется {len(document['test_cases']) - len(blocked)} из {len(document['test_cases'])} кейсов;"
-                  " блокер, который выражается операторами проверок, — замечание BLOCKING", "",
+                  " блокер, который выражается операторами проверок, — замечание WARNING: вопрос к следующему прогону,"
+                  " автоматизацию не отклоняет", "",
                   *(f"- {row['case_id']}: " + "; ".join(f"{step['step_id']} {', '.join(str(code) for code in step['codes'])}" for step in row["steps"])
                     for row in blocked), ""]
     lines.append("## Кейсы")

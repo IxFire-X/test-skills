@@ -266,3 +266,41 @@ def _evidence(*, blocker_count: int) -> dict:
             "materialization_applicability": "REQUIRED", "execution_applicability": "REQUIRED", "automation_accepted": True,
             "generated_required_count": 1, "generated_materialized_count": 1, "generated_retained_count": 1,
             "exact_target_pass": True, "mixed_manual_traceable": False, "operational_reliable": True}
+
+
+# --------------------------------------------------------------------------------------
+# FaT-PA2: «вручную» is every case without code; a blocker the operators express is a WARNING
+# --------------------------------------------------------------------------------------
+
+
+def test_a_case_of_manual_only_steps_is_manual_too_and_the_counts_add_up() -> None:
+    from tools.automation_validation import validate_automation_artifact
+    from tools.canonical_document import validate_canonical_document
+    from tools.finalize_attempt import split_cases
+
+    doc = document((3,))
+    step = doc["test_cases"][1]["steps"][0]
+    step.update(manual_only=True, manual_reason="Проверяется глазами на стенде.", operation=None, inputs=[], outputs=[])
+    for expectation in step["expectations"]:
+        expectation["assertions"] = []
+    assert validate_canonical_document(doc) == []
+    artifact = partial_artifact(doc, ["TC-batch-a-003"], automated=(1,))
+    artifact["artifacts"]["manual_dispositions"] = [{"case_id": "TC-batch-a-002", "step_id": "STEP-batch-a-002"}]
+    assert validate_automation_artifact(artifact, doc) == []
+    split = split_cases(doc, artifact)
+    assert split["automated"] == ["TC-batch-a-001"] and split["total"] == 3
+    assert split["manual"] == [{"case_id": "TC-batch-a-002", "steps": [{"step_id": "STEP-batch-a-002", "codes": ["manual_only"]}]},
+                               {"case_id": "TC-batch-a-003", "steps": [{"step_id": "STEP-batch-a-003", "codes": ["UNRESOLVED_OPERATION"]}]}]
+    assert len(split["automated"]) + len(split["manual"]) == split["total"]
+    assert split["summary"] == ("автоматизировано 1 из 3 кейсов, вручную 2: TC-batch-a-002 — manual_only; "
+                                "TC-batch-a-003 — UNRESOLVED_OPERATION")
+
+
+def test_an_expressible_blocker_is_a_warning_in_the_view_and_the_reviewer_skill() -> None:
+    from tools.review_view import render
+
+    view = render(document((3,)), "autotest").decode("utf-8")
+    assert "замечание WARNING: вопрос к следующему прогону, автоматизацию не отклоняет" in view and "BLOCKING" not in view
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "autotest-reviewer" / "SKILL.md").read_text(encoding="utf-8")
+    rule = next(line for line in skill.splitlines() if "excluded_cases" in line)
+    assert "is a WARNING finding" in rule and "is a BLOCKING finding" not in rule

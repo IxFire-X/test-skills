@@ -1216,21 +1216,28 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
 
 
 def automation_split(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
-    """FaT-PA: the automated and the manual cases of a partial automation (only reads); None when nothing is excluded.
-
-    The manual cases are ``blocked_cases`` of the effective canonical — the same reading as ``blocker_count`` and as the
-    validator's check of ``excluded_cases``; the automated ones are the cases the reviewed automation relates code to."""
-    from tools.canonical_document import blocked_cases
+    """FaT-PA: the automated and the manual cases of a partial automation (only reads); None when nothing is excluded."""
     from tools.generated_delta import journal_automation
 
     inputs = journal_automation(run_root, attempt_id)
     if inputs is None or not inputs["automation"]["artifacts"].get("excluded_cases"):
         return None
-    document = pilot_state.read_effective_canonical(run_root, attempt_id)["document"]
-    related = {str(row["case_id"]) for row in inputs["automation"]["artifacts"]["implementation_relations"]}
+    return split_cases(pilot_state.read_effective_canonical(run_root, attempt_id)["document"], inputs["automation"])
+
+
+def split_cases(document: Mapping[str, Any], automation: Mapping[str, Any]) -> dict[str, Any]:
+    """The automated cases are those the automation relates code to; every other case is manual (N + K = M), with its
+    reason: the codes of its canonical blockers (``blocked_cases`` — the same reading as ``blocker_count`` and the
+    validator's check of ``excluded_cases``), or ``manual_only`` for a case of manual-only steps (FaT-PA2)."""
+    from tools.canonical_document import blocked_cases
+
+    related = {str(row["case_id"]) for row in automation["artifacts"]["implementation_relations"]}
     order = [str(case["case_id"]) for case in document["test_cases"]]
-    manual = blocked_cases(document)
+    blocked = {str(row["case_id"]): row for row in blocked_cases(document)}
     automated = [case_id for case_id in order if case_id in related]
+    manual = [blocked.get(case_id) or {"case_id": case_id, "steps": [{"step_id": str(step["step_id"]), "codes": ["manual_only"]}
+                                                                      for step in case["steps"] if step.get("manual_only")]}
+              for case_id, case in zip(order, document["test_cases"]) if case_id not in related]
     reasons = "; ".join(f"{row['case_id']} — {', '.join(dict.fromkeys(code for step in row['steps'] for code in step['codes']))}" for row in manual)
     return {"automated": automated, "manual": manual, "total": len(order),
             "summary": f"автоматизировано {len(automated)} из {len(order)} кейсов, вручную {len(manual)}: {reasons}"}
