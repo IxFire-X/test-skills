@@ -12,6 +12,8 @@ import sys
 import tempfile
 import time
 import uuid
+from bisect import bisect_left
+from functools import lru_cache
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -511,20 +513,56 @@ def _annotation_region(masked: str, start: int) -> int:
     return index
 
 
+def _annotation_regions(masked: str, starts: Sequence[int]) -> dict[int, int]:
+    """FaT-R4: ``_annotation_region`` of every start in one pass.  A walk that reaches an earlier start at depth 0 goes
+    on exactly as the walk from that start did, so it takes that start's answer: linear instead of a walk per member."""
+    regions: dict[int, int] = {}
+    for start in sorted(set(starts)):
+        depth, index = 0, start
+        while index > 0:
+            if depth == 0 and index != start and index in regions:
+                index = regions[index]
+                break
+            char = masked[index - 1]
+            if char in ")}" and not (char == "}" and depth == 0):
+                depth += 1
+            elif char in "({" and depth > 0:
+                depth -= 1
+            elif depth == 0 and char in ";{}":
+                break
+            index -= 1
+        regions[start] = index
+    return regions
+
+
+@lru_cache(maxsize=4)
+def _masked_java(text: str) -> tuple[str, tuple[int, ...]]:
+    """FaT-R4: the masked text once per file (not once per group) and where ``ParameterizedTest`` stands in it."""
+    masked = _mask_java_noncode(text)
+    return masked, tuple(match.start() for match in re.finditer("ParameterizedTest", masked))
+
+
 def _declaration(masked: str, pattern: str) -> list[re.Match[str]]:
     return [match for match in re.finditer(pattern, masked) if _declared_after_type(masked, match.start("name"))]
 
 
 def _param_group_rows(text: str, method: str) -> list[str] | None:
     """The case IDs of the literal rows of the @ParameterizedTest ``method`` of a generated Java class, or None."""
-    masked = _mask_java_noncode(text)
+    masked, marks = _masked_java(text)
     # the test method, not a same-named provider of an unnamed @MethodSource: the one with @ParameterizedTest before it
-    declarations = [match for match in _declaration(masked, r"\b(?P<name>" + re.escape(method) + r")\s*\(")
-                    if "ParameterizedTest" in masked[_annotation_region(masked, match.start("name")):match.start("name")]]
+    candidates = _declaration(masked, r"\b(?P<name>" + re.escape(method) + r")\s*\(")
+    regions = _annotation_regions(masked, [match.start("name") for match in candidates])
+
+    def marked(match: re.Match[str]) -> bool:
+        start = match.start("name")
+        at = bisect_left(marks, regions[start])
+        return at < len(marks) and marks[at] + len("ParameterizedTest") <= start
+
+    declarations = [match for match in candidates if marked(match)]
     if len(declarations) != 1:
         return None
     start = declarations[0].start("name")
-    region_start = _annotation_region(masked, start)
+    region_start = regions[start]
     raw_region, masked_region = text[region_start:start], masked[region_start:start]
     names = [match.group(1) for match in _PARAM_ANNOTATION.finditer(masked_region)]
     if not _PARAM_TEST_NAME.search(raw_region) or _PARAM_OTHER_SOURCES & set(names) or names.count("MethodSource") + names.count("CsvSource") != 1:
@@ -543,7 +581,8 @@ def _param_group_rows(text: str, method: str) -> list[str] | None:
     if source is None or re.search(r"@\s*(?:[\w$]+\s*\.\s*)*MethodSource\s*\(", raw_region) and source.group("provider") is None:
         return None  # a provider in another class, several providers or a computed name
     provider = source.group("provider") or method
-    found = _declaration(masked, r"\bstatic\b[^;{}()=]*?\b(?P<name>" + re.escape(provider) + r")\s*\(\s*\)\s*\{")
+    # FaT-R4: a bounded run between ``static`` and the name — the unbounded lazy one re-read the text from every ``static``
+    found = _declaration(masked, r"\bstatic\b[^;{}()=]{0,200}?\b(?P<name>" + re.escape(provider) + r")\s*\(\s*\)\s*\{")
     if len(found) != 1:
         return None
     open_at = found[0].end() - 1
@@ -598,7 +637,8 @@ def _param_group_diagnostics(document: Mapping[str, Any], automation_artifact: M
 
 # FaT-AU4 (audit F6): the bytes of generated code one runner-compat call reads.  The campaign's largest automation had
 # 184 KB of code (spring-petclinic, one file of 62 methods); 1 MiB is ~5.7x that, and the checks stay linear up to it
-# (FaT-RC: the Java parsing; FaT-AU4: the @ParameterizedTest rows — 800 KB of rows in ~1 s).
+# (FaT-RC: the Java parsing; FaT-R4: the @ParameterizedTest rows — one mask per file, one pass over the members, a
+# bounded provider pattern: a degenerate 200 KB class in well under 5 s).
 RUNNER_INPUT_MAX_BYTES = 1024 * 1024
 
 

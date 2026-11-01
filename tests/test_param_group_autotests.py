@@ -7,6 +7,7 @@ a real offline run, JUnit 5.10.2); the match moves from the name into the code a
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -343,3 +344,33 @@ def test_one_reading_of_a_testcase_name_for_the_evidence_and_the_hint(name: str,
     from tools.run_tests import junit_method_name
 
     assert junit_method_name(name) == method
+
+
+# --- FaT-R4: the rows of a group are read in linear time up to the runner-compat limit --------------------------------
+
+def test_a_degenerate_class_of_200_kb_reads_its_rows_in_under_5_s() -> None:
+    import time
+
+    from tools.run_tests import _param_group_rows
+
+    text = ("class A {\n" + "  int test(int a)\n" * 12_000
+            + "  @ParameterizedTest(name = \"[{index}] {0}\")\n  @CsvSource({\"TC-1, a\", \"TC-2, b\"})\n  void test(String id, String v) {}\n}\n")
+    assert len(text) > 200_000
+    started = time.perf_counter()
+    rows = _param_group_rows(text, "test")
+    assert time.perf_counter() - started < 5
+    assert rows == ["TC-1", "TC-2"]  # the one declaration with @ParameterizedTest before it, as before
+
+
+def test_rows_are_the_same_with_the_memo_as_with_a_walk_from_each_declaration() -> None:
+    """The memoised region of a member equals the plain backward walk on the PT3 shapes."""
+    from tools import run_tests
+
+    text = ("class A {\n  static Stream<Arguments> rows() { return Stream.of(Arguments.of(\"TC-1\", 1), Arguments.of(\"TC-2\", 2)); }\n"
+            "  @Test void other() { test(1); }\n  @ParameterizedTest(name = \"[{index}] {0}\")\n  @MethodSource(\"rows\")\n  void test(String id, int v) {}\n"
+            "  @ParameterizedTest(name = \"[{index}] {0}\") @CsvSource({\"TC-3, x\", \"TC-4, y\"}) void csv(String id, String v) {}\n}\n")
+    masked = run_tests._mask_java_noncode(text)
+    starts = [match.start() for match in re.finditer(r"\b\w+\s*\(", masked)]
+    assert run_tests._annotation_regions(masked, starts) == {start: run_tests._annotation_region(masked, start) for start in starts}
+    assert run_tests._param_group_rows(text, "test") == ["TC-1", "TC-2"]
+    assert run_tests._param_group_rows(text, "csv") == ["TC-3", "TC-4"]
