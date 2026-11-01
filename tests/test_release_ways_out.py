@@ -96,3 +96,78 @@ def test_n3_n4_the_texts_the_agent_reads() -> None:
     generator = (ROOT / "skills" / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
     assert "`assemble` and `validate-canonical` before `model-response`" not in generator
     assert "`assemble` runs only after the last batch" in generator
+
+
+# --------------------------------------------------------------------------------------
+# FaT-O12b (bug-hunt 5): a left run is closed for the work everywhere; one envelope for a bare ValueError
+# --------------------------------------------------------------------------------------
+
+
+def test_o12b_a_left_run_takes_no_model_step_and_says_so(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bug-hunt 5 probe by the new expectation: status, model steps and the report of a left run."""
+    from tests.test_first_run import _python_project
+    from tests.test_scan_guard import _scan
+    from tools import pilot_state
+    from tools.project_inventory import read_execution_baseline
+
+    project = _python_project(tmp_path, runtime=False)
+    code, first = _scan(project, monkeypatch)
+    assert code == 0, first
+    code, left = _main(capsys, ["finish", "--project", str(project), "--run", first["run_id"], "--abandon", "LEFT_BEFORE_REVIEW"])
+    assert code == 0, left
+    code, status = _main(capsys, ["status", "--project", str(project), "--run", first["run_id"]])
+    step = status["next_step"]
+    assert step["code"] == "RUN_LEFT" and step["why"] == "прогон оставлен до ревью кейсов", step
+    assert " scan " in step["command"] and "--new-run" not in step["command"], step
+    root, attempt_id = Path(first["run_root"]), first["attempt_id"]
+    state = pilot_state.derive_state(root)
+    baseline = read_execution_baseline(root / "baselines" / (state["attempts"][-1]["baseline_digest"].removeprefix("sha256:") + ".json"))
+    contexts = list(dict.fromkeys(e["artifact_digest"] for e in state["events"] if e["event_type"] == "CONTEXT_SELECTED"))
+    journal = (root / "events.jsonl").read_bytes()
+    with pytest.raises(ValueError) as refused:
+        pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id="m", invocation_id="after-left",
+                                          input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], *contexts])
+    assert str(refused.value).startswith("RUN_LEFT") and "простой scan" in str(refused.value)
+    with pytest.raises(ValueError) as answered:
+        pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", {"schema_version": "5.0.0"})
+    assert str(answered.value).startswith("RUN_LEFT")
+    assert (root / "events.jsonl").read_bytes() == journal
+    code, report = _main(capsys, ["report", "--project", str(project), "--run", first["run_id"]])
+    shown = json.dumps(report, ensure_ascii=False) + (root / "report.md").read_text(encoding="utf-8")
+    assert "оставлен до ревью кейсов" in shown, report
+
+
+def test_o12b_the_mark_hides_only_its_own_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_first_run import _python_project
+    from tests.test_scan_guard import _scan
+    from tools.pilot_state import LEFT_MARK, left_attempt
+    from tools.run_pipeline import _left_mark
+
+    project = _python_project(tmp_path, runtime=False)
+    code, first = _scan(project, monkeypatch)
+    assert code == 0, first
+    root = Path(first["run_root"])
+    (root / LEFT_MARK).write_text(json.dumps({"attempt_id": "0" * 32, "reason": "LEFT_BEFORE_REVIEW"}), encoding="utf-8")
+    assert left_attempt(root) is None and _left_mark(root) is None  # a mark of another attempt hides nothing
+    (root / LEFT_MARK).write_text(json.dumps({"attempt_id": first["attempt_id"], "reason": "LEFT_BEFORE_REVIEW"}), encoding="utf-8")
+    assert left_attempt(root) == first["attempt_id"] and _left_mark(root)
+
+
+def test_o12b_a_bare_value_error_has_its_code_and_a_document_not_in_utf8_says_how(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.test_first_run import _python_project
+
+    project = _python_project(tmp_path, runtime=False)
+    docs = project / "docs"
+    docs.mkdir(exist_ok=True)
+    (docs / "req.md").write_bytes("Требование: владелец виден.".encode("cp1251"))
+    code, refused = _main(capsys, ["scan", "--project", str(project), "--module", "nested", "--docs", "docs/req.md"])
+    assert code == 2 and refused["code"] == "DOCS_ENCODING" == refused["reason"], refused
+    assert "UTF-8" in refused["fix"] and set(refused) >= {"status", "code", "message", "fix", "next"}, refused
+
+
+def test_o12b_the_texts_name_run_left() -> None:
+    skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    resume = skill[skill.index("## Resume и дрейф"):]
+    assert "RUN_LEFT" in resume and "LEFT_BEFORE_REVIEW" in resume
+    assert "LEFT_BEFORE_REVIEW" in (ROOT / "USAGE.md").read_text(encoding="utf-8")

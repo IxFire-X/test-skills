@@ -457,6 +457,8 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 `next_step` (стадия, действие, раздел этого SKILL; при `pending_request_path` — ответ на этот
 запрос). `next_step.command` — подсказка: шаблон команды шага с `<…>` вместо значений; шаг выбираешь ты по этому
 SKILL, значения берёшь из результатов tools. Ничего уже подтверждённого журналом не повторяй.
+`next_step.code: RUN_LEFT` — прогон оставлен до ревью (`finish --abandon LEFT_BEFORE_REVIEW`): шагов модели в нём нет
+(`RUN_LEFT`), выполни `next_step.command` — простой scan того же запроса.
 
 Interruption между model stages оставляет попытку nonterminal. Продолжай её в новой CLI session только после snapshot/config validation.
 После scan файлы проекта и `.skillsrc` не меняются до закрытия попытки. Если `status` показал `drift`,

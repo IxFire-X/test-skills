@@ -37,8 +37,9 @@ def test_finish_after_the_review_answer_but_before_select_names_select(tmp_path:
         run_pipeline.cmd_finish(SimpleNamespace(project=str(tmp_path), run=run_root.name, abandon=None))
     assert stop.value.code == "FINISH_FACT_UNDETERMINED" and "select" in str(stop.value)
     fix = stop.value.fix
-    assert "tools.orchestrate_test_case_revision select" in fix and f"--attempt-id {attempt_id}" in fix
-    assert str(run_root) in fix and "complete-review" in fix and "--review " in fix and str(run_root / "model-stage-artifacts") in fix
+    # FaT-O12b: tools.api review-select takes the package inputs and the reviewer answer from the journal
+    assert "tools.api review-select" in fix and f"--attempt {attempt_id}" in fix and "orchestrate_test_case_revision" not in fix
+    assert str(run_root) in fix and "complete-review" in fix and "--generator-fragment" not in fix
 
 
 def test_select_with_another_output_dir_names_the_directory_of_publish(tmp_path: Path) -> None:

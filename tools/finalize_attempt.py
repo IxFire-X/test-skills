@@ -1310,10 +1310,9 @@ def _finalize_durable_branch_attempt(run_root: Path, attempt_id: str, abandon: s
 
 
 _SELECT_FIX = ("сначала закрой ревью выбором: python -m tools.api complete-review --run-root <run> --attempt <attempt_id> "
-               "--out <run>/tmp/session.json, затем python -m tools.orchestrate_test_case_revision select с теми же --candidate, "
-               "--candidate-receipt, --assembly-receipt, --inventory-receipt, --context-receipt, --context-marker-output и "
-               "--generator-fragment, что у open-session, и --reviewer-session <run>/tmp/session.json --review {review} "
-               "--run-root <run> --attempt-id <attempt_id> --output-dir <каталог publish>; затем снова finish")
+               "--out <run>/tmp/session.json, затем python -m tools.api review-select --run-root <run> --attempt <attempt_id> "
+               "--output-dir <dir> --reviewer-session <run>/tmp/session.json (входы пакета и ответ ревьюера — из журнала); "
+               "затем снова finish")
 
 
 def _reviewer_answer(run_root: Path, attempt_id: str) -> str | None:

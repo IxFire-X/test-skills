@@ -453,7 +453,8 @@ def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]
 def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Sequence[str]) -> dict[str, Any]:
     """FaT-10c: one C-lite evidence pair for the open reviewer session.
 
-    The named project files of the attempt inventory become one context receipt (published like publish-evidence);
+    The named project files of the attempt inventory become one context receipt (the one way to publish evidence since
+    FaT-U5 removed publish-evidence);
     the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
     with the cumulative package digest, and the WAITING ledger is published again.
     """

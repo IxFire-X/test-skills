@@ -467,6 +467,16 @@ def _import_summary(root: Path, events: Sequence[Mapping[str, Any]]) -> dict[str
             **({"gaps": list(imported["gaps"]), "outside": outside_rows(imported)} if "gaps" in imported else {})}  # FaT-IMP3
 
 
+def _left(root: Path) -> str | None:
+    """FaT-O12b: «оставлен до ревью кейсов» of a run left by finish --abandon LEFT_BEFORE_REVIEW."""
+    from tools.pilot_state import left_attempt
+
+    try:
+        return "оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW)" if left_attempt(root) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
     """FaT-PA: automated N of M cases, manual K with their blocker codes — the same split exec and finish print."""
     if not attempt_id:
@@ -561,6 +571,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "import": _import_summary(root, events),
         "automation_split": _split(root, attempt_id),  # FaT-PA
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
+                  "left": _left(root),  # FaT-O12b
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
             "requirements": requirements,

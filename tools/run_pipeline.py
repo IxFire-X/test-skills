@@ -216,6 +216,10 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         except (KeyError, OSError, TypeError, ValueError):
             request = None
         result["next_step"] = _next_step(result, project, request)
+        if _left_mark(Path(run_root)):  # FaT-O12b: a left run goes nowhere; the plain scan of its request starts anew
+            result["next_step"] = {"code": "RUN_LEFT", "stage": "scan", "why": "прогон оставлен до ревью кейсов",
+                                   "action": "простой scan того же запроса начнёт новый прогон", "skill_section": "Resume и дрейф",
+                                   "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
     return result
 
 
@@ -545,7 +549,7 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError as error:
-            raise ValueError(f"docs file is not UTF-8: {rel}") from error
+            raise ValueError(f"DOCS_ENCODING: docs file is not UTF-8: {rel}; fix: сохрани документ в UTF-8 и повтори scan") from error
         entries.append({"path": rel, "sha256": _digest_bytes(data), "content": text})
     entries.sort(key=lambda row: row["path"])
     return entries
@@ -2404,15 +2408,14 @@ _INTERRUPTED_FIX = ("запуск тестов начался, но квитан
                     "прерванный запуск как UNKNOWN и закроет попытку")
 
 
-_LEFT = "left-before-review.json"
-
-
 def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
     """FaT-O12 O1: the mark «оставлен» of a run stopped before the canonical review — outside the journal, the attempt is
     not closed (that is FaT-AB2); only the same-request check of scan skips the run.  Written once; a repeat reads it."""
     from tools.confined_output import create_confined_bytes_exclusive, read_confined_bytes
 
-    target = root / _LEFT
+    from tools.pilot_state import LEFT_MARK
+
+    target = root / LEFT_MARK
     value = {"attempt_id": attempt_id, "reason": "LEFT_BEFORE_REVIEW"}
     data = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
     if read_confined_bytes(project, root, target) is None:
@@ -2421,11 +2424,13 @@ def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
 
 
 def _left_mark(root: Path) -> str | None:
+    """FaT-O12b: why the scan skips this run — only when the mark names the run's last attempt (read confined)."""
+    from tools.pilot_state import left_attempt
+
     try:
-        value = json.loads((root / _LEFT).read_text(encoding="utf-8"))
+        return "оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW)" if left_attempt(root) else None
     except (OSError, ValueError):
         return None
-    return "оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW)" if value.get("reason") == "LEFT_BEFORE_REVIEW" else None
 
 
 def _before_canonical_review(root: Path, attempt_id: str) -> bool:
@@ -2805,7 +2810,12 @@ def main(argv: list[str] | None = None) -> int:
             _print(payload)
             return 2
         if isinstance(error, (FileNotFoundError, ValueError)):
-            _print({"status": "error", "reason": str(error)})
+            # FaT-O12b: the refusal's own code (CODE: prefix) and fix, like the branch below; INPUT_INVALID otherwise
+            from tools.json_cli import error_code_prefix, error_fields
+
+            fields = error_fields(error)
+            code = error_code_prefix(fields["message"]) or "INPUT_INVALID"
+            _print({"status": "error", "reason": code, **fields, "code": code})
             return 2
         if isinstance(error, (KeyError, TypeError, OSError)):
             # FaT-F1: a JSON answer with the code instead of a traceback; an OSError names its file

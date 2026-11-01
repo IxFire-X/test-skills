@@ -291,7 +291,7 @@ def build_context(
             try:
                 text = data.decode("utf-8")
             except UnicodeDecodeError as error:
-                raise ValueError(f"docs file is not UTF-8: {doc}") from error
+                raise ValueError(f"DOCS_ENCODING: docs file is not UTF-8: {doc}; fix: сохрани документ в UTF-8 и повтори scan") from error
             doc_entries.append(
                 {
                     "path": confined.relative_to(project).as_posix(),

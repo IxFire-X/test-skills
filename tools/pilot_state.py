@@ -1927,6 +1927,34 @@ def _validate_generator_artifact_binding(root: Path, attempt_id: str, request: M
         raise ValueError("generator fragment must match its request and stored context receipt")
 
 
+LEFT_MARK = "left-before-review.json"  # FaT-O12: finish --abandon LEFT_BEFORE_REVIEW
+
+
+def left_attempt(run_root: Path) -> str | None:
+    """FaT-O12b: the attempt the run was left at before the canonical review — only while it is still the run's last
+    attempt (a later attempt is never hidden by an old mark); the mark is read confined."""
+    project, root = _run_root(run_root)
+    try:
+        data = read_confined_bytes(project, root, root / LEFT_MARK)
+        value = json.loads(data) if data is not None else None
+    except (OutputConfinementError, ValueError):
+        return None
+    attempts = derive_state(root)["attempts"]
+    if (
+        not isinstance(value, Mapping) or value.get("reason") != "LEFT_BEFORE_REVIEW" or not attempts
+        or value.get("attempt_id") != attempts[-1]["attempt_id"]
+    ):
+        return None
+    return str(value["attempt_id"])
+
+
+def _refuse_left(root: Path, attempt_id: str) -> None:
+    """FaT-O12b: no model step on a left attempt — the plain scan of the request starts a new run."""
+    if left_attempt(root) == attempt_id:
+        raise ValueError("RUN_LEFT: прогон оставлен до ревью кейсов (finish --abandon LEFT_BEFORE_REVIEW); "
+                         "fix: простой scan того же запроса начнёт новый")
+
+
 @closure_cached  # FaT-9b
 def publish_model_request(
     run_root: Path,
@@ -1944,6 +1972,7 @@ def publish_model_request(
     project whose answer for the same stage and the very same inputs is reused — checked here, recorded as ``reuse``.
     """
     project, root = _run_root(run_root)
+    _refuse_left(root, attempt_id)
     state = derive_state(root)
     attempt = next(
         (item for item in state["attempts"] if item["attempt_id"] == attempt_id), None,
@@ -2270,6 +2299,7 @@ def _publish_model_stage_artifact(
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
     project, root = _run_root(run_root)
+    _refuse_left(root, attempt_id)  # FaT-O12b
     state = derive_state(root)
     attempt = next(
         (item for item in state["attempts"] if item["attempt_id"] == attempt_id), None,
