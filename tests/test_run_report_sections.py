@@ -1,0 +1,134 @@
+"""P9: the report prints by itself what the pilot report template v2 asked the agent to count by hand."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from tests.test_run_report import _finished_run
+
+
+def _report(project: Path, run_root: Path) -> tuple[dict, str]:
+    from tools.run_report import build_report, render_markdown
+
+    report = build_report(project, run_root.name)[0]
+    return report, render_markdown(report)
+
+
+def _generated(tmp_path: Path) -> dict:
+    from tests.test_review_requested import _generated_run
+
+    return _generated_run(tmp_path)
+
+
+def test_the_header_tells_model_calls_from_code_steps_and_sreq_from_creq(tmp_path: Path) -> None:
+    run_root = _finished_run(tmp_path)
+    report, markdown = _report(tmp_path, run_root)
+    document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
+    counts = report["counts"]
+    assert counts["source_requirements"] == len(document["source_requirements"])
+    assert counts["canonical_requirements"] == len(document["requirements"])
+    assert counts["code_steps"] == 0
+    assert f"Вызовов модели {counts['model_calls']}, шагов кодом 0" in markdown
+    assert f"исходных SREQ {counts['source_requirements']}, канонических CREQ {counts['canonical_requirements']}" in markdown
+
+
+def test_a_controller_merge_is_counted_as_a_step_of_code(tmp_path: Path) -> None:
+    from tests.test_marker_parts import _marker, _publish_part, _publish_requirements, _run
+    from tools.context_marker_parts import merge_parts
+
+    root, attempt_id, baseline, receipts = _run(tmp_path, files=2)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    for index, receipt in enumerate(receipts, start=1):
+        _publish_part(root, attempt_id, baseline, index, receipt, requirements, _marker([f"src/part{index - 1}.py — наблюдение"]))
+    merge_parts(root)
+    report, markdown = _report(tmp_path, root)
+    assert report["counts"]["code_steps"] == 1
+    assert f"Вызовов модели {report['counts']['model_calls']}, шагов кодом 1" in markdown
+
+
+def test_no_measurements_say_so_and_the_tmp_folder_is_sized_not_removed(tmp_path: Path) -> None:
+    run_root = _finished_run(tmp_path)
+    tmp = run_root / "tmp"
+    tmp.mkdir(exist_ok=True)
+    before = sum(path.stat().st_size for path in tmp.rglob("*") if path.is_file())
+    (tmp / "fragment.json").write_bytes(b"x" * 1234)
+    report, markdown = _report(tmp_path, run_root)
+    assert report["step_sizes"] == []
+    section = markdown.split("## Размер входа шагов", 1)[1].split("\n## ", 1)[0]
+    assert "замеров нет" in section and "| Шаг |" not in section
+    assert report["tmp"]["bytes"] == before + 1234
+    assert report["tmp"]["path"] == f".pilot-runs/{run_root.name}/tmp"
+    assert f".pilot-runs/{run_root.name}/tmp" in markdown and ("rm -rf" in markdown or "rmdir" in markdown)
+    assert (tmp / "fragment.json").is_file()  # the report removes nothing
+
+
+def test_the_phases_are_cut_by_the_events_of_the_journal(tmp_path: Path) -> None:
+    run = _generated(tmp_path)
+    report, markdown = _report(run["project"], run["run_root"])
+    phases = {row["phase"]: row for row in report["phases"]}
+    assert {"подготовка", "разметка", "план и заголовок", "сборка и пакет ревью", "ревью", "закрытие"} <= set(phases)
+    assert phases["разметка"]["sec"] is not None and phases["подготовка"]["sec"] is not None
+    assert phases["ревью"]["sec"] is None  # no review yet: not guessed
+    batches = [row for row in report["phases"] if row["phase"] == "генерация"]
+    assert len(batches) == 2 and all(row["batch"].startswith("BATCH-") and row["sec"] is not None for row in batches)
+    assert "## Фазы по времени" in markdown and "генерация" in markdown.split("## Фазы по времени", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_input_is_split_by_kind_for_every_model_call(tmp_path: Path) -> None:
+    run = _generated(tmp_path)
+    report, markdown = _report(run["project"], run["run_root"])
+    rows = {row["stage"]: row for row in report["input_composition"]}
+    assert set(rows) == {call["stage"] for call in report["model_calls"] if call["by"] == "model"}
+    kinds = ("documents", "code", "markup", "plan_header", "role", "map", "other")
+    generator = next(row for stage, row in rows.items() if stage.startswith("tc-generator:"))
+    assert all(isinstance(generator[kind], int) for kind in kinds)
+    call = next(call for call in report["model_calls"] if call["stage"] == generator["stage"])
+    assert generator["role"] == call["role_bytes"]
+    assert sum(generator[kind] for kind in kinds if kind != "role") == call["input_bytes"]
+    assert generator["code"] > 0 and generator["markup"] > 0
+    assert "## Состав входа по видам" in markdown
+
+
+def test_refusals_are_summed_by_command_code_and_batch(tmp_path: Path) -> None:
+    run = _generated(tmp_path)
+    rows = [
+        {"at": "2026-11-03T10:00:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
+        {"at": "2026-11-03T10:01:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-a"},
+        {"at": "2026-11-03T10:02:00Z", "command": "validate-fragment", "code": "BATCH_FRAGMENT_INVALID", "stage": "tc-generator", "batch": "BATCH-b"},
+        {"at": "2026-11-03T10:03:00Z", "command": "assemble", "code": "BATCH_SEMANTIC_CONFLICT", "stage": None, "batch": None},
+        {"at": "2026-11-03T10:04:00Z", "command": "/home/user/secret project", "code": "some text with a path C:\\x", "stage": None, "batch": None},
+    ]
+    (run["run_root"] / "refusals.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows) + "not json\n", encoding="utf-8")
+    report, markdown = _report(run["project"], run["run_root"])
+    refusals = report["refusals"]
+    assert refusals["total"] == 5
+    assert refusals["by_command"]["validate-fragment"] == 3 and refusals["by_command"]["assemble"] == 1
+    assert refusals["by_code"]["BATCH_FRAGMENT_INVALID"] == 3
+    assert refusals["by_batch"] == {"BATCH-a": 2, "BATCH-b": 1}
+    assert refusals["first_at"] == "2026-11-03T10:00:00Z" and refusals["last_at"] == "2026-11-03T10:04:00Z"
+    blob = json.dumps(refusals) + markdown
+    assert "/home/user" not in blob and "secret project" not in blob  # only identifiers leave the run
+    section = markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
+    assert "validate-fragment" in section and "BATCH_FRAGMENT_INVALID" in section
+
+
+def test_a_run_without_the_refusal_journal_says_so(tmp_path: Path) -> None:
+    run = _generated(tmp_path)
+    report, markdown = _report(run["project"], run["run_root"])
+    assert report["refusals"] is None
+    assert "журнала отказов нет" in markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> None:
+    run_root = _finished_run(tmp_path)
+    report, markdown = _report(tmp_path, run_root)
+    document = json.loads(next((run_root / "candidate-bundle").glob("*.json")).read_text(encoding="utf-8"))
+    canon = report["canon"]
+    cases = document["test_cases"]
+    assert canon["cases"] == len(cases) and canon["bytes"] > 0
+    assert canon["bytes_per_case"] == round(canon["bytes"] / len(cases))
+    steps = sum(len(case["steps"]) for case in cases)
+    assert canon["steps_per_case"] == round(steps / len(cases), 1)
+    assert canon["blockers"] == sum(len(step.get("automation_blockers") or []) for case in cases for step in case["steps"])
+    assert "## Канон в числах" in markdown
+    assert report["counts"]["status_after_pause"] is None and "status_after_pause: —" in markdown

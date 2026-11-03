@@ -223,6 +223,7 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
         # FaT-CV2 (2.13) / FaT-AV: the view of the document when it is built, else the canonical JSON
         basis = "вид" if found and any(row.get("basis") == "вид" for row in found["files"]) else "канон"
     call["input_basis"] = basis
+    call["composition"] = _composition(found, project, root) if found else None
     # FaT-O: the answer bytes are the journal-bound response artifact behind its digest
     answer = _answer_bytes(root, call)
     # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
@@ -267,6 +268,158 @@ def step_sizes(root: Path) -> list[dict[str, Any]]:
         if isinstance(value, Mapping) and isinstance(value.get("step"), str):
             rows.append({key: value.get(key) for key in _STEP_KEYS})
     return rows
+
+
+_KINDS = ("documents", "code", "markup", "plan_header", "map", "other")
+_RUN_PLAN_SLOTS = ("generator-headers", "batch-plans")
+
+
+def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[str, int]:
+    """P9: the bytes ``stage_inputs`` found, by kind — requirement documents, project code, the answers of the marker, plan and
+    header, the map of existing tests, the rest (each file is counted once, as ``input_size`` does)."""
+    from tools.step_size import _requirement_files
+
+    try:
+        documents = {str(path.resolve()) for path in _requirement_files(project, root)}
+    except (KeyError, OSError, TypeError, ValueError):
+        documents = set()
+    run = root.resolve()
+    sums = dict.fromkeys(_KINDS, 0)
+    for path, row in {row["path"]: row for row in found["files"]}.items():
+        target = Path(path).resolve()
+        size = int(row["bytes"])
+        if row.get("basis") == "карта":
+            kind = "map"
+        elif str(target) in documents:
+            kind = "documents"
+        elif not target.is_relative_to(run):
+            kind = "code"
+        elif target.relative_to(run).parts[0] == "model-stage-artifacts":
+            kind = "markup" if _stage_of(target) == "context-marker" else "other"
+        elif target.relative_to(run).parts[0] in _RUN_PLAN_SLOTS:
+            kind = "plan_header"
+        else:
+            kind = "other"
+        sums[kind] += size
+    sums["other"] += sum(int(row["bytes"]) for row in found["bindings"])
+    return sums
+
+
+def _stage_of(path: Path) -> Any:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value.get("stage") if isinstance(value, Mapping) else None
+
+
+def input_composition(calls: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """P9 («Состав входа по видам»): one row per model call, the role bytes next to the kinds of the input."""
+    return [{"stage": call["stage"], **call["composition"], "role": call.get("role_bytes") or 0}
+            for call in calls if call.get("by") == "model" and call.get("composition")]
+
+
+def _find(events: Sequence[Mapping[str, Any]], kind: str, prefix: str | None = None, *, last: bool = False) -> Mapping[str, Any] | None:
+    found = [event for event in events if event.get("event_type") == kind
+             and (prefix is None or str(event.get("stage_instance_id") or "").startswith(prefix))]
+    return (found[-1] if last else found[0]) if found else None
+
+
+def phases(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """P9 («Фазы по времени»): the boundaries are journal events, as the report template names them; a phase whose
+    boundary is not in the journal yet has ``sec: None`` — never guessed."""
+    ordered = sorted(events, key=lambda event: event["seq"])
+    marker_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "context-marker:baseline", last=True)
+    first_generator = _find(ordered, "MODEL_REQUESTED", "tc-generator:")
+    plan_read = next((event for event in reversed(ordered) if event["event_type"] == "ARTIFACT_READ_BACK"
+                      and first_generator is not None and event["seq"] < first_generator["seq"]), None)
+    review_request = _find(ordered, "REVIEW_REQUESTED", "tc-reviewer:")
+    review_response = _find(ordered, "MODEL_RESPONSE_RECEIVED", "tc-reviewer:", last=True)
+    last_candidate = _find(ordered, "CANDIDATE_PUBLISHED", "tc-generator:", last=True)
+    rows: list[dict[str, Any]] = []
+
+    def phase(name: str, start: Mapping[str, Any] | None, end: Mapping[str, Any] | None, batch: str | None = None) -> None:
+        rows.append({"phase": name, "from": start.get("event_type") if start else None, "to": end.get("event_type") if end else None,
+                     "batch": batch, "sec": _seconds(start.get("observed_at"), end.get("observed_at")) if start and end else None})
+
+    phase("подготовка", ordered[0] if ordered else None, _find(ordered, "CONTEXT_SELECTED", last=True))
+    phase("разметка", _find(ordered, "MODEL_REQUESTED", "context-marker:"), marker_response)
+    phase("план и заголовок", marker_response, plan_read)
+    for request in (event for event in ordered if event["event_type"] == "MODEL_REQUESTED"
+                    and str(event.get("stage_instance_id") or "").startswith("tc-generator:")):
+        published = next((event for event in ordered if event["event_type"] == "CANDIDATE_PUBLISHED"
+                          and event.get("stage_instance_id") == request.get("stage_instance_id") and event["seq"] > request["seq"]), None)
+        phase("генерация", request, published, str(request.get("batch_id") or request.get("stage_instance_id")))
+    phase("сборка и пакет ревью", last_candidate, review_request)
+    phase("ревью", review_request, review_response)
+    phase("закрытие", review_response, _find(ordered, "ATTEMPT_TERMINAL", last=True))
+    return rows
+
+
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+
+
+def _identifier(value: Any) -> str | None:
+    """A command, code, stage or batch name; anything else (a path, a message) is dropped — the report never copies text."""
+    return value if isinstance(value, str) and _IDENTIFIER.match(value) else None
+
+
+def refusals(root: Path) -> dict[str, Any] | None:
+    """P9 («Отказы»): ``<run>/refusals.jsonl`` (``{at, command, code, stage, batch}`` per refusal, written by ``tools.api``)
+    summed by command, code, stage and batch; ``None`` when the run has no such journal; a line that is no JSON is skipped."""
+    try:
+        lines = (Path(root) / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    rows = []
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, Mapping):
+            rows.append(value)
+    times = sorted(str(row["at"]) for row in rows if isinstance(row.get("at"), str))
+    summary: dict[str, Any] = {"total": len(rows), "first_at": times[0] if times else None, "last_at": times[-1] if times else None}
+    for key, name in (("command", "by_command"), ("code", "by_code"), ("stage", "by_stage"), ("batch", "by_batch")):
+        counts: dict[str, int] = {}
+        for row in rows:
+            value = _identifier(row.get(key))
+            if value is not None:
+                counts[value] = counts.get(value, 0) + 1
+        summary[name] = dict(sorted(counts.items()))
+    pairs: dict[tuple[str, str], int] = {}
+    for row in rows:
+        pair = (_identifier(row.get("command")) or "?", _identifier(row.get("code")) or "?")
+        pairs[pair] = pairs.get(pair, 0) + 1
+    summary["by_command_code"] = [{"command": command, "code": code, "count": count} for (command, code), count in sorted(pairs.items())]
+    return summary
+
+
+def canon_numbers(document: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """P9 («Канон в числах»): the size of the canonical document (compact JSON) per case, and steps, assertions and
+    automation blockers per case."""
+    if not isinstance(document, Mapping) or not isinstance(document.get("test_cases"), list) or not document["test_cases"]:
+        return None
+    cases = document["test_cases"]
+    size = len(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    steps = [step for case in cases for step in case.get("steps") or []]
+    assertions = sum(len(expectation.get("assertions") or []) for step in steps for expectation in step.get("expectations") or [])
+    blockers = sum(len(step.get("automation_blockers") or []) for step in steps)
+    return {"cases": len(cases), "bytes": size, "bytes_per_case": round(size / len(cases)),
+            "steps_per_case": round(len(steps) / len(cases), 1), "assertions_per_case": round(assertions / len(cases), 1),
+            "blockers": blockers, "blockers_per_case": round(blockers / len(cases), 2)}
+
+
+def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
+    """P9: the size of ``<run>/tmp/`` (the agent's working files) and the command that removes it — the report removes nothing."""
+    tmp = Path(root) / "tmp"
+    if not tmp.is_dir():
+        return None
+    files = [path for path in tmp.rglob("*") if path.is_file()]
+    relative = tmp.relative_to(project).as_posix()
+    command = f'rmdir /s /q "{relative.replace("/", chr(92))}"' if sys.platform == "win32" else f'rm -rf "{relative}"'
+    return {"path": relative, "files": len(files), "bytes": sum(path.stat().st_size for path in files), "remove_command": command}
 
 
 def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]]) -> list[str]:
@@ -511,6 +664,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     for call in calls:
         _size(project, root, call, raw_sizes, state=state, journals=journals)
     measured = step_sizes(root)
+    composition = input_composition(calls)
 
     terminal: Mapping[str, Any] = {}
     if attempt and attempt["state"] == "TERMINAL":
@@ -545,6 +699,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     path_hint = end_to_end(root, attempt_id, document) if cases is not None else None
     existing = existing_repeats(root, attempt_id, document) if cases is not None else None
     compared = reference(root, attempt_id, document) if cases is not None else None
+    source_count = len(document["source_requirements"]) if isinstance(document, Mapping) and isinstance(document.get("source_requirements"), list) else None
+    canonical_count = len(document["requirements"]) if isinstance(document, Mapping) and isinstance(document.get("requirements"), list) else None
     notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
     autotest_notes = review_notes(root, attempt_id, "autotests") if attempt_id else {"count": 0, "items": []}
 
@@ -563,6 +719,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "steps": [{"seq": event["seq"], "event": event["event_type"], "stage": event.get("stage_instance_id"),
                    "batch": event.get("batch_id"), "at": event.get("observed_at")} for event in events],
         "model_calls": calls, "step_sizes": measured,
+        "phases": phases(events), "input_composition": composition, "refusals": refusals(root), "canon": canon_numbers(document),
+        "tmp": tmp_usage(root, project),
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
                     + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
@@ -575,6 +733,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
         "counts": {
             "requirements": requirements,
+            "source_requirements": requirements if requirements is not None else source_count,
+            "canonical_requirements": canonical_count,
             "batches": len({event.get("stage_instance_id") for event in responses if str(event.get("stage_instance_id")).startswith("tc-generator:")}),
             "cases": cases, "review_verdict": evidence.get("authoritative_verdict"),
             "automation": evidence.get("automation_accepted"),
@@ -583,8 +743,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "completion": terminal.get("completion"), "coverage": terminal.get("coverage"), "accepted": terminal.get("accepted"),
             # FaT-CR: calls a model made, and answers reused from an earlier run with the input bytes not sent
             "model_calls": sum(1 for call in calls if call.get("by") == "model"),
+            "code_steps": sum(1 for call in calls if call.get("by") == "code"),
             "reused_calls": sum(1 for call in calls if call.get("by") == "reuse"),
             "reused_input_bytes": sum(int(call.get("saved_bytes") or 0) for call in calls if call.get("by") == "reuse"),
+            "status_after_pause": None,  # P3: the number of status calls after a pause; empty until then
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         "review_notes": {"count": notes["count"], "items": notes["items"]},
@@ -633,13 +795,63 @@ def _notes_section(title: str, subject: str, notes: Mapping[str, Any] | None) ->
             *(_note_line(row) for row in notes["items"]), ""]
 
 
+def _minutes(seconds: Any) -> str:
+    return "—" if seconds is None else f"{seconds / 60:.1f}"
+
+
+def _phase_lines(report: Mapping[str, Any]) -> list[str]:
+    return ["## Фазы по времени", "", "| Фаза | Пачка | От события | До события | Минуты |", "|---|---|---|---|---|",
+            *(f"| {row['phase']} | {_dash(row['batch'])} | {_dash(row['from'])} | {_dash(row['to'])} | {_minutes(row['sec'])} |"
+              for row in report.get("phases") or []), ""]
+
+
+def _composition_lines(report: Mapping[str, Any]) -> list[str]:
+    rows = report.get("input_composition") or []
+    return ["## Состав входа по видам", "", "Байты входа вызова модели по видам (роль — отдельно).", "",
+            *(["состава нет", ""] if not rows else [
+                "| Стадия | документы | код | разметка | план+заголовок | карта тестов | прочее | роль |", "|---|---|---|---|---|---|---|---|",
+                *(f"| {r['stage']} | {r['documents']} | {r['code']} | {r['markup']} | {r['plan_header']} | {r['map']} | {r['other']} | {r['role']} |"
+                  for r in rows), ""])]
+
+
+def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
+    summary = report.get("refusals")
+    if summary is None:
+        return ["## Отказы", "", "журнала отказов нет (прогон до v0.2)", ""]
+    return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.", "",
+            "| Команда | Код | Сколько раз |", "|---|---|---|",
+            *(f"| {row['command']} | {row['code']} | {row['count']} |" for row in summary["by_command_code"]), "",
+            "- по стадиям: " + (", ".join(f"{key} {value}" for key, value in summary["by_stage"].items()) or "—"),
+            "- по пачкам: " + (", ".join(f"{key} {value}" for key, value in summary["by_batch"].items()) or "—"), ""]
+
+
+def _canon_lines(report: Mapping[str, Any]) -> list[str]:
+    canon = report.get("canon")
+    if canon is None:
+        return ["## Канон в числах", "", "канона нет", ""]
+    return ["## Канон в числах", "", f"- кейсов: {canon['cases']}; размер канона, Б: {canon['bytes']}; байт на кейс: {canon['bytes_per_case']}",
+            f"- шагов на кейс: {canon['steps_per_case']}; утверждений на кейс: {canon['assertions_per_case']}; "
+            f"блокеров всего {canon['blockers']}, на кейс {canon['blockers_per_case']}", ""]
+
+
+def _tmp_lines(report: Mapping[str, Any]) -> list[str]:
+    tmp = report.get("tmp")
+    if tmp is None:
+        return []
+    return ["## Рабочие файлы агента", "", f"`{tmp['path']}`: файлов {tmp['files']}, {tmp['bytes']} Б. Отчёт ничего не удаляет; "
+            f"убрать можно командой `{tmp['remove_command']}`.", ""]
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     lines = [
         f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
         f"- Профиль: {report['policy_profile']}", f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
-        "## Числа", "", *(f"- {key}: {_dash(value)}" for key, value in counts.items()),
+        "## Числа", "",
+        f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "
+        f"исходных SREQ {_dash(counts['source_requirements'])}, канонических CREQ {_dash(counts['canonical_requirements'])}.", "",
+        *(f"- {key}: {_dash(value)}" for key, value in counts.items()),
         *([f"- Автоматизация частичная: {report['automation_split']['summary']}"] if report.get("automation_split") else []), "",
         "## Вызовы модели", "", f"Время шага: {STEP_TIME_NOTE}.", "",
         "| Стадия | Запрос в журнале | Время шага, с | Попытки | Байты входа | Токены (оценка) | Бюджет, Б | Влезает | Байты ответа |", "|---|---|---|---|---|---|---|---|---|",
@@ -659,9 +871,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),
         "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",
-        "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
-        *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
-          f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), "",
+        *(["замеров нет", ""] if not report["step_sizes"] else [
+            "| Шаг | Байты входа | Роль, Б | Токены (оценка) | Бюджет, Б | Влезает | Время |", "|---|---|---|---|---|---|---|",
+            *(f"| {s['step']} | {_dash(s['bytes'])} | {_dash(s['role_bytes'])} | {_dash(s['tokens_est'])} | {_dash(s['budget_bytes'])} | "
+              f"{_dash(s['fits'])} | {_dash(s['at'])} |" for s in report["step_sizes"]), ""]),
+        *_phase_lines(report), *_composition_lines(report), *_refusal_lines(report), *_canon_lines(report),
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
     if report.get("import"):
@@ -687,7 +901,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.append("")
     lines += ["## Шаги", "", "| # | Событие | Стадия | Время |", "|---|---|---|---|",
               *(f"| {s['seq']} | {s['event']} | {_dash(s['stage'])} | {_dash(s['at'])} |" for s in report["steps"]), "",
-              "## Окружение", "", *(f"- {key}: {_dash(value)}" for key, value in report["environment"].items()), ""]
+              *_tmp_lines(report), "## Окружение", "", *(f"- {key}: {_dash(value)}" for key, value in report["environment"].items()), ""]
     return "\n".join(lines)
 
 
