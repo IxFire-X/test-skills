@@ -9,6 +9,18 @@ from tools import init_skillsrc
 from tools.skillsrc_manifest import SkillsrcError, parse_skillsrc_bytes, resolve_module_root
 
 
+# An existing .skillsrc is a JSON object since P5; these are the bytes of an authoritative v3 and a legacy v2 manifest.
+_V3_ORIGINAL = (json.dumps({
+    "version": "3.0", "project": {"name": "existing"}, "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+    "modules": [{"id": "root", "root": ".", "stack": {"language": "python", "build_tool": "pip"},
+                 "paths": {"source": ["src"], "tests": ["tests"]},
+                 "test": {"framework": "pytest", "adapter_id": "pytest:selected-symbols-v1", "interpreter": ".venv/Scripts/python.exe",
+                          "build_profile": "default", "adapter_parameters": {}},
+                 "detected_from": ["pyproject.toml"]}]}, indent=2) + "\n").encode("utf-8")
+_V2_ORIGINAL = (json.dumps({"project": {"name": "legacy", "language": "python", "build_tool": "pip"},
+                            "paths": {"source": "src", "tests": "tests"}, "test": {"framework": "pytest"}}, indent=2) + "\n").encode("utf-8")
+
+
 def _discovery() -> dict:
     return {
         "status": "ready",
@@ -101,7 +113,7 @@ def test_missing_skillsrc_is_created_atomically_and_read_back(tmp_path: Path, mo
 
 def test_existing_valid_skillsrc_is_authoritative_and_drift_is_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_discovery(monkeypatch)
-    original = b"version: '3.0'\nproject:\n  name: existing\ndiscovery:\n  on_missing: automatic\n  conflict_policy: ask_user\nmodules:\n  - id: root\n    root: '.'\n    stack:\n      language: python\n      build_tool: pip\n    paths:\n      source: [src]\n      tests: [tests]\n    test:\n      framework: pytest\n      adapter_id: pytest:selected-symbols-v1\n      interpreter: .venv/Scripts/python.exe\n      build_profile: default\n      adapter_parameters: {}\n    detected_from: [pyproject.toml]\n"
+    original = _V3_ORIGINAL
     (tmp_path / ".skillsrc").write_bytes(original)
 
     receipt = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
@@ -119,7 +131,7 @@ def test_existing_valid_skillsrc_is_authoritative_and_drift_is_safe(tmp_path: Pa
 
 def test_existing_valid_v2_skillsrc_is_authoritative_without_explicit_replacement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_discovery(monkeypatch)
-    original = b"project:\n  name: legacy\n  language: python\n  build_tool: pip\npaths:\n  source: src\n  tests: tests\ntest:\n  framework: pytest\n"
+    original = _V2_ORIGINAL
     (tmp_path / ".skillsrc").write_bytes(original)
 
     receipt = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
@@ -133,7 +145,7 @@ def test_existing_valid_v2_skillsrc_is_authoritative_without_explicit_replacemen
 
 def test_confirmed_replacement_requires_bound_digests_and_evidences_old_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_discovery(monkeypatch)
-    original = b"version: '3.0'\nproject:\n  name: existing\ndiscovery:\n  on_missing: automatic\n  conflict_policy: ask_user\nmodules:\n  - id: root\n    root: '.'\n    stack:\n      language: python\n      build_tool: pip\n    paths:\n      source: [src]\n      tests: [tests]\n    test:\n      framework: pytest\n      adapter_id: pytest:selected-symbols-v1\n      interpreter: .venv/Scripts/python.exe\n      build_profile: default\n      adapter_parameters: {}\n    detected_from: [pyproject.toml]\n"
+    original = _V3_ORIGINAL
     (tmp_path / ".skillsrc").write_bytes(original)
     preview = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
     evidence_dir = tmp_path / "immutable-evidence"
@@ -168,7 +180,7 @@ def test_confirmed_replacement_requires_bound_digests_and_evidences_old_bytes(tm
 
 def test_replacement_evidence_cannot_escape_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_discovery(monkeypatch)
-    original = b"project:\n  name: legacy\n  language: python\n  build_tool: pip\npaths:\n  source: src\n  tests: tests\ntest:\n  framework: pytest\n"
+    original = _V2_ORIGINAL
     (tmp_path / ".skillsrc").write_bytes(original)
     preview = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
     outside = tmp_path.parent / "outside-evidence"
@@ -261,3 +273,14 @@ def test_a_bug_in_the_skillsrc_write_is_not_hidden_as_a_write_error(tmp_path: Pa
     monkeypatch.setattr(init_skillsrc, "atomic_write_skillsrc", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyError("bug")))
     with pytest.raises(KeyError):
         init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
+
+
+def test_an_older_yaml_skillsrc_is_never_overwritten_and_never_parsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_discovery(monkeypatch)
+    original = b"version: '3.0'\nproject:\n  name: existing\nlimits:\n  step_window_bytes: 0\n"
+    (tmp_path / ".skillsrc").write_bytes(original)
+
+    receipt = init_skillsrc.ensure_skillsrc(tmp_path, {}, write=True)
+
+    assert (tmp_path / ".skillsrc").read_bytes() == original
+    assert receipt["written"] is False and receipt["status"] != "created"
