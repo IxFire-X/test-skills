@@ -137,6 +137,11 @@ def select_module(normalized: Mapping[str, Any], module_id: str | None) -> dict[
         raise SkillsrcError("module_required", "module selection is required")
     matches = [(index, module) for index, module in enumerate(modules) if module["id"] == module_id]
     if not matches:
+        from tools.module_ids import alias_match  # P6a: the id of the folder, in its current or old (hex) form
+
+        alias = alias_match(modules, module_id)
+        if alias is not None:
+            return alias
         raise SkillsrcError("module_unknown", f"unknown module: {module_id}")
     if len(matches) > 1:
         raise SkillsrcError(

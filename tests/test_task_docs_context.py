@@ -2,7 +2,7 @@
 
 Facts of 455ef01 before FaT-3 (handoff/fat-3-plan-20261026.md): without --target every task of to_do reached the model;
 with --target, and for a document outside the module, the task document did not reach it at all.  Now the document of
---docs is added to the selection whatever --target says; a document outside the module's inventory stops the scan.
+--docs is added to the selection whatever --target says; a document outside the project, or one the inventory rules leave out, stops the scan (P6a: outside the module is no longer one).
 """
 from __future__ import annotations
 
@@ -69,16 +69,27 @@ def test_with_target_the_task_document_still_goes(tmp_path: Path, monkeypatch: p
     assert "services/api/docs/to_do/T2/spec.md" not in context
 
 
-def test_a_task_document_outside_the_module_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_task_document_outside_the_module_joins_the_inventory_as_a_parent_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P6a (B-2): a document of the project outside the module is read as the task document — and is not code."""
     project, module = _project(tmp_path)
     _write(module, "src/app.py", "X = 1\n")
     _write(project, "docs/to_do/T1/spec.md", "Задача 1.\n")
-    scan = _scan(project, monkeypatch, ["docs/to_do/T1/spec.md"], expect=2)
-    assert scan["status"] == "error" and scan["reason"] == "TASK_DOC_OUTSIDE_CONTEXT"
-    assert "docs/to_do/T1/spec.md" in scan["detail"] and "--module" in scan["fix"]
+    scan = _scan(project, monkeypatch, ["docs/to_do/T1/spec.md"])
+    assert {"services/api/src/app.py", "docs/to_do/T1/spec.md"} <= _context_paths(scan)
+    summary = scan["context_summary"]
+    assert summary["task_documents"] == ["docs/to_do/T1/spec.md"]
+    assert summary["code_files"] == len(_context_paths(scan)) - 1  # the document is the task, not code
 
 
-def test_ready_stops_on_a_task_document_outside_the_module(tmp_path: Path) -> None:
+def test_a_task_document_outside_the_project_stops_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project, module = _project(tmp_path)
+    _write(module, "src/app.py", "X = 1\n")
+    _write(tmp_path, "outside/spec.md", "Задача 1.\n")
+    scan = _scan(project, monkeypatch, ["../outside/spec.md"], expect=2)
+    assert scan["status"] == "error" and "outside" in json.dumps(scan, ensure_ascii=False)
+
+
+def test_ready_passes_a_task_document_outside_the_module(tmp_path: Path) -> None:
     from tools.ready import check
 
     project, module = _project(tmp_path)
@@ -86,7 +97,7 @@ def test_ready_stops_on_a_task_document_outside_the_module(tmp_path: Path) -> No
     _write(project, "docs/to_do/T1/spec.md", "Задача 1.\n")
     report = check(project, ["docs/to_do/T1/spec.md"], profile="cases-only-v1", module="nested")
     row = next(item for item in report["checks"] if item["id"] == "docs:docs/to_do/T1/spec.md")
-    assert row["level"] == "STOP" and "--module" in row["fix"] and report["status"] == "BLOCKED"
+    assert row["level"] == "OK", row
 
 
 def test_a_secret_task_document_is_out_of_the_inventory_and_stops_with_its_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

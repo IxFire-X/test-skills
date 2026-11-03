@@ -675,6 +675,9 @@ def not_selected_defaults(discovery: Mapping[str, Any], selected_module: str | N
     host's supported runner — no decision is left there.  A question with several options stays a question."""
     if selected_module is None:
         return {}, []
+    from tools.module_ids import current_id
+
+    selected_module = current_id(discovery.get("modules", []), selected_module)  # P6a: --module may be the old hex id
     answers: dict[str, str] = {}
     notes: list[str] = []
     for question in discovery.get("questions", []):

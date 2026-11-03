@@ -12,6 +12,18 @@ else:  # direct CLI execution
     from json_cli import JsonArgumentParser
 
 
+CRLF_FIX = ("положите в папку пакета файл .gitattributes со строкой `* -text` (git перестанет менять переносы строк пакета) и верните "
+            "файлы пакета: git checkout -- <папка пакета> или заново скопируйте поставку")
+
+
+def _crlf_files(root: Path) -> list[str]:
+    if __package__:
+        from .release_manifest import crlf_converted
+    else:  # direct CLI execution
+        from release_manifest import crlf_converted
+    return crlf_converted(root)
+
+
 def _available(name: str) -> bool:
     try:
         return importlib.util.find_spec(name) is not None
@@ -106,6 +118,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
             missing_integrity.append("invalid:pipeline_contract")
             messages.append(f"проверка контракта: {type(error).__name__}: {error}")
     release_manifest_path = root / "release" / "manifest.json"
+    crlf_report: dict[str, object] | None = None
     if release_manifest_path.is_file() and not missing_modules:
         try:
             if __package__:
@@ -117,6 +130,11 @@ def inspect_environment(root: Path) -> dict[str, object]:
         except (ImportError, TypeError, ValueError) as error:
             missing_integrity.append("invalid:release/manifest.json")
             messages.append(f"release/manifest.json: {type(error).__name__}: {error}")
+            crlf = _crlf_files(root) if "does not match runtime bytes" in str(error) else []
+            if crlf:  # P6a: said in words; the byte-for-byte check is unchanged
+                crlf_report = {"count": len(crlf), "examples": crlf[:5], "fix": CRLF_FIX}
+                messages.append(f"переносы строк изменены (CRLF) в {len(crlf)} файл(ах) пакета, например {', '.join(crlf[:3])}: "
+                                f"содержимое то же, но git при checkout заменил LF на CRLF. {CRLF_FIX}")
     python_supported = sys.version_info >= (3, 11)
     ready = not missing_integrity and python_supported and all(item["available"] for item in dependencies.values())
     return {
@@ -130,6 +148,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "dependencies": dependencies,
         "messages": messages,
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
+        **({"crlf": crlf_report} if crlf_report else {}),
         "languages": {
             "java": {"execution": True, "verified": False},
             "python": {"execution": True, "verified": False},

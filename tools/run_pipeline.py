@@ -880,6 +880,13 @@ def _scan_execution_baseline(
         raise InventoryError("execution baseline lacks .skillsrc")
     module_path = str(inventory.get("module"))
     prefix = "" if module_path == "." else module_path.rstrip("/") + "/"
+    # P6a: a task document outside the module is a proved dependency file of the baseline, not a parent build manifest
+    outside_docs = {row["path"] for row in _docs_entries(project, getattr(args, "docs", None))} if prefix else set()
+    dependency_ids = [
+        str(item["opaque_id"]) for item in files
+        if isinstance(item, Mapping) and item.get("origin") != "context" and item.get("project_path") in outside_docs
+        and not str(item.get("project_path", "")).startswith(prefix)
+    ]
     parent_ids = [
         str(item["opaque_id"])
         for item in files
@@ -888,6 +895,7 @@ def _scan_execution_baseline(
         and item.get("origin") != "context"
         and prefix
         and not str(item.get("project_path", "")).startswith(prefix)
+        and item.get("opaque_id") not in dependency_ids
     ]
     context_ids = [str(item["opaque_id"]) for item in files if isinstance(item, Mapping) and item.get("origin") == "context"]
     execution_ids = [
@@ -896,6 +904,7 @@ def _scan_execution_baseline(
         if isinstance(item, Mapping)
         and item.get("opaque_id") != skillsrc.get("opaque_id")
         and item.get("opaque_id") not in parent_ids
+        and item.get("opaque_id") not in dependency_ids
         and item.get("opaque_id") not in context_ids
     ]
     policy_profile = getattr(args, "profile", "local-pilot-v1")
@@ -934,6 +943,7 @@ def _scan_execution_baseline(
         skillsrc_authority=build_skillsrc_authority_receipt((project / ".skillsrc").read_bytes()),
         execution_file_ids=execution_ids,
         parent_build_file_ids=parent_ids,
+        proved_dependency_file_ids=dependency_ids,
         context_file_ids=context_ids,
         policy_profile=policy_profile,
         **runtime_facts,
@@ -1273,6 +1283,10 @@ def _scan(args: Any) -> int:
         module_root, module = _resolve_scan_module(project, getattr(args, "module", None), skillsrc_document)
         module_path = module_root.resolve().relative_to(project).as_posix() or "."
         scope["module"] = module_path
+        from tools.module_ids import legacy_warning
+
+        legacy_module = legacy_warning(module, getattr(args, "module", None))  # P6a: --module in the old hex form
+        task_files = _outside_task_files(project, module_root, getattr(args, "docs", None))
         append_event(
             run_root,
             "MODULE_SELECTED",
@@ -1284,6 +1298,7 @@ def _scan(args: Any) -> int:
             module_root,
             skill_pack_root=_scan_skill_pack_root(project),
             generated_roots=(project / ".pilot-runs",),
+            proved_dependency_files=task_files,
         )
         prefix = "" if module_path == "." else module_path + "/"
         scope["parent_files"] = [item["project_path"] for item in inventory["files"] if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
@@ -1293,6 +1308,7 @@ def _scan(args: Any) -> int:
         exclusion_receipt = frozen["exclusions"]
         task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
             frozen_inventory, project, getattr(args, "docs", None))
+        context_warnings = [*context_warnings, *([legacy_module] if legacy_module else [])]
         attempt = create_attempt(
             run_root,
             {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
@@ -1385,12 +1401,25 @@ def _skillsrc_defaults(project: Path, module: Mapping[str, Any]) -> dict[str, An
         f"фреймворка; проверьте, что тесты модуля на {framework}, иначе исправьте .skillsrc"]}
 
 
-TASK_DOC_FIX = ("выберите модуль, внутри которого лежит документ (например, корневой --module <ID>), и сузьте --target на нужный "
-                "подмодуль; или положите документ внутрь модуля")
+TASK_DOC_FIX = ("документ задачи должен лежать внутри проекта, вне исключённых папок (.git, build, node_modules и т. п.), "
+                "быть текстом без секретов и не лежать в самом пакете: перенесите его или уберите названную причину")
 
 
 def _under_to_do(project_path: str) -> bool:
     return "to_do" in project_path.split("/")[:-1]
+
+
+def _outside_task_files(project: Path, module_root: Path, docs: list[str] | None) -> list[Path]:
+    """P6a: the task documents of --docs that lie in the project outside the module (the root of a multi-module project):
+    they join the inventory as parent files, bound by its digest, and are read as documents only.  One the rules of the
+    inventory leave out stops the scan with its rule."""
+    from tools.project_inventory import outside_task_documents
+
+    files, problems = outside_task_documents(project, module_root, [row["path"] for row in _docs_entries(project, docs)],
+                                             skill_pack_root=_scan_skill_pack_root(project))
+    for path, problem in problems.items():
+        raise HostStop("TASK_DOC_OUTSIDE_CONTEXT", f"документ задачи {path} не может войти в inventory: {problem}", TASK_DOC_FIX)
+    return files
 
 
 def _task_document_scope(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> tuple[list[str], set[str], dict[str, Any], list[str]]:
@@ -1458,7 +1487,33 @@ def _resolve_host_context(
     return execution_root, language, module
 
 
-def _read_run_coordinate(project: Path, run_id: str) -> tuple[Path, Mapping[str, Any], Mapping[str, Any]]:
+def _moved_project_note(project: Path, root: Path) -> dict[str, Any] | None:
+    """P6a: ``None`` when the run was made at ``project``; else what to tell about the moved project (code, paths, fix)."""
+    from tools.pilot_state import run_project_move
+
+    move = run_project_move(project, root)
+    if move is None:
+        return None
+    where = f"прогон создан в {move['recorded']}, сейчас проект в {move['current']}"
+    if move["same_structure"]:
+        fix = (f"проект перенесён: {where}. status и report работают и здесь; finish и exec — только там, где создан прогон, "
+               "а здесь — новый scan")
+    else:
+        shown = ", ".join(move["missing"][:5]) + (" и др." if len(move["missing"]) > 5 else "")
+        fix = (f"проект перенесён: {where}, но состав файлов другой (нет: {shown or 'опись прогона не читается'}). "
+               "Откройте папку, где создан прогон, или начните новый scan здесь")
+    return {"code": "PROJECT_MOVED", "recorded": move["recorded"], "current": move["current"],
+            "same_structure": move["same_structure"], "fix": fix}
+
+
+def _with_moved_note(payload: dict[str, Any], project: Path, root: Path) -> dict[str, Any]:
+    note = _moved_project_note(project, root)
+    if note is None:
+        return payload
+    return {**payload, "warnings": [*payload.get("warnings", []), f"PROJECT_MOVED: {note['fix']}"], "project_moved": note}
+
+
+def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = False) -> tuple[Path, Mapping[str, Any], Mapping[str, Any]]:
     from tools.pilot_state import derive_state, read_run
 
     project = Path(project).resolve()
@@ -1470,12 +1525,14 @@ def _read_run_coordinate(project: Path, run_id: str) -> tuple[Path, Mapping[str,
         run = read_run(root)
         state = derive_state(root)
     except (OSError, ValueError, KeyError) as error:
-        raise HostStop("EXECUTION_COORDINATES", "pilot run root is unreadable or outside this project") from error
+        note = _moved_project_note(project, root)  # P6a: the run is there, but the project is not where it was made
+        raise HostStop("EXECUTION_COORDINATES", "pilot run root is unreadable or outside this project",
+                       note["fix"] if note else None) from error
     manifest = run.get("manifest")
     if (
         root.parent != expected_parent
         or not isinstance(manifest, Mapping)
-        or manifest.get("project") != str(project)
+        or (manifest.get("project") != str(project) and not allow_moved)
         or run_id != manifest.get("run_id")
         or root.name != run_id
         or not isinstance(state, Mapping)
@@ -2544,29 +2601,33 @@ def cmd_report(args: Any) -> int:
     """FaT-6: write the run report and the analyst questions; only reads the journal."""
     from tools.run_report import GUARANTEE, write_report
 
+    from tools.pilot_state import moved_project_allowed
+
     project = Path(args.project).resolve()
-    _root, run, _state = _read_run_coordinate(project, args.run)
-    written = {Path(path).name: path for path in write_report(project, run["manifest"]["run_id"])}
-    _print({"status": "ok", "stage": "report", "run_id": run["manifest"]["run_id"], "report_md": written["report.md"],
-            "report_json": written["report.json"], "questions": written["questions-for-analyst.md"], "guarantee": GUARANTEE})
+    with moved_project_allowed():  # P6a: a moved project's run is read, never rewritten
+        root, run, _state = _read_run_coordinate(project, args.run, allow_moved=True)
+        written = {Path(path).name: path for path in write_report(project, run["manifest"]["run_id"])}
+    _print(_with_moved_note({"status": "ok", "stage": "report", "run_id": run["manifest"]["run_id"], "report_md": written["report.md"],
+                             "report_json": written["report.json"], "questions": written["questions-for-analyst.md"],
+                             "guarantee": GUARANTEE, "warnings": []}, project, root))
     return 0
 
 
 def cmd_status(args: Any) -> int:
-    from tools.pilot_state import closure_cache
+    from tools.pilot_state import closure_cache, moved_project_allowed
     from tools.project_inventory import inventory_cache
 
     project = Path(args.project).resolve()
     # FaT-ST: one block, so the run manifest is validated and the journal derived once; the answer is printed after
     # the block's final full journal check.  FaT-AU4: and the module's inventory built once.
-    with closure_cache(), inventory_cache():
+    with moved_project_allowed(), closure_cache(), inventory_cache():  # P6a: status of a moved project works (the final check of closure_cache too)
         result = _status_result(project, args.run)
     _print(result)
     return 0
 
 
 def _status_result(project: Path, run_id: str) -> dict[str, Any]:
-    root, run, state = _read_run_coordinate(project, run_id)
+    root, run, state = _read_run_coordinate(project, run_id, allow_moved=True)
     result = _durable_status(project, root, stage="status")
     attempt = state["attempts"][-1] if state["attempts"] else None
     if attempt is not None:
@@ -2580,7 +2641,7 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
             pass
     elif attempt is not None:
         result.update(_status_drift(project, root, run["manifest"], attempt))
-    return result
+    return _with_moved_note(result, project, root)
 
 
 def run_phase_one_spine(project: Path, policy_profile: str, authorization: Mapping[str, Any], identity: Mapping[str, Any], baseline: Mapping[str, Any], facts: Mapping[str, Any]) -> Mapping[str, Any]:

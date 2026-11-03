@@ -300,10 +300,73 @@ def _validate_authorization(policy_profile: str, authorization: Mapping[str, Any
     return dict(authorization)
 
 
+# P6a: status and report read a run of a project that was moved or renamed.  The manifest keeps the absolute path of the folder
+# where the run was made; inside this block a different path is accepted when the files of the frozen inventories are all there.
+_MOVED_PROJECT: contextvars.ContextVar[dict[Any, Any] | None] = contextvars.ContextVar("pilot_moved_project", default=None)
+
+
+@contextmanager
+def moved_project_allowed():
+    token = _MOVED_PROJECT.set({})
+    try:
+        yield
+    finally:
+        _MOVED_PROJECT.reset(token)
+
+
+def run_project_move(project: Path, run_root: Path) -> dict[str, Any] | None:
+    """P6a: ``None`` when the run was made at ``project``; else ``{"recorded", "current", "same_structure", "missing"}``.
+
+    The structure is the same when the run has frozen inventories, they read back whole (their own digest), and every file
+    they list is in ``project`` at the same relative path.  Contents are not compared here: a changed file is a drift,
+    which status reports as before.  Only reads."""
+    from tools.project_inventory import InventoryError, read_inventory_receipt
+
+    project, root = Path(project).resolve(), Path(run_root)
+    try:
+        recorded = json.loads((root / "run-manifest.json").read_bytes().decode("utf-8")).get("project")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(recorded, str) or recorded == str(project):
+        return None
+    missing: list[str] = []
+    paths = sorted((root / "inventories").glob("*.json")) if (root / "inventories").is_dir() else []
+    same = bool(paths)
+    for path in paths:
+        try:
+            files = [str(row["project_path"]) for row in read_inventory_receipt(path)["files"]]
+        except (InventoryError, OSError, KeyError, TypeError, ValueError):
+            same = False
+            continue
+        for rel in files:
+            if rel not in missing and (Path(rel).is_absolute() or ".." in Path(rel).parts or not (project / rel).is_file()):
+                missing.append(rel)
+    return {"recorded": recorded, "current": str(project), "same_structure": same and not missing, "missing": sorted(missing)}
+
+
+def _moved_project_ok(project: Path, root: Path) -> bool:
+    cache = _MOVED_PROJECT.get()
+    if cache is None:
+        return False
+    key = (str(project), str(root))
+    if key not in cache:
+        move = run_project_move(project, root)
+        cache[key] = bool(move and move["same_structure"])
+        if cache[key]:
+            cache[("recorded", str(project))] = move["recorded"]
+    return cache[key]
+
+
+def _moved_recorded(project: Path) -> str | None:
+    """The project path the run was made at, inside moved_project_allowed() once the run was found to be a moved project's."""
+    cache = _MOVED_PROJECT.get()
+    return None if cache is None else cache.get(("recorded", str(project)))
+
+
 def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     manifest = _read_artifact(project, root, root / "run-manifest.json", "run manifest")
     receipt = _read_artifact(project, root, root / "run-authorization-receipt.json", "authorization receipt")
-    if manifest.get("run_id") != root.name or manifest.get("project") != str(project):
+    if manifest.get("run_id") != root.name or (manifest.get("project") != str(project) and not _moved_project_ok(project, root)):
         raise ValueError("invalid run boundary")
     # FaT-RL: unique dirty paths are checked here, not by the schema's uniqueItems — quadratic on a large dirty tree
     state = manifest.get("project_state")
@@ -1456,7 +1519,13 @@ def module_selection_digest(project: Path, module: str) -> str:
 
 def _module_selection_is_bound(project: Path, events: list[dict[str, Any]], module: str) -> bool:
     selected = [event for event in events if event["event_type"] == "MODULE_SELECTED"]
-    return len(selected) == 1 and selected[0].get("artifact_digest") == module_selection_digest(project, module)
+    if len(selected) != 1:
+        return False
+    if selected[0].get("artifact_digest") == module_selection_digest(project, module):
+        return True
+    recorded = _moved_recorded(project)  # P6a: the digest binds the path where the run was made
+    return recorded is not None and selected[0].get("artifact_digest") == _digest(
+        {"schema_version": "1.0.0", "project": recorded, "module": _module(_project_root(project), module)})
 
 
 def _validate_attempt_record(

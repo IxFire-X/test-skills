@@ -104,6 +104,28 @@ def verify_release_manifest(root: Path, manifest: Mapping[str, Any]) -> dict[str
     return value
 
 
+def crlf_converted(root: Path) -> list[str]:
+    """P6a: the runtime files whose bytes differ from the manifest only by line endings — the same bytes after CRLF -> LF.
+
+    git with autocrlf (the default on Windows) turns LF into CRLF at checkout.  The byte check itself stays as it is; this
+    only tells a changed line ending from a changed file, for the person who reads the doctor's answer."""
+    root = Path(root).resolve()
+    try:
+        registry = load_json_strict(root / "release" / "manifest.json").get("registry")
+    except (OSError, UnicodeDecodeError, StrictJsonError, AttributeError):
+        return []
+    found = []
+    for row in registry if isinstance(registry, list) else []:
+        try:
+            data = (root / str(row["path"])).read_bytes()
+            expected = row["digest"]
+        except (OSError, KeyError, TypeError):
+            continue
+        if _digest_bytes(data) != expected and _digest_bytes(data.replace(b"\r\n", b"\n")) == expected:
+            found.append(str(row["path"]))
+    return sorted(found)
+
+
 def load_release_manifest(root: Path) -> dict[str, Any]:
     """Read and verify the persisted machine-authoritative release manifest."""
     root = root.resolve()

@@ -387,6 +387,64 @@ def skillsrc_context(project_root: Path, module_root: Path) -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def task_document_problem(project_root: Path, project_path: str, *, skill_pack_root: Path | None = None) -> str | None:
+    """P6a: why a task document outside the module cannot join the inventory, or None.  The rules are those of the walk of the
+    module (excluded folders, binary and generated files, secrets) and of a proved dependency (no link, not the package)."""
+    root = Path(project_root).absolute()
+    parts = Path(project_path).parts
+    current = root
+    for part in parts:
+        current /= part
+        if _is_reparse(current):
+            return f"симлинк или reparse-точка: {project_path}"
+    path = root.joinpath(*parts)
+    if not path.is_file():
+        return f"нет такого файла: {project_path}"
+    resolved = path.resolve()
+    if skill_pack_root is not None and Path(skill_pack_root).resolve() in (resolved, *resolved.parents):
+        return f"исключён правилом skill-pack-root-v1: {project_path}"
+    if parts[0] == ".pilot-runs":
+        return f"исключён правилом pipeline-state-root-v1: {project_path}"
+    reason = path_reason(parts[:-1])
+    if reason is not None:
+        return f"исключён правилом {reason[1]}: {project_path}"
+    if path.suffix.casefold() in _GENERATED_SUFFIXES or _is_binary_or_generated(path):
+        return f"исключён правилом binary-generated-v1: {project_path}"
+    secret = _secret_rule(path, b"", project_path)
+    if secret is None:
+        try:
+            contents = path.read_bytes()
+        except OSError:
+            return f"файл не читается: {project_path}"
+        if b"\0" in contents[:8192]:
+            return f"исключён правилом binary-content-v1: {project_path}"
+        secret = _secret_rule(path, contents, project_path)
+    if secret is not None:
+        return f"исключён правилом {secret[0]}: {project_path}"
+    return None
+
+
+def outside_task_documents(project_root: Path, module_root: Path, project_paths: Iterable[str], *,
+                           skill_pack_root: Path | None = None) -> tuple[list[Path], dict[str, str]]:
+    """P6a: ``(files, problems)`` — of the task documents (paths from the project root) those that lie in the project outside
+    the module and its context roots: the files join the inventory as proved dependency files (read as documents, never as
+    code of the module), the problems say, by path, why one cannot."""
+    project, module = Path(project_root).resolve(), Path(module_root).resolve()
+    module_path = module.relative_to(project).as_posix()
+    context = tuple(_relative(project, root) + "/" for root in skillsrc_context(project, module))
+    files: list[Path] = []
+    problems: dict[str, str] = {}
+    for rel in project_paths:
+        if module_path == "." or rel.startswith(module_path + "/") or rel.startswith(context):
+            continue  # the walk of the module or of its context decides
+        problem = task_document_problem(project, rel, skill_pack_root=skill_pack_root)
+        if problem is None:
+            files.append(project / Path(rel))
+        else:
+            problems[rel] = problem
+    return files, problems
+
+
 def _skillsrc_paths(project_root: Path, module_root: Path, key: str) -> tuple[str, ...]:
     path = Path(project_root) / ".skillsrc"
     if not path.is_file():

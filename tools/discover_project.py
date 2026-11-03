@@ -22,6 +22,7 @@ if __package__:
         manifest_language,
     )
     from .schema_validation import StrictJsonError, load_json_strict
+    from .module_ids import legacy_module_id, module_id_for
 else:
     from stack_catalog import (
         GO_FRAMEWORK_MARKERS,
@@ -38,6 +39,7 @@ else:
         manifest_language,
     )
     from schema_validation import StrictJsonError, load_json_strict
+    from module_ids import legacy_module_id, module_id_for
 
 WORKSPACE_MANIFESTS = {"settings.gradle", "settings.gradle.kts", "go.work"}
 MARKERS = {"python": (PYTHON_FRAMEWORK_MARKERS, PYTHON_TEST_MARKERS, "pip"), "java": (JAVA_FRAMEWORK_MARKERS, JAVA_TEST_MARKERS, "maven"), "typescript": (JS_FRAMEWORK_MARKERS, JS_TEST_MARKERS, "npm"), "go": (GO_FRAMEWORK_MARKERS, GO_TEST_MARKERS, "go-mod")}
@@ -117,8 +119,16 @@ def _safe_parse(root: Path, manifests: Sequence[Path]) -> tuple[dict[Path,Any],l
         except (json.JSONDecodeError, tomllib.TOMLDecodeError, ET.ParseError, StrictJsonError, ValueError): errors.append(f"invalid manifest: {_rel(root,p)}")
     return parsed,errors
 def _id(rel: str) -> str:
-    if rel==".": return "root"
-    return "root--"+"--".join(part.encode("utf-8").hex() for part in rel.split("/"))
+    return module_id_for(rel)
+def _declared_legacy_ids(root: Path) -> dict[str,str]:
+    """P6a: the old hex ids an existing .skillsrc already uses stay the ids of those folders — the file is not rewritten and its
+    modules are not taken for removed ones."""
+    try:
+        import yaml
+        modules=yaml.safe_load((root/".skillsrc").read_text(encoding="utf-8")).get("modules",[])
+    except (ImportError, OSError, ValueError, AttributeError, yaml.YAMLError): return {}
+    if not isinstance(modules,list): return {}
+    return {m["root"]:m["id"] for m in modules if isinstance(m,dict) and isinstance(m.get("root"),str) and m.get("id")==legacy_module_id(m["root"])}
 def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
     return {"id":f"module:{mid}:{field}","field":f"modules.{mid}.{field}","impact":"Определяет шаблон генерации и средство запуска тестов","options":[{"id":v,"value":v,"evidence":sorted(values[v])} for v in sorted(values)]}
 def _test_values(lang: str, texts: Mapping[str, str]) -> dict[str, list[str]]:
@@ -305,12 +315,12 @@ def analyze_module_roots(root:Path, manifests:Sequence[Path])->tuple[list[dict[s
     by={}
     for p in parsed:
         if p.name not in WORKSPACE_MANIFESTS: by.setdefault(p.parent,[]).append(p)
-    modules=[]; qs=[]; unresolved=set()
+    modules=[]; qs=[]; unresolved=set(); declared=_declared_legacy_ids(root)
     for base,owned in sorted(by.items(),key=lambda x:_rel(root,x[0])):
         # A workspace declaration with no real confined code is evidence-only even when nested.
         all_here=[p for p in parsed if p.parent==base]
         if any(_refs(p,parsed[p]) for p in all_here) and not _has_code(root,base): continue
-        rel=_rel(root,base); mid=_id(rel); languages={}
+        rel=_rel(root,base); mid=declared.get(rel) or _id(rel); languages={}
         for p in owned:
             lang=manifest_language(p.name); languages.setdefault(lang,[]).append(f"{_rel(root,p)}:manifest")
         stack={}

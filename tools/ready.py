@@ -81,8 +81,9 @@ def check_pack() -> dict[str, Any]:
     if report.get("status") == "PASS":
         return _row("pack", CASES, "OK", "пакет цел (doctor PASS)")
     missing = report.get("integrity", {}).get("missing") or []
+    crlf = report.get("crlf")  # P6a: only the line endings differ — the fix is the .gitattributes line, not a new copy of the package
     return _row("pack", CASES, "STOP", "doctor: " + "; ".join([*map(str, missing), *map(str, report.get("messages") or [])]),
-                "сверьте папку пакета с поставкой (файлы и SHA-256)", {"doctor": report})
+                crlf["fix"] if isinstance(crlf, dict) else "сверьте папку пакета с поставкой (файлы и SHA-256)", {"doctor": report})
 
 
 def check_git(project: Path) -> dict[str, Any]:
@@ -208,8 +209,10 @@ def proposed_modules(project: Path, selected: str | None = None) -> list[dict[st
 
 def select_module(modules: Sequence[Mapping[str, Any]], module_id: str | None) -> tuple[Mapping[str, Any] | None, str | None]:
     if module_id is not None:
-        found = [module for module in modules if module.get("id") == module_id]
-        return (found[0], None) if found else (None, f"модуля {module_id} нет; есть: {', '.join(str(m.get('id')) for m in modules)}")
+        from tools.module_ids import select
+
+        found = select(modules, module_id)  # P6a: the exact id first, then the id of the folder in its current or old form
+        return (found, None) if found is not None else (None, f"модуля {module_id} нет; есть: {', '.join(str(m.get('id')) for m in modules)}")
     if len(modules) == 1:
         return modules[0], None
     return None, f"модулей несколько: {', '.join(str(m.get('id')) for m in modules)}" if modules else "модулей нет"
@@ -219,11 +222,28 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     module, problem = select_module(_modules(project, module_id), module_id)
     if module is None:
         return _row("module", CASES, "STOP", str(problem), "укажите --module <ID> из списка"), None
+    from tools.module_ids import legacy_warning
+
+    legacy = legacy_warning(module, module_id)
+    if legacy is not None:  # P6a: the old hex id works; the row says what to write instead
+        return _row("module", CASES, "WARN", f"модуль {module.get('id')} ({module.get('root')}); {legacy}",
+                    legacy.split("пишите ", 1)[1]), module
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
 
 
-def check_scan(project: Path, module: Mapping[str, Any]) -> tuple[dict[str, Any], Mapping[str, Any]]:
-    from tools.project_inventory import build_inventory
+def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
+    """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business)."""
+    rels = []
+    for raw in docs:
+        candidate = Path(raw)
+        path = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        if path.is_file() and path.is_relative_to(root):
+            rels.append(path.relative_to(root).as_posix())
+    return rels
+
+
+def check_scan(project: Path, module: Mapping[str, Any], docs: Sequence[str] = ()) -> tuple[dict[str, Any], Mapping[str, Any]]:
+    from tools.project_inventory import build_inventory, outside_task_documents
     from tools.scan_rules import exclusion_summary
 
     root = Path(project).resolve()
@@ -233,7 +253,10 @@ def check_scan(project: Path, module: Mapping[str, Any]) -> tuple[dict[str, Any]
     except ValueError:
         pack = None
     started = time.monotonic()
-    inventory = build_inventory(root, module_root, skill_pack_root=pack, generated_roots=(root / ".pilot-runs",))
+    # P6a: a task document outside the module (the root of a multi-module project) joins the inventory, as in scan
+    outside, _problems = outside_task_documents(root, module_root, _docs_rels(root, docs), skill_pack_root=pack)
+    inventory = build_inventory(root, module_root, skill_pack_root=pack, generated_roots=(root / ".pilot-runs",),
+                                proved_dependency_files=outside)
     seconds = round(time.monotonic() - started, 2)
     summary = exclusion_summary(inventory["exclusions"], module_root.relative_to(root).as_posix() or ".")
     details = {"files": len(inventory["files"]), "bytes": sum(int(item["size"]) for item in inventory["files"]), "seconds": seconds,
@@ -272,17 +295,22 @@ def check_context(project: Path, module: Mapping[str, Any], docs: Sequence[str],
 
 def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequence[str], inventory: Mapping[str, Any]) -> None:
     """FaT-3: a document of --docs outside the module's inventory never reaches the model — the same stop as scan."""
+    from tools.project_inventory import outside_task_documents
     from tools.run_pipeline import TASK_DOC_FIX, _exclusion_note
 
     root = Path(project).resolve()
     paths = {str(item["project_path"]) for item in inventory["files"]}
+    module_root = (root / str(inventory.get("module") or ".")).resolve()
+    _files, problems = outside_task_documents(root, module_root, _docs_rels(root, docs))
     for raw in docs:
         row = next((item for item in rows if item["id"] == f"docs:{raw}"), None)
         if row is None or row["level"] != "OK":
             continue
         candidate = Path(raw)
         relative = (candidate if candidate.is_absolute() else root / candidate).resolve().relative_to(root).as_posix()
-        if relative not in paths:
+        if relative in problems:  # P6a: outside the module, left out by a rule of the inventory
+            row.update(level="STOP", fix=TASK_DOC_FIX, message=f"{raw}: документ задачи не может войти в inventory: {problems[relative]} — модель его не получит")
+        elif relative not in paths:
             row.update(level="STOP", fix=TASK_DOC_FIX,
                        message=f"{raw}: документ задачи не входит в inventory выбранного модуля{_exclusion_note(inventory, relative)} — модель его не получит")
 
@@ -483,7 +511,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
         rows.append(module_row)
         if selected is not None:
             try:
-                scan_row, inventory = check_scan(project, selected)
+                scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
                 check_task_documents(rows, project, docs, inventory)
                 rows.append(check_context(project, selected, docs, inventory, target))
