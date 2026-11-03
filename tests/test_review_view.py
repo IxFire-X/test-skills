@@ -595,3 +595,22 @@ def test_the_autotest_view_keeps_the_canonical_requirements_the_cases_link() -> 
     canonical = "\n".join(row["text"] for row in document["requirements"])
     unique = [row["text"] for row in document["source_requirements"] if row["text"] not in canonical]
     assert unique and not [text for text in unique if text in view]  # a source text kept as a canonical one stays
+
+
+@pytest.mark.parametrize(("text", "value", "hinted"), [
+    ("Отправить форму, где firstName — тремя пробелами, city Testville", {"firstName": "   ", "city": "Testville"}, False),  # P9: invisible in text
+    ("Открыть форму (GET /owners/{ownerId}/pets/100000/visits/new)", "/owners/{ownerId}/pets/{petId}/visits/new", False),
+    ("Открыть карточку (GET /owners/{ID})", "/owners/{ownerId}", False),
+    ("Открыть карточку (GET /pets/{ID})", "/owners/{ownerId}", True),  # a route the step does not name is still a hint
+    ("Отправить форму", {"firstName": "   ", "city": "Zebra-City"}, True),  # a blank value is skipped, the other leaf still counts
+])
+def test_blank_values_and_route_templates_are_not_false_mismatches(text: str, value, hinted: bool) -> None:
+    from tools.review_view import data_mismatches
+
+    document = _example()
+    _case, step = _mvc_step(document)
+    item = copy.deepcopy(step["inputs"][0])
+    item["source"]["value"] = value
+    item["target"]["sensitive"] = False
+    step.update(action=text, test_data="—", inputs=[item])
+    assert bool([hint for hint in data_mismatches(document) if hint["step_id"] == step["step_id"]]) is hinted

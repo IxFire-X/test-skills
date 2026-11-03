@@ -45,6 +45,7 @@ DATA_MISMATCH = "CV_DATA_MISMATCH"
 NO_END_TO_END = "CV_NO_END_TO_END"
 MIN_LITERAL = 3
 LITERAL_LIMIT = 200
+_PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 _NUMERIC = re.compile(r"^-?\d+(?:[.,]\d+)?$")
 HINT_LIMIT = 50
 _SHOWN = 3
@@ -159,6 +160,10 @@ def _numbers_in_words(text: str) -> set[int]:
 def _named(leaf: str, text: str) -> bool:
     """FaT-CV2 (2.10): a number of any length is named only as a whole token (17 is not in 170 or 1.17), FaT-NW: or as a
     Russian numeral of the same integer value; other text from MIN_LITERAL."""
+    if not leaf.strip():  # P9: a blank value (three spaces) cannot be named literally — the text says «пробелы»
+        return True
+    if _PLACEHOLDER.search(leaf):  # P9: a route template — its fixed parts are named, the placeholder is a value of another input
+        return all(part in text for part in _PLACEHOLDER.split(leaf) if part.strip())
     if _NUMERIC.fullmatch(leaf):
         if re.search(rf"(?<!\d)(?<!\d[.,]){re.escape(leaf)}(?!\d)(?![.,]\d)", text) is not None:
             return True
