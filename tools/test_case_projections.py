@@ -113,7 +113,7 @@ def _markdown_subject(subject: dict[str, Any]) -> str:
 
 def _reject_unknown_profile(profile: str) -> None:
     if profile not in _PROFILES:
-        raise ValueError(f"unknown Zephyr CSV profile: {profile}")
+        raise ValueError(f"ZEPHYR_CSV_PROFILE: unknown Zephyr CSV profile: {profile}; known: {', '.join(sorted(_PROFILES))}")
 
 
 def _trailing_json(value: str) -> tuple[str, str | None]:

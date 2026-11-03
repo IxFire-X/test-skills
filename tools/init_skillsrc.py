@@ -420,23 +420,23 @@ def _preserve_immutable_evidence(project_root: Path, directory: Path | None, ori
     try:
         relative = directory.absolute().relative_to(project)
     except ValueError as error:
-        raise InitError("evidence_write_error", "immutable evidence directory escapes project") from error
+        raise InitError("evidence_write_error", "immutable evidence directory escapes project: the directory must lie inside the project") from error
     probe = project
     for part in relative.parts:
         probe /= part
         if not probe.exists() or _is_reparse(probe):
-            raise InitError("evidence_write_error", "immutable evidence directory is unsafe")
+            raise InitError("evidence_write_error", "immutable evidence directory is missing or is a link: create a plain directory inside the project")
     directory = directory.resolve(strict=True)
     if not directory.is_dir():
-        raise InitError("evidence_write_error", "immutable evidence directory is unsafe")
+        raise InitError("evidence_write_error", "immutable evidence directory is not a directory: name a directory, not a file")
     destination = directory / (hashlib.sha256(original).hexdigest() + ".skillsrc")
     try:
         create_confined_bytes_exclusive(project, directory, destination, original)
         read_back = read_confined_bytes(project, directory, destination)
     except (OSError, OutputConfinementError, ValueError) as error:
-        raise InitError("evidence_write_error", "immutable evidence write failed") from error
+        raise InitError("evidence_write_error", "immutable evidence write failed: the evidence file exists already or the directory is not writable") from error
     if read_back != original:
-        raise InitError("evidence_write_error", "immutable evidence read-back failed")
+        raise InitError("evidence_write_error", "immutable evidence read-back failed: the file written differs from the original")
 
 
 def atomic_write_skillsrc(project_dir: Path, destination: Path, document: Mapping[str, Any], expected_fingerprint: str, expected_destination: bytes | None, *, before_replace: Any = None) -> bytes:

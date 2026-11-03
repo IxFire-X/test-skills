@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from tools.fixes import delete_field_fix
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
 
@@ -2147,7 +2148,34 @@ def publish_model_request(
         batch_id=batch_id, stage_instance_id=stage_instance_id,
         artifact_digest=receipt["digest"],
     )
-    return read_model_request(root, attempt_id, stage_instance_id, receipt["digest"])
+    published = dict(read_model_request(root, attempt_id, stage_instance_id, receipt["digest"]))
+    if not str(model_id or "").startswith("controller:"):  # the merge by the code is no model step
+        warning, measure_error = _record_step_size(project, root, run_id, stage_instance_id)
+        if warning is not None:  # P1: a warning, never a refusal
+            published["step_warning"] = warning
+        if measure_error is not None:  # nor is a measurement that failed silent
+            published["step_measure_error"] = measure_error
+    return published
+
+
+def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id: str) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
+    """P1: the measurement of the step the request has just fixed, appended to ``step-sizes.jsonl`` (the report's section) —
+    the same measure ``tools.step_size --run --stage`` makes, by the code at the one place every request passes, for every
+    stage whose inputs the journal resolves.  Returns ``(warning, error)``: STEP_OVER_BUDGET is a warning and a measurement
+    that cannot be taken or written is named (class of the error), neither stops the request."""
+    from tools import step_size
+
+    stage = stage_instance_id.split(":", 1)[0]
+    try:
+        found = step_size.request_files(root, stage_instance_id) if stage in step_size._REQUEST_STAGES else step_size.stage_inputs(root, stage_instance_id)
+        report = step_size.measure(project, [Path(row["path"]) for row in found["files"]], stage,
+                                   extra_bytes=sum(row["bytes"] for row in found["bindings"]))
+        step_size.record(project, run_id, stage_instance_id, report)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as error:
+        return None, {"code": "STEP_MEASURE_FAILED", "error": type(error).__name__}
+    if report["fits"]:
+        return None, None
+    return {"code": step_size.OVER_BUDGET, "bytes": report["bytes"], "budget_bytes": report["budget_bytes"], "hint": report["hint"]}, None
 
 
 def _read_model_request_with_state(
@@ -2392,6 +2420,11 @@ def _publish_model_stage_artifact(
         and event.get("event_type") == "MODEL_REQUESTED"
     ]
     filled: list[str] = []
+    normalized: list[str] = []
+    if stage_instance_id.startswith("tc-generator:"):  # P1: the order of requirement_ids and categories is the code's work, as in validate-fragment
+        from tools.batch_assembly import normalize_fragment
+
+        value, normalized = normalize_fragment(value)
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
@@ -2434,7 +2467,8 @@ def _publish_model_stage_artifact(
         raise ModelResponseDigestMismatch(
             f"MODEL_RESPONSE_DIGEST_MISMATCH: {stage_instance_id}: "
             + "; ".join(f"{pointer}: дан {given}, ожидается {expected} — {source}" for pointer, given, expected, source in mismatches)
-            + "; fix: это ошибка ответа — исправь поля и отдай ответ единственным повтором стадии (--transport-attempts 2), ничего не записано"
+            + "; fix: " + delete_field_fix(", ".join(pointer for pointer, *_rest in mismatches))
+            + "; это ошибка ответа — отдай его единственным повтором стадии (--transport-attempts 2), ничего не записано"
         )
     # FaT-SN: source requirements follow their documents; only a new answer is checked, journals already written read as before
     misplaced = _requirement_order_rows(stage_instance_id, value)
@@ -2458,8 +2492,10 @@ def _publish_model_stage_artifact(
                                   _accepted_earlier_fragments(project, root, state, attempt_id, published[0], stage_instance_id.split(":", 1)[1]),
                                   imported=_imported_for_answer(project, root, state, attempt_id, stage_instance_id.split(":", 1)[1], request))
         except BatchAssemblyError as error:
-            raise BatchAssemblyError(error.code, str(error).split(": ", 1)[1] + "; fix: исправь фрагмент и отдай его единственным "
-                                     "повтором стадии (--transport-attempts 2), ничего не записано") from error
+            retry = "отдай исправленный фрагмент единственным повтором стадии (--transport-attempts 2), ничего не записано"
+            rows = getattr(error, "diagnostics", ())  # P1: the whole list, each row with its fix
+            raise BatchAssemblyError(error.code, error.detail + "; fix: исправь фрагмент и " + retry, rows,
+                                     (getattr(error, "fix", None) + "; " if getattr(error, "fix", None) else "исправь фрагмент и ") + retry) from error
     if stage_instance_id.startswith("context-marker:"):
         _validate_context_marker_sources(project, root, state, attempt, request, value)
     if stage_instance_id == "context-marker:requirements":
@@ -2503,6 +2539,8 @@ def _publish_model_stage_artifact(
                      warning=output_warning(project, measured))
     if filled:  # audit U2: what the code put into the answer
         published["filled"] = filled
+    if normalized:  # P1: what the code put in order
+        published["normalized"] = normalized
     return published
 
 
@@ -2649,7 +2687,9 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
     state = derive_state(root)
     attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
     value = dict(session)
-    if attempt is None or attempt["state"] == "TERMINAL" or schema_diagnostics(value, _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT):
+    if attempt is not None and attempt["state"] == "TERMINAL":  # P1: not a bare ValueError — the attempt is closed
+        raise ValueError(f"ATTEMPT_TERMINAL: the attempt {attempt_id} is closed; a reviewer session ledger needs an open attempt")
+    if attempt is None or schema_diagnostics(value, _SCHEMA_ROOT / "reviewer-session.schema.json", _PACK_ROOT):
         raise ValueError("invalid reviewer session ledger")
     digest = value.get("digest")
     session_body = {key: item for key, item in value.items() if key != "digest"}

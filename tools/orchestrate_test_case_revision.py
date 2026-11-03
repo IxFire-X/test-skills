@@ -19,6 +19,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
+from tools.fixes import FIXES
 from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
@@ -1057,13 +1058,7 @@ def _read_existing_context_receipts(paths: Sequence[Path], run_root: Path, attem
     return result
 
 
-_FIXES = {  # FaT-10d
-    "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
-                            "REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json` и вызови select без --review; вердикт уже записан — "
-                            "начни новый прогон (scan --new-run) и строй session-start командой `tools.api session-start`",
-    "ORCHESTRATION_RECEIPT_SHAPE": "--candidate-receipt — файл candidate_bundle_receipt из вывода publish (его поля как есть)",
-    "REVIEWER_PROTOCOL": "входы не совпадают с журналом: передай те же файлы, что open-session, и сессию из `tools.api complete-review`",
-}
+_FIXES = {code: FIXES[code] for code in ("REVIEW_CONTEXT_LIMIT", "ORCHESTRATION_RECEIPT_SHAPE", "REVIEWER_PROTOCOL")}  # FaT-10d; P1: the texts live in tools.fixes
 
 
 # FaT-U5: the old command names stay until the release to testers; tools.api is the one CLI of the review layer

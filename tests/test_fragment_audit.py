@@ -32,15 +32,20 @@ def _fixed(fragment: dict) -> dict:
     return _resealed(fixed)
 
 
-def test_the_doc_only_batch_1_answer_is_refused_with_the_code_assemble_gave(tmp_path: Path) -> None:
-    """run-doc-only c1f13463…: validate-fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER."""
-    from tools.batch_assembly import BatchAssemblyError, validate_fragment
+def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code_and_assemble_still_refuses_the_raw_one(tmp_path: Path) -> None:
+    """run-doc-only c1f13463…: validate-fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER.
+    P1: the order is the code's work — validate-fragment (and model-response) put the categories in V3 order and say so; the rule
+    stays: assemble of a document that was not put in order is refused."""
+    from tools.batch_assembly import BatchAssemblyError, normalize_fragment, validate_fragment
+    from tools.canonical_document import validate_canonical_document
 
     fragment, plan, header = _load("doc-only-fragment-1.json"), _load("doc-only-plan.json"), _load("doc-only-header.json")
-    with pytest.raises(BatchAssemblyError) as refused:
-        validate_fragment(fragment, plan, header, fragment["context_receipt"])
-    assert refused.value.code == "BATCH_SEMANTIC_CONFLICT" and "pre-review audit failed: CANONICAL_CATEGORY_ORDER" in str(refused.value)
-    validate_fragment(_fixed(fragment), plan, header, fragment["context_receipt"])  # the corrected answer goes
+    fragment.pop("digest", None)
+    result = validate_fragment(fragment, plan, header, fragment["context_receipt"])
+    assert result and any(row.endswith("/categories") for row in result["normalized"]), result
+    done, _names = normalize_fragment(fragment)
+    assert [case["categories"] for case in done["test_cases"]] == [sorted(case["categories"], key=PRECEDENCE.index) for case in fragment["test_cases"]]
+    validate_fragment(_fixed(fragment), plan, header, fragment["context_receipt"])  # the corrected answer goes as before
 
 
 def _synthetic() -> tuple[dict, dict, dict, dict]:
@@ -53,7 +58,7 @@ def _synthetic() -> tuple[dict, dict, dict, dict]:
 
 
 @pytest.mark.parametrize("broken", ["categories", "requirement_ids"])
-def test_validate_fragment_and_the_command_refuse_an_order_error_assemble_refuses_the_same(broken: str, tmp_path: Path, capsys) -> None:
+def test_validate_fragment_and_the_command_put_an_order_error_in_order_while_assemble_refuses_the_raw_one(broken: str, tmp_path: Path, capsys) -> None:
     from tests.test_batch_assembly import _fragment
     from tools import api
     from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
@@ -70,11 +75,10 @@ def test_validate_fragment_and_the_command_refuse_an_order_error_assemble_refuse
         bad["source_to_canonical_mappings"][0]["canonical_requirement_ids"].append(second["requirement_id"])
         case["requirement_ids"] = [second["requirement_id"], case["requirement_ids"][0]]
         expected = "CANONICAL_REQUIREMENT_ID_ORDER"
-    bad = _resealed(bad)
-    with pytest.raises(BatchAssemblyError) as refused:
-        validate_fragment(bad, plan, header, context)
-    assert refused.value.code == "BATCH_SEMANTIC_CONFLICT" and f"pre-review audit failed: {expected}" in str(refused.value)
-    with pytest.raises(BatchAssemblyError) as assembled:
+    bad.pop("digest", None)  # a digest sealed over the unordered content would be refused: «удали поле digest»
+    result = validate_fragment(bad, plan, header, context)  # P1: put in order by the code, named
+    assert result == {"normalized": [f"/test_cases/0/{broken}"]}, result
+    with pytest.raises(BatchAssemblyError) as assembled:  # the rule is the same: assemble of the raw fragment refuses it
         assemble_candidate(header, plan, [bad, _fragment(plan, context, 1)])
     assert assembled.value.code == "BATCH_SEMANTIC_CONFLICT" and f"pre-review audit failed: {expected}" in str(assembled.value)
     paths = {name: tmp_path / f"{name}.json" for name in ("fragment", "plan", "header", "context")}
@@ -83,7 +87,7 @@ def test_validate_fragment_and_the_command_refuse_an_order_error_assemble_refuse
     code = api.main(["validate-fragment", "--fragment", str(paths["fragment"]), "--plan", str(paths["plan"]), "--header", str(paths["header"]),
                      "--context-receipt", str(paths["context"])])
     printed = json.loads(capsys.readouterr().out)
-    assert code == 2 and printed["code"] == "BATCH_SEMANTIC_CONFLICT" and expected in printed["message"], printed
+    assert code == 0 and printed["result"] == {"normalized": [f"/test_cases/0/{broken}"]}, printed
 
 
 def test_a_valid_split_still_assembles_and_document_wide_rules_stay_in_assemble() -> None:

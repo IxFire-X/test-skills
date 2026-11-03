@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, pilot_state, run_tests, step_size
-from tools.json_cli import JsonArgumentParser, error_envelope
+from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
 
@@ -362,6 +362,12 @@ def _write(target: Path, value: Any) -> dict[str, Any]:
     return {"out": str(target), "bytes": len(data), "sha256": "sha256:" + hashlib.sha256(data).hexdigest()}
 
 
+def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:
+    rows = envelope.get("diagnostics")
+    code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
+    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), getattr(args, "batch_id", None))
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     handler, _options, invalid, parts = COMMANDS[args.command]
@@ -371,8 +377,10 @@ def main(argv: list[str] | None = None) -> int:
         result = handler(args)
     except Exception as error:
         # FaT-U6: the refusal's own code and fix; FaT-U5: the one envelope {status, code, message, fix, next}
-        _print({**error_envelope(error), "command": args.command,
-                **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})})
+        envelope = {**error_envelope(error), "command": args.command,
+                    **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})}
+        _print(envelope)
+        _record_refusal(args, envelope)  # P1: <run>/refusals.jsonl, when the command names its run
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
@@ -385,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         payload["result"] = plain(result)
     _print(payload)
+    if status == "invalid":
+        _record_refusal(args, payload)
     return 1 if status == "invalid" else 0
 
 

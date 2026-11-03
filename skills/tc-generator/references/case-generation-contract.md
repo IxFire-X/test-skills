@@ -249,6 +249,18 @@ Remember an id from step N and use it later (`step_output`). After create or cha
 Do not invent a catalog of one-shot handle checks or list every route. Apply the
 behavior/prerequisite/testing-instruction distinction above to inventory requirements.
 
+## What the check of a fragment refuses most often
+
+`validate-fragment` returns the whole list of refusals, each with a `fix`: correct all of them in one pass.
+
+- Do not write `digest` or any `*_digest` field — the code sets them; a wrong value is refused («удали поле»).
+- Do not order `requirement_ids` or `categories` — the code does and names it (`normalized`).
+- Correct the fragment yourself; write no scripts of your own.
+- `SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING`: an expectation with `http_body` assertions ends with the pretty-printed response JSON — `"id": "<значение присутствующего поля>"` for `exists`, the literal for `equals`.
+- `SEMANTIC_HUMAN_BODY_UNBOUND`: every leaf of the request JSON in `test_data` has its own input with `target.location = body` and its RFC 6901 pointer (`{"a": {"b": 1}}` → `/a/b`).
+- `SEMANTIC_BODY_TARGET_OVERLAP`: body pointers are never equal or nested; `semantic_type` sits beside `target` and `source`, not inside: `{"target": {"location": "body", "pointer": "/a/b", "sensitive": false}, "source": {…}, "semantic_type": {…}}`.
+- Blockers (`SEMANTIC_BLOCKER_PATH`, `SEMANTIC_MISSING_ASSERTION_BLOCKER`, `SEMANTIC_SPURIOUS_BLOCKER`) mark only an absent or unconfirmed element: `UNRESOLVED_OPERATION`/`UNSUPPORTED_AUTOMATION_CAPABILITY` → `/operation`; `UNRESOLVED_INPUT_BINDING` → `/inputs`; `UNRESOLVED_OUTPUT_BINDING` → `/outputs`; `UNRESOLVED_ASSERTION`/`UNSUPPORTED_ASSERTION_DIALECT`/`UNCONFIRMED_TYPE` → `/expectations/<n>/assertions`. An expectation of a blocked step without assertions has its own blocker; a fully bound step has none.
+
 ## Requirement to case to assertion examples
 
 These illustrate reasoning about coverage; they do not add requirements or replace the canonical schema.

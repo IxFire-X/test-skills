@@ -283,10 +283,14 @@ def test_out_outside_the_run_tmp_directory_is_refused_and_writes_nothing(tmp_pat
     from tests.test_finish import _project
 
     _project_path, run_root, attempt_id, _values = _project(tmp_path)
-    before = {path: path.read_bytes() for path in run_root.rglob("*") if path.is_file()}
+    def files() -> dict:
+        return {path: path.read_bytes() for path in run_root.rglob("*") if path.is_file() and path.name != "refusals.jsonl"}  # P1: the refusal is journaled
+
+    before = files()
     code, refused = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / name)], capsys)
     assert code == 2 and refused["code"] == "API_OUT_OUTSIDE_RUN", refused
-    assert {path: path.read_bytes() for path in run_root.rglob("*") if path.is_file()} == before
+    assert files() == before
+    assert json.loads((run_root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()[-1])["code"] == "API_OUT_OUTSIDE_RUN"
 
 
 def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:

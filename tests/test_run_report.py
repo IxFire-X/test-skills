@@ -135,7 +135,7 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
     run_root = _finished_run(tmp_path)
     write_report(tmp_path, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
-    assert report["step_sizes"] == [] and "STEP_OVER_BUDGET" not in report["warnings"]
+    assert "STEP_OVER_BUDGET" not in report["warnings"]  # P1: model-request measures its steps itself, none of them is over the budget
     rows = [{"step": "tc-reviewer:canonical", "bytes": 732886, "input_bytes": 700000, "role_bytes": 32886, "role": "tc-reviewer",
              "files": 3, "tokens_est": 175893, "budget_bytes": 500000, "fits": False, "warning": "STEP_OVER_BUDGET", "at": "2026-10-28T01:00:00Z"},
             {"step": "context-marker", "bytes": 1000, "input_bytes": 900, "role_bytes": 100, "role": "context-marker",

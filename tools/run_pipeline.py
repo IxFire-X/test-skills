@@ -17,6 +17,7 @@ import re
 import uuid
 from typing import Any, Mapping, Sequence
 
+from tools.fixes import fix_for
 from tools.json_cli import JsonArgumentParser
 from tools.project_inventory import (
     ContextSelectionError,
@@ -38,15 +39,30 @@ class HostStop(RuntimeError):
     def __init__(self, code: str, message: str = "", fix: str | None = None):
         super().__init__(message or code)
         self.code = code
-        self.fix = fix
+        self.fix = fix or fix_for(code)  # P1: the table has a way out for the codes without a fix at their raise site
 
 
 _PRINTED: list[dict[str, Any]] = []
 
 
+_ARGS: list[Any] = []  # the arguments of the running command: the refusal journal needs its run
+
+
+def _journal_refusal(payload: Mapping[str, Any]) -> None:
+    """P1: a refusal of a command that names its run goes to ``<run>/refusals.jsonl`` (code, command, stage — nothing else)."""
+    from tools.json_cli import record_refusal
+
+    args = _ARGS[0] if _ARGS else None
+    run, project = getattr(args, "run", None), getattr(args, "project", None)
+    run = run if isinstance(run, str) and run else payload.get("run_id")
+    if isinstance(run, str) and run and project:
+        record_refusal(Path(str(project)).resolve() / ".pilot-runs" / run, args.command, payload.get("code") or payload.get("reason"), payload.get("stage"))
+
+
 def _print(payload: dict[str, Any]) -> None:
     if payload.get("status") == "error":
         payload = _envelope(payload)
+        _journal_refusal(payload)
     _PRINTED[:] = [payload]
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -2942,6 +2958,7 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
+    _ARGS[:] = [args]
     commands = {
         "scan": cmd_scan,
         "exec": cmd_exec,

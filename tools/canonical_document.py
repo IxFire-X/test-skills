@@ -913,6 +913,19 @@ def validate_canonical_document(document: dict[str, Any]) -> list[dict[str, str]
     return _semantic_diagnostics(document)
 
 
+_PRECONDITION_CODES = frozenset({"CANONICAL_DOCUMENT_ID", "CANONICAL_DISPLAY_ORDER", "CANONICAL_NONFINITE_NUMBER", "CANONICAL_REVISION_TYPE"})
+
+
+def validate_canonical_document_all(document: dict[str, Any]) -> list[dict[str, str]]:
+    """P1: every diagnostic of *document* in one pass — the same rules as :func:`validate_canonical_document`, which stops at the
+    first layer that has any.  A schema error or a precondition (ids, display_order) leaves the structure unreadable, so those
+    are the whole answer; otherwise the canonical-order rows of the schema layer and the relational rows come together."""
+    diagnostics = schema_diagnostics(document, _CANONICAL_DOCUMENT_SCHEMA, _ROOT)
+    if any(row["code"].startswith("SCHEMA_") or row["code"] in _PRECONDITION_CODES for row in diagnostics):
+        return diagnostics
+    return sorted([*diagnostics, *_semantic_diagnostics(document)], key=lambda item: (item["path"], item["code"], item["message"]))
+
+
 def require_valid_canonical_document(document: dict[str, Any]) -> None:
     """Raise a stable diagnostic exception unless *document* is canonical and ready."""
     diagnostics = validate_canonical_document(document)

@@ -173,6 +173,10 @@ def _cached_schema_errors(schema_name: str, snapshot: tuple[tuple[str, bytes], .
     return tuple((_error_path(error), _error_code(error), error.message) for error in validator.iter_errors(loads_json_strict(serialized)))
 
 
+# V3 precedence of the categories of a case: the order the canon keeps them in (the code puts it, P1)
+CATEGORY_PRECEDENCE = ("positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional")
+
+
 def _semantic_error(path: str, code: str, message: str) -> dict[str, str]:
     return {"path": path, "code": code, "message": message}
 
@@ -226,8 +230,7 @@ def _canonical_semantic_diagnostics(instance: Any) -> list[dict[str, str]]:
     diagnostics.extend(_sorted_field_diagnostics(instance.get("operation_capabilities"), ["operation_capabilities"], "capability_id", "CANONICAL_CAPABILITY_ORDER"))
     diagnostics.extend(_display_order_diagnostics(instance.get("requirements"), ["requirements"]))
     diagnostics.extend(_display_order_diagnostics(instance.get("test_cases"), ["test_cases"]))
-    precedence = ["positive", "negative", "boundary", "authorization", "security", "concurrency", "idempotency", "observability", "functional"]
-    rank = {category: index for index, category in enumerate(precedence)}
+    rank = {category: index for index, category in enumerate(CATEGORY_PRECEDENCE)}
 
     for capability_index, capability in enumerate(instance.get("operation_capabilities", [])):
         if not isinstance(capability, dict):

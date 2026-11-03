@@ -10,8 +10,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import validate_canonical_document
-from tools.schema_validation import schema_diagnostics
+from tools.canonical_document import validate_canonical_document, validate_canonical_document_all
+from tools.fixes import delete_field_fix, fix_for
+from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
 from tools.test_design_hints import capped_code_hints, code_hints
 
@@ -24,10 +25,18 @@ _CONTEXT_SCHEMA = _ROOT / "schemas" / "context-selection-receipt.schema.json"
 
 
 class BatchAssemblyError(ValueError):
-    """A stable controller-contract failure which must not invoke review."""
+    """A stable controller-contract failure which must not invoke review.
 
-    def __init__(self, code: str, message: str) -> None:
+    P1: ``diagnostics`` — all the rows of one validate-fragment pass, ``{path, code, message, fix}`` each; ``code`` is the
+    controller code of the first one, ``fix`` the way out of the whole list."""
+
+    def __init__(self, code: str, message: str, diagnostics: Sequence[Mapping[str, Any]] = (), fix: str | None = None) -> None:
         self.code = code
+        self.detail = message
+        if diagnostics:
+            self.diagnostics = tuple(dict(row) for row in diagnostics)
+        if fix:
+            self.fix = fix
         super().__init__(f"{code}: {message}")
 
 
@@ -526,32 +535,6 @@ def _validate_context_receipt(receipt: dict[str, Any], expected_digest: str) -> 
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding")
 
 
-def _require_namespaced_identifiers(fragment: dict[str, Any]) -> None:
-    namespace = fragment["namespace"]
-    prefixes = {
-        "requirement_id": f"CREQ-{namespace}-", "case_id": f"TC-{namespace}-", "step_id": f"STEP-{namespace}-",
-        "input_id": f"INPUT-{namespace}-", "expectation_id": f"EXP-{namespace}-", "assertion_id": f"ASSERT-{namespace}-", "blocker_id": f"BLOCK-{namespace}-",
-    }
-    def require(item: dict[str, Any], key: str) -> None:
-        value = item.get(key)
-        if not isinstance(value, str) or not value.startswith(prefixes[key]):
-            raise BatchAssemblyError("BATCH_ID_CONFLICT", f"{key} does not use namespace {namespace}")
-    for requirement in fragment["requirements"]:
-        require(requirement, "requirement_id")
-    for case in fragment["test_cases"]:
-        require(case, "case_id")
-        for step in case["steps"]:
-            require(step, "step_id")
-            for item in step["inputs"]:
-                require(item, "input_id")
-            for blocker in step["automation_blockers"]:
-                require(blocker, "blocker_id")
-            for expectation in step["expectations"]:
-                require(expectation, "expectation_id")
-                for assertion in expectation["assertions"]:
-                    require(assertion, "assertion_id")
-
-
 def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]], batch: dict[str, Any],
                        fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """FaT-BO: exactly the fragments of the batches before *batch* in plan order (batches go one after another)."""
@@ -644,10 +627,40 @@ def require_imported_human_fields(fragment: dict[str, Any], batch: dict[str, Any
                                  + " — требования каждого кейса должны отображаться только в source requirement его строки")
 
 
+def normalize_fragment(fragment: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """P1: the order the canon wants, which the code lays out before the check — ``requirement_ids`` of every case by the
+    display_order of the fragment's requirements and ``categories`` by V3 precedence.  One function for validate-fragment and
+    model-response; returns a copy and the pointers it changed (``normalized``).  An id or category the rules do not know is
+    left where it is for the refusal; nothing else is touched."""
+    if not isinstance(fragment, dict) or fragment.get("status") != "COMPLETE":
+        return fragment, []
+    requirements, cases = fragment.get("requirements"), fragment.get("test_cases")
+    if not isinstance(requirements, list) or not isinstance(cases, list):
+        return fragment, []
+    position: dict[str, int] = {}
+    for index, item in enumerate(requirements):
+        if isinstance(item, dict) and isinstance(item.get("requirement_id"), str):
+            position.setdefault(item["requirement_id"], index)
+    rank = {category: index for index, category in enumerate(CATEGORY_PRECEDENCE)}
+    value = deepcopy(fragment)
+    names: list[str] = []
+    for index, case in enumerate(value["test_cases"]):
+        if not isinstance(case, dict):
+            continue
+        for field, order in (("categories", rank), ("requirement_ids", position)):
+            items = case.get(field)
+            if isinstance(items, list) and all(isinstance(item, str) and item in order for item in items):
+                ordered = sorted(items, key=order.__getitem__)
+                if ordered != items:
+                    case[field] = ordered
+                    names.append(f"/test_cases/{index}/{field}")
+    return value, names
+
+
 def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
     """Audit U2: the binding fields of a fragment that the plan fixes and the answer leaves out (no key, null or "") — the
     plan, header and context digests of its batch, then the self-digest; what model-response puts there too.  A field given
-    with another value stays for the refusal."""
+    with another value stays for the refusal (P1: its fix is «удали поле — код поставит его сам»)."""
     batch = next((row for row in plan.get("batches") or [] if isinstance(row, Mapping) and row.get("batch_id") == fragment.get("batch_id")), None)
     if batch is None:
         return fragment
@@ -661,68 +674,163 @@ def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) ->
     return value
 
 
+def _row(code: str, path: str, message: str, fix: str | None = None, *, controller: str = "BATCH_SEMANTIC_CONFLICT") -> dict[str, str]:
+    return {"path": path, "code": code, "message": message, "fix": fix or fix_for(code) or fix_for(controller) or ""}
+
+
+def _namespace_rows(fragment: dict[str, Any]) -> list[tuple[str, str]]:
+    """Every identifier of the fragment outside the namespace of its batch — (path, message)."""
+    namespace = fragment["namespace"]
+    prefixes = {
+        "requirement_id": f"CREQ-{namespace}-", "case_id": f"TC-{namespace}-", "step_id": f"STEP-{namespace}-",
+        "input_id": f"INPUT-{namespace}-", "expectation_id": f"EXP-{namespace}-", "assertion_id": f"ASSERT-{namespace}-", "blocker_id": f"BLOCK-{namespace}-",
+    }
+    rows: list[tuple[str, str]] = []
+
+    def require(item: dict[str, Any], key: str, path: str) -> None:
+        value = item.get(key)
+        if not isinstance(value, str) or not value.startswith(prefixes[key]):
+            rows.append((f"{path}/{key}", f"{key} does not use namespace {namespace}: {value!r} must start with {prefixes[key]}"))
+
+    for r_index, requirement in enumerate(fragment["requirements"]):
+        require(requirement, "requirement_id", f"/requirements/{r_index}")
+    for c_index, case in enumerate(fragment["test_cases"]):
+        require(case, "case_id", f"/test_cases/{c_index}")
+        for s_index, step in enumerate(case["steps"]):
+            base = f"/test_cases/{c_index}/steps/{s_index}"
+            require(step, "step_id", base)
+            for i_index, item in enumerate(step["inputs"]):
+                require(item, "input_id", f"{base}/inputs/{i_index}")
+            for b_index, blocker in enumerate(step["automation_blockers"]):
+                require(blocker, "blocker_id", f"{base}/automation_blockers/{b_index}")
+            for e_index, expectation in enumerate(step["expectations"]):
+                require(expectation, "expectation_id", f"{base}/expectations/{e_index}")
+                for a_index, assertion in enumerate(expectation["assertions"]):
+                    require(assertion, "assertion_id", f"{base}/expectations/{e_index}/assertions/{a_index}")
+    return rows
+
+
 def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], context_receipt: dict[str, Any],
-                      prior_fragments: list[dict[str, Any]] | None = None, imported: Mapping[str, Any] | None = None) -> None:
-    """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches)."""
+                      prior_fragments: list[dict[str, Any]] | None = None, imported: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """Validate a complete or failed fragment against controller-owned bindings (and, from batch 2, the earlier batches).
+
+    P1: the bindings (batch_id, namespace, ownership, the header and the context receipt) are refused alone and first; every
+    other violation comes in one ``BatchAssemblyError.diagnostics`` list, each row with its fix.  The order of ``requirement_ids``
+    and ``categories`` is laid out by the code first — what it changed is returned as ``{"normalized": [...]}``."""
     batches = _plan_batches(plan)
     if not isinstance(fragment, dict):
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment must be an object")
+    fragment, normalized = normalize_fragment(fragment)
     fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
-    _schema_valid(fragment, _FRAGMENT_SCHEMA, "candidate fragment")
-    _self_digest_valid(fragment, "candidate fragment")
     batch = batches.get(fragment.get("batch_id"))
     if batch is None:
         raise BatchAssemblyError("BATCH_ID_CONFLICT", "fragment batch_id is not in plan")
     if fragment.get("namespace") != batch["namespace"]:
         raise BatchAssemblyError("BATCH_ID_CONFLICT", "fragment namespace does not match plan")
-    if fragment.get("plan_digest") != plan["digest"]:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment plan digest does not match plan")
+    if fragment.get("owned_source_requirement_ids") != batch["owned_source_requirement_ids"]:
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "fragment ownership differs from plan")
     header_bytes = {key: value for key, value in header.items() if key != "digest"}
-    if fragment.get("header_digest") != batch["header_digest"] or _digest(header_bytes) != batch["header_digest"]:
+    if _digest(header_bytes) != batch["header_digest"]:
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment/header digest binding is invalid")
-    if fragment.get("context_receipt_digest") != batch["context_receipt_digest"]:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment/context digest binding is invalid")
     _validate_context_receipt(context_receipt, batch["context_receipt_digest"])
+    if not isinstance(fragment.get("context_receipt"), dict):
+        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment lacks its context receipt")
     _validate_context_receipt(fragment["context_receipt"], batch["context_receipt_digest"])
     if fragment["context_receipt"] != context_receipt:
         raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment context receipt differs from verified receipt")
-    if fragment.get("owned_source_requirement_ids") != batch["owned_source_requirement_ids"]:
-        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "fragment ownership differs from plan")
+    earlier = _earlier_fragments(plan, batches, batch, prior_fragments or []) if batch["ordinal"] > 1 else []
+
+    rows: list[tuple[str, dict[str, str]]] = []  # (controller code, row)
+
+    def add(controller: str, code: str, path: str, message: str, fix: str | None = None) -> None:
+        rows.append((controller, _row(code, path, message, fix, controller=controller)))
+
+    def check(function: Any, *arguments: Any) -> None:
+        try:
+            function(*arguments)
+        except BatchAssemblyError as error:
+            add(error.code, error.code, "", error.detail)
+
+    def refuse() -> None:
+        first = rows[0][1]
+        count = len(rows)
+        raise BatchAssemblyError(
+            rows[0][0],
+            first["message"] if count == 1 else f"{first['message']}; всего диагностик {count} — все в diagnostics, у каждой свой fix",
+            [row for _controller, row in rows],
+            first["fix"] if count == 1 else f"исправь все {count} диагностик из diagnostics за один заход (у каждой свой fix) и повтори validate-fragment")
+
+    # the fields the code puts itself: another value given is the answer's mistake, the way out is to leave the field out
+    for key, expected, message in (("plan_digest", plan["digest"], "fragment plan digest does not match plan"),
+                                   ("header_digest", batch["header_digest"], "fragment/header digest binding is invalid"),
+                                   ("context_receipt_digest", batch["context_receipt_digest"], "fragment/context digest binding is invalid")):
+        if fragment.get(key) != expected:
+            add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", f"/{key}", message, delete_field_fix(key))
+    schema_rows = schema_diagnostics(fragment, _FRAGMENT_SCHEMA, _ROOT)
+    for row in schema_rows:
+        add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"], f"candidate fragment schema is invalid: {row['code']} — {row['message']}")
+    if fragment.get("digest") != _digest({key: item for key, item in fragment.items() if key != "digest"}):
+        add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", "/digest", "candidate fragment digest is invalid", delete_field_fix("digest"))
+    if schema_rows:  # the shape is unreadable: the rest is judged on the corrected fragment
+        refuse()
     if fragment.get("status") == "FAILED":
         if not isinstance(fragment.get("failure"), dict):
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "failed fragment lacks immutable failure evidence")
-        return
+            add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", "/failure", "failed fragment lacks immutable failure evidence",
+                "у фрагмента со status FAILED обязателен объект failure с причиной")
+        if rows:
+            refuse()
+        return {"normalized": normalized} if normalized else None
     if fragment.get("status") != "COMPLETE":
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment status is invalid")
-    _require_namespaced_identifiers(fragment)
+        add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", "/status", "fragment status is invalid", "status — COMPLETE или FAILED")
+        refuse()
+    for path, message in _namespace_rows(fragment):
+        add("BATCH_ID_CONFLICT", "BATCH_ID_CONFLICT", path, message)
     if batch["ordinal"] > 1:
-        _require_prior_capabilities(fragment, _earlier_fragments(plan, batches, batch, prior_fragments or []))
+        check(_require_prior_capabilities, fragment, earlier)
     if imported is not None:
-        require_imported_human_fields(fragment, batch, imported)
-    requirement_ids = _fragment_requirements(fragment)
-    mappings = fragment.get("source_to_canonical_mappings")
-    if not isinstance(mappings, list):
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment mappings must be a list")
+        check(require_imported_human_fields, fragment, batch, imported)
+    try:
+        requirement_ids = _fragment_requirements(fragment)
+    except BatchAssemblyError as error:
+        add(error.code, error.code, "/requirements", error.detail)
+        requirement_ids = {item.get("requirement_id") for item in fragment["requirements"] if isinstance(item, dict)}
+    mappings = fragment["source_to_canonical_mappings"]
     mapping_sources = [item.get("source_requirement_id") for item in mappings if isinstance(item, dict)]
-    if sorted(mapping_sources) != sorted(batch["owned_source_requirement_ids"]) or len(set(mapping_sources)) != len(mapping_sources):
-        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "mappings must cover exactly the owned source requirements")
+    owned = batch["owned_source_requirement_ids"]
+    if sorted(mapping_sources) != sorted(owned) or len(set(mapping_sources)) != len(mapping_sources):
+        add("BATCH_PARTITION_CONFLICT", "BATCH_PARTITION_CONFLICT", "/source_to_canonical_mappings",
+            "mappings must cover exactly the owned source requirements: owned " + ", ".join(map(str, owned)) + "; mapped " + ", ".join(map(str, mapping_sources)))
     mapped_canonical: set[str] = set()
-    for mapping in mappings:
+    for index, mapping in enumerate(mappings):
         targets = mapping.get("canonical_requirement_ids") if isinstance(mapping, dict) else None
         if not isinstance(targets, list) or not targets or any(target not in requirement_ids for target in targets):
-            raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "mapping references an unknown canonical requirement")
-        mapped_canonical.update(targets)
+            add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", f"/source_to_canonical_mappings/{index}/canonical_requirement_ids",
+                "mapping references an unknown canonical requirement")
+        else:
+            mapped_canonical.update(targets)
     if mapped_canonical != requirement_ids:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "every canonical requirement must have source provenance")
-    cases = fragment.get("test_cases")
-    if not isinstance(cases, list):
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment cases must be a list")
-    for case in cases:
+        add("BATCH_SEMANTIC_CONFLICT", "BATCH_SEMANTIC_CONFLICT", "/requirements",
+            "every canonical requirement must have source provenance: " + ", ".join(sorted(map(str, requirement_ids - mapped_canonical))))
+    for index, case in enumerate(fragment["test_cases"]):
         references = case.get("requirement_ids") if isinstance(case, dict) else None
         if not isinstance(references, list) or not references or any(item not in requirement_ids for item in references):
-            raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "case references a canonical requirement outside its batch")
-    require_batch_coverage(fragment)
-    _fragment_audit(fragment, plan, header, _earlier_fragments(plan, batches, batch, prior_fragments or []) if batch["ordinal"] > 1 else [])
+            add("BATCH_PARTITION_CONFLICT", "BATCH_PARTITION_CONFLICT", f"/test_cases/{index}/requirement_ids",
+                "case references a canonical requirement outside its batch")
+    before = len(rows)
+    check(require_batch_coverage, fragment)
+    uncovered = len(rows) > before  # the same fact assemble calls SEMANTIC_UNCOVERED_REQUIREMENT: said once
+    try:
+        audit = _audit_rows(fragment, plan, header, earlier)
+    except BatchAssemblyError as error:
+        add(error.code, error.code, "", error.detail)
+        audit = []
+    for row in audit:
+        if not (uncovered and row["code"] == "SEMANTIC_UNCOVERED_REQUIREMENT"):
+            add("BATCH_SEMANTIC_CONFLICT", row["code"], row["path"],
+                f"canonical pre-review audit failed: {row['code']} at {row['path']} (of this fragment) — {row['message']}")
+    if rows:
+        refuse()
+    return {"normalized": normalized} if normalized else None
 
 
 # FaT-VF: the pre-review audit rules that need the whole document; every other rule of validate_canonical_document is
@@ -733,12 +841,11 @@ DOCUMENT_WIDE_CODES = frozenset({
 })
 
 
-def _fragment_audit(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> None:
+def _audit_rows(fragment: dict[str, Any], plan: dict[str, Any], header: dict[str, Any], earlier: list[dict[str, Any]]) -> list[dict[str, str]]:
     """FaT-VF: the canonical pre-review audit of assemble on this batch alone — the document assemble would build from the
     header, the batch's own source requirements, the capabilities of the earlier batches and this one, and this fragment,
-    with the same display_order — so an order or format error is refused by validate-fragment, not first by assemble."""
-    from tools.canonical_document import validate_canonical_document
-
+    with the same display_order — so an order or format error is refused by validate-fragment, not first by assemble.
+    P1: all its rows (``validate_canonical_document_all``), not the first."""
     owned = set(fragment["owned_source_requirement_ids"])
     probe = {key: deepcopy(value) for key, value in header.items() if key != "digest"}
     probe.update({
@@ -753,10 +860,7 @@ def _fragment_audit(fragment: dict[str, Any], plan: dict[str, Any], header: dict
     for name in ("requirements", "test_cases"):
         for index, item in enumerate(probe[name], start=1):
             item["display_order"] = index
-    diagnostics = [row for row in validate_canonical_document(probe) if row["code"] not in DOCUMENT_WIDE_CODES]
-    if diagnostics:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {diagnostics[0]['code']} at "
-                                                            f"{diagnostics[0]['path']} (of this fragment) — {diagnostics[0]['message']}")
+    return [row for row in validate_canonical_document_all(probe) if row["code"] not in DOCUMENT_WIDE_CODES]
 
 
 def require_batch_coverage(fragment: dict[str, Any]) -> None:

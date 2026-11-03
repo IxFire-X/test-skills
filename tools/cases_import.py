@@ -21,29 +21,24 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.context_marker_merge import REQUIREMENTS_PLACEHOLDER
+from tools.fixes import FIXES
 from tools.zephyr_csv import ZephyrCsvError, parse_zephyr_csv, require_human_csv
 
 IMPORT_MODEL_ID = "controller:cases-import"
-_FIXES = {
-    "IMPORT_CASE_LINKS": "в ответе context-marker:requirements у каждой строки-кейса CSV ровно одна связь case_links: row — номер "
-                         "строки кейса, source_requirement_ids — SREQ этого ответа, пустой список только с reason; отдай исправленный "
-                         "ответ единственным повтором стадии (--transport-attempts 2), ничего не записано",
-    "IMPORT_LINKS_NOT_ANSWERED": "при --docs требования и связи кейсов размечает модель: сначала model-request и model-response "
-                                 "context-marker:requirements, потом cases-import",
-    "IMPORT_CSV_V4": "выгрузите кейсы в профиле v5 (по умолчанию) или экспортом из Zephyr — в Test Data должен быть текст человека",
-    "ZEPHYR_CSV_COLUMNS": "нужен экспорт тест-кейсов Zephyr Scale в CSV с колонками шаблона; лишние колонки уберите из выгрузки",
-    "ZEPHYR_CSV_ROWS": "заполните названные ячейки CSV: у кейса Name и хотя бы один шаг, у каждого шага Step и Expected Result — "
-                       "наблюдаемый результат системы, не «успешно», «ok» или «—»; потом повторите scan --cases",
-    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе): замените значение ссылкой на переменную "
-                         "окружения или фикстуру и повторите scan --cases; файл с секретом модель не увидит",
-    "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
-    "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
-    "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
-    "IMPORT_NOT_CASES_RUN": "cases-import — для прогона scan --cases; у этого прогона требования размечает модель",
-    "IMPORT_CSV_CHANGED": "CSV изменился после scan: повторите scan --cases --new-run",
-    "IMPORT_REQUIREMENTS_INVALID": "требования из CSV не прошли проверку ответа разметки — запрос не записан; исправьте названные "
-                                   "ячейки CSV и повторите scan --cases --new-run",
-}
+_FIXES = {code: FIXES[code] for code in (
+    "IMPORT_CASE_LINKS",
+    "IMPORT_LINKS_NOT_ANSWERED",
+    "IMPORT_CSV_V4",
+    "ZEPHYR_CSV_COLUMNS",
+    "ZEPHYR_CSV_ROWS",
+    "IMPORT_CSV_SECRET",
+    "ZEPHYR_CSV_ENCODING",
+    "ZEPHYR_CSV_NOT_CSV",
+    "ZEPHYR_CSV_DELIMITER",
+    "IMPORT_NOT_CASES_RUN",
+    "IMPORT_CSV_CHANGED",
+    "IMPORT_REQUIREMENTS_INVALID",
+)}  # P1: the texts live in tools.fixes
 
 
 class CasesImportError(ValueError):
