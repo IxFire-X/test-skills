@@ -68,6 +68,21 @@ def test_status_of_a_moved_project_works_and_says_it_was_moved(tmp_path: Path, c
     assert status["last_confirmed_stage"] == home["last_confirmed_stage"] and status["attempt_state"] == home["attempt_state"]
 
 
+def test_status_of_a_moved_open_attempt_makes_no_baseline_comparison(tmp_path: Path, capsys: pytest.CaptureFixture[str], made_runs) -> None:
+    """The baseline binds the folder name and path of the scan: compared in a moved project it would report a drift of no file."""
+    source, target, run_id = _moved(tmp_path, made_runs, "open")
+    _, home = _call(["status", "--project", str(source), "--run", run_id], capsys)
+    assert home["attempt_state"] != "TERMINAL" and "drift" not in home and "drift_check_error" not in home, home
+    code, status = _call(["status", "--project", str(target), "--run", run_id], capsys)
+    assert code == 0 and status["project_moved"]["code"] == "PROJECT_MOVED", status
+    assert "drift" not in status and "drift_check_error" not in status, status
+    assert "сверка файлов с baseline" in status["project_moved"]["fix"]
+    # finish and exec keep the old refusal on the moved project
+    with pytest.raises(HostStop) as stop:
+        _read_run_coordinate(target, run_id)
+    assert stop.value.code == "EXECUTION_COORDINATES" and stop.value.fix.startswith("проект перенесён:")
+
+
 def test_report_of_a_moved_project_is_written(tmp_path: Path, capsys: pytest.CaptureFixture[str], made_runs) -> None:
     _source, target, run_id = _moved(tmp_path, made_runs, "terminal")
     code, report = _call(["report", "--project", str(target), "--run", run_id], capsys)

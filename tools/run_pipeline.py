@@ -1496,8 +1496,8 @@ def _moved_project_note(project: Path, root: Path) -> dict[str, Any] | None:
         return None
     where = f"прогон создан в {move['recorded']}, сейчас проект в {move['current']}"
     if move["same_structure"]:
-        fix = (f"проект перенесён: {where}. status и report работают и здесь; finish и exec — только там, где создан прогон, "
-               "а здесь — новый scan")
+        fix = (f"проект перенесён: {where}. status и report работают и здесь (сверка файлов с baseline открытой попытки здесь не делается); "
+               "finish и exec — только там, где создан прогон, а здесь — новый scan")
     else:
         shown = ", ".join(move["missing"][:5]) + (" и др." if len(move["missing"]) > 5 else "")
         fix = (f"проект перенесён: {where}, но состав файлов другой (нет: {shown or 'опись прогона не читается'}). "
@@ -2639,7 +2639,9 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
             result.update(_next_run(project, run["manifest"], read_terminal_result(root, str(attempt["attempt_id"])).get("reason_code")))
         except (KeyError, OSError, TypeError, ValueError):
             pass
-    elif attempt is not None:
+    elif attempt is not None and _moved_project_note(project, root) is None:
+        # P6a: in a moved project the baseline binds the folder name and path of the scan, so the comparison would report a
+        # drift of no file at all; the PROJECT_MOVED note says that the check is not made here
         result.update(_status_drift(project, root, run["manifest"], attempt))
     return _with_moved_note(result, project, root)
 
