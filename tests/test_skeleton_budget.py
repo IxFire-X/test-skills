@@ -44,7 +44,7 @@ def test_the_whole_skeleton_is_no_part_of_the_step_input_of_every_batch(run: dic
     plain = _plan(run, None)
     counted = _plan(run, run["receipt"])
     assert _step_input(counted) == _step_input(plain), (plain.notes, counted.notes)
-    assert "её часть скелета импорта" in counted.notes[-1]
+    assert any("её часть скелета импорта" in note for note in counted.notes)  # P9 adds the volume note last: not necessarily the last of all
     assert not any("скелет" in note for note in plain.notes)  # without an import the plan bytes are as before
 
 
