@@ -404,6 +404,9 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
         plan.notes.append(context_note(receipts, taken))
     if value is not None:
         plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
+    # P9: the volume of the run, so that the person sees at once how long it will take
+    plan.notes.append(f"пачек {len(plan['batches'])}, требований {len(source_requirements)}, "
+                      f"ориентировочно кейсов {len(source_requirements)}×2–3 ({len(source_requirements) * 2}–{len(source_requirements) * 3})")
     return plan
 
 

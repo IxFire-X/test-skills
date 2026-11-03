@@ -198,3 +198,12 @@ def _campaign_requirements(root: Path, attempt: str) -> list[dict]:
         if requirements:
             return requirements
     raise AssertionError("no requirements in the campaign run")
+
+
+def test_plan_batches_estimates_the_volume_of_the_whole_run(three) -> None:
+    """P9: the output says how many batches and requirements, and a rough number of cases (2–3 per requirement)."""
+    from tools.batch_assembly import plan_batches_for_project
+
+    project, _root, _attempt, _baseline, receipts = three
+    plan = plan_batches_for_project(_requirements(), _grouping(receipts[:1]), project, [], receipts[0])
+    assert plan.notes[-1] == f"пачек {len(plan['batches'])}, требований 2, ориентировочно кейсов 2×2–3 (4–6)", plan.notes
