@@ -28,7 +28,7 @@ git status --short
 ```
 
 The pack does not create the environment or install dependencies. Exact observed
-dependency versions are recorded in `release/dependencies.lock.txt`; an approved
+dependency versions are pinned with hashes in `requirements.txt`; an approved
 company mirror/wheelhouse remains external deployment evidence.
 
 Linux uses the same gate:

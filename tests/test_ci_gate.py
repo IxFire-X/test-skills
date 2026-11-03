@@ -60,3 +60,16 @@ def test_ci_gate_reports_a_missing_required_tool_as_not_runnable(tmp_path: Path,
 
     assert ci_gate.main(["--root", str(tmp_path)]) == 2
     assert "NOT_RUNNABLE: missing tools/contract_check.py" in capsys.readouterr().err
+
+
+def test_ci_gate_reports_a_delivery_copy_without_tests_as_not_runnable(tmp_path: Path, monkeypatch, capsys) -> None:
+    from tools import ci_gate
+
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "contract_check.py").write_text("", encoding="utf-8")
+    (tmp_path / "tools" / "render_contract_docs.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ci_gate.subprocess, "run",
+                        lambda command, **kwargs: subprocess.CompletedProcess(command, 0))
+
+    assert ci_gate.main(["--root", str(tmp_path)]) == 2
+    assert "NOT_RUNNABLE: missing tests" in capsys.readouterr().err
