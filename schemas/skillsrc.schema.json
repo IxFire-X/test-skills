@@ -73,7 +73,8 @@
       "properties": {"step_input_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000},
                      "context_batch_bytes": {"type": "integer", "minimum": 1024, "maximum": 100000000, "description": "FaT-5: bytes of one context batch, one part of the context marker; default 262144"},
                      "step_output_warn_bytes": {"type": "integer", "minimum": 1000, "maximum": 100000000, "description": "FaT-O: an answer of one model call above it is the warning STEP_OUTPUT_LARGE, only measured; default 128000"},
-                     "step_window_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000, "description": "FaT-BO: the model window in bytes; tc-generator batches split when input + expected answer exceed 0.85 of it; 0 turns the split off; default 1000000"}}
+                     "step_window_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000, "description": "FaT-BO: the model window in bytes; tc-generator batches split when input + expected answer exceed 0.85 of it; 0 turns the split off; default 1000000"},
+                     "generator_context": {"enum": ["all", "own"], "description": "FaT-P3: the context a tc-generator batch reads; all (default) - the receipts of the plan; own - not implemented yet (plan-batches refuses it)"}}
     },
     "v2_project": {
       "type": "object",

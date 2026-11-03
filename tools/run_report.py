@@ -642,6 +642,25 @@ def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
         return None
 
 
+def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict[str, Any] | None:
+    """FaT-P3: what the human decided on the gaps of the marker — the requirements left out of the batches, each with the
+    reason the human gave; None for a run whose marker has no gaps (nothing was asked)."""
+    if not attempt_id:
+        return None
+    from tools.scope_pause import out_of_scope, scope_state
+
+    try:
+        scope = scope_state(root, attempt_id, state)
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+    if not scope["gaps"]:
+        return None
+    decision = scope["decision"]
+    answer = "пауза не снималась: ответа человека нет" if scope["pending"] else (
+        "без остановки (scan --no-pause)" if decision is None else ("исключены" if out_of_scope(decision) else "продолжить как есть"))
+    return {"gaps": len(scope["gaps"]), "answer": answer, "out_of_scope": out_of_scope(decision)}
+
+
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
     """The report and the marker warnings of the run (the warnings feed only the analyst questions)."""
     from tools import pilot_state as pilot
@@ -728,6 +747,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
         "automation_split": _split(root, attempt_id),  # FaT-PA
+        "scope": _scope(root, attempt_id, state),  # FaT-P3: the answer on the gaps and the excluded requirements with reasons
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "left": _left(root),  # FaT-O12b
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
@@ -878,6 +898,10 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         *_phase_lines(report), *_composition_lines(report), *_refusal_lines(report), *_canon_lines(report),
         "## Остановки и ошибки", "", *(f"- {key}: {_dash(value) if not isinstance(value, list) else (', '.join(value) or '—')}" for key, value in report["stops"].items()), "",
     ]
+    if report.get("scope"):
+        scope = report["scope"]
+        lines += ["## Охват после разметки", "", f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
+                  *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]), ""]
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "

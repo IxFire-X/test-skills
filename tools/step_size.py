@@ -63,6 +63,30 @@ def step_window(project: Path) -> int:
     return _limit(project, "step_window_bytes", DEFAULT_WINDOW, zero=True)
 
 
+class GeneratorContextNotImplemented(ValueError):
+    code = "GENERATOR_CONTEXT_NOT_IMPLEMENTED"
+
+
+def generator_context(project: Path) -> str:
+    """FaT-P3: ``.skillsrc`` ``limits.generator_context`` — ``all`` (default: every generator batch reads the context receipts
+    of its plan) or ``own``.  ``own`` (the receipts of the batch's own group plus an index of the others) waits for the
+    measurement on the PQ1 line and a definition of «own group»; ``plan-batches`` refuses it with a code."""
+    path = Path(project) / ".skillsrc"
+    if not path.is_file():
+        return "all"
+    from tools.skillsrc_manifest import load_skillsrc
+
+    value = (load_skillsrc(path).get("limits") or {}).get("generator_context")
+    return value if value in {"all", "own"} else "all"
+
+
+def require_generator_context_all(project: Path) -> None:
+    if generator_context(project) == "own":
+        raise GeneratorContextNotImplemented(
+            "GENERATOR_CONTEXT_NOT_IMPLEMENTED: limits.generator_context: own ещё не реализовано — оно ждёт замера на линейке PQ1 "
+            "и определения «своей группы»; fix: убери ключ из .skillsrc или поставь all (по умолчанию), см. plan-new P3")
+
+
 def looks_truncated(text: str) -> bool:
     """FaT-O2: the JSON ends inside a string or with an open bracket — cut in the middle, not merely malformed."""
     depth, in_string, escape = 0, False, False
@@ -149,8 +173,21 @@ def _requirement_files(project: Path, root: Path) -> list[Path]:
     from tools.cases_import import cases_path, docs_run
 
     request = json.loads((root / "run-manifest.json").read_text(encoding="utf-8")).get("scan_request") or {}
-    paths = [*(request.get("docs") or []), *([str(cases_path(root))] if docs_run(root) else [])]
-    return list(dict.fromkeys(Path(path) if Path(path).is_absolute() else project / path for path in paths))
+    from tools.doc_sections import resolve_spec, view_name
+
+    files: list[Path] = []
+    for raw in request.get("docs") or []:
+        path, heading = resolve_spec(project, raw)  # FaT-P3: the model reads the view of path#Section, not the file
+        if heading is None:
+            files.append(Path(path) if Path(path).is_absolute() else project / path)
+        else:
+            candidate = Path(path)
+            rel = (candidate if candidate.is_absolute() else project / candidate).resolve().relative_to(project.resolve()).as_posix()
+            files.append(root / "doc-sections" / view_name(rel, heading))
+    if docs_run(root):
+        csv = Path(str(cases_path(root)))
+        files.append(csv if csv.is_absolute() else project / csv)
+    return list(dict.fromkeys(files))
 
 
 def journal_files(project: Path, run_id: str, stage: str, batch: int | None) -> list[Path]:

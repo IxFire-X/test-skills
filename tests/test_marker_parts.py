@@ -54,10 +54,14 @@ def _publish_requirements(root: Path, attempt_id: str, baseline: dict) -> dict:
     return pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:requirements", _marker([REQUIREMENTS_PLACEHOLDER], ["док — требование без ожидаемого результата"]))
 
 
-def _publish_part(root: Path, attempt_id: str, baseline: dict, index: int, receipt: dict, requirements: dict, value: dict) -> dict:
+def _publish_part(root: Path, attempt_id: str, baseline: dict, index: int, receipt: dict, requirements: dict, value: dict,
+                  *, legacy: bool = False) -> dict:
+    """FaT-P3: a part binds the inventory, its receipt and the requirements answer — not the documents again; ``legacy`` is
+    the form of the runs before P3 (the requirements digest first), which stays accepted."""
     stage = f"context-marker:batch-{index:03d}"
+    head = [baseline["requirements"]["digest"]] if legacy else []
     pilot_state.publish_model_request(root, attempt_id, stage, model_id="model-context", invocation_id=f"context-part-{index}",
-                                      input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipt["digest"], requirements["content_digest"]])
+                                      input_digests=[*head, baseline["inventory_digest"], receipt["digest"], requirements["content_digest"]])
     return pilot_state.publish_model_stage_artifact(root, attempt_id, stage, value)
 
 
@@ -146,7 +150,7 @@ def test_a_part_needs_the_requirements_answer_first(tmp_path: Path) -> None:
     root, attempt_id, baseline, receipts = _run(tmp_path)
     with pytest.raises(ValueError):
         pilot_state.publish_model_request(root, attempt_id, "context-marker:batch-001", model_id="model-context", invocation_id="early",
-                                          input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"], receipts[0]["digest"], "sha256:" + "c" * 64])
+                                          input_digests=[baseline["inventory_digest"], receipts[0]["digest"], "sha256:" + "c" * 64])
 
 
 def test_a_forged_merged_marker_is_rejected(tmp_path: Path) -> None:
@@ -226,7 +230,7 @@ def test_a_merged_marker_passes_the_review_and_compatibility_checks(pack_root: P
         for index, receipt in enumerate(inputs[2:], start=1):
             stage_id = f"context-marker:batch-{index:03d}"
             real_request(run_root, attempt_id, stage_id, model_id="model-context", invocation_id=f"part-{index}-{attempt_id}",
-                         input_digests=[*inputs[:2], receipt, requirements["content_digest"]])
+                         input_digests=[inputs[1], receipt, requirements["content_digest"]])
             real_artifact(run_root, attempt_id, stage_id, value)
         return merge_parts(Path(run_root))
 
@@ -291,7 +295,69 @@ def test_a_part_plan_names_no_digests_until_the_requirements_answer(tmp_path: Pa
     parts = plan(root)["parts"][1:]
     assert all("input_digests" not in part and part["waits"] == "ждёт ответа context-marker:requirements" for part in parts)
     requirements = _publish_requirements(root, attempt_id, baseline)
-    head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
     parts = plan(root)["parts"][1:]
-    assert [part["input_digests"] for part in parts] == [[*head, receipt["digest"], requirements["content_digest"]] for receipt in receipts]
+    assert [part["input_digests"] for part in parts] == [[baseline["inventory_digest"], receipt["digest"], requirements["content_digest"]]
+                                                         for receipt in receipts]
     assert all("waits" not in part for part in parts)
+
+
+def test_a_part_without_the_documents_digest_is_planned_and_accepted(tmp_path: Path) -> None:
+    """FaT-P3: part input = inventory, receipt of the batch, requirements answer; the documents are in no part."""
+    from tools.context_marker_parts import merge_parts, plan
+
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    steps = plan(root)["parts"][1:]
+    assert all(baseline["requirements"]["digest"] not in part["input_digests"] for part in steps)
+    assert all(len(part["input_digests"]) == 3 for part in steps)
+    for index, receipt in enumerate(receipts, start=1):
+        _publish_part(root, attempt_id, baseline, index, receipt, requirements, _marker([f"src/part{index - 1}.py — x"]))
+    assert plan(root)["next"] == "merge"
+    merged = merge_parts(root)
+    artifact = pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged["content_digest"])["artifact"]
+    assert len(artifact["artifacts"]["source_code_and_diff"]["sources"]) == 3
+
+
+def test_a_part_of_a_run_before_p3_with_the_documents_digest_is_still_accepted(tmp_path: Path) -> None:
+    """FaT-P3: v0.1 runs keep the requirements digest first in each part; they replay and merge as before."""
+    from tools.context_marker_parts import merge_parts, plan
+
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    for index, receipt in enumerate(receipts, start=1):
+        _publish_part(root, attempt_id, baseline, index, receipt, requirements, _marker([f"src/part{index - 1}.py — x"]), legacy=True)
+    assert plan(root)["next"] == "merge"
+    merged = merge_parts(root)
+    assert len(pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged["content_digest"])["artifact"]
+               ["artifacts"]["source_code_and_diff"]["sources"]) == 3
+
+
+def test_a_part_with_a_foreign_head_is_refused(tmp_path: Path) -> None:
+    """FaT-P3: the shorter form is not a gap in the check — the inventory still comes first and the receipt second."""
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    with pytest.raises(ValueError, match="context-marker inputs must bind"):
+        pilot_state.publish_model_request(root, attempt_id, "context-marker:batch-001", model_id="model-context", invocation_id="foreign",
+                                          input_digests=["sha256:" + "d" * 64, receipts[0]["digest"], requirements["content_digest"]])
+
+
+def test_the_input_size_of_a_part_has_no_documents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FaT-P3: stage_inputs of a part is smaller by the size of the documents (v0.1: 897 KB = documents 475 KB + batch + answer)."""
+    from tools import step_size
+
+    root, attempt_id, baseline, receipts = _run(tmp_path)
+    document = tmp_path / "analytics.md"
+    document.write_bytes(b"D" * 5000)
+    monkeypatch.setattr(step_size, "_requirement_files", lambda _project, _root: [document])
+    requirements = _publish_requirements(root, attempt_id, baseline)
+    _publish_part(root, attempt_id, baseline, 1, receipts[0], requirements, _marker(["src/part0.py — x"]))
+    _publish_part(root, attempt_id, baseline, 2, receipts[1], requirements, _marker(["src/part1.py — x"]), legacy=True)
+    fresh = step_size.input_size(step_size.stage_inputs(root, "context-marker:batch-001"))
+    legacy = step_size.input_size(step_size.stage_inputs(root, "context-marker:batch-002"))
+    found = step_size.stage_inputs(root, "context-marker:batch-001")
+    assert str(document) not in [row["path"] for row in found["files"]] and found["unresolved"] == []
+    assert str(document) in [row["path"] for row in step_size.stage_inputs(root, "context-marker:batch-002")["files"]]
+    # the legacy part is its own batch + answer + inventory plus the documents once; the new one has none of the 5000 B
+    rows = step_size.stage_inputs(root, "context-marker:batch-002")["files"]
+    assert legacy == sum(row["bytes"] for row in rows) and [row["bytes"] for row in rows if row["path"] == str(document)] == [5000]
+    assert fresh == sum(row["bytes"] for row in found["files"]) and fresh < legacy

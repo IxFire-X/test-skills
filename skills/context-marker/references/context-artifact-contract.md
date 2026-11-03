@@ -60,7 +60,8 @@ independent review still checks all semantic conditions in the bodies.
 
 The marker request binds exactly `[baseline.requirements.digest, baseline.inventory_digest,
 *context_receipt_digests]`, with at least one current authorized context receipt from the
-same attempt/inventory. Publication and readback verify the bound OpenSpec files and
+same attempt/inventory (a part of a marker in parts, FaT-P3, binds `[inventory_digest, its context receipt, the
+`context-marker:requirements` answer]` — the documents are read once, by the requirements step). Publication and readback verify the bound OpenSpec files and
 normalized identities. No additional source discovery or whole-project claim follows
 from those receipts: full-spec scope needs all agreed specifications authorized; change
 scope needs the selected delta and the justified related regression inputs.

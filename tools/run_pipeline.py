@@ -215,12 +215,39 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
             request = read_run(Path(run_root))["manifest"].get("scan_request")
         except (KeyError, OSError, TypeError, ValueError):
             request = None
-        result["next_step"] = _next_step(result, project, request)
+        result["next_step"] = _scope_pause_step(Path(run_root), str(result["attempt_id"]), _next_step(result, project, request))
         if _left_mark(Path(run_root)):  # FaT-O12b: a left run goes nowhere; the plain scan of its request starts anew
             result["next_step"] = {"code": "RUN_LEFT", "stage": "scan", "why": "прогон оставлен до ревью кейсов",
                                    "action": "простой scan того же запроса начнёт новый прогон", "skill_section": "Resume и дрейф",
                                    "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
     return result
+
+
+def _scope_pause_step(run_root: Path, attempt_id: str, step: dict[str, Any]) -> dict[str, Any]:
+    """FaT-P3: after the marker the plan of the batches waits for the human's answer on the gaps of the marker.  Only reads;
+    the step is the plan step itself until the marker has gaps, the human has not answered and the run keeps its pause."""
+    if step.get("code") != "GENERATOR_PLAN":
+        return step
+    from tools import scope_pause
+
+    try:
+        scope = scope_pause.scope_state(run_root, attempt_id)
+    except scope_pause.ScopeRefused as error:  # a decision file that is not the human's answer: fail closed, say so
+        return {"code": error.code, "stage": "scope", "skill_section": "3", "action": str(error), "command": None}
+    except (OSError, KeyError, TypeError, ValueError):
+        return step
+    if not scope["pending"]:
+        return step
+    gaps = scope["gaps"]
+    rows = [{"source_requirement_ids": row["source_requirement_ids"], "requirement": row["requirement"], "missing": row["missing"],
+             "blocks": row["blocks"], "question": row["question"]} for row in gaps[:scope_pause.LISTED]]
+    return {"code": "SCOPE_PENDING", "stage": "scope", "skill_section": "3",
+            "action": f"пауза после разметки: {len(gaps)} требований с пробелом (нет наблюдаемого канала, ожидаемого результата, доступа). "
+                      "Покажи список человеку (вопросы аналитику — questions-for-analyst.md в каталоге прогона) и спроси: исключить ли какие-то "
+                      "из них? Ответ человека передай в plan-batches; без ответа план отказывает кодом SCOPE_PENDING",
+            "command": _API + "plan-batches ... --run-root <run> --attempt <attempt> (--exclude <SREQ-id> [--exclude ...] --reason \"<текст человека>\" | --continue)",
+            "gaps": rows, **({"gaps_not_listed": len(gaps) - len(rows)} if len(gaps) > len(rows) else {}),
+            "no_pause": "scan --no-pause начинает прогон без этой остановки"}
 
 
 def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -541,8 +568,22 @@ def _is_zephyr_csv(data: bytes) -> bool:
 
 
 def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]:
+    from tools.doc_sections import resolve_spec
+
     entries: list[dict[str, str]] = []
-    for rel, data in _input_files(project, docs, "--docs"):
+    sections: dict[str, str | None] = {}  # FaT-P3: --docs path#Section — one section of the file, its heading by path
+    files: list[tuple[str, bytes]] = []
+    for raw in docs or []:
+        path, heading = resolve_spec(project, raw)
+        for rel, data in _input_files(project, [path], "--docs"):
+            if rel in sections:
+                if sections[rel] != heading:
+                    raise HostStop("TASK_DOC_SECTION_CONFLICT", f"{rel} указан дважды с разными разделами",
+                                   fix="один раздел на файл: --docs путь#Раздел один раз (или весь файл без #)")
+                continue
+            sections[rel] = heading
+            files.append((rel, data))
+    for rel, data in files:
         if _is_zephyr_csv(data):  # FaT-REF: an export of cases is not a requirements document
             raise HostStop("DOCS_ZEPHYR_CSV", f"{rel} — выгрузка тест-кейсов Zephyr, а не документ требований",
                            fix=f"подайте её через scan --reference {rel} (эталон для сравнения), а в --docs — документ требований")
@@ -550,9 +591,28 @@ def _docs_entries(project: Path, docs: list[str] | None) -> list[dict[str, str]]
             text = data.decode("utf-8")
         except UnicodeDecodeError as error:
             raise ValueError(f"DOCS_ENCODING: docs file is not UTF-8: {rel}; fix: сохрани документ в UTF-8 и повтори scan") from error
-        entries.append({"path": rel, "sha256": _digest_bytes(data), "content": text})
+        entry = {"path": rel, "sha256": _digest_bytes(data), "content": text}
+        if sections[rel] is not None:
+            entry.update(_section_entry(rel, text, str(sections[rel])))
+            entry["sha256"] = _digest_bytes(entry["content"].encode("utf-8"))  # what the code's inventory is built from
+        entries.append(entry)
     entries.sort(key=lambda row: row["path"])
     return entries
+
+
+def _section_entry(rel: str, text: str, heading: str) -> dict[str, str]:
+    """FaT-P3: the entry of ``path#Section``: ``content`` is the section at its source line numbers (the rest of the lines
+    empty), ``view`` the same with the note the model reads.  The digest is that of ``content`` and the requirement digest also
+    binds the heading (``_docs_projection``); a change of the file is drift of the inventory as before."""
+    from tools.doc_sections import SectionMissing, find_section, view
+
+    try:
+        section = find_section(text, heading, rel)
+    except SectionMissing as error:
+        message, _, fix = str(error).partition("; fix: ")
+        raise HostStop("TASK_DOC_SECTION_MISSING", message.removeprefix("TASK_DOC_SECTION_MISSING: "), fix=fix or None) from None
+    return {"content": view(text, section, rel, note=False), "view": view(text, section, rel), "section": section.heading,
+            "lines": f"{section.first}-{section.last}"}
 
 
 def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, list[dict[str, Any]]] | None:
@@ -577,7 +637,7 @@ def _reference_cases(project: Path, reference: str | None) -> tuple[str, bytes, 
 
 
 def _docs_projection(snapshot: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [{"path": row["path"], "sha256": row["sha256"]} for row in snapshot]
+    return [{"path": row["path"], "sha256": row["sha256"], **({"section": row["section"]} if "section" in row else {})} for row in snapshot]
 
 
 def _execution_skipped(project: Path, args: Any) -> dict[str, str] | None:
@@ -839,9 +899,37 @@ def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Pa
     task_ids, other_task_ids, _summary, _warnings = _task_document_scope(inventory, project, docs)
     selected = [opaque for opaque in _context_scope_ids(inventory, project, module_root, target) if opaque not in other_task_ids]
     selected += [opaque for opaque in task_ids if opaque not in selected]
+    sectioned = _sectioned_ids(inventory, project, docs)  # FaT-P3
+    selected = [opaque for opaque in selected if opaque not in sectioned]
+    task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
     budget = _scan_context_budget(inventory, project)
     kept, skipped = _filtered_context(inventory, project, module_root, selected, task_ids, budget)
     return kept, skipped, budget
+
+
+def _sectioned_ids(inventory: Mapping[str, Any], project: Path, docs: list[str] | None) -> set[str]:
+    """FaT-P3: the inventory ids of the documents given as ``path#Section``.  The model reads their section view, not the file:
+    they stay out of the context receipts (else the whole file would reach the model once more)."""
+    paths = {row["path"] for row in _docs_entries(project, docs) if "section" in row}
+    return {str(item["opaque_id"]) for item in inventory.get("files", []) if isinstance(item, Mapping) and str(item["project_path"]) in paths}
+
+
+def _write_section_views(project: Path, run_root: Path, docs: list[str] | None) -> list[dict[str, str]]:
+    """FaT-P3: ``<run>/doc-sections/<name>.md`` — the view of each ``path#Section`` (the lines of the section at their source
+    numbers); the rows tell the agent which file the model reads instead of the document."""
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.doc_sections import view_name
+
+    rows = []
+    for entry in _docs_entries(project, docs):
+        if "section" not in entry:
+            continue
+        name = view_name(entry["path"], entry["section"])
+        target = run_root / "doc-sections" / name
+        atomic_write_confined_bytes_at_root(project, run_root, target, entry["view"].encode("utf-8"))
+        rows.append({"path": entry["path"], "section": entry["section"], "lines": entry["lines"],
+                     "view": target.relative_to(project).as_posix()})
+    return rows
 
 
 def _scan_context_budget(inventory: Mapping[str, Any], project: Path | None = None) -> int:
@@ -958,6 +1046,7 @@ def _scan_request(args: Any) -> dict[str, Any]:
         "target": getattr(args, "target", None), "profile": getattr(args, "profile", "local-pilot-v1"),
         "accept_self_review": bool(getattr(args, "accept_self_review", False)),
         "disposition_policy": getattr(args, "disposition_policy", None),
+        **({"no_pause": True} if getattr(args, "no_pause", False) else {}),  # FaT-P3: a run without the pause after the marker
         **({"reference": str(args.reference)} if getattr(args, "reference", None) else {}),
         **({"cases": str(cases)} if cases else {}),  # FaT-IMP
     }
@@ -1071,6 +1160,8 @@ def _scan_command(project: Path, request: Mapping[str, Any], *, extra: Sequence[
     parts.append(f"--profile {request.get('profile') or 'local-pilot-v1'}")
     if request.get("accept_self_review"):
         parts.append("--accept-self-review")
+    if request.get("no_pause"):
+        parts.append("--no-pause")
     if request.get("disposition_policy"):
         parts.append(f"--disposition-policy {request['disposition_policy']}")
     if request.get("reference"):
@@ -1318,6 +1409,10 @@ def _scan(args: Any) -> int:
         # FaT-3: the task document of --docs always goes to the model; the other tasks of to_do do not.
         selected_ids = [opaque for opaque in selected_ids if opaque not in other_task_ids]
         selected_ids += [opaque for opaque in task_ids if opaque not in selected_ids]
+        sectioned = _sectioned_ids(frozen_inventory, project, getattr(args, "docs", None))  # FaT-P3: path#Section is no context file
+        selected_ids = [opaque for opaque in selected_ids if opaque not in sectioned]
+        task_ids = [opaque for opaque in task_ids if opaque not in sectioned]
+        context_summary["document_sections"] = _write_section_views(project, run_root, getattr(args, "docs", None))
         by_id = {str(item["opaque_id"]): str(item["project_path"]) for item in frozen_inventory["files"]}
         reference = _reference_cases(project, getattr(args, "reference", None))
         if reference is not None:  # FaT-REF: the reference CSV is never context of a model
@@ -2800,6 +2895,8 @@ def build_parser() -> JsonArgumentParser:
     scan_parser.add_argument("--cases", help="FaT-IMP: a Zephyr CSV of ready test cases inside the project; autotests from them, without --docs")
     scan_parser.add_argument("--accept-self-review", action="store_true",
                              help="FaT-4b: the human accepts a reviewer in the same session, without a fresh context (marked SELF).")
+    scan_parser.add_argument("--no-pause", action="store_true",
+                             help="FaT-P3: no stop after the context marker for the human to exclude requirements with gaps (kept in the run manifest).")
     scan_parser.add_argument("--reference", default=None,
                              help="FaT-REF: a Zephyr Scale CSV of reference cases — compared with the new cases as a review hint")
     scan_parser.add_argument("--new-run", action="store_true",

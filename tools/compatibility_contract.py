@@ -44,6 +44,13 @@ def _label(value: Any) -> bool:
     return isinstance(value, str) and _LABEL.fullmatch(value) is not None
 
 
+def _marker_requirements(rows: Any, root: Any, attempt_id: str) -> Any:
+    """FaT-P3: the requirements the effective document holds: the marker's without those the human excluded (plan out_of_scope)."""
+    from tools.scope_pause import marker_requirements_in_scope
+
+    return marker_requirements_in_scope(rows, Path(root), attempt_id)
+
+
 def _error(errors: list[str], code: str) -> None:
     if code not in errors:
         errors.append(code)
@@ -395,8 +402,8 @@ def _stage_errors(evidence: Mapping[str, Any], attempt: Mapping[str, Any], ledge
         or not isinstance(effective_document, Mapping)
         or not isinstance(reviewer_output, Mapping)
         or reviewer_output.get("content_digest") != reviewer_output_digest
-        or marker_artifact.get("artifacts", {}).get("analytics_documentation", {}).get("requirements")
-        != effective_document.get("source_requirements")
+        or _marker_requirements(marker_artifact.get("artifacts", {}).get("analytics_documentation", {}).get("requirements"),
+                                durable["root"], str(attempt["attempt_id"])) != effective_document.get("source_requirements")
     ):
         _error(errors, "STAGE_READBACK_INVALID")
         return "independence_unverified"

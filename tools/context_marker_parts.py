@@ -2,7 +2,8 @@
 
 ``python -m tools.context_marker_parts plan --run-root <project>/.pilot-runs/<run_id>`` lists the marker steps of the
 current attempt: with one context batch the single ``context-marker:baseline`` as before; with more,
-``context-marker:requirements`` (documents only), one ``context-marker:batch-NNN`` per batch and the merge.  Each step
+``context-marker:requirements`` (documents only), one ``context-marker:batch-NNN`` per batch and the merge.  A part binds the
+inventory, its receipt and the requirements answer — the documents are read once, by the requirements step (FaT-P3).  Each step
 comes with its ``input_digests``, its bytes (batch / requirements / role instructions) against the step budget of
 ``tools.step_size`` and the next step to take.  ``merge`` publishes ``context-marker:baseline`` from the recorded answers:
 a merge of the parts by code, recorded with the model id ``controller:context-marker-merge`` — not a model call.
@@ -79,7 +80,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
         if imported and not docs_run(root):  # code, not a model call: no prompt, no budget (FaT-IMP3: with --docs the model)
             parts[0].update(fits=True, hint=None, by_code=f"python -m tools.api cases-import --run-root {root} --attempt {attempt_id}")
         for receipt in receipts:
-            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [*head, receipt["digest"], answer],
+            part = step(f"context-marker:batch-{int(receipt['batch_index']):03d}", [baseline["inventory_digest"], receipt["digest"], answer],  # FaT-P3: no documents digest in a part
                         {"batch": int(receipt["byte_count"]), "requirements": requirements_bytes, "role": role},
                         "часть с требованиями больше бюджета шага: уменьшите limits.context_batch_bytes и повторите scan"
                         + ("; сами требования с инструкциями роли больше бюджета — сузьте --docs" if requirements_bytes + role > budget else ""))
@@ -130,7 +131,10 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
                                       invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged))
     published["warning"] = None  # FaT-O: the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
-    return published
+    from tools.scope_pause import write_draft
+
+    draft = write_draft(root, attempt_id)  # FaT-P3: the gaps of the marker as questions, for the human's decision on the scope
+    return {**published, **({"questions_draft": str(draft)} if draft else {})}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,7 +150,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             published = merge_parts(args.run_root)
             print(json.dumps({"status": "ok", "stage": "context-marker:baseline", "kind": "слияние частей кодом",
-                              "content_digest": published["content_digest"]}, ensure_ascii=False, sort_keys=True))
+                              "content_digest": published["content_digest"],
+                              **({"questions_draft": published["questions_draft"],
+                                  "next": "пауза: покажи человеку пробелы разметки (status → next_step SCOPE_PENDING)"}
+                                 if published.get("questions_draft") else {})}, ensure_ascii=False, sort_keys=True))
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
         return 2

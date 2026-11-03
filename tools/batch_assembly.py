@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from tools.canonical_document import validate_canonical_document
 from tools.schema_validation import schema_diagnostics
@@ -303,14 +303,45 @@ def _end_to_end_notes(batches: list[list[str]], keys: dict[str, str | None]) -> 
             "требования своей пачки — сквозной путь строится внутри пачки"]
 
 
+def _without_out_of_scope(source: list[dict[str, Any]], out_of_scope: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """FaT-P3: the source requirements the human excluded leave the plan (and so the candidate document): no batch owns them,
+    the rest keep their IDs and are numbered 1..N again (the canonical document wants a contiguous display_order)."""
+    ids = [str(row.get("source_requirement_id")) for row in out_of_scope]
+    known = {item["source_requirement_id"] for item in source}
+    unknown = sorted(set(ids) - known)
+    if unknown or len(set(ids)) != len(ids) or any(not str(row.get("reason") or "").strip() for row in out_of_scope):
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", f"out_of_scope names unknown, repeated or reasonless requirements: {unknown or ids}")
+    kept = [item for item in source if item["source_requirement_id"] not in ids]
+    if not kept:
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "out_of_scope leaves no source requirement to plan")
+    return [dict(item, display_order=index) for index, item in enumerate(kept, start=1)]
+
+
+def in_scope_requirements(rows: Sequence[Mapping[str, Any]], plan: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """FaT-P3: the marker's requirements as the candidate document of that plan holds them: the excluded ones left out
+    and the rest renumbered. For the checks that compare the document with the marker. Without ``out_of_scope`` the
+    rows themselves."""
+    excluded = {str(row.get("source_requirement_id")) for row in (plan or {}).get("out_of_scope") or [] if isinstance(row, Mapping)}
+    if not excluded:
+        return [dict(row) for row in rows]
+    return [dict(row, display_order=index) for index, row in
+            enumerate((row for row in rows if row.get("source_requirement_id") not in excluded), start=1)]
+
+
 def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], *, window_bytes: int = 0,
                  input_bytes: int = 0, id_pattern: re.Pattern[str] | None = None,
-                 documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None) -> BatchPlan:
+                 documents: dict[str, str] | None = None, imported: Mapping[str, Any] | None = None,
+                 out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
     """Create one complete partition: one batch unless the expected answer does not fit the window (FaT-BO).
 
     FaT-AU3: a grouping with more than one context receipt (``context_receipt_digests``, the first one is
-    ``context_receipt_digest``) gives a plan with the same list: every batch reads all of them."""
+    ``context_receipt_digest``) gives a plan with the same list: every batch reads all of them.
+    FaT-P3: ``out_of_scope`` is ``[{source_requirement_id, reason}]`` the human excluded after the marker: no batch owns
+    them, the plan names them with the reason."""
     source = _source_requirements(source_requirements)
+    order = {item["source_requirement_id"]: item["display_order"] for item in source}
+    if out_of_scope:
+        source = _without_out_of_scope(source, out_of_scope)
     header_digest, context_digest = _evidence_digests(grouping_evidence)
     contexts = context_digests(grouping_evidence)
     if contexts[0] != context_digest or len(set(contexts)) != len(contexts):
@@ -333,6 +364,9 @@ def plan_batches(source_requirements: list[dict[str, Any]], grouping_evidence: d
     body: dict[str, Any] = {"schema_version": "1.0.0", "source_requirements": source, "header_digest": header_digest, "context_receipt_digest": context_digest, "batches": batches}
     if len(contexts) > 1:  # one context batch: the plan bytes as before FaT-AU3
         body["context_receipt_digests"] = contexts
+    if out_of_scope:  # without an exclusion the plan bytes are as before FaT-P3
+        body["out_of_scope"] = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": " ".join(str(row["reason"]).split())}
+                                for row in sorted(out_of_scope, key=lambda row: order[row["source_requirement_id"]])]
     plan = BatchPlan(_with_digest(body))
     _schema_valid(plan, _PLAN_SCHEMA, "batch plan")
     plan.notes = notes
@@ -344,7 +378,8 @@ _DOCUMENT_SUFFIXES = {".md", ".markdown", ".txt", ".adoc", ".rst"}
 
 def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping_evidence: dict[str, Any], project: Path,
                              input_files: list[Path], context_receipt: dict[str, Any] | list[dict[str, Any]],
-                             imported: Mapping[str, Any] | None = None) -> BatchPlan:
+                             imported: Mapping[str, Any] | None = None,
+                             out_of_scope: Sequence[Mapping[str, Any]] | None = None) -> BatchPlan:
     """``tools.api plan-batches``: the window and id_pattern of ``.skillsrc``, the step input as ``tools.step_size`` measures
     it (the given files, the context files of the receipts, the map of existing project tests — FaT-EC — the skeleton of an
     import — FaT-SK — and the tc-generator role), the documents of the receipts.
@@ -391,7 +426,7 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
         if len(taken) > 1:
             evidence["context_receipt_digests"] = [str(receipt["digest"]) for receipt in taken]
         return plan_batches(source_requirements, evidence, window_bytes=window, input_bytes=step_input, id_pattern=pattern,
-                            documents=documents, imported=value)
+                            documents=documents, imported=value, out_of_scope=out_of_scope)
 
     plan, taken = plan_with(receipts[:1]), 1
     while taken < len(receipts):
@@ -405,8 +440,10 @@ def plan_batches_for_project(source_requirements: list[dict[str, Any]], grouping
     if value is not None:
         plan.notes.append("вход пачки включает её часть скелета импорта: байты её кейсов входят в оценку пачки")
     # P9: the volume of the run, so that the person sees at once how long it will take
-    plan.notes.append(f"пачек {len(plan['batches'])}, требований {len(source_requirements)}, "
-                      f"ориентировочно кейсов {len(source_requirements)}×2–3 ({len(source_requirements) * 2}–{len(source_requirements) * 3})")
+    counted = len(plan["source_requirements"])  # FaT-P3: the excluded requirements get no cases
+    plan.notes.append(f"пачек {len(plan['batches'])}, требований {counted}"
+                      + (f" (вне охвата {len(plan['out_of_scope'])})" if plan.get("out_of_scope") else "")
+                      + f", ориентировочно кейсов {counted}×2–3 ({counted * 2}–{counted * 3})")
     return plan
 
 
@@ -464,6 +501,9 @@ def _plan_batches(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     expected = [item.get("source_requirement_id") for item in plan.get("source_requirements", [])]
     if sorted(owned) != sorted(expected) or len(set(owned)) != len(owned):
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "plan ownership is not an exact partition")
+    excluded = [row.get("source_requirement_id") for row in plan.get("out_of_scope", [])]  # FaT-P3: owned by no batch, in no document
+    if len(set(excluded)) != len(excluded) or set(excluded) & set(expected):
+        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "out_of_scope requirements must be unique and outside source_requirements")
     return by_id
 
 

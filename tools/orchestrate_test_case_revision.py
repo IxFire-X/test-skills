@@ -174,6 +174,13 @@ def _exact_receipt(value: Mapping[str, Any], label: str) -> dict[str, Any]:
     return plain
 
 
+def _marker_requirements(rows: Any, run_root: Path, attempt_id: str) -> Any:
+    """FaT-P3: the requirements the candidate document holds — those of the marker without the ones the human excluded."""
+    from tools.scope_pause import marker_requirements_in_scope
+
+    return marker_requirements_in_scope(rows, Path(run_root), attempt_id)
+
+
 def reviewer_package_binding(
     candidate: Mapping[str, Any],
     candidate_receipt: Receipt,
@@ -214,7 +221,7 @@ def reviewer_package_binding(
     if (
         not isinstance(marker, dict)
         or not isinstance(marker_analytics, dict)
-        or marker_analytics.get("requirements") != candidate_value.get("source_requirements")
+        or _marker_requirements(marker_analytics.get("requirements"), run_root, attempt_id) != candidate_value.get("source_requirements")
     ):
         raise ValueError("REVIEWER_PROTOCOL: context-marker output is invalid")
     marker_digest = "sha256:" + hashlib.sha256(canonical_bytes(marker)).hexdigest()

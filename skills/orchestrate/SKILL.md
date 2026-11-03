@@ -210,6 +210,12 @@ Run остаётся связан с исходной project/module identity.
 это отказ, а не ответ: покажи человеку байты и подсказку одной строкой и используй единственный повтор стадии с
 `retry_prompt` из `validate_artifact` (просьба ответить тем же JSON компактно, без отступов). Ответ сам не дописывай.
 
+`--docs путь#Раздел` (Markdown): в опись и разметку идёт только раздел — заголовок ATX и всё до следующего заголовка того же или
+более высокого уровня. Модель читает не файл, а его вид `<run>/doc-sections/<имя>.md` (строки раздела на своих номерах из исходного
+файла, остальные пусты; путь вида — в `context_summary.document_sections` вывода scan и в `step-inputs`), а в provenance пишет путь и
+строку исходного файла. Файл с таким разделом в квитанции контекста не входит. Нет заголовка — `TASK_DOC_SECTION_MISSING` с перечнем
+заголовков файла; один раздел на файл.
+
 Документ задачи (`--docs`) всегда входит в выбор контекста, документы других задач из `to_do` —
 нет; `context_summary` вывода scan показывает, что уйдёт модели. Если scan остановился с
 `TASK_DOC_OUTSIDE_CONTEXT`, передай человеку `fix`: модель без документа задачи пишет кейсы без
@@ -225,7 +231,9 @@ Run остаётся связан с исходной project/module identity.
    `input_digests` (пока нет ответа `context-marker:requirements`, у частей вместо них пометка
    `waits`). Один батч (`mode: single`) — пункт 1 как раньше. Несколько (`mode: parts`):
    `context-marker:requirements` (только документы; размер — `step_size --stage context-marker:requirements`) →
-   по каждой части `step_size --stage context-marker --batch N` и вызов `context-marker:batch-NNN` с правилами части из SKILL
+   по каждой части `step_size --stage context-marker --batch N` и вызов `context-marker:batch-NNN` (вход части — inventory, квитанция
+   её батча и ответ `context-marker:requirements`: документов в части нет, их один раз читает шаг требований; прогоны до P3
+   с четырьмя входами принимаются как раньше) с правилами части из SKILL
    context-marker → `merge` (слияние частей кодом, не вызов модели). Между частями можно `/clear`:
    status покажет `next_step`.
    Импорт готовых кейсов (`scan --cases <csv>`, без `--docs`): шаг `context-marker:requirements` делает код —
@@ -249,7 +257,15 @@ Run остаётся связан с исходной project/module identity.
    --stage <stage> --artifact <ответ.json>` — ответ передаётся как есть; `result.content_digest` — его digest.
    Порядок `input_digests`: `[baseline.requirements.digest, baseline.inventory_digest,
    ...authorized_context_receipt_digests]`; нужен минимум один current/readback receipt.
-2. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
+2. **Пауза после разметки (P3).** Если разметка оставила пробелы (предупреждения из четырёх полей — нет наблюдаемого канала, ожидаемого
+   результата, доступа), `status` показывает `next_step.code: SCOPE_PENDING` со списком требований, а `merge` или `plan-batches` без
+   ответа кладут черновик `questions-for-analyst.md` в каталог прогона. Остановись: покажи человеку список и спроси, исключать ли
+   какие-то требования (кейсы для них не пишутся) или продолжать как есть. Ответ человека передай `plan-batches` с `--run-root <run>
+   --attempt <id>`: `--exclude <SREQ-id>` (повторяемый) с `--reason "<его текст>"` или `--continue`. Код записывает ответ артефактом
+   прогона `scope-decision.json`; без ответа `plan-batches` и `publish-generator-input --kind plan` отказывают `SCOPE_PENDING`, план
+   с исключёнными несёт `out_of_scope` (требования с причиной), и отчёт их называет. Решение за человеком, не за тобой; другое решение
+   — новый прогон. Прогон без остановки — `scan --no-pause` (его просит человек, ты не добавляешь его сам).
+2a. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
    каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
    `tools.api read-context --digest <d>`. Сначала header: `tools.api publish-generator-input --kind header --value <f>`
    (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. План — `tools.api plan-batches

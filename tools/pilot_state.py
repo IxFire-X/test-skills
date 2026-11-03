@@ -1790,19 +1790,20 @@ def _context_marker_receipt_digests(
             raise ValueError("context-marker requirements step binds the requirements and the inventory only")
         return []
     if stage_instance_id.startswith("context-marker:batch-"):
-        if len(inputs) != 4 or requirements is None or requirements[1] is None or inputs[3] != requirements[1]:
+        # FaT-P3: [inventory, receipt, requirements answer]; the runs before P3 also bound the documents digest first
+        if len(inputs) not in (3, 4) or requirements is None or requirements[1] is None or inputs[-1] != requirements[1]:
             raise ValueError("context-marker part must bind one context receipt and the requirements answer")
         number = int(stage_instance_id.rsplit("-", 1)[1])
-        if not 1 <= number <= len(published) or inputs[2] != published[number - 1]:
+        if not 1 <= number <= len(published) or inputs[-2] != published[number - 1]:
             raise ValueError(f"{stage_instance_id} must bind context receipt {number} of the attempt (batch-NNN is the N-th published receipt)")
-        return [inputs[2]]
+        return [inputs[-2]]
     if not batches:
         if list(inputs[2:]) != published:
             raise ValueError("context-marker:baseline must bind every context receipt of the attempt, once, in publication order")
         return list(inputs[2:])
     if requirements is None or requirements[1] is None or any(response is None for _stage, _request, response in batches):
         raise ValueError("merged context-marker request requires every part answer")
-    receipts = [_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"][2] for stage, request, _response in batches]
+    receipts = [_read_model_request_with_state(project, root, state, attempt_id, stage, request)["input_digests"][-2] for stage, request, _response in batches]
     if receipts != published:
         missing = [f"batch-{index:03d}" for index, digest in enumerate(published, start=1) if digest not in receipts]
         raise ValueError(f"CONTEXT_MARKER_PARTS_INCOMPLETE: the parts must cover every context receipt of the attempt once, in order; missing {missing}")
@@ -1821,7 +1822,10 @@ def _context_marker_snapshots(
 
     baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
     minimum = 2 if stage_instance_id == "context-marker:requirements" else 3
-    if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:2]) != [baseline["requirements"]["digest"], baseline["inventory_digest"]] or len(inputs) < minimum:
+    head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
+    if stage_instance_id.startswith("context-marker:batch-") and len(inputs) == 3:
+        head = head[1:]  # FaT-P3: a part binds the inventory, not the documents again (the answer of the requirements step does)
+    if baseline["digest"] != attempt["baseline_digest"] or list(inputs[:len(head)]) != head or len(inputs) < minimum:
         raise ValueError("context-marker inputs must bind baseline requirements, inventory, and authorized context receipts")
     snapshots: dict[str, dict[str, str]] = {}
     if receipts is None:
@@ -4811,7 +4815,7 @@ def _marker_base(source: Mapping[str, Any]) -> list[str]:
     stages = source["stages"]
     baseline = list(stages["context-marker:baseline"][0]["input_digests"])
     parts = sorted(stage for stage in stages if stage.startswith("context-marker:batch-"))
-    receipts = [str(stages[stage][0]["input_digests"][2]) for stage in parts] if parts else baseline[2:]
+    receipts = [str(stages[stage][0]["input_digests"][-2]) for stage in parts] if parts else baseline[2:]
     return [*baseline[:2], *receipts]
 
 
@@ -4928,6 +4932,9 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
     project, root = _run_root(run_root)
     if kind == "plan":  # FaT-DG: a plan the generator request would refuse is refused now, while another plan is still possible
         state = derive_state(root)
+        from tools.scope_pause import check_plan
+
+        check_plan(root, attempt_id, item, state)  # FaT-P3: the pause after the marker — the plan carries the human's answer
         try:
             header = _generator_input(project, root, state, attempt_id, "header")
         except ModelInputsMismatch as error:

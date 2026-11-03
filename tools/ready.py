@@ -110,8 +110,11 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
     root = Path(project).resolve()
     if not docs:
         return [_row("docs", CASES, "STOP", "не указан ни один документ требований", "добавьте --docs <путь внутри проекта>")]
+    from tools.doc_sections import resolve_spec
+
     for raw in docs:
-        candidate = Path(raw)
+        spec, heading = resolve_spec(root, raw)  # FaT-P3: path#Section
+        candidate = Path(spec)
         path = (candidate if candidate.is_absolute() else root / candidate).resolve()
         check_id = f"docs:{raw}"
         try:
@@ -123,9 +126,20 @@ def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
             rows.append(_row(check_id, CASES, "STOP", f"{raw} не найден", "проверьте путь от корня проекта"))
             continue
         try:
-            path.read_bytes().decode("utf-8")
+            text = path.read_bytes().decode("utf-8")
         except UnicodeDecodeError:
             rows.append(_row(check_id, CASES, "STOP", f"{raw} не в UTF-8", "сохраните документ в кодировке UTF-8"))
+            continue
+        if heading is not None:
+            from tools.doc_sections import SectionMissing, find_section
+
+            try:
+                section = find_section(text, heading, spec)
+            except SectionMissing as error:
+                message, _, fix = str(error).partition("; fix: ")
+                rows.append(_row(check_id, CASES, "STOP", message.removeprefix("TASK_DOC_SECTION_MISSING: "), fix or "укажите заголовок файла"))
+                continue
+            rows.append(_row(check_id, CASES, "OK", f"{raw} — раздел, строки {section.first}–{section.last} из {path.stat().st_size} Б файла"))
             continue
         rows.append(_row(check_id, CASES, "OK", f"{raw} — {path.stat().st_size} Б"))
     return rows
@@ -306,7 +320,9 @@ def check_task_documents(rows: list[dict[str, Any]], project: Path, docs: Sequen
         row = next((item for item in rows if item["id"] == f"docs:{raw}"), None)
         if row is None or row["level"] != "OK":
             continue
-        candidate = Path(raw)
+        from tools.doc_sections import resolve_spec
+
+        candidate = Path(resolve_spec(root, raw)[0])
         relative = (candidate if candidate.is_absolute() else root / candidate).resolve().relative_to(root).as_posix()
         if relative in problems:  # P6a: outside the module, left out by a rule of the inventory
             row.update(level="STOP", fix=TASK_DOC_FIX, message=f"{raw}: документ задачи не может войти в inventory: {problems[relative]} — модель его не получит")
