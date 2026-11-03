@@ -124,9 +124,10 @@ def _declared_legacy_ids(root: Path) -> dict[str,str]:
     """P6a: the old hex ids an existing .skillsrc already uses stay the ids of those folders — the file is not rewritten and its
     modules are not taken for removed ones."""
     try:
-        import yaml
-        modules=yaml.safe_load((root/".skillsrc").read_text(encoding="utf-8")).get("modules",[])
-    except (ImportError, OSError, ValueError, AttributeError, yaml.YAMLError): return {}
+        if __package__: from .skillsrc_manifest import load_skillsrc
+        else: from skillsrc_manifest import load_skillsrc
+        modules=load_skillsrc(root/".skillsrc").get("modules",[])
+    except Exception: return {}  # a missing or invalid .skillsrc is the business of scan and ready
     if not isinstance(modules,list): return {}
     return {m["root"]:m["id"] for m in modules if isinstance(m,dict) and isinstance(m.get("root"),str) and m.get("id")==legacy_module_id(m["root"])}
 def _question(mid:str, field:str, values:dict[str,list[str]])->dict[str,Any]:
