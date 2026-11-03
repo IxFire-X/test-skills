@@ -7,9 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator
-
 from tools import pilot_state
+from tools.schema_engine import Draft202012Validator
 from tools.json_cli import JsonArgumentParser
 
 

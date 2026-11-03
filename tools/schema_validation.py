@@ -10,8 +10,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker
-from referencing import Registry, Resource
+if __package__:
+    from .schema_engine import Draft202012Validator, FormatChecker
+else:  # direct CLI execution (validate_artifact.py)
+    from schema_engine import Draft202012Validator, FormatChecker
 
 
 class StrictJsonError(ValueError):
@@ -119,22 +121,20 @@ def _schema_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
 
 @lru_cache(maxsize=64)
 def _compiled_validator(schema_name: str, snapshot: tuple[tuple[str, bytes], ...]) -> Draft202012Validator:
-    registry = Registry()
+    registry: dict[str, dict[str, Any]] = {}
     schema: dict[str, Any] | None = None
     for name, raw in snapshot:
         contents = _loads_json_bytes_strict(raw)
         if not isinstance(contents, dict):
             raise SchemaRegistryError(f"repository-local schema is not an object: {name}")
-        resource = Resource.from_contents(contents)
         identifier = contents.get("$id")
         if not isinstance(identifier, str) or not identifier:
             raise SchemaRegistryError(f"repository-local schema has no $id: {name}")
-        registry = registry.with_resource(identifier, resource)
+        registry[identifier] = contents
         if name == schema_name:
             schema = contents
     if schema is None:
         raise SchemaRegistryError(f"repository-local schema does not exist: {schema_name}")
-    Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
 
 

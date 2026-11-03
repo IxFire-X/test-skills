@@ -13,8 +13,6 @@ import tempfile
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
-import yaml
-
 if __package__:
     from .confined_output import ConfinedOutputTarget, OutputConfinementError, acquire_confined_output, create_confined_bytes_exclusive, read_confined_bytes
     from .discover_project import SOURCE_SUFFIXES, _ok, _source_dir_has_code, discover_project
@@ -356,7 +354,7 @@ def _v2_unsupported_fields(document: Mapping[str, Any]) -> list[str]:
 
 
 def _payload(document: Mapping[str, Any]) -> bytes:
-    return yaml.safe_dump(dict(document), allow_unicode=True, sort_keys=False, default_flow_style=False).replace("\r\n", "\n").encode("utf-8")
+    return (json.dumps(dict(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 def _digest(data: bytes) -> str:
@@ -503,7 +501,7 @@ def _public_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _input_exit_code(code: str) -> int:
-    return 2 if code in {"answer_unknown", "context_root_invalid", "discovery_invalid", "invalid_encoding", "invalid_yaml", "invalid_shape", "schema_invalid", "read_error"} else 1
+    return 2 if code in {"answer_unknown", "context_root_invalid", "discovery_invalid", "invalid_encoding", "invalid_json", "invalid_shape", "schema_invalid", "read_error"} else 1
 
 
 def _safe_fingerprint(value: Any) -> str:

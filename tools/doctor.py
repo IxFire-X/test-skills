@@ -31,6 +31,18 @@ def _available(name: str) -> bool:
         return False
 
 
+def _engine_importable() -> bool:
+    """The package's own schema validator (tools/schema_engine.py, standard library only) imports and validates."""
+    try:
+        if __package__:
+            from .schema_engine import Draft202012Validator
+        else:  # direct CLI execution
+            from schema_engine import Draft202012Validator
+        return Draft202012Validator({"type": "string"}).is_valid("x")
+    except Exception:
+        return False
+
+
 def inspect_environment(root: Path) -> dict[str, object]:
     """Return support and required-dependency availability for a skill pack."""
     root = root.resolve()
@@ -58,6 +70,7 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "tools/run_tests.py",
         "tools/execution_adapters.py",
         "tools/skillsrc_manifest.py",
+        "tools/schema_engine.py",
         "tools/discover_project.py",
         "tools/init_skillsrc.py",
         "tools/compatibility_contract.py",
@@ -96,12 +109,12 @@ def inspect_environment(root: Path) -> dict[str, object]:
                 missing_integrity.append(f"invalid:{relative}")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             missing_integrity.append(f"invalid:{relative}")
-    dependencies = {name: {"required": True, "available": _available(name)} for name in ("jsonschema", "yaml")}
+    dependencies = {"schema_engine": {"required": True, "available": _engine_importable()}}
     missing_modules = [name for name, item in dependencies.items() if not item["available"]]
-    # FaT-R: without them the contract and manifest checks cannot run — say what is missing, not "invalid contract".
+    # FaT-R: without it the contract and manifest checks cannot run — say what is missing, not "invalid contract".
     messages = [
-        f"у этого Python ({sys.executable}) нет модуля {name}; проверка контракта и манифеста пропущена. Команда: "
-        f'"{sys.executable}" -m pip install --no-cache-dir --require-hashes -r "{root / "requirements.txt"}"'
+        f"не импортируется собственный валидатор схем ({name}, tools/schema_engine.py); проверка контракта и манифеста пропущена. "
+        "Сверьте папку пакета с поставкой: стороннее ПО пакету не нужно"
         for name in missing_modules
     ]
     pipeline_path = root / "contracts" / "pipeline.json"

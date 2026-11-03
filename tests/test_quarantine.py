@@ -356,15 +356,13 @@ def test_scan_reads_skillsrc_once_and_the_flag_wins(tmp_path: Path, skillsrc: st
     assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=flag)) == expected
 
 
-def test_scan_reads_the_policy_from_a_yaml_skillsrc_fat_b(tmp_path: Path) -> None:
+def test_scan_does_not_read_the_policy_from_an_older_yaml_skillsrc(tmp_path: Path) -> None:
     from types import SimpleNamespace
-
-    import yaml
 
     from tools.run_pipeline import _scan_disposition_policy
 
-    (tmp_path / ".skillsrc").write_text(yaml.safe_dump(_skillsrc("cleanup"), allow_unicode=True), encoding="utf-8")
-    assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) == "cleanup"
+    (tmp_path / ".skillsrc").write_text('schema_version: "5.0.0"\ndisposition_policy: cleanup\n', encoding="utf-8")
+    assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) is None
     (tmp_path / ".skillsrc").write_text("disposition_policy: [\n", encoding="utf-8")
     assert _scan_disposition_policy(tmp_path, SimpleNamespace(disposition_policy=None)) is None
 

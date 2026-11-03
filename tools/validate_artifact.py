@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from jsonschema import SchemaError
+    if __package__:
+        from .schema_engine import SchemaError
+    else:  # direct CLI execution
+        from schema_engine import SchemaError
 except ImportError as error:  # pragma: no cover
     SchemaError = Exception
     _IMPORT_ERROR = error

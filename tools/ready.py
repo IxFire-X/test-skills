@@ -7,7 +7,7 @@ documents, ``.skillsrc``, the module, the scan with its exclusions and — as a 
 build (wrapper, system ``mvn``, JDK, the module interpreter, the project's style checks, the validate probe).  The JSON
 report goes to stdout, a table to stderr; the exit code is 0 when cases can start.
 
-Only the standard library at module level: ready must run where ``jsonschema`` or ``yaml`` is missing, so every part of
+Only the standard library at module level, so a broken pack is reported by a check and not by a traceback: every part of
 the package is imported inside the check that needs it.
 """
 
@@ -39,19 +39,6 @@ def _row(check_id: str, block: str, level: str, message: str, fix: str | None = 
     return row
 
 
-def pip_command() -> str:
-    """FaT-SEC1: the install command shown to the person — never into a system Python: the running venv, else the package's own
-    ``.venv`` (created first when it is missing)."""
-    install = f'-m pip install --no-cache-dir --require-hashes -r "{PACK / "requirements.txt"}"'
-    if sys.prefix != sys.base_prefix:
-        return f'"{sys.executable}" {install}'
-    venv = PACK / ".venv"
-    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if python.is_file():
-        return f'"{python}" {install}'
-    return f'"{sys.executable}" -m venv "{venv}" && "{python}" {install}'
-
-
 def check_python() -> dict[str, Any]:
     version = ".".join(str(part) for part in sys.version_info[:3])
     if sys.version_info >= (3, 11):
@@ -60,15 +47,17 @@ def check_python() -> dict[str, Any]:
 
 
 def check_deps() -> dict[str, Any]:
-    missing = []
-    for name in ("jsonschema", "yaml"):
-        try:
-            __import__(name)
-        except ImportError:
-            missing.append(name)
-    if not missing:
-        return _row("deps", CASES, "OK", "зависимости пакета установлены")
-    return _row("deps", CASES, "STOP", f"у этого Python ({sys.executable}) нет: {', '.join(missing)}", pip_command())
+    """The package needs no third-party software: only its own schema validator has to import."""
+    try:
+        from tools.schema_engine import Draft202012Validator
+
+        if Draft202012Validator({"type": "string"}).is_valid("x"):
+            return _row("deps", CASES, "OK", "собственный валидатор схем импортируется; стороннее ПО не нужно")
+        problem = "валидатор вернул неверный ответ"
+    except Exception as error:
+        problem = f"{type(error).__name__}: {error}"
+    return _row("deps", CASES, "STOP", f"не импортируется собственный валидатор схем (tools/schema_engine.py): {problem}",
+                "сверьте папку пакета с поставкой")
 
 
 def check_pack() -> dict[str, Any]:
@@ -149,10 +138,47 @@ def _init_command(project: Path) -> str:
     return f'"{sys.executable}" -m tools.init_skillsrc --project "{project}"'
 
 
+_LEGACY_KEYS = {"limits": "limits", "review": "review", "service_url_env": "service_url_env", "include": "paths.include",
+                "projection": "projection"}
+_LEGACY_KEY_LINE = re.compile(r"^(?P<indent>[ \t-]*)(?P<key>[A-Za-z_][A-Za-z0-9_]*)[ \t]*:(?P<rest>.*)$")
+
+
+def legacy_yaml_keys(project: Path) -> list[str] | None:
+    """The lines of an older YAML ``.skillsrc`` that carry settings worth moving into the JSON one (``limits``, ``review``,
+    ``service_url_env``, ``paths.include``, ``projection``); None when the file is missing or is a JSON object.  YAML is not
+    parsed: the lines are read as text, so nothing here can execute or fail on the content."""
+    path = Path(project) / ".skillsrc"
+    try:
+        text = path.read_bytes().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not text.strip() or text.lstrip().startswith("{"):
+        return None
+    lines, found, depth = text.splitlines(), [], None
+    for number, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if depth is not None:  # the body of the key that was found: deeper lines, comments and blanks stay out of it
+            if stripped and not stripped.startswith("#") and len(line) - len(line.lstrip()) > depth:
+                found.append(f"  {line.rstrip()[:200]}")
+                continue
+            depth = None
+        match = _LEGACY_KEY_LINE.match(line)
+        if match and match["key"] in _LEGACY_KEYS:
+            found.append(f"{_LEGACY_KEYS[match['key']]} (строка {number}): {line.strip()[:200]}")
+            depth = len(match["indent"].replace("-", " "))
+    return found[:60]
+
+
 def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
     from tools.init_skillsrc import ensure_skillsrc
 
+    legacy = legacy_yaml_keys(project)
+    if legacy is not None:
+        keys = legacy or ["в файле нет limits, review, service_url_env, paths.include, projection — переносить нечего"]
+        return [_row("skillsrc", CASES, "STOP", ".skillsrc в старом формате YAML: пакет читает JSON",
+                     "переименуйте .skillsrc в .skillsrc.yaml.bak, создайте новый: " + _init_command(project) + " --write; затем перенесите в него "
+                     "значения этих ключей (в JSON): " + " | ".join(keys), {"legacy_yaml_keys": keys})]
     receipt = ensure_skillsrc(Path(project), {}, write=False, selected_module=module)
     status = receipt.get("status")
     if not (Path(project) / ".skillsrc").is_file():

@@ -114,20 +114,46 @@ def test_ready_cli_exit_code_and_table(tmp_path: Path) -> None:
     assert bad.returncode == 2 and "СТОП" in bad.stderr
 
 
-def test_ready_runs_without_jsonschema_and_yaml(tmp_path: Path) -> None:
+THIRD_PARTY = ("jsonschema", "yaml", "referencing", "rpds", "attrs", "jsonschema_specifications", "typing_extensions")
+
+
+def _blocked(module: str, argv: str) -> str:
+    lines = ["import runpy, sys", *(f"sys.modules[{name!r}] = None" for name in THIRD_PARTY), f"sys.argv = {argv}",
+             f"runpy.run_module({module!r}, run_name='__main__')"]
+    return "\n".join(lines) + "\n"
+
+
+def test_ready_runs_without_any_third_party_package(tmp_path: Path) -> None:
     project = _python_project(tmp_path, runtime=False)
-    script = ("import runpy, sys\nsys.modules['jsonschema'] = None\nsys.modules['yaml'] = None\n"
-              f"sys.argv = ['ready', '--project', {str(project)!r}, '--docs', 'services/api/docs/feature.md']\n"
-              "runpy.run_module('tools.ready', run_name='__main__')\n")
+    script = _blocked("tools.ready", f"['ready', '--project', {str(project)!r}, '--docs', 'services/api/docs/feature.md']")
     completed = subprocess.run([sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert "Traceback" not in completed.stderr, completed.stderr[-3000:]
     report = json.loads(completed.stdout)
     deps = next(item for item in report["checks"] if item["id"] == "deps")
-    assert deps["level"] == "STOP" and "--require-hashes" in deps["fix"] and "--no-cache-dir" in deps["fix"]
+    assert deps["level"] == "OK" and "pip" not in json.dumps(report, ensure_ascii=False).lower().replace("pipeline", "")
     levels = _levels(report)
     assert levels["python"] == "OK" and levels["git"] == "OK" and levels["docs:services/api/docs/feature.md"] == "OK"
-    assert completed.returncode == 2
+    assert levels["pack"] == "OK" and levels["skillsrc"] == "OK", levels
+
+
+def test_doctor_and_ready_pass_in_a_venv_without_packages(tmp_path: Path) -> None:
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, capture_output=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    listing = subprocess.run([str(python), "-c", "import importlib.util as u; print([n for n in ('jsonschema','yaml','referencing','rpds','attrs') if u.find_spec(n)])"],
+                             capture_output=True, text=True, check=True)
+    assert listing.stdout.strip() == "[]", listing.stdout
+    environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    doctor = subprocess.run([str(python), "-m", "tools.doctor", "--root", str(ROOT)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=environment)
+    report = json.loads(doctor.stdout)
+    assert report["dependencies"] == {"schema_engine": {"required": True, "available": True}}, report
+    assert report["integrity"]["valid"] and report["status"] == "PASS" and doctor.returncode == 0, report
+    project = _python_project(tmp_path, runtime=False)
+    ready = subprocess.run([str(python), "-m", "tools.ready", "--project", str(project), "--docs", "services/api/docs/feature.md"],
+                           cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env=environment)
+    assert "Traceback" not in ready.stderr, ready.stderr[-3000:]
+    assert _levels(json.loads(ready.stdout))["deps"] == "OK"
 
 
 def test_ready_checks_git_exactly_like_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,18 +211,15 @@ def test_a_gradle_project_without_wrapper_is_a_warning(tmp_path: Path) -> None:
 # doctor names the real cause
 # --------------------------------------------------------------------------------------
 
-def test_doctor_without_jsonschema_names_it_and_the_pip_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib.util
-
+def test_doctor_names_a_missing_schema_engine_and_offers_no_pip(monkeypatch: pytest.MonkeyPatch) -> None:
     from tools import doctor
 
-    real = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *rest: None if name == "jsonschema" else real(name, *rest))
+    monkeypatch.setitem(sys.modules, "tools.schema_engine", None)
     report = doctor.inspect_environment(ROOT)
-    assert report["status"] == "NOT_RUNNABLE"
+    assert report["status"] == "NOT_RUNNABLE" and report["dependencies"]["schema_engine"]["available"] is False
     assert not [item for item in report["integrity"]["missing"] if item.startswith("invalid:")], report["integrity"]
     message = " ".join(report["messages"])
-    assert "jsonschema" in message and "--require-hashes" in message and "--no-cache-dir" in message
+    assert "schema_engine" in message and "pip" not in message
 
 
 # --------------------------------------------------------------------------------------

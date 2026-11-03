@@ -8,27 +8,12 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
-import yaml
-from jsonschema import Draft202012Validator
-
-
-class _UniqueKeyLoader(yaml.SafeLoader):
-    pass
-
-
-def _construct_mapping(loader: yaml.SafeLoader, node: yaml.nodes.MappingNode, deep: bool = False) -> dict:
-    mapping: dict = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise yaml.constructor.ConstructorError(
-                None, None, f"duplicate key: {key}", key_node.start_mark
-            )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping)
+try:
+    from tools.schema_engine import Draft202012Validator
+    from tools.schema_validation import StrictJsonError, loads_json_strict
+except ImportError:  # direct execution from tools/
+    from schema_engine import Draft202012Validator
+    from schema_validation import StrictJsonError, loads_json_strict
 
 
 class SkillsrcError(ValueError):
@@ -44,7 +29,7 @@ class SkillsrcError(ValueError):
 
 
 def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]:
-    """Load a YAML manifest and validate it against the bundled schema."""
+    """Load a JSON manifest and validate it against the bundled schema."""
     return parse_skillsrc_bytes(path.read_bytes(), schema_path)
 
 
@@ -60,11 +45,11 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None) -> dict[s
             [{"path": "/", "message": str(error)}],
         ) from error
     try:
-        document = yaml.load(source, Loader=_UniqueKeyLoader)
-    except yaml.YAMLError as error:
+        document = loads_json_strict(source.removeprefix("\ufeff"))
+    except StrictJsonError as error:
         raise SkillsrcError(
-            "invalid_yaml",
-            ".skillsrc contains invalid YAML",
+            "invalid_json",
+            ".skillsrc must be one JSON object (an older YAML .skillsrc is not read: tools.ready lists its keys to carry over)",
             [{"path": "/", "message": str(error)}],
         ) from error
     if not isinstance(document, dict):

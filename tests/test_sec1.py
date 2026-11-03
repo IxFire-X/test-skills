@@ -11,26 +11,14 @@ import pytest
 # without control characters, and git never runs a hook of the project (core.fsmonitor).
 
 
-def test_pip_in_a_venv_is_the_running_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_package_installs_nothing_and_offers_no_pip() -> None:
+    """P5: no third-party software at runtime, so nothing is installed: no pip command in the tools, an empty requirements.txt."""
     from tools import ready
 
-    monkeypatch.setattr(sys, "base_prefix", sys.prefix + "-base")
-    assert ready.pip_command().startswith(f'"{sys.executable}" -m pip install')
-
-
-def test_pip_outside_a_venv_is_the_python_of_the_package_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import ready
-
-    monkeypatch.setattr(sys, "base_prefix", sys.prefix)
-    monkeypatch.setattr(ready, "PACK", tmp_path)
-    venv_python = tmp_path / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    missing = ready.pip_command()
-    assert f'-m venv "{tmp_path / ".venv"}"' in missing and f'"{venv_python}" -m pip install' in missing, missing
-    assert f'"{sys.executable}" -m pip' not in missing
-    venv_python.parent.mkdir(parents=True)
-    venv_python.write_bytes(b"")
-    present = ready.pip_command()
-    assert present.startswith(f'"{venv_python}" -m pip install') and "-m venv" not in present, present
+    assert not hasattr(ready, "pip_command")
+    root = Path(__file__).resolve().parents[1]
+    offenders = [path.name for path in sorted((root / "tools").glob("*.py")) if "pip install" in path.read_text(encoding="utf-8")]
+    assert not offenders, offenders
 
 
 def test_a_secret_in_a_probe_line_keeps_its_key_and_hides_its_value() -> None:

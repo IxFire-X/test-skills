@@ -21,34 +21,11 @@
 Пакет приходит папкой. Положите её в проект как `.tools/test-skills` — должен существовать файл
 `.tools/test-skills/skills/orchestrate/SKILL.md`.
 
-Окружение и зависимости ставите **вы**, не модель. Терминал — в корне проекта. Создайте окружение пакета
-(если `python` не находится, укажите путь к установленному Python 3.11+):
+Ставить ничего не нужно: пакету достаточно Python 3.11–3.13 и его стандартной библиотеки, сторонние
+пакеты и виртуальное окружение не требуются. Автотесты работают в среде самого проекта.
 
-```text
-python -m venv .tools/test-skills/.venv
-```
-
-Установите зависимости в него.
-
-**Windows / PowerShell:**
-
-```powershell
-.\.tools\test-skills\.venv\Scripts\python.exe -m pip install --no-cache-dir --require-hashes -r .tools\test-skills\requirements.txt
-```
-
-**Linux:**
-
-```bash
-.tools/test-skills/.venv/bin/python -m pip install --no-cache-dir --require-hashes -r .tools/test-skills/requirements.txt
-```
-
-`requirements.txt` закрепляет версии и SHA-256 каждого файла. Если pip сообщает о несовпадении хешей, не
-снимайте `--require-hashes` — сообщите об этом: файл мог быть подменён. `--no-cache-dir` нужен, чтобы pip не
-писал кэш вне проекта. В рабочей сети используйте разрешённый в компании источник Python-пакетов. Это
-окружение — только для инструментов Трассы; автотесты работают в среде самого проекта.
-
-Ниже `<python пакета>` — это `.tools\test-skills\.venv\Scripts\python.exe` (Windows) или
-`.tools/test-skills/.venv/bin/python` (Linux).
+Ниже `<python пакета>` — команда вашего Python 3.11–3.13: `python` (Windows `py -3.11` тоже подойдёт) или
+`python3` (Linux). Если `python` не находится, укажите полный путь к установленному Python 3.11+.
 
 **Git проекта.** Пакет и результаты прогонов — не часть проекта:
 
@@ -108,7 +85,7 @@ python -m venv .tools/test-skills/.venv
 Требования: docs/feature.md, путь от корня проекта.
 Профиль: cases-only-v1 (ready и scan — с --profile cases-only-v1).
 Инструменты пакета запускай командами python -m tools.… через Python
-из .tools/test-skills/.venv; функции пакета не импортируй.
+3.11–3.13; функции пакета не импортируй.
 
 В конце кратко объясни результат ревью, перечисли пробелы и дай полные
 пути к HTML, Markdown и JSON выбранной проверяющим редакции, а также
@@ -126,7 +103,7 @@ python -m venv .tools/test-skills/.venv
 Требования: docs/feature.md, путь от корня проекта.
 Профиль: local-pilot-v1.
 Инструменты пакета запускай командами python -m tools.… через Python
-из .tools/test-skills/.venv; функции пакета не импортируй.
+3.11–3.13; функции пакета не импортируй.
 Разрешаю создание и выполнение прошедших ревью автотестов средствами
 этого проекта только в рамках текущего запуска.
 
