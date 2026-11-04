@@ -194,6 +194,7 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
     # --- the pause after the marker (tools.scope_pause) ---
+    "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
     "SCOPE_DECISION_INVALID": "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)",
     # --- the schema: every SCHEMA_* has the generic fix of fix_for; these are the ones that need more ---
     "SCHEMA_ENUM": "значение вне перечня — перечень в message; category: positive, negative, boundary, authorization, security, "

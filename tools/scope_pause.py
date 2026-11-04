@@ -16,6 +16,8 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from tools.fixes import fix_for
+
 DECISION_NAME = "scope-decision.json"
 REASON_LIMIT = 200  # the reason is the human's text and goes into the report: a line, not a document
 LISTED = 20  # the gaps `status` lists inline; the whole list is the draft questions-for-analyst.md
@@ -254,6 +256,35 @@ def plan_of(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None:
         return pilot_state._generator_input(root.parents[1], root, pilot_state.derive_state(root), attempt_id, "plan")
     except (pilot_state.ModelInputsMismatch, OSError, KeyError, ValueError, IndexError):
         return None
+
+
+def _rows(rows: Any) -> list[tuple[str, str]]:
+    return sorted((str(row.get("source_requirement_id")), str(row.get("reason"))) for row in rows or [] if isinstance(row, Mapping))
+
+
+def published_scope(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """Once the plan is published its ``out_of_scope`` is the scope of the run: the plan is bound by the journal, the file
+    ``scope-decision.json`` is not (it has no event).  None before the plan.  ``mismatch`` — the file says another thing than the
+    plan (or is no answer at all): a rewritten file never changes what the report and ``status`` say, it is named."""
+    root = Path(run_root).resolve()
+    plan = plan_of(root, attempt_id)
+    if plan is None:
+        return None
+    in_plan = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": str(row["reason"])}
+               for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping)]
+    try:
+        decision, invalid = read_decision(root, attempt_id), False
+    except ScopeRefused:
+        decision, invalid = None, True
+    mismatch = invalid or _rows(out_of_scope(decision)) != _rows(in_plan)
+    note = None
+    if mismatch:
+        said = "не читается как решение человека" if invalid else (
+            f"называет вне охвата {', '.join(row['source_requirement_id'] for row in out_of_scope(decision)) or 'ничего'}")
+        note = (f"SCOPE_DECISION_MISMATCH: {DECISION_NAME} {said}, а опубликованный план — "
+                f"{', '.join(row['source_requirement_id'] for row in in_plan) or 'ничего'}; охват взят из плана; "
+                f"fix: {fix_for('SCOPE_DECISION_MISMATCH')}")
+    return {"out_of_scope": in_plan, "decision": decision, "invalid": invalid, "mismatch": mismatch, "note": note}
 
 
 def marker_requirements_in_scope(marker_requirements: Any, run_root: Path, attempt_id: str) -> Any:

@@ -234,11 +234,25 @@ def _durable_status(project: Path, run_root: Path, *, stage: str, status: str = 
         except (KeyError, OSError, TypeError, ValueError):
             request = None
         result["next_step"] = _scope_pause_step(Path(run_root), str(result["attempt_id"]), _next_step(result, project, request))
+        note = _scope_mismatch(Path(run_root), str(result["attempt_id"]))
+        if note:
+            result["scope_warning"] = {"code": "SCOPE_DECISION_MISMATCH", "detail": note}
         if _left_mark(Path(run_root)):  # FaT-O12b: a left run goes nowhere; the plain scan of its request starts anew
             result["next_step"] = {"code": "RUN_LEFT", "stage": "scan", "why": "прогон оставлен до ревью кейсов",
                                    "action": "простой scan того же запроса начнёт новый прогон", "skill_section": "Resume и дрейф",
                                    "command": _scan_command(project, request) if isinstance(request, Mapping) else None}
     return result
+
+
+def _scope_mismatch(run_root: Path, attempt_id: str) -> str | None:
+    """FaT-P3: once the plan is published the scope is its ``out_of_scope``; a ``scope-decision.json`` that says another thing is named.  Only reads."""
+    from tools import scope_pause
+
+    try:
+        published = scope_pause.published_scope(run_root, attempt_id)
+    except (OSError, KeyError, TypeError, ValueError):
+        return None
+    return published["note"] if published is not None and published["mismatch"] else None
 
 
 def _scope_pause_step(run_root: Path, attempt_id: str, step: dict[str, Any]) -> dict[str, Any]:

@@ -456,7 +456,8 @@ _WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюдже�
                  "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
                                      "(подсказка ревьюеру)",
                  "CV_EXISTING_TEST": "кейсы повторяют тесты проекта — тот же эндпоинт и исход (справка ревьюеру, кейсы остаются)",
-                 "CV_REFERENCE": "сравнение с эталонными кейсами scan --reference: пробелы, новые без пары, возможные дубли (подсказка)"}
+                 "CV_REFERENCE": "сравнение с эталонными кейсами scan --reference: пробелы, новые без пары, возможные дубли (подсказка)",
+                 "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: охват взят из плана (см. «Охват после разметки»)"}
 
 
 def existing_repeats(root: Path, attempt_id: str | None, document: Any) -> dict[str, Any] | None:
@@ -668,21 +669,32 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
     if not attempt_id:
         return None
     from tools.fixes import fix_for
-    from tools.scope_pause import ScopeRefused, out_of_scope, scope_state
+    from tools.scope_pause import ScopeRefused, published_scope, scope_state
 
+    # once the plan is published its out_of_scope is the scope; the decision file (no journal event) is only compared with it
+    try:
+        published = published_scope(root, attempt_id, state)
+    except (KeyError, OSError, TypeError, ValueError):
+        published = None
     try:
         scope = scope_state(root, attempt_id, state)
     except ScopeRefused as error:  # a decision file that is not the human's answer: the report says so (a ScopeRefused is a ValueError, below)
-        fix = str(error).split("fix: ", 1)[1] if "fix: " in str(error) else fix_for(error.code)  # the text the status prints; the table when it has none
-        return {"refused": {"code": error.code, "fix": fix}}
+        if published is None:
+            fix = str(error).split("fix: ", 1)[1] if "fix: " in str(error) else fix_for(error.code)  # the text the status prints; the table when it has none
+            return {"refused": {"code": error.code, "fix": fix}}
+        scope = {"gaps": [], "decision": None, "pending": False}
     except (KeyError, OSError, TypeError, ValueError):
         return None
     decision = scope["decision"]
-    if not scope["gaps"] and not out_of_scope(decision):  # an exclusion needs no gap: the human may leave a requirement out of a marker without any
+    excluded = published["out_of_scope"] if published is not None else [dict(row) for row in (decision or {}).get("excluded") or []]
+    if not scope["gaps"] and not excluded and not (published and published["mismatch"]):  # an exclusion needs no gap: the human may leave a requirement out of a marker without any
         return None
-    answer = "пауза не снималась: ответа человека нет" if scope["pending"] else (
-        "без остановки (scan --no-pause)" if decision is None else ("исключены" if out_of_scope(decision) else "продолжить как есть"))
-    return {"gaps": len(scope["gaps"]), "answer": answer, "out_of_scope": out_of_scope(decision)}
+    answer = "пауза не снималась: ответа человека нет" if scope["pending"] and published is None else (
+        "без остановки (scan --no-pause)" if decision is None and not excluded else ("исключены" if excluded else "продолжить как есть"))
+    result = {"gaps": len(scope["gaps"]), "answer": answer, "out_of_scope": excluded}
+    if published is not None and published["mismatch"]:
+        result["mismatch"] = published["note"]
+    return result
 
 
 def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]:
@@ -753,6 +765,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         review = "ревью в свежем контексте"
     else:
         review = None
+    scope = _scope(root, attempt_id, state)
     report = {
         "schema_version": "1.0.0", "run_id": run["manifest"]["run_id"], "policy_profile": run["manifest"]["policy_profile"],
         "guarantee": GUARANTEE, "clock": CLOCK_NOTE,
@@ -767,11 +780,12 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "warnings": budget_warnings(calls, measured) + (["STEP_OUTPUT_LARGE"] if any(call.get("output_large") for call in calls) else [])
                     + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
-                    + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else []),
+                    + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else [])
+                    + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
         "automation_split": _split(root, attempt_id),  # FaT-PA
-        "scope": _scope(root, attempt_id, state),  # FaT-P3: the answer on the gaps and the excluded requirements with reasons
+        "scope": scope,  # FaT-P3: the answer on the gaps and the excluded requirements with reasons
         "stops": {"stop_reason": status.get("stop_reason"), "reason_code": terminal.get("reason_code"),
                   "left": _left(root),  # FaT-O12b
                   "evidence_errors": sorted({row["code"] for row in status.get("evidence_errors") or []})},
@@ -929,7 +943,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             lines += [f"- {scope['refused']['code']}: ответ человека не читается как ответ человека, охват не определён; fix: {scope['refused']['fix']}", ""]
         else:
             lines += [f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
-                      *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]), ""]
+                      *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]),
+                      *([f"- {scope['mismatch']}"] if scope.get("mismatch") else []), ""]
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "

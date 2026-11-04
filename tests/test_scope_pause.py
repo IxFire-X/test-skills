@@ -431,3 +431,90 @@ def test_a_continue_decision_on_a_marker_without_gaps_adds_no_section(tmp_path: 
     scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
     report, _warnings = build_report(root.parent.parent, root.name)
     assert report["scope"] is None and "Охват после разметки" not in render_markdown(report)
+
+
+# --- the scope after the plan is the plan's (FaT-P3-fix2, hunt 7.2) ---------------------------------------------
+
+def _published_plan(tmp_path: Path, **decision):
+    from tools.batch_assembly import plan_batches
+    from tools import scope_pause
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+    scope_pause.record_decision(root, attempt_id, **decision)
+    header = pilot_state.publish_generator_input(root, attempt_id, "header", {"kind": "header", "title": "Заголовок"})["digest"]
+    evidence = {"header_digest": header, "context_receipt_digest": receipts[0]["digest"]}
+    plan = dict(plan_batches(_marker_rows(), evidence, out_of_scope=scope_pause.out_of_scope(scope_pause.read_decision(root, attempt_id))))
+    pilot_state.publish_generator_input(root, attempt_id, "plan", plan)
+    return root, attempt_id, plan
+
+
+def _rewrite(root: Path, attempt_id: str, value) -> None:
+    from tools import scope_pause
+
+    raw = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    (root / "artifacts" / attempt_id / scope_pause.DECISION_NAME).write_bytes(raw)
+
+
+CONTINUE = {"schema_version": "1.0.0", "kind": "scope-decision", "decision": "continue", "excluded": []}
+
+
+def test_the_report_takes_the_exclusions_from_the_plan_not_from_a_rewritten_decision_file(tmp_path: Path) -> None:
+    from tools.run_report import build_report, render_markdown
+
+    root, attempt_id, plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"]["out_of_scope"] == plan["out_of_scope"] and "mismatch" not in report["scope"]  # the honest file: no warning
+    assert "SCOPE_DECISION_MISMATCH" not in report["warnings"]
+    _rewrite(root, attempt_id, CONTINUE)  # a well-formed file that says «continue» after the plan excluded a requirement
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"]["out_of_scope"] == plan["out_of_scope"] == [{"source_requirement_id": "SREQ-batch-a-001", "reason": "нет стенда"}]
+    assert report["scope"]["answer"] == "исключены"
+    assert "SCOPE_DECISION_MISMATCH" in report["scope"]["mismatch"] and "SCOPE_DECISION_MISMATCH" in report["warnings"]
+    markdown = render_markdown(report)
+    assert "SREQ-batch-a-001: нет стенда" in markdown and "SCOPE_DECISION_MISMATCH" in markdown
+
+
+def test_a_file_that_adds_an_exclusion_the_plan_does_not_have_is_named_too(tmp_path: Path) -> None:
+    from tools.run_report import build_report
+
+    root, attempt_id, _plan = _published_plan(tmp_path, excluded=[], reason=None, proceed=True)
+    _rewrite(root, attempt_id, {**CONTINUE, "decision": "exclude", "excluded": [{"source_requirement_id": "SREQ-batch-a-002", "reason": "подмена"}]})
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"]["out_of_scope"] == [] and report["scope"]["answer"] == "продолжить как есть"
+    assert "SCOPE_DECISION_MISMATCH" in report["scope"]["mismatch"] and "SREQ-batch-a-002" in report["scope"]["mismatch"]
+
+
+def test_an_unreadable_decision_file_after_the_plan_does_not_hide_the_plans_scope(tmp_path: Path) -> None:
+    from tools.run_report import build_report
+
+    root, attempt_id, plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    _rewrite(root, attempt_id, b"not json")
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert "refused" not in report["scope"] and report["scope"]["out_of_scope"] == plan["out_of_scope"]
+    assert "SCOPE_DECISION_MISMATCH" in report["scope"]["mismatch"] and "не читается" in report["scope"]["mismatch"]
+
+
+def test_status_names_a_decision_file_that_differs_from_the_plan(tmp_path: Path) -> None:
+    from tools.run_pipeline import _scope_mismatch
+
+    root, attempt_id, _plan = _published_plan(tmp_path, excluded=["SREQ-batch-a-001"], reason="нет стенда", proceed=False)
+    assert _scope_mismatch(root, attempt_id) is None
+    _rewrite(root, attempt_id, CONTINUE)
+    note = _scope_mismatch(root, attempt_id)
+    assert note and note.startswith("SCOPE_DECISION_MISMATCH") and "SREQ-batch-a-001" in note and "fix:" in note
+
+
+def test_before_the_plan_the_decision_file_still_serves_the_pause(tmp_path: Path) -> None:
+    from tools import scope_pause
+
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
+    assert scope_pause.published_scope(root, attempt_id) is None  # no plan: nothing to compare with
+    assert scope_pause.scope_state(root, attempt_id)["pending"] is True
+    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    assert scope_pause.scope_state(root, attempt_id)["pending"] is False
+
+
+def test_the_mismatch_has_a_fix_in_the_table() -> None:
+    from tools.fixes import fix_for
+
+    assert "плану" in fix_for("SCOPE_DECISION_MISMATCH")
