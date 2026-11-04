@@ -53,10 +53,24 @@ def test_the_declared_network_of_a_role_is_none_and_the_orchestrator_names_what_
     for path in SKILLS:
         permissions = frontmatter(path)["permissions"]
         if path.parent.name != "orchestrate":
-            assert permissions["network"] == "нет" and permissions["external_delivery"] == "нет", path
+            assert permissions["network"] == "none" and permissions["external_delivery"] == "none" and permissions["dependencies"] == "none", path
         else:
             assert permissions["network"].startswith("cases-only-v1: нет") and "pip агент не запускает" in permissions["dependencies"]
             assert "--output-dir внутри проекта" in permissions["write"]
+
+
+ROLE_BLOCK_LIMIT = 230  # bytes: a role file is counted whole into the step input (step_size), the campaign budget test has ~300 B of slack
+
+
+def _block_bytes(path: Path) -> int:
+    raw = path.read_bytes().replace(b""+bytes([13,10]), bytes([10]))
+    start = raw.index(b"permissions:")
+    return len(raw[start:raw.index(bytes([10]) + b"---", start)])
+
+
+@pytest.mark.parametrize("path", [path for path in SKILLS if path.parent.name != "orchestrate"], ids=lambda path: path.parent.name)
+def test_the_permissions_block_of_a_role_stays_small_because_the_whole_file_is_model_input(path: Path) -> None:
+    assert _block_bytes(path) <= ROLE_BLOCK_LIMIT, (path, _block_bytes(path))
 
 
 def test_the_skill_does_not_send_the_agent_for_outside_documentation() -> None:

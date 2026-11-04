@@ -164,9 +164,17 @@ def test_the_old_publish_and_select_check_the_same_paths(tmp_path: Path, capsys:
     base = ["publish", "--candidate", str(candidate), "--run-root", str(run_root), "--attempt-id", attempt_id]
     outside = tmp_path / "outside"
     assert main([*base, "--output-dir", str(outside)]) == 2
-    assert json.loads(capsys.readouterr().out)["code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and not outside.exists()
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and printed["fix"] and not outside.exists()
     assert main([*base, "--output-dir", str(project / "bundle"), "--out", str(run_root / "receipt.json")]) == 2
-    assert json.loads(capsys.readouterr().out)["code"] == "API_OUT_OUTSIDE_RUN"
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["code"] == printed["reason_code"] == "API_OUT_OUTSIDE_RUN"
+    select = ["select", "--candidate", str(candidate), "--candidate-receipt", str(candidate), "--assembly-receipt", str(candidate),
+              "--inventory-receipt", str(candidate), "--context-receipt", str(candidate), "--context-marker-output", str(candidate),
+              "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root), "--attempt-id", attempt_id]
+    assert main([*select, "--output-dir", str(outside)]) == 2
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["code"] == printed["reason_code"] == "OUTPUT_DIR_OUTSIDE_PROJECT" and not outside.exists()
 
 
 # ---- every entry point -------------------------------------------------------------------------------------------

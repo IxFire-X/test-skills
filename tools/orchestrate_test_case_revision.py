@@ -1380,7 +1380,7 @@ def main(argv: list[str] | None = None) -> int:
                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
     except output_guard.OutputRefused as error:  # --out / --output-dir outside the run or the project: its own code and fix
         print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")],
-                          "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
+                          "successor_bundle_receipt": None, "reason_code": error.code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     except (StrictJsonError, OSError, ValueError) as error:
         # FaT-10d: the inner refusal code and its fix; FaT-U5: the one envelope, the code is the refusal's own
         envelope = error_envelope(error)  # FaT-U6: the same reading as tools.api

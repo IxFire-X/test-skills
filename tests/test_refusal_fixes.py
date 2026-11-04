@@ -91,10 +91,13 @@ def test_a_bad_candidate_receipt_has_a_reason_code_and_a_fix(tmp_path: Path, cap
     receipt.write_text(json.dumps({"document_id": "TCDOC-x"}), encoding="utf-8")
     candidate = tmp_path / "candidate.json"
     candidate.write_text("{}", encoding="utf-8")
+    run_root = tmp_path / "project" / ".pilot-runs" / ("a" * 32)  # a real run: --output-dir is checked against its project first (P8a-2)
+    run_root.mkdir(parents=True)
+    (run_root / "run-manifest.json").write_text("{}", encoding="utf-8")
     flags = ["--candidate", str(candidate), "--candidate-receipt", str(receipt), "--assembly-receipt", str(candidate),
              "--inventory-receipt", str(candidate), "--context-receipt", str(candidate), "--context-marker-output", str(candidate),
-             "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(tmp_path),
-             "--attempt-id", "a" * 32, "--output-dir", str(tmp_path / "out")]
+             "--generator-fragment", str(candidate), "--reviewer-session", str(candidate), "--run-root", str(run_root),
+             "--attempt-id", "a" * 32, "--output-dir", str(tmp_path / "project" / "out")]
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert printed["reason_code"] == "ORCHESTRATION_RECEIPT_SHAPE" and "missing" in printed["message"] and "publish" in printed["fix"], printed
