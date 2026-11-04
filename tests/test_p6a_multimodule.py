@@ -192,3 +192,30 @@ def test_ready_stops_on_a_secret_document_outside_the_module_with_its_rule(tmp_p
     (project / DOC).write_text('# Требования\n\npassword="secret123456"\n', encoding="utf-8")
     row = next(item for item in check(project, [DOC], profile="cases-only-v1", module="api")["checks"] if item["id"] == f"docs:{DOC}")
     assert row["level"] == "STOP" and "token-assignment-v1" in row["message"] and "сузьте" not in row["fix"], row
+
+
+# --- FaT-P3-fix: ``--docs путь#Раздел`` for a document of the root outside the module --------------------------------
+
+SECTION = DOC + "#Приветствие"
+
+
+def _docs_row(project: Path, spec: str) -> dict:
+    from tools.ready import check
+
+    report = check(project, [spec], profile="cases-only-v1", module="api")
+    return next(item for item in report["checks"] if item["id"] == f"docs:{spec}")
+
+
+def test_ready_passes_a_section_of_a_document_of_the_root_for_a_submodule(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    assert _docs_row(project, SECTION)["level"] == "OK", _docs_row(project, SECTION)
+    assert _docs_row(project, DOC)["level"] == "OK"  # the whole file: as before
+
+
+def test_ready_names_the_inventory_rule_of_a_secret_document_with_and_without_a_section(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    (project / DOC).write_text('# Приветствие\n\nR01. Требование.\n\n# Доступ\n\npassword="secret123456"\n', encoding="utf-8")
+    for spec in (DOC, SECTION):
+        row = _docs_row(project, spec)
+        assert row["level"] == "STOP" and "token-assignment-v1" in row["message"] and "сузьте" not in row["fix"], (spec, row)
+        assert "не входит в inventory выбранного модуля" not in row["message"], (spec, row)

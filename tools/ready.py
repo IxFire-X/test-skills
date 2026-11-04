@@ -272,10 +272,13 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
 
 
 def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
-    """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business)."""
+    """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business).
+    FaT-P3: ``путь#Раздел`` is the file ``путь``; the heading is the docs row's business."""
+    from tools.doc_sections import resolve_spec
+
     rels = []
     for raw in docs:
-        candidate = Path(raw)
+        candidate = Path(resolve_spec(root, raw)[0])
         path = (candidate if candidate.is_absolute() else root / candidate).resolve()
         if path.is_file() and path.is_relative_to(root):
             rels.append(path.relative_to(root).as_posix())
