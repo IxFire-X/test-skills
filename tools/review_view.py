@@ -648,7 +648,15 @@ def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any])
     if not published or published[-1].get("artifact_digest") != digest:
         raise ValueError("the candidate is not the assembled candidate of the run")
     target = review_canaries.view_target(root, digest)
-    existing = review_canaries.verify(root, attempt_id)
+    try:
+        existing = review_canaries.verify(root, attempt_id)
+    except review_canaries.CanaryMismatch:
+        if not review_canaries.resume_binding(root, attempt_id):  # a seeding cut short between the receipt and its events: finish it
+            raise
+        existing = review_canaries.verify(root, attempt_id)  # a real divergence of bytes is still a mismatch
+    else:
+        if existing is None and review_canaries.resume_binding(root, attempt_id):  # the receipt file is there, its events are not
+            existing = review_canaries.verify(root, attempt_id)
     if existing is not None:
         return {"path": target, "created": False, "canaries": len(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
     mutated, canaries = review_canaries.seed(document)

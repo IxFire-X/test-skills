@@ -50,16 +50,27 @@ def _crash_points(monkeypatch, point: str) -> None:
     if point == "ledger":
         _crash_once(monkeypatch, otcr, "_publish_reviewer_ledger")
     elif point == "boundary-read-back":
-        _crash_once(monkeypatch, pilot_state, "append_event", lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_READ_BACK")
+        _crash_once(monkeypatch, pilot_state, "append_event",
+                    lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_READ_BACK" and k.get("batch_id") != "review-canaries-v1")
     elif point == "boundary-published":
-        _crash_once(monkeypatch, pilot_state, "append_event", lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_PUBLISHED")
+        _crash_once(monkeypatch, pilot_state, "append_event",
+                    lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_PUBLISHED" and k.get("batch_id") != "review-canaries-v1")
+    elif point == "canary-files-written":  # P7: the view and the map are written, the receipt is not
+        _crash_once(monkeypatch, pilot_state, "publish_review_canaries")
+    elif point == "canary-receipt-written":  # P7: the receipt file is there, none of its events
+        _crash_once(monkeypatch, pilot_state, "append_event",
+                    lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_PUBLISHED" and k.get("batch_id") == "review-canaries-v1")
+    elif point == "canary-published":  # P7: the receipt and its first event, not the read-back
+        _crash_once(monkeypatch, pilot_state, "append_event",
+                    lambda run_root, event_type, *a, **k: event_type == "ARTIFACT_READ_BACK" and k.get("batch_id") == "review-canaries-v1")
     elif point == "model-request":
         _crash_once(monkeypatch, pilot_state, "publish_model_request")
     else:
         raise AssertionError(point)
 
 
-@pytest.mark.parametrize("point", ["boundary-published", "boundary-read-back", "ledger", "model-request"])
+@pytest.mark.parametrize("point", ["canary-files-written", "canary-receipt-written", "canary-published", "boundary-published", "boundary-read-back",
+                                   "ledger", "model-request"])
 def test_review_open_cut_short_is_finished_by_the_same_call(tmp_path: Path, monkeypatch, capsys, point: str) -> None:
     run = _generated_run(tmp_path)
     with monkeypatch.context() as broken:
@@ -162,3 +173,18 @@ def test_the_mixed_path_verdict_without_a_request_points_to_review_open(tmp_path
     assert code == 2 and refused["code"] == "MODEL_STAGE_NOT_REQUESTED", refused
     assert "review-open" in refused["fix"] and "model-request" not in refused["fix"].split("review-open")[0], refused["fix"]
     assert _journal(run["run_root"]) == before
+
+
+def test_a_canary_binding_cut_short_is_finished_and_a_real_divergence_is_not(tmp_path: Path, monkeypatch, capsys) -> None:
+    """P7: the same call again finishes the binding of the canaries; a map that does not match the receipt is still REVIEW_CANARY_MISMATCH."""
+    from tools import review_canaries
+
+    run = _generated_run(tmp_path)
+    with monkeypatch.context() as broken:
+        _crash_points(broken, "canary-published")
+        assert _main(capsys, _open_argv(run))[0] == 2
+    mapped = next((run["run_root"] / "review-views").glob("*.canaries.json"))
+    mapped.write_bytes(mapped.read_bytes() + b" ")  # a real divergence of bytes, not a cut
+    code, refused = _main(capsys, _open_argv(run))
+    assert code == 2 and "REVIEW_CANARY_MISMATCH" in json.dumps(refused, ensure_ascii=False), refused
+    assert review_canaries.BATCH_ID == "review-canaries-v1"

@@ -284,6 +284,34 @@ def _read_canaries(run_root: Path, attempt_id: str, events: list[dict[str, Any]]
     return list(value["canaries"])
 
 
+def resume_binding(run_root: Path, attempt_id: str) -> bool:
+    """Finish the binding of a seeding that was cut short.  The receipt file is there (the journal may lack one or both of its events),
+    and the map and the view match it byte for byte: the missing events are appended and ``True`` returned.  No receipt file —
+    ``False`` (nothing to finish; the seeding starts over).  A receipt file whose map or view do not match it is a real divergence:
+    ``REVIEW_CANARY_MISMATCH``."""
+    from tools import pilot_state as pilot
+    from tools.confined_output import read_confined_bytes
+
+    project, root = pilot._run_root(Path(run_root))
+    try:
+        raw = read_confined_bytes(project, root, pilot._receipt_target(root, attempt_id, RECEIPT_KIND))
+    except (OSError, ValueError) as error:
+        raise _mismatch("файл квитанции review-canaries не читается") from error
+    if raw is None:
+        return False
+    try:
+        record = json.loads(raw.decode("utf-8"))
+        facts = {key: record[key] for key in ("candidate_digest", "view_digest", "canary_map_digest", "canary_count")}
+        data = read_confined_bytes(project, root, map_target(root, facts["candidate_digest"]))
+        view = read_confined_bytes(project, root, view_target(root, facts["candidate_digest"]))
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise _mismatch("квитанция review-canaries не читается") from error
+    if data is None or view is None or _digest_of(data) != facts["canary_map_digest"] or _digest_of(view) != facts["view_digest"]:
+        raise _mismatch("файл квитанции есть, а карта или вид не совпадают с ним")
+    pilot.publish_review_canaries(run_root, attempt_id, facts)  # the same facts: the receipt is the one that is there, the events are added
+    return True
+
+
 # --- hits ------------------------------------------------------------------------------------------
 
 def _names(marker: str, text: str) -> bool:
