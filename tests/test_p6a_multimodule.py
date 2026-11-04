@@ -10,7 +10,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-import yaml
 
 from tools import run_pipeline
 
@@ -78,10 +77,10 @@ def test_an_old_skillsrc_keeps_its_hex_ids_and_is_not_rewritten(tmp_path: Path, 
 
     project = _project(tmp_path)
     first = _scan(project, monkeypatch, module="api")
-    skillsrc = yaml.safe_load((project / ".skillsrc").read_text(encoding="utf-8"))
+    skillsrc = json.loads((project / ".skillsrc").read_text(encoding="utf-8"))
     for module in skillsrc["modules"]:
         module["id"] = "root--" + module["root"].encode().hex()  # what the package wrote before P6a
-    old_text = yaml.safe_dump(skillsrc, allow_unicode=True)
+    old_text = json.dumps(skillsrc, ensure_ascii=False, indent=2)
     (project / ".skillsrc").write_bytes(old_text.encode("utf-8"))
     assert {row["id"] for row in discover_project(project)["modules"]} == {"root--617069", "root--636f7265"}
 

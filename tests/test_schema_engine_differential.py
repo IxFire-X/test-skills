@@ -1,6 +1,7 @@
 """Differential test: tools.schema_engine against jsonschema, the oracle, which lives only in requirements-dev.txt.
 
-Every (schema, instance) pair must give the same list of errors: the same (path, validator) pairs in the same order, the
+Every (schema, instance) pair must give the same list of errors: the same (path, validator) pairs (the order of errors of an additionalProperties schema depends on
+PYTHONHASHSEED in jsonschema, so the lists are compared sorted), the
 same ``_error_code`` and ``_error_path`` of schema_validation, the same schema path and message. The instances are the
 fixtures of tests/, the artifacts of earlier runs (``live/*/.pilot-runs``, read only; skipped when absent) and mutations of
 the valid ones: a removed required key, a changed type, an extra property, a value outside the enum or the bounds, a
@@ -57,19 +58,16 @@ def _signature(error: Any, depth: int = 2) -> tuple:
 
 def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
     """True when the oracle accepts the instance. Appends one line per difference to *problems*."""
-    expected = [_signature(error) for error in ORACLE[name].iter_errors(instance)]
+    expected = sorted((_signature(error) for error in ORACLE[name].iter_errors(instance)), key=repr)
     try:
-        actual = [_signature(error) for error in ENGINE[name].iter_errors(instance)]
+        actual = sorted((_signature(error) for error in ENGINE[name].iter_errors(instance)), key=repr)
     except Exception as error:  # an engine crash is a difference too
         problems.append(f"{label} x {name}: engine raised {type(error).__name__}: {error}")
         return not expected
     if actual != expected:
-        if sorted(actual, key=repr) == sorted(expected, key=repr):
-            problems.append(f"{label} x {name}: same errors, other order")
-        else:
-            only_oracle = [item for item in expected if item not in actual][:2]
-            only_engine = [item for item in actual if item not in expected][:2]
-            problems.append(f"{label} x {name}: oracle-only {only_oracle!r} engine-only {only_engine!r}")
+        only_oracle = [item for item in expected if item not in actual][:2]
+        only_engine = [item for item in actual if item not in expected][:2]
+        problems.append(f"{label} x {name}: oracle-only {only_oracle!r} engine-only {only_engine!r}")
     return not expected
 
 
@@ -233,8 +231,8 @@ def test_standalone_validators_of_the_consumers_without_a_registry() -> None:
             old = jsonschema.Draft202012Validator(contents, format_checker=checker_old)
             new = schema_engine.Draft202012Validator(contents, format_checker=checker_new)
             for label, instance in instances:
-                expected = [_signature(error) for error in old.iter_errors(instance)]
-                actual = [_signature(error) for error in new.iter_errors(instance)]
+                expected = sorted((_signature(error) for error in old.iter_errors(instance)), key=repr)
+                actual = sorted((_signature(error) for error in new.iter_errors(instance)), key=repr)
                 if expected != actual:
                     problems.append(f"{name} x {label}: {expected[:1]!r} != {actual[:1]!r}")
                 assert old.is_valid(instance) == new.is_valid(instance)

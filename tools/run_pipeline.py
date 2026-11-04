@@ -795,7 +795,7 @@ def _scan_disposition_policy(project: Path, args: Any) -> str | None:
     from tools.skillsrc_manifest import SkillsrcError, load_skillsrc
 
     try:
-        document = load_skillsrc(project / ".skillsrc")  # FaT-B: the package writes YAML; JSON is YAML too
+        document = load_skillsrc(project / ".skillsrc")  # .skillsrc is a JSON object (P5)
     except (OSError, SkillsrcError):
         return None
     return "cleanup" if document.get("disposition_policy") == "cleanup" else None

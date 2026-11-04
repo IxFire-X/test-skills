@@ -27,9 +27,11 @@ git diff --check
 git status --short
 ```
 
-The pack does not create the environment or install dependencies. Exact observed
-dependency versions are pinned with hashes in `requirements.txt`; an approved
-company mirror/wheelhouse remains external deployment evidence.
+The pack does not create the environment or install dependencies: the runtime uses
+only Python and its standard library, so `requirements.txt` holds no packages. The
+development dependencies (the `jsonschema` oracle of the differential test, pytest)
+are pinned with hashes in `requirements-dev.txt`; an approved company
+mirror/wheelhouse remains external deployment evidence for them.
 
 Linux uses the same gate:
 

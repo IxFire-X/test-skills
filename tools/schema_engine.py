@@ -25,6 +25,9 @@ __all__ = ["Draft202012Validator", "FormatChecker", "SchemaError", "ValidationEr
 _UNSET: Any = object()
 _TYPE_NAMES = frozenset({"array", "boolean", "integer", "null", "number", "object", "string"})
 # Keywords that carry no assertion of their own or are read by a sibling keyword (then/else by if, min/maxContains by contains).
+# Formats the schemas of the package use. date is checked, date-time is an annotation; any other name is refused when the schema
+# is loaded, because jsonschema may check it and the engine would silently not.
+_FORMATS = frozenset({"date", "date-time"})
 _ANNOTATIONS = frozenset({"$schema", "$id", "$defs", "title", "description", "then", "else", "minContains", "maxContains"})
 
 
@@ -372,6 +375,7 @@ def _b_unique(compiler: _Compiler, value: Any, raw: dict, base: str) -> Any:
 
 def _b_format(compiler: _Compiler, value: Any, raw: dict, base: str) -> Any:
     _check(isinstance(value, str), "format", "must be a string")
+    _check(value in _FORMATS, "format", f"{value!r} is not a format the engine knows ({', '.join(sorted(_FORMATS))})")
     return value
 
 
@@ -633,6 +637,16 @@ _VALIDATORS: dict[str, Callable[..., Any]] = {
 assert _BUILDERS.keys() == _VALIDATORS.keys()
 
 
+def _compile(schema: Any, registry: Mapping[str, Any] | None, link: bool) -> _Node:
+    """Build the root node; whatever the standard library raises on a hostile schema (a broken URI, an absurd nesting) is a SchemaError."""
+    try:
+        return _Compiler(schema, registry, link).root
+    except SchemaError:
+        raise
+    except (ValueError, OverflowError, RecursionError, re.error) as error:
+        raise SchemaError(f"the schema cannot be loaded: {type(error).__name__}: {error}") from error
+
+
 class Draft202012Validator:
     """``Draft202012Validator(schema, registry=None, format_checker=None)`` with the calls the package uses.
 
@@ -643,12 +657,12 @@ class Draft202012Validator:
     def __init__(self, schema: Any, registry: Mapping[str, Any] | None = None, format_checker: FormatChecker | None = None) -> None:
         self.schema = schema
         self.format_checker = format_checker
-        self._root = _Compiler(schema, registry, link=True).root
+        self._root = _compile(schema, registry, link=True)
 
     @classmethod
     def check_schema(cls, schema: Any) -> None:
         """Raise ``SchemaError`` for an unknown keyword or a malformed keyword value. References are not resolved."""
-        _Compiler(schema, None, link=False)
+        _compile(schema, None, link=False)
 
     def iter_errors(self, instance: Any) -> Iterator[ValidationError]:
         return self.descend(instance, self._root)

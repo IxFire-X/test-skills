@@ -225,7 +225,7 @@ def test_additional_properties_as_a_schema_and_the_not_keyword() -> None:
 
 
 def test_format_date_is_checked_and_date_time_is_not() -> None:
-    from tools.schema_engine import FormatChecker
+    from tools.schema_engine import FormatChecker, SchemaError
 
     schema_date, schema_time = {"format": "date"}, {"format": "date-time"}
     checker = FormatChecker()
@@ -238,7 +238,12 @@ def test_format_date_is_checked_and_date_time_is_not() -> None:
     for odd in ("x", "2026-02-30", "", "2026-11-03 10:00"):
         assert not _errors(schema_time, odd, format_checker=checker)
     assert not _errors(schema_date, "x")  # no format checker: formats are annotations only
-    assert not _errors({"format": "made-up"}, "x", format_checker=checker)
+    with pytest.raises(SchemaError) as caught:  # fail closed: jsonschema may check a format the engine does not
+        _validator({"format": "made-up"})
+    assert "made-up" in str(caught.value)
+    for name in ("uuid", "email", "ipv4", "regex", "time", "uri"):
+        with pytest.raises(SchemaError):
+            _validator({"properties": {"a": {"format": name}}})
     assert checker.conforms("2026-11-03", "date") and not checker.conforms("nope", "date") and checker.conforms("nope", "date-time")
 
 
@@ -284,3 +289,18 @@ def test_requirements_txt_is_only_a_comment_and_dev_requirements_hold_the_oracle
     assert runtime == []
     dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     assert re.search(r"^jsonschema==", dev, re.M) and re.search(r"^referencing==", dev, re.M) and "-r requirements.txt" not in dev
+
+
+def test_what_the_standard_library_raises_on_a_hostile_schema_is_a_schema_error() -> None:
+    from tools.schema_engine import Draft202012Validator, SchemaError
+
+    broken_uri = {"$id": "http://[", "$defs": {"x": {}}, "properties": {"a": {"$ref": "#/$defs/x"}}}
+    with pytest.raises(SchemaError):
+        Draft202012Validator(broken_uri)
+    deep: dict = {"type": "object"}
+    for _ in range(20000):
+        deep = {"properties": {"a": deep}}
+    with pytest.raises(SchemaError):
+        Draft202012Validator(deep)
+    with pytest.raises(SchemaError):
+        Draft202012Validator.check_schema(deep)
