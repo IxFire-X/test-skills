@@ -1,6 +1,13 @@
 ---
 name: autotest-reviewer
 description: Use when selected effective canonical test cases and generated V5 automation require a static, role-isolated completeness and traceability review before execution.
+permissions:
+  read: "входы шага, которые назвал controller (требования, контекст, кандидат, ответы других ролей); файлы проекта только из inventory"
+  write: "только ответ роли в <run>/tmp/ (путь называет controller); файлы проекта роль не пишет"
+  network: "нет"
+  external_delivery: "нет"
+  dependencies: "ничего не устанавливает"
+  rollback: "ответ роли лежит в <run>/tmp/ и уходит вместе с прогоном (<project>/.pilot-runs/<run_id>/)"
 ---
 
 # Static automation review

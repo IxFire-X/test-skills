@@ -1,6 +1,13 @@
 ---
 name: tc-reviewer
 description: Use when a complete canonical test-case candidate requires one fresh role-isolated review session, a bounded evidence retrieval, an effective selection, or rework.
+permissions:
+  read: "входы шага, которые назвал controller (требования, контекст, кандидат, ответы других ролей); файлы проекта только из inventory"
+  write: "только ответ роли в <run>/tmp/ (путь называет controller); файлы проекта роль не пишет"
+  network: "нет"
+  external_delivery: "нет"
+  dependencies: "ничего не устанавливает"
+  rollback: "ответ роли лежит в <run>/tmp/ и уходит вместе с прогоном (<project>/.pilot-runs/<run_id>/)"
 ---
 
 # Canonical test-case review

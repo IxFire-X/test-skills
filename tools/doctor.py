@@ -1,6 +1,10 @@
-"""Report portable skill-pack integrity and unqualified runtime capabilities."""
+"""Report portable skill-pack integrity: the files of the pack, their SHA-256, line endings said in words.
 
-import importlib.util
+A small checker.  It reads ``release/manifest.json`` and compares the pack with it (``tools.pack_registry``): the exact set of
+registry files of one profile, the bytes of each, the manifest's own digest and schema.  It writes nothing, starts nothing, and
+leaves no mark: no other tool reads its answer back as a fact — every run checks again.
+"""
+
 import json
 import platform
 import sys
@@ -14,21 +18,15 @@ else:  # direct CLI execution
 
 CRLF_FIX = ("положите в папку пакета файл .gitattributes со строкой `* -text` (git перестанет менять переносы строк пакета) и верните "
             "файлы пакета: git checkout -- <папка пакета> или заново скопируйте поставку")
+MANIFEST_FIX = "сверьте папку пакета с поставкой (файлы и SHA-256): скопируйте поставку заново"
 
 
-def _crlf_files(root: Path) -> list[str]:
+def _registry():
     if __package__:
-        from .release_manifest import crlf_converted
+        from . import pack_registry
     else:  # direct CLI execution
-        from release_manifest import crlf_converted
-    return crlf_converted(root)
-
-
-def _available(name: str) -> bool:
-    try:
-        return importlib.util.find_spec(name) is not None
-    except (ImportError, ValueError):  # a module blocked in sys.modules has no spec
-        return False
+        import pack_registry
+    return pack_registry
 
 
 def _engine_importable() -> bool:
@@ -44,115 +42,57 @@ def _engine_importable() -> bool:
 
 
 def inspect_environment(root: Path) -> dict[str, object]:
-    """Return support and required-dependency availability for a skill pack."""
+    """Return the integrity of a skill pack and what it can run."""
     root = root.resolve()
+    registry = _registry()
     qualification: dict[str, object] = {"state": "unavailable", "ready_tuple": None}
-    required_files = (
-        "contracts/pipeline.json",
-        "schemas/canonical-test-document.schema.json",
-        "schemas/tc-reviewer-output.schema.json",
-        "schemas/tc-to-autotest-output.schema.json",
-        "schemas/autotest-reviewer-output.schema.json",
-        "schemas/run-tests-output.schema.json",
-        "schemas/trace-document.schema.json",
-        "schemas/orchestrator-output.schema.json",
-        "schemas/skillsrc.schema.json",
-        "schemas/project-discovery-output.schema.json",
-        "schemas/skillsrc-init-output.schema.json",
-        "schemas/compatibility-evidence.schema.json",
-        "schemas/scenario-observation-receipt.schema.json",
-        "schemas/release-eval-run.schema.json",
-        "schemas/release-eval-receipt.schema.json",
-        "schemas/release-manifest.schema.json",
-        "release/manifest.json",
-        "tools/orchestrate_test_case_revision.py",
-        "tools/build_trace_document.py",
-        "tools/run_tests.py",
-        "tools/execution_adapters.py",
-        "tools/skillsrc_manifest.py",
-        "tools/schema_engine.py",
-        "tools/discover_project.py",
-        "tools/init_skillsrc.py",
-        "tools/compatibility_contract.py",
-        "tools/release_manifest.py",
-        "evals/release_eval.py",
-        "evals/scenarios/pilot-critical.json",
-    )
-    required_dirs = ("schemas", "tools", "contracts")
-    missing_integrity = [item for item in required_files if not (root / item).is_file()]
-    missing_integrity.extend(item for item in required_dirs if not (root / item).is_dir())
+    missing_integrity: list[str] = []
+    messages: list[str] = []
     if not root.is_dir():
-        missing_integrity.insert(0, "root")
-    for relative, expected in (
-        ("contracts/pipeline.json", "pipeline"),
-        ("schemas/orchestrator-output.schema.json", "schemas/orchestrator-output.schema.json"),
-        ("schemas/tc-to-autotest-output.schema.json", "schemas/tc-to-autotest-output.schema.json"),
-        ("schemas/skillsrc.schema.json", "schemas/skillsrc.schema.json"),
-        ("schemas/project-discovery-output.schema.json", "schemas/project-discovery-output.schema.json"),
-        ("schemas/skillsrc-init-output.schema.json", "schemas/skillsrc-init-output.schema.json"),
-    ):
-        candidate = root / relative
-        if not candidate.is_file():
-            continue
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-            if expected == "pipeline":
-                valid = (
-                    data.get("$schema") == "schemas/pipeline.schema.json"
-                    and data.get("version") == "4.0"
-                    and data.get("pipeline") == "portable-testing-skills-frozen-pilot"
-                    and isinstance(data.get("artifact_registry"), list)
-                )
-            else:
-                valid = data.get("$id") == expected and data.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
-            if not valid:
-                missing_integrity.append(f"invalid:{relative}")
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            missing_integrity.append(f"invalid:{relative}")
+        missing_integrity.append("root")
     dependencies = {"schema_engine": {"required": True, "available": _engine_importable()}}
     missing_modules = [name for name, item in dependencies.items() if not item["available"]]
-    # FaT-R: without it the contract and manifest checks cannot run — say what is missing, not "invalid contract".
-    messages = [
-        f"не импортируется собственный валидатор схем ({name}, tools/schema_engine.py); проверка контракта и манифеста пропущена. "
+    # FaT-R: without it the manifest cannot be checked — say what is missing, not "invalid manifest".
+    messages.extend(
+        f"не импортируется собственный валидатор схем ({name}, tools/schema_engine.py); сверка с манифестом пропущена. "
         "Сверьте папку пакета с поставкой: стороннее ПО пакету не нужно"
         for name in missing_modules
-    ]
-    pipeline_path = root / "contracts" / "pipeline.json"
-    if pipeline_path.is_file() and not missing_modules:
-        try:
-            if __package__:
-                from .contract_check import validate_pipeline_contract
-            else:  # direct CLI execution
-                from contract_check import validate_pipeline_contract
-            contract_report = validate_pipeline_contract(json.loads(pipeline_path.read_text(encoding="utf-8")), root, check_drift=False)
-            if contract_report["status"] != "passed":
-                missing_integrity.append("invalid:pipeline_contract")
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ImportError) as error:
-            missing_integrity.append("invalid:pipeline_contract")
-            messages.append(f"проверка контракта: {type(error).__name__}: {error}")
-    release_manifest_path = root / "release" / "manifest.json"
+    )
+    profile: str | None = None
     crlf_report: dict[str, object] | None = None
-    if release_manifest_path.is_file() and not missing_modules:
+    if root.is_dir() and not (root / "release" / "manifest.json").is_file():
+        missing_integrity.append("release/manifest.json")
+        messages.append(f"нет release/manifest.json: пакет нечем сверить; {MANIFEST_FIX}")
+    elif root.is_dir() and not missing_modules:
         try:
-            if __package__:
-                from .release_manifest import load_release_manifest
-            else:  # direct CLI execution
-                from release_manifest import load_release_manifest
-            manifest = load_release_manifest(root)
+            profile, manifest = registry.verify_pack(root)
             qualification = dict(manifest["qualification"])
         except (ImportError, TypeError, ValueError) as error:
             missing_integrity.append("invalid:release/manifest.json")
             messages.append(f"release/manifest.json: {type(error).__name__}: {error}")
-            crlf = _crlf_files(root) if "does not match runtime bytes" in str(error) else []
+            crlf = registry.crlf_converted(root) if "does not match runtime bytes" in str(error) else []
             if crlf:  # P6a: said in words; the byte-for-byte check is unchanged
                 crlf_report = {"count": len(crlf), "examples": crlf[:5], "fix": CRLF_FIX}
                 messages.append(f"переносы строк изменены (CRLF) в {len(crlf)} файл(ах) пакета, например {', '.join(crlf[:3])}: "
                                 f"содержимое то же, но git при checkout заменил LF на CRLF. {CRLF_FIX}")
+            if "match no delivery profile" in str(error):
+                try:
+                    _nearest, extra, absent = registry.profile_diff(root, registry.load_manifest(root))
+                except ValueError:
+                    extra, absent = [], []
+                for path in extra[:10]:
+                    if "/__pycache__/" in path and path.endswith(".pyc"):
+                        messages.append(f"кэш байт-кода {path} не совпадает с исходником (или исходника нет): удалите каталог {path.rsplit('/', 1)[0]}")
+                    else:
+                        messages.append(f"лишний файл {path}: удалите его (в пакете такого файла нет)")
+                messages.extend(f"нет файла {path}: скопируйте поставку заново" for path in absent[:10])
     python_supported = sys.version_info >= (3, 11)
     ready = not missing_integrity and python_supported and all(item["available"] for item in dependencies.values())
+    runs_projects = profile != "cases-only"  # the cases-only pack has no module that starts a build or a test
     return {
         "status": "PASS" if ready else "NOT_RUNNABLE",
         "status_scope": "pack_integrity",
+        "profile": profile,
         "qualification": qualification,
         "python": {
             "supported": python_supported,
@@ -163,16 +103,16 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
         **({"crlf": crlf_report} if crlf_report else {}),
         "languages": {
-            "java": {"execution": True, "verified": False},
-            "python": {"execution": True, "verified": False},
+            "java": {"execution": runs_projects, "verified": False},
+            "python": {"execution": runs_projects, "verified": False},
             "typescript": {"execution": False, "verified": False},
             "go": {"execution": False, "verified": False},
         },
         "adapters": {
-            "local_project_native": {"core": True, "verified": False},
+            "local_project_native": {"core": runs_projects, "verified": False},
             "company_runner": {"core": False, "verified": False},
         },
-        "root": str(root.resolve()),
+        "root": str(root),
     }
 
 

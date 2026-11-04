@@ -1,6 +1,13 @@
 ---
 name: context-marker
 description: Use when authorized requirements, code observations, or change notes must become a provenance-preserving 5.0.0 source-requirement context artifact for the test pipeline.
+permissions:
+  read: "входы шага, которые назвал controller (требования, контекст, кандидат, ответы других ролей); файлы проекта только из inventory"
+  write: "только ответ роли в <run>/tmp/ (путь называет controller); файлы проекта роль не пишет"
+  network: "нет"
+  external_delivery: "нет"
+  dependencies: "ничего не устанавливает"
+  rollback: "ответ роли лежит в <run>/tmp/ и уходит вместе с прогоном (<project>/.pilot-runs/<run_id>/)"
 ---
 
 # Context marking

@@ -20,6 +20,7 @@ if str(Path(__file__).resolve().parents[1]) not in sys.path:
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
 from tools.fixes import FIXES
+from tools import output_guard
 from tools.json_cli import error_code_prefix, error_envelope
 from tools.publish_test_case_bundle import Receipt, publish_bundle, verify_bundle
 from tools.revision_selection import SelectionError, reviewer_verdict_is_bound, select_effective_document, validate_review_decision
@@ -1326,13 +1327,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "publish":
             from tools.api import _out_target, _write  # FaT-AU2: the one --out policy and writer of the package
 
-            out = _out_target(str(args.out)) if args.out is not None else None  # refused before anything is published
+            out = _out_target(str(args.out), args.run_root) if args.out is not None else None  # refused before anything is published
+            output_guard.run_output_directory(args.output_dir, args.run_root)
             published = publish_command(candidate, args.output_dir, args.csv_profile, run_root=args.run_root, attempt_id=args.attempt_id)
             published["warnings"] = [*published["warnings"], _RENAMED["publish"]]
             if out is not None:
                 published["out"] = _write(out, published["candidate_bundle_receipt"])
             print(json.dumps(published, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
             return 0
+        if args.command == "select":
+            output_guard.run_output_directory(args.output_dir, args.run_root)
         receipt = _load_receipt(args.candidate_receipt)
         base_contexts = [load_json_strict(path) for path in args.context_receipt]
         if args.command == "open-session":
@@ -1374,6 +1378,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": _receipt_json(error.candidate_bundle_receipt),
                           "diagnostics": [dict(row) for row in error.diagnostics], "successor_bundle_receipt": _receipt_json(error.successor_bundle_receipt)},
                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return exit_code
+    except output_guard.OutputRefused as error:  # --out / --output-dir outside the run or the project: its own code and fix
+        print(json.dumps({**error_envelope(error), "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")],
+                          "successor_bundle_receipt": None}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
     except (StrictJsonError, OSError, ValueError) as error:
         # FaT-10d: the inner refusal code and its fix; FaT-U5: the one envelope, the code is the refusal's own
         envelope = error_envelope(error)  # FaT-U6: the same reading as tools.api

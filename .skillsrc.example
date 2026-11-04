@@ -40,30 +40,6 @@
       "detected_from": [
         "backend/pom.xml"
       ]
-    },
-    {
-      "id": "frontend",
-      "root": "frontend",
-      "stack": {
-        "language": "typescript",
-        "build_tool": "npm"
-      },
-      "paths": {
-        "source": [
-          "src"
-        ],
-        "tests": [
-          "tests"
-        ]
-      },
-      "feature_sources": {
-        "requirements": [
-          "docs/requirements"
-        ]
-      },
-      "detected_from": [
-        "frontend/package.json"
-      ]
     }
   ]
 }

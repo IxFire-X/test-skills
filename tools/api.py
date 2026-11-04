@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, pilot_state, run_tests, step_size
+from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, output_guard, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -354,6 +354,9 @@ def _parser() -> JsonArgumentParser:
                 command.add_argument(f"--out-{part}", dest=f"out_{part}", required=True)
         else:
             command.add_argument("--out", default=None)
+        if not any(action.dest == "run_root" for action in command._actions):
+            # an --out file is confined to <run>/tmp/: a command that has no run of its own takes the run for that check only
+            command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="with --out: the run whose tmp/ gets the file")
     return parser
 
 
@@ -363,19 +366,9 @@ def _print(payload: Mapping[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-class _OutsideRun(ValueError):
-    code = "API_OUT_OUTSIDE_RUN"
-
-
-def _out_target(path: str) -> Path:
-    target = Path(path).resolve()
-    parts = target.parts
-    if ".pilot-runs" not in parts:
-        raise _OutsideRun("--out must name a file under <project>/.pilot-runs/<run_id>/tmp/")
-    index = parts.index(".pilot-runs")
-    if len(parts) < index + 4 or parts[index + 2] != "tmp":
-        raise _OutsideRun("--out must name a file under <project>/.pilot-runs/<run_id>/tmp/")
-    return target
+def _out_target(path: str, run_root: object = None) -> Path:
+    """The one ``--out`` policy (tools.output_guard): a file directly in ``<run>/tmp/`` of the run ``--run-root`` names."""
+    return output_guard.out_file(path, run_root)
 
 
 def _write(target: Path, value: Any) -> dict[str, Any]:
@@ -418,8 +411,11 @@ def main(argv: list[str] | None = None) -> int:
     handler, _options, invalid, parts = COMMANDS[args.command]
     dry_run = bool(getattr(args, "dry_run", False))
     try:
-        targets = {part: _out_target(getattr(args, f"out_{part}")) for part in parts}
-        out = _out_target(args.out) if not parts and args.out is not None else None
+        run_root = getattr(args, "run_root", None)
+        targets = {part: _out_target(getattr(args, f"out_{part}"), run_root) for part in parts}
+        out = _out_target(args.out, run_root) if not parts and args.out is not None else None
+        if getattr(args, "output_dir", None) is not None:  # the publication directory: inside the project of the run, never in .git
+            output_guard.run_output_directory(args.output_dir, run_root)
         result = handler(args)
     except Exception as error:
         # FaT-U6: the refusal's own code and fix; FaT-U5: the one envelope {status, code, message, fix, next}

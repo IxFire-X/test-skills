@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import sys
 import tempfile
@@ -13,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, require_valid_canonical_document
-from tools.json_cli import JsonArgumentParser
 from tools.schema_validation import classify_version
 from tools.test_case_projections import (
     _reject_unknown_profile as _reject_projection_profile,
@@ -304,16 +302,3 @@ def verify_bundle(document: dict[str, Any], output_dir: str | os.PathLike[str], 
     if mismatches:
         raise BundleMismatchError(mismatches)
     return _receipt(document, csv_profile, targets, tuple(values))  # type: ignore[arg-type]
-
-
-def _emit(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-
-
-def _parser() -> JsonArgumentParser:
-    parser = JsonArgumentParser()
-    parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--csv-profile", default=_PROFILE)
-    parser.add_argument("--verify-only", action="store_true")
-    return parser

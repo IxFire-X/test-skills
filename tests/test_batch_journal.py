@@ -94,7 +94,7 @@ def test_a_changed_capability_of_batch_two_is_refused_before_the_write_and_keeps
     code, answered = _response(run, second, run["fragments"][1], "--transport-attempts", "2")
     assert code == 0, answered
     code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *[flag for path in run["fragments"] for flag in ("--fragment", path)],
-                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"))
+                           "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
     assert code == 0, assembled
 
 

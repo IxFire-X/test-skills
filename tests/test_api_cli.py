@@ -305,7 +305,7 @@ def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys:
     source = run_root / "tmp" / "document.json"
     source.parent.mkdir()
     source.write_text(json.dumps(automated_document(), ensure_ascii=False), encoding="utf-8")
-    code, _line = _api(["document-digest", "--document", str(source), "--out", str(run_root / "tmp" / "digest.json")], capsys)
+    code, _line = _api(["document-digest", "--document", str(source), "--out", str(run_root / "tmp" / "digest.json"), "--run-root", str(run_root)], capsys)
     assert code == 0 and (run_root / "tmp" / "digest.json").is_file()
     assert "drift" not in _status(project, scan["run_id"], monkeypatch)
 

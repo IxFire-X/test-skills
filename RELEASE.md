@@ -1,6 +1,6 @@
 # Portable pilot release
 
-- **Package version:** `0.5.0-pilot`
+- **Package version:** `release_qualification.package_version` of `contracts/pipeline.json` (the one place; the manifest and `PIPELINE.md` take it from there)
 - **Machine authority:** `release/manifest.json`
 - **Qualification:** `implemented_unverified`
 - **Ready tuple:** `null`

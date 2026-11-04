@@ -371,6 +371,7 @@ python -m tools.render_contract_docs --root . --check
 python -m pytest -q
 python -m tools.doctor --root .
 python -m tools.ci_gate --root .
+python -m tools.ci_gate --root <папка поставки или git archive> --pack-only
 ```
 
 Это maintainer/release-команды, а не шаги обычного production run. Runtime не запускает

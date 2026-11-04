@@ -1,6 +1,13 @@
 ---
 name: tc-generator
 description: Use when a 5.0.0 source-requirement context batch must become one canonical candidate fragment without inventing technical behavior.
+permissions:
+  read: "входы шага, которые назвал controller (требования, контекст, кандидат, ответы других ролей); файлы проекта только из inventory"
+  write: "только ответ роли в <run>/tmp/ (путь называет controller); файлы проекта роль не пишет"
+  network: "нет"
+  external_delivery: "нет"
+  dependencies: "ничего не устанавливает"
+  rollback: "ответ роли лежит в <run>/tmp/ и уходит вместе с прогоном (<project>/.pilot-runs/<run_id>/)"
 ---
 
 # Canonical test-case generation

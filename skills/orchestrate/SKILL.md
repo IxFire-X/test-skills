@@ -1,6 +1,13 @@
 ---
 name: orchestrate
 description: Использовать, когда пользователь просит тест-кейсы или функциональные автотесты приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
+permissions:
+  read: "файлы проекта по inventory с исключениями; --docs, --reference и --cases только внутри проекта"
+  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir внутри проекта (не внутри .git); в режиме local-pilot-v1 ещё тестовый корень модуля"
+  network: "cases-only-v1: нет; local-pilot-v1: HEAD к стенду по service_url_env и сборка проекта (в поставке только кейсов этих модулей нет)"
+  external_delivery: "cases-only-v1: нет; local-pilot-v1: запросы сгенерированных тестов к стенду"
+  dependencies: "пакет ничего не устанавливает; pip агент не запускает"
+  rollback: "удалить <project>/.pilot-runs/<run_id>/ и созданный <project>/.skillsrc; тесты local-pilot-v1 снимает карантин пакета"
 ---
 
 # Оркестрация frozen pilot Pipeline 4.0
@@ -131,14 +138,8 @@ worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
 
 ## 2. Выбери exact module и заморозь baseline
 
-Если нужные для native test boundary API или настройки подтверждаются только внешними
-зависимостями, до inventory сохрани разрешённые узкие выдержки их документации или
-метаданных отдельным evidence-файлом в eligible project tree. Укажи точную версию,
-источник и digest; включи файл в обычный immutable context receipt для генератора и
-reviewer. Это техническое доказательство, не новое бизнес-требование и не текст
-человеческих шагов ТК. Не копируй целиком зависимости или секреты. Поздно обнаруженный
-пробел не закрывай незаявленными bytes после freeze: используй разрешённый retrieval
-либо сохрани gap для следующей попытки.
+Документацию внешних зависимостей сам не ищи и в дерево проекта не сохраняй: бери только то, что человек дал через
+`--docs`, `--reference` и `--cases`. Если нужного не хватает, скажи об этом человеку одной строкой и иди дальше.
 
 1. Выполни локальный read-only inventory eligible project tree.
    Укажи выбранный module root, включённые parent files и явно разрешённые зависимости.
@@ -188,8 +189,8 @@ Run остаётся связан с исходной project/module identity.
 Функции пакета не импортируй и своих скриптов с `tools` не пиши: каждый шаг ниже — команда
 `python -m tools.api <команда> --run-root <run> --attempt <attempt_id> …` (cwd пакета). Она вызывает одну функцию
 и печатает одну строку JSON: `status: ok` и `result`, `invalid` (код 1, диагностики в `result`) или `error`
-(код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` — только в
-каталог прогона, никогда в исходники проекта. Аргументы — `python -m tools.api <команда> --help`.
+(код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>` — только в
+`tmp/` существующего прогона, никогда в исходники проекта (без `--run-root` и вне `<run>/tmp/` код откажет). Аргументы — `python -m tools.api <команда> --help`.
 
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
@@ -303,7 +304,7 @@ Run остаётся связан с исходной project/module identity.
    `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
-   --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
+   --run-root <run> --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
    `tools.api validate-canonical --document <run>/tmp/candidate.json`. `--fragment` — файл ответа пачки как есть или записанный ответ
    (`read-model-artifact`): порядок id и категорий `assemble` ставит сам, как `validate-fragment`.
    Проверь полноту относительно исходного документа, а не только normalized context.

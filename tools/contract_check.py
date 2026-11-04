@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -53,8 +54,7 @@ PROJECTION_ROWS = [
     {"id": "zephyr-scale-step-row-24-v5", "format": "csv", "mode": "default", "tenant_status": "N_A"},
     {"id": "zephyr-scale-xml-observed-v1", "format": "xml", "mode": "opt_in_observed", "tenant_status": "N_A"},
 ]
-RELEASE_QUALIFICATION = {
-    "package_version": "0.5.0-pilot",
+RELEASE_QUALIFICATION = {  # package_version is the contract's own (the one place), checked by format
     "compatibility_contract_version": "portable-cli-v1",
     "execution_profile_version": "v1",
     "release_eval_policy": "adaptive-1-3-5-v1",
@@ -64,6 +64,7 @@ RELEASE_QUALIFICATION = {
     "ready_tuple": None,
     "not_applicable": ["company_runner", "zephyr_tenant", "production_rollback"],
 }
+PACKAGE_VERSION_FORMAT = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.]+)?")
 CONTROLLER_SCHEMAS = [row[0] for row in SCHEMA_ROWS if row[2] == "IMPLEMENTED"]
 VERSIONLESS_RECEIPT_SCHEMAS = {"materialization-receipt.schema.json", "disposition-receipt.schema.json"}
 EXPECTED_EVENT_ORDER = [
@@ -152,6 +153,17 @@ def _known_object_boundaries_are_closed(value: Any) -> bool:
     return True
 
 
+def _left_out_by_profile(root: Path, relative: str) -> bool:
+    """True when ``root`` is a cases-only pack (its files are exactly that profile of its manifest) and the profile leaves ``relative`` out."""
+    from tools import pack_registry
+
+    try:
+        return (pack_registry.is_cases_only_excluded(relative)
+                and pack_registry.profile_of(root, pack_registry.load_manifest(root)) == "cases-only")
+    except ValueError:
+        return False
+
+
 def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:
     rows = contract.get("schema_registry", [])
     _error_if_not_equal(errors, "schema_registry exact truth", rows, _expected_schema_rows())
@@ -165,6 +177,8 @@ def _validate_schema_registry(contract: Mapping[str, Any], root: Path, errors: l
         path = root / "schemas" / str(name)
         if status in {"IMPLEMENTED", "MIGRATION_PENDING"}:
             if not path.is_file():
+                if _left_out_by_profile(root, f"schemas/{name}"):  # a schema only the release evaluation reads: not in a cases-only pack
+                    continue
                 errors.append(f"{status.lower()} schema missing: {name}")
                 continue
             schema = _load_json(path)
@@ -215,7 +229,12 @@ def _validate_registry_shape(contract: Mapping[str, Any], errors: list[str]) -> 
     _error_if_not_equal(errors, "projection_profiles", projections, PROJECTION_ROWS)
     if len({row.get("id") for row in projections if isinstance(row, Mapping)}) != len(projections):
         errors.append("duplicate projection_profiles")
-    _error_if_not_equal(errors, "release qualification", contract.get("release_qualification"), RELEASE_QUALIFICATION)
+    qualification = contract.get("release_qualification")
+    version = qualification.get("package_version") if isinstance(qualification, Mapping) else None
+    if not isinstance(version, str) or not PACKAGE_VERSION_FORMAT.fullmatch(version):
+        errors.append("release qualification package_version format mismatch")
+    _error_if_not_equal(errors, "release qualification", {key: item for key, item in qualification.items() if key != "package_version"}
+                        if isinstance(qualification, Mapping) else qualification, RELEASE_QUALIFICATION)
 
 
 def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str]) -> None:

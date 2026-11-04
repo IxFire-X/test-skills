@@ -107,7 +107,7 @@ def _open_session(run: dict, start: str = "fixture", budget_delta: int = 0, fres
     tmp, run_root, attempt = run["tmp"], str(run["run_root"]), run["attempt_id"]
     fragment_flags = [flag for path in run["fragments"] for flag in ("--fragment", path)]
     code, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *fragment_flags,
-                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"))
+                           "--out-candidate", str(tmp / "candidate.json"), "--out-receipt", str(tmp / "assembly-receipt.json"), "--run-root", run_root)
     assert code == 0, assembled
     code, published = _cmd("tools.orchestrate_test_case_revision", "publish", "--candidate", str(tmp / "candidate.json"),
                            "--output-dir", str(run["project"] / "bundles"), "--run-root", run_root, "--attempt-id", attempt)
@@ -441,9 +441,12 @@ def test_select_names_the_inner_refusal_and_its_fix(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(revision, "_read_existing_context_receipts", lambda *_args: [])
     monkeypatch.setattr(revision, "reviewer_package_binding", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(revision, "orchestrate_revision", refuse)
+    run_root = tmp_path / "project" / ".pilot-runs" / ("a" * 32)  # a real run: --output-dir is checked against its project
+    run_root.mkdir(parents=True)
+    (run_root / "run-manifest.json").write_text("{}", encoding="utf-8")
     flags = ["--candidate", "c", "--candidate-receipt", "r", "--assembly-receipt", "a", "--inventory-receipt", "i", "--context-receipt", "x",
-             "--context-marker-output", "m", "--generator-fragment", "g", "--reviewer-session", "s", "--run-root", str(tmp_path),
-             "--attempt-id", "a1", "--output-dir", str(tmp_path / "out")]
+             "--context-marker-output", "m", "--generator-fragment", "g", "--reviewer-session", "s", "--run-root", str(run_root),
+             "--attempt-id", "a1", "--output-dir", str(tmp_path / "project" / "out")]
     assert revision.main(["select", *flags]) == 2
     printed = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     # FaT-U5: the envelope's code is the refusal's own code, not ORCHESTRATION_INPUT over it

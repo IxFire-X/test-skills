@@ -3,10 +3,10 @@
   "$id": "schemas/release-manifest.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "package_version", "skill_pack_digest", "pipeline_contract", "compatibility_contract_version", "execution_profile_version", "policy_profiles", "adapter_registry", "stage_registry", "projection_profiles", "release_eval", "registry", "qualification", "digest"],
+  "required": ["schema_version", "package_version", "skill_pack_digest", "pipeline_contract", "compatibility_contract_version", "execution_profile_version", "policy_profiles", "adapter_registry", "stage_registry", "projection_profiles", "release_eval", "delivery_profiles", "registry", "qualification", "digest"],
   "properties": {
     "schema_version": {"const": "1.0.0"},
-    "package_version": {"const": "0.5.0-pilot"},
+    "package_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9.]+)?$"},
     "skill_pack_digest": {"$ref": "#/$defs/digest"},
     "pipeline_contract": {
       "type": "object", "additionalProperties": false,
@@ -24,6 +24,20 @@
       "required": ["suite_id", "suite_digest", "policy"],
       "properties": {"suite_id": {"const": "pilot-critical-v1"}, "suite_digest": {"$ref": "#/$defs/digest"}, "policy": {"const": "adaptive-1-3-5-v1"}}
     },
+    "delivery_profiles": {
+      "type": "array", "minItems": 1, "maxItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "excluded_files", "excluded_patterns", "excluded_prefixes", "skill_pack_digest"],
+        "properties": {
+          "id": {"const": "cases-only"},
+          "excluded_files": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+          "excluded_patterns": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._/*-]+$"}},
+          "excluded_prefixes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+/$"}},
+          "skill_pack_digest": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
     "registry": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/file"}},
     "qualification": {
       "type": "object", "additionalProperties": false,
@@ -40,10 +54,11 @@
       "required": ["id", "version"],
       "properties": {"id": {"$ref": "#/$defs/label"}, "version": {"$ref": "#/$defs/label"}}
     },
+    "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._/-]+$"},
     "file": {
       "type": "object", "additionalProperties": false,
       "required": ["path", "digest"],
-      "properties": {"path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._/-]+$"}, "digest": {"$ref": "#/$defs/digest"}}
+      "properties": {"path": {"$ref": "#/$defs/path"}, "digest": {"$ref": "#/$defs/digest"}}
     },
     "stage": {
       "type": "object", "additionalProperties": false,

@@ -35,7 +35,9 @@ def test_publication_adds_readable_markdown_without_overwriting_a_changed_copy(t
 
 
 def test_new_projection_public_defaults_are_exact_v5_and_receipts_use_preview_names(tmp_path: Path) -> None:
-    from tools.publish_test_case_bundle import _parser, build_bundle, publish_bundle
+    import inspect
+
+    from tools.publish_test_case_bundle import build_bundle, publish_bundle
     from tools.test_case_projections import render_zephyr_csv
 
     document = canonical_fixture()
@@ -43,7 +45,7 @@ def test_new_projection_public_defaults_are_exact_v5_and_receipts_use_preview_na
     assert bundle.preview_bytes.startswith(b"<!doctype html>")
     assert bundle.csv_bytes == render_zephyr_csv(document).payload
     assert bundle.markdown_bytes.startswith(b"# ")
-    assert next(action.default for action in _parser()._actions if action.dest == "csv_profile") == V5
+    assert inspect.signature(build_bundle).parameters["csv_profile"].default == V5
     receipt = publish_bundle(document, tmp_path)
     assert receipt.csv_profile == V5
     assert receipt.preview_path.endswith(".html")

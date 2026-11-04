@@ -208,6 +208,7 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
     receipt["digest"] = "sha256:" + hashlib.sha256(json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     run_tmp = project / ".pilot-runs" / "run1" / "tmp"
     run_tmp.mkdir(parents=True)
+    (run_tmp.parent / "run-manifest.json").write_text("{}", encoding="utf-8")  # --out is checked against an existing run
     marker = run_tmp / "marker.json"
     marker.write_bytes(b"{" + b" " * 700_000 + b"}")
     requirements = [_requirement(1, "REQ-1 Оплата " + "а" * 3000), _requirement(2, "REQ-2 Возврат " + "б" * 3000)]
@@ -217,7 +218,7 @@ def test_api_plan_batches_reads_the_window_and_measures_the_step_input(tmp_path,
 
     code = api.main(["plan-batches", "--requirements", str(run_tmp / "req.json"), "--grouping", str(run_tmp / "grouping.json"),
                      "--project", str(project), "--input-file", str(marker), "--context-receipt", str(run_tmp / "context.json"),
-                     "--out", str(run_tmp / "plan.json")])
+                     "--out", str(run_tmp / "plan.json"), "--run-root", str(run_tmp.parent)])
     payload = json.loads(capsys.readouterr().out)
 
     assert code == 0 and payload["status"] == "ok", payload

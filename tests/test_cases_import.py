@@ -514,7 +514,7 @@ def test_a_plain_password_in_a_cell_is_refused_on_scan_without_its_value(tmp_pat
     assert "строка 2" in refused["detail"] and f"колонка {column}" in refused["detail"] and "похоже на пароль" in refused["detail"], refused
     text = json.dumps(refused, ensure_ascii=False)
     assert "Qwerty123" not in text and "abc123def" not in text
-    assert "переменн" in refused["fix"] and "фикстур" in refused["fix"]
+    assert "плейсхолдер" in refused["fix"] and "переменн" not in refused["fix"]  # P8a-2: a placeholder, not a variable of the environment
 
 
 def test_a_password_in_the_preconditions_is_refused_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

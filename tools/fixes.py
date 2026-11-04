@@ -92,8 +92,8 @@ FIXES: dict[str, str] = {
     "ZEPHYR_CSV_COLUMNS": "нужен экспорт тест-кейсов Zephyr Scale в CSV с колонками шаблона; лишние колонки уберите из выгрузки",
     "ZEPHYR_CSV_ROWS": "заполните названные ячейки CSV: у кейса Name и хотя бы один шаг, у каждого шага Step и Expected Result — "
                        "наблюдаемый результат системы, не «успешно», «ok» или «—»; потом повторите scan --cases",
-    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе): замените значение ссылкой на переменную "
-                         "окружения или фикстуру и повторите scan --cases; файл с секретом модель не увидит",
+    "IMPORT_CSV_SECRET": "уберите секрет из CSV (пароль, токен, учётные данные в адресе): замените значение плейсхолдером <…> "
+                         "(например <пароль>) и повторите scan --cases; файл с секретом модель не увидит",
     "ZEPHYR_CSV_ENCODING": "сохраните CSV в UTF-8 (Excel: Файл → Сохранить как → CSV UTF-8)",
     "ZEPHYR_CSV_NOT_CSV": "нужен экспорт тест-кейсов Zephyr Scale в CSV",
     "ZEPHYR_CSV_DELIMITER": "нужен CSV с разделителем «,» или «;» и колонками Zephyr (Name, …)",
@@ -194,6 +194,10 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: поправь step_id/output_id или объяви выход",
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
+    # --- the paths the agent names (tools.output_guard) ---
+    "API_OUT_OUTSIDE_RUN": "добавь --run-root <run> (существующий прогон) и пиши файл в <run>/tmp/<имя>.json",
+    "OUTPUT_DIR_OUTSIDE_PROJECT": "каталог публикации — внутри проекта (например <project>/test-cases/) и не внутри .git; "
+                                  "повтори с таким --output-dir",
     # --- the pause after the marker (tools.scope_pause) ---
     "SCOPE_DECISION_MISMATCH": "scope-decision.json расходится с опубликованным планом: верь плану (out_of_scope), файл не правь; другое решение — новый прогон (scan --new-run)",
     "SCOPE_DECISION_INVALID": "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)",

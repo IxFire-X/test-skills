@@ -113,7 +113,7 @@ def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> Non
     bad = _put(run["tmp"] / "bad.json", _uncovered(fragments[0]))
     code, validated = _api("validate-fragment", "--fragment", bad, "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"])
     code_assembled, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], "--fragment", bad, "--fragment", run["fragments"][1],
-                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"))
+                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
     missing = _uncovered(fragments[0])["requirements"][1]["requirement_id"]
     assert code == code_assembled == 2 and validated["code"] == assembled["code"] == "BATCH_UNCOVERED_REQUIREMENT", (validated, assembled)
     assert missing in validated["message"] and missing in assembled["message"]
@@ -124,7 +124,7 @@ def test_assemble_and_validate_fragment_agree_on_coverage(tmp_path: Path) -> Non
         uncovered_requirements(_uncovered(fragments[0])["requirements"], fragments[0]["test_cases"])[0]]["requirement_id"]
     code, validated = _api("validate-fragment", "--fragment", run["fragments"][0], "--plan", run["plan"], "--header", run["header"], "--context-receipt", run["context"])
     code_assembled, assembled = _api("assemble", "--header", run["header"], "--plan", run["plan"], *[flag for path in run["fragments"] for flag in ("--fragment", path)],
-                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"))
+                                     "--out-candidate", str(run["tmp"] / "c.json"), "--out-receipt", str(run["tmp"] / "r.json"), "--run-root", str(run["run_root"]))
     assert code == code_assembled == 0, (validated, assembled)
 
 
