@@ -22,19 +22,33 @@ class SkillsrcError(ValueError):
         code: str,
         message: str,
         details: list[dict[str, object]] | None = None,
+        fix: str | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.details = details or []
+        self.fix = fix
 
 
 def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]:
     """Load a JSON manifest and validate it against the bundled schema."""
-    return parse_skillsrc_bytes(path.read_bytes(), schema_path)
+    return parse_skillsrc_bytes(path.read_bytes(), schema_path, project=path.parent if path.name == ".skillsrc" else None)
 
 
-def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None) -> dict[str, Any]:
-    """Parse and validate one exact UTF-8 manifest byte sequence."""
+def _legacy_yaml_row(project: Path | None) -> dict[str, Any] | None:
+    """The row ``tools.ready`` gives an older YAML ``.skillsrc`` (message and fix, in Russian), or None when the file is not one."""
+    if project is None:
+        return None
+    try:
+        from tools.ready import check_skillsrc, legacy_yaml_keys
+
+        return check_skillsrc(project)[0] if legacy_yaml_keys(project) is not None else None
+    except (ImportError, OSError, IndexError):
+        return None
+
+
+def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, project: Path | None = None) -> dict[str, Any]:
+    """Parse and validate one exact UTF-8 manifest byte sequence; *project* is where the file lies, for the fix of an older YAML one."""
     schema_path = schema_path or Path(__file__).resolve().parents[1] / "schemas" / "skillsrc.schema.json"
     try:
         source = data.decode("utf-8")
@@ -47,10 +61,12 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None) -> dict[s
     try:
         document = loads_json_strict(source.removeprefix("\ufeff"))
     except StrictJsonError as error:
+        legacy = _legacy_yaml_row(project)
         raise SkillsrcError(
             "invalid_json",
-            ".skillsrc must be one JSON object (an older YAML .skillsrc is not read: tools.ready lists its keys to carry over)",
+            legacy["message"] if legacy else ".skillsrc must be one JSON object (an older YAML .skillsrc is not read: tools.ready lists its keys to carry over)",
             [{"path": "/", "message": str(error)}],
+            fix=legacy.get("fix") if legacy else None,
         ) from error
     if not isinstance(document, dict):
         raise SkillsrcError("invalid_shape", ".skillsrc must be a mapping")

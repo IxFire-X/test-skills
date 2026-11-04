@@ -733,7 +733,10 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
         existing_modules = normalize_skillsrc(existing)["modules"] if existing is not None else []
     except (SkillsrcError, OSError, TypeError, ValueError) as error:
         code = getattr(error, "code", "read_error")
-        return _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
+        receipt = _receipt("error", root, False, modules, [], [code], fingerprint, _input_exit_code(code))
+        if getattr(error, "fix", None):  # an older YAML .skillsrc: what to do goes beside the code (the receipt schema stays as it is)
+            receipt.update(_message=str(error), _fix=str(error.fix))
+        return receipt
     working_discovery = copy.deepcopy(discovery)
     if explicit_target is not None and not _valid_explicit_target(root, existing_modules + modules, explicit_target):
         return _receipt("error", root, False, modules, [], ["source_target_invalid"], fingerprint, 2)
@@ -850,6 +853,8 @@ def main() -> int:
     except (OSError, TypeError, ValueError, KeyError):
         report = _receipt("error", root.resolve(), False, [], [], ["read_error"], hashlib.sha256(b"").hexdigest(), 2)
     public_report = _public_report(report)
+    if report.get("_fix"):
+        public_report.update(message=report["_message"], fix=report["_fix"])
     if output_target is not None:
         try:
             output_target.write_bytes(json.dumps(public_report, ensure_ascii=False, indent=2).encode("utf-8"))

@@ -547,7 +547,7 @@ def _read_skillsrc_binding(path: Path) -> tuple[dict[str, Any], str]:
     from tools.skillsrc_manifest import parse_skillsrc_bytes
 
     data = path.read_bytes()
-    return parse_skillsrc_bytes(data), _digest_bytes(data)
+    return parse_skillsrc_bytes(data, project=path.parent), _digest_bytes(data)
 
 
 def _input_files(project: Path, paths: Sequence[str] | None, flag: str, *, outside_fix: str | None = None) -> list[tuple[str, bytes]]:
@@ -2976,7 +2976,7 @@ def main(argv: list[str] | None = None) -> int:
             _print({"status": "error", "reason": error.code, "message": str(error), **({"fix": error.fix} if error.fix else {})})
             return 2
         if isinstance(error, SkillsrcError):
-            _print({"status": "error", "reason": error.code, "message": str(error)})
+            _print({"status": "error", "reason": error.code, "message": str(error), **({"fix": error.fix} if error.fix else {})})
             return 2
         if isinstance(error, RuntimeError):
             payload: dict[str, Any] = {"status": "error", "reason": str(error)}

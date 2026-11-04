@@ -108,3 +108,67 @@ def test_the_example_is_json_for_a_java_project_and_valid() -> None:
     assert text.lstrip().startswith("{")
     document = parse_skillsrc_bytes(text.encode("utf-8"))
     assert document["modules"] and document["modules"][0]["stack"]["language"] == "java"
+
+
+def _yaml_project(tmp_path: Path, text: str = YAML_SKILLSRC) -> Path:
+    import shutil
+
+    project = tmp_path / "yaml-project"
+    shutil.copytree(FIXTURE.parent, project, ignore=shutil.ignore_patterns(".skillsrc"))
+    (project / "docs").mkdir(exist_ok=True)
+    (project / "docs" / "req.md").write_text("# Требования\n\nR1. Сложение двух чисел.\n", encoding="utf-8")
+    (project / ".skillsrc").write_text(text, encoding="utf-8")
+    return project
+
+
+def _cli(*args: str) -> tuple[int, dict]:
+    import subprocess
+    import sys
+
+    done = subprocess.run([sys.executable, "-m", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                          env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
+    return done.returncode, json.loads(done.stdout)
+
+
+def test_load_skillsrc_of_an_older_yaml_one_carries_the_russian_text_and_fix_of_ready(tmp_path: Path) -> None:
+    from tools.ready import check_skillsrc
+
+    project = _yaml_project(tmp_path)
+    row = check_skillsrc(project)[0]
+    with pytest.raises(SkillsrcError) as caught:
+        load_skillsrc(project / ".skillsrc")
+    assert caught.value.code == "invalid_json"
+    assert str(caught.value) == row["message"] and "YAML" in str(caught.value)
+    assert caught.value.fix == row["fix"] and "--write" in caught.value.fix and "service_url_env: SERVICE_URL" in caught.value.fix
+    assert (project / ".skillsrc").read_text(encoding="utf-8") == YAML_SKILLSRC
+
+
+def test_scan_of_an_older_yaml_skillsrc_says_what_to_do(tmp_path: Path) -> None:
+    project = _yaml_project(tmp_path)
+    code, out = _cli("tools.run_pipeline", "scan", "--project", str(project), "--docs", "docs/req.md", "--profile", "cases-only-v1")
+    assert code == 2 and out["status"] == "error" and out["code"] == "invalid_json"
+    assert "YAML" in out["message"] and "JSON" in out["message"] and "must be" not in out["message"]
+    assert out["fix"] and "tools.init_skillsrc" in out["fix"] and "--write" in out["fix"] and ".skillsrc.yaml.bak" in out["fix"]
+    assert (project / ".skillsrc").read_text(encoding="utf-8") == YAML_SKILLSRC
+
+
+@pytest.mark.parametrize("flags", [(), ("--write",)])
+def test_init_skillsrc_of_an_older_yaml_skillsrc_says_what_to_do_and_writes_nothing(tmp_path: Path, flags: tuple[str, ...]) -> None:
+    project = _yaml_project(tmp_path)
+    code, out = _cli("tools.init_skillsrc", "--project", str(project), *flags)
+    assert code == 2 and out["status"] == "error" and out["errors"] == ["invalid_json"] and out["written"] is False
+    assert "YAML" in out["message"] and "JSON" in out["message"]
+    assert ".skillsrc.yaml.bak" in out["fix"] and "--write" in out["fix"] and "service_url_env: SERVICE_URL" in out["fix"]
+    assert (project / ".skillsrc").read_text(encoding="utf-8") == YAML_SKILLSRC
+    assert not (project / ".skillsrc.yaml.bak").exists()
+
+
+def test_a_truly_broken_json_skillsrc_keeps_the_old_refusal(tmp_path: Path) -> None:
+    project = _yaml_project(tmp_path, '{"version": "3.0", \n')
+    with pytest.raises(SkillsrcError) as caught:
+        load_skillsrc(project / ".skillsrc")
+    assert caught.value.code == "invalid_json" and caught.value.fix is None and "must be one JSON object" in str(caught.value)
+    code, out = _cli("tools.run_pipeline", "scan", "--project", str(project), "--docs", "docs/req.md", "--profile", "cases-only-v1")
+    assert code == 2 and out["code"] == "invalid_json" and "must be one JSON object" in out["message"] and out["fix"] is None
+    code, out = _cli("tools.init_skillsrc", "--project", str(project), "--write")
+    assert code == 2 and out["errors"] == ["invalid_json"] and "fix" not in out and "message" not in out

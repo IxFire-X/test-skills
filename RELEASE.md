@@ -33,6 +33,10 @@ development dependencies (the `jsonschema` oracle of the differential test, pyte
 are pinned with hashes in `requirements-dev.txt`; an approved company
 mirror/wheelhouse remains external deployment evidence for them.
 
+Moving from v0.1.1: `.skillsrc` is now a JSON object (the file keeps its name), not YAML. A YAML one is not read:
+`ready`, `scan` and `init_skillsrc` stop with the keys to carry over (`limits`, `review`, `service_url_env`,
+`paths.include`, `projection`) and the steps: rename it to `.skillsrc.yaml.bak`, run `init_skillsrc --write`, move the values in.
+
 Linux uses the same gate:
 
 ```bash
