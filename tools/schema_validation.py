@@ -7,6 +7,7 @@ import math
 import re
 from collections.abc import Iterable
 from functools import lru_cache
+from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
@@ -37,10 +38,29 @@ def _reject_duplicates(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+MAX_JSON_DEPTH = 256  # nesting levels of arrays and objects; the deepest document of the package has 14
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)  # a quote closes a string unless a backslash escapes it
+_NOT_A_BRACKET = re.compile(r"[^\[\]{}]+")
+_LEVEL = {"[": 1, "{": 1, "]": -1, "}": -1}
+
+
+def _check_json_depth(text: str) -> None:
+    """Refuse a nesting deeper than MAX_JSON_DEPTH before the parser sees it.  The standard library's scanner stops at a depth of its own (about the
+    recursion limit on one platform, far beyond it on another), so leaving the refusal to it makes the policy depend on the platform.  Only the brackets
+    outside strings count: take the strings and everything else out with two regular expressions, then the highest running sum of +1 (opening) and -1
+    (closing) is the depth.  All of it runs at C speed, in one pass over the brackets; a text that is not JSON is left to the parser to refuse."""
+    if text.count("[") + text.count("{") <= MAX_JSON_DEPTH:  # the depth cannot exceed the number of opening brackets
+        return
+    brackets = _NOT_A_BRACKET.sub("", _JSON_STRING.sub("", text))
+    if max(accumulate(map(_LEVEL.__getitem__, brackets)), default=0) > MAX_JSON_DEPTH:
+        raise StrictJsonError(f"JSON nesting is deeper than {MAX_JSON_DEPTH} levels")
+
+
 def loads_json_strict(text: str) -> Any:
-    """Load precisely one JSON value without BOM, duplicate keys, or non-finites."""
+    """Load precisely one JSON value without BOM, duplicate keys, non-finites, or a nesting deeper than MAX_JSON_DEPTH."""
     if text.startswith("\ufeff"):
         raise StrictJsonError("UTF-8 BOM is not permitted")
+    _check_json_depth(text)
     try:
         return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_reject_duplicates)
     except StrictJsonError:
