@@ -40,7 +40,11 @@ def test_every_answer_is_measured_by_the_raw_bytes_of_the_artifact_file(tmp_path
             monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", through_the_command)
         assert code == 0, output
         published.append((output["result"], answer.stat().st_size))
-        return output["result"]
+        # PF-1: the command prints the receipt of the record, not the answer's body; the callers get it read back by the digest of the receipt
+        code, stored = _api(["read-model-artifact", "--run-root", str(run_root), "--attempt", attempt_id, "--stage", stage,
+                             "--digest", output["result"]["content_digest"]], capsys)
+        assert code == 0, stored
+        return {**output["result"], "artifact": stored["result"]["artifact"]}
 
     monkeypatch.setattr(pilot_state, "publish_model_stage_artifact", through_the_command)
     run_root, attempt_id = _run(tmp_path, "cases-only-v1", flag=False)

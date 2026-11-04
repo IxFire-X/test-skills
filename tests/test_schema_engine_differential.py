@@ -279,8 +279,8 @@ def _live_instances() -> list[tuple[str, Any]]:
     return result
 
 
-def test_the_oracle_and_the_engine_cover_the_same_43_schemas() -> None:
-    assert len(RAW) == 43 and set(ORACLE) == set(ENGINE)
+def test_the_oracle_and_the_engine_cover_the_same_44_schemas() -> None:
+    assert len(RAW) == 44 and set(ORACLE) == set(ENGINE)
 
 
 def test_fixtures_and_documents_against_every_schema() -> None:

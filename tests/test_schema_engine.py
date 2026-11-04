@@ -33,7 +33,7 @@ def _errors(schema, instance, **kwargs):
 
 
 def test_engine_compiles_every_schema_of_the_package() -> None:
-    assert len(SCHEMAS) == 43
+    assert len(SCHEMAS) == 44
     registry = _registry()
     for contents in registry.values():
         _validator(contents, registry=registry)
