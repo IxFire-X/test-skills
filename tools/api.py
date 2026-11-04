@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, cases_import, orchestrate_test_case_revision, output_guard, pilot_state, run_tests, step_size
+from tools import automation_validation, batch_assembly, canonical_document, cases_import, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, run_tests, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -108,12 +108,41 @@ def _cmd_cases_import(a):
     return cases_import.import_requirements(a.run_root, a.attempt)
 
 
+_PLAN_REQUIREMENTS_FIX = ("{command}: --requirements — голый JSON-массив source requirements (поле `source_requirements` ответа разметки, не весь ответ); "
+                          "у каждого `source_requirement_id` (SREQ-…), `display_order` (1..N подряд), `text`, `provenance` (список строк) и `digest`; "
+                          "не прошло: {detail}")
+_PLAN_GROUPING_FIX = ("{command}: --grouping — объект `context_receipt_digest` (digest квитанции с наименьшим batch_index) и `context_receipt_digests` "
+                      "(digest всех квитанций попытки, этот первым; даже если квитанция одна — оба поля вместе); `header_digest` в `plan` код ставит сам; "
+                      "не прошло: {detail}")
+
+
+def _plan_inputs(command: str, call):
+    """PT2: a refusal about the shape of the inputs of ``plan`` / ``plan-batches`` names the command and the input that failed — the
+    table's fix of the same codes is about a fragment of a batch."""
+    try:
+        return call()
+    except batch_assembly.BatchAssemblyError as error:
+        detail = str(error.detail)
+        if "; fix:" in detail:
+            raise
+        if detail.startswith(("source requirements must be", "source requirement IDs", "source requirement SREQ", "source requirement display_order")) or (
+                detail.startswith("source requirement ") and "lacks exact provenance" in detail):
+            template = _PLAN_REQUIREMENTS_FIX
+        elif detail.startswith(("grouping evidence must be", "grouping context_receipt_digest", "missing header_digest", "missing context_receipt_digest",
+                                "plan-batches needs every context receipt")):
+            template = _PLAN_GROUPING_FIX
+        else:
+            raise
+        raise batch_assembly.BatchAssemblyError(error.code, detail, getattr(error, "diagnostics", ()), template.format(command=command, detail=detail)) from None
+
+
 def _cmd_plan_batches(a):
     imported = a.imported if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value; FaT-SK: its bytes
     # FaT-AU3: one --context-receipt per context batch of the attempt; one is the receipt itself, as before
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     out_of_scope = _scope_answer(a)
-    return batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts, imported, out_of_scope)
+    return _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
+                                                                                         imported, out_of_scope))
 
 
 def _scope_answer(a):
@@ -144,8 +173,9 @@ def _cmd_plan(a):
     the pause after the marker answers first, before anything is published."""
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     imported = a.imported if isinstance(a.imported, dict) else None
-    return pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file, contexts, imported,
-                                    _scope_answer(a))
+    answer = _scope_answer(a)
+    return _plan_inputs("plan", lambda: pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file,
+                                                                 contexts, imported, answer))
 
 
 def _cmd_validate_fragment(a):
@@ -226,7 +256,9 @@ def _cmd_read_ledger(a):
 
 
 def _cmd_read_effective(a):
-    return pilot_state.read_effective_canonical(a.run_root, a.attempt)
+    """PT2: before the verdict there is no effective document — that is an answer (``effective: null``), not a refusal that the
+    journal of refusals counts; a run or an attempt that does not exist is still a refusal."""
+    return pilot_state.effective_canonical_or_reason(a.run_root, a.attempt)
 
 
 def _cmd_open_automation_boundary(a):
@@ -259,7 +291,8 @@ def _cmd_runner_compat(a):
 
 
 def _cmd_step_inputs(a):
-    return step_size.request_files(a.run_root, a.stage)
+    """PT2: the summary and the path of the file with the whole list — a generator batch reads a hundred files."""
+    return step_size.step_inputs(a.run_root, a.stage)
 
 
 RUN = ("--run-root", "--attempt")
@@ -330,6 +363,14 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                                            ("--materialized", "flag")), _not_runnable, ()),
     "step-inputs": (_cmd_step_inputs, ("--run-root", "--stage"), None, ()),
 }
+
+
+# PT2: the commands of mode B (the automation of tests) exist only where the execution files are — the seam of the profile
+_AUTOMATION_COMMANDS = ("automation-boundary-facts", "open-automation-boundary", "automation-digest", "relations-digest", "validate-automation",
+                        "runner-compat")
+if not execution_gate.execution_available():
+    for _name in _AUTOMATION_COMMANDS:
+        COMMANDS.pop(_name, None)
 
 
 def _parser() -> JsonArgumentParser:

@@ -529,8 +529,13 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                 for blocker in _baseline_blockers(project, selected):
                     rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "WARN",
                                      f"{blocker['file']}: {blocker['reason']}; прогон пойдёт как cases-only-v1", blocker["fix"]))
-    rows.append(_row("run:freeze", CASES, "OK", "после scan не меняйте файлы проекта и .skillsrc до finish или exec: иначе exec "
-                     "остановится на дрейфе и предложит вернуть файлы или начать новый scan"))
+    if profile == "local-pilot-v1":
+        freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish или exec: иначе exec "
+                  "остановится на дрейфе и предложит вернуть файлы или начать новый scan")
+    else:  # PT2: the cases-only profile has no exec
+        freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish: иначе status покажет дрейф (drift) "
+                  "и предложит вернуть файлы или начать новый scan")
+    rows.append(_row("run:freeze", CASES, "OK", freeze))
     # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
     from tools.skillsrc_manifest import skillsrc_review_self
 

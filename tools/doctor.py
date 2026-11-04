@@ -102,16 +102,16 @@ def inspect_environment(root: Path) -> dict[str, object]:
         "messages": messages,
         "integrity": {"valid": not missing_integrity, "missing": missing_integrity},
         **({"crlf": crlf_report} if crlf_report else {}),
-        "languages": {
-            "java": {"execution": runs_projects, "verified": False},
-            "python": {"execution": runs_projects, "verified": False},
+        # PT2: what the pack can run is said only by a pack that can run it; the delivery of cases has nothing to say here
+        **({"languages": {
+            "java": {"execution": True, "verified": False},
+            "python": {"execution": True, "verified": False},
             "typescript": {"execution": False, "verified": False},
             "go": {"execution": False, "verified": False},
-        },
-        "adapters": {
-            "local_project_native": {"core": runs_projects, "verified": False},
+        }, "adapters": {
+            "local_project_native": {"core": True, "verified": False},
             "company_runner": {"core": False, "verified": False},
-        },
+        }} if runs_projects else {}),
         "root": str(root),
     }
 

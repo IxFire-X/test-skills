@@ -22,7 +22,7 @@ Check all jointly required observations, such as rejection and unchanged storage
 Report a missing condition against its source/mapping and a missing check against
 the affected canonical requirement and case/step. Do not claim full coverage from
 the number of conditions, cases or relations. This audit belongs to the same single
-authoritative review; no additional reviewer role or user-supplied checklist is required.
+authoritative review; no additional reviewer role or user-supplied checklist is required. A missing condition or check is a BLOCKING finding; a gap of unavailable evidence only is a WARNING.
 
 `select` checks the candidate digest, full successor lineage, source/canonical/case traceability and identity preservation; `validate-canonical` checks canonical semantics. Canonical review has revision 1 and at most one complete mechanical successor revision 2; revision 3, destructive, partial, and choice-bearing changes are `ТРЕБУЕТ ДОРАБОТКИ`.
 

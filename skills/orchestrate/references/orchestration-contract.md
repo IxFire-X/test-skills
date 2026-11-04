@@ -72,9 +72,8 @@ Inventory учитывает файлы выбранного модуля, paren
    candidate digest получает `REVIEW_REQUESTED` (`tools.api review-requested`) до reviewer `MODEL_REQUESTED`;
 8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
-9. Зафиксируй materialization/execution/dispositions как `NOT_APPLICABLE` и перейди к trace/finalization:
-   pre-finalization trace -> finalization receipt/readback -> terminal result -> derived
-   terminal trace -> terminal event.
+9. Перейди к trace/finalization: pre-finalization trace -> finalization receipt/readback -> terminal result ->
+   derived terminal trace -> terminal event (`finish` проходит это сам).
 
 
 ## Project boundary
@@ -94,8 +93,7 @@ Model self-attestation не доказывает fresh context; это дела�
 
 ## Finalization и result
 
-Finalization verifier читает pre-finalization trace, заканчивающийся dispositions.
-Materialization/execution/dispositions для этого профиля `NOT_APPLICABLE`, не missing.
+Finalization verifier читает pre-finalization trace.
 
 Receipt `valid=false` не препятствует terminal transition: terminal reason становится
 `FINALIZATION_INVALID`, а прежняя stage cause остаётся immutable evidence. Verification

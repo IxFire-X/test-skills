@@ -81,7 +81,7 @@ Python validators выполняются как код. Исходник tools �
 однозначную часть только при доказанной независимости; существенный пробел запрещает
 заявлять полный запрошенный объём.
 
-Профиль `cases-only-v1`: draft canonical cases/review без выполнения project code; `accepted=false`, не full-pipeline exit 0.
+Профиль `cases-only-v1`: код проекта не выполняется; `accepted=false`, не full-pipeline exit 0.
 
 `ready` показывает строку `review:isolation` (уровень OK — исправлять там нечего). Если твой CLI не открывает ревьюера в свежем
 контексте (отдельный subagent), спроси сейчас, до scan: позже новый прогон выбросит
@@ -146,7 +146,7 @@ Run остаётся связан с исходной project/module identity.
 
 ## 3. Построй canonical из deterministic batches
 
-Функции пакета не импортируй и своих скриптов с `tools` не пиши: каждый шаг ниже — команда
+Функции пакета не импортируй: каждый шаг ниже — команда
 `python -m tools.api <команда> --run-root <run> --attempt <attempt_id> …` (cwd пакета). Она вызывает одну функцию
 и печатает одну строку JSON: `status: ok` и `result`, `invalid` (код 1, диагностики в `result`) или `error`
 (код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>` — только в
@@ -154,15 +154,15 @@ Run остаётся связан с исходной project/module identity.
 `model-response` без `--out` печатает в stdout весь артефакт (сотни КБ): передавай `--out <run>/tmp/<имя>.json --run-root <run>` и читай
 из ответа только `result.path`, `result.content_digest`, `output_bytes`, `warning`. Аргументы — `python -m tools.api <команда> --help`.
 
-Порядок, на котором спотыкаются чаще всего: запрос стадии (`model-request`) и ответ (`model-response`) — разными командами, не одной цепочкой;
-`step-inputs` и `step_size` — после `model-request` стадии; `--input-file` плана — абсолютный путь; `--input-digest` разметки — из
+Где спотыкаются чаще всего: запрос стадии (`model-request`) и ответ (`model-response`) — разными командами, не одной цепочкой;
+`step-inputs` и `step_size --stage tc-generator:…` — после `model-request` стадии (у частей разметки `step_size` — до запроса); `--input-file` плана — абсолютный путь; `--input-digest` разметки — из
 `context_marker_parts plan`.
 
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
 для разметки одним батчем. Генератор — после `tools.api model-request` этого шага:
 `--run <run_id> --stage tc-generator:<batch>` (ревью — `tc-reviewer:canonical`); файлы входа код берёт
-по журналу прогона из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` и отчёт — те же байты). Вход,
+по журналу прогона из `input_digests` опубликованного запроса и печатает сводку `files_summary` и `list_path` — файл `<run>/tmp/step-inputs-<стадия>.json` со всем списком (`tools.api step-inputs` — те же байты). Вход,
 которого нет в журнале (или два файла журнала с одним digest), — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
 одной строкой). Для `tc-generator:<batch>` там же может быть файл `existing-tests.md` (basis «карта», FaT-EC) — карта существующих
 тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
@@ -172,8 +172,7 @@ Run остаётся связан с исходной project/module identity.
 `--target` или `paths` модуля) и продолжай шаг. Вход не обрезай.
 Размер ответа каждого вызова меряет код (FaT-O): `tools.api model-response` возвращает в `result`
 `output_bytes` и `warning`; `STEP_OUTPUT_LARGE` (больше `limits.step_output_warn_bytes`, по умолчанию
-128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай.
-`output_bytes` — сырые байты файла `--artifact` (FaT-O2), поэтому передавай ответ модели как есть.
+128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай: `output_bytes` — сырые байты файла `--artifact`.
 `MODEL_OUTPUT_TRUNCATED` (у `model-response` или `validate_artifact`: JSON оборван на середине, вероятно лимит выхода) —
 это отказ, а не ответ: покажи человеку байты и подсказку одной строкой и используй единственный повтор стадии с
 `retry_prompt` из `validate_artifact` (просьба ответить тем же JSON компактно, без отступов). Ответ сам не дописывай.
@@ -239,7 +238,7 @@ Run остаётся связан с исходной project/module identity.
    (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. Одной командой `tools.api plan --header <f>
    --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f> --run-root <run>
    --attempt <id> --out-plan <run>/tmp/plan.json --out-published <run>/tmp/published.json` код публикует заголовок, строит план
-   и публикует его (`header_digest` в grouping можно не писать — код поставит; чужой — `GENERATOR_INPUT_HEADER`); события и файлы те же,
+   и публикует его (`header_digest` в grouping можно не писать — код поставит; чужой — `GENERATOR_INPUT_HEADER`); формы входов — [fragment-sample.md](references/fragment-sample.md#входы-plan); события и файлы те же,
    что у трёх команд ниже. Или по шагам: план — `tools.api plan-batches
    --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f>` — по одному
    `--context-receipt` на каждый receipt попытки; при нескольких в grouping — `context_receipt_digests` (все digests,
@@ -249,17 +248,17 @@ Run остаётся связан с исходной project/module identity.
    limits.step_window_bytes`, группы требований не рвёт; `notes` в выводе — сколько пачек и почему, покажи их человеку
    как есть, и `context` из вывода `publish-generator-input --kind plan`, когда он есть.
 3. Для каждого batch вызови `tc-generator` с declared immutable inputs — пачки строго по очереди (`ordinal`),
-   пачка k после принятого ответа пачки k−1, не параллельно.
+   пачка k после принятого ответа пачки k−1, не параллельно. Общие требования (данные) живут в первой пачке — пачка 2 на её CREQ не ссылается.
    `model-request` без `--input-digest` берёт входы пачки из журнала (marker, context-receipts плана, plan, header,
    с пачки 2 — capabilities прошлых пачек: сначала `tools.api prior-capabilities --run-root <run> --attempt <attempt_id>
-   --batch-id <id>`); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров)
+   --batch-id <id>`: `capability_ids` — состав, `path` — файл с телом); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров)
    не считай: пропущенные ставит `model-response` (`filled`), неверные отказывает до записи
    (`MODEL_RESPONSE_DIGEST_MISMATCH`, с верным значением) — это ошибка ответа, на неё единственный повтор стадии.
-   Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
+   Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
    **Фрагмент** — голый объект (без конверта `artifacts`); образец структуры — [fragment-sample.md](references/fragment-sample.md),
    схема — `schemas/candidate-fragment.schema.json`. Во фрагмент входит `context_receipt` — квитанция контекста пачки **целиком**
-   (файл receipt как есть, не её digest); digest-поля ставит код.
+   (файл receipt как есть, не её digest); digest-поля ставит код. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
    До `model-response` проверь файл ответа: `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>
    --run-root <run>` (`--run-root` — тогда отказ попадает в журнал прогона и в отчёт; `--context-receipt` — один receipt:
    `context_receipt_digest` плана, первый по `batch_index`). С пачки 2 — `--prior-fragment <f>` на каждую прошлую пачку: **записанный
@@ -332,7 +331,7 @@ test-skills <run_id>»; ответ ревьюера — файл, затем `re
 **Ревьюер-субагент.** В его задаче назови `run_root` и `attempt_id` и разреши только эти команды (cwd пакета; все читают, ничего не меняют):
 `python -m tools.api read-receipt --run-root <run> --attempt <id> --kind reviewer-session-boundary --event ARTIFACT_READ_BACK` (граница
 ревью: оба `--kind` и `--event` обязательны; без них команда отказывает), `python -m tools.api read-effective --run-root <run>
---attempt <id>`, `python -m tools.api read-ledger --run-root <run> --attempt <id> [--digest <d>]`, и `python -m tools.api review-evidence
+--attempt <id>` (до вердикта — `effective: null`), `python -m tools.api read-ledger --run-root <run> --attempt <id> [--digest <d>]`, и `python -m tools.api review-evidence
 --run-root <run> --attempt <id> --path <путь в проекте>` — когда нужен файл проекта. Дай ему вид `review-views/<sha>.md`. Не давай: диалог
 и reasoning генератора, карту канареек, `nonce`, чужие прогоны. Не запрещай общим запретом файлы прогона: проверка происхождения обязательна.
 
@@ -360,10 +359,6 @@ Successful session содержит ровно один verdict; explicit termin
 `review-views/<sha>.md` (одинаковый кандидат — одинаковые байты); размер шага —
 `step_size --run <run_id> --files <вид> --role tc-reviewer --step tc-reviewer:canonical`.
 
-Для прогонов v0.1 (начатых до P2): старый порядок — `session-start` → `review-open --session-start` → `review-requested` →
-`model-request` / `model-response` для `tc-reviewer:canonical` → `complete-review` → `review-select --reviewer-session` — работает ещё один
-выпуск и печатает `deprecated: "tools.api review-open …"`; события те же.
-
 `ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает только один complete
 successor revision 2 и тот же authoritative verdict; ревьюер отдаёт его как `successor_edits`
 (точные правки человеческих полей), код строит revision 2 из кандидата сам. Любая смысловая/частичная/третья
@@ -374,10 +369,9 @@ correction — `REWORK/PARTIAL`. Без host isolation evidence записыва
 
 ## 5. Закрой попытку
 
-Автотесты, материализация и executor в этой поставке не вызываются. После ревью закрой попытку одной командой
-`python -m tools.run_pipeline finish --project <abs> --run <run_id>`: она сама помечает их
-`NOT_APPLICABLE` и проходит закрытие. Результат draft/artifact-only: `verification=NOT_APPLICABLE`,
-`accepted=false`; green full-pipeline exit 0 запрещён.
+После ревью закрой попытку одной командой
+`python -m tools.run_pipeline finish --project <abs> --run <run_id>`: она сама проходит закрытие. Результат draft/artifact-only:
+`verification=NOT_APPLICABLE`, `accepted=false`; green full-pipeline exit 0 запрещён.
 
 ## 6. Закрытие
 

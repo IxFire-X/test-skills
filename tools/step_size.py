@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -420,6 +421,39 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             "unresolved": unresolved}
 
 
+LIST_HEAD = 5  # names of the files printed in the summary; the whole list is in the file
+
+
+def compact_inputs(run_root: Path, stage: str, found: Mapping[str, Any]) -> dict[str, Any]:
+    """PT2: what the commands of the agent print for the files of a step.  A batch of a generator reads a hundred files, so the
+    printed answer carries the summary — how many, how many bytes, by what basis, the first few — and the path of the file that
+    holds the whole list (``<run>/tmp/step-inputs-<stage>.json``, written here; nothing reads it back as a fact: it is for the agent).
+
+    The answer keeps ``bindings`` and ``unresolved`` (short) and, for the automation stages, whatever else ``found`` carries."""
+    from tools.confined_output import atomic_write_confined_bytes_at_root, create_confined_directory_exclusive
+
+    root = Path(run_root).resolve()
+    project = root.parent.parent
+    files = list(found["files"])
+    tmp = root / "tmp"
+    if not tmp.is_dir():  # a run made before the scan made it
+        create_confined_directory_exclusive(project, root, tmp)
+    target = tmp / ("step-inputs-" + re.sub(r"[^A-Za-z0-9._-]", "-", stage) + ".json")
+    atomic_write_confined_bytes_at_root(project, root, target, json.dumps({key: found[key] for key in ("stage", "attempt_id", "request_digest", "files", "bindings", "unresolved")},
+                                                                         ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    by_basis: dict[str, int] = {}
+    for row in files:
+        by_basis[str(row.get("basis") or "файл")] = by_basis.get(str(row.get("basis") or "файл"), 0) + 1
+    summary = {"count": len(files), "bytes": sum({row["path"]: int(row["bytes"]) for row in files}.values()), "by_basis": by_basis,
+               "head": [row["path"] for row in files[:LIST_HEAD]], "list_path": str(target)}
+    return {**{key: value for key, value in found.items() if key != "files"}, "files_summary": summary}
+
+
+def step_inputs(run_root: Path, stage: str) -> dict[str, Any]:
+    """``tools.api step-inputs``: the files of the step as :func:`request_files` finds them, printed as :func:`compact_inputs` — one function."""
+    return compact_inputs(run_root, stage, request_files(run_root, stage))
+
+
 def input_size(found: Mapping[str, Any]) -> int:
     """The bytes a step reads behind :func:`stage_inputs`: each file once (as ``measure`` counts them) and the bindings."""
     return sum({row["path"]: int(row["bytes"]) for row in found["files"]}.values()) + sum(int(row["bytes"]) for row in found["bindings"])
@@ -531,7 +565,8 @@ def main(argv: list[str] | None = None) -> int:
         report = measure(project, list(dict.fromkeys(files)), role, tokens_per_byte=args.tokens_per_byte, budget=args.budget_bytes,
                          extra_bytes=sum(row["bytes"] for row in requested["bindings"]) if requested else 0)
         if requested is not None:
-            report.update(input_files=requested["files"], input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
+            report.update(input_files_summary=compact_inputs(project / ".pilot-runs" / args.run, args.stage, requested)["files_summary"],
+                          input_bindings=requested["bindings"], unresolved=requested["unresolved"], size_complete=not requested["unresolved"],
                           input_warning=INPUT_UNRESOLVED if requested["unresolved"] else None)
             report.update({key: requested[key] for key in ("java_level", "junit_params") if key in requested})
         report["recorded"] = False

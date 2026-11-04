@@ -846,6 +846,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         create_confined_directory_exclusive(root_project, runs, root)
         if _is_reparse(root):
             raise ValueError("unsafe run root")
+        create_confined_directory_exclusive(root_project, root, root / "tmp")  # PT2: where --out writes; the code makes it, not the agent
         receipt_data = {"schema_version": "1.0.0", "run_id": run_id, "request_id": safe_auth["request_id"], "policy_profile": policy_profile, "execution_requested": safe_auth["execution_requested"]}
         if "host_id" in safe_auth:
             receipt_data["host_id"] = safe_auth["host_id"]
@@ -875,7 +876,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
                     remove_confined_bytes_if_equal(root_project, root, target, _canonical_bytes(artifact))
                 except OutputConfinementError:
                     pass
-        for directory in (root / "events", root):
+        for directory in (root / "events", root / "tmp", root):
             try:
                 directory.rmdir()
             except OSError:
@@ -4514,6 +4515,29 @@ def read_effective_canonical_if_present(
     return read_effective_canonical(root, attempt_id)
 
 
+def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
+    """PT2: the answer of ``read-effective`` — the effective selection, or ``{"effective": None, "reason": …}`` while the journal says there is none.
+
+    "None yet" is decided by the journal, never by a missing file: a file that is there is read as before (validated against its
+    events); a file that is gone or replaced where the journal recorded an accepting verdict is the refusal it always was.
+    Without a recorded verdict of the review: not yet.  With one that does not accept the candidate (REJECTED): never."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    if next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None) is None:
+        return _read_effective_canonical_with_state(project, root, state, attempt_id)  # unknown attempt: its refusal
+    if _receipt_target(root, attempt_id, "effective-canonical").exists():
+        return _read_effective_canonical_with_state(project, root, state, attempt_id)
+    recorded = any(event.get("event_type") == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id
+                   and event.get("stage_instance_id") == "tc-reviewer:canonical" for event in state["events"])
+    if not recorded:
+        return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (review-select --verdict)"}
+    ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None)  # a ledger the journal cannot confirm is a refusal
+    verdict = next((event.get("verdict") for event in ledger["events"] if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"), None)
+    if verdict == "REJECTED":
+        return {"effective": None, "reason": "effective нет: вердикт ТРЕБУЕТ ДОРАБОТКИ (REJECTED) не принимает кандидата"}
+    return _read_effective_canonical_with_state(project, root, state, attempt_id)  # an accepting verdict without its selection: the refusal
+
+
 def _recover_attempt_receipt_events(run_root: Path, attempt_id: str, kind: str) -> Mapping[str, Any]:
     """Repair only missing journal bindings for one exact fixed receipt."""
     project, root = _run_root(run_root)
@@ -4784,8 +4808,11 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
             raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {batch_id} already has other prior capabilities; another one needs "
                              "a new run (scan --new-run)")
     _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
-    return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(value["operation_capabilities"]),
-            "path": target.relative_to(root).as_posix()}
+    ids = [str(row.get("capability_id")) for row in value["operation_capabilities"]]
+    # PT2: the composition in a line — the ids (their names), the body in the file: record.prior_capabilities.operation_capabilities
+    return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(ids), "capability_ids": ids[:60],
+            **({"capability_ids_more": len(ids) - 60} if len(ids) > 60 else {}),
+            "path": target.relative_to(root).as_posix(), "body_at": "record.prior_capabilities.operation_capabilities"}
 
 
 _STAGE_EXAMPLES = "context-marker:baseline, tc-generator:BATCH-<id>, tc-reviewer:canonical, tc-to-autotest:r1, autotest-reviewer:r1"

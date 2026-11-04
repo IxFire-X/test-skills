@@ -24,6 +24,7 @@ ALLOWED = (
 MODE_B_WORDS = [
     r"local-pilot", r"rerun-retained", r"run_pipeline exec", r"service_url_env", r"SERVICE_URL", r"SERVICE_UNREACHABLE", r"стенд", r"maven",
     r"gradle", r"\bmvn\b", r"pytest", r"карантин", r"@Disabled", r"accepted=true", r"tc-to-autotest", r"autotest-reviewer", r"mode-b",
+    r"generated-source", r"project-native generated", r"reviewed test source",
 ]
 SECURITY_WORDS = [r"безопасн", r"AppSec", r"Amber", r"Green", r"Red flag", r"🟢", r"🟡", r"🔴", r"вердикт безопасности"]
 
@@ -180,7 +181,7 @@ def test_the_json_blocks_of_the_fragment_sample_are_the_form_of_the_schemas(tmp_
     from tools.schema_validation import schema_diagnostics
 
     text = (ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md").read_text(encoding="utf-8")
-    fragment, case = (json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S))
+    fragment, case, *_forms = (json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S))  # PT2: then the forms of the plan inputs
     schema = json.loads((ROOT / "schemas" / "candidate-fragment.schema.json").read_text(encoding="utf-8"))
     assert sorted(set(schema["required"]) - set(fragment)) == [] and sorted(set(fragment) - set(schema["properties"])) == []
     tokens = {"<ns>": "B1", "<SREQ-… этой пачки>": "SREQ-0001", "<SREQ-…>": "SREQ-0001", "<имя>": "batch_ids", "<имя операции>": "batch_ids",

@@ -101,8 +101,7 @@ Canonical order recipe: operation_capabilities by capability_id; arguments and r
 
 Never invent capability arguments, values, operations, assertions, roles, or environment facts. Validate before publication; a projection cannot repair invalid semantics.
 
-For project-native generated tests, an `operation_capability` describes the exact
-operation the reviewed test source must implement. It need not name an existing
+An `operation_capability` describes the exact operation a step performs. It need not name an existing
 application helper or a preinstalled runtime provider. A capability may compose
 confirmed application and existing test-framework APIs for cohesive preparation,
 execution and observation. Record the exact calls, order, state/transaction boundary,
@@ -112,8 +111,7 @@ an application method with that name exists. Reuse a capability across cases whe
 contract is the same; do not invent a new adapter or dependency to supply it.
 
 Verify the required APIs and setup from authorized project code/tests or available
-dependency documentation/metadata, retrieving missing evidence within the allowed
-context. Keep dependency evidence in the authorized technical context and reference it
+dependency documentation/metadata the human gave; search for no more. Keep dependency evidence in the authorized technical context and reference it
 from capability provenance; do not copy API signatures, framework annotations or
 isolation configuration into human Action/Test Data/Expected Result fields.
 Absence of a ready-made fixture, helper or capability declaration alone is
@@ -123,9 +121,7 @@ that an environment has already started or return an expected constant as an obs
 result. Persistence claims need real storage and the declared independent readback;
 a mock or rereading the same managed object is not an equivalent composition.
 
-This describes the existing reviewed generated-source path. Direct canonical/provider
-execution still requires its real provider/adapter preflight. Capability declarations
-alone never authorize execution or prove that an implementation exists or passes.
+A capability declaration alone never proves that an implementation exists or passes.
 
 ## Human scenario rules
 
@@ -144,7 +140,7 @@ observable checks. Use natural Russian around types: «значение типа
 Choose the operation kind for the declared test execution boundary. Use
 `operation.kind=http` for direct HTTP execution only when the canonical HTTP contract
 can represent the exact method, path, base URL source, request and observations.
-The presence of an HTTP route does not force that kind for project-native tests:
+The presence of an HTTP route does not force that kind for a project action:
 an evidence-backed `project_action` may use the existing framework to submit a form,
 inspect its real MVC response/model/errors and reread storage. Preserve the real
 method/path and all form values in its structured arguments; do not encode form data
@@ -255,7 +251,7 @@ behavior/prerequisite/testing-instruction distinction above to inventory require
 
 - Do not write `digest` or any `*_digest` field — the code sets them; a wrong value is refused («удали поле»).
 - Do not order `requirement_ids` or `categories` — the code does and names it (`normalized`).
-- Correct the fragment yourself; write no scripts of your own.
+- Correct the fragment yourself; write no scripts that import or call the package.
 - `SEMANTIC_HUMAN_EXPECTATION_BODY_MISSING`: an expectation with `http_body` assertions ends with the pretty-printed response JSON — `"id": "<значение присутствующего поля>"` for `exists`, the literal for `equals`.
 - `SEMANTIC_HUMAN_BODY_UNBOUND`: every leaf of the request JSON in `test_data` has its own input with `target.location = body` and its RFC 6901 pointer (`{"a": {"b": 1}}` → `/a/b`).
 - `SEMANTIC_BODY_TARGET_OVERLAP`: body pointers are never equal or nested; `semantic_type` sits beside `target` and `source`, not inside: `{"target": {"location": "body", "pointer": "/a/b", "sensitive": false}, "source": {…}, "semantic_type": {…}}`.

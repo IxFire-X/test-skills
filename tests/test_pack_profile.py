@@ -72,7 +72,7 @@ def test_a_cases_only_copy_is_recognised_whole_and_passes_the_three_checks_and_t
     pack = copy_profile(tmp_path / "pack", "cases-only")
     report = _doctor(pack)
     assert report["status"] == "PASS" and report["profile"] == "cases-only" and report["integrity"] == {"valid": True, "missing": []}, report
-    assert report["languages"]["java"]["execution"] is False and report["adapters"]["local_project_native"]["core"] is False
+    assert "languages" not in report and "adapters" not in report  # PT2: nothing to say about running projects
     for module, arguments in (("tools.contract_check", ("--full",)), ("tools.render_contract_docs", ("--check",)), ("tools.release_manifest", ("--check",))):
         done = _cli(module, "--root", str(pack), *arguments)
         assert done.returncode == 0, (module, done.stdout, done.stderr)

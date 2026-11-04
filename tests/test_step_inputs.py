@@ -171,7 +171,8 @@ def test_the_run_record_has_no_paths(tmp_path: Path, capsys: pytest.CaptureFixtu
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     code = step_size.main(["--project", str(root.parent.parent), "--run", root.name, "--stage", "tc-generator:BATCH-fixture"])
     report = json.loads(capsys.readouterr().out)
-    assert code == 0 and report["recorded"] and any("part0.py" in row["path"] for row in report["input_files"]), report
+    listed = json.loads(Path(report["input_files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"]  # PT2: the list is in the file
+    assert code == 0 and report["recorded"] and any("part0.py" in row["path"] for row in listed) and "input_files" not in report, report
     lines = (root / "step-sizes.jsonl").read_text(encoding="utf-8").splitlines()
     line = lines[-1]  # P1: model-request has measured its own steps before (one line each); the last is this command's
     assert "part0.py" not in "".join(lines) and "\\" not in "".join(lines), lines
@@ -195,13 +196,15 @@ def test_the_requirements_step_measures_only_the_documents(tmp_path: Path, capsy
 
 def test_the_api_command_matches_the_function(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools import api
-    from tools.step_size import request_files
+    from tools.step_size import compact_inputs, request_files
 
     root, attempt_id, _baseline, receipts, marker, plan, header, _plan_path, _header_path = _generator_run(tmp_path)
     _request(root, attempt_id, "tc-generator:BATCH-fixture", [marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     code = api.main(["step-inputs", "--run-root", str(root), "--stage", "tc-generator:BATCH-fixture"])
     payload = json.loads(capsys.readouterr().out)
-    assert code == 0 and payload["result"] == json.loads(json.dumps(api.plain(request_files(root, "tc-generator:BATCH-fixture")), ensure_ascii=False))
+    found = request_files(root, "tc-generator:BATCH-fixture")
+    assert code == 0 and payload["result"] == json.loads(json.dumps(api.plain(compact_inputs(root, "tc-generator:BATCH-fixture", found)), ensure_ascii=False))
+    assert json.loads(Path(payload["result"]["files_summary"]["list_path"]).read_text(encoding="utf-8"))["files"] == json.loads(json.dumps(found["files"]))
     code = api.main(["step-inputs", "--run-root", str(root), "--stage", "tc-to-autotest:r1"])
     assert code == 2 and json.loads(capsys.readouterr().out)["status"] == "error"
 

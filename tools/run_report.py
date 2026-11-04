@@ -751,6 +751,15 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     cases = None
     candidate = next((event for event in reversed(events) if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"), None)
     document = case_document(root, attempt_id) or (_json_at(root, candidate.get("artifact_digest")) if candidate else None)
+    canon_basis = None
+    if document is None and attempt_id:
+        # PT2: a review that sent the set back (REWORK) has no effective document: the numbers are those of the candidate r1, not accepted
+        try:
+            from tools.orchestrate_test_case_revision import journal_assembly
+
+            document, canon_basis = journal_assembly(root, attempt_id)[0], "кандидат r1, не принят"
+        except (KeyError, OSError, TypeError, ValueError):
+            document = None
     if isinstance(document, Mapping) and isinstance(document.get("test_cases"), list):
         cases = len(document["test_cases"])
     automation = automation_artifact(root, events)
@@ -815,7 +824,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         "counts": {
             "requirements": requirements,
             "source_requirements": requirements if requirements is not None else source_count,
-            "canonical_requirements": canonical_count,
+            "canonical_requirements": canonical_count, "canon_basis": canon_basis,
             "batches": len({event.get("stage_instance_id") for event in responses if str(event.get("stage_instance_id")).startswith("tc-generator:")}),
             "cases": cases, "review_verdict": evidence.get("authoritative_verdict"),
             "automation": evidence.get("automation_accepted"),
