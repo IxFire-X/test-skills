@@ -547,3 +547,27 @@ def test_a_real_blocking_finding_in_the_step_of_a_canary_about_something_else_ma
     answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [step], "Шаг не проверяет требование REQ-9 вовсе.", code="REQ_GAP")])
     done = _select(run, answer)  # not refused: the finding does not name the value of the canary
     assert done["status"] == "REWORK"
+
+
+def test_a_receipt_map_and_view_planted_before_review_open_do_not_switch_the_canaries_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The files agree with each other (count 0, an empty map, a view without control errors) and the journal has no event of them:
+    review-open does not take them for a cut-short seeding — they are not what the seeding of the journal's candidate gives."""
+    from tools import review_canaries
+    from tools.canonical_document import document_sha256
+    from tools.orchestrate_test_case_revision import _PROFILE, journal_assembly, publish_command
+    from tools.pilot_state import publish_attempt_receipt
+    from tools.review_view import render
+
+    run = _generated_run(tmp_path)
+    candidate = journal_assembly(*_flags(run))[0]
+    publish_command(candidate, run["project"] / "bundles", _PROFILE, run_root=run["run_root"], attempt_id=run["attempt_id"])
+    digest = document_sha256(candidate)
+    plain_view, empty_map = render(candidate), review_canaries.map_bytes(digest, [])
+    (run["run_root"] / "review-views").mkdir(parents=True, exist_ok=True)
+    review_canaries.view_target(run["run_root"], digest).write_bytes(plain_view)
+    review_canaries.map_target(run["run_root"], digest).write_bytes(empty_map)
+    publish_attempt_receipt(*_flags(run), "review-canaries", review_canaries.receipt_facts(digest, plain_view, empty_map, 0))  # a file, no events
+    assert review_canaries.verify(*_flags(run)) is None  # the journal knows nothing of it
+    with pytest.raises(ValueError, match="REVIEW_CANARY_MISMATCH"):
+        _open(run, monkeypatch)  # the seeding gives two canaries here, the planted files give none
+    assert [row for row in _events(run["run_root"]) if row.get("batch_id") == review_canaries.BATCH_ID] == []  # no event was added for them

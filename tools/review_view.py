@@ -648,24 +648,34 @@ def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any])
     if not published or published[-1].get("artifact_digest") != digest:
         raise ValueError("the candidate is not the assembled candidate of the run")
     target = review_canaries.view_target(root, digest)
+    seeded: list[Any] = []
+
+    def seeding() -> tuple[dict[str, Any], bytes, bytes]:
+        """What the seeding of the journal's candidate gives now: ``(receipt facts, view, map)`` — computed once."""
+        if not seeded:
+            mutated, canaries = review_canaries.seed(document)
+            data, _grouping, _reference = _run_render(root, state, mutated, "review", basis=document)
+            mapped = review_canaries.map_bytes(digest, canaries)
+            seeded.append((review_canaries.receipt_facts(digest, data, mapped, len(canaries)), data, mapped))
+        return seeded[0]
+
     try:
         existing = review_canaries.verify(root, attempt_id)
     except review_canaries.CanaryMismatch:
-        if not review_canaries.resume_binding(root, attempt_id):  # a seeding cut short between the receipt and its events: finish it
+        # a seeding cut short between the receipt and its events: finish it — only if the files are what the seeding gives
+        if not review_canaries.resume_binding(root, attempt_id, seeding):
             raise
-        existing = review_canaries.verify(root, attempt_id)  # a real divergence of bytes is still a mismatch
+        existing = review_canaries.verify(root, attempt_id)
     else:
-        if existing is None and review_canaries.resume_binding(root, attempt_id):  # the receipt file is there, its events are not
+        if existing is None and review_canaries.resume_binding(root, attempt_id, seeding):  # the receipt file is there, its events are not
             existing = review_canaries.verify(root, attempt_id)
     if existing is not None:
         return {"path": target, "created": False, "canaries": len(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
-    mutated, canaries = review_canaries.seed(document)
-    data, _grouping, _reference = _run_render(root, state, mutated, "review", basis=document)
-    mapped = review_canaries.map_bytes(digest, canaries)
+    facts, data, mapped = seeding()
     atomic_write_confined_bytes_at_root(project, root, target, data)
     atomic_write_confined_bytes_at_root(project, root, review_canaries.map_target(root, digest), mapped)
-    receipt = publish_review_canaries(root, attempt_id, review_canaries.receipt_facts(digest, data, mapped, len(canaries)))
-    return {"path": target, "created": bool(receipt.get("created")), "canaries": len(canaries), "candidate_sha256": digest, "bytes": len(data)}
+    receipt = publish_review_canaries(root, attempt_id, facts)
+    return {"path": target, "created": bool(receipt.get("created")), "canaries": facts["canary_count"], "candidate_sha256": digest, "bytes": len(data)}
 
 
 def _hints_of_run(root: Path, state: Mapping[str, Any], document: Mapping[str, Any]) -> tuple[Any, Any]:

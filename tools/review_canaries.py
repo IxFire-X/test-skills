@@ -284,11 +284,12 @@ def _read_canaries(run_root: Path, attempt_id: str, events: list[dict[str, Any]]
     return list(value["canaries"])
 
 
-def resume_binding(run_root: Path, attempt_id: str) -> bool:
-    """Finish the binding of a seeding that was cut short.  The receipt file is there (the journal may lack one or both of its events),
-    and the map and the view match it byte for byte: the missing events are appended and ``True`` returned.  No receipt file —
-    ``False`` (nothing to finish; the seeding starts over).  A receipt file whose map or view do not match it is a real divergence:
-    ``REVIEW_CANARY_MISMATCH``."""
+def resume_binding(run_root: Path, attempt_id: str, expected: Any) -> bool:
+    """Finish the binding of a seeding that was cut short.  The receipt file is there (the journal may lack one or both of its events).
+    Files that agree with each other are no proof — an agent can write a receipt, a map and a view of its own before ``review-open`` —
+    so the bytes are compared with what the seeding gives now: *expected* is a function returning ``(facts, view, map)``, the seeding of
+    the candidate of the journal (it is deterministic).  Equal byte for byte → the missing events are appended, ``True``.  No receipt
+    file → ``False`` (nothing to finish; the seeding starts over).  Anything else is ``REVIEW_CANARY_MISMATCH``."""
     from tools import pilot_state as pilot
     from tools.confined_output import read_confined_bytes
 
@@ -299,15 +300,16 @@ def resume_binding(run_root: Path, attempt_id: str) -> bool:
         raise _mismatch("файл квитанции review-canaries не читается") from error
     if raw is None:
         return False
+    facts, view, mapped = expected()
     try:
         record = json.loads(raw.decode("utf-8"))
-        facts = {key: record[key] for key in ("candidate_digest", "view_digest", "canary_map_digest", "canary_count")}
+        same = {key: record[key] for key in facts} == facts
         data = read_confined_bytes(project, root, map_target(root, facts["candidate_digest"]))
-        view = read_confined_bytes(project, root, view_target(root, facts["candidate_digest"]))
+        shown = read_confined_bytes(project, root, view_target(root, facts["candidate_digest"]))
     except (OSError, KeyError, TypeError, ValueError) as error:
         raise _mismatch("квитанция review-canaries не читается") from error
-    if data is None or view is None or _digest_of(data) != facts["canary_map_digest"] or _digest_of(view) != facts["view_digest"]:
-        raise _mismatch("файл квитанции есть, а карта или вид не совпадают с ним")
+    if not same or data != mapped or shown != view:
+        raise _mismatch("квитанция, карта и вид не равны тому, что даёт посев кандидата журнала: файлы подложены или испорчены")
     pilot.publish_review_canaries(run_root, attempt_id, facts)  # the same facts: the receipt is the one that is there, the events are added
     return True
 
