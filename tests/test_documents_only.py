@@ -122,9 +122,11 @@ def test_the_orchestrate_skill_describes_the_documents_mode_as_the_code_does() -
     skill = (root / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
     start = skill.index("Проект только с документами (FaT-DOC)")
     paragraph = skill[start:skill.index("\n\n", start)]
-    for fact in ("`root`", "«.»", "`stack.language: documents`", "`cases-only-v1`", "`NO_BUILD_MODULE`", "`manual_only`",
+    for fact in ("`root`", "«.»", "`stack.language: documents`", "`cases-only-v1`", "`manual_only`",
                  "`coverage: MANUAL_ONLY`", "`accepted: false`"):
         assert fact in paragraph, fact
+    # PT: the refusal of local-pilot-v1 is mode B — its text is in the development build's reference, not in the delivered SKILL
+    assert "`NO_BUILD_MODULE`" in (root / "skills" / "orchestrate" / "references" / "mode-b.md").read_text(encoding="utf-8")
     discover = (root / "tools" / "discover_project.py").read_text(encoding="utf-8")
     pipeline = (root / "tools" / "run_pipeline.py").read_text(encoding="utf-8")
     assert '"id": "root", "root": ".", "stack": {"language": "documents"}' in discover

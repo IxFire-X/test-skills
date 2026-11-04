@@ -35,12 +35,14 @@ PROFILES = ("universal", "cases-only")
 # builder of this manifest), the schemas read only by the release evaluation, and everything that starts or measures a run.
 CASES_ONLY_EXCLUDED_FILES = (
     "tools/ci_gate.py", "tools/compatibility_contract.py", "tools/contract_check.py", "tools/release_manifest.py",
-    "tools/render_contract_docs.py",
+    "tools/render_contract_docs.py", "skills/orchestrate/references/mode-b.md",
     "schemas/compatibility-evidence.schema.json", "schemas/release-eval-receipt.schema.json",
     "schemas/release-eval-run.schema.json", "schemas/scenario-observation-receipt.schema.json",
 )
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe (P8a-1)
-CASES_ONLY_EXCLUDED_PREFIXES = ("evals/",)
+# The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a
+# delivery of cases does not carry (PT).
+CASES_ONLY_EXCLUDED_PREFIXES = ("evals/", "skills/tc-to-autotest/", "skills/autotest-reviewer/")
 
 # Files of a delivery that are not in the registry (they are in the SHA256SUMS of the delivery folder).
 DELIVERY_FILES = ("README.md", "HOW-TO-USE.md", ".skillsrc.example", "requirements.txt", "release/manifest.json")

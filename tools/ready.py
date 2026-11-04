@@ -538,9 +538,10 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         rows.append(_row("review:isolation", CASES, "OK", "в .skillsrc review.self: true — ревью в той же сессии принимается с пометкой SELF, "
                          "вопрос не задаётся (свежий контекст всё равно лучше)"))
     else:
-        rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
-                         "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
-                         _self_review_scan(project, docs, profile, module, target)))
+        # PT: the row is OK — there is nothing to fix; the scan with the SELF flag is data for the one case the human says yes to
+        rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); если CLI этого не умеет — "
+                         "спросите человека о прогоне с пометкой SELF; команду scan с флагом SELF (details.self_review_scan) — только после его «да»",
+                         None, {"self_review_scan": _self_review_scan(project, docs, profile, module, target)}))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": requested_profile, "checks": rows}
 
@@ -553,7 +554,7 @@ def _table(report: Mapping[str, Any]) -> str:
             lines.append(f"[{title}]")
             for row in rows:
                 lines.append(f"  {_LABELS[row['level']]:<9} {row['id']}: {row['message']}")
-                if row.get("fix") and (row["level"] != "OK" or row["id"] == "review:isolation"):
+                if row.get("fix") and row["level"] != "OK":
                     lines.append(f"            исправить: {row['fix']}")
     return "\n".join(lines)
 

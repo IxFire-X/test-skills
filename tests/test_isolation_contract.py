@@ -118,10 +118,10 @@ def test_ready_says_the_question_is_answered_when_the_skillsrc_answers_it(tmp_pa
 
     project = _python_project(tmp_path, runtime=False)
     plain = next(row for row in ready.check(project, [], "cases-only-v1")["checks"] if row["id"] == "review:isolation")
-    assert "accept-self-review" in plain["fix"]
+    assert "accept-self-review" in plain["details"]["self_review_scan"] and "fix" not in plain  # PT: the row is OK, nothing to fix
     _with_review_self(project, True)
     answered = next(row for row in ready.check(project, [], "cases-only-v1")["checks"] if row["id"] == "review:isolation")
-    assert "review.self" in answered["message"] and "fix" not in answered
+    assert "review.self" in answered["message"] and "fix" not in answered and "details" not in answered
 
 
 def test_a_second_scan_with_review_self_behaves_as_without_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

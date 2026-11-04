@@ -361,7 +361,7 @@ def test_with_digest_is_public_and_the_old_name_is_the_same_function() -> None:
 def test_the_tester_documents_carry_the_p9_sections_and_no_word_of_the_security_review() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     how_to = (ROOT / "HOW-TO-USE.md").read_text(encoding="utf-8")
-    assert "## Какие это автотесты" in readme and "## Словарь терминов" in readme and "`SELF`" in readme
+    assert "## Словарь терминов" in readme and "`SELF`" in readme  # PT: the delivery has no section about automated tests
     for term in ("run", "attempt", "revision", "accepted", "verification", "coverage"):
         assert f"({term})" in readme, term
     table = how_to.split("## 8. Частые остановки", 1)[1].split("\n## ", 1)[0]

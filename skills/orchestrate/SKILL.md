@@ -1,42 +1,33 @@
 ---
 name: orchestrate
-description: Использовать, когда пользователь просит тест-кейсы или функциональные автотесты приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
+description: Использовать, когда пользователь просит тест-кейсы приложения по согласованным требованиям, всей спецификации OpenSpec либо выбранному change со связанной регрессией.
 permissions:
   read: "файлы проекта по inventory с исключениями; --docs, --reference и --cases только внутри проекта"
-  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir внутри проекта (не внутри .git); в режиме local-pilot-v1 ещё тестовый корень модуля"
-  network: "cases-only-v1: нет; local-pilot-v1: HEAD к стенду по service_url_env и сборка проекта (в поставке только кейсов этих модулей нет)"
-  external_delivery: "cases-only-v1: нет; local-pilot-v1: запросы сгенерированных тестов к стенду"
+  write: "<project>/.pilot-runs/<run_id>/; <project>/.skillsrc при создании; каталог публикации --output-dir внутри проекта (не внутри .git)"
+  network: "нет"
+  external_delivery: "нет"
   dependencies: "пакет ничего не устанавливает; pip агент не запускает"
-  rollback: "удалить <project>/.pilot-runs/<run_id>/ и созданный <project>/.skillsrc; тесты local-pilot-v1 снимает карантин пакета"
+  rollback: "удалить <project>/.pilot-runs/<run_id>/ и созданный <project>/.skillsrc"
 ---
 
-# Оркестрация frozen pilot Pipeline 4.0
+# Оркестрация frozen pilot Pipeline 4.0 — тест-кейсы
 
 Ты — controller в совместимой model-enabled CLI. Не запускай из Python модель и не
-передавай model credentials. Python tools здесь только детерминированно проверяют,
-публикуют/readback-проверяют артефакты и, при явном разрешении, запускают exact
-project-native test targets.
+передавай model credentials. Python tools здесь только детерминированно проверяют и
+публикуют/readback-проверяют артефакты; сборку и тесты проекта они не запускают.
+Профиль один — `cases-only-v1`. Автотесты (`local-pilot-v1`, режим Б) — только в сборке разработки, в эту поставку они не входят.
 
 Прочитай [контракт оркестрации](references/orchestration-contract.md). До работы выполни
 `python -m tools.doctor --root <pack-root>`: manifest проверяет код. Из
-`contracts/pipeline.json` извлекай нужные записи `skill_files`, `stage_registry` и
-выбранного профиля программно. Используй только exact registered Skills и stages.
+`contracts/pipeline.json` извлекай нужные записи `skill_files`, `stage_registry` программно.
+Используй только exact registered Skills и stages.
 Каждая роль читает свои инструкции, контракт, схему ответа и полные необходимые входы;
 Python validators выполняются как код. Исходник tools читай адресно при диагностике,
 не требуй пересказа всего пакета и не заменяй выполнение валидатора его чтением.
 
 Пути `contracts/`, `schemas/`, `skills/`, `tools/` и `release/` разрешай от корня
 этого пакета. Python tools вызывай с cwd пакета и абсолютным `--project` целевого
-проекта, чтобы не импортировать чужой модуль `tools`. Cwd project-native executor
-при этом остаётся выбранным module root, как требует frozen request.
-
-При формировании reviewer prompt явно передай `run_root` и `attempt_id` и разреши
-read-only команды `python -m tools.api read-receipt`, `read-effective` и `read-ledger` для exact boundary, effective
-canonical и связанных receipts текущего attempt. Эти API также читают необходимые
-run manifest и journal bindings. Не запрещай их общим запретом на run-файлы:
-проверка происхождения обязательна. За пределами reviewer context остаются диалог
-и reasoning генератора, transport logs и несвязанные runs; проверенные артефакты
-и записи идентичности не являются диалогом генератора.
+проекта, чтобы не импортировать чужой модуль `tools`.
 
 Для проверки хода работы используй `run_pipeline status` и компактные результаты
 штатных API. Transport JSONL разбирай как JSON и выводи только нужные поля последних
@@ -51,37 +42,18 @@ run manifest и journal bindings. Не запрещай их общим запр
 
 ## 0. Проверь готовность
 
-Первая команда — `python -m tools.ready --project <abs> --docs <путь> [--docs …] --profile <профиль> [--module <ID>]`
-(cwd — корень пакета). `--profile` — всегда явно, по выбранному варианту: только кейсы — `cases-only-v1`
-(ready и scan код проекта не запускают), кейсы и автотесты — `local-pilot-v1`; тот же профиль — у scan. Она только читает и проверяет всё сразу: Python и зависимости, пакет,
-git, документы, `.skillsrc`, модуль, скан с исключениями и отдельным блоком — сборку. Покажи
-человеку таблицу (stderr). Каждый `СТОП` в блоке «Для кейсов» исправь по его `fix`: команду установки
+Первая команда — `python -m tools.ready --project <abs> --docs <путь> [--docs …] --profile cases-only-v1 [--module <ID>]`
+(cwd — корень пакета; `--profile` — всегда явно, тот же профиль — у scan). Она только читает и проверяет всё сразу: Python и
+зависимости, пакет, документы, `.skillsrc`, модуль, скан с исключениями. Код проекта она не запускает, git не вызывает. Покажи
+человеку таблицу (stderr). Каждый `СТОП` исправь по его `fix`: команду установки
 зависимостей пакета покажи человеку и сам не запускай, остальное тоже покажи человеку; затем
-запусти ready снова; код выхода 0 — кейсы можно
-начинать. Предупреждения блока «Нужно только для исполнения» не останавливают: скажи
-человеку один раз «сборка не готова: <message>; можно исправить сейчас (<fix>) до первой
-задачи модели, иначе этот прогон — только кейсы» и иди дальше, не дожидаясь ответа.
-Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сборщик из сети. Переключение
-`.skillsrc` на системный `mvn` (`execution:skillsrc-switch`) — только командой из `fix`, с
-подтверждением человека.
-
-Если `scan` вернул `requested_policy_profile: local-pilot-v1` и `policy_profile: cases-only-v1`,
-прогон понижен: передай человеку `execution_skipped.reason` и `fix` — после исправления сборки
-нужен новый прогон `local-pilot-v1`.
-
-Модуль только с тестами, приложение — в соседнем каталоге того же корня (FaT-2R): ready спросит
-`module:<id>:paths.context`; ответ — каталог приложения из `options` (его пакет только читает для контекста модели, ничего
-там не пишет и не собирает). Приложение пакет не поднимает: стенд поднимает человек, адрес — в переменной окружения,
-имя которой стоит в `.skillsrc` у модуля (`service_url_env`). Без него прогон понижается до кейсов. exec до любой записи
-проверяет, что стенд отвечает; `SERVICE_URL_MISSING` / `SERVICE_UNREACHABLE` — не итог: попытка открыта, передай человеку
-`fix` и после его «стенд поднят» запусти exec снова.
+запусти ready снова; код выхода 0 — кейсы можно начинать.
 
 Проект только с документами (FaT-DOC): нет манифестов сборки и исходников — один модуль `root` с корнем «.» и
-`stack.language: documents`, `.skillsrc` создаётся сам. Режим только `cases-only-v1`: `local-pilot-v1` честно отказывает
-`NO_BUILD_MODULE`, без понижения. Все шаги кейсов — `manual_only`, итог `coverage: MANUAL_ONLY`, `accepted: false` — это
-норма режима, не ошибка. Контекст модели — все документы папки, не только `--docs`: второй документ рядом тоже попадает туда.
+`stack.language: documents`, `.skillsrc` создаётся сам. Режим только `cases-only-v1`. Все шаги кейсов — `manual_only`, итог `coverage: MANUAL_ONLY`,
+`accepted: false` — это норма режима, не ошибка. Контекст модели — все документы папки, не только `--docs`: второй документ рядом тоже попадает туда.
 
-## 1. Выбери профиль и создай run
+## 1. Создай run
 
 Для OpenSpec уточни фактическую версию и схему и выбери один объём:
 
@@ -107,23 +79,16 @@ Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сб�
 недостающее условие; заблокированные проверки; конкретный вопрос. Выводи этот отчёт
 из сохранённого контекста. Неопределённое требование остаётся в наборе. Продолжай
 однозначную часть только при доказанной независимости; существенный пробел запрещает
-заявлять полный запрошенный объём. Ясный Expected при дефекте приложения остаётся FAIL.
+заявлять полный запрошенный объём.
 
-Допустимы только:
+Профиль `cases-only-v1`: draft canonical cases/review без выполнения project code; `accepted=false`, не full-pipeline exit 0.
 
-- `cases-only-v1`: draft canonical cases/review без выполнения project code; `accepted=false`, не full-pipeline exit 0;
-- `local-pilot-v1`: полный pipeline с run-scoped project-native execution; `accepted=true` только после live PASS всех
-  кейсов — с ручными кейсами (блокеры канона) PASS даёт `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
-
-Для `local-pilot-v1` execution разрешён только явным пользовательским запросом полного
-pipeline в этом run. Наличие папки, scan или запрос test cases не разрешают execution.
-
-`ready` показывает строку `review:isolation`. Если твой CLI не открывает ревьюера в свежем
+`ready` показывает строку `review:isolation` (уровень OK — исправлять там нечего). Если твой CLI не открывает ревьюера в свежем
 контексте (отдельный subagent), спроси сейчас, до scan: позже новый прогон выбросит
 сгенерированное. Флаг сам не ставь. Спроси человека дословно: «Ревьюер будет работать в той же
 сессии, без свежего контекста. Принять такой прогон с пометкой SELF?». Только после явного «да»
 в этом разговоре выполни scan с теми же `--project`, `--docs`, `--profile` и `--module`, что
-и без флага, добавив `--accept-self-review` (готовая команда — в fix строки `review:isolation`).
+и без флага, добавив `--accept-self-review` (готовая команда — `details.self_review_scan` строки `review:isolation`).
 Без флага ревью без изоляции не принимается, и `finish` закрывает попытку с `INDEPENDENCE_UNVERIFIED`.
 Если человек уже ответил «да» для проекта, в `.skillsrc` стоит `review: {"self": true}` — `ready` вопроса не задаёт, а `scan`
 принимает SELF сам, как с `--accept-self-review`; ключ ставит человек, не ты.
@@ -162,19 +127,14 @@ worktree, sandbox, environment, dependency, CI/cron, commit, push или PR.
    Сначала сопоставь user path с module,
    затем передавай его exact ID; при единственном module не подставляй `.` как ID.
 4. Прими valid существующий `.skillsrc` как authoritative. Отсутствующий создай
-   автоматически и атомарно; execution-significant drift требует одного подтверждения.
-   Для Maven предпочти пригодный wrapper, затем доступный через PATH системный `mvn`.
-   Явную конфигурацию молча не переключай; Maven/Wrapper автоматически не устанавливай.
-5. Заморозь baseline выбранного профиля: requirements, `.skillsrc`, eligible
-   source/config/build/fixture inputs, доказанные parent dependencies и module.
-   Для `local-pilot-v1` также обязательны test root, interpreter/wrapper/executable,
-   adapter ID, build profile и typed params. Для `cases-only-v1` эти execution facts
-   неприменимы: отсутствие Maven не препятствует подготовке ручных кейсов.
+   автоматически и атомарно; drift его значимых полей требует одного подтверждения.
+   Явную конфигурацию молча не переключай.
+5. Заморозь baseline: requirements, `.skillsrc`, eligible source/config/build/fixture
+   inputs, доказанные parent dependencies и module. Сведения о запуске сборки к кейсам не
+   относятся: отсутствие сборщика не препятствует подготовке кейсов.
 6. Опубликуй/readback-проверь module selection, inventory и baseline до
    `ATTEMPT_CREATED`, затем создай один nonterminal attempt.
 
-Поздно найденный undeclared execution input не добавляй в baseline. Закрой branch как
-`NOT_RUNNABLE/BASELINE_INCOMPLETE`; продолжение — новый scan того же запроса.
 Run остаётся связан с исходной project/module identity.
 
 До завершения анализа сопоставь проверяемые точки входа, реализацию, helpers,
@@ -190,17 +150,22 @@ Run остаётся связан с исходной project/module identity.
 `python -m tools.api <команда> --run-root <run> --attempt <attempt_id> …` (cwd пакета). Она вызывает одну функцию
 и печатает одну строку JSON: `status: ok` и `result`, `invalid` (код 1, диагностики в `result`) или `error`
 (код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>` — только в
-`tmp/` существующего прогона, никогда в исходники проекта (без `--run-root` и вне `<run>/tmp/` код откажет). Аргументы — `python -m tools.api <команда> --help`.
+`tmp/` существующего прогона, никогда в исходники проекта (без `--run-root` и вне `<run>/tmp/` код откажет).
+`model-response` без `--out` печатает в stdout весь артефакт (сотни КБ): передавай `--out <run>/tmp/<имя>.json --run-root <run>` и читай
+из ответа только `result.path`, `result.content_digest`, `output_bytes`, `warning`. Аргументы — `python -m tools.api <команда> --help`.
 
-Перед каждым шагом модели — разметка, пачка генератора, часть ревью, автоматизация — проверь
+Порядок, на котором спотыкаются чаще всего: запрос стадии (`model-request`) и ответ (`model-response`) — разными командами, не одной цепочкой;
+`step-inputs` и `step_size` — после `model-request` стадии; `--input-file` плана — абсолютный путь; `--input-digest` разметки — из
+`context_marker_parts plan`.
+
+Перед каждым шагом модели — разметка, пачка генератора, часть ревью — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
-для разметки одним батчем. Генератор и автоматизация — после `tools.api model-request` этого шага:
-`--run <run_id> --stage tc-generator:<batch>` (`tc-reviewer:canonical`, `tc-to-autotest:rN`, `autotest-reviewer:rN`); файлы входа код берёт
+для разметки одним батчем. Генератор — после `tools.api model-request` этого шага:
+`--run <run_id> --stage tc-generator:<batch>` (ревью — `tc-reviewer:canonical`); файлы входа код берёт
 по журналу прогона из `input_digests` опубликованного запроса и печатает в `input_files` (`tools.api step-inputs` и отчёт — те же байты). Вход,
 которого нет в журнале (или два файла журнала с одним digest), — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
-одной строкой). Для `tc-to-autotest:rN` и `autotest-reviewer:rN` там же `java_level` — уровень Java модуля по его сборке — и `junit_params` (есть ли junit-jupiter-params для групп `param_group`);
-передай его генератору и ревьюеру как ограничение API. Для `tc-generator:<batch>` там же может быть файл
-`existing-tests.md` (basis «карта», FaT-EC) — карта существующих тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
+одной строкой). Для `tc-generator:<batch>` там же может быть файл `existing-tests.md` (basis «карта», FaT-EC) — карта существующих
+тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
 (роль добавляет её SKILL.md и references; `--run` записывает шаг и байты в run, их покажет
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить
@@ -287,21 +252,23 @@ Run остаётся связан с исходной project/module identity.
    пачка k после принятого ответа пачки k−1, не параллельно.
    `model-request` без `--input-digest` берёт входы пачки из журнала (marker, context-receipts плана, plan, header,
    с пачки 2 — capabilities прошлых пачек: сначала `tools.api prior-capabilities --run-root <run> --attempt <attempt_id>
-   --batch-id <id>`); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров,
-   автотестов) не считай: пропущенные ставит `model-response` (`filled`), неверные отказывает до записи
+   --batch-id <id>`); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров)
+   не считай: пропущенные ставит `model-response` (`filled`), неверные отказывает до записи
    (`MODEL_RESPONSE_DIGEST_MISMATCH`, с верным значением) — это ошибка ответа, на неё единственный повтор стадии.
    Бери digests из результатов tools, не вычисляй их текстом модели. Plan/header —
    commitments, их содержимое и семантику проверяет существующая batch assembly.
-   Ответ генератора — голый fragment (без конверта `artifacts`). До `model-response` проверь файл ответа:
-   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>` (`--context-receipt` — один receipt:
-   `context_receipt_digest` плана, первый по `batch_index`; с пачки 2 —
-   `--prior-fragment <f>` на каждую прошлую пачку: та же capability — те же байты). До `model-response` пачки — только
-   `validate-fragment`: `assemble` на части пачек всегда отказывает (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет).
-   Отказ `validate-fragment` — ошибка ответа: на неё идёт единственный повтор стадии (`retry_prompt` — текст отказа);
+   **Фрагмент** — голый объект (без конверта `artifacts`); образец структуры — [fragment-sample.md](references/fragment-sample.md),
+   схема — `schemas/candidate-fragment.schema.json`. Во фрагмент входит `context_receipt` — квитанция контекста пачки **целиком**
+   (файл receipt как есть, не её digest); digest-поля ставит код.
+   До `model-response` проверь файл ответа: `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f>
+   --run-root <run>` (`--run-root` — тогда отказ попадает в журнал прогона и в отчёт; `--context-receipt` — один receipt:
+   `context_receipt_digest` плана, первый по `batch_index`). С пачки 2 — `--prior-fragment <f>` на каждую прошлую пачку: **записанный
+   ответ** пачки (`path` из вывода её `model-response`, он же `read-model-artifact`), а не твой исходный файл ответа без заполненных
+   digest. До `model-response` пачки — только `validate-fragment`: `assemble` на части пачек всегда отказывает (`BATCH_PARTITION_CONFLICT`,
+   фрагментов ещё нет). Отказ `validate-fragment` — ошибка ответа: на неё идёт единственный повтор стадии (`retry_prompt` — текст отказа);
    после `model-response` ответ стадии не заменить. Повтор один: код отказывает при `--transport-attempts` больше 2 и при замене
    записанного ответа; отказанные ответы журнал пока не считает (учёт — FaT-AB2), лимит держишь ты. `assemble` и `validate-canonical` из п.4 —
    после ответа последней пачки, на всех фрагментах.
-   `CANDIDATE_PUBLISHED` для exact digest `model-response` пишет сам (так же для `tc-to-autotest:rN`).
 4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
    --run-root <run> --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
@@ -317,7 +284,8 @@ Run остаётся связан с исходной project/module identity.
    HTML/CSV никогда не становятся downstream model input.
 
 Human-facing canonical поля обязательны на русском; technical tokens сохраняются
-exact. Не ограничивай число requirements/cases искусственным потолком.
+exact. Не ограничивай число requirements/cases искусственным потолком. Условия работы над тестами (подмена репозиториев заглушками,
+режим запуска) в человеческие поля — предусловия, шаги, ожидания — не пишутся: ревьюер вернёт на доработку весь набор.
 
 ## 4. Выполни одно authoritative canonical review
 
@@ -329,16 +297,19 @@ evidence и provenance. Ревью — **две команды**; события
    (assemble → validate-canonical → review-publish), если он ещё не опубликован, строит пакет и границу ревью, пишет
    `REVIEW_REQUESTED` и запрос ревьюера (`MODEL_REQUESTED`: оба digest — кандидата и пакета — он знает сам). Повтор той же
    команды ничего не меняет; другой ревьюер — `REVIEW_ALREADY_OPEN`. В выводе `next_step` — следующая команда.
-2. Вызови `tc-reviewer` в fresh invocation (ревьюер читает пакет, вид кандидата — `tools.review_view`, ниже) и сохрани его ответ файлом.
+2. Вызови `tc-reviewer` в fresh invocation (ревьюер читает пакет, вид кандидата — `tools.review_view`, ниже) и сохрани его ответ файлом
+   `<run>/tmp/reviewer-answer.json`.
 3. `tools.api review-select --run-root <run> --attempt <id> --output-dir <dir> --verdict <файл ответа ревьюера>` — записывает
    ответ (`MODEL_RESPONSE_RECEIVED`), закрывает сессию и выбирает ревизию. Ответ не прошёл проверку — отказ называет ошибку, ничего не
    записано: исправленный ответ отдай единственным повтором стадии (`--transport-attempts 2`). Без `--verdict` и `--reviewer-session`
    команда берёт последнюю ревизию журнала сессии (ответ уже записан, сессия закрыта `review-abort`, выбор повторяется). Файлы пакета
    (`--candidate`, `--candidate-receipt` …) не нужны: переданный файл код только сверяет с журналом (`REVIEW_INPUT_MISMATCH`).
-   Каталог `--output-dir` один на всё ревью — тот, куда опубликован кандидат: `tools.api review-select … --output-dir <dir>` и
-   `review-open` берут его от тебя, угадывать его код не станет.
    **`--dry-run`** — все проверки вердикта без записи: журнал и файлы прогона остаются байт в байт; вывод — что было бы опубликовано
    (`would_publish`) или отказ. Закрытая попытка — `ATTEMPT_TERMINAL` сразу.
+
+**`--output-dir`** — один каталог на всё ревью, внутри проекта и вне `.git`: возьми `<run>/published` (он внутри
+`.pilot-runs/<run_id>/`). Тот же путь — в `review-open`, `review-select` и `review-publish`; в нём лягут кандидат и HTML/Markdown/CSV
+(их человек читает). Угадывать его код не станет; путь вне проекта — отказ `OUTPUT_DIR_OUTSIDE_PROJECT`.
 
 `--fresh-context` — твоё честное заявление: `yes` — только если ревьюер отдельный субагент или вызов без истории генерации; ревью
 в этой же сессии — `no`, и оно допустимо только в прогоне, принявшем SELF (§1: `scan --accept-self-review` или
@@ -348,19 +319,22 @@ evidence и provenance. Ревью — **две команды**; события
 бюджет, `distinct_invocations` (твой id против id генератора из журнала) и `evidence_digest` считает код. Бюджет меньше пакета —
 `review-open` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
 
-`review-open` печатает `for_human` — инструкцию человеку для ревью в свежей сессии (новая сессия или `/clear`, вставить «проведи ревью
-test-skills <run_id>», ответ ревьюера — файл, затем `review-select --verdict <файл>`) и `reviewer_view` — вид ревьюера с контрольными
-ошибками (канарейками): код сам вставил их в вид, а не в кандидата; карту не читай и ревьюеру не показывай. Вывод `model-request` для
-`tc-generator:*` содержит `nonce`: вставь строку «Контрольное слово: <nonce>» в начало задачи генератору, в ответ и файлы слово не копируй.
-Ревьюер называет слово в `codeword_seen` — названное слово значит, что он видел задачу генератора (SELF).
-`review-select` сообщает `review_canaries` (поймано из посеянных) и `codeword`; `REVIEW_CANARY_ONLY_VERDICT` / `REVIEW_ONLY_CANARY_FIXES` —
-вердикт держится на контрольных ошибках, ничего не записано: ревьюер оставляет их находками `INFO` и даёт вердикт по остальному.
+**Ревью в свежей сессии.** `review-open` печатает `for_human` — инструкцию человеку (новая сессия или `/clear`, вставить «проведи ревью
+test-skills <run_id>»; ответ ревьюера — файл, затем `review-select --verdict <файл>`): покажи её человеку как есть и жди файла ответа.
+Контрольные ошибки (канарейки) код вставил в `reviewer_view` — вид ревьюера, не в кандидата: карту канареек не читай и ревьюеру не
+показывай. Вывод `model-request` для `tc-generator:*` содержит `nonce`: вставь строку «Контрольное слово: <nonce>» в начало задачи
+генератору; в ответ и файлы слово не копируй. Ревьюер называет слово в `codeword_seen` — названное слово значит, что он видел задачу
+генератора (SELF). `review-select` сообщает `review_canaries` (поймано из посеянных) и `codeword`. Отказы: `REVIEW_CANARY_ONLY_VERDICT` /
+`REVIEW_ONLY_CANARY_FIXES` — вердикт держится на контрольных ошибках, ничего не записано: ревьюер оставляет их находками `INFO` и даёт
+вердикт по остальному; `REVIEW_CANARY_MISMATCH` — файлы пакета ревью не совпали с журналом: свои файлы не подставляй, повтори
+`review-open`. В отчёте «ревью слабое: пропущено N из M» и `REVIEW_UNRELIABLE` (не замечена ни одна) — человеку перечитать набор самому.
 
-Для прогонов v0.1 (начатых до P2): старый порядок — `session-start` → `review-open --session-start` → `review-requested` →
-`model-request` / `model-response` для `tc-reviewer:canonical` → `complete-review` → `review-select --reviewer-session` — работает ещё один
-выпуск и печатает `deprecated: "tools.api review-open …"`; события те же.
-
-Ревью без свежего контекста допускается только по флагу из §1 (вопрос задаётся до scan).
+**Ревьюер-субагент.** В его задаче назови `run_root` и `attempt_id` и разреши только эти команды (cwd пакета; все читают, ничего не меняют):
+`python -m tools.api read-receipt --run-root <run> --attempt <id> --kind reviewer-session-boundary --event ARTIFACT_READ_BACK` (граница
+ревью: оба `--kind` и `--event` обязательны; без них команда отказывает), `python -m tools.api read-effective --run-root <run>
+--attempt <id>`, `python -m tools.api read-ledger --run-root <run> --attempt <id> [--digest <d>]`, и `python -m tools.api review-evidence
+--run-root <run> --attempt <id> --path <путь в проекте>` — когда нужен файл проекта. Дай ему вид `review-views/<sha>.md`. Не давай: диалог
+и reasoning генератора, карту канареек, `nonce`, чужие прогоны. Не запрещай общим запретом файлы прогона: проверка происхождения обязательна.
 
 Эти события ограничивают одну logical stage invocation. Поле
 `MODEL_RESPONSE_RECEIVED.transport_attempts` равно `1` без retry или `2` после
@@ -369,18 +343,15 @@ test-skills <run_id>», ответ ревьюера — файл, затем `re
 `retry_prompt` — отдай роли исходный вход и этот текст как есть. Перед повтором проверь вход
 (исходный + `retry_prompt`) тем же `step_size`, что и первый вызов. Третьей попытки нет — стоп.
 Кардинальность C-lite фиксируется самими
-`EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs reviewer ledger. Эти внутренние действия
-не являются повторениями release campaign. Adaptive `1 -> 3 -> 5` запускается только
-отдельной явной release qualification, никогда обычным production run.
+`EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs reviewer ledger.
 
 Внутри session допустимы zero or more bounded C-lite
 `EVIDENCE_REQUESTED/EVIDENCE_PROVIDED` pairs. Запрещены per-batch/hierarchical reviewers,
 вторая session, generator dialogue/reasoning и больше одного authoritative verdict.
 Successful session содержит ровно один verdict; explicit terminal pre-verdict abort,
 включая `REVIEW_CONTEXT_LIMIT`, содержит ноль.
-Ревьюер просит файлы проекта — `tools.api review-evidence --path <путь в проекте> [--path …]`: код публикует receipt
-и дописывает пару в ledger (digest считает код; `review-select` берёт evidence из ledger). Не хватает бюджета — отказ
-`REVIEW_CONTEXT_LIMIT`: закрой сессию `tools.api review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json`
+Не хватает бюджета на evidence — отказ `REVIEW_CONTEXT_LIMIT`: закрой сессию
+`tools.api review-abort --reason REVIEW_CONTEXT_LIMIT --out <run>/tmp/session.json --run-root <run> --attempt <id>`
 и вызови `review-select` с этим `--reviewer-session`. Ответ ревьюера дважды не прошёл проверку или `review-select`
 отказал, а сессия ждёт вердикта — то же с `--reason REVIEW_UNUSABLE`.
 
@@ -389,99 +360,35 @@ Successful session содержит ровно один verdict; explicit termin
 `review-views/<sha>.md` (одинаковый кандидат — одинаковые байты); размер шага —
 `step_size --run <run_id> --files <вид> --role tc-reviewer --step tc-reviewer:canonical`.
 
+Для прогонов v0.1 (начатых до P2): старый порядок — `session-start` → `review-open --session-start` → `review-requested` →
+`model-request` / `model-response` для `tc-reviewer:canonical` → `complete-review` → `review-select --reviewer-session` — работает ещё один
+выпуск и печатает `deprecated: "tools.api review-open …"`; события те же.
+
 `ПРИНЯТО` выбирает exact candidate. `AUTO_FIX_APPLIED` допускает только один complete
 successor revision 2 и тот же authoritative verdict; ревьюер отдаёт его как `successor_edits`
 (точные правки человеческих полей), код строит revision 2 из кандидата сам. Любая смысловая/частичная/третья
 correction — `REWORK/PARTIAL`. Без host isolation evidence записывай
 `independence_unverified` и не принимай branch.
 
-При отказе или terminal pre-verdict abort не вызывай automation даже в `local-pilot-v1`.
-Закрой раннюю отрицательную ветку через trace/finalization с
-`materialization=execution=NOT_APPLICABLE`, исходной причиной и `accepted=false`.
+При отказе или terminal pre-verdict abort закрой раннюю отрицательную ветку через `finish` с исходной причиной и `accepted=false`.
 
-## 5. Закрой выбранный профиль
+## 5. Закрой попытку
 
-### `cases-only-v1`
-
-Не вызывай automation, materialization или executor. После ревью закрой попытку одной командой
+Автотесты, материализация и executor в этой поставке не вызываются. После ревью закрой попытку одной командой
 `python -m tools.run_pipeline finish --project <abs> --run <run_id>`: она сама помечает их
 `NOT_APPLICABLE` и проходит закрытие. Результат draft/artifact-only: `verification=NOT_APPLICABLE`,
-`accepted=false`; green full-pipeline exit 0 запрещён. Прогон, пониженный до cases-only в
-FaT-R (`requested_policy_profile: local-pilot-v1`), закрывается так же.
-
-### `local-pilot-v1`
-
-Для model request `tc-to-autotest:rN` передай `input_digests` ровно как
-`[effective.document_digest, effective.effective_bundle_receipt_digest]` из
-`python -m tools.api read-effective`. Перед вызовом построй вид документа для генератора (FaT-AV):
-`python -m tools.review_view --project <abs> --run <run_id> --effective` — `step_size`/`step-inputs` отдают этот вид
-вместо JSON документа, квитанцию — в `input_bindings` (носитель `effective-canonicals` не читай). Для `autotest-reviewer:rN` — ровно
-`[boundary.automation_digest, boundary.digest]` из read-back
-`automation-review-boundary-rN` (`tools.api read-receipt --kind automation-review-boundary-rN --event ARTIFACT_READ_BACK`). Порядок значим. Это привязки артефактов этапа,
-а не hashes всех прочитанных skill/schema/source файлов или полного prompt.
-Exact transport input/output bytes сохраняются отдельно; их digest не заменяет
-эти поля. Не переписывай опубликованный request после вызова модели.
-
-1. Вызови `tc-to-autotest` для effective canonical. `content_digest`, `source.*` и digest предшественника не считай:
-   пропущенные ставит `model-response`.
-2. Открой attempt-owned automation review boundary (`tools.api open-automation-boundary --facts <f>`); файл facts строит
-   код из журнала после `model-response` стадии `tc-to-autotest:rN`, руками его не собирай:
-   `tools.api automation-boundary-facts --revision N --reviewer-invocation-id <id> --fresh-context yes|no
-   --out <run>/tmp/auto-facts-rN.json` (заявления — как для `session-start` в §4). Затем запиши
-   `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
-   вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
-3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует
-   execution-inputs и материализует принятую автоматизацию (generated delta) из ответов
-   журнала, если этого ещё не было; partial materialization по-прежнему запрещает execution.
-   Нет принятого static review — exec отвечает `EXECUTION_NOT_PREPARED` с подсказкой.
-4. exec строит closed execution request сам: adapter ID, exact frozen
-   interpreter/wrapper/executable, build profile и typed params; user shell strings и
-   `argv_template` запрещены.
-5. exec запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
-   системный `mvn` или `gradlew`. Системный Maven использует закрытый адаптер
-   `maven:selected-symbols-v1` и поле `executable`; абсолютный launcher и его bytes
-   связаны с baseline. Hash launcher не доказывает идентичность всех библиотек Maven/JDK.
-   Maven `test` читает Surefire: если проект требует Failsafe/integration-test lifecycle,
-   этот маршрут недостаточен — сохрани блокер. Не исправляй тест после runtime `FAIL`.
-
-Исполнение и всё закрытие — одна команда из cwd пакета; шесть квитанций она берёт из журнала
-попытки сама (явный путь `--canonical-document` и т. п. — необязательная сверка тех же байтов):
-
-```powershell
-python -m tools.run_pipeline exec --project "$project" --module "$moduleId" --run "$runId"
-```
-
-Resume после `EXECUTION_STARTED` идёт штатной веткой восстановления той же командой, а не
-повторным запуском тестов.
-
-Controller/process timeout без authoritative framework result даёт `UNKNOWN`.
-Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`. После
-`EXECUTION_STARTED` interruption не перезапускай автоматически.
+`accepted=false`; green full-pipeline exit 0 запрещён.
 
 ## 6. Закрытие
 
-`exec` (local-pilot) и `finish` (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации) сами проходят
-линейное закрытие в фиксированном порядке: materialization → execution → execution trace →
-dispositions → pre-finalization trace → finalization → terminal result и event. Повторный вызов
-возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
-называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную. Цепочка автоматизации не может
+`finish` (в том числе ранний отрицательный исход ревью, окончательный отказ) сам проходит
+линейное закрытие в фиксированном порядке: trace → pre-finalization trace → finalization → terminal result и event.
+Повторный вызов возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
+называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную. Цепочка не может
 продолжиться — `finish --abandon <код>` из fix; список кодов закрытый, и `finish` сам откажет, если выход другой.
-Частичная автоматизация (кейсы с блокерами канона ручные): `exec` печатает `automation_split` — передай человеку его
-`summary` как есть («автоматизировано N из M, вручную K: …»); итог `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
-
-Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` —
-карантин: упавшие методы помечаются `@Disabled`/`xfail`, прошедшие остаются (`QUARANTINED`); если
-сопоставить упавшие методы нельзя — очистка с `QUARANTINE_UNRESOLVED`; `NOT_RUNNABLE` — очистка
-только byte-identical pipeline-owned файлов; `UNKNOWN` — очистка
-запрещена (`PRESERVED_EXECUTION_UNKNOWN`); частичная материализация — исполнения нет.
 `valid=false` финализации — terminal с `FINALIZATION_INVALID` и `accepted=false`.
 
-После `finish`/`exec` с `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку
-`quarantine_unresolved` как есть. `@Disabled`/`xfail` в этом прогоне не снимай и тесты не чини.
-`scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
-Строки `style_checks_skipped` и `format_hint` из вывода `exec`/`finish` передай человеку как есть; файлы сам не форматируй.
-
-Если в `.skillsrc` задан `projection.zephyr.template`, после закрытия попытки (`exec` или `finish`) один раз
+Если в `.skillsrc` задан `projection.zephyr.template`, после закрытия попытки один раз
 запусти `python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`
 выбранной ревизии. Он кладёт рядом `.zephyr-import.csv` с полями из шаблона — этот файл человек импортирует
 в Zephyr. Ошибка `ZEPHYR_TEMPLATE_*` (шаблон) или `ZEPHYR_EXPORT_*` (`NOT_CLOSED` — попытка не закрыта,
@@ -491,7 +398,7 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 В конце прогона (после закрытия или остановки) один раз запусти
 `python -m tools.run_pipeline report --project <abs> --run <id>`: он пишет в каталог run `report.md`,
 `report.json` и `questions-for-analyst.md` без кода и текста спеки — назови человеку эти пути.
-Если в выводе `finish`/`status` есть `review_notes` или `autotest_review_notes` (ревью приняло кейсы или автотесты с замечаниями-мелочами), назови человеку
+Если в выводе `finish`/`status` есть `review_notes` (ревью приняло кейсы с замечаниями-мелочами), назови человеку
 их число и путь одной строкой; кейсы не меняй и вердикт не пересматривай — текст замечаний в `questions-for-analyst.md`.
 
 ## Resume и дрейф
@@ -509,13 +416,12 @@ Interruption между model stages оставляет попытку nontermin
 После scan файлы проекта и `.skillsrc` не меняются до закрытия попытки. Если `status` показал `drift`,
 передай человеку пути из `drift.changed` и `drift.fix` как есть: вернуть файлы или начать новый прогон
 командой `drift.command`; сам файлы не правь и прогон не начинай. После `finish` с `next_run`
-(ТРЕБУЕТ ДОРАБОТКИ, отказ автоматизации) следующий заход — команда `next_run.command` как есть.
+(ТРЕБУЕТ ДОРАБОТКИ) следующий заход — команда `next_run.command` как есть.
 Terminal attempt immutable; одновременно active может быть только один.
 
 ## Stop conditions
 
 Остановись без guess при invalid/unsupported version, ambiguous module, unsafe path,
 required invention, unavailable tool/model, schema/semantic/provenance failure, secret
-exposure, baseline drift, stale digest/readback, unproved reviewer isolation, partial
-materialization или выходе за authorized scope. Сохрани factual partial/waiting evidence
-и не выдавай `implemented_unverified` за verified readiness.
+exposure, baseline drift, stale digest/readback, unproved reviewer isolation или выходе за authorized scope.
+Сохрани factual partial/waiting evidence и не выдавай `implemented_unverified` за verified readiness.

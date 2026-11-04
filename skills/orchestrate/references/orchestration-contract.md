@@ -27,10 +27,7 @@ Human docs не переопределяют machine truth. Каждый artifac
 | Сборка | `tools.api assemble`, `tools.api review-publish` | semantic/provenance audit, UNREVIEWED bundle/readback |
 | Canonical review | `tools.api session-start`; `tools.api review-open`; `tools.api review-requested`; `model-request`/`model-response`; `tools.api review-evidence`, `tools.api review-abort`; `tools.api read-ledger` | complete package, отдельный reviewer, exact boundary/ledger |
 | Выбор | `tools.api complete-review` (сессия ревьюера с вердиктом), `tools.api review-select`, `tools.api read-effective` | immutable selected document и receipt |
-| Автоматизация | `model-request`/`model-response`; `tools.api automation-boundary-facts`, `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
-| Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
-| Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |
-| Закрытие | `tools.run_pipeline exec` / `tools.run_pipeline finish` | trace/dispositions/finalization/terminal по выбранной ветке |
+| Закрытие | `tools.run_pipeline finish` | trace/finalization/terminal |
 | Ход/resume | `tools.run_pipeline status --project <path> --run <id>` | last confirmed stage, next artifact, stop reason, evidence paths и сохранённые warnings; чтение не запускает recovery |
 
 Аргументы команды — в `python -m tools.api <команда> --help`; modules не перечитывай. Envelope и digests
@@ -57,9 +54,7 @@ Inventory учитывает файлы выбранного модуля, paren
 2. До scan/model call создай/readback-проверь authorization, run manifest и
    `RUN_CREATED`.
 3. Read-only inventory -> exact module -> authoritative `.skillsrc` -> frozen
-   baseline выбранного профиля. Для cases-only нужны точные source/config/requirements,
-   для local-pilot дополнительно все execution facts. Существующее событие
-   `EXECUTION_BASELINE_FROZEN` подтверждает applicable receipt, не разрешение запуска.
+   baseline выбранного профиля. Нужны точные source/config/requirements.
    Все boundary возникают до `ATTEMPT_CREATED`.
 4. Создай единственный nonterminal attempt. Persist/readback-проверяй event/artifact
    identity и digest на каждом переходе.
@@ -75,40 +70,19 @@ Inventory учитывает файлы выбранного модуля, paren
 7. Открой одну fresh canonical reviewer session: `(REQUESTED -> PROVIDED)*`, затем один
    authoritative verdict и completion; либо explicit terminal abort до verdict. Exact
    candidate digest получает `REVIEW_REQUESTED` (`tools.api review-requested`) до reviewer `MODEL_REQUESTED`;
-   так же для `autotest-reviewer:rN` на digest кандидата `tc-to-autotest:rN`.
 8. Выбери candidate или единственный complete successor (из `successor_edits` его строит код). Передай downstream только
    effective JSON/digest.
-9. Для `cases-only-v1` зафиксируй materialization/execution/dispositions как
-   `NOT_APPLICABLE` и перейди к trace/finalization.
-10. Для `local-pilot-v1`: automation -> static review -> optional one complete
-    correction/review -> generated delta -> per-file materialization -> one exact
-    project-native execution.
-11. Построй execution trace, определи disposition всего generated set, затем выполни
-    pre-finalization trace -> finalization receipt/readback -> terminal result -> derived
-    terminal trace -> terminal event.
+9. Зафиксируй materialization/execution/dispositions как `NOT_APPLICABLE` и перейди к trace/finalization:
+   pre-finalization trace -> finalization receipt/readback -> terminal result -> derived
+   terminal trace -> terminal event.
 
-## Project и execution boundary
+
+## Project boundary
 
 Pipeline работает в обычном рабочем проекте и не создаёт isolated copy. Разрешены
-read-only inventory и новые pipeline-owned generated-test files в selected active test
-root. Запрещено менять application source, existing tests, config, lock files,
-dependencies, permissions или behavior ради PASS.
-
-Project code запускается только при `local-pilot-v1`, explicit run authorization,
-complete materialization и accepted static review. Closed adapter получает:
-
-```text
-adapter_id + exact interpreter/wrapper/executable + build_profile + typed adapter_parameters
-```
-
-Shell strings, `argv_template`, automatic fallback и cross-module orchestration
-запрещены. Environment receipt хранит только allowlisted safe key IDs/labels без values.
-`maven:selected-symbols-v1` разрешает системный Maven через `executable` и замораживает
-абсолютный путь и digest launcher. Wrapper предпочтителен при создании отсутствующей
-конфигурации; существующая конфигурация authoritative. Оба Maven-адаптера запускают
-точные reviewed selectors через `test` и читают Surefire. Отдельный integration-test
-lifecycle требует подтверждённого закрытого маршрута; произвольная shell-команда его
-не заменяет. Cases-only не требует фиктивного runtime и не вызывает project code.
+read-only inventory и запись только в `<project>/.pilot-runs/`, `<project>/.skillsrc` и каталог
+публикации `--output-dir` внутри проекта. Запрещено менять application source, existing tests, config,
+lock files, dependencies, permissions. Код проекта не запускается.
 
 ## Reviewer cardinality
 
@@ -116,32 +90,12 @@ Canonical branch имеет максимум одну reviewer session и мак
 verdict. Successful/effective canonical требует ровно один verdict. Zero разрешён только
 для explicit terminal pre-verdict abort, включая `REVIEW_CONTEXT_LIMIT`.
 
-Automation имеет одну static reviewer invocation на revision и не более двух полных
-versions/reviews: initial + одна correction. Model self-attestation не доказывает fresh
-context; это делает только host/controller evidence.
-
-## Generated set и disposition
-
-Каждый generated file имеет path, exact bytes/digest, materialization receipt и конечный
-disposition. Execution не начинается при partial materialization.
-
-| Branch | Disposition |
-|---|---|
-| authoritative `PASS` + valid trace | unchanged file `RETAINED` |
-| `FAIL` (policy `quarantine`, default) | failed methods marked, file `QUARANTINED`; none failed in file → `RETAINED`; unresolved → `CLEANED` + `QUARANTINE_UNRESOLVED` |
-| `FAIL` (policy `cleanup`) / `NOT_RUNNABLE` | byte-identical pipeline-owned file `CLEANED` |
-| `UNKNOWN`, unchanged | `PRESERVED_EXECUTION_UNKNOWN` |
-| `UNKNOWN`, drifted | `PRESERVED_CONTENT_CONFLICT` + unknown evidence |
-| partial materialization | safe cleanup либо `NOT_MATERIALIZED` |
-
-Если cleanup нельзя доказать безопасным, сохрани file с exact reason и
-`accepted=false`. Cleanup при `UNKNOWN` запрещён.
+Model self-attestation не доказывает fresh context; это делает только host/controller evidence.
 
 ## Finalization и result
 
 Finalization verifier читает pre-finalization trace, заканчивающийся dispositions.
-Materialization/execution/dispositions проверяются только когда required текущим
-profile/branch; иначе они `NOT_APPLICABLE`, не missing.
+Materialization/execution/dispositions для этого профиля `NOT_APPLICABLE`, не missing.
 
 Receipt `valid=false` не препятствует terminal transition: terminal reason становится
 `FINALIZATION_INVALID`, а прежняя stage cause остаётся immutable evidence. Verification
@@ -153,16 +107,12 @@ Receipt `valid=false` не препятствует terminal transition: termina
 attempt_state + completion + verification + coverage + reason_code + accepted
 ```
 
-Нельзя преобразовывать `FAIL`, `UNKNOWN`, `NOT_RUNNABLE`, manual coverage или invalid
-finalization в PASS-подобный плоский status.
+Нельзя преобразовывать manual coverage или invalid finalization в PASS-подобный плоский status.
 
 ## Resume
 
 Waiting/model interruption продолжает тот же attempt только после validation frozen
-snapshot/config. Requirements/module/policy drift останавливает attempt: status называет изменённые пути, выход — вернуть файлы или новый scan. Late undeclared
-execution input закрывает текущий attempt как `NOT_RUNNABLE/BASELINE_INCOMPLETE`.
-Execution interruption даёт `UNKNOWN`; retry — только новый scan после
-доказанной остановки прежнего process scope.
+snapshot/config. Requirements/module/policy drift останавливает attempt: status называет изменённые пути, выход — вернуть файлы или новый scan.
 
 ## Release claim
 

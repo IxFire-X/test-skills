@@ -327,7 +327,7 @@ def test_ready_hints_at_the_choice_without_stopping(tmp_path: Path) -> None:
 
     report = check(_python_project(tmp_path, runtime=False), [], "cases-only-v1", "nested")
     row = next(item for item in report["checks"] if item["id"] == "review:isolation")
-    assert row["level"] == "OK" and "--accept-self-review" in row["fix"]
+    assert row["level"] == "OK" and "--accept-self-review" in row["details"]["self_review_scan"] and "fix" not in row
 
 
 def test_ready_hint_repeats_the_request_arguments(tmp_path: Path) -> None:
@@ -335,6 +335,6 @@ def test_ready_hint_repeats_the_request_arguments(tmp_path: Path) -> None:
     from tools.ready import check
 
     report = check(_python_project(tmp_path, runtime=False), ["docs/task.md"], "cases-only-v1", "nested")
-    fix = next(item for item in report["checks"] if item["id"] == "review:isolation")["fix"]
+    fix = next(item for item in report["checks"] if item["id"] == "review:isolation")["details"]["self_review_scan"]
     assert '--docs "docs/task.md"' in fix and '--module "nested"' in fix and "--profile cases-only-v1" in fix
     assert fix.endswith("--accept-self-review")

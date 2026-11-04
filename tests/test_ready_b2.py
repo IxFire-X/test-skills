@@ -50,9 +50,10 @@ def test_the_self_review_command_is_in_the_table_with_the_package_interpreter(tm
     from tools.ready import _table, check
 
     report = check(_python_project(tmp_path, runtime=False), ["docs/task.md"], "cases-only-v1", "nested")
-    fix = next(row for row in report["checks"] if row["id"] == "review:isolation")["fix"]
+    row = next(row for row in report["checks"] if row["id"] == "review:isolation")
+    fix = row["details"]["self_review_scan"]  # PT: data, not a fix of an OK row
     assert fix.startswith(f'"{sys.executable}" -m tools.run_pipeline scan') and fix.endswith("--accept-self-review")
-    assert fix in _table(report)
+    assert "fix" not in row and "--accept-self-review" not in _table(report)  # the SELF command is in details, not in the table
 
 
 def test_execution_rows_are_warnings_never_stops(tmp_path: Path) -> None:
@@ -77,7 +78,7 @@ def test_ready_target_previews_the_narrowed_context(tmp_path: Path) -> None:
     assert [row["id"] for row in wide["checks"] if row["level"] == "STOP"] == ["context:too-large"]
     narrow = check(project, [DOCS], profile="cases-only-v1", target="src/app.py")
     assert not [row for row in narrow["checks"] if row["level"] == "STOP"], narrow["checks"]
-    fix = next(row for row in narrow["checks"] if row["id"] == "review:isolation")["fix"]
+    fix = next(row for row in narrow["checks"] if row["id"] == "review:isolation")["details"]["self_review_scan"]
     assert '--target "src/app.py"' in fix and fix.endswith("--accept-self-review")
     completed = subprocess.run([sys.executable, "-m", "tools.ready", "--project", str(project), "--docs", DOCS, "--profile", "cases-only-v1",
                                 "--target", "src/app.py"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",

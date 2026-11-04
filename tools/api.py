@@ -359,7 +359,7 @@ def _parser() -> JsonArgumentParser:
             command.add_argument("--out", default=None)
         if not any(action.dest == "run_root" for action in command._actions):
             # an --out file is confined to <run>/tmp/: a command that has no run of its own takes the run for that check only
-            command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="with --out: the run whose tmp/ gets the file")
+            command.add_argument("--run-root", dest="run_root", type=Path, default=None, help="the run: --out writes into its tmp/; the refusals of the command are journaled there")
     return parser
 
 

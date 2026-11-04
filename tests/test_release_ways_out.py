@@ -92,7 +92,8 @@ def test_o1_left_is_refused_after_the_review_started(tmp_path: Path, capsys: pyt
 
 def test_n3_n4_the_texts_the_agent_reads() -> None:
     skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
-    assert "automation_split" in skill and "`PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`" in skill
+    mode_b = (ROOT / "skills" / "orchestrate" / "references" / "mode-b.md").read_text(encoding="utf-8")  # PT: mode B text of the development build
+    assert "automation_split" in mode_b and "`PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`" in mode_b and "automation_split" not in skill
     usage = (ROOT / "USAGE.md").read_text(encoding="utf-8")
     assert "`AUTOMATION_PARTIAL` — `TERMINAL + PARTIAL + PASS + accepted=false`" in usage
     generator = (ROOT / "skills" / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")

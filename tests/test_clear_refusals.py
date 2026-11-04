@@ -96,4 +96,7 @@ def test_the_same_directory_with_other_files_stays_a_receipt_refusal(tmp_path: P
 def test_the_orchestrate_skill_names_the_output_dir_of_select() -> None:
     text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
     # FaT-U5: review-select takes the --output-dir review-publish published to
-    assert "`tools.api review-select … --output-dir <dir>`" in text and "review-publish --run-root <run> --attempt <id> --output-dir <dir>" in text
+    # PT: one paragraph names the one directory of the whole review (`<run>/published`) for review-open, review-select and review-publish
+    flat = " ".join(text.split())
+    assert "**`--output-dir`** — один каталог на всё ревью" in flat and "`<run>/published`" in flat
+    assert "review-publish --run-root <run> --attempt <id> --output-dir <dir>" in flat and "review-select --run-root <run> --attempt <id> --output-dir <dir>" in flat

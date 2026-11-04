@@ -49,13 +49,13 @@ def test_every_skill_declares_its_permissions_in_one_key_after_name_and_descript
     assert len(SKILLS) == 6
 
 
-def test_the_declared_network_of_a_role_is_none_and_the_orchestrator_names_what_leaves_the_cases_only_profile() -> None:
+def test_the_declared_network_of_every_skill_is_none() -> None:
     for path in SKILLS:
         permissions = frontmatter(path)["permissions"]
         if path.parent.name != "orchestrate":
             assert permissions["network"] == "none" and permissions["external_delivery"] == "none" and permissions["dependencies"] == "none", path
         else:
-            assert permissions["network"].startswith("cases-only-v1: нет") and "pip агент не запускает" in permissions["dependencies"]
+            assert permissions["network"] == "нет" and permissions["external_delivery"] == "нет" and "pip агент не запускает" in permissions["dependencies"]
             assert "--output-dir внутри проекта" in permissions["write"]
 
 

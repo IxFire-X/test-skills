@@ -245,7 +245,7 @@ def _validate_bindings(contract: Mapping[str, Any], root: Path, errors: list[str
     else:
         for skill in CORE_SKILLS:
             path = SKILL_PATHS[skill]
-            if not (root / path).is_file():
+            if not (root / path).is_file() and not _left_out_by_profile(root, path):  # a role of mode B is not in a cases-only pack
                 errors.append(f"Skill path missing: {skill}")
     _error_if_not_equal(errors, "controller_schemas", contract.get("controller_schemas"), CONTROLLER_SCHEMAS)
     if contract.get("runtime_signatures") != EXPECTED_SIGNATURES:
