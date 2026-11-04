@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -75,23 +74,15 @@ def check_pack() -> dict[str, Any]:
                 crlf["fix"] if isinstance(crlf, dict) else "сверьте папку пакета с поставкой (файлы и SHA-256)", {"doctor": report})
 
 
-def check_git(project: Path) -> dict[str, Any]:
-    """Exactly the call of the pipeline (pilot_state._project_state_snapshot) when the project has .git."""
-    project = Path(project).resolve()
-    if not (project / ".git").exists():
-        return _row("git", CASES, "OK", "не git-проект: git не нужен")
-    try:
-        # FaT-SEC1: core.fsmonitor=false — a hook the project's .git/config names is never run
-        completed = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
-                                    "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    except OSError as error:
-        return _row("git", CASES, "STOP", f"в проекте есть .git, но git не запускается: {error}", "установите git и добавьте его в PATH")
-    if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["код " + str(completed.returncode)]
-        return _row("git", CASES, "STOP", f"git status проекта не прошёл: {detail[0]}",
-                    f'git -c safe.directory="{project.as_posix()}" -C "{project}" status — исправьте ошибку, которую он покажет')
-    return _row("git", CASES, "OK", "git status проекта работает")
+def _git_row(project: Path, profile: str) -> dict[str, Any]:
+    """The ``git`` row.  Only ``local-pilot-v1`` runs ``git`` (``tools/exec_git.py``): ``cases-only-v1`` never does — ``git status``
+    can run a clean filter or a hook of the project's own configuration."""
+    from tools import execution_gate
+
+    module = execution_gate.load("exec_git") if profile == "local-pilot-v1" else None
+    if module is None:
+        return _row("git", CASES, "OK", "git не вызывается: профиль cases-only-v1")
+    return module.check_git(project)
 
 
 def check_docs(project: Path, docs: Sequence[str]) -> list[dict[str, Any]]:
@@ -492,7 +483,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
         requested_profile = profile
     deps = check_deps()
     rows.append(deps)
-    rows.append(check_git(project))
+    rows.append(_git_row(project, profile))
     rows.extend(check_docs(project, docs))
     if deps["level"] != "OK":
         skipped = "пропущено до установки зависимостей пакета"

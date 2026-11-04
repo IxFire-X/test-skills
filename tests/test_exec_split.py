@@ -21,7 +21,7 @@ from tests.test_first_run import _python_project
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
-EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
+EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
 GATE = "execution_gate"
 
 # the process and network primitives: where they may be imported (the exec files, and the explicit exceptions below)
@@ -29,12 +29,11 @@ PRIMITIVES = {"subprocess", "socket", "ctypes", "signal", "http.client", "urllib
 ALLOWED_OUTSIDE_EXEC = {
     # a CI helper of the development tree, not part of the delivered profile
     "ci_gate.py": {"subprocess"},
-    # the git probe of ``ready`` and of the pilot state: removed with the cases-only delivery (P8a-2)
-    "ready.py": {"subprocess"},
-    "pilot_state.py": {"subprocess"},
     # the maintainer's list of delivery files (git ls-files / ls-tree) — a build-time tool of the package tree (P8a-2 A)
     "release_manifest.py": {"subprocess"},
-    # Windows file-system calls of the confined writer — no process, no network
+    # Windows file-system calls of the confined writer (CreateFileW without FILE_SHARE_DELETE pins the parent directory; NtSetInformationFile
+    # renames by handle) — fixed kernel32/ntdll calls, no process, no network, no library loading by name; the one ctypes of the cases-only
+    # profile, because every write of the pipeline goes through this module (tests/test_p8a2_no_git.py holds that line)
     "confined_output.py": {"ctypes"},
 }
 

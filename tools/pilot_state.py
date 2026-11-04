@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -832,7 +831,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
                 scan_request: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
     safe_auth = _validate_authorization(policy_profile, authorization)
     root_project = _project_root(project)
-    project_state = _project_state_snapshot(root_project)
+    project_state = _project_state_for(policy_profile, root_project)
     runs = root_project / ".pilot-runs"
     if runs.exists() and _is_reparse(runs):
         raise ValueError("unsafe run root")
@@ -6302,84 +6301,19 @@ def _scenario_observation_target(root: Path, attempt_id: str, scenario_id: str) 
     return root / "scenario-observations" / f"{attempt_id}.{scenario_id}.json"
 
 
-def _project_state_snapshot(
-    project: Path,
-    expected: Mapping[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    """Seal non-Git identity or the user-owned dirty paths present at run start."""
-    project = Path(project).resolve()
-    if not (project / ".git").exists():
-        if expected is not None and expected.get("kind") != "GIT_DIRECTORY":
-            raise ValueError("project Git state changed")
-        return _sealed({"kind": "GIT_DIRECTORY", "path": ".git", "entries": []})
+def _project_state_for(policy_profile: str, project: Path, expected: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """The project's git state for a run — only a ``local-pilot-v1`` run looks at git (``tools/exec_git.py``, through the gate).
 
-    completed = subprocess.run(
-        [
-            # FaT-SEC1: core.fsmonitor=false — a hook the project's .git/config names is never run
-            "git", "-c", "core.fsmonitor=false", "-c", f"safe.directory={project.as_posix()}", "-C", str(project),
-            "status", "--porcelain=v1", "-z", "--untracked-files=all",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise ValueError("project Git state is unavailable")
-    tokens = completed.stdout.split(b"\0")
-    status_by_path: dict[str, str] = {}
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        index += 1
-        if not token:
-            continue
-        if len(token) < 4 or token[2:3] != b" ":
-            raise ValueError("project Git status is invalid")
-        try:
-            status = token[:2].decode("ascii")
-            relative = token[3:].decode("utf-8").replace("\\", "/")
-        except UnicodeDecodeError as error:
-            raise ValueError("project Git status is invalid") from error
-        if "R" in status or "C" in status:
-            index += 1
-        if relative == ".pilot-runs" or relative.startswith(".pilot-runs/"):
-            continue
-        path = Path(relative)
-        if path.is_absolute() or ".." in path.parts or "\n" in relative or "\r" in relative:
-            raise ValueError("project Git status path is unsafe")
-        status_by_path[relative] = f"{status} {relative}"
+    A ``cases-only-v1`` run never starts ``git`` (``git status`` can run a clean filter or a hook of the project's own configuration),
+    so its manifest says ``project_state: null`` — "not taken", which no reader takes for "clean"."""
+    if policy_profile == "cases-only-v1":
+        return None
+    from tools import execution_gate
 
-    if expected is not None:
-        if expected.get("kind") != "GIT_TREE":
-            raise ValueError("project Git state changed")
-        expected_status = list(expected.get("status", ()))
-        expected_paths = [str(row.get("path")) for row in expected.get("files", ())]
-        if (
-            len(expected_status) != len(expected_paths)
-            or any(status_by_path.get(path) != status for path, status in zip(expected_paths, expected_status))
-        ):
-            raise ValueError("project dirty status changed")
-        selected = list(zip(expected_paths, expected_status))
-    else:
-        selected = sorted(status_by_path.items())
-        if not selected:
-            return None
-
-    files: list[dict[str, str]] = []
-    statuses: list[str] = []
-    for relative, status in selected:
-        target = project.joinpath(*relative.split("/"))
-        try:
-            target.resolve().relative_to(project)
-            content = target.read_bytes() if target.is_file() else b"<missing>"
-        except (OSError, ValueError) as error:
-            raise ValueError("project dirty file is unavailable") from error
-        statuses.append(status)
-        files.append({
-            "path": relative,
-            "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
-        })
-    return _sealed({"kind": "GIT_TREE", "status": statuses, "files": files})
+    module = execution_gate.load("exec_git")
+    if module is None:
+        raise ValueError("project state needs tools/exec_git.py: local-pilot-v1 is not offered by this package")
+    return module.project_state_snapshot(project, expected)
 
 
 def _terminal_retry_snapshot(run_root: Path, attempt_id: str) -> dict[str, Any]:
@@ -7001,7 +6935,7 @@ def publish_project_state_observation(
     elif before.get("kind") == "GIT_TREE":
         scenario_id = "dirty-git-preservation"
         precondition, action = "DIRTY_GIT_TREE", "RUN_PRESERVING_DIRTY_TREE"
-        after = _project_state_snapshot(project, before)
+        after = _project_state_for(str(attempt["policy_profile"]), project, before)
         if after != before:
             return None
     else:

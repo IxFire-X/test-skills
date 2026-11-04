@@ -157,7 +157,7 @@ def test_doctor_and_ready_pass_in_a_venv_without_packages(tmp_path: Path) -> Non
 
 
 def test_ready_checks_git_exactly_like_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import ready
+    from tools import exec_git as ready  # P8a-2 B: the check moved with the git file; only local-pilot-v1 runs it
 
     project = _python_project(tmp_path, runtime=False)
     assert ready.check_git(project)["level"] == "OK" and "не git" in ready.check_git(project)["message"]

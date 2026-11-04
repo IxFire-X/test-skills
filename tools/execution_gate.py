@@ -14,7 +14,7 @@ import importlib
 import importlib.util
 from types import ModuleType
 
-EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
+EXEC_MODULES = ("exec_commands", "exec_stand", "exec_probe", "exec_runner", "exec_git")
 LOCAL_PILOT = "local-pilot-v1"
 CASES_ONLY = "cases-only-v1"
 
