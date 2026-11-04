@@ -37,6 +37,9 @@ class BatchAssemblyError(ValueError):
             self.diagnostics = tuple(dict(row) for row in diagnostics)
         if fix:
             self.fix = fix
+        elif code == "BATCH_SEMANTIC_CONFLICT" and not diagnostics:
+            # PF-1: the table fix of this code sends the agent to ``diagnostics``; a refusal with none says where its reason is
+            self.fix = "причина названа в message — исправь её и повтори команду; других диагностик у этого отказа нет"
         super().__init__(f"{code}: {message}")
 
 
@@ -532,7 +535,9 @@ def _validate_context_receipt(receipt: dict[str, Any], expected_digest: str) -> 
     _schema_valid(receipt, _CONTEXT_SCHEMA, "context receipt")
     _self_digest_valid(receipt, "context receipt")
     if receipt["digest"] != expected_digest:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "context receipt does not match batch binding")
+        raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "context receipt does not match batch binding",
+                       "--context-receipt — квитанция этой пачки: её digest равен context_receipt_digest пачки в плане (первая по batch_index "
+                       "для пачки 1); возьми ту, на которую ссылается план, и положи её же в поле context_receipt фрагмента")
 
 
 def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]], batch: dict[str, Any],
@@ -542,8 +547,21 @@ def _earlier_fragments(plan: dict[str, Any], batches: dict[str, dict[str, Any]],
     by_batch = {item.get("batch_id"): item for item in fragments if isinstance(item, dict) and item.get("plan_digest") == plan["digest"]}
     missing = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch]
     if missing:
-        raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", f"batch {batch['namespace']} goes after {', '.join(missing)}: give the accepted "
-                                 "fragments of the earlier batches (--prior-fragment, one per batch)")
+        # PF-1: «not given» and «given, but not the recorded answer» are two refusals with two fixes: a fragment of the batch
+        # without the plan_digest of this plan is the agent's file, not what model-response recorded
+        unrecorded = [item["namespace"] for item in earlier if item["batch_id"] not in by_batch
+                      and any(isinstance(given, dict) and given.get("batch_id") == item["batch_id"] for given in fragments)]
+        if unrecorded:
+            raise _refusal("BATCH_PARTITION_CONFLICT", "/prior_fragment",
+                           f"batch {batch['namespace']} goes after {', '.join(missing)}: --prior-fragment of {', '.join(unrecorded)} is given, but it is "
+                           "not the recorded answer (its plan_digest is not this plan's)",
+                           "передай в --prior-fragment записанный ответ пачки — файл по path из вывода её model-response "
+                           "(или read-model-artifact), а не файл ответа агента; нужен тот, где код поставил digest и plan_digest")
+        raise _refusal("BATCH_PARTITION_CONFLICT", "/prior_fragment",
+                       f"batch {batch['namespace']} goes after {', '.join(missing)}: give the accepted fragments of the earlier batches "
+                       "(--prior-fragment, one per batch)",
+                       f"добавь --prior-fragment для каждой пачки раньше этой ({', '.join(missing)}): записанный ответ пачки — "
+                       "файл по path из вывода её model-response")
     return [by_batch[item["batch_id"]] for item in earlier]
 
 
@@ -674,6 +692,12 @@ def fill_fragment_bindings(fragment: dict[str, Any], plan: Mapping[str, Any]) ->
     return value
 
 
+def _refusal(code: str, path: str, message: str, fix: str) -> BatchAssemblyError:
+    """PF-1: a refusal that stands alone (a binding): one row of ``diagnostics`` and its own fix, so a fix never points at rows
+    the answer does not have."""
+    return BatchAssemblyError(code, message, [{"path": path, "code": code, "message": message, "fix": fix}], fix)
+
+
 def _row(code: str, path: str, message: str, fix: str | None = None, *, controller: str = "BATCH_SEMANTIC_CONFLICT") -> dict[str, str]:
     return {"path": path, "code": code, "message": message, "fix": fix or fix_for(code) or fix_for(controller) or ""}
 
@@ -719,7 +743,8 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
     and ``categories`` is laid out by the code first — what it changed is returned as ``{"normalized": [...]}``."""
     batches = _plan_batches(plan)
     if not isinstance(fragment, dict):
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment must be an object")
+        raise _refusal("BATCH_SEMANTIC_CONFLICT", "", "fragment must be an object",
+                       "ответ генератора — один JSON-объект фрагмента, без конверта artifacts и без обёртки")
     fragment, normalized = normalize_fragment(fragment)
     fragment = fill_fragment_bindings(fragment, plan)  # audit U2: the fields model-response would put there
     batch = batches.get(fragment.get("batch_id"))
@@ -731,13 +756,18 @@ def validate_fragment(fragment: dict[str, Any], plan: dict[str, Any], header: di
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "fragment ownership differs from plan")
     header_bytes = {key: value for key, value in header.items() if key != "digest"}
     if _digest(header_bytes) != batch["header_digest"]:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment/header digest binding is invalid")
+        raise _refusal("BATCH_SEMANTIC_CONFLICT", "/header_digest", "fragment/header digest binding is invalid",
+                       "--header — тот header, что опубликован для плана (его digest без поля digest равен header_digest пачки в плане): "
+                       "возьми его из publish-generator-input header, не пересобирай")
     _validate_context_receipt(context_receipt, batch["context_receipt_digest"])
     if not isinstance(fragment.get("context_receipt"), dict):
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment lacks its context receipt")
+        raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment lacks its context receipt",
+                       "добавь во фрагмент поле context_receipt — объект квитанции контекста пачки целиком, байт в байт тот же, что файл "
+                       "--context-receipt (его digest — context_receipt_digest пачки в плане); digest-поля код ставит сам, этот объект — нет")
     _validate_context_receipt(fragment["context_receipt"], batch["context_receipt_digest"])
     if fragment["context_receipt"] != context_receipt:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", "fragment context receipt differs from verified receipt")
+        raise _refusal("BATCH_SEMANTIC_CONFLICT", "/context_receipt", "fragment context receipt differs from verified receipt",
+                       "context_receipt фрагмента должен совпасть с файлом --context-receipt байт в байт: замени объект целиком, не правь поля")
     earlier = _earlier_fragments(plan, batches, batch, prior_fragments or []) if batch["ordinal"] > 1 else []
 
     rows: list[tuple[str, dict[str, str]]] = []  # (controller code, row)

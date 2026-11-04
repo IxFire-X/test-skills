@@ -133,7 +133,7 @@ def test_model_request_and_response_match_the_direct_calls(tmp_path: Path, capsy
                            "--artifact", str(answer)], capsys)
     assert code == 0, response
     assert response["result"]["content_digest"] == direct["content_digest"]
-    assert set(response["result"]) == set(_plain(direct))
+    assert set(response["result"]) == set(_plain(direct)) - {"artifact"}  # PF-1: the receipt of the record; the body is read-model-artifact's
     code, read = _api(["read-model-artifact", "--run-root", str(root), "--attempt", attempt_id, "--stage", "context-marker:baseline",
                        "--digest", direct["content_digest"]], capsys)
     assert code == 0 and read["result"] == _plain(pilot_state.read_model_stage_artifact(root, attempt_id, "context-marker:baseline", direct["content_digest"]))

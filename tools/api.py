@@ -85,8 +85,11 @@ def _cmd_model_request(a):
 
 
 def _cmd_model_response(a):
-    return pilot_state.publish_model_stage_artifact(a.run_root, a.attempt, a.stage, a.artifact.value, transport_attempts=a.transport_attempts,
-                                                    raw_bytes=a.artifact.raw_bytes)
+    published = pilot_state.publish_model_stage_artifact(a.run_root, a.attempt, a.stage, a.artifact.value, transport_attempts=a.transport_attempts,
+                                                         raw_bytes=a.artifact.raw_bytes)
+    # PF-1: the receipt of the record (digest, path, size, filled, normalized, warning), not the answer's body — hundreds of KB the agent
+    # already has; the body is read apart with read-model-artifact
+    return {key: value for key, value in published.items() if key != "artifact"}
 
 
 def _cmd_review_requested(a):
@@ -293,7 +296,8 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                          "--run-root", "--attempt", ("--exclude", str, "append", "optional"), ("--reason", str, None),
                          ("--continue", "flag")), None, ("plan", "published")),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
-                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
+                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None),
+                                                   ("--run-root", Path, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
     "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
     "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
@@ -385,7 +389,12 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
         return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
-    record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), getattr(args, "batch_id", None))
+    stage, batch = getattr(args, "stage", None), getattr(args, "batch_id", None)
+    if args.command == "validate-fragment":  # PF-1: the check of a batch's answer is a step of that batch's tc-generator
+        given = getattr(args, "fragment", None)
+        batch = given.get("batch_id") if isinstance(given, Mapping) else None
+        stage = f"tc-generator:{batch}" if isinstance(batch, str) else None
+    record_refusal(getattr(args, "run_root", None), args.command, code, stage, batch)
 
 
 # P2: the review in two commands; the nine of before work one more release and say so
