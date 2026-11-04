@@ -376,3 +376,107 @@ def test_the_fix_of_the_call_site_beats_the_table_and_the_errors_own_beats_both(
     assert error_fields(Refused("x"))["fix"]  # the table's
     assert "fix" not in error_fields(Refused("x"), table=False)  # the call site falls back to its own
     assert error_fields(Refused("x; fix: свой"), table=False)["fix"] == "свой"
+
+
+# --------------------------------------------------------------------------------------
+# P1-fix2: assemble lays out the same canon as validate-fragment and model-response (bug hunt 6, 6.1, 6.6, 6.7)
+# --------------------------------------------------------------------------------------
+
+def _shuffled_batch_one():
+    """The agent's file of batch 1: ids and categories not in the canon's order, no digest — validate-fragment accepts it."""
+    fragment, plan, header, context = _synthetic()
+    second = dict(fragment["requirements"][0], requirement_id=fragment["requirements"][0]["requirement_id"] + "-B", display_order=100)
+    fragment["requirements"].append(second)
+    fragment["source_to_canonical_mappings"][0]["canonical_requirement_ids"].append(second["requirement_id"])
+    first_id = fragment["requirements"][0]["requirement_id"]
+    fragment["test_cases"][0]["requirement_ids"] = [second["requirement_id"], first_id]
+    fragment["test_cases"][0]["categories"] = ["functional", "positive"]
+    fragment.pop("digest", None)
+    return fragment, plan, header, context
+
+
+def _others(plan: dict, context: dict) -> list[dict]:
+    return [_fragment(plan, context, index) for index in range(1, len(plan["batches"]))]
+
+
+def test_assemble_accepts_the_file_validate_fragment_accepted() -> None:
+    from tools.batch_assembly import assemble_candidate, validate_fragment
+
+    mixed, plan, header, context = _shuffled_batch_one()
+    assert validate_fragment(copy.deepcopy(mixed), plan, header, context)["normalized"]
+    candidate, _receipt = assemble_candidate(header, plan, [mixed, *_others(plan, context)])
+    case = candidate["test_cases"][0]
+    assert case["categories"] == ["positive", "functional"] and case["requirement_ids"] == sorted(case["requirement_ids"])
+
+
+def test_assemble_of_the_agents_file_and_of_the_recorded_answer_is_the_same_candidate_and_receipt() -> None:
+    from tools.batch_assembly import assemble_candidate, fill_fragment_bindings, normalize_fragment
+
+    mixed, plan, header, context = _shuffled_batch_one()
+    recorded = fill_fragment_bindings(normalize_fragment(copy.deepcopy(mixed))[0], plan)  # what model-response writes to the journal
+    others = _others(plan, context)
+    from_file = assemble_candidate(header, plan, [copy.deepcopy(mixed), *copy.deepcopy(others)])
+    from_journal = assemble_candidate(header, plan, [recorded, *copy.deepcopy(others)])
+    assert from_file == from_journal  # the candidate, the fragment digests and the receipt digest alike
+
+
+def test_assemble_does_not_change_the_files_it_was_given() -> None:
+    from tools.batch_assembly import assemble_candidate
+
+    mixed, plan, header, context = _shuffled_batch_one()
+    before = copy.deepcopy(mixed)
+    assemble_candidate(header, plan, [mixed, *_others(plan, context)])
+    assert mixed == before
+
+
+def test_a_refusal_of_the_canonical_audit_in_assemble_gives_all_rows_and_its_own_fix() -> None:
+    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+    from tools.json_cli import error_fields
+
+    context = _context_receipt()
+    header = dict(_header(), schema_version="1.1.0")  # param_group is of the 1.1.0 canon
+    plan = _plan(header, context)
+    fragment = _fragment(plan, context, 0)
+    fragment["test_cases"][0]["param_group"] = "PG-alone"  # a group may span batches: only assemble sees it is alone
+    fragment["digest"] = _self_digest({key: item for key, item in fragment.items() if key != "digest"})
+    assert validate_fragment(copy.deepcopy(fragment), plan, header, context) is None
+    with pytest.raises(BatchAssemblyError) as refused:
+        assemble_candidate(header, plan, [fragment, *_others(plan, context)])
+    assert refused.value.code == "BATCH_SEMANTIC_CONFLICT"
+    rows = refused.value.diagnostics
+    assert rows and rows[0]["code"] == "SEMANTIC_PARAM_GROUP_SINGLE" and all(row["fix"] and row["path"] for row in rows), rows
+    fields = error_fields(refused.value)
+    assert fields["fix"] and "validate-fragment" not in fields["fix"], fields  # not the circle back to the check that said ok
+
+
+def test_the_fix_of_a_canonical_order_is_true_for_assemble_too() -> None:
+    from tools.fixes import fix_for
+
+    for code in ("CANONICAL_REQUIREMENT_ID_ORDER", "CANONICAL_CATEGORY_ORDER"):
+        assert "assemble" in fix_for(code), code
+
+
+def test_the_skill_names_what_assemble_takes_as_the_fragment_file() -> None:
+    text = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    assert "`--fragment` — файл ответа пачки как есть или записанный ответ" in text
+
+
+def test_a_scope_pause_is_not_a_refusal_of_the_journal(tmp_path: Path, capsys) -> None:
+    from tests.test_scope_pause import _api, _paused_run, _plan_arguments
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts))
+    assert code == 2 and payload["code"] == "SCOPE_PENDING", payload
+    assert not (root / "refusals.jsonl").exists()  # the pause is routine; the report shows it, not the refusals
+
+
+def test_the_fix_of_an_invalid_argument_names_the_module_that_refused(capsys) -> None:
+    from tools.json_cli import JsonArgumentParser
+
+    for prog, module in (("python -m tools.api", "tools.api"), ("run_pipeline.py", "tools.run_pipeline")):
+        parser = JsonArgumentParser(prog=prog)
+        parser.add_argument("--known")
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--unknown"])
+        fix = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["fix"]
+        assert module in fix and (module == "tools.api" or "tools.api" not in fix), (prog, fix)

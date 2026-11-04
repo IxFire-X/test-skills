@@ -35,9 +35,8 @@ def _fixed(fragment: dict) -> dict:
 def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code_and_assemble_still_refuses_the_raw_one(tmp_path: Path) -> None:
     """run-doc-only c1f13463…: validate-fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER.
     P1: the order is the code's work — validate-fragment (and model-response) put the categories in V3 order and say so; the rule
-    stays: assemble of a document that was not put in order is refused."""
-    from tools.batch_assembly import BatchAssemblyError, normalize_fragment, validate_fragment
-    from tools.canonical_document import validate_canonical_document
+    stays in the document audit; P1-fix2: assemble puts the same file in the same order."""
+    from tools.batch_assembly import normalize_fragment, validate_fragment
 
     fragment, plan, header = _load("doc-only-fragment-1.json"), _load("doc-only-plan.json"), _load("doc-only-header.json")
     fragment.pop("digest", None)
@@ -58,29 +57,26 @@ def _synthetic() -> tuple[dict, dict, dict, dict]:
 
 
 @pytest.mark.parametrize("broken", ["categories", "requirement_ids"])
-def test_validate_fragment_and_the_command_put_an_order_error_in_order_while_assemble_refuses_the_raw_one(broken: str, tmp_path: Path, capsys) -> None:
+def test_validate_fragment_and_the_command_put_an_order_error_in_order_and_assemble_takes_the_same_file(broken: str, tmp_path: Path, capsys) -> None:
     from tests.test_batch_assembly import _fragment
     from tools import api
-    from tools.batch_assembly import BatchAssemblyError, assemble_candidate, validate_fragment
+    from tools.batch_assembly import assemble_candidate, validate_fragment
 
     fragment, plan, header, context = _synthetic()
     bad = copy.deepcopy(fragment)
     case = bad["test_cases"][0]
     if broken == "categories":
         case["categories"] = ["functional", "positive"]
-        expected = "CANONICAL_CATEGORY_ORDER"
     else:
         second = dict(bad["requirements"][0], requirement_id=bad["requirements"][0]["requirement_id"] + "-B", display_order=100)
         bad["requirements"].append(second)
         bad["source_to_canonical_mappings"][0]["canonical_requirement_ids"].append(second["requirement_id"])
         case["requirement_ids"] = [second["requirement_id"], case["requirement_ids"][0]]
-        expected = "CANONICAL_REQUIREMENT_ID_ORDER"
     bad.pop("digest", None)  # a digest sealed over the unordered content would be refused: «удали поле digest»
     result = validate_fragment(bad, plan, header, context)  # P1: put in order by the code, named
     assert result == {"normalized": [f"/test_cases/0/{broken}"]}, result
-    with pytest.raises(BatchAssemblyError) as assembled:  # the rule is the same: assemble of the raw fragment refuses it
-        assemble_candidate(header, plan, [bad, _fragment(plan, context, 1)])
-    assert assembled.value.code == "BATCH_SEMANTIC_CONFLICT" and f"pre-review audit failed: {expected}" in str(assembled.value)
+    candidate, _receipt = assemble_candidate(header, plan, [bad, _fragment(plan, context, 1)])  # P1-fix2: the same canon, from the same file
+    assert candidate["test_cases"][0][broken] == (["positive", "functional"] if broken == "categories" else sorted(case["requirement_ids"]))
     paths = {name: tmp_path / f"{name}.json" for name in ("fragment", "plan", "header", "context")}
     for name, value in zip(paths, (bad, plan, header, context)):
         paths[name].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")

@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.canonical_document import validate_canonical_document, validate_canonical_document_all
+from tools.canonical_document import validate_canonical_document_all
 from tools.fixes import delete_field_fix, fix_for
 from tools.schema_validation import CATEGORY_PRECEDENCE, schema_diagnostics
 from tools.pilot_state import closure_cached as _closure_cached
@@ -916,6 +916,9 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
         raise BatchAssemblyError("BATCH_PARTITION_CONFLICT", "there must be exactly one fragment per batch")
     by_batch: dict[str, dict[str, Any]] = {}
     ordinals = {key: item["ordinal"] for key, item in batches.items()}
+    # P1-fix2: the document is built from the canon validate-fragment and model-response lay out — the order of the ids and
+    # categories and the bindings the code puts itself — so the agent's file and the recorded answer give the same bytes
+    fragments = [fill_fragment_bindings(normalize_fragment(item)[0], plan) if isinstance(item, dict) else item for item in fragments]
     for fragment in sorted(fragments, key=lambda item: ordinals.get(item.get("batch_id"), 0) if isinstance(item, dict) else 0):
         validate_fragment(fragment, plan, header, fragment.get("context_receipt"), list(by_batch.values()))
         batch_id = fragment["batch_id"]
@@ -949,9 +952,14 @@ def assemble_candidate(header: dict[str, Any], plan: dict[str, Any], fragments: 
     for name in ("requirements", "test_cases"):
         for index, item in enumerate(document[name], start=1):
             item["display_order"] = index
-    diagnostics = validate_canonical_document(document)
-    if diagnostics:
-        raise BatchAssemblyError("BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {diagnostics[0]['code']}")
+    audit = validate_canonical_document_all(document)
+    if audit:
+        rows = [_row(row["code"], row["path"], row["message"]) for row in audit]
+        raise BatchAssemblyError(
+            "BATCH_SEMANTIC_CONFLICT", f"canonical pre-review audit failed: {rows[0]['code']}"
+            + (f"; всего диагностик {len(rows)} — все в diagnostics, у каждой свой fix" if len(rows) > 1 else ""), rows,
+            rows[0]["fix"] if len(rows) == 1 else f"исправь все {len(rows)} диагностик из diagnostics за один заход (у каждой свой fix), "
+            "собери фрагменты и повтори assemble; validate-fragment этих правил не видит — они на весь документ")
     fingerprints: dict[str, list[str]] = defaultdict(list)
     for case in document["test_cases"]:
         fingerprints[_case_fingerprint(case)].append(case["case_id"])

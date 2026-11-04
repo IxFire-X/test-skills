@@ -364,6 +364,8 @@ def _write(target: Path, value: Any) -> dict[str, Any]:
 
 def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> None:
     rows = envelope.get("diagnostics")
+    if envelope.get("code") == "SCOPE_PENDING":  # the pause of the human is routine: the report shows it, the refusals do not count it
+        return
     code = envelope.get("code") or (rows[0].get("code") if isinstance(rows, list) and rows and isinstance(rows[0], Mapping) else None)
     record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), getattr(args, "batch_id", None))
 

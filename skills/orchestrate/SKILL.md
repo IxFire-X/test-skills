@@ -298,7 +298,8 @@ Run остаётся связан с исходной project/module identity.
 4. Собери один bare canonical JSON `1.1.0` (`schema_version` в header; `1.0.0` без `param_group` валиден) с explicit many-to-many traceability и
    выполни schema/semantic/provenance audit: `tools.api assemble --header <f> --plan <f> --fragment <f> …
    --out-candidate <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем
-   `tools.api validate-canonical --document <run>/tmp/candidate.json`.
+   `tools.api validate-canonical --document <run>/tmp/candidate.json`. `--fragment` — файл ответа пачки как есть или записанный ответ
+   (`read-model-artifact`): порядок id и категорий `assemble` ставит сам, как `validate-fragment`.
    Проверь полноту относительно исходного документа, а не только normalized context.
    Передай reviewer исходные authorized requirement bytes через существующие immutable
    context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.

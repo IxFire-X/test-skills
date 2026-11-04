@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
 
 from tools.fixes import fix_for
 
@@ -74,7 +75,17 @@ def record_refusal(run_root: object, command: str, code: object, stage: object =
         return
 
 
-def emit_error(message: str) -> None:
+def _module_name(prog: str | None) -> str:
+    """The module of the parser that refused: ``python -m tools.api`` as it is, a script name (``run_pipeline.py``) as its module."""
+    if not prog:
+        return "tools.api"
+    if prog.startswith("python -m "):
+        return prog.removeprefix("python -m ").strip()
+    stem = Path(prog).stem
+    return f"tools.{stem}" if stem and stem != "__main__" else "tools.api"
+
+
+def emit_error(message: str, prog: str | None = None) -> None:
     """Emit the one machine-readable response allowed for usage/input errors."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -82,7 +93,7 @@ def emit_error(message: str) -> None:
     if message.startswith("argument error: "):  # P1: the one envelope of every refusal, the old field stays
         flags = [flag for flag in _MODEL_REQUEST_FLAGS if flag in message]
         fix = ("флаги " + ", ".join(flags) + " — у model-request; model-response получает только --run-root, --attempt, --stage, "
-               "--artifact, --transport-attempts") if flags else "проверь флаги команды: tools.api <команда> --help"
+               "--artifact, --transport-attempts") if flags else f"проверь флаги команды: {_module_name(prog)} <команда> --help"
         payload.update(code="INVALID_ARGUMENT", message=message, fix=fix)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
@@ -91,5 +102,5 @@ class JsonArgumentParser(argparse.ArgumentParser):
     """Argparse parser that never writes prose usage as the only stdout result."""
 
     def error(self, message: str) -> None:
-        emit_error(f"argument error: {message}")
+        emit_error(f"argument error: {message}", self.prog)
         raise SystemExit(2)

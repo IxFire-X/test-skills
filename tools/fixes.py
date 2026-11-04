@@ -105,10 +105,10 @@ FIXES: dict[str, str] = {
     # --- bare ValueErrors that became codes ---
     "INVALID_ARGUMENT": "проверь флаги команды: tools.api <команда> --help",
     # --- the audit of the canon: the order is the code's work, the rest is the agent's ---
-    "CANONICAL_REQUIREMENT_ID_ORDER": "requirement_ids кейса — в порядке requirements документа (display_order); validate-fragment и "
-                                      "model-response ставят порядок сами",
+    "CANONICAL_REQUIREMENT_ID_ORDER": "requirement_ids кейса — в порядке requirements документа (display_order); validate-fragment, "
+                                      "model-response и assemble ставят порядок сами",
     "CANONICAL_CATEGORY_ORDER": "categories кейса — в порядке positive, negative, boundary, authorization, security, concurrency, "
-                                "idempotency, observability, functional; validate-fragment и model-response ставят порядок сами",
+                                "idempotency, observability, functional; validate-fragment, model-response и assemble ставят порядок сами",
     "CANONICAL_ARGUMENT_ORDER": "arguments capability — по name в порядке кодовых точек Unicode",
     "CANONICAL_RESULT_ORDER": "results capability — по name в порядке кодовых точек Unicode",
     "CANONICAL_CAPABILITY_ORDER": "operation_capabilities — по capability_id в порядке кодовых точек Unicode",
