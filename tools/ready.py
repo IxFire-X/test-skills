@@ -585,9 +585,15 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
     rows.append(_row("run:freeze", CASES, "OK", "после scan не меняйте файлы проекта и .skillsrc до finish или exec: иначе exec "
                      "остановится на дрейфе и предложит вернуть файлы или начать новый scan"))
     # FaT-4b: a hint, never a STOP — whether the CLI opens a fresh reviewer is known only to the agent.
-    rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
-                     "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
-                     _self_review_scan(project, docs, profile, module, target)))
+    from tools.skillsrc_manifest import skillsrc_review_self
+
+    if skillsrc_review_self(project):  # P2: the project has answered once, in .skillsrc
+        rows.append(_row("review:isolation", CASES, "OK", "в .skillsrc review.self: true — ревью в той же сессии принимается с пометкой SELF, "
+                         "вопрос не задаётся (свежий контекст всё равно лучше)"))
+    else:
+        rows.append(_row("review:isolation", CASES, "OK", "ревьюер кейсов нужен в свежем контексте (отдельный subagent); "
+                         "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
+                         _self_review_scan(project, docs, profile, module, target)))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
     return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": profile, "checks": rows}
 

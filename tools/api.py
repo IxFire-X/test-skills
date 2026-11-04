@@ -136,6 +136,15 @@ def _scope_answer(a):
     return scope_pause.out_of_scope(scope["decision"]) or None
 
 
+def _cmd_plan(a):
+    """P2: the header, the plan of the batches and their publication in one command (one package function, ``pilot_state.publish_plan``);
+    the pause after the marker answers first, before anything is published."""
+    contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
+    imported = a.imported if isinstance(a.imported, dict) else None
+    return pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file, contexts, imported,
+                                    _scope_answer(a))
+
+
 def _cmd_validate_fragment(a):
     imported = a.imported.get("imported", a.imported) if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value
     return batch_assembly.validate_fragment(a.fragment, a.plan, a.header, a.context_receipt, a.prior_fragment, imported)
@@ -180,13 +189,21 @@ def _cmd_review_publish(a):
 
 
 def _cmd_review_open(a):
-    return orchestrate_test_case_revision.review_step("open", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
-                                                      csv_profile=a.csv_profile, session_start=a.session_start)
+    """P2: without ``--session-start`` the whole opening of the review (publish, session start, boundary, request); with it the
+    FaT-U5 command of the nine, as before — one package function either way."""
+    return orchestrate_test_case_revision.review_open_step(
+        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=a.csv_profile, model_id=a.model_id,
+        invocation_id=a.invocation_id, fresh_context=a.fresh_context, session_start=a.session_start)
 
 
 def _cmd_review_select(a):
-    return orchestrate_test_case_revision.review_step("select", a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir,
-                                                      csv_profile=a.csv_profile, reviewer_session=a.reviewer_session, review=a.review)
+    """P2: ``--verdict`` records the answer and selects; ``--reviewer-session`` (the nine) is optional — the last revision of the
+    ledger when it is not given; ``--dry-run`` writes nothing."""
+    verdict = a.verdict
+    return orchestrate_test_case_revision.review_select_step(
+        a.run_root, a.attempt, files=_review_files(a), output_dir=a.output_dir, csv_profile=a.csv_profile,
+        verdict=None if verdict is None else verdict.value, verdict_bytes=None if verdict is None else verdict.raw_bytes,
+        transport_attempts=a.transport_attempts, reviewer_session=a.reviewer_session, review=a.review, dry_run=a.dry_run)
 
 
 def _cmd_complete_review(a):
@@ -270,6 +287,11 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                                          ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
                                          ("--run-root", Path, None), ("--attempt", str, None), ("--exclude", str, "append", "optional"),
                                          ("--reason", str, None), ("--continue", "flag")), None, ()),
+    # P2: header + plan-batches + publish of both in one command; --out-plan is the plan (the file validate-fragment and assemble read)
+    "plan": (_cmd_plan, (("--header", _json), ("--requirements", _json), ("--grouping", _json), ("--project", Path),
+                         ("--input-file", Path, "append"), ("--context-receipt", _json, "append"), ("--imported", _json, None),
+                         "--run-root", "--attempt", ("--exclude", str, "append", "optional"), ("--reason", str, None),
+                         ("--continue", "flag")), None, ("plan", "published")),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
                                                    ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
@@ -283,10 +305,13 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
     # FaT-U5: the review layer in one CLI; the seven inputs come from the journal, a file passed is only compared
     "review-publish": (_cmd_review_publish, (*RUN, ("--candidate", _json, None), ("--output-dir", Path),
                                              ("--csv-profile", str, PROFILE)), None, ()),
+    # P2: review-open [--model-id --invocation-id --fresh-context] opens the whole review; review-select [--verdict] [--dry-run] closes it
     "review-open": (_cmd_review_open, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
-                                       ("--session-start", _json)), None, ()),
+                                       ("--session-start", _json, None), ("--model-id", str, None), ("--invocation-id", str, None),
+                                       ("--fresh-context", _yes_no, None)), None, ()),
     "review-select": (_cmd_review_select, (*RUN, *REVIEW_FILES, ("--output-dir", Path), ("--csv-profile", str, PROFILE),
-                                           ("--reviewer-session", _json), ("--review", _json, None)), None, ()),
+                                           ("--reviewer-session", _json, None), ("--review", _json, None), ("--verdict", _answer, None),
+                                           ("--transport-attempts", int, 1), ("--dry-run", "flag")), None, ()),
     "complete-review": (_cmd_complete_review, RUN, None, ()),
     "review-evidence": (_cmd_review_evidence, (*RUN, ("--path", "append")), None, ()),
     "review-abort": (_cmd_review_abort, (*RUN, "--reason"), None, ()),
@@ -370,9 +395,28 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
     record_refusal(getattr(args, "run_root", None), args.command, code, getattr(args, "stage", None), getattr(args, "batch_id", None))
 
 
+# P2: the review in two commands; the nine of before work one more release and say so
+_REVIEW_OPEN_NOW = "tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> --fresh-context yes|no"
+_REVIEW_SELECT_NOW = "tools.api review-select --verdict <файл ответа ревьюера> --run-root <run> --attempt <id> --output-dir <dir>"
+
+
+def _deprecated(args: argparse.Namespace) -> str | None:
+    """P2: ``deprecated: "tools.api review-open …"`` for a command of the nine of the canonical review, the one that replaces it."""
+    stage = getattr(args, "stage", None)
+    reviewer = stage == orchestrate_test_case_revision.REVIEW_STAGE
+    if args.command == "session-start" or (args.command == "review-open" and args.session_start is not None) or (
+            args.command in {"review-requested", "model-request"} and reviewer):
+        return _REVIEW_OPEN_NOW
+    if args.command == "complete-review" or (args.command == "model-response" and reviewer) or (
+            args.command == "review-select" and args.reviewer_session is not None):
+        return _REVIEW_SELECT_NOW
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     handler, _options, invalid, parts = COMMANDS[args.command]
+    dry_run = bool(getattr(args, "dry_run", False))
     try:
         targets = {part: _out_target(getattr(args, f"out_{part}")) for part in parts}
         out = _out_target(args.out) if not parts and args.out is not None else None
@@ -382,10 +426,16 @@ def main(argv: list[str] | None = None) -> int:
         envelope = {**error_envelope(error), "command": args.command,
                     **({"diagnostics": [dict(row) for row in error.diagnostics]} if hasattr(error, "diagnostics") else {})}
         _print(envelope)
-        _record_refusal(args, envelope)  # P1: <run>/refusals.jsonl, when the command names its run
+        if not dry_run:  # a dry run leaves no file behind, a refusal line included
+            _record_refusal(args, envelope)  # P1: <run>/refusals.jsonl, when the command names its run
         return 2
     status = "invalid" if invalid is not None and invalid(result) else "ok"
     payload: dict[str, Any] = {"status": status, "command": args.command}
+    if dry_run:
+        payload["dry_run"] = True
+    deprecated = _deprecated(args)
+    if deprecated is not None:
+        payload["deprecated"] = deprecated
     if getattr(result, "notes", None):  # FaT-BO: plan-batches says how and why it split
         payload["notes"] = list(result.notes)
     if parts:

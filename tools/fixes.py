@@ -21,6 +21,11 @@ _BLOCKER_RULE = (
 _STAGES = "context-marker, tc-generator, tc-reviewer, tc-to-autotest, autotest-reviewer"
 _DELETE_FIELD = "удали поле {name} из ответа — код поставит его сам"
 
+# P2: the whole review in one sentence — the fix of the refusals of its stage and the way out of `status` (item 5)
+REVIEW_CHAIN = ("ревью — две команды: `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <модель> "
+                "--invocation-id <id вызова ревьюера> --fresh-context yes|no` → вызов ревьюера по пакету → `tools.api review-select "
+                "--run-root <run> --attempt <id> --output-dir <dir> --verdict <файл ответа ревьюера>`")
+
 FIXES: dict[str, str] = {
     # --- the review layer (moved from orchestrate_test_case_revision._FIXES, FaT-10d) ---
     "REVIEW_CONTEXT_LIMIT": "бюджет сессии меньше пакета ревью: сессия ещё ждёт вердикта — закрой её `tools.api review-abort --reason "
@@ -40,13 +45,22 @@ FIXES: dict[str, str] = {
     "INDEPENDENCE_UNVERIFIED": "ревью требует свежего контекста: передай --fresh-context yes, если ревьюер запущен новым "
                                "сеансом; нового сеанса нет — прогон должен начинаться с scan --accept-self-review",
     "ATTEMPT_TERMINAL": "попытка закрыта, итог — report.md прогона; новая работа — новый прогон (scan --new-run)",
+    # --- the review in two commands (P2) ---
+    "FRESH_CONTEXT_REQUIRED": "--fresh-context yes — ревьюер отдельный субагент или вызов без истории генерации; ревью в той же сессии — "
+                              "прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)",
+    "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори review-open с теми же --model-id, --invocation-id и --fresh-context или иди "
+                           "дальше — review-select --verdict <файл ответа ревьюера>",
+    "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
+    "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: tools.api review-select --verdict <файл ответа ревьюера> записывает его и "
+                                 "выбирает ревизию; ревьюера ещё не вызывали — " + REVIEW_CHAIN,
+    "GENERATOR_INPUT_HEADER": "удали header_digest из grouping — команда plan поставит digest заголовка сама",
     # --- the model stages of the journal ---
     "MODEL_REQUEST_INVALID": "model-request --stage <стадия>:<экземпляр>; стадии: " + _STAGES + "; --attempt — attempt_id этого "
                              "прогона (run_pipeline status); --input-digest на каждый вход стадии по порядку",
     "MODEL_REQUEST_DUPLICATE": "у стадии один запрос: не повторяй model-request, ответ отдай в model-response",
     "MODEL_REQUEST_OUT_OF_ORDER": "стадии цепочки идут по порядку: сделай model-request следующей стадии, названной в сообщении",
     "MODEL_INPUTS_MISMATCH": "входы стадии не совпадают с журналом: возьми digest и источник из сообщения отказа (он называет верный "
-                             "digest каждой позиции) и повтори model-request",
+                             "digest каждой позиции) и повтори model-request; у ревьюера кейсов запроса вручную нет — " + REVIEW_CHAIN,
     "MODEL_STAGE_ARTIFACT_INVALID": "ответ не прошёл схему стадии: исправь поля из diagnostics и отдай ответ единственным повтором "
                                     "стадии (--transport-attempts 2)",
     "MODEL_RESPONSE_DIGEST_MISMATCH": "удали из ответа поля digest, названные в сообщении, — код поставит их сам; отдай ответ "

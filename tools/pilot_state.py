@@ -2363,20 +2363,46 @@ def publish_model_stage_artifact(
     *,
     transport_attempts: int = 1,
     raw_bytes: int | None = None,
+    dry_run: bool = False,
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
 
     Audit 2 (FaT-AB): a refused answer given as the one retry (--transport-attempts 2) never advises that retry again — its
-    fix is the way out of the stage.  The code does not count refused answers yet (AB2, after the release)."""
+    fix is the way out of the stage.  The code does not count refused answers yet (AB2, after the release).
+
+    P2: ``dry_run`` runs every check that precedes the write and returns ``{"dry_run": True, "artifact": <the answer as it would
+    be stored>, "content_digest", "filled", "normalized"}`` — nothing is written, no event is appended."""
     try:
         return _publish_model_stage_artifact(run_root, attempt_id, stage_instance_id, artifact,
-                                             transport_attempts=transport_attempts, raw_bytes=raw_bytes)
+                                             transport_attempts=transport_attempts, raw_bytes=raw_bytes, dry_run=dry_run)
     except Exception as error:
         if transport_attempts == 2 and "--transport-attempts 2" in str(error):
             error.args = tuple(_retry_spent(arg) if isinstance(arg, str) and "--transport-attempts 2" in arg else arg for arg in error.args)
             if isinstance(getattr(error, "fix", None), str):
                 error.fix = _RETRY_SPENT + _RETRY_EXHAUSTED_FIX.removeprefix("fix: ")
         raise
+
+
+def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: str, artifact: Mapping[str, Any]) -> str:
+    """P2: ``"none"`` when the stage has no recorded answer, ``"same"`` when ``artifact`` is the answer recorded (as ``model-response``
+    would store it, the digest fields it puts filled in), ``"other"`` when another answer is recorded.  Reads only."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    events = [event for event in state["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id]
+    responses = [event for event in events if event["event_type"] == "MODEL_RESPONSE_RECEIVED"]
+    requests = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
+    if not responses:
+        return "none"
+    value = dict(artifact)
+    if len(requests) == 1:
+        prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
+        if not isinstance(prior.get("reuse"), Mapping):
+            try:
+                value, _filled = _fill_response_bindings(project, root, state, attempt_id, stage_instance_id, prior, value)
+            except (ValueError, KeyError, TypeError):
+                return "other"
+    digest = "sha256:" + hashlib.sha256(_model_stage_artifact_bytes(value)).hexdigest()
+    return "same" if responses[0].get("artifact_digest") == digest else "other"
 
 
 def _retry_spent(text: str) -> str:
@@ -2391,6 +2417,7 @@ def _publish_model_stage_artifact(
     *,
     transport_attempts: int = 1,
     raw_bytes: int | None = None,
+    dry_run: bool = False,
 ) -> Mapping[str, Any]:
     """Persist a requested model output, then bind its response/candidate events.
 
@@ -2506,6 +2533,8 @@ def _publish_model_stage_artifact(
     if stage_instance_id == "tc-reviewer:canonical":
         _validate_review_decision(root, state, attempt_id, value)
     _validate_generator_artifact_binding(root, attempt_id, request, value)
+    if dry_run:  # P2: every check above ran; nothing below is written
+        return {"dry_run": True, "artifact": value, "content_digest": content_digest, "filled": filled, "normalized": normalized}
     target = _model_stage_artifact_target(root, attempt_id, content_digest)
     try:
         create_confined_bytes_exclusive(project, root, target, data)
@@ -2545,6 +2574,26 @@ def _publish_model_stage_artifact(
 
 
 def _read_model_stage_artifact_with_state(
+    project: Path,
+    root: Path,
+    state: Mapping[str, Any],
+    attempt_id: str,
+    stage_instance_id: str,
+    content_digest: str,
+) -> Mapping[str, Any]:
+    """P2: inside one closure a stage answer is read and checked once — its bytes are content-addressed and its request and
+    predecessors are earlier events of an append-only journal, so a second read of the same digest checks the same things."""
+    kept = _CLOSURE_CACHE.get()
+    key = ("stage-artifact", str(root), attempt_id, stage_instance_id, content_digest)
+    if kept is not None and key in kept:
+        return copy.deepcopy(kept[key])
+    result = _read_model_stage_artifact_checked(project, root, state, attempt_id, stage_instance_id, content_digest)
+    if kept is not None:
+        kept[key] = copy.deepcopy(result)
+    return result
+
+
+def _read_model_stage_artifact_checked(
     project: Path,
     root: Path,
     state: Mapping[str, Any],
@@ -2657,7 +2706,19 @@ def publish_context_selection(run_root: Path, attempt_id: str, receipt: Mapping[
 
 
 def read_context_selection(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
-    """Read a C-lite receipt only when immutable bytes and attempt event both bind it."""
+    """Read a C-lite receipt only when immutable bytes and attempt event both bind it.  P2: once per closure — the receipt is
+    content-addressed and its event is in the journal for good."""
+    kept = _CLOSURE_CACHE.get()
+    key = ("context-selection", str(run_root), attempt_id, receipt_digest)
+    if kept is not None and key in kept:
+        return copy.deepcopy(kept[key])
+    receipt = _read_context_selection_checked(run_root, attempt_id, receipt_digest)
+    if kept is not None:
+        kept[key] = copy.deepcopy(receipt)
+    return receipt
+
+
+def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_digest: str) -> Mapping[str, Any]:
     from tools.project_inventory import ContextSelectionError, validate_context_receipt_binding
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
@@ -4931,6 +4992,11 @@ def _generator_input_digest(value: Mapping[str, Any]) -> str:
     return with_digest({key: item for key, item in value.items() if key != "digest"})["digest"]
 
 
+def generator_input_digest(value: Mapping[str, Any]) -> str:
+    """P2: the self-digest ``publish_generator_input`` gives a plan or a header — known before it is published."""
+    return _generator_input_digest(value)
+
+
 def _plan_contexts(plan: Mapping[str, Any]) -> list[str]:
     """FaT-AU3: the context receipts every generator batch of the plan reads, in order (one before the list)."""
     from tools.batch_assembly import context_digests
@@ -5029,6 +5095,37 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
             **({"batch_skeletons": skeletons} if skeletons else {}), **({"context": context} if context else {})}
 
 
+class PlanPublished(tuple):
+    """``(plan, published)`` of :func:`publish_plan` — a tuple for the two ``--out-…`` files, with the notes ``plan-batches`` prints."""
+
+    notes: list[str] = []
+
+
+def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], requirements: list[dict[str, Any]], grouping: Mapping[str, Any],
+                 project: Path, input_files: list[Path], context_receipt: Any, imported: Mapping[str, Any] | None,
+                 out_of_scope: Any = None) -> PlanPublished:
+    """P2 (item 9): ``tools.api plan`` — what ``publish-generator-input --kind header``, ``plan-batches`` and ``publish-generator-input
+    --kind plan`` do, in that order, with their events and files, in one call.  The grouping needs no ``header_digest``: it is the
+    self-digest of the header; a grouping that names another is GENERATOR_INPUT_HEADER.  The plan is built before anything is published,
+    so a refusal of the plan (the pause after the marker among them) leaves the journal as it was."""
+    from tools.batch_assembly import plan_batches_for_project
+
+    item = dict(header)
+    expected = _generator_input_digest(item)
+    evidence = dict(grouping)
+    if evidence.get("header_digest") in (None, ""):
+        evidence["header_digest"] = expected
+    elif evidence["header_digest"] != expected:
+        raise ValueError(f"GENERATOR_INPUT_HEADER: header_digest of the grouping is {evidence['header_digest']}, the header's own is {expected}; "
+                         f"fix: удали header_digest из grouping — код поставит digest заголовка ({expected}) сам")
+    plan = plan_batches_for_project(requirements, evidence, project, input_files, context_receipt, imported, out_of_scope)
+    published_header = publish_generator_input(run_root, attempt_id, "header", item)
+    published_plan = publish_generator_input(run_root, attempt_id, "plan", dict(plan))
+    result = PlanPublished((dict(plan), {"header": published_header, "plan": published_plan}))
+    result.notes = list(plan.notes)
+    return result
+
+
 def _published_generator_inputs(project: Path, root: Path, state: Mapping[str, Any], attempt_id: str) -> tuple[Mapping[str, Any], Mapping[str, Any]] | None:
     """FaT-DG: the published (plan, header) of the attempt, or None when the run published neither (before FaT-DG)."""
     try:
@@ -5125,6 +5222,11 @@ def _inputs_mismatch(stage_instance_id: str, inputs: Sequence[str], expected: Se
     if len(inputs) > len(expected):
         rows.append(f"лишние входы: {', '.join(inputs[len(expected):])}")
     order = " ".join(f"--input-digest {digest}" for digest, _source in expected)
+    if stage_instance_id.startswith("tc-reviewer:"):  # P2: the reviewer's request is the work of review-open, one fix for the whole chain
+        from tools.fixes import REVIEW_CHAIN
+
+        return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + "; fix: запрос ревьюера кейсов пишет review-open "
+                                   "(он знает оба digest сам), руками он не нужен — " + REVIEW_CHAIN)
     return ModelInputsMismatch(f"MODEL_INPUTS_MISMATCH: {stage_instance_id}: " + "; ".join(rows) + f"; fix: повтори model-request с {order}")
 
 

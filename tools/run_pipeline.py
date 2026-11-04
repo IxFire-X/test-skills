@@ -107,7 +107,6 @@ def _confined(project: Path, candidate: Path) -> Path:
 _API = "python -m tools.api "
 _PIPELINE = "python -m tools.run_pipeline "
 _PARTS = "python -m tools.context_marker_parts "
-_REVIEW = "python -m tools.orchestrate_test_case_revision "
 _FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
 _EXEC = _PIPELINE + "exec --project <project> --run <run_id>"
 _NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
@@ -136,15 +135,18 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
         "GENERATOR_NEXT", "tc-generator", "следующая пачка генератора; когда все фрагменты есть — сборка кандидата кодом", "3",
         _API + "model-request --run-root <run> --attempt <attempt> --stage tc-generator:<batch> --input-digest <d> ..."),
     "canonical reviewer package and boundary": (
-        "REVIEW_SESSION", "canonical-review", "собрать пакет ревью и начать независимое ревью", "4", _API + "session-start ..."),
+        "REVIEW_SESSION", "canonical-review", "открыть ревью одной командой (review-open: кандидат, пакет, запрос), затем ревьюер и review-select --verdict",
+        "4", _API + "review-open --run-root <run> --attempt <attempt> --output-dir <dir> --model-id <модель> --invocation-id <id ревьюера> "
+                    "--fresh-context yes|no"),
     "reviewer evidence or verdict": (
-        "REVIEW_CONTINUE", "canonical-review", "продолжить ревью: следующая часть или вердикт", "4",
-        _API + "review-evidence --run-root <run> --attempt <attempt> --path <путь в проекте>"),
+        "REVIEW_CONTINUE", "canonical-review", "ревьюер отвечает: review-select --verdict <файл> закрывает ревью (нужен файл проекта — review-evidence --path)",
+        "4", _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir> --verdict <файл ответа ревьюера>"),
     "reviewer ledger and effective selection or negative closure": (
-        "REVIEW_SELECT", "canonical-review", "завершить журнал ревью и выбрать effective canonical или закрыть отрицательную ветку",
-        "4", _REVIEW + "select ..."),
+        "REVIEW_SELECT", "canonical-review", "выбрать effective canonical или закрыть отрицательную ветку: review-select (сессия — последняя ревизия журнала)",
+        "4", _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir>"),
     "effective canonical": (
-        "REVIEW_EFFECTIVE", "canonical-review", "завершить ревью и опубликовать effective canonical", "4", _REVIEW + "select ..."),
+        "REVIEW_EFFECTIVE", "canonical-review", "завершить ревью и опубликовать effective canonical: review-select", "4",
+        _API + "review-select --run-root <run> --attempt <attempt> --output-dir <dir>"),
     "negative branch trace and finalization": (
         "FINISH_NEGATIVE", "finish", "отрицательная ветка ревью: finish закрывает попытку", "6", _FINISH),
     "automation artifact": (
@@ -804,6 +806,7 @@ def _scan_disposition_policy(project: Path, args: Any) -> str | None:
 def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any] | None = None) -> tuple[Mapping[str, Any], dict[str, Any]]:
     from tools.init_skillsrc import ensure_skillsrc
     from tools.pilot_state import create_lowered_run, create_run
+    from tools.skillsrc_manifest import skillsrc_review_self as _skillsrc_review_self
 
     profile = getattr(args, "profile", "local-pilot-v1")
     skipped = _execution_skipped(project, args) if profile == "local-pilot-v1" else None
@@ -812,7 +815,7 @@ def _init_skillsrc_run(project: Path, args: Any, scan_request: Mapping[str, Any]
         profile = "cases-only-v1"
         args.profile = profile
     authorization = {"request_id": f"scan-{uuid.uuid4().hex[:12]}", "execution_requested": profile == "local-pilot-v1"}
-    if getattr(args, "accept_self_review", False):
+    if getattr(args, "accept_self_review", False) or _skillsrc_review_self(project):  # P2: the flag, or .skillsrc review.self: true
         authorization["accept_self_review"] = True
     if _scan_disposition_policy(project, args) == "cleanup":
         authorization["disposition_policy"] = "cleanup"

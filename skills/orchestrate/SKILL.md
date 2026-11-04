@@ -118,6 +118,8 @@ pipeline в этом run. Наличие папки, scan или запрос te
 в этом разговоре выполни scan с теми же `--project`, `--docs`, `--profile` и `--module`, что
 и без флага, добавив `--accept-self-review` (готовая команда — в fix строки `review:isolation`).
 Без флага ревью без изоляции не принимается, и `finish` закрывает попытку с `INDEPENDENCE_UNVERIFIED`.
+Если человек уже ответил «да» для проекта, в `.skillsrc` стоит `review: {"self": true}` — `ready` вопроса не задаёт, а `scan`
+принимает SELF сам, как с `--accept-self-review`; ключ ставит человек, не ты.
 
 До scan и первого model call вызови durable Phase 1 boundary: создай
 `run-authorization-receipt.json`, `run-manifest.json`, readback-проверь оба и запиши
@@ -268,7 +270,11 @@ Run остаётся связан с исходной project/module identity.
 2a. Детерминированно разбей normalized requirements на batches и persist/readback-проверь
    каждый context-selection receipt. Receipts выбора контекста публикует scan; читай их
    `tools.api read-context --digest <d>`. Сначала header: `tools.api publish-generator-input --kind header --value <f>`
-   (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. План — `tools.api plan-batches
+   (поле `digest` код дописывает сам); его `result.digest` — `header_digest` в grouping. Одной командой `tools.api plan --header <f>
+   --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f> --run-root <run>
+   --attempt <id> --out-plan <run>/tmp/plan.json --out-published <run>/tmp/published.json` код публикует заголовок, строит план
+   и публикует его (`header_digest` в grouping можно не писать — код поставит; чужой — `GENERATOR_INPUT_HEADER`); события и файлы те же,
+   что у трёх команд ниже. Или по шагам: план — `tools.api plan-batches
    --requirements <f> --grouping <f> --project <abs> --input-file <ответ разметки> --context-receipt <f>` — по одному
    `--context-receipt` на каждый receipt попытки; при нескольких в grouping — `context_receipt_digests` (все digests,
    первым — receipt с наименьшим `batch_index`, он же `context_receipt_digest`). Затем
@@ -305,7 +311,8 @@ Run остаётся связан с исходной project/module identity.
    context receipts; недоступное доказательство полноты оставь gap, не `FULL`-обещание.
 5. Немедленно опубликуй revision 1 как `UNREVIEWED` с V4 derived bundle и прочитай exact
    bytes обратно (`tools.api review-publish --run-root <run> --attempt <id> --output-dir <dir>`; кандидата код собирает
-   из журнала); journal связывает его digest с `CANDIDATE_PUBLISHED` stage `assembly`. Повтор даёт ту же квитанцию.
+   из журнала; `review-open` из §4 делает это сам, если кандидат ещё не опубликован); journal связывает его digest с
+   `CANDIDATE_PUBLISHED` stage `assembly`. Повтор даёт ту же квитанцию.
    HTML/CSV никогда не становятся downstream model input.
 
 Human-facing canonical поля обязательны на русском; technical tokens сохраняются
@@ -314,27 +321,35 @@ exact. Не ограничивай число requirements/cases искусст�
 ## 4. Выполни одно authoritative canonical review
 
 Controller формирует immutable package из candidate, exact requirements/context/source
-evidence и provenance. Открой одну fresh role-isolated reviewer session
-(`tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --session-start <run>/tmp/session-start.json`)
-и вызови `tc-reviewer`; выбор ревизии — `tools.api review-select … --output-dir <dir>` с `--reviewer-session` из
-`tools.api complete-review --out <run>/tmp/session.json` (сессию строит код из журнала; руками не собирай). Входы пакета
-(кандидат, квитанции, разметка, ответы пачек, ответ ревьюера, evidence) review-* берут из журнала; переданный файл код
-только сверяет (`REVIEW_INPUT_MISMATCH` — поле и источник). Старые имена `tools.orchestrate_test_case_revision
-publish|open-session|select` ещё работают (`COMMAND_RENAMED`). До reviewer model call запиши `REVIEW_REQUESTED` для exact опубликованного
-candidate: `tools.api review-requested --stage tc-reviewer:canonical --digest <boundary.canonical_branch_digest>`
-(повтор с тем же digest ничего не меняет, другой digest — отказ); сам вызов окружи stage-bound `MODEL_REQUESTED` и
-`MODEL_RESPONSE_RECEIVED`. Тот же порядок применяется к automation review.
-Для `tc-reviewer:canonical` передай `[boundary.canonical_branch_digest,
-boundary.package_digest]` из прочитанного `reviewer-session-boundary` и его exact
-`reviewer_invocation_id`. Request проверяет существующие boundary/ledger и порядок.
-Файл `--session-start` строит код, руками его не собирай: `tools.api session-start --run-root <run> --attempt <id>
---output-dir <dir> --out <run>/tmp/session-start.json`, плюс два твоих заявления:
-`--reviewer-invocation-id <id вызова ревьюера>` (тот же id потом в его `model-request`) и `--fresh-context yes|no`.
-Называй честно: `yes` — только если ревьюер отдельный субагент или вызов без истории генерации; ревью в этой же
-сессии — `no`, и оно допустимо только при флаге из §1 (иначе отказ `INDEPENDENCE_UNVERIFIED` с fix). Бюджет сессии
-`context_budget_bytes` = `base_package_byte_count` пакета ревью + `.skillsrc limits.context_batch_bytes` (256 КиБ по
-умолчанию: место под C-lite evidence); бюджет, `distinct_invocations` (твой id против id генератора из журнала) и
-`evidence_digest` считает код. Бюджет меньше пакета — `review-open` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
+evidence и provenance. Ревью — **две команды**; события журнала и их порядок те же, что давали прежние девять:
+
+1. `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <метка модели ревьюера>
+   --invocation-id <id вызова ревьюера> --fresh-context yes|no` — до вызова модели. Код сам публикует кандидата
+   (assemble → validate-canonical → review-publish), если он ещё не опубликован, строит пакет и границу ревью, пишет
+   `REVIEW_REQUESTED` и запрос ревьюера (`MODEL_REQUESTED`: оба digest — кандидата и пакета — он знает сам). Повтор той же
+   команды ничего не меняет; другой ревьюер — `REVIEW_ALREADY_OPEN`. В выводе `next_step` — следующая команда.
+2. Вызови `tc-reviewer` в fresh invocation (ревьюер читает пакет, вид кандидата — `tools.review_view`, ниже) и сохрани его ответ файлом.
+3. `tools.api review-select --run-root <run> --attempt <id> --output-dir <dir> --verdict <файл ответа ревьюера>` — записывает
+   ответ (`MODEL_RESPONSE_RECEIVED`), закрывает сессию и выбирает ревизию. Ответ не прошёл проверку — отказ называет ошибку, ничего не
+   записано: исправленный ответ отдай единственным повтором стадии (`--transport-attempts 2`). Без `--verdict` и `--reviewer-session`
+   команда берёт последнюю ревизию журнала сессии (ответ уже записан, сессия закрыта `review-abort`, выбор повторяется). Файлы пакета
+   (`--candidate`, `--candidate-receipt` …) не нужны: переданный файл код только сверяет с журналом (`REVIEW_INPUT_MISMATCH`).
+   Каталог `--output-dir` один на всё ревью — тот, куда опубликован кандидат: `tools.api review-select … --output-dir <dir>` и
+   `review-open` берут его от тебя, угадывать его код не станет.
+   **`--dry-run`** — все проверки вердикта без записи: журнал и файлы прогона остаются байт в байт; вывод — что было бы опубликовано
+   (`would_publish`) или отказ. Закрытая попытка — `ATTEMPT_TERMINAL` сразу.
+
+`--fresh-context` — твоё честное заявление: `yes` — только если ревьюер отдельный субагент или вызов без истории генерации; ревью
+в этой же сессии — `no`, и оно допустимо только в прогоне, принявшем SELF (§1: `scan --accept-self-review` или
+`review.self: true` в `.skillsrc`), — в таком прогоне флаг можно не передавать, код поставит `no` сам; в другом отказ
+`FRESH_CONTEXT_REQUIRED` (без флага) или `INDEPENDENCE_UNVERIFIED` (`no`) с fix. Бюджет сессии `context_budget_bytes` =
+`base_package_byte_count` пакета ревью + `.skillsrc limits.context_batch_bytes` (256 КиБ по умолчанию: место под C-lite evidence);
+бюджет, `distinct_invocations` (твой id против id генератора из журнала) и `evidence_digest` считает код. Бюджет меньше пакета —
+`review-open` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
+
+Для прогонов v0.1 (начатых до P2): старый порядок — `session-start` → `review-open --session-start` → `review-requested` →
+`model-request` / `model-response` для `tc-reviewer:canonical` → `complete-review` → `review-select --reviewer-session` — работает ещё один
+выпуск и печатает `deprecated: "tools.api review-open …"`; события те же.
 
 Ревью без свежего контекста допускается только по флагу из §1 (вопрос задаётся до scan).
 

@@ -8,7 +8,7 @@
     "schema_version": {"const": "5.0.0"},
     "version": {}, "project": {}, "paths": {}, "test": {}, "methodology": {},
     "sdd": {}, "resolution": {}, "contracts": {}, "skills_registry": {},
-    "discovery": {}, "modules": {}, "requirements": {}, "limits": {},
+    "discovery": {}, "modules": {}, "requirements": {}, "limits": {}, "review": {},
     "disposition_policy": {"enum": ["quarantine", "cleanup"]},
     "projection": {}
   },
@@ -34,6 +34,7 @@
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
         "limits": {"$ref": "#/$defs/limits"},
+        "review": {"$ref": "#/$defs/review"},
         "disposition_policy": {"enum": ["quarantine", "cleanup"]},
         "projection": {"$ref": "#/$defs/projection"}
       }
@@ -53,9 +54,15 @@
         "skills_registry": {"$ref": "#/$defs/skills_registry"},
         "requirements": {"$ref": "#/$defs/requirements"},
         "limits": {"$ref": "#/$defs/limits"},
+        "review": {"$ref": "#/$defs/review"},
         "disposition_policy": {"enum": ["quarantine", "cleanup"]},
         "projection": {"$ref": "#/$defs/projection"}
       }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false,
+      "description": "P2: self: true — every run of this project admits a review in the same session (SELF), as scan --accept-self-review does; the question is not asked again.",
+      "properties": {"self": {"type": "boolean"}}
     },
     "projection": {
       "type": "object", "additionalProperties": false,

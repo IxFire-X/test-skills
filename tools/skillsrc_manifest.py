@@ -47,6 +47,16 @@ def _legacy_yaml_row(project: Path | None) -> dict[str, Any] | None:
         return None
 
 
+def skillsrc_review_self(project: Path) -> bool:
+    """P2 (item 7): ``.skillsrc`` ``review.self: true`` — the project admits a review in the same session at every run, so scan asks
+    nothing.  A missing, unreadable or invalid manifest, a missing key or ``self: false`` is the question asked as before."""
+    try:
+        document = load_skillsrc(Path(project) / ".skillsrc")
+    except (OSError, SkillsrcError):
+        return False
+    return (document.get("review") or {}).get("self") is True
+
+
 def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, project: Path | None = None) -> dict[str, Any]:
     """Parse and validate one exact UTF-8 manifest byte sequence; *project* is where the file lies, for the fix of an older YAML one."""
     schema_path = schema_path or Path(__file__).resolve().parents[1] / "schemas" / "skillsrc.schema.json"
