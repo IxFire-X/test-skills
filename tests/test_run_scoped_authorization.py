@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+from tools import exec_commands, exec_runner
 
 
 def _controller_inputs(tmp_path: Path) -> tuple[Path, dict, dict, dict, dict, dict, dict]:
@@ -107,7 +108,8 @@ def test_runner_v5_unknown_preserves_non_authoritative_timeout_receipt() -> None
 
 def test_subprocess_preserves_non_locale_output_with_bounded_memory_tail(tmp_path: Path) -> None:
     import sys
-    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES, run_subprocess
+    from tools.run_tests import PROCESS_OUTPUT_TAIL_BYTES
+    from tools.exec_runner import run_subprocess
 
     outcome = run_subprocess(
         [sys.executable, "-c", "import os; os.write(1, b'x' * 70000 + b'\\n\\x98done\\n'); os.write(2, 'Привет'.encode('utf-8'))"],
@@ -122,7 +124,7 @@ def test_controller_timeout_records_os_process_scope_stop(tmp_path: Path) -> Non
     import os
     import sys
 
-    from tools.run_tests import run_subprocess
+    from tools.exec_runner import run_subprocess
 
     outcome = run_subprocess(
         [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -143,8 +145,8 @@ def test_windows_job_assignment_failure_is_not_process_stop_proof(tmp_path: Path
 
     from tools import run_tests
 
-    monkeypatch.setattr(run_tests, "_assign_windows_kill_job", lambda _process: None)
-    outcome = run_tests.run_subprocess(
+    monkeypatch.setattr(exec_runner, "_assign_windows_kill_job", lambda _process: None)
+    outcome = exec_runner.run_subprocess(
         [sys.executable, "-c", "import time; time.sleep(30)"], tmp_path, timeout=1,
     )
 
@@ -197,7 +199,8 @@ def test_controller_exec_is_local_only_and_requires_sealed_run_coordinates() -> 
 def test_execution_coordinates_reject_a_legacy_or_foreign_run_label_before_artifact_loading(tmp_path: Path) -> None:
     """A caller cannot combine an arbitrary legacy --run with a durable pilot root."""
     from tools.pilot_state import create_run
-    from tools.run_pipeline import HostStop, _validated_execution_coordinates
+    from tools.run_pipeline import HostStop
+    from tools.exec_commands import _validated_execution_coordinates
 
     create_run(
         tmp_path,
@@ -212,7 +215,7 @@ def test_execution_coordinates_reject_a_legacy_or_foreign_run_label_before_artif
 
 def test_cmd_exec_rejects_unbound_coordinates_before_reading_caller_artifacts(tmp_path: Path, capsys) -> None:
     from tools.pilot_state import create_run
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     create_run(
         tmp_path,
@@ -257,7 +260,7 @@ def test_controller_claims_execution_only_from_v5_admission_and_never_legacy_clo
     }
 
     baseline_checks = []
-    monkeypatch.setattr(run_pipeline, "_revalidate_execution_baseline", lambda *_args: baseline_checks.append(_args))
+    monkeypatch.setattr(exec_commands, "_revalidate_execution_baseline", lambda *_args: baseline_checks.append(_args))
     monkeypatch.setattr(run_tests, "build_closed_execution_request", lambda *_args: (request, object()))
     monkeypatch.setattr(run_tests, "validate_execution_eligibility", lambda *_args, **_kwargs: {"ready": True})
     monkeypatch.setattr("tools.pilot_state.claim_execution_start", lambda *args: captured.update(claim=args))
@@ -284,7 +287,7 @@ def test_controller_claims_execution_only_from_v5_admission_and_never_legacy_clo
         assert kwargs["post_execution_check"]() is None
         return {"verdict": "PASS"}
 
-    monkeypatch.setattr(run_tests, "run_tests_v5", v5)
+    monkeypatch.setattr(exec_runner, "run_tests_v5", v5)
     closure_result = {
         "result": {
             "verification": "PASS", "accepted": True, "finalization_valid": True,
@@ -298,7 +301,7 @@ def test_controller_claims_execution_only_from_v5_admission_and_never_legacy_clo
         return closure_result
 
     monkeypatch.setattr("tools.finalize_attempt.finalize_durable_execution_attempt", close_execution)
-    result = run_pipeline._execute(
+    result = exec_commands._execute(
         project, coordinates, project, "python", "local", document, automation, review,
         {"sealed": "authorization"}, {"controller": "boundary"}, {"durable": "delta"},
     )
@@ -328,7 +331,7 @@ def test_controller_rechecks_durable_delta_before_claim_and_never_starts_mutated
 
     project, coordinates, document, automation, review, authorization, facts = _controller_inputs(tmp_path)
     started = []
-    original_v5 = run_tests.run_tests_v5
+    original_v5 = exec_runner.run_tests_v5
 
     def mutate_at_controller_gate(*args, **kwargs):
         original_gate = kwargs["on_execution_start"]
@@ -339,10 +342,10 @@ def test_controller_rechecks_durable_delta_before_claim_and_never_starts_mutated
 
         return original_v5(*args, **(kwargs | {"on_execution_start": mutate_then_gate}))
 
-    monkeypatch.setattr(run_tests, "run_tests_v5", mutate_at_controller_gate)
-    monkeypatch.setattr("tools.run_tests._invoke_closed_request", lambda *_args, **_kwargs: started.append(True))
+    monkeypatch.setattr(exec_runner, "run_tests_v5", mutate_at_controller_gate)
+    monkeypatch.setattr("tools.exec_runner._invoke_closed_request", lambda *_args, **_kwargs: started.append(True))
 
-    result = run_pipeline._execute(
+    result = exec_commands._execute(
         project, coordinates, project, facts["language"], "local", document, automation, review,
         authorization, facts["boundary"], facts["delta"],
     )
@@ -369,7 +372,7 @@ def test_controller_publishes_durable_not_runnable_receipt_for_request_construct
         lambda *_args: (_ for _ in ()).throw(RunnerInputError("RUNNER_REQUEST", [])),
     )
 
-    result = run_pipeline._execute(
+    result = exec_commands._execute(
         project, coordinates, project, facts["language"], "local", document, automation, review,
         authorization, facts["boundary"], facts["delta"],
     )
@@ -400,7 +403,7 @@ def test_controller_baseline_drift_preserves_exact_closed_request_in_not_runnabl
     )
     (project / "src" / "sample.py").write_text("def combine(left, right): return left + right\n", encoding="utf-8")
 
-    result = run_pipeline._execute(
+    result = exec_commands._execute(
         project, coordinates, project, facts["language"], "local", document, automation, review,
         authorization, facts["boundary"], facts["delta"],
     )
@@ -416,7 +419,7 @@ def test_controller_baseline_drift_preserves_exact_closed_request_in_not_runnabl
 
 def test_cmd_exec_missing_carrier_is_controller_error_and_leaves_attempt_resumable(tmp_path: Path, capsys) -> None:
     from tools.pilot_state import derive_state, read_attempt_receipt
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, coordinates, _document, _automation, _review, _authorization, _facts = _controller_inputs(tmp_path)
     args = SimpleNamespace(
@@ -461,13 +464,12 @@ def test_cmd_exec_resumes_read_back_execution_receipt_without_second_executor_ca
     attempt = coordinates["attempt"]
     run = {"manifest": coordinates["manifest"], "authorization": coordinates["authorization"]}
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    run_pipeline._publish_execution_receipt(coordinates, report)
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    exec_commands._publish_execution_receipt(coordinates, report)
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("executor must not run on closure resume")),
     )
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     terminal = pilot_state.read_terminal_result(run_root, attempt_id)
@@ -486,7 +488,7 @@ def test_cmd_exec_resumes_read_back_execution_receipt_without_second_executor_ca
         module=None, language=None, target=None, executor="local", **missing,
     )
 
-    second_code = run_pipeline.cmd_exec(terminal_args)
+    second_code = exec_commands.cmd_exec(terminal_args)
 
     second_output = json.loads(capsys.readouterr().out)
     assert second_code == 0
@@ -516,10 +518,9 @@ def test_cmd_exec_recovers_installed_execution_receipt_binding_without_rerun(tmp
 
     monkeypatch.setattr(pilot_state, "append_event", interrupt_execution_readback)
     with pytest.raises(RuntimeError, match="interrupt before execution readback"):
-        run_pipeline._publish_execution_receipt(coordinates, report)
+        exec_commands._publish_execution_receipt(coordinates, report)
     monkeypatch.setattr(pilot_state, "append_event", original_append)
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("executor must not rerun")),
     )
     for name in carriers:
@@ -550,14 +551,13 @@ def test_cmd_exec_turns_started_execution_without_receipt_into_unknown_without_r
         tmp_path, run_root, attempt_id, durable,
     )
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("interrupted execution must not rerun")),
     )
     for name in carriers:
         setattr(args, name, str(inputs / f"missing-{name}.json"))
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     try:
@@ -596,12 +596,11 @@ def test_started_resume_never_falls_back_from_corrupt_durable_execution_inputs(t
     project_file = Path(durable["trace_inputs"]["automation_artifact"]["artifacts"]["generated_files"][0]["path"])
     receipt_path = run_root / "execution-inputs" / f"{attempt_id}.json"
     receipt_path.write_bytes(receipt_path.read_bytes() + b" ")
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("corrupt durable carriers must not execute")),
     )
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     assert code == 2 and output["reason"] == "FINALIZATION"
@@ -633,7 +632,7 @@ def test_cmd_exec_resumes_prestart_not_runnable_receipt_without_inventing_execut
         "tools.finalize_attempt.finalize_durable_execution_attempt",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("interrupt before prestart finalization")),
     )
-    assert run_pipeline._reject_prestart_execution(
+    assert exec_commands._reject_prestart_execution(
         coordinates, "RUNNER_REQUEST", "request cannot be built",
         automation_artifact=automation, autotest_review=review,
     ) == 2
@@ -645,13 +644,12 @@ def test_cmd_exec_resumes_prestart_not_runnable_receipt_without_inventing_execut
         "tools.finalize_attempt.finalize_durable_execution_attempt",
         finalize_durable_execution_attempt,
     )
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("prestart receipt must not execute")),
     )
     capsys.readouterr()
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     terminal = pilot_state.read_terminal_result(run_root, attempt_id)
@@ -673,18 +671,17 @@ def test_cmd_exec_terminalizes_read_back_pass_as_unaccepted_when_resume_baseline
         tmp_path, run_root, attempt_id, durable,
     )
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    run_pipeline._publish_execution_receipt(coordinates, report)
+    exec_commands._publish_execution_receipt(coordinates, report)
     project = Path(coordinates["attempt"]["project"])
     (project / ".skillsrc").write_text(
         (project / ".skillsrc").read_text(encoding="utf-8") + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("drifted resume must not rerun")),
     )
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     try:
@@ -713,7 +710,7 @@ def test_late_resume_drift_preserves_an_already_frozen_retained_disposition(
         tmp_path, run_root, attempt_id, durable,
     )
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    run_pipeline._publish_execution_receipt(coordinates, report)
+    exec_commands._publish_execution_receipt(coordinates, report)
     original_publish_closure = pilot_state.publish_closure_artifact
 
     def interrupt_before_pretrace(root, selected_attempt_id, kind, artifact):
@@ -737,13 +734,12 @@ def test_late_resume_drift_preserves_an_already_frozen_retained_disposition(
         encoding="utf-8",
     )
     monkeypatch.setattr(pilot_state, "publish_closure_artifact", original_publish_closure)
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("resume must not rerun")),
     )
     capsys.readouterr()
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     terminal = pilot_state.read_terminal_result(run_root, attempt_id)
@@ -771,7 +767,7 @@ def test_resume_after_pretrace_records_late_drift_without_rewriting_closure(
         tmp_path, run_root, attempt_id, durable,
     )
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    run_pipeline._publish_execution_receipt(coordinates, report)
+    exec_commands._publish_execution_receipt(coordinates, report)
     original_verify = finalize_attempt.verify_finalization
     monkeypatch.setattr(
         finalize_attempt,
@@ -791,13 +787,12 @@ def test_resume_after_pretrace_records_late_drift_without_rewriting_closure(
         encoding="utf-8",
     )
     monkeypatch.setattr(finalize_attempt, "verify_finalization", original_verify)
-    monkeypatch.setattr(
-        run_tests, "run_tests_v5",
+    monkeypatch.setattr(exec_runner, "run_tests_v5",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("resume must not rerun")),
     )
     capsys.readouterr()
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     output = json.loads(capsys.readouterr().out)
     terminal = pilot_state.read_terminal_result(run_root, attempt_id)
@@ -831,7 +826,7 @@ def test_cmd_exec_uses_immutable_finalization_installation_as_validation_frontie
     args = SimpleNamespace(
         project=str(tmp_path), run="b" * 32,
     )
-    monkeypatch.setattr(run_pipeline, "_validated_execution_coordinates", lambda *_args: coordinates)
+    monkeypatch.setattr(exec_commands, "_validated_execution_coordinates", lambda *_args: coordinates)
     monkeypatch.setattr(pilot_state, "read_terminal_result", lambda *_args: (_ for _ in ()).throw(KeyError()))
     monkeypatch.setattr(pilot_state, "derive_state", lambda *_args: {"events": []})
     monkeypatch.setattr(pilot_state, "read_effective_canonical", lambda *_args: {"document": {}})
@@ -848,7 +843,7 @@ def test_cmd_exec_uses_immutable_finalization_installation_as_validation_frontie
         lambda *_args: {"digest": "sha256:" + "d" * 64} if finalization_installed else None,
     )
     monkeypatch.setattr(pilot_state, "read_resume_validation_if_present", lambda *_args: None)
-    monkeypatch.setattr(run_pipeline, "_reconstruct_started_request", lambda *_args: (object(), "python"))
+    monkeypatch.setattr(exec_commands, "_reconstruct_started_request", lambda *_args: (object(), "python"))
     validations = []
     publications = []
 
@@ -856,7 +851,7 @@ def test_cmd_exec_uses_immutable_finalization_installation_as_validation_frontie
         validations.append(True)
         raise run_pipeline.HostStop("BASELINE_DRIFT", "changed")
 
-    monkeypatch.setattr(run_pipeline, "_revalidate_execution_baseline", validate)
+    monkeypatch.setattr(exec_commands, "_revalidate_execution_baseline", validate)
     monkeypatch.setattr(
         pilot_state, "publish_resume_validation",
         lambda *_args: publications.append(_args[-1]),
@@ -869,7 +864,7 @@ def test_cmd_exec_uses_immutable_finalization_installation_as_validation_frontie
         },
     )
 
-    code = run_pipeline.cmd_exec(args)
+    code = exec_commands.cmd_exec(args)
 
     assert bool(validations) is must_revalidate
     assert publications == (["BASELINE_DRIFT"] if must_revalidate else [])

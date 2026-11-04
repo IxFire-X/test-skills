@@ -312,7 +312,7 @@ def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys:
 
 def test_a_file_written_by_out_makes_no_drift_for_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_finish import _args, _project
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     code, _line = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / "tmp" / "effective.json")], capsys)

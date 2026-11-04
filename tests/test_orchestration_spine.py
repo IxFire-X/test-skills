@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from tools import pilot_state
 from tools.run_pipeline import resume_phase_one_spine, run_phase_one_spine
 from helpers import build_phase_two_baseline, phase_two_baseline
+from tools import exec_commands
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -120,7 +121,7 @@ def test_spine_uses_confined_publishers_and_never_invokes_model_executor_or_proj
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("forbidden dependency invoked")
 
-    monkeypatch.setattr(pipeline, "_execute", forbidden)
+    monkeypatch.setattr(exec_commands, "_execute", forbidden)
     result = _run(tmp_path)
     assert result["exit_code"] == 3
     source = Path(pipeline.__file__).read_text(encoding="utf-8")

@@ -407,7 +407,6 @@ def execution_facts(project: Path, module: Mapping[str, Any]) -> dict[str, Any]:
     return {"ready": False, "reason": "; ".join(reason for reason, _fix in problems), "fix": "; ".join(fix for _reason, fix in problems)}
 
 
-PROBE_TIMEOUT = 120
 _EXCLUSIONS = {
     "nohttp": ("в maven-checkstyle-plugin, в <configuration> выполнения nohttp, допишите через запятую в <excludes>: "
                "**/{pack}/**,**/.pilot-runs/**  (например <excludes>…,**/{pack}/**,**/.pilot-runs/**</excludes>); "
@@ -469,60 +468,6 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
                  f"автотесты — только API Java {level['level']}, новее отклонит runner-compat (RUNNER_API_LEVEL)")]
 
 
-def _probe_runner(argv: Sequence[str], cwd: Path, *, timeout: int) -> Any:
-    from tools.run_tests import run_subprocess
-
-    return run_subprocess(list(argv), Path(cwd), timeout=timeout)
-
-
-_URL_USERINFO = re.compile(r"://[^/\s@]+@")
-_SECRET_VALUE = re.compile(r"(?i)((?:password|passwd|pwd|token|secret)[\w.-]*['\"]?\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;)]+)")
-PROBE_LINE_CHARS = 200
-
-
-def _scrub(line: str) -> str:
-    """FaT-H2a: an [ERROR] line of the probe goes to the agent — no URL userinfo, no secret values, at most 200 chars."""
-    line = _SECRET_VALUE.sub(r"\1***", _URL_USERINFO.sub("://***@", line))
-    return line if len(line) <= PROBE_LINE_CHARS else line[:PROBE_LINE_CHARS - 1] + "…"
-
-
-def build_probe(project: Path, module: Mapping[str, Any], runner: Any = None) -> dict[str, Any] | None:
-    """FaT-L: the offline validate phase with the exec flags — whatever fails here fails the selected-tests run too."""
-    from tools.execution_adapters import AdapterRequestError, MAVEN, SYSTEM_MAVEN, probe_command_for, probe_executable
-
-    test = module.get("test") if isinstance(module.get("test"), Mapping) else None
-    if test is None or test.get("adapter_id") not in {MAVEN, SYSTEM_MAVEN}:
-        return None
-    module_root = (Path(project).resolve() / str(module.get("root") or ".")).resolve()
-    try:
-        argv = probe_command_for(str(test["adapter_id"]), probe_executable(module_root, test), str(test.get("build_profile")))
-    except (AdapterRequestError, KeyError, OSError):
-        return None
-    started = time.monotonic()
-    outcome = (runner or _probe_runner)(argv, module_root, timeout=PROBE_TIMEOUT)
-    seconds = round(time.monotonic() - started, 1)
-    command = " ".join(f'"{part}"' if " " in part else part for part in argv)
-    # FaT-H2a P1: run_tests.ProcessOutcome — exit_code and kind (EXIT, TIMEOUT, OS_ERROR), never returncode/cause.
-    if outcome.kind == "TIMEOUT":
-        return _row("execution:build-probe", EXECUTION, "WARN", f"фаза validate офлайн не уложилась в {PROBE_TIMEOUT} с — не проверено",
-                    f"запустите вручную в {module_root}: {command}")
-    if outcome.kind == "OS_ERROR":
-        return _row("execution:build-probe", EXECUTION, "WARN", "фазу validate офлайн не удалось запустить — не проверено",
-                    f"запустите вручную в {module_root}: {command}")
-    if outcome.exit_code == 0:
-        return _row("execution:build-probe", EXECUTION, "OK", f"фаза validate проекта офлайн прошла за {seconds} с (флаги exec)")
-    output = f"{outcome.stdout}\n{outcome.stderr}"
-    errors = [_scrub(line.strip()) for line in output.splitlines() if line.strip().startswith("[ERROR]") and "-> [Help" not in line][:3]
-    if "offline mode" in output:
-        return _row("execution:build-probe", EXECUTION, "WARN",
-                    "фаза validate офлайн не проверена: плагинов или зависимостей проекта нет в локальном репозитории Maven; "
-                    "первый exec пойдёт за ними в сеть — нужна сеть или зеркало компании",
-                    "проверить заранее с сетью: " + command.replace(" -o ", " "))
-    return _row("execution:build-probe", EXECUTION, "WARN",
-                "фаза validate проекта падает с флагами exec — выбранные тесты не запустятся: " + (" | ".join(errors) or f"код {outcome.exit_code}"),
-                f"исправьте сборку проекта, пока в {module_root} не пройдёт: {command}")
-
-
 def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: str | None, target: str | None = None) -> str:
     """FaT-4b: the full scan command of this very request plus the flag — an agent runs a fix verbatim (package python)."""
     parts = [f'"{sys.executable}" -m tools.run_pipeline scan --project "{project}"', *(f'--docs "{doc}"' for doc in docs),
@@ -531,10 +476,20 @@ def _self_review_scan(project: Path, docs: Sequence[str], profile: str, module: 
     return " ".join(parts)
 
 
-def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", module: str | None = None,
+def check(project: Path, docs: Sequence[str], profile: str | None = None, module: str | None = None,
           target: str | None = None) -> dict[str, Any]:
+    from tools import execution_gate
+
     project = Path(project).resolve()
+    profile = profile or execution_gate.default_profile()  # P8a-1: what this package can do
     rows: list[dict[str, Any]] = [check_python()]
+    if profile == "local-pilot-v1" and not execution_gate.execution_available():
+        rows.append(_row("profile", CASES, "STOP", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает",
+                         "запустите ready без --profile или с --profile cases-only-v1"))
+        profile = "cases-only-v1"  # no execution rows: this package has nothing to check them with
+        requested_profile = "local-pilot-v1"
+    else:
+        requested_profile = profile
     deps = check_deps()
     rows.append(deps)
     rows.append(check_git(project))
@@ -573,7 +528,8 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
                 rows.extend(style_rows(project, selected))
                 rows.extend(java_level_rows(project, selected))
-                probe = build_probe(project, selected) if facts["ready"] else None
+                exec_probe = execution_gate.load("exec_probe")
+                probe = exec_probe.build_probe(project, selected) if facts["ready"] and exec_probe is not None else None
                 if probe is not None:
                     rows.append(probe)
                 # FaT-S: the baseline refusals the scan would meet, the same code; cases are not blocked by them.
@@ -595,7 +551,7 @@ def check(project: Path, docs: Sequence[str], profile: str = "local-pilot-v1", m
                          "если CLI этого не умеет — спросите человека о прогоне с пометкой SELF",
                          _self_review_scan(project, docs, profile, module, target)))
     blocked = any(row["level"] == "STOP" and row["block"] == CASES for row in rows)
-    return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": profile, "checks": rows}
+    return {"status": "BLOCKED" if blocked else "READY", "project": str(project), "profile": requested_profile, "checks": rows}
 
 
 def _table(report: Mapping[str, Any]) -> str:
@@ -618,7 +574,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = JsonArgumentParser(description="Readiness of a project for a run: every problem at once, with fixes.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--docs", action="append", default=[])
-    parser.add_argument("--profile", choices=("cases-only-v1", "local-pilot-v1"), default="local-pilot-v1")
+    parser.add_argument("--profile", choices=("cases-only-v1", "local-pilot-v1"), default=None,
+                        help="P8a-1: default is what this package can do — local-pilot-v1 with its execution files, else cases-only-v1")
     parser.add_argument("--module")
     parser.add_argument("--target", help="the narrowed context of scan --target, to preview before the scan")
     args = parser.parse_args(argv)

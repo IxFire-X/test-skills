@@ -799,6 +799,86 @@ flowchart TD
 </details>
 
 
+### `tools/exec_commands.py`
+
+**Команды запуска сгенерированных тестов.**
+
+Здесь живут команды `exec` и `rerun-retained` и всё, чем пользуются только они: проверка координат прогона, подготовка принятой автоматизации, квитанции исполнения. Код перенесён из `run_pipeline.py` без изменений. Ядро подключает этот файл только через `tools/execution_gate.py`; если файла в поставке нет, команд исполнения тоже нет.
+
+[Открыть файл](../tools/exec_commands.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `cmd_exec`, `rerun_retained_tests`, `cmd_rerun_retained`, `add_parsers`, `COMMANDS`.
+
+</details>
+
+
+### `tools/exec_probe.py`
+
+**Пробный запуск сборки перед первым прогоном.**
+
+Запускает офлайн фазу validate Maven-модуля с теми же флагами, что и выбранные тесты, и сообщает в `ready`, пройдёт ли сборка. Строки ошибок очищаются от адресов с логином и значений секретов.
+
+[Открыть файл](../tools/exec_probe.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `build_probe`.
+
+</details>
+
+
+### `tools/exec_runner.py`
+
+**Запуск процесса с тестами.**
+
+Единственное место, где запускается процесс сборки или тестов: сам процесс, остановка всего дерева процессов по таймауту (на Windows через Job Object) и `run_tests_v5`, который ведёт один запуск от проверки допуска до отчёта. Сбор и разбор отчётов остался в `run_tests.py`.
+
+[Открыть файл](../tools/exec_runner.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `run_subprocess`, `run_tests_v5`.
+
+</details>
+
+
+### `tools/exec_stand.py`
+
+**Проверка стенда приложения.**
+
+Единственное место, где пакет обращается к самому приложению: один запрос без тела по адресу из переменной модуля `service_url_env`. Если стенд не отвечает, `exec` останавливается до записи файлов, а `finish` может закрыть попытку по причине STAND_UNAVAILABLE.
+
+[Открыть файл](../tools/exec_stand.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `stand_down`.
+
+</details>
+
+
+### `tools/execution_gate.py`
+
+**Шов между ядром и файлами исполнения.**
+
+Закрытый список из четырёх файлов `exec_*`, проверка, что они есть в поставке, и профиль по умолчанию: `local-pilot-v1`, если файлы на месте, иначе `cases-only-v1`. Профиль поставки — это наличие её файлов исполнения. Только этот модуль загружает другие по имени.
+
+[Открыть файл](../tools/execution_gate.py)
+
+<details>
+<summary>Технические подробности</summary>
+
+**Основные определения в коде:** `EXEC_MODULES`, `execution_available`, `default_profile`, `load`.
+
+</details>
+
+
 ### `tools/finalize_attempt.py`
 
 **Подведение окончательного итога.**
@@ -972,7 +1052,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `check`, `check_python`, `check_deps`, `check_skillsrc`, `check_module`, `build_probe`.
+**Основные определения в коде:** `check`, `check_python`, `check_deps`, `check_skillsrc`, `check_module`.
 
 </details>
 
@@ -1060,16 +1140,16 @@ Markdown сверяется при публикации, но не входит 
 
 **Команды управления работой.**
 
-Предоставляет команды для изучения проекта, чтения состояния, исполнения принятых тестов и повторной проверки сохранённых тестов. Соединяет нужные операции других модулей в правильном порядке. Сам к модели не обращается: вызовами модели управляет внешняя программа по инструкциям из skills/.
+Предоставляет команды для изучения проекта, чтения состояния и закрытия попытки; команды исполнения принятых тестов подключаются из `tools/exec_commands.py`, если этот файл есть в поставке. Соединяет нужные операции других модулей в правильном порядке. Сам к модели не обращается: вызовами модели управляет внешняя программа по инструкциям из skills/.
 
 [Открыть файл](../tools/run_pipeline.py)
 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `HostStop`, `cmd_scan`, `cmd_exec`, `rerun_retained_tests`, `cmd_rerun_retained`, `cmd_status`, `run_phase_one_spine`, `resume_phase_one_spine`, `finalize_phase_one_spine`, `build_parser`, `argparse_parent`, `main`.
+**Основные определения в коде:** `HostStop`, `cmd_scan`, `cmd_status`, `run_phase_one_spine`, `resume_phase_one_spine`, `finalize_phase_one_spine`, `build_parser`, `argparse_parent`, `main`.
 
-Команды: `scan`, `status`, `exec`, `rerun-retained`. Для `exec` сейчас допустим только `--executor local`.
+Команды: `scan`, `status`, `finish`, `report`; `exec` и `rerun-retained` добавляются, только если в поставке есть файл `tools/exec_commands.py` (см. `tools/execution_gate.py`).
 
 </details>
 
@@ -1085,7 +1165,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `consume_controller_process_stop_proof`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `run_subprocess`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `run_tests_v5`, `main`.
+**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `consume_controller_process_stop_proof`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `main`.
 
 
 </details>

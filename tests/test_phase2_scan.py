@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from tools import run_pipeline
 from tools.init_skillsrc import _payload
+from tools import exec_commands
 
 
 def _skillsrc() -> bytes:
@@ -83,7 +84,7 @@ def test_scan_publishes_full_nested_inventory_and_safe_receipts(tmp_path: Path, 
     assert run_pipeline.cmd_status(SimpleNamespace(project=str(project), run=scan["run_id"])) == 0
     status = payloads[-1]
     assert (status["run_id"], status["attempt_id"], status["attempt_state"]) == (scan["run_id"], attempt_id, "ACTIVE")
-    execution = run_pipeline._validated_execution_coordinates(project, scan["run_id"])
+    execution = exec_commands._validated_execution_coordinates(project, scan["run_id"])
     assert execution["attempt"]["attempt_id"] == attempt_id
 
 

@@ -13,6 +13,7 @@ import shlex
 from pathlib import Path
 
 import pytest
+from tools import exec_commands, exec_stand
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,10 +41,11 @@ def test_o2_a_stand_that_cannot_be_brought_up_closes_by_the_abandon_exec_names(t
     from tools.pilot_state import derive_state
 
     root, _attempt = _automation_chain(tmp_path, ["ПРИНЯТО"])
-    monkeypatch.setattr(run_pipeline, "_service_stop", lambda project, module: None)  # the stand answers
+    monkeypatch.setattr(exec_stand, "_service_stop", lambda project, module: None)  # the stand answers (finish)
     code, refused = _main(capsys, ["finish", "--project", str(tmp_path), "--run", root.name, "--abandon", "STAND_UNAVAILABLE"])
     assert code == 2 and derive_state(root)["attempts"][-1]["state"] != "TERMINAL", refused
-    monkeypatch.setattr(run_pipeline, "_service_stop", lambda project, module: dict(_DOWN))
+    monkeypatch.setattr(exec_stand, "_service_stop", lambda project, module: dict(_DOWN))
+    monkeypatch.setattr(exec_commands, "_service_stop", lambda project, module: dict(_DOWN))  # exec
     code, stopped = _main(capsys, ["exec", "--project", str(tmp_path), "--run", root.name])
     assert code == 2 and stopped["code"] == "SERVICE_UNREACHABLE" and "--abandon STAND_UNAVAILABLE" in stopped["fix"], stopped
     command = stopped["fix"].split("стенд не поднять — ", 1)[1]

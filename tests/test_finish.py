@@ -42,7 +42,7 @@ def _args(project: Path, run_root: Path, **paths: str) -> SimpleNamespace:
 
 def test_exec_takes_the_carriers_from_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     code = cmd_exec(_args(project, run_root))
@@ -52,7 +52,7 @@ def test_exec_takes_the_carriers_from_the_attempt(tmp_path: Path, capsys: pytest
 
 
 def test_an_explicit_carrier_is_checked_against_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, _attempt_id, values = _project(tmp_path)
     forged = dict(values["automation_artifact"])
@@ -70,7 +70,7 @@ def test_an_explicit_carrier_is_checked_against_the_attempt(tmp_path: Path, caps
 
 def test_exec_with_and_without_paths_gives_the_same_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     results = []
     for name, with_paths in (("a", True), ("b", False)):

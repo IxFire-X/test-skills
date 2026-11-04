@@ -110,8 +110,9 @@ def test_controller_proved_timeout_allows_explicit_child_after_unknown(tmp_path:
     from tests.test_durable_execution_trace import _unknown_report
     from tests.test_execution_receipt import _execution_facts
     from tools.execution_adapters import request_digest
-    from tools.run_pipeline import _publish_execution_receipt
-    from tools.run_tests import _process_row, run_subprocess
+    from tools.exec_commands import _publish_execution_receipt
+    from tools.run_tests import _process_row
+    from tools.exec_runner import run_subprocess
 
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     timeout = _unknown_report(root, attempt_id, durable, request)
@@ -151,7 +152,8 @@ def test_schema_shaped_timeout_evidence_cannot_unlock_process_stop(tmp_path: Pat
     from tests.test_durable_execution_trace import _unknown_report
     from tests.test_execution_receipt import _execution_facts
     from tools.execution_adapters import request_digest
-    from tools.run_pipeline import HostStop, _publish_execution_receipt
+    from tools.run_pipeline import HostStop
+    from tools.exec_commands import _publish_execution_receipt
 
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     timeout = _unknown_report(root, attempt_id, durable, request)

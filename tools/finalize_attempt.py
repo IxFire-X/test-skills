@@ -1190,12 +1190,12 @@ def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
 
 
 def _stand_down(run_root: Path, attempt_id: str) -> bool:
-    """FaT-O12 O2: the module's stand (FaT-2R ``service_url_env``) does not answer now — the same check as exec's."""
-    from tools.run_pipeline import _service_stop
+    """FaT-O12 O2: the module's stand (FaT-2R ``service_url_env``) does not answer now — the same check as exec's.
+    A delivery without the stand module cannot check it: the fact stays undetermined (P8a-1)."""
+    from tools import execution_gate
 
-    attempt = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
-    project = Path(str(pilot_state.read_run(run_root)["manifest"]["project"]))
-    return _service_stop(project, str(attempt["module"])) is not None
+    stand = execution_gate.load("exec_stand")
+    return stand is not None and stand.stand_down(run_root, attempt_id)
 
 
 def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int, abandon: str | None = None) -> str:

@@ -88,7 +88,7 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
     """The callback cannot itself be treated as proof that execution was claimed."""
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -152,7 +152,7 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
 def test_runner_refuses_replay_after_preexisting_execution_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -185,7 +185,7 @@ def test_runner_preserves_closed_request_for_admission_and_isolation_rejections(
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
     from tools.pilot_state import publish_attempt_receipt
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
     from tools.schema_validation import schema_diagnostics
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"

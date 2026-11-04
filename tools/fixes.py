@@ -211,6 +211,9 @@ FIXES: dict[str, str] = {
                      "нет: такое наблюдение — утверждение ожидания или его блокер",
     "SCHEMA_REQUIRED": "не хватает обязательного поля (его имя — в path): утверждение assertion требует assertion_id, display_order, "
                        "actual, operator и expected (кроме exists и not_exists)",
+    # --- P8a-1: a delivery without the execution files ---
+    "PROFILE_NOT_IN_PACKAGE": "в этой поставке нет исполнения тестов — повтори команду без --profile или с --profile cases-only-v1: "
+                              "кейсы и отчёт доступны, автотесты запускает тот, у кого есть полная поставка",
 }
 
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"

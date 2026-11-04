@@ -7,6 +7,7 @@ import pytest
 
 from tests.test_execution_receipt import _execution_facts
 from tests.test_exit_policy import _local
+from tools import exec_commands
 
 
 def _publish_execution(root: Path, attempt_id: str, report: dict, *, request=None) -> dict:
@@ -207,7 +208,7 @@ def test_public_execution_receipt_records_unknown_immediately_after_readback(tmp
     }
     pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
 
-    receipt = run_pipeline._publish_execution_receipt(
+    receipt = exec_commands._publish_execution_receipt(
         coordinates, _unknown_report(root, attempt_id, durable, request),
     )
 

@@ -44,7 +44,7 @@ def _has(run_root: Path, attempt_id: str, kind: str) -> bool:
 
 def test_exec_after_the_static_review_prepares_its_inputs_and_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path)
     assert not _has(run_root, attempt_id, "execution-inputs") and not _has(run_root, attempt_id, "generated-delta")
@@ -60,7 +60,7 @@ def test_exec_after_the_static_review_prepares_its_inputs_and_runs(tmp_path: Pat
 
 def test_exec_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path)
     events = [event for event in derive_state(run_root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id]
@@ -74,7 +74,7 @@ def test_exec_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.Ca
 
 
 def test_exec_without_an_accepted_static_review_names_the_step(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path, publish_static_review=False)
     code = cmd_exec(_args(project, run_root))
@@ -85,7 +85,7 @@ def test_exec_without_an_accepted_static_review_names_the_step(tmp_path: Path, c
 
 
 def test_exec_after_a_static_review_that_is_not_accepted_materializes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     before = sorted(path.relative_to(project).as_posix() for path in project.rglob("*") if ".pilot-runs" not in path.parts)

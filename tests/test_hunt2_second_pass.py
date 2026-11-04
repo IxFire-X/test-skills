@@ -146,7 +146,8 @@ def test_status_names_a_vanished_runtime_and_still_compares_the_files(tmp_path: 
 
 
 def test_exec_names_a_vanished_runtime(tmp_path: Path) -> None:
-    from tools.run_pipeline import HostStop, _revalidate_execution_baseline
+    from tools.run_pipeline import HostStop
+    from tools.exec_commands import _revalidate_execution_baseline
 
     missing = tmp_path / "services/api/.venv/Scripts/python.exe"
     coordinates = {"manifest": {"project": str(tmp_path)}, "run_root": str(tmp_path / "run"), "module_root": str(tmp_path),
@@ -189,7 +190,7 @@ def test_exec_after_a_refused_static_review_points_to_finish_not_to_another_revi
                                                                                   capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_exec_prepares import _project
     from tests.test_finish import _args
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, _attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     assert cmd_exec(_args(project, run_root)) == 2

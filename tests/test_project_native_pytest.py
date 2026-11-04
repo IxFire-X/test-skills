@@ -255,7 +255,7 @@ def _request(project: Path, document: dict, artifact: dict):
 def test_v5_runner_uses_project_pyproject_plugin_conftest_and_exact_reviewed_nodeid(tmp_path: Path) -> None:
     from tools.execution_adapters import request_digest
     from tools.pilot_state import claim_execution_start
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -296,7 +296,7 @@ def test_sensitive_junit_identity_finalizes_unknown_without_publishing_value(tmp
     from tools.execution_adapters import request_digest
     from tools.finalize_attempt import finalize_durable_execution_attempt
     from tools.pilot_state import claim_execution_start
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     monkeypatch.setenv("AUDIT_CASE_VALUE", marker)
     project = tmp_path / "project"
@@ -339,7 +339,7 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     from tools.pilot_state import (
         claim_execution_start, read_attempt_receipt, read_effective_canonical,
     )
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -401,7 +401,7 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
 def test_controller_exec_keeps_nested_module_runtime_cwd_and_selector_without_root_fallback(tmp_path: Path, capsys) -> None:
     """A parent-owned run executes only its selected nested module, never project root."""
     from tools.pilot_state import derive_state, read_attempt_receipt, read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project, module_root = tmp_path / "project", tmp_path / "project" / "modules" / "child"
@@ -463,14 +463,14 @@ def test_controller_exec_keeps_nested_module_runtime_cwd_and_selector_without_ro
 
 
 def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_path: Path, monkeypatch) -> None:
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
     shutil.copytree(fixture, project)
     _module_python(project)
     document, artifact, static_review, evidence, run_root, attempt_id, _authorization, delta = _reviewed_inputs(project)
-    monkeypatch.setattr("tools.run_tests.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
+    monkeypatch.setattr("tools.exec_runner.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
 
     denied = run_tests_v5(
         _request(project, document, artifact), _sealed_authorization(profile="cases-only-v1", execution_requested=False),
@@ -498,7 +498,7 @@ def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_p
 def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp_path: Path, monkeypatch) -> None:
     """Changing only request.executable must block before any project process starts."""
     from tools.execution_adapters import ExecutionRequest, PYTEST
-    from tools.run_tests import run_tests_v5
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -515,7 +515,7 @@ def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp
         report_paths=("test-results/pytest.xml",),
         environment_labels=("PROJECT_NATIVE_ENV",),
     )
-    monkeypatch.setattr("tools.run_tests.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
+    monkeypatch.setattr("tools.exec_runner.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
 
     result = run_tests_v5(
         forged, authorization, document, artifact, static_review,

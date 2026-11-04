@@ -72,7 +72,8 @@ def test_java_zero_report_with_negative_exit_is_unknown(tmp_path, monkeypatch):
     from tests.test_project_native_pytest import _reviewed_inputs
     from tools.execution_adapters import ExecutionRequest, MAVEN, MAVEN_STYLE_SKIPS, request_digest
     from tools.pilot_state import claim_execution_start
-    from tools.run_tests import ProcessOutcome, RunnerCompatibility, run_tests_v5
+    from tools.run_tests import ProcessOutcome, RunnerCompatibility
+    from tools.exec_runner import run_tests_v5
 
     project = tmp_path / "project"
     project.mkdir()
@@ -107,7 +108,7 @@ def test_java_zero_report_with_negative_exit_is_unknown(tmp_path, monkeypatch):
         "default",
     )
 
-    monkeypatch.setattr("tools.run_tests.validate_artifact_runner_compatibility", lambda *_args: compatibility)
+    monkeypatch.setattr("tools.exec_runner.validate_artifact_runner_compatibility", lambda *_args: compatibility)
 
     def negative_exit_with_zero_report(*_args):
         reports = project / "target" / "surefire-reports"

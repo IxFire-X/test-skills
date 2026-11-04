@@ -23,6 +23,7 @@ import pytest
 from tests.test_first_run import _python_project, _write
 from tests.test_phase2_scan import _args
 from tools import run_pipeline
+from tools import exec_commands
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = "services/api/docs/feature.md"
@@ -146,7 +147,7 @@ def test_exec_names_the_changed_files_instead_of_a_child_attempt(tmp_path: Path,
 
     project, run_root, _attempt_id, _values = _project(tmp_path)
     (project / "src" / "sample.py").write_text((project / "src" / "sample.py").read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-    code = run_pipeline.cmd_exec(exec_args(project, run_root))
+    code = exec_commands.cmd_exec(exec_args(project, run_root))
     output = capsys.readouterr().out
     payload, _end = json.JSONDecoder().raw_decode(output)
     assert code != 0 and "src/sample.py" in json.dumps(payload, ensure_ascii=False), payload
@@ -242,5 +243,5 @@ def test_exec_never_trusts_the_profile_written_in_the_baseline(tmp_path: Path, m
     request = SimpleNamespace(adapter_id="pytest:selected-symbols-v1", build_profile="default", typed_parameters=(), executable="unused")
     coordinates = {"manifest": {"project": str(project)}, "run_root": run_root, "attempt": attempt, "module_root": module_root}
     with pytest.raises(run_pipeline.HostStop) as stop:  # the runtime identity is always computed: none here — fail closed
-        run_pipeline._revalidate_execution_baseline(coordinates, request)
+        exec_commands._revalidate_execution_baseline(coordinates, request)
     assert stop.value.code == "BASELINE_INCOMPLETE", (stop.value.code, str(stop.value))

@@ -22,7 +22,7 @@ def test_the_package_installs_nothing_and_offers_no_pip() -> None:
 
 
 def test_a_secret_in_a_probe_line_keeps_its_key_and_hides_its_value() -> None:
-    from tools.ready import _scrub
+    from tools.exec_probe import _scrub
 
     line = _scrub("[ERROR] Failed: password=Qwerty123 and token: abc.def-ghi")
     assert "password=***" in line and "token: ***" in line, line

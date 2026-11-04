@@ -20,6 +20,7 @@ import pytest
 from tests.test_execution_adapters import _module
 from tests.test_first_run import _write
 from tools.run_tests import ProcessOutcome
+from tools import exec_probe
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAIN = "http" + "://"  # kept split so this file does not trip the guard below
@@ -187,7 +188,7 @@ def test_ready_names_the_style_checks_and_the_exclusions_for_the_project_build(t
 ])
 def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: Path, outcome: ProcessOutcome, level: str, needle: str) -> None:
     from tools.execution_adapters import MAVEN_STYLE_SKIPS
-    from tools.ready import build_probe
+    from tools.exec_probe import build_probe
 
     project, module = _petclinic_like(tmp_path)
     calls: list[tuple] = []
@@ -207,7 +208,7 @@ def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: P
 
 
 def test_ready_does_not_probe_gradle_pytest_or_a_build_that_is_not_ready(tmp_path: Path) -> None:
-    from tools.ready import build_probe
+    from tools.exec_probe import build_probe
 
     def runner(*_args, **_kwargs):
         raise AssertionError("no probe expected")
@@ -239,7 +240,7 @@ def test_ready_probe_failure_does_not_block_the_cases(tmp_path: Path, monkeypatc
         "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
         "modules": [{**module, "paths": {"source": ["src/main/java"], "tests": ["src/test/java"]}, "detected_from": ["pom.xml"]}],
     }))
-    monkeypatch.setattr(ready, "_probe_runner", lambda argv, cwd, *, timeout: failed)
+    monkeypatch.setattr(exec_probe, "_probe_runner", lambda argv, cwd, *, timeout: failed)
     monkeypatch.setenv("JAVA_HOME", str(tmp_path))
     report = ready.check(project, ["docs/feature.md"], profile="local-pilot-v1")
     rows = {row["id"]: row for row in report["checks"]}
@@ -256,7 +257,8 @@ def test_exec_and_finish_hint_to_format_the_files_left_in_the_project(tmp_path: 
                                                                       capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_finish import _args, _project
     from tools import execution_adapters
-    from tools.run_pipeline import cmd_exec, cmd_finish
+    from tools.exec_commands import cmd_exec
+    from tools.run_pipeline import cmd_finish
 
     project, run_root, _attempt_id, _values = _project(tmp_path)
     seen: list[tuple] = []

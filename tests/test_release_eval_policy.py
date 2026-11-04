@@ -476,8 +476,8 @@ def test_retained_native_rerun_observation_is_produced_by_public_controller(tmp_
     from tools.execution_adapters import request_digest
     from tools.finalize_attempt import finalize_durable_execution_attempt
     from tools.pilot_state import claim_execution_start, derive_state, read_scenario_observation
-    from tools.run_pipeline import rerun_retained_tests
-    from tools.run_tests import run_tests_v5
+    from tools.exec_commands import rerun_retained_tests
+    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -615,7 +615,7 @@ def test_retained_native_rerun_rejects_passing_report_for_unreviewed_target(
     from tests.test_execution_receipt import _execution_facts
     from tools import pilot_state
     from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.run_pipeline import rerun_retained_tests
+    from tools.exec_commands import rerun_retained_tests
     from tools.run_tests import ProcessOutcome
 
     run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)

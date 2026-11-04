@@ -147,7 +147,8 @@ def test_gradle_runs_the_tests_past_the_build_cache(tmp_path: Path) -> None:
 
 def test_an_old_gradle_request_is_refused_for_rerun_with_its_reason(tmp_path: Path) -> None:
     from tools.execution_adapters import GRADLE, MAVEN, build_request
-    from tools.run_pipeline import HostStop, _rerun_request_current
+    from tools.run_pipeline import HostStop
+    from tools.exec_commands import _rerun_request_current
 
     request = build_request(GRADLE, _module(tmp_path / "g", GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
     _rerun_request_current(request)
@@ -193,7 +194,7 @@ def test_the_format_hint_says_what_the_command_formats() -> None:
 def test_the_build_probe_error_lines_carry_no_credentials(tmp_path: Path) -> None:
     from tests.test_build_style import _petclinic_like
     from tools.run_tests import ProcessOutcome
-    from tools.ready import build_probe
+    from tools.exec_probe import build_probe
 
     project, module = _petclinic_like(tmp_path)
     stdout = ("[ERROR] Failed to read artifact from https://ci:hunter2@repo.corp/maven2 (token=abcdef123456)\n"
@@ -207,11 +208,11 @@ def test_the_build_probe_error_lines_carry_no_credentials(tmp_path: Path) -> Non
 
 
 def test_the_build_probe_reads_the_real_process_outcome(tmp_path: Path) -> None:
-    """FaT-H2a P1: the probe runs through run_tests.run_subprocess — the outcome form can never drift from a test double."""
+    """FaT-H2a P1: the probe runs through exec_runner.run_subprocess — the outcome form can never drift from a test double."""
     import sys
 
     from tests.test_build_style import _petclinic_like
-    from tools.ready import _probe_runner, build_probe
+    from tools.exec_probe import _probe_runner, build_probe
 
     project, module = _petclinic_like(tmp_path)
     fake = tmp_path / "fake_mvn.py"

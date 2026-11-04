@@ -10,6 +10,7 @@ import pytest
 from tests.test_first_run import _python_project, _write
 from tests.test_phase2_scan import _args
 from tools import run_pipeline
+from tools import exec_commands
 
 SECRET = "s3cr3t-XYZ-not-real"
 SECRET_PATH = "services/api/config/app.yml"
@@ -88,11 +89,11 @@ def test_the_drift_stop_names_no_secret_and_no_digest(tmp_path: Path, monkeypatc
     digest = "sha256:" + hashlib.sha256(SECRET.encode("utf-8")).hexdigest()
     drift = {"status": "DECLARED_INPUT_DRIFT", "reason_code": "BASELINE_DRIFT", "changed": [SECRET_PATH],
              "secret_inputs": [{"project_path": SECRET_PATH, "content_digest": digest}], "detail": f"password: {SECRET}"}
-    monkeypatch.setattr(run_pipeline, "_baseline_check", lambda *args, **kwargs: drift)
+    monkeypatch.setattr(exec_commands, "_baseline_check", lambda *args, **kwargs: drift)
     coordinates = {"manifest": {"project": str(tmp_path)}, "run_root": str(tmp_path / ".pilot-runs" / "r"), "attempt": {},
                    "module_root": str(tmp_path)}
     with pytest.raises(run_pipeline.HostStop) as caught:
-        run_pipeline._revalidate_execution_baseline(coordinates, None)
+        exec_commands._revalidate_execution_baseline(coordinates, None)
     stop = caught.value
     printed = json.dumps({"message": str(stop), "code": stop.code, "fix": stop.fix, "args": [str(item) for item in stop.args]}, ensure_ascii=False)
     assert stop.code == "BASELINE_DRIFT" and SECRET_PATH in str(stop)  # FaT-G: the stop names the changed path

@@ -152,7 +152,7 @@ class _Answer(http.server.BaseHTTPRequestHandler):
 
 
 def test_exec_checks_the_stand_before_any_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.run_pipeline import _service_stop
+    from tools.exec_stand import _service_stop
 
     root = _stand(tmp_path)
     _declare(root, ["app"], service="STAND_URL")
@@ -228,7 +228,7 @@ def test_an_unreachable_stand_changes_nothing_and_exec_after_it_is_up_runs(tmp_p
     once the stand answers, the same exec goes on to the run of the tests."""
     import tests.test_finish as finish
     from tools.pilot_state import read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _stand_project(tmp_path)
     monkeypatch.setenv("STAND_URL", _local(9, "/"))  # the discard port: nobody answers
@@ -329,7 +329,7 @@ def test_the_stop_names_why_the_stand_did_not_answer(tmp_path: Path, monkeypatch
     """FaT-SU: one attempt, no retry — the message says a closed port from an unknown host; the code stays SERVICE_UNREACHABLE."""
     import socket
 
-    from tools.run_pipeline import _service_stop
+    from tools.exec_stand import _service_stop
 
     root = _stand(tmp_path)
     _declare(root, ["app"], service="STAND_URL")
@@ -357,7 +357,7 @@ def test_a_timeout_and_tls_have_their_own_reason(error: str, reason: str) -> Non
     import ssl
     import urllib.error
 
-    from tools.run_pipeline import _unreachable_reason
+    from tools.exec_stand import _unreachable_reason
 
     cause = {"timeout": socket.timeout("timed out"), "tls": ssl.SSLCertVerificationError(1, "certificate verify failed"),
              "other": BrokenPipeError()}[error]

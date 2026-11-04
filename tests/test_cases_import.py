@@ -348,7 +348,8 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import (append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt,
                                    read_model_stage_artifact, read_terminal_result)
-    from tools.run_pipeline import cmd_exec
+    from tools import exec_commands
+    from tools.exec_commands import cmd_exec
 
     run = _to_generator(tmp_path, monkeypatch)
     root, attempt_id, tmp = run["root"], run["attempt_id"], run["root"] / "tmp"
@@ -397,6 +398,7 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
 
     printed: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", printed.append)  # the scan above replaced it too
+    monkeypatch.setattr(exec_commands, "_print", printed.append)  # exec prints from its own module
     code = cmd_exec(_args(run["project"], root))
     output = printed[-1]
     assert code == 0 and output["verdict"] == "PASS", output

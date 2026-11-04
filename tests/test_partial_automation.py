@@ -180,7 +180,7 @@ def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: P
                                                                      capsys: pytest.CaptureFixture[str]) -> None:
     from tests.test_finish import _args
     from tools.pilot_state import read_terminal_result
-    from tools.run_pipeline import cmd_exec
+    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = partial_project(tmp_path, monkeypatch)
     capsys.readouterr()
