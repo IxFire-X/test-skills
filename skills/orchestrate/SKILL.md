@@ -348,6 +348,14 @@ evidence и provenance. Ревью — **две команды**; события
 бюджет, `distinct_invocations` (твой id против id генератора из журнала) и `evidence_digest` считает код. Бюджет меньше пакета —
 `review-open` отказывает сразу (`REVIEW_CONTEXT_LIMIT`).
 
+`review-open` печатает `for_human` — инструкцию человеку для ревью в свежей сессии (новая сессия или `/clear`, вставить «проведи ревью
+test-skills <run_id>», ответ ревьюера — файл, затем `review-select --verdict <файл>`) и `reviewer_view` — вид ревьюера с контрольными
+ошибками (канарейками): код сам вставил их в вид, а не в кандидата; карту не читай и ревьюеру не показывай. Вывод `model-request` для
+`tc-generator:*` содержит `nonce`: вставь строку «Контрольное слово: <nonce>» в начало задачи генератору, в ответ и файлы слово не копируй.
+Ревьюер называет слово в `codeword_seen` — названное слово значит, что он видел задачу генератора (SELF).
+`review-select` сообщает `review_canaries` (поймано из посеянных) и `codeword`; `REVIEW_CANARY_ONLY_VERDICT` / `REVIEW_ONLY_CANARY_FIXES` —
+вердикт держится на контрольных ошибках, ничего не записано: ревьюер оставляет их находками `INFO` и даёт вердикт по остальному.
+
 Для прогонов v0.1 (начатых до P2): старый порядок — `session-start` → `review-open --session-start` → `review-requested` →
 `model-request` / `model-response` для `tc-reviewer:canonical` → `complete-review` → `review-select --reviewer-session` — работает ещё один
 выпуск и печатает `deprecated: "tools.api review-open …"`; события те же.

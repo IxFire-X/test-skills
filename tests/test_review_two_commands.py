@@ -52,8 +52,9 @@ def _events(run_root: Path) -> list[dict]:
     return [json.loads(line) for line in _journal(run_root).decode("utf-8").splitlines()]
 
 
-def _shape(run_root: Path) -> list[tuple]:
-    """Event type, stage and batch of every event; the batch ids of two runs differ, so they are numbered in order of appearance."""
+def _shape(run_root: Path, without: str | None = None) -> list[tuple]:
+    """Event type, stage and batch of every event; the batch ids of two runs differ, so they are numbered in order of appearance.
+    ``without`` — the digest of a receipt whose event pair is left out (P7: ``review-open`` binds the canary receipt, the nine do not)."""
     batches: dict[str, int] = {}
 
     def name(value):
@@ -62,7 +63,7 @@ def _shape(run_root: Path) -> list[tuple]:
         return f"batch-{batches.setdefault(str(value).removeprefix('tc-generator:'), len(batches) + 1)}"
 
     return [(row["event_type"], name(row.get("stage_instance_id")) if str(row.get("stage_instance_id")).startswith("tc-generator:") else row.get("stage_instance_id"),
-             name(row.get("batch_id"))) for row in _events(run_root)]
+             name(row.get("batch_id"))) for row in _events(run_root) if without is None or row.get("artifact_digest") != without]
 
 
 def _tree(root: Path) -> dict[str, bytes]:
@@ -97,7 +98,9 @@ def test_two_commands_leave_the_events_of_the_nine(tmp_path: Path) -> None:
     code, selected = _select_verdict(new, _verdict(new))
     assert code == 0, selected
 
-    assert _shape(new["run_root"]) == _shape(old["run_root"])
+    code, canaries = _api("read-receipt", *_flags(new), "--kind", "review-canaries", "--event", "ARTIFACT_READ_BACK")
+    assert code == 0, canaries  # P7: review-open seeds the reviewer's view — one receipt, its event pair the only difference
+    assert _shape(new["run_root"], without=canaries["result"]["digest"]) == _shape(old["run_root"])
     stages = [row for row in _shape(new["run_root"]) if row[1] in {"assembly", "tc-reviewer:canonical"}]
     assert [row[0] for row in stages] == ["CANDIDATE_PUBLISHED", "REVIEW_REQUESTED", "MODEL_REQUESTED", "MODEL_RESPONSE_RECEIVED"], stages
     # the boundary, the ledger (its events and isolation) and the effective canonical are the ones of the nine

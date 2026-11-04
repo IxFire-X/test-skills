@@ -38,6 +38,7 @@
       "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
     },
     "skill_pack_digest": {"description": "FaT-CR: skill_pack_digest of the package the answer is made with (context-marker).", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nonce_sha256": {"description": "P7: sha256 of the control word the request of a generator gave (tc-generator); the word itself is only in the output of that call.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "reuse": {
       "description": "FaT-CR: the earlier run whose answer for the same stage and inputs this request reuses.",
       "type": "object", "additionalProperties": false, "required": ["run_id", "attempt_id", "request_digest", "response_digest"],

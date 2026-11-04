@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json"
 NIGHT = Path(r"D:\AI-Projects\live\petclinic-fat-night-20261027\.pilot-runs\7a71393605b2482b989c9a824cf30188\cases\TCDOC-owner-lifecycle-night-7a713936.r1.json")
-TARGET_BYTES = 320_000  # FaT-CV2: машинная часть шага для ревьюера, +61 КБ на ночном каноне; ради размера её не режем
+TARGET_BYTES = 321_000  # FaT-CV2: машинная часть шага для ревьюера, +61 КБ на ночном каноне; ради размера её не режем. P7: +1 КБ — строки роли про кодовое слово и свежую сессию
 TARGET_CASES = 52
 
 
@@ -127,7 +127,13 @@ def test_the_view_command_writes_the_view_of_the_assembled_candidate_only(tmp_pa
     done = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
     out = json.loads(done.stdout)
     assert done.returncode == 0 and out["candidate_sha256"] == document_sha256(document) and out["data_mismatch"] == 0
-    assert Path(out["path"]).read_bytes() == render(document) and out["bytes"] == len(render(document))
+    from tools.review_canaries import seed
+
+    mutated, canaries = seed(document)  # P7: the view command shows the reviewer the candidate with its control errors
+    assert Path(out["path"]).read_bytes() == render(mutated, basis=document) and out["bytes"] == len(render(mutated, basis=document))
+    assert out["canaries"] == len(canaries) and out["canaries_created"] is True
+    if canaries:
+        assert Path(out["path"]).read_bytes() != render(document)
     assert Path(out["path"]).parent == run_root / "review-views"
 
 

@@ -1744,6 +1744,9 @@ def _status_result(project: Path, run_id: str) -> dict[str, Any]:
     attempt = state["attempts"][-1] if state["attempts"] else None
     if attempt is not None:
         result.update(_review_notes_summary(root, str(attempt["attempt_id"])))
+        from tools.review_canaries import status_fields
+
+        result.update(status_fields(root, str(attempt["attempt_id"]), result))  # P7: the canaries of the review, REVIEW_UNRELIABLE
     if attempt is not None and attempt.get("state") == "TERMINAL":
         from tools.pilot_state import read_terminal_result
 

@@ -451,31 +451,35 @@ IMPORT_NOTE = ("Импорт (FaT-IMP): название, цель, предус
 def render(document: Mapping[str, Any], profile: str = "review", groups: Mapping[str, str | None] | None = None,
            batches: Iterable[Iterable[str]] | None = None, existing: Mapping[str, Any] | None = None,
            reference: Iterable[Mapping[str, Any]] | None = None, *, imported: bool = False, normalized: int = 0,
-           context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None) -> bytes:
+           context: str | None = None, import_gaps: tuple[list[str], list[str]] | None = None,
+           basis: Mapping[str, Any] | None = None) -> bytes:
     """The deterministic view of a valid canonical document: ``review`` for the reviewer, ``autotest`` (FaT-AV) for the
     automation generator.  FaT-E2E: with the requirement *groups* (and *batches*) the review view adds ``CV_NO_END_TO_END``;
     without them the bytes are the same as before.  FaT-EC: with the map of *existing* project tests the hints add
     ``CV_EXISTING_TEST`` and the map itself; without a map (or with an empty one) the bytes are the same as before.
-    FaT-REF: with the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same."""
+    FaT-REF: with the *reference* cases of ``scan --reference`` it adds ``CV_REFERENCE``; without them the bytes are the same.
+    P7: *basis* is the real candidate when *document* is its copy with canaries (``tools.review_canaries.seed``): the header, the
+    digest and every hint of the code are the real candidate's, only the cases show the control errors."""
     from tools.canonical_document import document_sha256, require_valid_canonical_document
 
     if profile not in PROFILES:
         raise ValueError(f"unknown view profile: {profile}")
-    require_valid_canonical_document(dict(document))
+    real = document if basis is None else basis
+    require_valid_canonical_document(dict(real))
     if profile == "autotest":
         return ("\n".join(_autotest(document, document_sha256(dict(document)))) + "\n").encode("utf-8")
     sources: dict[str, list[str]] = {}
     for mapping in document["source_to_canonical_mappings"]:
         for requirement_id in mapping["canonical_requirement_ids"]:
             sources.setdefault(requirement_id, []).append(mapping["source_requirement_id"])
-    hints = data_mismatches(document)
-    path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(document, groups, batches))
-    path_hint += _existing_lines(document, existing or {})
-    path_hint += _reference_lines(None if reference is None else reference_match(document, list(reference)))
+    hints = data_mismatches(real)
+    path_hint = _end_to_end_lines(None if groups is None else end_to_end_hint(real, groups, batches))
+    path_hint += _existing_lines(real, existing or {})
+    path_hint += _reference_lines(None if reference is None else reference_match(real, list(reference)))
     lines = [
         f"# Вид для ревью {document['document_id']} r{document['revision']}", "",
         f"- Вид: {VIEW_VERSION}, построен кодом из кандидата; одинаковый кандидат — одинаковые байты.",
-        f"- candidate document_sha256: {document_sha256(dict(document))}",
+        f"- candidate document_sha256: {document_sha256(dict(real))}",
         "- Код проверил структуру и ссылки (типы, ID, порядок, поток данных между шагами), не смысл. Смысл операций, входов"
         " и выходов шага проверяешь ты: та ли capability и тот ли action, те ли метод, путь и значения, что в действии,"
         " данных и требовании. Длинный литерал урезан с пометкой «…(+N симв.)» — полное значение в JSON кандидата у того же шага.",
@@ -592,6 +596,84 @@ def _normalized(root: Path, state: Mapping[str, Any]) -> int:
     return len(imported.get("normalized") or [])
 
 
+def _run_render(root: Path, state: Mapping[str, Any], document: Mapping[str, Any], profile: str,
+                basis: Mapping[str, Any] | None = None) -> tuple[bytes, Any, Any]:
+    """``(bytes, grouping, reference)``: the view of *document* with the hints of the run.  *basis* — the real candidate when
+    *document* is its copy with canaries (the hints of the code are the real candidate's)."""
+    from tools.cases_import import cases_path
+    from tools.pilot_state import read_reference_cases
+
+    real = document if basis is None else basis
+    review = profile == "review"
+    attempt_id = str(state["attempts"][-1]["attempt_id"]) if state["attempts"] else None
+    try:  # FaT-E2E: the hint never stops the view — without groups the view is the one before FaT-E2E
+        grouping = None if not review or attempt_id is None else run_requirement_groups(root, attempt_id, dict(real))
+    except (OSError, ValueError, KeyError, TypeError):
+        grouping = None
+    try:  # FaT-EC: the map is a hint too — none, and the view is the one before FaT-EC
+        existing = None if not review or attempt_id is None else run_existing_tests(root, attempt_id)
+    except (OSError, ValueError, KeyError, TypeError):
+        existing = None
+    try:  # FaT-AU3: which context batches the generator saw — a hint too, never a stop
+        context = None if not review or attempt_id is None else run_context_note(root, attempt_id)
+    except (OSError, ValueError, KeyError, TypeError):
+        context = None
+    reference = None if not review or attempt_id is None else read_reference_cases(root, attempt_id)
+    imported = review and cases_path(root) is not None
+    data = render(document, profile, *(grouping or (None, None)), existing=existing,
+                  reference=None if reference is None else reference["cases"],
+                  imported=imported, normalized=_normalized(root, state) if imported else 0,
+                  context=context, import_gaps=_import_gaps(root, state) if imported else None, basis=basis)
+    return data, grouping, reference
+
+
+def ensure_reviewer_view(project: Path, root: Path, document: Mapping[str, Any]) -> dict[str, Any]:
+    """P7: the reviewer's view of the assembled candidate with canaries, its map and the receipt that binds both to the journal.
+
+    The view is rendered from a copy of the candidate with 0..3 control errors (``tools.review_canaries.seed``); the candidate, its
+    bundles and its journal events stay as they are.  The map and the view are written next to each other in
+    ``<run>/review-views/``, the receipt ``review-canaries`` (and its event pair) carries their digests and the candidate's.  A run
+    that already has the receipt and files that match it is left as it is — the same call again changes nothing."""
+    from tools import review_canaries
+    from tools.canonical_document import document_sha256
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+    from tools.pilot_state import derive_state, publish_review_canaries
+
+    state = derive_state(root)
+    if not state["attempts"]:
+        raise ValueError("the run has no attempt yet")
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    digest = document_sha256(dict(document))
+    published = [event for event in state["events"] if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
+    if not published or published[-1].get("artifact_digest") != digest:
+        raise ValueError("the candidate is not the assembled candidate of the run")
+    target = review_canaries.view_target(root, digest)
+    existing = review_canaries.verify(root, attempt_id)
+    if existing is not None:
+        return {"path": target, "created": False, "canaries": len(existing), "candidate_sha256": digest, "bytes": len(target.read_bytes())}
+    mutated, canaries = review_canaries.seed(document)
+    data, _grouping, _reference = _run_render(root, state, mutated, "review", basis=document)
+    mapped = review_canaries.map_bytes(digest, canaries)
+    atomic_write_confined_bytes_at_root(project, root, target, data)
+    atomic_write_confined_bytes_at_root(project, root, review_canaries.map_target(root, digest), mapped)
+    receipt = publish_review_canaries(root, attempt_id, review_canaries.receipt_facts(digest, data, mapped, len(canaries)))
+    return {"path": target, "created": bool(receipt.get("created")), "canaries": len(canaries), "candidate_sha256": digest, "bytes": len(data)}
+
+
+def _hints_of_run(root: Path, state: Mapping[str, Any], document: Mapping[str, Any]) -> tuple[Any, Any]:
+    """The requirement groups and the reference cases of the run, for the output of the view command."""
+    from tools.pilot_state import read_reference_cases
+
+    if not state["attempts"]:
+        return None, None
+    attempt_id = str(state["attempts"][-1]["attempt_id"])
+    try:
+        grouping = run_requirement_groups(root, attempt_id, dict(document))
+    except (OSError, ValueError, KeyError, TypeError):
+        grouping = None
+    return grouping, read_reference_cases(root, attempt_id)
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -614,6 +696,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"unknown run: {args.run}")
         root = project / ".pilot-runs" / args.run
         state = derive_state(root)
+        extra: dict[str, Any] = {}
         if args.effective:
             if not state["attempts"]:
                 raise ValueError("the run has no attempt yet")
@@ -623,36 +706,15 @@ def main(argv: list[str] | None = None) -> int:
             if digest != effective["document_digest"]:
                 raise ValueError("the effective document does not match its digest")
             target = autotest_view(root, digest)
+            data, grouping, reference = _run_render(root, state, document, "autotest")
+            atomic_write_confined_bytes_at_root(project, root, target, data)
         else:
             document, profile = json.loads(Path(args.candidate).read_text(encoding="utf-8")), "review"
-            digest = document_sha256(document)
-            published = [event for event in state["events"]
-                         if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"]
-            if not published or published[-1].get("artifact_digest") != digest:
-                raise ValueError("the candidate is not the assembled candidate of the run")
-            target = root / "review-views" / (digest.removeprefix("sha256:") + ".md")
-        try:  # FaT-E2E: the hint never stops the view — without groups the view is the one before FaT-E2E
-            grouping = None if profile == "autotest" or not state["attempts"] else run_requirement_groups(root, str(state["attempts"][-1]["attempt_id"]), document)
-        except (OSError, ValueError, KeyError, TypeError):
-            grouping = None
-        try:  # FaT-EC: the map is a hint too — none, and the view is the one before FaT-EC
-            existing = None if profile == "autotest" or not state["attempts"] else run_existing_tests(root, str(state["attempts"][-1]["attempt_id"]))
-        except (OSError, ValueError, KeyError, TypeError):
-            existing = None
-        try:  # FaT-AU3: which context batches the generator saw — a hint too, never a stop
-            context = None if profile == "autotest" or not state["attempts"] else run_context_note(root, str(state["attempts"][-1]["attempt_id"]))
-        except (OSError, ValueError, KeyError, TypeError):
-            context = None
-        from tools.cases_import import cases_path
-        from tools.pilot_state import read_reference_cases
-
-        reference = None if profile == "autotest" or not state["attempts"] else read_reference_cases(root, str(state["attempts"][-1]["attempt_id"]))
-        data = render(document, profile, *(grouping or (None, None)), existing=existing,
-                      reference=None if reference is None else reference["cases"],
-                      imported=profile == "review" and cases_path(root) is not None,
-                      normalized=_normalized(root, state) if profile == "review" and cases_path(root) is not None else 0,
-                      context=context, import_gaps=_import_gaps(root, state) if profile == "review" and cases_path(root) is not None else None)
-        atomic_write_confined_bytes_at_root(project, root, target, data)
+            made = ensure_reviewer_view(project, root, document)
+            target, digest = made["path"], made["candidate_sha256"]
+            data = Path(target).read_bytes()
+            grouping, reference = _hints_of_run(root, state, document)
+            extra = {"canaries": made["canaries"], "canaries_created": made["created"], "canaries_note": "канарейки — сигнал качества ревью, не защита"}
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"status": "error", "message": str(error)[:2000]}, ensure_ascii=False))
         return 2
@@ -660,7 +722,8 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps({"status": "ok", "path": str(target), "bytes": len(data), "candidate_sha256": digest, "view": view, "profile": profile,
                       "data_mismatch": len(data_mismatches(document)),
                       "end_to_end_hint": None if grouping is None else end_to_end_hint(document, *grouping),
-                      "reference": None if reference is None else _reference_counts(reference_match(document, reference["cases"]))},
+                      "reference": None if reference is None else _reference_counts(reference_match(document, reference["cases"])),
+                      **extra},
                      ensure_ascii=False, sort_keys=True))
     return 0
 

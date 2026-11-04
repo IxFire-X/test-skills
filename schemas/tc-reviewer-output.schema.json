@@ -17,7 +17,8 @@
         "successor_edits": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/successor_edit"}}
       }
     },
-    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "codeword_seen": {"description": "P7: the control word of the generator's task, if it is in the reviewer's context; null if not. A word is stored as its sha256 — a named word means the reviewer saw the generator's task (SELF).", "type": ["string", "null"], "maxLength": 128}
   },
   "allOf": [
     {

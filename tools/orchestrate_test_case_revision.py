@@ -615,6 +615,10 @@ def validate_reviewer_session(session: Mapping[str, Any], package_binding: Mappi
     if isolation["distinct_invocations"] != invocation_distinct or isolation.get("evidence_digest") != _host_isolation_digest(isolation):
         raise ValueError("REVIEWER_PROTOCOL: contradictory invocation isolation evidence")
     verified = bool(isolation["fresh_context"] and isolation["distinct_invocations"] and isolation["role_policy"] == "canonical-reviewer-v1")
+    if verified and review_artifact is not None:  # P7: a reviewer who names the generator's control word saw its task — SELF, whatever was declared
+        from tools.review_canaries import codeword_state
+
+        verified = codeword_state(run_root, attempt_id, _plain(review_artifact)) != "named"
     if lifecycle["pre_verdict_abort"]:
         if review_artifact is not None:
             raise ValueError("REVIEWER_PROTOCOL: aborted session cannot have review artifact")
@@ -676,7 +680,7 @@ def publish_unreviewed_candidate(
 
 
 def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any], *, imported: bool = False,
-                    candidate_receipt: Receipt | None = None) -> tuple[Any, Any]:
+                    candidate_receipt: Receipt | None = None, canaries: Sequence[Mapping[str, Any]] | None = None) -> tuple[Any, Any]:
     """FaT-R1: ``(successor, effective)`` of a reviewer answer, or OrchestrationError — every deterministic check of the
     decision, writing nothing: the review shape, the successor edits, the decision against the candidate, the successor
     document and (FaT-IMP) the human fields of an import.  select runs it before it publishes the ledger, model-response
@@ -686,8 +690,14 @@ def review_decision(candidate: Mapping[str, Any], review_value: Mapping[str, Any
     if rows:
         raise OrchestrationError("ORCHESTRATION_INPUT", rows, candidate_receipt) from None
     report = review_value["artifacts"]["validation_report"]
+    artifacts = review_value["artifacts"]
+    if canaries:  # P7: an edit of a canary text has the mutated text as ``old`` — the canon holds the original, so it never applies
+        from tools import review_canaries
+
+        artifacts, dropped = review_canaries.filter_edits(canaries, artifacts)
+        review_canaries.refuse_if_only_canaries(canaries, review_value, dropped)
     try:
-        successor = reviewer_successor(candidate_value, review_value["artifacts"])  # FaT-CV: a document or exact edits
+        successor = reviewer_successor(candidate_value, artifacts)  # FaT-CV: a document or exact edits
     except SelectionError as error:
         raise OrchestrationError("ORCHESTRATION_SELECTION", _safe(error.diagnostics, "ORCHESTRATION_SELECTION"), candidate_receipt) from None
     decision_rows = validate_review_decision(candidate_value, report, successor)
@@ -777,8 +787,10 @@ def orchestrate_revision(candidate: Mapping[str, Any], candidate_receipt: Receip
             return OrchestrationResult(_freeze(candidate_value), candidate_receipt, "UNREVIEWED", None, None, None, None, str(facts.get("reason_code", "REWORK")), _freeze(facts), ())
         raise OrchestrationError("ORCHESTRATION_INPUT", [_diag("/review_artifact", "REVIEWER_PROTOCOL")], candidate_receipt)
     # FaT-R1: every deterministic check of the decision before validate_reviewer_session publishes the COMPLETED ledger
+    from tools.review_canaries import verify as _verify_canaries
+
     successor, effective = review_decision(candidate_value, review_value, imported=_run_imported(run_root, attempt_id),
-                                           candidate_receipt=candidate_receipt)
+                                           candidate_receipt=candidate_receipt, canaries=_verify_canaries(run_root, attempt_id))
     report = review_value["artifacts"]["validation_report"]
     verdict = report["verdict"]
     facts = validate_reviewer_session(
@@ -1008,6 +1020,10 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
         published = None
         if not any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly" for event in events):
             published = publish_command(journal_assembly(run_root, attempt_id)[0], output_dir, csv_profile, run_root=run_root, attempt_id=attempt_id)
+        from tools.pilot_state import _run_root as _pilot_run_root
+        from tools.review_view import ensure_reviewer_view
+
+        view = ensure_reviewer_view(*_pilot_run_root(Path(run_root)), journal_assembly(run_root, attempt_id)[0])  # P7: the reviewer's view with canaries
         receipt = files.get("candidate_receipt")
         given = {**files, "candidate_receipt": _load_receipt(Path(receipt)) if receipt else None}
         try:
@@ -1044,15 +1060,30 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
             if request.get("invocation_id") != invocation_id or request.get("model_id") != model_id:
                 raise ReviewRefused("REVIEW_ALREADY_OPEN", f"запрос ревьюера уже записан (модель {request.get('model_id')}, вызов "
                                     f"{request.get('invocation_id')}); fix: повтори review-open с теми же --model-id и --invocation-id")
+        select_command = (f"tools.api review-select --run-root {run_root} --attempt {attempt_id} --output-dir {output_dir} "
+                          "--verdict <файл ответа ревьюера>")
         result: dict[str, Any] = {
             "package_binding": package, "reviewer_session_boundary": boundary, "review_requested": dict(requested),
-            "model_request": dict(request),
-            "next_step": f"ревьюер читает пакет и отвечает; затем tools.api review-select --run-root {run_root} --attempt {attempt_id} "
-                         f"--output-dir {output_dir} --verdict <файл ответа ревьюера>"}
+            "model_request": dict(request), "reviewer_view": str(view["path"]),
+            "canaries": {"seeded": view["canaries"], "note": "канарейки — сигнал качества ревью, не защита; классы и кейсы здесь не печатаются"},
+            "next_step": f"ревьюер читает пакет и отвечает; затем {select_command}",
+            "for_human": human_instruction(run_root, view["path"], select_command)}
         if published is not None:
             result.update(candidate_bundle_receipt=published["candidate_bundle_receipt"], questions_for_analyst=published["questions_for_analyst"],
                           warnings=published["warnings"])
         return result
+
+
+def human_instruction(run_root: Path, view: Path | str, select_command: str) -> str:
+    """PQ3: what a person does to have the review made in a fresh session.  Printed text only — the model is not started here."""
+    run_id = Path(run_root).name
+    answer = Path(run_root) / "tmp" / "reviewer-answer.json"
+    return ("Ревью кейсов в свежей сессии (руками):\n"
+            "1. Открой новую сессию GigaCode или выполни /clear: в ней не должно быть истории генерации этого прогона.\n"
+            f"2. Вставь в неё: «проведи ревью test-skills {run_id}». Модель прочтёт вид кейсов {view}, проверит кейсы по требованиям "
+            f"и запишет ответ в {answer}. В ответе поле codeword_seen: контрольное слово из задачи генератора, если оно есть в контексте "
+            "сессии, иначе null (слово не названо — признак свежего контекста, не доказательство).\n"
+            f"3. Вернись в рабочую сессию и выполни: {select_command.replace('<файл ответа ревьюера>', str(answer))}")
 
 
 def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1117,6 +1148,7 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
         session = reviewer_session if reviewer_session is not None else _last_reviewer_session(run_root, attempt_id, pending)
         selected = review_step("select", run_root, attempt_id, files=files, output_dir=output_dir, csv_profile=csv_profile,
                                reviewer_session=session, review=review if review is not None else pending, dry_run=dry_run)
+        selected = {**selected, **_canary_report(run_root, attempt_id, pending)}  # P7: the canaries and the codeword of the answer
         if not dry_run:
             return selected
         would: dict[str, Any] = {"model_response": answer, "reviewer_ledger": {"status": _plain(session).get("status"), "digest": _plain(session).get("digest")}}
@@ -1125,6 +1157,17 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
             would["effective_source"] = source
             would["successor_revision"] = source["revision"] if source["revision"] > 1 else None
         return {**selected, "would_publish": would}
+
+
+def _canary_report(run_root: Path, attempt_id: str, pending: Mapping[str, Any] | None) -> dict[str, Any]:
+    """P7: what ``review-select`` says of the canaries (the outcome of the answer) and of the control word."""
+    from tools import review_canaries
+
+    summary = review_canaries.summary(run_root, attempt_id, pending)
+    answer = pending if pending is not None else review_canaries.recorded_answer(run_root, attempt_id)
+    state = review_canaries.codeword_state(run_root, attempt_id, answer)
+    warnings = [code for code in (summary.get("warning"), "REVIEWER_NAMED_CODEWORD" if state == "named" else None) if code]
+    return {"review_canaries": summary, "codeword": {"state": state, "note": review_canaries.CODEWORD_NOTES[state]}, "review_warnings": warnings}
 
 
 REVIEW_INPUT_FIELDS = ("candidate", "candidate_receipt", "assembly_receipt", "inventory_receipt", "context_receipts",
@@ -1388,7 +1431,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({**envelope, "code": reason_code or "ORCHESTRATION_INPUT", "fix": _FIXES.get(reason_code) or envelope["fix"],
                           "candidate_bundle_receipt": None, "diagnostics": [_diag("", "ORCHESTRATION_IO")], "successor_bundle_receipt": None,
                           "reason_code": reason_code}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))); return 2
-    output = {**select_output(result), "warnings": [_RENAMED["select"]]}
+    output = {**select_output(result), "warnings": [_RENAMED["select"]], **_canary_report(args.run_root, args.attempt_id, None)}
     print(json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0
 

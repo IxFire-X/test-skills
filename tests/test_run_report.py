@@ -145,7 +145,7 @@ def test_the_report_shows_the_measured_steps_and_warns_over_the_budget(tmp_path:
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
     assert [row["step"] for row in report["step_sizes"]] == ["tc-reviewer:canonical", "context-marker"]
-    assert report["warnings"] == ["STEP_OVER_BUDGET"]
+    assert [code for code in report["warnings"] if code != "REVIEW_UNMEASURED"] == ["STEP_OVER_BUDGET"]  # P7: a run of the nine commands has no canaries
     assert "## Размер входа шагов" in markdown and "| tc-reviewer:canonical | 732886 |" in markdown
     assert "STEP_OVER_BUDGET" in markdown.split("## Предупреждения", 1)[1].split("##", 1)[0]
 

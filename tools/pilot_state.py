@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -2117,6 +2118,12 @@ def publish_model_request(
             extra["skill_pack_digest"] = pack
         if reuse_from is not None:
             extra["reuse"] = _reuse_source(project, root, attempt, stage_instance_id, inputs, role_policy, pack, reuse_from)
+    nonce = None
+    if stage == "tc-generator":  # P7: the control word of the generator's task — the run keeps its sha256 only
+        from tools.review_canaries import nonce_digest
+
+        nonce = secrets.token_hex(6)
+        extra["nonce_sha256"] = nonce_digest(nonce)
     receipt = _sealed({
         "schema_version": "1.1.0" if extra else "1.0.0",
         "run_id": run_id,
@@ -2148,6 +2155,10 @@ def publish_model_request(
         artifact_digest=receipt["digest"],
     )
     published = dict(read_model_request(root, attempt_id, stage_instance_id, receipt["digest"]))
+    if nonce is not None:  # only in this output, never in a file: the agent puts it at the head of the generator's task
+        published["nonce"] = nonce
+        published["nonce_note"] = (f"вставь строку «Контрольное слово: {nonce}» в начало задачи генератору; в его ответ и в файлы прогона "
+                                   "слово не копируй — прогон хранит только его sha256; вывод этой команды слово показывает один раз")
     if not str(model_id or "").startswith("controller:"):  # the merge by the code is no model step
         warning, measure_error = _record_step_size(project, root, run_id, stage_instance_id)
         if warning is not None:  # P1: a warning, never a refusal
@@ -2342,8 +2353,15 @@ def _validate_review_decision(root: Path, state: Mapping[str, Any], attempt_id: 
         return
     if requested is None or document_sha256(candidate) != requested:
         return
+    from tools import review_canaries
+
+    canaries = review_canaries.verify(root, attempt_id)  # P7: a map that does not match is a refusal, before anything is written
+    if review_canaries.codeword_state(root, attempt_id, value) == "named" and not _self_review_accepted_at(_run_root(root)[0], root):
+        raise ValueError("REVIEW_CODEWORD_NAMED: ревьюер назвал контрольное слово генератора — он видел задачу генератора, это ревью в той же "
+                         "сессии; fix: проведи ревью в новой сессии (/clear или новое окно: «проведи ревью test-skills <run_id>») и подай её "
+                         "ответ как есть; ничего не записано. Ревью в той же сессии допустимо, только если прогон начат с scan --accept-self-review")
     try:
-        review_decision(candidate, value, imported=_run_imported(root, attempt_id))
+        review_decision(candidate, value, imported=_run_imported(root, attempt_id), canaries=canaries)
     except OrchestrationError as error:
         rows = "; ".join(f"{row.get('path') or '/'} {row.get('code')}" for row in error.diagnostics[:8])
         raise ValueError(f"REVIEW_DECISION_INVALID: {rows}; fix: это ошибка ответа ревьюера — исправь решение и отдай его "
@@ -2393,6 +2411,10 @@ def recorded_model_answer(run_root: Path, attempt_id: str, stage_instance_id: st
     if not responses:
         return "none"
     value = dict(artifact)
+    if stage_instance_id == "tc-reviewer:canonical":  # P7: as the answer is stored
+        from tools.review_canaries import hash_codeword
+
+        value = hash_codeword(value)
     if len(requests) == 1:
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):
@@ -2451,6 +2473,10 @@ def _publish_model_stage_artifact(
         from tools.batch_assembly import normalize_fragment
 
         value, normalized = normalize_fragment(value)
+    if stage_instance_id == "tc-reviewer:canonical":  # P7: the control word the reviewer names is kept as its sha256 only
+        from tools.review_canaries import hash_codeword
+
+        value = hash_codeword(value)
     if len(requests) == 1:  # audit U2: the digest fields the journal fixes and the answer leaves out — put by the code
         prior = read_model_request(root, attempt_id, stage_instance_id, str(requests[0].get("artifact_digest", "")))
         if not isinstance(prior.get("reuse"), Mapping):  # FaT-CR: a reused answer is passed as it is
@@ -3024,7 +3050,7 @@ def read_run(run_root: Path) -> Mapping[str, Any]:
 
 
 def _receipt_target(root: Path, attempt_id: str, kind: str) -> Path:
-    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases"}
+    directories = {"phase1-artifact": "phase1-artifacts", "structured-result": "structured-results", "reviewer-session-boundary": "reviewer-session-boundaries", "effective-canonical": "effective-canonicals", "automation-review-boundary-r1": "automation-review-boundaries", "automation-review-boundary-r2": "automation-review-boundaries", "execution-inputs": "execution-inputs", "materialization-ownership": "materialization-ownership", "generated-delta": "generated-deltas", "execution-receipt": "execution-receipts", "resume-validation": "resume-validations", "execution-trace": "execution-traces", "trace-audit": "trace-audits", "disposition-plan": "disposition-plans", "disposition-receipt": "disposition-receipts", "batch-plan": "batch-plans", "generator-header": "generator-headers", "reference-cases": "reference-cases", "review-canaries": "review-canaries"}
     if kind.startswith(_SKELETON_KIND):  # FaT-SKB: the skeleton of one batch, next to the whole one
         if not re.fullmatch(r"BATCH-[a-z0-9-]+", kind[len(_SKELETON_KIND):]) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
             raise ValueError("invalid factual receipt")
@@ -3373,6 +3399,19 @@ def _validate_factual_receipt(
             or not isinstance(reference.get("cases"), list)
         ):
             raise ValueError("invalid reference-cases receipt")
+    elif kind == "review-canaries":  # P7: the digests of the canary map and of the reviewer's view, bound to the assembled candidate
+        digests = ("candidate_digest", "view_digest", "canary_map_digest")
+        if (
+            set(receipt) != common | {*digests, "canary_count"}
+            or not identity_matches
+            or any(not _DIGEST.fullmatch(str(receipt.get(name, ""))) for name in digests)
+            or type(receipt.get("canary_count")) is not int
+            or not 0 <= receipt["canary_count"] <= 3
+            or not any(event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("attempt_id") == attempt["attempt_id"]
+                       and event.get("stage_instance_id") == "assembly" and event.get("artifact_digest") == receipt["candidate_digest"]
+                       for event in state["events"])
+        ):
+            raise ValueError("invalid review-canaries receipt")
     elif kind in _GENERATOR_INPUT_KINDS.values():  # FaT-DG: the plan or the header with its one self-digest
         field = next(name for name, value in _GENERATOR_INPUT_KINDS.items() if value == kind)
         value = receipt.get(field)
@@ -3480,10 +3519,14 @@ def _validate_factual_receipt(
             edits = reviewer_output.get("artifacts", {}).get("successor_edits") if isinstance(reviewer_output, Mapping) else None
             if edits is not None:
                 # FaT-CV: the successor is the candidate with the reviewer's exact edits; undo them to reach the candidate digest.
+                # P7: the edits of a canary text were dropped before the successor was made — they are dropped here too.
+                from tools.review_canaries import filter_edits, verify as verify_canaries
                 from tools.review_edits import edits_rebuild
 
+                edits = filter_edits(verify_canaries(root, str(attempt["attempt_id"])) or [], {"successor_edits": edits})[0].get("successor_edits")
+
                 successor = document if (
-                    isinstance(document, Mapping) and isinstance(package_binding, Mapping)
+                    edits is not None and isinstance(document, Mapping) and isinstance(package_binding, Mapping)
                     and edits_rebuild(document, edits, str(package_binding.get("candidate_digest")))
                 ) else None
             verdict_event = next(
@@ -5446,6 +5489,12 @@ def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str,
     append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
     append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
     return read_attempt_receipt(run_root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK")
+
+
+def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
+    """P7: bind the digests of the canary map and of the reviewer's view to the attempt (the receipt and its event pair); the same
+    facts again change nothing."""
+    return _publish_bound_attempt_receipt(run_root, attempt_id, "review-canaries", dict(facts))
 
 
 def publish_phase5_receipt(run_root: Path, attempt_id: str, kind: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:

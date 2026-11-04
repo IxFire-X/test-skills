@@ -450,7 +450,11 @@ def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[
     return [OVER_BUDGET] if over else []
 
 
-_WARNING_TEXT = {"STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
+_WARNING_TEXT = {"REVIEW_UNRELIABLE": "ни одна контрольная ошибка (канарейка) в виде ревьюера не поймана — ревью ненадёжно, accepted=false",
+                 "REVIEW_WEAK": "ревьюер поймал не все контрольные ошибки (канарейки) своего вида",
+                 "REVIEW_UNMEASURED": "ревью не измерено канарейками (прогон открыт до P7)",
+                 "REVIEW_CANARY_MISMATCH": "карта канареек или вид ревьюера не совпадают с квитанцией журнала",
+                 "STEP_OVER_BUDGET": "вход шага больше бюджета, прогон шёл дальше",
                  "STEP_OUTPUT_LARGE": "ответ модели больше порога limits.step_output_warn_bytes — только замер, деление выключено",
                  "CV_DATA_MISMATCH": "значения входов шага не названы в его действии и данных (подсказка ревьюеру)",
                  "CV_NO_END_TO_END": "групп требований несколько, а ни один кейс не связывает две из них — нет сквозного кейса "
@@ -759,7 +763,23 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
     notes = review_notes(root, attempt_id) if attempt_id else {"count": 0, "items": []}
     autotest_notes = review_notes(root, attempt_id, "autotests") if attempt_id else {"count": 0, "items": []}
 
-    if terminal.get("review_independence") == "SELF":
+    from tools import review_canaries
+
+    answer = None
+    canaries = None
+    codeword = None
+    if attempt_id:  # P7: what the canaries and the control word say of the review — derived from the journal, nothing stored
+        try:
+            answer = review_canaries.recorded_answer(root, attempt_id)
+        except (OSError, KeyError, TypeError, ValueError):
+            answer = None
+        if answer is not None:
+            canaries = review_canaries.summary(root, attempt_id, answer)
+            codeword = review_canaries.codeword_state(root, attempt_id, answer)
+    unreliable = canaries is not None and canaries.get("status") == "UNRELIABLE"
+    if codeword == "named":
+        review = "ревью в той же сессии (SELF): ревьюер назвал контрольное слово генератора"
+    elif terminal.get("review_independence") == "SELF":
         review = "ревью в той же сессии (SELF), принято по согласию человека"
     elif evidence.get("reviewer_isolation_state") is not None:
         review = "ревью в свежем контексте"
@@ -781,7 +801,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["CV_DATA_MISMATCH"] if mismatched else []) + (["CV_NO_END_TO_END"] if path_hint else [])
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else [])
-                    + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else []),
+                    + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else [])
+                    + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
         "automation_split": _split(root, attempt_id),  # FaT-PA
@@ -798,7 +819,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "automation": evidence.get("automation_accepted"),
             "execution": execution.get("verdict") or terminal.get("verification"),
             "execution_duration_sec": (execution.get("stats") or {}).get("duration_sec"),
-            "completion": terminal.get("completion"), "coverage": terminal.get("coverage"), "accepted": terminal.get("accepted"),
+            "completion": terminal.get("completion"), "coverage": terminal.get("coverage"),
+            "accepted": False if unreliable else terminal.get("accepted"),  # P7: REVIEW_UNRELIABLE — not accepted (the sealed result is the terminal's)
             # FaT-CR: calls a model made, and answers reused from an earlier run with the input bytes not sent
             "model_calls": sum(1 for call in calls if call.get("by") == "model"),
             "code_steps": sum(1 for call in calls if call.get("by") == "code"),
@@ -807,6 +829,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "status_after_pause": None,  # P3: the number of status calls after a pause; empty until then
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
+        "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
         "quarantine": [{key: row[key] for key in ("file", "method", "ref", "failed_rows", "disabled_passed_rows") if key in row}
@@ -900,6 +923,21 @@ def _tmp_lines(report: Mapping[str, Any]) -> list[str]:
             f"убрать можно командой `{tmp['remove_command']}`" + (f" (в cmd: `{tmp['remove_command_cmd']}`)" if tmp.get("remove_command_cmd") else "") + ".", ""]
 
 
+def _canary_lines(report: Mapping[str, Any]) -> list[str]:
+    """P7: the canaries of the reviewer's view and the control word — numbers and the honest note, never the map itself."""
+    canaries, codeword = report.get("review_canaries"), report.get("review_codeword")
+    if not canaries and not codeword:
+        return []
+    lines = ["## Контрольные ошибки ревью (канарейки)", ""]
+    if canaries:
+        lines.append(f"- {canaries['status']}: посеяно {_dash(canaries.get('seeded'))}, поймано {_dash(canaries.get('caught'))}"
+                     + (f"; пропущены классы: {', '.join(canaries['missed_classes'])}" if canaries.get("missed_classes") else ""))
+        lines.append(f"- {canaries['note']}")
+    if codeword:
+        lines.append(f"- кодовое слово: {codeword['state']} — {codeword['note']}")
+    return lines + [""]
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     lines = [
@@ -926,6 +964,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
            f"новых без пары {len(report['reference']['new'])}, возможных дублей {len(report['reference']['duplicates'])}"]
           if report.get("reference") and "CV_REFERENCE" in report["warnings"] else []),
         *([] if report["warnings"] else ["- нет"]), "",
+        *_canary_lines(report),
         *_notes_section("Замечания ревью", "кейсы", report.get("review_notes")),
         *_notes_section("Замечания ревью автотестов", "автотесты", report.get("autotest_review_notes")),
         "## Размер входа шагов", "", "Замер `tools.step_size --run` перед вызовом.", "",

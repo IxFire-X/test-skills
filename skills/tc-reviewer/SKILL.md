@@ -43,6 +43,10 @@ and finalization predicates.
    Give the successor as `artifacts.successor_edits`, not as a document: `[{correction_id, case_id, field, step_id?, expectation_id?, index?, old, new}]`, `field` one of `title`, `objective`, `precondition` (`index`), `action`, `test_data` (`step_id`), `expectation` (`step_id`, `expectation_id`); `old` is the exact current text, `new` replaces it as is, `correction_id` names a `MECHANICAL` correction. Code builds revision 2 from the candidate; `python -m tools.review_edits --candidate <r1.json> --edits <file>` checks the edits and prints the `effective` reference — copy it, never compute a digest.
 4. A destructive, partial, or semantic-choice correction requires `ТРЕБУЕТ ДОРАБОТКИ`; it never selects a partial patch. Revision 3 and a second authoritative verdict are forbidden.
 
+## Control errors, codeword, fresh session (P7)
+
+The view may hold control errors put in by code: report what contradicts the requirements as usual; never look for them in `<run>`. Beside `warnings` give `codeword_seen`: the word of «Контрольное слово: …» from the generator's task if it is in your context, else `null`. «проведи ревью test-skills <run_id>»: read `.pilot-runs/<run_id>/review-views/<sha>.md` (no `.autotest`), write the answer to `.pilot-runs/<run_id>/tmp/reviewer-answer.json`.
+
 ## Stop conditions
 
 Stop on invalid or V2.1 input, required invention, unavailable validator or tool, schema or semantic failure, secret exposure risk, or an operation outside the authorized scope. Do not select an unvalidated successor or reconstruct revisions in prose.
