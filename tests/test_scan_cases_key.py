@@ -5,6 +5,7 @@ Before: a second CSV was blocked by the open import (SCAN_RUN_IN_PROGRESS), and 
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,4 +63,8 @@ def test_a_request_without_cases_keeps_its_old_key(tmp_path: Path) -> None:
            "disposition_policy": None}
     assert _request_key(tmp_path, old) == _request_key(tmp_path, {**old, "cases": None})
     assert _request_key(tmp_path, old) != _request_key(tmp_path, {**old, "cases": "cases/zephyr.csv"})
-    assert _request_key(tmp_path, {**old, "cases": "cases\\zephyr.csv"}) == _request_key(tmp_path, {**old, "cases": "cases/zephyr.csv"})
+    backslash = _request_key(tmp_path, {**old, "cases": "cases\\zephyr.csv"})
+    if os.name == "nt":  # on Windows both separators are the same path
+        assert backslash == _request_key(tmp_path, {**old, "cases": "cases/zephyr.csv"})
+    else:  # on POSIX a backslash is an ordinary character of a file name: another file, another key
+        assert backslash != _request_key(tmp_path, {**old, "cases": "cases/zephyr.csv"})

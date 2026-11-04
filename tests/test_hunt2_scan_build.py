@@ -294,7 +294,9 @@ def _maven_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, password: str) 
     project = _java_project(tmp_path)
     _write(project, "pom.xml", _FLYWAY_POM.replace("PASSWORD", password))
     wrapper = "mvnw.cmd" if os.name == "nt" else "mvnw"
-    _write(project, wrapper, "@echo off\n" if os.name == "nt" else "#!/bin/sh\n")
+    launcher = _write(project, wrapper, "@echo off\n" if os.name == "nt" else "#!/bin/sh\n")
+    if os.name != "nt":
+        launcher.chmod(0o755)  # ready takes a POSIX wrapper without the execute bit for unusable and lowers the profile to cases-only
     (project / ".skillsrc").write_bytes(_payload({
         "schema_version": "5.0.0", "version": "3.0", "project": {"name": "java"},
         "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
