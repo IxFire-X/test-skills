@@ -52,6 +52,9 @@ def test_no_measurements_say_so_and_the_tmp_folder_is_sized_not_removed(tmp_path
     tmp.mkdir(exist_ok=True)
     before = sum(path.stat().st_size for path in tmp.rglob("*") if path.is_file())
     (tmp / "fragment.json").write_bytes(b"x" * 1234)
+    measured = run_root / "step-sizes.jsonl"
+    assert measured.is_file() and measured.stat().st_size > 0  # P1: model-request measures its steps itself
+    measured.unlink()  # a run from before the measurements: none of them
     report, markdown = _report(tmp_path, run_root)
     assert report["step_sizes"] == []
     section = markdown.split("## Размер входа шагов", 1)[1].split("\n## ", 1)[0]
