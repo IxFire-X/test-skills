@@ -165,13 +165,24 @@ CAMPAIGN = Path(r"D:\AI-Projects\live\campaign-20261028")
 
 
 @pytest.mark.skipif(not (CAMPAIGN / "jpetstore-6").is_dir(), reason="the campaign of 28.10 is on the work machine only")
-def test_a_campaign_run_with_two_context_batches_takes_both_and_fits() -> None:
+def test_a_campaign_run_with_two_context_batches_takes_both_and_fits(monkeypatch: pytest.MonkeyPatch) -> None:
     """Read only: the jpetstore-6 run of 28.10 — its requirements, its two context receipts, its project (before FaT-AU3
     the generator saw one: 261 563 of 488 714 B); its two batches stay two."""
     from tools.batch_assembly import WINDOW_SHARE, plan_batches_for_project
     from tools.step_size import step_window
 
     project = CAMPAIGN / "jpetstore-6"
+    # The campaign keeps the YAML .skillsrc of the version before P5, which the package no longer reads. Its settings, as JSON:
+    # no limits and no requirements.id_pattern, so every default applies exactly as it did.
+    campaign_skillsrc = {"schema_version": "5.0.0", "version": "3.0", "project": {"name": "jpetstore-6"},
+                         "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
+                         "modules": [{"id": "root", "root": ".", "stack": {"language": "java", "build_tool": "maven", "framework": "unknown"},
+                                      "detected_from": ["pom.xml"],
+                                      "paths": {"source": ["src", "src/main/java"], "tests": ["src/test/java"],
+                                                "resources": ["src/main/resources", "src/test/resources"]},
+                                      "test": {"framework": "junit5", "adapter_id": "maven:selected-symbols-v1", "build_profile": "default",
+                                               "adapter_parameters": {}}}]}
+    monkeypatch.setattr("tools.skillsrc_manifest.load_skillsrc", lambda path, schema_path=None: campaign_skillsrc)
     root = project / ".pilot-runs" / "f6c976a2e9a349dc87e462e74dd6deaf"
     [attempt] = [path.name for path in (root / "context-selections").iterdir()]
     receipts = [json.loads(path.read_text(encoding="utf-8")) for path in sorted((root / "context-selections" / attempt).glob("*.json"))]

@@ -294,7 +294,7 @@ def test_requirements_txt_is_only_a_comment_and_dev_requirements_hold_the_oracle
 def test_what_the_standard_library_raises_on_a_hostile_schema_is_a_schema_error() -> None:
     from tools.schema_engine import Draft202012Validator, SchemaError
 
-    broken_uri = {"$id": "http://[", "$defs": {"x": {}}, "properties": {"a": {"$ref": "#/$defs/x"}}}
+    broken_uri = {"$id": "https://[", "$defs": {"x": {}}, "properties": {"a": {"$ref": "#/$defs/x"}}}
     with pytest.raises(SchemaError):
         Draft202012Validator(broken_uri)
     deep: dict = {"type": "object"}
