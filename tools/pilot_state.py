@@ -2476,6 +2476,12 @@ def _publish_model_stage_artifact(
             raise ValueError(f"MODEL_STAGE_ANSWERED: {stage_instance_id}: ответ стадии уже записан, другой ответ его не заменит; "
                              "ничего не записано; " + _RETRY_EXHAUSTED_FIX)
         if not requests:  # FaT-AU1
+            if stage_instance_id == "tc-reviewer:canonical":  # P2-fix: the request of the reviewer is the work of review-open
+                from tools.fixes import REVIEW_CHAIN
+
+                raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
+                                 "the stage has none; fix: запрос ревьюера пишет review-open (повтори его с тем же --invocation-id, если он уже был), "
+                                 "руками model-request не нужен — " + REVIEW_CHAIN)
             raise ValueError(f"MODEL_STAGE_NOT_REQUESTED: {stage_instance_id}: model stage artifact requires its exact prior request — "
                              "the stage has none; fix: tools.api model-request for this stage first, then model-response")
         raise ValueError("model stage artifact requires its exact prior request")
@@ -5018,6 +5024,38 @@ def _plan_batches_listed(plan: Mapping[str, Any]) -> bool:
 
 
 @closure_cached  # FaT-DG
+def _check_plan_against(root: Path, attempt_id: str, item: Mapping[str, Any], header_digest: str, state: Mapping[str, Any]) -> None:
+    """P2-fix: the checks a plan must pass before it is published — its batches bind ``header_digest`` and context receipts of the
+    attempt, the receipts are a prefix in batch_index order.  They write nothing, so ``tools.api plan`` can run them before it
+    publishes the header and a refusal leaves the journal as it was."""
+    for row in item["batches"]:
+        if row["header_digest"] != header_digest:
+            raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
+                             f"header is {header_digest}; fix: put {header_digest} as header_digest in the grouping and rerun plan-batches")
+        for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # FaT-AU3: and the list
+            try:
+                read_context_selection(root, attempt_id, context)
+            except ValueError as error:
+                selected = sorted({str(event["artifact_digest"]) for event in state["events"]
+                                   if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
+                raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
+                                 f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
+                                 "(tools.api read-context --digest <d>)") from error
+    # FaT-H4a (hunt 4.1): the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
+    # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
+    ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(
+        str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")),
+        key=lambda receipt: int(receipt["batch_index"]))
+    contexts, prefix = _plan_contexts(item), [str(receipt["digest"]) for receipt in ordered]
+    if contexts != prefix[:len(contexts)]:
+        index = next(index for index, (given, wanted) in enumerate(zip(contexts, prefix)) if given != wanted)
+        raise ValueError(
+            f"GENERATOR_INPUT_CONTEXT: the plan reads the context receipts {', '.join(contexts)}; position {index + 1} must be "
+            f"{prefix[index]} (batch_index {ordered[index]['batch_index']}) — the plan takes the receipts of the attempt in batch_index "
+            f"order from the first, none skipped: {', '.join(prefix)}; fix: put every digest in the grouping context_receipt_digests "
+            "(the lowest batch_index first, also as context_receipt_digest), one --context-receipt each, and rerun plan-batches")
+
+
 def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: Mapping[str, Any]) -> dict[str, Any]:
     """Publish the batch plan or the generator header of the attempt with its one digest — the self-digest.
 
@@ -5046,32 +5084,8 @@ def publish_generator_input(run_root: Path, attempt_id: str, kind: str, value: M
         except ModelInputsMismatch as error:
             raise ValueError("GENERATOR_INPUT_ORDER: the header is not published yet; fix: first tools.api publish-generator-input "
                              "--kind header --value <file>, build the plan with its result.digest, then publish the plan") from error
-        for row in item["batches"]:
-            if row["header_digest"] != header["digest"]:
-                raise ValueError(f"GENERATOR_INPUT_HEADER: batch {row['batch_id']} binds the header {row['header_digest']}, the published "
-                                 f"header is {header['digest']}; fix: put {header['digest']} as header_digest in the grouping and rerun plan-batches")
-            for context in dict.fromkeys([str(row["context_receipt_digest"]), *_plan_contexts(item)]):  # FaT-AU3: and the list
-                try:
-                    read_context_selection(root, attempt_id, context)
-                except ValueError as error:
-                    selected = sorted({str(event["artifact_digest"]) for event in state["events"]
-                                       if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"})
-                    raise ValueError(f"GENERATOR_INPUT_CONTEXT: batch {row['batch_id']} binds the context {context}, which "
-                                     f"is not a context receipt of this attempt; the attempt has: {', '.join(selected) or 'none'} "
-                                     "(tools.api read-context --digest <d>)") from error
-        # FaT-H4a (hunt 4.1): the plan reads a prefix, in batch_index order, of every context receipt of the attempt — a skipped
-        # receipt (1 and 3 without 2) is one the generator would never read while the note says it saw them all
-        ordered = sorted((read_context_selection(root, attempt_id, digest) for digest in dict.fromkeys(
-            str(event["artifact_digest"]) for event in state["events"] if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED")),
-            key=lambda receipt: int(receipt["batch_index"]))
-        contexts, prefix = _plan_contexts(item), [str(receipt["digest"]) for receipt in ordered]
-        if contexts != prefix[:len(contexts)]:
-            index = next(index for index, (given, wanted) in enumerate(zip(contexts, prefix)) if given != wanted)
-            raise ValueError(
-                f"GENERATOR_INPUT_CONTEXT: the plan reads the context receipts {', '.join(contexts)}; position {index + 1} must be "
-                f"{prefix[index]} (batch_index {ordered[index]['batch_index']}) — the plan takes the receipts of the attempt in batch_index "
-                f"order from the first, none skipped: {', '.join(prefix)}; fix: put every digest in the grouping context_receipt_digests "
-                "(the lowest batch_index first, also as context_receipt_digest), one --context-receipt each, and rerun plan-batches")
+        _check_plan_against(root, attempt_id, item, str(header["digest"]), state)
+
     try:
         prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, receipt_kind, "ARTIFACT_READ_BACK")["record"][kind]
     except (ValueError, OSError, KeyError):
@@ -5119,6 +5133,16 @@ def publish_plan(run_root: Path, attempt_id: str, header: Mapping[str, Any], req
         raise ValueError(f"GENERATOR_INPUT_HEADER: header_digest of the grouping is {evidence['header_digest']}, the header's own is {expected}; "
                          f"fix: удали header_digest из grouping — код поставит digest заголовка ({expected}) сам")
     plan = plan_batches_for_project(requirements, evidence, project, input_files, context_receipt, imported, out_of_scope)
+    item_plan = dict(plan)
+    item_plan.setdefault("digest", _generator_input_digest(item_plan))
+    if not _plan_batches_listed(item_plan):
+        raise ValueError("GENERATOR_INPUT_INVALID: the plan lists no batches; build it with tools.api plan-batches")
+    _root = _run_root(run_root)[1]
+    from tools.scope_pause import check_plan
+
+    state = derive_state(_root)
+    check_plan(_root, attempt_id, item_plan, state)  # the pause after the marker, then the bindings: before anything is written
+    _check_plan_against(_root, attempt_id, item_plan, expected, state)
     published_header = publish_generator_input(run_root, attempt_id, "header", item)
     published_plan = publish_generator_input(run_root, attempt_id, "plan", dict(plan))
     result = PlanPublished((dict(plan), {"header": published_header, "plan": published_plan}))

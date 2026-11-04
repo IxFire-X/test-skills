@@ -359,9 +359,15 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
         "canonical_branch_digest": package["candidate_digest"],
         "package_digest": package["package_digest"],
     }
+    from tools.pilot_state import derive_state
+
     published = publish_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
-    append_event(Path(run_root), "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    append_event(Path(run_root), "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
+    # P2-fix: an opening cut short is opened again — the events the first try wrote are not written twice
+    recorded = {event["event_type"] for event in derive_state(Path(run_root))["events"]
+                if event.get("attempt_id") == attempt_id and event.get("artifact_digest") == published["digest"]}
+    for event_type in ("ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"):
+        if event_type not in recorded:
+            append_event(Path(run_root), event_type, actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
     boundary = dict(read_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"])
     created = {
         "schema_version": "1.0.0",
@@ -1007,6 +1013,16 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
             boundary = dict(read_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"])
         except (KeyError, TypeError, ValueError, OSError):
             boundary = None
+        if boundary is not None:
+            isolation = boundary.get("host_isolation", {})
+            if boundary.get("reviewer_invocation_id") != invocation_id or (fresh_context is not None and isolation.get("fresh_context") != fresh):
+                raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью уже открыто с ревьюером {boundary.get('reviewer_invocation_id')} "
+                                    f"(fresh_context={isolation.get('fresh_context')}); второй сессии нет; "
+                                    "fix: повтори review-open с теми же --invocation-id и --fresh-context или иди дальше: review-select --verdict")
+            try:  # an opening cut short between the boundary and the ledger: the boundary is there, the ledger is not — open it again
+                package = _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)["package_binding"])
+            except (KeyError, TypeError, ValueError, OSError):
+                boundary = None
         if boundary is None:
             inputs = review_inputs(run_root, attempt_id, output_dir=output_dir, csv_profile=csv_profile, given=given)
             start = reviewer_session_start(
@@ -1016,13 +1032,6 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
                 generator_fragments=inputs["generator_fragments"], fresh_context=fresh, reviewer_invocation_id=invocation_id)
             package = review_package(run_root, attempt_id, inputs)
             boundary = open_reviewer_session(run_root, attempt_id, package, start)
-        else:
-            isolation = boundary.get("host_isolation", {})
-            if boundary.get("reviewer_invocation_id") != invocation_id or (fresh_context is not None and isolation.get("fresh_context") != fresh):
-                raise ReviewRefused("REVIEW_ALREADY_OPEN", f"ревью уже открыто с ревьюером {boundary.get('reviewer_invocation_id')} "
-                                    f"(fresh_context={isolation.get('fresh_context')}); второй сессии нет; "
-                                    "fix: повтори review-open с теми же --invocation-id и --fresh-context или иди дальше: review-select --verdict")
-            package = _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)["package_binding"])
         requested = request_review(Path(run_root), attempt_id, REVIEW_STAGE, str(boundary["canonical_branch_digest"]))
         recorded = next((event for event in derive_state(Path(run_root))["events"] if event.get("attempt_id") == attempt_id
                          and event["event_type"] == "MODEL_REQUESTED" and event.get("stage_instance_id") == REVIEW_STAGE), None)
@@ -1060,6 +1069,16 @@ def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str,
     return complete_reviewer_session(run_root, attempt_id, review=review)
 
 
+def _ledger_status(run_root: Path, attempt_id: str) -> str | None:
+    """The status of the last revision of the attempt's reviewer ledger, or None when there is none to read."""
+    from tools.pilot_state import read_reviewer_session_ledger
+
+    try:
+        return _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)).get("status")
+    except (KeyError, TypeError, ValueError, OSError):
+        return None
+
+
 def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any], output_dir: Path, csv_profile: str = _PROFILE,
                        verdict: Mapping[str, Any] | None = None, verdict_bytes: int | None = None, transport_attempts: int = 1,
                        reviewer_session: Mapping[str, Any] | None = None, review: Mapping[str, Any] | None = None,
@@ -1080,6 +1099,10 @@ def review_select_step(run_root: Path, attempt_id: str, *, files: Mapping[str, A
                 raise ReviewRefused("MODEL_STAGE_ANSWERED", "ответ ревьюера уже записан, другой его не заменит; ничего не записано; "
                                     "fix: review-select без --verdict берёт записанный ответ; другой вердикт — новый прогон (scan --new-run)")
             if known == "none":
+                closed = _plain(reviewer_session).get("status") if reviewer_session is not None else _ledger_status(run_root, attempt_id)
+                if closed in {"ABORTED", "COMPLETED"}:  # the session is over: a verdict now would be recorded and never used
+                    raise ReviewRefused("REVIEW_CLOSED", "сессия ревьюера уже закрыта (прервана или завершена), вердикт в неё не добавить; ничего не записано; "
+                                        "fix: ревью закрыто; новое ревью — новый прогон (scan --new-run)")
                 if dry_run:
                     dry = publish_model_stage_artifact(Path(run_root), attempt_id, REVIEW_STAGE, verdict, transport_attempts=transport_attempts,
                                                        raw_bytes=verdict_bytes, dry_run=True)

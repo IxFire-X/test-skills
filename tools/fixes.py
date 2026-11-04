@@ -50,6 +50,7 @@ FIXES: dict[str, str] = {
                               "прогон должен начинаться с scan --accept-self-review (или review.self: true в .skillsrc)",
     "REVIEW_ALREADY_OPEN": "ревью уже открыто: повтори review-open с теми же --model-id, --invocation-id и --fresh-context или иди "
                            "дальше — review-select --verdict <файл ответа ревьюера>",
+    "REVIEW_CLOSED": "ревью закрыто (сессия прервана или завершена), вердикт в него не добавить; новое ревью — новый прогон (scan --new-run)",
     "REVIEW_NOT_OPEN": "сначала " + REVIEW_CHAIN,
     "REVIEWER_RESPONSE_MISSING": "ответ ревьюера не записан: tools.api review-select --verdict <файл ответа ревьюера> записывает его и "
                                  "выбирает ревизию; ревьюера ещё не вызывали — " + REVIEW_CHAIN,
