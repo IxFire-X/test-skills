@@ -773,8 +773,10 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             answer = review_canaries.recorded_answer(root, attempt_id)
         except (OSError, KeyError, TypeError, ValueError):
             answer = None
+        canaries = review_canaries.summary(root, attempt_id, answer)
+        if answer is None and canaries["status"] != "MISMATCH":  # before the answer only a map that does not match is news
+            canaries = None
         if answer is not None:
-            canaries = review_canaries.summary(root, attempt_id, answer)
             codeword = review_canaries.codeword_state(root, attempt_id, answer)
     unreliable = canaries is not None and canaries.get("status") == "UNRELIABLE"
     if codeword == "named":

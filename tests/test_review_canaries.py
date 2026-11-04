@@ -273,6 +273,8 @@ def _forge(run: dict, what: str) -> None:
         view.write_bytes(view.read_bytes().replace(" 6".encode(), b""))
     elif what == "view-deleted":
         view.unlink()
+    elif what == "receipt-deleted":
+        (run["run_root"] / "review-canaries" / f"{run['attempt_id']}.json").unlink()
     elif what == "receipt-edited":
         target = run["run_root"] / "review-canaries" / f"{run['attempt_id']}.json"
         value = json.loads(target.read_bytes())
@@ -280,7 +282,7 @@ def _forge(run: dict, what: str) -> None:
         target.write_bytes(review_canaries.canonical_bytes(value))
 
 
-@pytest.mark.parametrize("what", ["map-edited", "map-deleted", "view-edited", "view-deleted", "receipt-edited"])
+@pytest.mark.parametrize("what", ["map-edited", "map-deleted", "view-edited", "view-deleted", "receipt-edited", "receipt-deleted"])
 def test_a_forged_or_missing_canary_file_is_a_refusal_not_zero_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, what: str) -> None:
     run = _generated_run(tmp_path)
     _open(run, monkeypatch)
@@ -405,7 +407,8 @@ def test_a_rework_that_stands_on_canaries_alone_is_refused_and_a_retry_with_info
     one, two = _ids(run)
     exp_one, exp_two = one["steps"][0]["expectations"][0]["expectation_id"], two["steps"][0]["expectations"][0]["expectation_id"]
     before = (run["run_root"] / "events.jsonl").read_bytes()
-    only = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [exp_one], code="BOUNDARY"), _finding("BLOCKING", [exp_two])])
+    only = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [exp_one], "Ожидание называет 6, а требование — 5.", code="BOUNDARY"),
+                                                                _finding("BLOCKING", [exp_two], "Нет проверки delta = 1.")])
     with pytest.raises(ValueError) as refused:
         _select(run, only)
     message = str(refused.value)
@@ -422,7 +425,8 @@ def test_a_rework_with_a_real_blocking_finding_beside_the_canaries_stands(tmp_pa
     _open(run, monkeypatch)
     one, _two = _ids(run)
     exp_one = one["steps"][0]["expectations"][0]["expectation_id"]
-    answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [exp_one]), _finding("BLOCKING", ["REQ-OTHER"], "Нет кейса на требование.")])
+    answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [exp_one], "Ожидание называет 6, а требование — 5."),
+                                                        _finding("BLOCKING", ["REQ-OTHER"], "Нет кейса на требование.")])
     done = _select(run, answer)
     assert done["status"] == "REWORK" and done["review_canaries"]["caught"] == 1 and done["review_canaries"]["status"] == "WEAK"
     assert "REVIEW_WEAK" in done["review_warnings"]
@@ -462,3 +466,84 @@ def test_a_weak_review_is_a_warning_not_a_failure(tmp_path: Path, monkeypatch: p
     assert "assertion_removed" in done["review_canaries"]["note"]
     report, _w = build_report(run["project"], run["run_root"].name)
     assert report["review_canaries"]["status"] == "WEAK" and "REVIEW_WEAK" in report["warnings"] and "REVIEW_UNRELIABLE" not in report["warnings"]
+
+
+# --------------------------------------------------------------------------------------
+# the journal decides «seeded or not»; a refusal stands on a strict hit only
+# --------------------------------------------------------------------------------------
+
+def test_the_receipt_events_are_marked_and_a_run_without_them_is_not_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import review_canaries
+
+    run = _generated_run(tmp_path)
+    assert review_canaries.verify(*_flags(run)) is None  # no event of the receipt: not seeded, nothing to read
+    _open(run, monkeypatch)
+    marked = [row for row in _events(run["run_root"]) if row.get("batch_id") == review_canaries.BATCH_ID]
+    assert [row["event_type"] for row in marked] == ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
+
+
+def test_a_deleted_receipt_file_is_a_mismatch_in_report_and_status_even_before_the_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import review_canaries
+    from tools.run_pipeline import _status_result
+    from tools.run_report import build_report
+
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    _forge(run, "receipt-deleted")
+    with pytest.raises(review_canaries.CanaryMismatch, match="REVIEW_CANARY_MISMATCH"):
+        review_canaries.verify(*_flags(run))
+    found = review_canaries.summary(*_flags(run))
+    assert found["status"] == "MISMATCH" and found["warning"] == "REVIEW_CANARY_MISMATCH"
+    report, _warnings = build_report(run["project"], run["run_root"].name)
+    assert report["review_canaries"]["status"] == "MISMATCH" and "REVIEW_CANARY_MISMATCH" in report["warnings"]
+    status = _status_result(run["project"], run["run_root"].name)
+    assert status["review_canaries"]["status"] == "MISMATCH" and "REVIEW_CANARY_MISMATCH" in status["warnings"]
+
+
+def test_any_failure_to_read_the_canaries_of_a_seeded_run_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import review_canaries
+
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+
+    def broken(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(review_canaries, "_read_canaries", broken)
+    found = review_canaries.summary(*_flags(run))
+    assert found["status"] == "MISMATCH" and found["warning"] == "REVIEW_CANARY_MISMATCH" and "disk" in found["note"]
+
+
+def _canary(**overrides) -> dict:
+    return {"canary_id": "CAN-1", "class": "boundary", "case_id": "TC-S", "step_id": "STEP-S1", "expectation_id": "EXP-S1", "assertion_id": None,
+            "field": "expectation", "original": "5 дней", "mutated": "6 дней", "markers": ["6", "5"], **overrides}
+
+
+def test_ids_are_compared_whole_s1_is_not_s10() -> None:
+    from tools.review_canaries import finding_hits
+
+    other = {"severity": "WARNING", "code": "X", "message": "В STEP-S10 называется 6.", "evidence": ["STEP-S10"], "related_ids": ["STEP-S10", "EXP-S10"]}
+    assert not finding_hits(_canary(), other) and not finding_hits(_canary(), other, strict=True)
+    own = {**other, "message": "В STEP-S1 называется 6.", "related_ids": ["STEP-S1"]}
+    assert finding_hits(_canary(), own) and finding_hits(_canary(), own, strict=True)
+
+
+def test_a_strict_hit_needs_the_id_in_related_ids_and_the_value_in_the_text() -> None:
+    from tools.review_canaries import finding_hits
+
+    about_else = {"severity": "BLOCKING", "code": "X", "message": "Нет кейса на требование.", "evidence": ["REQ"], "related_ids": ["STEP-S1"]}
+    assert finding_hits(_canary(), about_else) and not finding_hits(_canary(), about_else, strict=True)  # statistics only
+    by_text = {**about_else, "message": "В STEP-S1 называется 6.", "related_ids": ["TC-S"]}
+    assert finding_hits(_canary(), by_text) and not finding_hits(_canary(), by_text, strict=True)  # the ID is only in the text
+    case_and_value = {**about_else, "message": "Называется 6.", "related_ids": ["TC-S"]}
+    assert finding_hits(_canary(), case_and_value) and not finding_hits(_canary(), case_and_value, strict=True)
+
+
+def test_a_real_blocking_finding_in_the_step_of_a_canary_about_something_else_makes_the_rework_stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run = _generated_run(tmp_path)
+    _open(run, monkeypatch)
+    one, _two = _ids(run)
+    step = one["steps"][0]["step_id"]
+    answer = _answer(run, "ТРЕБУЕТ ДОРАБОТКИ", findings=[_finding("BLOCKING", [step], "Шаг не проверяет требование REQ-9 вовсе.", code="REQ_GAP")])
+    done = _select(run, answer)  # not refused: the finding does not name the value of the canary
+    assert done["status"] == "REWORK"

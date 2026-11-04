@@ -5492,9 +5492,20 @@ def publish_generated_delta(run_root: Path, attempt_id: str, delta: Mapping[str,
 
 
 def publish_review_canaries(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
-    """P7: bind the digests of the canary map and of the reviewer's view to the attempt (the receipt and its event pair); the same
-    facts again change nothing."""
-    return _publish_bound_attempt_receipt(run_root, attempt_id, "review-canaries", dict(facts))
+    """P7: bind the digests of the canary map and of the reviewer's view to the attempt: the receipt and its event pair, marked with
+    ``batch_id`` ``review-canaries-v1`` — whether canaries were seeded is read from these events, not from a file.  The same facts
+    again change nothing."""
+    from tools.review_canaries import BATCH_ID
+
+    published = publish_attempt_receipt(run_root, attempt_id, "review-canaries", dict(facts))
+    _project, root = _run_root(run_root)
+    seen = {event["event_type"] for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id
+            and event.get("batch_id") == BATCH_ID and event.get("artifact_digest") == published["digest"]}
+    for event_type in ("ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"):
+        if event_type not in seen:
+            append_event(root, event_type, actor="controller", attempt_id=attempt_id, batch_id=BATCH_ID, artifact_digest=published["digest"])
+    return {**read_attempt_receipt(root, attempt_id, "review-canaries", "ARTIFACT_READ_BACK"),
+            "created": published["created"], "installed_identity": published["installed_identity"]}
 
 
 def publish_phase5_receipt(run_root: Path, attempt_id: str, kind: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:

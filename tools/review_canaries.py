@@ -226,31 +226,47 @@ def _mismatch(reason: str) -> CanaryMismatch:
     return CanaryMismatch(f"REVIEW_CANARY_MISMATCH: {reason}")
 
 
+BATCH_ID = "review-canaries-v1"  # the mark of the events of the receipt: «seeded or not» is decided by the journal, not by a file
+
+
+def _bound_events(run_root: Path, attempt_id: str) -> list[dict[str, Any]]:
+    from tools import pilot_state as pilot
+
+    return [event for event in pilot.derive_state(pilot._run_root(Path(run_root))[1])["events"]
+            if event.get("attempt_id") == attempt_id and event.get("batch_id") == BATCH_ID]
+
+
 def verify(run_root: Path, attempt_id: str) -> list[dict[str, Any]] | None:
-    """The canaries of the attempt, read through the journal, or ``None`` when the run has no ``review-canaries`` receipt (a run
-    opened before P7: not measured).  A receipt that is there binds three digests; the map and the view are read with
-    confined reads and must give them."""
+    """The canaries of the attempt, read through the journal, or ``None`` when the journal has no event of a ``review-canaries``
+    receipt for the attempt (a run opened before P7: not measured).  Events that are there bind a receipt, and the receipt three
+    digests; the receipt, the map and the view must all be there and give them — a file removed or changed is
+    ``REVIEW_CANARY_MISMATCH``, whatever the reason it cannot be read."""
+    events = _bound_events(run_root, attempt_id)
+    if not events:
+        return None
+    try:
+        return _read_canaries(run_root, attempt_id, events)
+    except CanaryMismatch:
+        raise
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise _mismatch(f"канарейки не читаются ({str(error)[:120]})") from error
+
+
+def _read_canaries(run_root: Path, attempt_id: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     from tools import pilot_state as pilot
     from tools.confined_output import read_confined_bytes
     from tools.schema_validation import schema_diagnostics
 
     project, root = pilot._run_root(Path(run_root))
     try:
-        present = read_confined_bytes(project, root, pilot._receipt_target(root, attempt_id, RECEIPT_KIND)) is not None
-    except (OSError, ValueError):
-        present = False
-    if not present:
-        return None
-    try:
         record = dict(pilot.read_attempt_receipt(root, attempt_id, RECEIPT_KIND, "ARTIFACT_READ_BACK")["record"])
     except (OSError, KeyError, TypeError, ValueError) as error:
-        raise _mismatch("квитанция review-canaries не прошла проверку по журналу") from error
+        raise _mismatch("квитанция review-canaries есть в журнале, а файл удалён или не проходит проверку") from error
+    if {event["event_type"] for event in events if event.get("artifact_digest") == record["digest"]} != {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}:
+        raise _mismatch("события журнала не связывают эту квитанцию")
     candidate = str(record["candidate_digest"])
-    try:
-        data = read_confined_bytes(project, root, map_target(root, candidate))
-        view = read_confined_bytes(project, root, view_target(root, candidate))
-    except (OSError, ValueError) as error:
-        raise _mismatch("карта или вид не читаются") from error
+    data = read_confined_bytes(project, root, map_target(root, candidate))
+    view = read_confined_bytes(project, root, view_target(root, candidate))
     if data is None or view is None:
         raise _mismatch("квитанция есть, а карты канареек или вида ревьюера в review-views нет")
     if _digest_of(data) != record["canary_map_digest"]:
@@ -276,15 +292,25 @@ def _names(marker: str, text: str) -> bool:
     return marker in text
 
 
-def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any]) -> bool:
+def _has_id(text: str, identifier: str) -> bool:
+    """An ID named whole in a text (STEP-S1 is not in STEP-S10)."""
+    return re.search(rf"(?<![A-Za-z0-9_.:-]){re.escape(identifier)}(?![A-Za-z0-9_.:-])", text) is not None
+
+
+def finding_hits(canary: Mapping[str, Any], finding: Mapping[str, Any], *, strict: bool = False) -> bool:
     """A finding is about a canary when its ``related_ids`` or its text name the mutated step, expectation or assertion, or name
-    the case and, in the text, a value of the canary.  A bare case ID in a general finding is not a hit."""
+    the case and, in the text, a value of the canary.  A bare case ID in a general finding is not a hit.  *strict* — what a refusal
+    may stand on: the ID of the step, expectation or assertion is in ``related_ids`` as a whole item **and** the text names the
+    mutated or the original value; a looser hit is for the statistics only."""
     ids = {str(item) for item in finding.get("related_ids") or []}
     text = " ".join([str(finding.get("message", "")), *(str(item) for item in finding.get("evidence") or [])])
     specific = {str(canary[key]) for key in ("step_id", "expectation_id", "assertion_id") if canary.get(key)}
-    if ids & specific or any(item in text for item in specific):
+    named = any(_names(marker, text) for marker in canary.get("markers") or [])
+    if strict:
+        return bool(ids & specific) and named
+    if ids & specific or any(_has_id(text, item) for item in specific):
         return True
-    return canary["case_id"] in ids and any(_names(marker, text) for marker in canary.get("markers") or [])
+    return canary["case_id"] in ids and named
 
 
 def edit_hits(canary: Mapping[str, Any], edit: Mapping[str, Any]) -> bool:
@@ -334,7 +360,7 @@ def only_canary_verdict(canaries: Sequence[Mapping[str, Any]], answer: Mapping[s
                 if isinstance(item, Mapping) and item.get("severity") == "BLOCKING"]
     named = []
     for index, finding in blocking:
-        canary = next((row for row in canaries if finding_hits(row, finding)), None)
+        canary = next((row for row in canaries if finding_hits(row, finding, strict=True)), None)
         if canary is None:
             return []
         named.append(f"находка #{index} {finding.get('code')} (шаг {canary['step_id']})")
@@ -401,14 +427,16 @@ def recorded_answer(run_root: Path, attempt_id: str) -> Mapping[str, Any] | None
 
 
 def summary(run_root: Path, attempt_id: str, answer: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """The outcome for the report and the status: never raises — a map that does not match is a status of its own."""
+    """The outcome for the report and the status: never raises — and never silent: a map that does not match, or any failure to read
+    the canaries of a run whose journal has them, is ``MISMATCH`` with the warning ``REVIEW_CANARY_MISMATCH``."""
     try:
         canaries = verify(run_root, attempt_id)
         return outcome(canaries, answer if answer is not None else recorded_answer(run_root, attempt_id))
     except CanaryMismatch as error:
-        return {"status": "MISMATCH", "seeded": None, "caught": None, "warning": "REVIEW_CANARY_MISMATCH", "note": str(error)}
+        note = str(error)
     except (OSError, KeyError, TypeError, ValueError) as error:
-        return {"status": "UNREADABLE", "seeded": None, "caught": None, "warning": None, "note": f"канарейки не прочитаны: {str(error)[:200]}"}
+        note = f"REVIEW_CANARY_MISMATCH: канарейки или ответ ревьюера не прочитаны ({str(error)[:160]})"
+    return {"status": "MISMATCH", "seeded": None, "caught": None, "warning": "REVIEW_CANARY_MISMATCH", "note": note}
 
 
 def status_fields(run_root: Path, attempt_id: str, status: Mapping[str, Any]) -> dict[str, Any]:
@@ -416,10 +444,10 @@ def status_fields(run_root: Path, attempt_id: str, status: Mapping[str, Any]) ->
     try:
         answer = recorded_answer(run_root, attempt_id)
     except (OSError, KeyError, TypeError, ValueError):
-        return {}
-    if answer is None:
-        return {}
+        answer = None
     found = summary(run_root, attempt_id, answer)
+    if answer is None and found["status"] != "MISMATCH":  # before the answer only a map that does not match is news
+        return {}
     fields: dict[str, Any] = {"review_canaries": found}
     if found.get("warning"):
         fields["warnings"] = [*(status.get("warnings") or []), found["warning"]]
