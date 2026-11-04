@@ -365,3 +365,14 @@ def test_run_pipeline_refusals_of_a_named_run_go_to_the_same_journal(tmp_path: P
     (line,) = (root / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
     row = json.loads(line)
     assert sorted(row) == ["at", "batch", "code", "command", "stage"] and row["command"] == "finish" and row["code"], row
+
+
+def test_the_fix_of_the_call_site_beats_the_table_and_the_errors_own_beats_both() -> None:
+    from tools.json_cli import error_fields
+
+    class Refused(ValueError):
+        code = "INVENTORY_INVALID"
+
+    assert error_fields(Refused("x"))["fix"]  # the table's
+    assert "fix" not in error_fields(Refused("x"), table=False)  # the call site falls back to its own
+    assert error_fields(Refused("x; fix: свой"), table=False)["fix"] == "свой"

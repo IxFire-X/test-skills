@@ -1295,7 +1295,7 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
     except Exception as error:  # FaT-HARD (F2): not a drift — but said, with its code and fix; the hint never fails status
         from tools.json_cli import error_fields
 
-        fields = error_fields(error)
+        fields = error_fields(error, table=False)  # P1: the fix of this place below is more exact than the table's
         return {"drift_check_error": {"code": fields["code"], "message": fields["message"][:500], "fix": fields.get("fix") or (
             "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, exec остановится "
             "на той же сверке: начни новый прогон тем же scan с --new-run (команда — next_step.command)")}}
