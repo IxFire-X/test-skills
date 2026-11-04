@@ -15,13 +15,25 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_a_module_root_instead_of_its_id_is_module_unknown_with_the_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_module_root_is_taken_as_the_module_of_that_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_first_run import _python_project
     from tests.test_scan_guard import _scan
 
-    code, payload = _scan(_python_project(tmp_path, runtime=False), monkeypatch, module="services/api")
+    project = _python_project(tmp_path, runtime=False)
+    by_id = _scan(project, monkeypatch, module="nested")[1]
+    code, by_root = _scan(project, monkeypatch, module="services/api")
+    assert code == 0 and by_root["status"] == "ok", by_root
+    assert by_root["module_id"] == by_id["module_id"] == "nested"
+    assert by_root["scope"]["module"] == by_id["scope"]["module"] == "services/api"
+
+
+def test_an_unknown_module_is_module_unknown_with_the_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_first_run import _python_project
+    from tests.test_scan_guard import _scan
+
+    code, payload = _scan(_python_project(tmp_path, runtime=False), monkeypatch, module="nope")
     assert code == 2 and payload["reason"] == "MODULE_UNKNOWN", payload
-    assert "nested (root services/api)" in payload["detail"] and "services/api" in payload["detail"]
+    assert "nested (root services/api)" in payload["detail"]
     assert payload["fix"] == "--module nested"
 
 
