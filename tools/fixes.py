@@ -179,6 +179,8 @@ FIXES: dict[str, str] = {
     "SEMANTIC_UNKNOWN_STEP_OUTPUT": "step_output ссылается на несуществующий выход шага: поправь step_id/output_id или объяви выход",
     "SEMANTIC_UNMAPPED_CANONICAL_REQUIREMENT": "у каждого требования канона должен быть mapping с исходным SREQ",
     "SEMANTIC_UNMAPPED_SOURCE_REQUIREMENT": "у каждого SREQ пачки должен быть mapping: добавь недостающий",
+    # --- the pause after the marker (tools.scope_pause) ---
+    "SCOPE_DECISION_INVALID": "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)",
     # --- the schema: every SCHEMA_* has the generic fix of fix_for; these are the ones that need more ---
     "SCHEMA_ENUM": "значение вне перечня — перечень в message; category: positive, negative, boundary, authorization, security, "
                    "concurrency, idempotency, observability, functional; priority: CRITICAL, HIGH, MEDIUM, LOW; technique: EP, "

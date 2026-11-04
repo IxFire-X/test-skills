@@ -43,8 +43,12 @@ def loads_json_strict(text: str) -> Any:
         raise StrictJsonError("UTF-8 BOM is not permitted")
     try:
         return json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_reject_duplicates)
+    except StrictJsonError:
+        raise
     except (json.JSONDecodeError, TypeError) as error:
         raise StrictJsonError(str(error)) from error
+    except (ValueError, RecursionError) as error:  # an integer past the interpreter's digit limit; a nesting past its recursion limit
+        raise StrictJsonError(f"{type(error).__name__}: {error}") from error
 
 
 def load_json_strict(path: Path) -> Any:

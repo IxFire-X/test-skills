@@ -358,3 +358,76 @@ def test_status_names_a_forged_decision_instead_of_going_on(tmp_path: Path) -> N
     pilot_state.publish_run_artifact_bytes(root, attempt_id, scope_pause.DECISION_NAME, b"{}")
     step = {"code": "GENERATOR_PLAN", "stage": "tc-generator", "action": "план", "skill_section": "3", "command": "plan-batches"}
     assert _scope_pause_step(root, attempt_id, step)["code"] == "SCOPE_DECISION_INVALID"
+
+
+# --- PH: the report names a forged decision instead of dropping the section --------------------------------------------------------------
+
+def _tail_fix(error: Exception) -> str:
+    return str(error).split("fix: ", 1)[1]
+
+
+def test_the_report_names_a_forged_decision_and_what_to_do(tmp_path: Path) -> None:
+    from tools import scope_pause
+    from tools.run_report import build_report, render_markdown
+
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
+    pilot_state.publish_run_artifact_bytes(root, attempt_id, scope_pause.DECISION_NAME, b"{}")
+    with pytest.raises(scope_pause.ScopeRefused) as stopped:
+        scope_pause.read_decision(root, attempt_id)
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"] == {"refused": {"code": "SCOPE_DECISION_INVALID", "fix": _tail_fix(stopped.value)}}  # the text P3 prints, byte for byte
+    markdown = render_markdown(report)
+    section = markdown.split("## Охват после разметки", 1)[1].split("\n## ", 1)[0]
+    assert "SCOPE_DECISION_INVALID" in section and _tail_fix(stopped.value) in section and "scan --new-run" in section
+
+
+def test_the_report_names_an_unreadable_decision_with_its_own_fix(tmp_path: Path, monkeypatch) -> None:
+    from tools import confined_output, scope_pause
+    from tools.run_report import build_report, render_markdown
+
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
+
+    def unreadable(*_args, **_kwargs):
+        raise OSError("denied")
+
+    monkeypatch.setattr(confined_output, "read_confined_bytes", unreadable)
+    with pytest.raises(scope_pause.ScopeRefused) as stopped:
+        scope_pause.read_decision(root, attempt_id)
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"] == {"refused": {"code": "SCOPE_DECISION_INVALID", "fix": _tail_fix(stopped.value)}}
+    assert _tail_fix(stopped.value) in render_markdown(report)
+
+
+def test_the_fix_table_holds_the_scope_decision_code() -> None:
+    from tools.fixes import FIXES, fix_for
+
+    assert fix_for("SCOPE_DECISION_INVALID") == FIXES["SCOPE_DECISION_INVALID"]
+    assert "scan --new-run" in FIXES["SCOPE_DECISION_INVALID"] and "fix:" not in FIXES["SCOPE_DECISION_INVALID"]
+    tails = {"не подменяй артефакты прогона; другое решение — новый прогон (scan --new-run)",
+             "не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)"}
+    assert FIXES["SCOPE_DECISION_INVALID"] in tails  # the texts P3 prints; no third wording
+
+
+# --- PH (hunt 6.3): an exclusion on a marker without gaps is in the report -------------------------------------------------------------
+
+def test_an_exclusion_on_a_marker_without_gaps_is_named_in_the_report(tmp_path: Path, capsys) -> None:
+    from tools.run_report import build_report, render_markdown
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path, warnings=["док — общее замечание без четырёх полей"])
+    code, payload = _api(capsys, _plan_arguments(root, attempt_id, receipts, "--exclude", "SREQ-batch-a-001", "--reason", "не в этом релизе"))
+    assert code == 0, payload
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"] == {"gaps": 0, "answer": "исключены", "out_of_scope": [{"source_requirement_id": "SREQ-batch-a-001", "reason": "не в этом релизе"}]}
+    markdown = render_markdown(report)
+    section = markdown.split("## Охват после разметки", 1)[1].split("\n## ", 1)[0]
+    assert "вне охвата SREQ-batch-a-001: не в этом релизе" in section
+
+
+def test_a_continue_decision_on_a_marker_without_gaps_adds_no_section(tmp_path: Path) -> None:
+    from tools import scope_pause
+    from tools.run_report import build_report, render_markdown
+
+    root, attempt_id, _baseline, _receipts = _paused_run(tmp_path, warnings=["док — общее замечание"])
+    scope_pause.record_decision(root, attempt_id, excluded=[], reason=None, proceed=True)
+    report, _warnings = build_report(root.parent.parent, root.name)
+    assert report["scope"] is None and "Охват после разметки" not in render_markdown(report)

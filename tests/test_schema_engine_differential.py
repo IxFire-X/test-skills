@@ -38,26 +38,63 @@ RAW = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in SCHEM
 STORE = {contents["$id"]: contents for contents in RAW.values()}
 
 
-def _build_oracle() -> dict[str, Any]:
+def _ecma_schema(node: Any) -> Any:
+    """A copy of the schema whose patterns say a backslash-Z where they say ``$``: the oracle of ECMA 262, where ``$`` is the end of the string.
+    The patterns of the package escape no dollar and put none in a class (asserted here), so a plain replacement is exact."""
+    if isinstance(node, dict):
+        return {key: (_ecma_pattern(value) if key == "pattern" and isinstance(value, str) else _ecma_schema(value)) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_ecma_schema(value) for value in node]
+    return node
+
+
+def _ecma_pattern(pattern: str) -> str:
+    assert "\\$" not in pattern and "[$" not in pattern and "$]" not in pattern, pattern
+    return pattern.replace("$", "\\Z")
+
+
+def _build_oracle(raw: dict[str, Any] = RAW) -> dict[str, Any]:
     registry = referencing.Registry()
-    for contents in RAW.values():
+    for contents in raw.values():
         registry = registry.with_resource(contents["$id"], referencing.Resource.from_contents(contents))
     return {name: jsonschema.Draft202012Validator(contents, registry=registry, format_checker=jsonschema.FormatChecker())
-            for name, contents in RAW.items()}
+            for name, contents in raw.items()}
 
 
 ORACLE = _build_oracle()
+ECMA_ORACLE = _build_oracle({name: _ecma_schema(contents) for name, contents in RAW.items()})
+ECMA_END_OF_STRING: list[str] = []  # the named allowance: the labels of the pairs it forgave (the test below needs it to be exercised)
 ENGINE = {name: schema_engine.Draft202012Validator(contents, registry=STORE, format_checker=schema_engine.FormatChecker())
           for name, contents in RAW.items()}
 
 
-def _signature(error: Any, depth: int = 2) -> tuple:
-    context = tuple(sorted((_signature(child, depth - 1) for child in error.context), key=repr)) if depth else len(error.context)
-    return (tuple(error.absolute_path), error.validator, tuple(error.absolute_schema_path), error.message, _error_path(error), _error_code(error), context)
+def _signature(error: Any, depth: int = 2, ecma: bool = False) -> tuple:
+    """*ecma*: the signature of an error of the ECMA oracle, whose copy of the schema says a backslash-Z for a dollar — the message names the pattern as written."""
+    context = tuple(sorted((_signature(child, depth - 1, ecma) for child in error.context), key=repr)) if depth else len(error.context)
+    message = error.message.replace(_ECMA_END, "$") if ecma and error.validator == "pattern" else error.message
+    return (tuple(error.absolute_path), error.validator, tuple(error.absolute_schema_path), message, _error_path(error), _error_code(error), context)
+
+
+_ECMA_END = "\\\\Z"  # how repr() shows the backslash-Z of the pattern in the message of the ECMA oracle
+
+
+def _holds_a_final_newline(instance: Any) -> bool:
+    """A string value or key that ends on a newline: the only instances on which ``ECMA_END_OF_STRING`` may be claimed."""
+    if isinstance(instance, str):
+        return instance.endswith("\n")
+    if isinstance(instance, dict):
+        return any(_holds_a_final_newline(key) or _holds_a_final_newline(value) for key, value in instance.items())
+    if isinstance(instance, list):
+        return any(_holds_a_final_newline(value) for value in instance)
+    return False
 
 
 def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
-    """True when the oracle accepts the instance. Appends one line per difference to *problems*."""
+    """True when the oracle accepts the instance. Appends one line per difference to *problems*.
+
+    The one named allowance, ``ECMA_END_OF_STRING``: the oracle matches patterns with Python ``re.search``, where ``$`` also matches before a final
+    newline; the engine follows ECMA 262, where it does not. A difference is forgiven only if the instance holds a string with a final newline and the
+    engine gives exactly the errors of the same oracle over the schemas with ``$`` written as the end of the string — any other difference stays one."""
     expected = sorted((_signature(error) for error in ORACLE[name].iter_errors(instance)), key=repr)
     try:
         actual = sorted((_signature(error) for error in ENGINE[name].iter_errors(instance)), key=repr)
@@ -65,6 +102,11 @@ def _compare(name: str, instance: Any, label: str, problems: list[str]) -> bool:
         problems.append(f"{label} x {name}: engine raised {type(error).__name__}: {error}")
         return not expected
     if actual != expected:
+        if _holds_a_final_newline(instance):
+            ecma = sorted((_signature(error, ecma=True) for error in ECMA_ORACLE[name].iter_errors(instance)), key=repr)
+            if actual == ecma:
+                ECMA_END_OF_STRING.append(f"{label} x {name}")
+                return not ecma
         only_oracle = [item for item in expected if item not in actual][:2]
         only_engine = [item for item in actual if item not in expected][:2]
         problems.append(f"{label} x {name}: oracle-only {only_oracle!r} engine-only {only_engine!r}")
@@ -120,6 +162,8 @@ def _mutations(instance: Any) -> Iterator[tuple[str, Any]]:
             yield f"str-empty {tag}", put("")
             yield f"str-bad-date {tag}", put("2026-02-30")
             yield f"str-date {tag}", put("2026-11-03")
+            yield f"str-final-newline {tag}", put(node + "\n")
+            yield f"str-final-crlf {tag}", put(node + "\r\n")
             yield f"str-datetime {tag}", put("2026-11-03T10:00:00Z")
             yield f"str-long {tag}", put(node + "x" * 300)
         elif isinstance(node, (int, float)):
@@ -207,6 +251,51 @@ def test_artifacts_of_earlier_runs_and_their_mutations() -> None:
         pytest.skip("live/ has no .pilot-runs artifacts")
     problems = _differential(instances, mutate=True)
     assert not problems, f"{len(problems)} differences\n" + "\n".join(problems[:40])
+
+
+def test_the_named_allowance_ecma_end_of_string_is_exercised_and_is_nothing_more() -> None:
+    """Every string of a valid fixture, with a final newline or CRLF: the engine and the oracle differ exactly where a pattern ends on "$"
+    (the oracle accepts, the engine refuses), the allowance forgives them all, and no other difference is left."""
+    forgiven_before = len(ECMA_END_OF_STRING)
+    problems: list[str] = []
+    refused = 0
+    for label, instance in _fixture_instances():
+        for name in RAW:
+            if not _compare(name, instance, label, problems):
+                continue
+            for tail in ("\n", "\r\n"):
+                for mutation, mutant in _final_newline_mutants(instance, tail):
+                    _compare(name, mutant, f"{label} [{mutation}]", problems)
+                    refused += (not ENGINE[name].is_valid(mutant)) and ORACLE[name].is_valid(mutant)
+    assert not problems, "\n".join(problems[:40])
+    assert refused >= 5 and len(ECMA_END_OF_STRING) - forgiven_before >= refused, (refused, len(ECMA_END_OF_STRING) - forgiven_before)
+
+
+def _final_newline_mutants(instance: Any, tail: str) -> Iterator[tuple[str, Any]]:
+    """One mutant per string value of the instance: that value with *tail* after it (up to 40 of them, spread over the instance)."""
+    sites: list[tuple[tuple, str]] = []
+
+    def walk(node: Any, path: tuple) -> None:
+        if isinstance(node, str):
+            sites.append((path, node))
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, path + (key,))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, path + (index,))
+
+    walk(instance, ())
+    for path, value in sites[::max(1, len(sites) // 40)][:40]:
+        if not path:
+            yield "<root>", value + tail
+            continue
+        clone = copy.deepcopy(instance)
+        target = clone
+        for step in path[:-1]:
+            target = target[step]
+        target[path[-1]] = value + tail
+        yield "/".join(map(str, path)), clone
 
 
 def test_hand_made_broken_instances_of_every_schema() -> None:

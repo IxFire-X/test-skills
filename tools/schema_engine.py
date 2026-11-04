@@ -286,7 +286,7 @@ def _b_schema(compiler: _Compiler, value: Any, raw: dict, base: str) -> _Node:
 
 def _b_schema_list(keyword: str):
     def build(compiler: _Compiler, value: Any, raw: dict, base: str) -> list[_Node]:
-        _check(isinstance(value, list) and (keyword == "prefixItems" or bool(value)), keyword, "must be a non-empty array of schemas")
+        _check(isinstance(value, list) and bool(value), keyword, "must be a non-empty array of schemas")
         return [compiler.node(item, base) for item in value]
     return build
 
@@ -329,11 +329,13 @@ def _b_type(compiler: _Compiler, value: Any, raw: dict, base: str) -> list[str]:
     names = [value] if isinstance(value, str) else value
     _check(isinstance(names, list) and bool(names) and all(isinstance(name, str) and name in _TYPE_NAMES for name in names),
            "type", f"must be one of {sorted(_TYPE_NAMES)} or a list of them")
+    _check(len(set(names)) == len(names), "type", "must not name a type twice")
     return names
 
 
 def _b_required(compiler: _Compiler, value: Any, raw: dict, base: str) -> list[str]:
     _check(isinstance(value, list) and all(isinstance(name, str) for name in value), "required", "must be an array of strings")
+    _check(len(set(value)) == len(value), "required", "must not name a property twice")
     return value
 
 
@@ -360,10 +362,49 @@ def _b_number(keyword: str):
     return build
 
 
-def _b_pattern(compiler: _Compiler, value: Any, raw: dict, base: str) -> re.Pattern:
+def _ecma_end_of_string(pattern: str) -> str:
+    r"""*pattern* with every ``$`` anchor written as ``\Z``.  ECMA 262 (the dialect of JSON Schema) has no flag ``m`` here, so ``$`` is the end
+    of the string; Python's ``$`` also matches before a final newline, which would let ``a.py`` + newline through every path pattern.
+    A backslash takes the next character (``\$`` is a dollar sign, ``\\$`` a backslash and the anchor); a dollar in a class is a character.
+    Python-only syntax that would change what ``$`` means or hide it — inline flags, ``(?#`` comments — is refused."""
+    out: list[str] = []
+    index, size = 0, len(pattern)
+    in_class = False
+    while index < size:
+        char = pattern[index]
+        if char == "\\":
+            out.append(pattern[index:index + 2])
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+            out.append(char)
+            index += 1
+            for first in ("^", "]"):  # Python: a "]" right after "[" or "[^" is a member of the class
+                if pattern.startswith(first, index):
+                    out.append(first)
+                    index += 1
+            continue
+        elif pattern.startswith("(?", index) and pattern[index + 2:index + 3] in _INLINE_FLAG_START:
+            raise SchemaError(f"keyword 'pattern': {pattern!r} uses an inline flag or comment, which ECMA 262 does not have")
+        elif char == "$":
+            out.append("\\Z")
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+_INLINE_FLAG_START = frozenset("aiLmsux-#")
+
+
+def _b_pattern(compiler: _Compiler, value: Any, raw: dict, base: str) -> tuple[re.Pattern, str]:
     _check(isinstance(value, str), "pattern", "must be a string")
     try:
-        return re.compile(value)
+        return re.compile(_ecma_end_of_string(value)), value
     except re.error as error:
         raise SchemaError(f"keyword 'pattern': {value!r} is not a regular expression: {error}") from None
 
@@ -501,9 +542,10 @@ def _v_const(validator, expected, instance, raw):
         return [ValidationError(f"{expected!r} was expected")]
 
 
-def _v_pattern(validator, compiled, instance, raw):
+def _v_pattern(validator, built, instance, raw):
+    compiled, source = built
     if isinstance(instance, str) and not compiled.search(instance):
-        return [ValidationError(f"{instance!r} does not match {compiled.pattern!r}")]
+        return [ValidationError(f"{instance!r} does not match {source!r}")]
 
 
 def _v_format(validator, name, instance, raw):

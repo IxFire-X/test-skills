@@ -366,11 +366,18 @@ def _identifier(value: Any) -> str | None:
 
 def refusals(root: Path) -> dict[str, Any] | None:
     """P9 («Отказы»): ``<run>/refusals.jsonl`` (``{at, command, code, stage, batch}`` per refusal, written by ``tools.api``)
-    summed by command, code, stage and batch; ``None`` when the run has no such journal; a line that is no JSON is skipped."""
+    summed by command, code, stage and batch; ``None`` when the run has neither the journal nor the step
+    measurements of v0.2 (no way to tell a clean run from one before v0.2); a line that is no JSON is skipped."""
     try:
         lines = (Path(root) / "refusals.jsonl").read_text(encoding="utf-8").splitlines()
     except OSError:
-        return None
+        # The journal is created by the first refusal, so a clean run of v0.2 has none.  What only v0.2 writes is ``step-sizes.jsonl`` (it measures
+        # every step it sends to the model): with it the run is v0.2 and had no refusal; without it there is no way to tell, and the report says so.
+        from tools.step_size import RECORD
+
+        if not (Path(root) / RECORD).is_file():
+            return None
+        lines = []
     rows = []
     for line in lines:
         try:
@@ -411,6 +418,16 @@ def canon_numbers(document: Mapping[str, Any] | None) -> dict[str, Any] | None:
             "blockers": blockers, "blockers_per_case": round(blockers / len(cases), 2)}
 
 
+def remove_commands(relative: str, system: str) -> tuple[str, str | None]:
+    """The command that removes the folder *relative* (a posix path from the project) for the shell of the machine, and for Windows the cmd form
+    beside the PowerShell one.  PowerShell quotes with apostrophes (one inside is doubled, nothing else is special there), cmd and sh with double quotes."""
+    if system == "win32":
+        windows = relative.replace("/", "\\")
+        quoted = windows.replace("'", "''")
+        return f"Remove-Item -LiteralPath '{quoted}' -Recurse -Force", f'rmdir /s /q "{windows}"'
+    return f'rm -rf "{relative}"', None
+
+
 def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
     """P9: the size of ``<run>/tmp/`` (the agent's working files) and the command that removes it — the report removes nothing."""
     tmp = Path(root) / "tmp"
@@ -418,8 +435,11 @@ def tmp_usage(root: Path, project: Path) -> dict[str, Any] | None:
         return None
     files = [path for path in tmp.rglob("*") if path.is_file()]
     relative = tmp.relative_to(project).as_posix()
-    command = f'rmdir /s /q "{relative.replace("/", chr(92))}"' if sys.platform == "win32" else f'rm -rf "{relative}"'
-    return {"path": relative, "files": len(files), "bytes": sum(path.stat().st_size for path in files), "remove_command": command}
+    command, command_cmd = remove_commands(relative, sys.platform)
+    usage = {"path": relative, "files": len(files), "bytes": sum(path.stat().st_size for path in files), "remove_command": command}
+    if command_cmd is not None:
+        usage["remove_command_cmd"] = command_cmd
+    return usage
 
 
 def budget_warnings(calls: Iterable[Mapping[str, Any]], sizes: Iterable[Mapping[str, Any]]) -> list[str]:
@@ -644,18 +664,22 @@ def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
 
 def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict[str, Any] | None:
     """FaT-P3: what the human decided on the gaps of the marker — the requirements left out of the batches, each with the
-    reason the human gave; None for a run whose marker has no gaps (nothing was asked)."""
+    reason the human gave; None for a run whose marker has no gaps and whose human excluded nothing (nothing was asked, nothing left out)."""
     if not attempt_id:
         return None
-    from tools.scope_pause import out_of_scope, scope_state
+    from tools.fixes import fix_for
+    from tools.scope_pause import ScopeRefused, out_of_scope, scope_state
 
     try:
         scope = scope_state(root, attempt_id, state)
+    except ScopeRefused as error:  # a decision file that is not the human's answer: the report says so (a ScopeRefused is a ValueError, below)
+        fix = str(error).split("fix: ", 1)[1] if "fix: " in str(error) else fix_for(error.code)  # the text the status prints; the table when it has none
+        return {"refused": {"code": error.code, "fix": fix}}
     except (KeyError, OSError, TypeError, ValueError):
         return None
-    if not scope["gaps"]:
-        return None
     decision = scope["decision"]
+    if not scope["gaps"] and not out_of_scope(decision):  # an exclusion needs no gap: the human may leave a requirement out of a marker without any
+        return None
     answer = "пауза не снималась: ответа человека нет" if scope["pending"] else (
         "без остановки (scan --no-pause)" if decision is None else ("исключены" if out_of_scope(decision) else "продолжить как есть"))
     return {"gaps": len(scope["gaps"]), "answer": answer, "out_of_scope": out_of_scope(decision)}
@@ -859,7 +883,7 @@ def _tmp_lines(report: Mapping[str, Any]) -> list[str]:
     if tmp is None:
         return []
     return ["## Рабочие файлы агента", "", f"`{tmp['path']}`: файлов {tmp['files']}, {tmp['bytes']} Б. Отчёт ничего не удаляет; "
-            f"убрать можно командой `{tmp['remove_command']}`.", ""]
+            f"убрать можно командой `{tmp['remove_command']}`" + (f" (в cmd: `{tmp['remove_command_cmd']}`)" if tmp.get("remove_command_cmd") else "") + ".", ""]
 
 
 def render_markdown(report: Mapping[str, Any]) -> str:
@@ -900,8 +924,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     ]
     if report.get("scope"):
         scope = report["scope"]
-        lines += ["## Охват после разметки", "", f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
-                  *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]), ""]
+        lines += ["## Охват после разметки", ""]
+        if "refused" in scope:
+            lines += [f"- {scope['refused']['code']}: ответ человека не читается как ответ человека, охват не определён; fix: {scope['refused']['fix']}", ""]
+        else:
+            lines += [f"- пробелов в разметке: {scope['gaps']}; ответ человека: {scope['answer']}",
+                      *(f"- вне охвата {row['source_requirement_id']}: {row['reason']} (кейсы для него не пишутся)" for row in scope["out_of_scope"]), ""]
     if report.get("import"):
         summary = report["import"]
         lines += ["## Импорт кейсов", "", f"- CSV: {summary['csv']}; кейсов: {_dash(summary['cases'])}; нормализовано: "

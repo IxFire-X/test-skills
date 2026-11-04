@@ -115,11 +115,24 @@ def test_refusals_are_summed_by_command_code_and_batch(tmp_path: Path) -> None:
     assert "validate-fragment" in section and "BATCH_FRAGMENT_INVALID" in section
 
 
-def test_a_run_without_the_refusal_journal_says_so(tmp_path: Path) -> None:
+def test_a_run_before_v02_without_the_refusal_journal_says_so(tmp_path: Path) -> None:
     run = _generated(tmp_path)
+    (run["run_root"] / "refusals.jsonl").unlink(missing_ok=True)
+    (run["run_root"] / "step-sizes.jsonl").unlink(missing_ok=True)  # v0.2 measures every step it sends to the model; a run before v0.2 has neither file
     report, markdown = _report(run["project"], run["run_root"])
     assert report["refusals"] is None
-    assert "журнала отказов нет" in markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
+    assert "журнала отказов нет (прогон до v0.2)" in markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
+
+
+def test_a_v02_run_without_a_single_refusal_prints_zero(tmp_path: Path) -> None:
+    """The journal is created by the first refusal, so a clean v0.2 run has none; the step measurements are what only v0.2 writes."""
+    run = _generated(tmp_path)
+    (run["run_root"] / "refusals.jsonl").unlink(missing_ok=True)
+    assert (run["run_root"] / "step-sizes.jsonl").is_file()
+    report, markdown = _report(run["project"], run["run_root"])
+    assert report["refusals"]["total"] == 0 and report["refusals"]["by_command_code"] == [] and report["refusals"]["first_at"] is None
+    section = markdown.split("## Отказы", 1)[1].split("\n## ", 1)[0]
+    assert "Всего: 0" in section and "до v0.2" not in section and "журнала отказов нет" not in section
 
 
 def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> None:
@@ -135,3 +148,45 @@ def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> No
     assert canon["blockers"] == sum(len(step.get("automation_blockers") or []) for case in cases for step in case["steps"])
     assert "## Канон в числах" in markdown
     assert report["counts"]["status_after_pause"] is None and "status_after_pause: —" in markdown
+
+
+# --- PH: the command that removes tmp/ is written for the shell of the machine ---------------------------------------------------------
+
+def test_the_remove_command_is_powershell_first_with_the_cmd_form_beside_it_on_windows() -> None:
+    from tools.run_report import remove_commands
+
+    ps, cmd = remove_commands(".pilot-runs/r1/tmp", "win32")
+    assert ps == r"Remove-Item -LiteralPath '.pilot-runs\r1\tmp' -Recurse -Force"
+    assert cmd == r'rmdir /s /q ".pilot-runs\r1\tmp"'
+    assert remove_commands(".pilot-runs/r1/tmp", "linux") == ('rm -rf ".pilot-runs/r1/tmp"', None)
+    assert remove_commands(".pilot-runs/r1/tmp", "darwin") == ('rm -rf ".pilot-runs/r1/tmp"', None)
+
+
+def test_a_path_with_a_space_or_an_apostrophe_is_quoted_for_each_shell() -> None:
+    from tools.run_report import remove_commands
+
+    ps, cmd = remove_commands(".pilot-runs/my run/tmp", "win32")
+    assert ps == r"Remove-Item -LiteralPath '.pilot-runs\my run\tmp' -Recurse -Force" and cmd == r'rmdir /s /q ".pilot-runs\my run\tmp"'
+    ps, cmd = remove_commands(".pilot-runs/o'brien/tmp", "win32")
+    assert ps == r"Remove-Item -LiteralPath '.pilot-runs\o''brien\tmp' -Recurse -Force"  # the apostrophe is doubled inside single quotes
+    assert cmd == r'rmdir /s /q ".pilot-runs\o' + "'" + r'brien\tmp"'
+    assert remove_commands(".pilot-runs/o'brien/tmp", "linux")[0] == 'rm -rf ".pilot-runs/o\'brien/tmp"'
+
+
+def test_the_report_carries_the_command_for_the_shell_and_says_cmd_beside_it(tmp_path: Path, monkeypatch) -> None:
+    from tools import run_report
+
+    root = tmp_path / ".pilot-runs" / "my o'run"
+    (root / "tmp").mkdir(parents=True)
+    (root / "tmp" / "a.json").write_bytes(b"x")
+    monkeypatch.setattr(run_report.sys, "platform", "win32")
+    usage = run_report.tmp_usage(root, tmp_path)
+    assert usage["remove_command"] == r"Remove-Item -LiteralPath '.pilot-runs\my o''run\tmp' -Recurse -Force"
+    assert usage["remove_command_cmd"] == r'rmdir /s /q ".pilot-runs\my o' + "'" + r'run\tmp"'
+    lines = "\n".join(run_report._tmp_lines({"tmp": usage}))
+    assert f"`{usage['remove_command']}`" in lines and f"в cmd: `{usage['remove_command_cmd']}`" in lines and "Отчёт ничего не удаляет" in lines
+    monkeypatch.setattr(run_report.sys, "platform", "linux")
+    usage = run_report.tmp_usage(root, tmp_path)
+    assert usage["remove_command"] == 'rm -rf ".pilot-runs/my o\'run/tmp"' and "remove_command_cmd" not in usage
+    assert "в cmd" not in "\n".join(run_report._tmp_lines({"tmp": usage}))
+    assert (root / "tmp" / "a.json").is_file()  # the report removes nothing

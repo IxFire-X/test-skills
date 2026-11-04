@@ -191,7 +191,8 @@ def test_bounds_lengths_and_patterns() -> None:
     assert _errors({"minProperties": 1}, {})[0].message == "{} should be non-empty"
     assert _errors({"maxProperties": 0}, {"a": 1})[0].message == "{'a': 1} is expected to be empty"
     assert _errors({"pattern": "^a"}, "ba")[0].message == "'ba' does not match '^a'"
-    assert not _errors({"pattern": "b"}, "abc") and _errors({"pattern": "^a$"}, "a\n") == []  # re.search, "$" before a final newline
+    assert not _errors({"pattern": "b"}, "abc") and not _errors({"pattern": "^a$"}, "a")
+    assert [e.message for e in _errors({"pattern": "^a$"}, "a\n")] == ["'a\\n' does not match '^a$'"]  # ECMA 262: "$" is the end of the string
     assert not _errors({"pattern": "^a"}, 5)
 
 
@@ -304,3 +305,159 @@ def test_what_the_standard_library_raises_on_a_hostile_schema_is_a_schema_error(
         Draft202012Validator(deep)
     with pytest.raises(SchemaError):
         Draft202012Validator.check_schema(deep)
+
+
+# --- PH: "$" is the end of the string (ECMA 262), not "before a final newline" (Python re) ---------------------------------------
+
+@pytest.mark.parametrize("pattern,accepted,refused", [
+    ("^a$", ["a"], ["a\n", "a\r\n", "a\r"]),
+    (r"^a\$", ["a$", "a$\n"], ["a"]),  # backslash-dollar is a literal dollar, not an anchor: nothing after it is anchored
+    (r"^a\$$", ["a$"], ["a$\n", "a$\r\n"]),  # a literal dollar and then the anchor
+    (r"^a\\$", ["a\\"], ["a\\\n"]),  # two backslashes are one literal backslash and the $ after them is the anchor
+    (r"^a\\\$$", ["a\\$"], ["a\\$\n"]),  # a literal backslash, a literal dollar, the anchor
+    ("^[$]+$", ["$$"], ["$$\n"]),  # a dollar inside a class is a plain character
+    ("^[a$]$", ["$", "a"], ["a\n", "$\n"]),
+    ("^[^$]$", ["a"], ["$", "a\n"]),
+    ("^[]$]+$", ["$]"], ["$]\n"]),  # Python: a bracket right after "[" belongs to the class
+    ("^a$|^b$", ["a", "b"], ["a\n", "b\n"]),
+    ("^(?=.{2}$)ab$", ["ab"], ["ab\n"]),  # in a lookahead too
+    (r"^(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9./]+$", ["a/b", "a/.b"], ["a/b\n", "a/..\n", "a/..", "a/b\r\n"]),
+    ("a$", ["xa"], ["xa\n"]),
+])
+def test_a_dollar_in_a_pattern_is_the_end_of_the_string_only(pattern: str, accepted: list[str], refused: list[str]) -> None:
+    schema = {"type": "string", "pattern": pattern}
+    for text in accepted:
+        assert _errors(schema, text) == [], (pattern, text)
+    for text in refused:
+        assert [e.validator for e in _errors(schema, text)] == ["pattern"], (pattern, text)
+        assert _errors(schema, text)[0].message == f"{text!r} does not match {pattern!r}"  # the message carries the source pattern
+
+
+@pytest.mark.parametrize("pattern", ["(?i)abc", "(?m)^a$", "(?s)a.b", "(?i:abc)", "(?-i:abc)", "(?x) a", r"(?a)\w", "(?#comment $)a", "a(?m:$)"])
+def test_an_inline_flag_or_comment_in_a_pattern_is_a_schema_error(pattern: str) -> None:
+    from tools.schema_engine import Draft202012Validator, SchemaError
+
+    for schema in ({"pattern": pattern}, {"properties": {"x": {"items": {"pattern": pattern}}}}):
+        with pytest.raises(SchemaError) as caught:
+            Draft202012Validator(schema)
+        assert "pattern" in str(caught.value) and repr(pattern) in str(caught.value)
+        with pytest.raises(SchemaError):
+            Draft202012Validator.check_schema(schema)
+
+
+@pytest.mark.parametrize("pattern", ["(?:a)", "(?=a)", "(?!a)", "(?<=a)b", "(?<!a)b", "(?P<n>a)", "[(?i)]"])
+def test_a_group_that_is_not_a_flag_is_not_refused(pattern: str) -> None:
+    _validator({"pattern": pattern})
+
+
+def _patterns_of_the_schemas() -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+
+    def walk(node, name: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "pattern" and isinstance(value, str):
+                    found.append((name, value))
+                else:
+                    walk(value, name)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, name)
+
+    for path in SCHEMAS:
+        walk(json.loads(path.read_text(encoding="utf-8")), path.name)
+    return found
+
+
+# strings that the path / id / version patterns of the schemas accept
+_ACCEPTED = ["a.py", "src/a.py", "src/main/java/A.java", ".", "docs/a.md", "a.json", "BATCH-a", "SREQ-001", "EXP-a.b", "CAP-x:y", "P-1", "FIX-1",
+             "project-" + "a" * 24, "artifacts/" + "0" * 32 + "/generated/a.json", "artifacts/" + "0" * 32 + "/retained-rerun/reports/r.json",
+             "tc-generator:BATCH-a", "mvnw", "gradlew", "gradlew.bat", "x/gradlew", "TC_CODE", "a-v1", "case.schema.json", "1.0.0", "4.0",
+             "/operation", "/inputs", "/expectations/0/assertions", "Aa1" + "x" * 30, "ghp_x", "sk-x", "token"]
+# Patterns whose body takes a newline as an ordinary character, so ECMA 262 accepts the string with a final newline: the two globs of .skillsrc exclude
+# only "/", a backslash and ":" and then everything else; a JSON pointer token (canonical-test-document) is any character except "~" and "/".
+_NEWLINE_IN_THE_BODY = {("canonical-test-document.schema.json", r"^(?:|/(?:[^~/]|~[01])*)*$"), ("skillsrc.schema.json", r"^(?![/\\])(?![A-Za-z]:)(?!.*(?:^|/)\.\.(?:/|$))[^\\:]+$")}
+
+
+def test_a_final_newline_is_refused_by_every_pattern_of_the_schemas_that_ends_on_a_dollar() -> None:
+    """Every (pattern, string) pair where the pattern accepts the string: the string with "\n" or "\r\n" after it is refused,
+    except for the patterns whose body takes a newline as an ordinary character."""
+    pairs = [(name, pattern, text) for name, pattern in sorted(set(_patterns_of_the_schemas())) for text in _ACCEPTED
+             if pattern.endswith("$") and re.search(pattern, text)]
+    assert len({(name, pattern) for name, pattern, _ in pairs}) >= 25 and len(pairs) >= 100
+    tolerant: set[tuple[str, str]] = set()
+    for name, pattern, text in pairs:
+        validator = _validator({"type": "string", "pattern": pattern})
+        assert validator.is_valid(text), (pattern, text)
+        for tail in ("\n", "\r\n"):
+            if validator.is_valid(text + tail):
+                tolerant.add((name, pattern))
+    assert tolerant <= _NEWLINE_IN_THE_BODY, sorted(tolerant - _NEWLINE_IN_THE_BODY)
+
+
+_PATH_FIELDS = [  # (schema, path of the field inside it): the path fields that carry a pattern
+    ("run-manifest.schema.json", "$defs/file/properties/path"), ("release-manifest.schema.json", "$defs/file/properties/path"),
+    ("compatibility-evidence.schema.json", "$defs/file/properties/path"), ("inventory-receipt.schema.json", "properties/files/items/properties/project_path"),
+    ("exclusion-receipt.schema.json", "$defs/exclusion/properties/project_path"), ("execution-baseline.schema.json", "properties/test_root"),
+    ("release-eval-run.schema.json", "$defs/ref/properties/path"), ("retained-native-rerun-receipt.schema.json", "$defs/relative_path"),
+    ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/0/properties/source_path"),
+    ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/1/properties/source_path"),
+    ("scenario-observation-receipt.schema.json", "$defs/observed_file/properties/path"),
+    ("scenario-observation-receipt.schema.json", "$defs/retained_file/properties/path"),
+]
+
+
+@pytest.mark.parametrize("name,pointer", _PATH_FIELDS)
+def test_a_path_with_a_final_newline_is_refused_by_the_path_fields(name: str, pointer: str) -> None:
+    node = json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
+    for step in pointer.split("/"):
+        node = node[int(step)] if isinstance(node, list) else node[step]
+    assert node.get("pattern", "").endswith("$"), (name, pointer)
+    field = _validator(node)
+    accepted = [path for path in ("a.json", "src/a.json", "src/a.py") if field.is_valid(path)]
+    assert accepted, (name, pointer)
+    for path in accepted:
+        for tail in ("\n", "\r\n"):
+            assert not field.is_valid(path + tail), (name, pointer, path, tail)
+
+
+def test_the_path_fields_listed_are_all_the_path_fields_with_a_pattern() -> None:
+    """A new path pattern in a schema must be listed above, so that it is tested for the final newline too."""
+    listed = {(name, pointer) for name, pointer in _PATH_FIELDS}
+    found = set()
+
+    def walk(node, trail, name) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "pattern" and isinstance(value, str) and "(?!/)" in value:
+                    found.add((name, "/".join(trail)))
+                else:
+                    walk(value, trail + [key], name)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, trail + [str(index)], name)
+
+    for path in SCHEMAS:
+        walk(json.loads(path.read_text(encoding="utf-8")), [], path.name)
+    assert found == listed, sorted(found ^ listed)
+
+
+# --- PH: the cosmetics of check_schema ----------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("schema", [
+    {"type": ["string", "string"]}, {"type": ["string", "null", "string"]}, {"required": ["a", "a"]}, {"required": ["a", "b", "a"]},
+    {"prefixItems": []}, {"properties": {"x": {"type": ["integer", "integer"]}}}, {"items": {"required": ["a", "a"]}},
+    {"properties": {"x": {"prefixItems": []}}}, {"$defs": {"unused": {"type": ["null", "null"]}}}, {"type": []},
+])
+def test_a_duplicate_in_type_or_required_and_an_empty_prefix_items_are_schema_errors(schema) -> None:
+    from tools.schema_engine import Draft202012Validator, SchemaError
+
+    with pytest.raises(SchemaError):
+        Draft202012Validator(schema)
+    with pytest.raises(SchemaError):
+        Draft202012Validator.check_schema(schema)
+
+
+def test_the_distinct_forms_of_type_required_and_prefix_items_still_load() -> None:
+    _validator({"type": ["string", "null"], "required": ["a", "b"], "prefixItems": [{"type": "string"}]})
+    _validator({"type": "string", "required": []})
