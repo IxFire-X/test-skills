@@ -32,7 +32,7 @@ def _fixed(fragment: dict) -> dict:
     return _resealed(fixed)
 
 
-def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code_and_assemble_still_refuses_the_raw_one(tmp_path: Path) -> None:
+def test_the_doc_only_batch_1_answer_is_put_in_order_by_the_code(tmp_path: Path) -> None:
     """run-doc-only c1f13463…: validate-fragment passed batch 1, assemble of both batches refused CANONICAL_CATEGORY_ORDER.
     P1: the order is the code's work — validate-fragment (and model-response) put the categories in V3 order and say so; the rule
     stays in the document audit; P1-fix2: assemble puts the same file in the same order."""
@@ -96,3 +96,26 @@ def test_a_valid_split_still_assembles_and_document_wide_rules_stay_in_assemble(
     assert len(candidate["test_cases"]) == 2
     source = (Path(__file__).resolve().parents[1] / "tools" / "canonical_document.py").read_text(encoding="utf-8")
     assert all(f'"{code}"' in source for code in DOCUMENT_WIDE_CODES)  # each one a real code of the audit
+
+
+@pytest.mark.parametrize("broken", ["categories", "requirement_ids"])
+def test_the_audit_of_the_canon_still_catches_a_wrong_order_in_an_assembled_candidate(broken: str) -> None:
+    """P1-fix2: assemble puts the order in itself, so the one thing that catches a hand-edited candidate with a wrong order
+    is the audit validate-canonical runs — here on a candidate assembled right and then turned around."""
+    from tests.test_batch_assembly import _fragment
+    from tools.batch_assembly import assemble_candidate
+    from tools.canonical_document import validate_canonical_document_all
+
+    fragment, plan, header, context = _synthetic()
+    case = fragment["test_cases"][0]
+    second = dict(fragment["requirements"][0], requirement_id=fragment["requirements"][0]["requirement_id"] + "-B", display_order=100)
+    fragment["requirements"].append(second)
+    fragment["source_to_canonical_mappings"][0]["canonical_requirement_ids"].append(second["requirement_id"])
+    case["requirement_ids"] = [fragment["requirements"][0]["requirement_id"], second["requirement_id"]]
+    case["categories"] = ["positive", "functional"]
+    fragment.pop("digest", None)
+    candidate, _receipt = assemble_candidate(header, plan, [fragment, _fragment(plan, context, 1)])
+    assert validate_canonical_document_all(candidate) == []
+    candidate["test_cases"][0][broken].reverse()
+    expected = "CANONICAL_CATEGORY_ORDER" if broken == "categories" else "CANONICAL_REQUIREMENT_ID_ORDER"
+    assert expected in {row["code"] for row in validate_canonical_document_all(candidate)}
