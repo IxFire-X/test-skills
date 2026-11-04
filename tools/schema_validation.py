@@ -39,7 +39,9 @@ def _reject_duplicates(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
 
 
 MAX_JSON_DEPTH = 256  # nesting levels of arrays and objects; the deepest document of the package has 14
-_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)  # a quote closes a string unless a backslash escapes it
+# A quote closes a string unless a backslash escapes it.  The closing quote is optional: an unterminated string (a response cut off in the middle of one) takes
+# the rest of the text in one pass; with a mandatory quote the search would try every quote of the rest as a start and walk to the end of the text each time.
+_JSON_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"?', re.DOTALL)
 _NOT_A_BRACKET = re.compile(r"[^\[\]{}]+")
 _LEVEL = {"[": 1, "{": 1, "]": -1, "}": -1}
 

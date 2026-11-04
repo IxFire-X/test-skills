@@ -117,6 +117,30 @@ def test_an_unterminated_string_after_deep_nesting_is_still_a_strict_json_error(
             loads_json_strict(text)
 
 
+_UNTERMINATED = {  # ~200 KB each: a response cut off in the middle of a string
+    "escaped-quotes": lambda: '"' + '\\"' * 100_000,
+    "escaped-quotes-then-brackets": lambda: '"' + '\\"' * 100_000 + '[' * 300,
+    "brackets-then-letters-and-escaped-quotes": lambda: '[' * 300 + '"' + 'a\\"' * 70_000,
+    "escaped-backslashes": lambda: '{"a": "' + '\\\\' * 100_000,
+    "lone-backslash-at-the-end": lambda: '"' + '\\"' * 100_000 + '\\',
+    "escaped-quotes-between-strings": lambda: '"x" ' + '"\\" ' * 50_000,
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_UNTERMINATED))
+def test_an_unterminated_string_of_escaped_quotes_is_refused_in_linear_time(kind: str) -> None:
+    """A response cut off in the middle of a string with escaped quotes: the depth check takes the rest of the text as the string in one pass.
+    (With a mandatory closing quote every quote of the rest was tried as the start of a string, each walking to the end: 32 KB took 5.6 s, 800 KB about an hour.)"""
+    import time
+
+    text = _UNTERMINATED[kind]()
+
+    start = time.perf_counter()
+    with pytest.raises(StrictJsonError):
+        loads_json_strict(text)
+    assert time.perf_counter() - start < 1.0
+
+
 def _reference_exceeds(text: str, limit: int) -> bool:
     """The plain definition: a bracket outside a string takes a level; the text exceeds the limit if some prefix has more levels than it."""
     depth, index = 0, 0
@@ -124,7 +148,7 @@ def _reference_exceeds(text: str, limit: int) -> bool:
         char = text[index]
         if char == '"':
             index += 1
-            while text[index] != '"':
+            while index < len(text) and text[index] != '"':  # an unterminated string takes the rest of the text
                 index += 2 if text[index] == "\\" else 1
         elif char in "[{":
             depth += 1
@@ -141,7 +165,7 @@ def test_the_fast_check_agrees_with_the_plain_definition_on_random_texts(monkeyp
 
     from tools import schema_validation
 
-    pieces = ["[", "]", "{", "}", '"a"', '"["', '"]"', '"{"', '"\\""', '"\\\\"', '"\\\\["', ",", "1", ":"]
+    pieces = ["[", "]", "{", "}", '"a"', '"["', '"]"', '"{"', '"\\""', '"\\\\"', '"\\\\["', ",", "1", ":", '"', "\\"]  # a lone quote opens a string that may stay unterminated; a lone backslash escapes what follows it inside one
     randomizer = random.Random(20261104)
     refused = accepted = 0
     for limit in (1, 2, 3, 5, 8):
