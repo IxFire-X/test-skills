@@ -350,6 +350,74 @@ def test_a_group_that_is_not_a_flag_is_not_refused(pattern: str) -> None:
     _validator({"pattern": pattern})
 
 
+# --- PH2: "." is any character but a line terminator of ECMA 262 (\n \r \u2028 \u2029), not "but \n" (Python re) -----------------
+
+@pytest.mark.parametrize("pattern,accepted,refused", [
+    ("^a.b$", ["axb", "a b", "a.b", "a\x85b", "aéb"], ["a\nb", "a\rb", "a\u2028b", "a\u2029b"]),  # \x85 is no line terminator in ECMA
+    (r"^a\.b$", ["a.b"], ["axb"]),  # an escaped dot is a dot
+    ("^a[.]b$", ["a.b"], ["axb", "a\rb"]),  # in a class a dot is a character
+    ("^[^.]b$", ["xb", "\rb", "\nb"], [".b"]),
+    ("^[].]+$", ["].", "."], ["\r", "a"]),  # a bracket right after "[" belongs to the class
+    ("^[^].]+$", ["a\r"], ["]", "."]),
+    (r"^a\\.b$", ["a\\xb"], ["a\\\rb", "a\\\nb"]),  # two backslashes are one backslash: the dot after them is not escaped
+    (r"^a\\\.b$", ["a\\.b"], ["a\\xb"]),  # a backslash and an escaped dot
+    ("^.+ — .+$", ["a — b"], ["a\r — b", "a — b\r", "a\u2028 — b", "a — b\u2029"]),
+    ("^.*$", ["", "abc"], ["\r", "a\u2028", "a\n"]),
+    ("^.{3}$", ["abc"], ["a\rb"]),
+    ("^.+?$", ["abc"], ["a\rb"]),  # lazy
+    ("^(?!.*x).+$", ["abc", "a\x85"], ["abx", "a\rb"]),  # in a lookahead too
+    (r"^(?!/)(?!.*(?:^|/)\.{1,2}(?:/|$)).+$", ["a/b", "a/.b", "a b"], ["/a", "a/..", "a/../b", "a\rb", "a\u2028b"]),  # the path pattern of the schemas
+    (r"^.*\S.*$", ["a", " a "], ["a\rb"]),
+    ("(?:a|.)b", ["xb"], ["\rb"]),
+])
+def test_a_dot_in_a_pattern_is_not_a_line_terminator(pattern: str, accepted: list[str], refused: list[str]) -> None:
+    schema = {"type": "string", "pattern": pattern}
+    for text in accepted:
+        assert _errors(schema, text) == [], (pattern, text)
+    for text in refused:
+        assert [e.validator for e in _errors(schema, text)] == ["pattern"], (pattern, text)
+        assert _errors(schema, text)[0].message == f"{text!r} does not match {pattern!r}"
+
+
+# \d \w \D \W are Unicode in Python and ASCII in ECMA 262; no schema of the package uses them, so the engine refuses them rather than translate them.
+@pytest.mark.parametrize("pattern", [r"\d", r"^\d+$", r"\w", r"^\w+$", r"\D", r"\W", r"[\d]", r"[a\w]", r"[^\W]", r"[\d-]", r"x\Dy", r"^(?=\w)a$", r"a\\\d", r"\bfoo", r"foo\b", r"\B", r"^(?:\b|a)$", r"a\\\b"])
+def test_a_digit_or_word_class_in_a_pattern_is_a_schema_error(pattern: str) -> None:
+    from tools.schema_engine import Draft202012Validator, SchemaError
+
+    for schema in ({"pattern": pattern}, {"properties": {"x": {"items": {"pattern": pattern}}}}):
+        with pytest.raises(SchemaError) as caught:
+            Draft202012Validator(schema)
+        assert "pattern" in str(caught.value) and repr(pattern) in str(caught.value) and "ASCII" in str(caught.value)
+        with pytest.raises(SchemaError):
+            Draft202012Validator.check_schema(schema)
+
+
+@pytest.mark.parametrize("pattern", [r"\bfoo", r"foo\b", r"\B", r"^(?:\b|a)$"])
+def test_a_word_boundary_in_a_pattern_is_a_schema_error_that_does_not_advise_a_digit_class(pattern: str) -> None:
+    from tools.schema_engine import Draft202012Validator, SchemaError
+
+    with pytest.raises(SchemaError) as caught:
+        Draft202012Validator({"pattern": pattern})
+    assert repr(pattern) in str(caught.value) and "boundary" in str(caught.value) and "[0-9]" not in str(caught.value)
+
+
+@pytest.mark.parametrize("pattern,accepted", [
+    (r"^a\\d$", ["a\\d"]),  # a backslash and the letter d
+    (r"^a\\w$", ["a\\w"]),
+    (r"^[\\d]$", ["\\", "d"]),  # in a class: a backslash, then d
+    (r"^\S+$", ["abc"]),  # \s stays as it is (both dialects know the Unicode spaces)
+    (r"^[0-9]+\.[a-z_]+$", ["1.a"]),
+    (r"^[\b]$", ["\b"]),  # a backspace in a class, the same in both dialects
+    (r"^a\\b$", ["a\\b"]),  # a backslash and the letter b, not a boundary
+    (r"^a\\\\b$", ["a\\\\b"]),
+    (r"^a\$d$", ["a$d"]),
+])
+def test_what_looks_like_a_digit_or_word_class_but_is_not_is_not_refused(pattern: str, accepted: list[str]) -> None:
+    schema = {"type": "string", "pattern": pattern}
+    for text in accepted:
+        assert _errors(schema, text) == [], (pattern, text)
+
+
 def _patterns_of_the_schemas() -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
 

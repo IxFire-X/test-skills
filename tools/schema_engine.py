@@ -362,17 +362,28 @@ def _b_number(keyword: str):
     return build
 
 
-def _ecma_end_of_string(pattern: str) -> str:
-    r"""*pattern* with every ``$`` anchor written as ``\Z``.  ECMA 262 (the dialect of JSON Schema) has no flag ``m`` here, so ``$`` is the end
-    of the string; Python's ``$`` also matches before a final newline, which would let ``a.py`` + newline through every path pattern.
-    A backslash takes the next character (``\$`` is a dollar sign, ``\\$`` a backslash and the anchor); a dollar in a class is a character.
-    Python-only syntax that would change what ``$`` means or hide it — inline flags, ``(?#`` comments — is refused."""
+_NOT_A_LINE_TERMINATOR = r"[^\n\r\u2028\u2029]"  # the "." of ECMA 262 (Python's also matches \r, \u2028 and \u2029)
+
+
+def _ecma_pattern(pattern: str) -> str:
+    r"""*pattern* in the dialect of ECMA 262 (JSON Schema), written for Python ``re``: every ``$`` anchor as ``\Z`` and every ``.`` outside a class as
+    any character but a line terminator.  ECMA has no flag ``m`` here, so ``$`` is the end of the string; Python's ``$`` also matches before a final
+    newline, which would let ``a.py`` + newline through every path pattern, and Python's ``.`` lets ``\r``, ``\u2028`` and ``\u2029`` through.
+    A backslash takes the next character (``\$`` is a dollar sign, ``\.`` a dot, ``\\$`` a backslash and the anchor); in a class both are characters.
+    ``\d \D \w \W`` and the word boundaries ``\b \B`` (outside a class) are Unicode in Python and ASCII in ECMA; no schema of the package uses them, so they are
+    refused instead of translated.  ``\s`` and ``\S`` stay: both dialects are Unicode there and differ only in a few characters.
+    Python-only syntax that would change what ``$`` means or hide it — inline flags, ``(?#`` comments — is refused as well."""
     out: list[str] = []
     index, size = 0, len(pattern)
     in_class = False
     while index < size:
         char = pattern[index]
         if char == "\\":
+            escaped = pattern[index + 1:index + 2]
+            if escaped in _UNICODE_CLASSES or (escaped in _WORD_BOUNDARIES and not in_class):  # in a class "\b" is a backspace in both dialects
+                hint = ("write the boundary out with lookarounds over [A-Za-z0-9_]" if escaped in _WORD_BOUNDARIES
+                        else "write the class out ([0-9], [A-Za-z0-9_])")
+                raise SchemaError(f"keyword 'pattern': {pattern!r} uses \\{escaped}, which is Unicode in Python and ASCII in ECMA 262; {hint}")
             out.append(pattern[index:index + 2])
             index += 2
             continue
@@ -393,18 +404,24 @@ def _ecma_end_of_string(pattern: str) -> str:
             out.append("\\Z")
             index += 1
             continue
+        elif char == ".":
+            out.append(_NOT_A_LINE_TERMINATOR)
+            index += 1
+            continue
         out.append(char)
         index += 1
     return "".join(out)
 
 
 _INLINE_FLAG_START = frozenset("aiLmsux-#")
+_UNICODE_CLASSES = frozenset("dDwW")  # frozensets, not strings: the empty slice after a lone final backslash must not be "in" them
+_WORD_BOUNDARIES = frozenset("bB")  # a boundary between \w and \W: as Unicode-dependent as they are
 
 
 def _b_pattern(compiler: _Compiler, value: Any, raw: dict, base: str) -> tuple[re.Pattern, str]:
     _check(isinstance(value, str), "pattern", "must be a string")
     try:
-        return re.compile(_ecma_end_of_string(value)), value
+        return re.compile(_ecma_pattern(value)), value
     except re.error as error:
         raise SchemaError(f"keyword 'pattern': {value!r} is not a regular expression: {error}") from None
 
