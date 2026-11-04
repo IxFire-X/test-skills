@@ -96,3 +96,13 @@ def test_model_response_prints_the_receipt_of_the_record_and_not_the_answers_bod
     code, stored = _api("read-model-artifact", "--run-root", str(run["run_root"]), "--attempt", run["attempt_id"], "--stage", f"tc-generator:{first}",
                         "--digest", answered["result"]["content_digest"])
     assert code == 0 and stored["result"]["artifact"]["test_cases"][0]["objective"] == big["test_cases"][0]["objective"]  # the body is read apart
+
+
+def test_a_run_root_that_is_no_run_leaves_the_refusal_as_it_was_and_writes_nothing(tmp_path: Path) -> None:
+    run, _plan_digest, _header_digest, fragments = _run(tmp_path)
+    bare = {key: value for key, value in fragments[0].items() if key not in ("context_receipt", "digest")}
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    code, refused = _validate(run, Path(_put(run["tmp"] / "bare.json", bare)), "--run-root", str(nowhere))
+    assert code == 2 and refused["code"] == "BATCH_SEMANTIC_CONFLICT", refused  # the refusal of the check, not of the run
+    assert not list(nowhere.rglob("refusals.jsonl")) and not (Path(run["run_root"]) / "refusals.jsonl").exists()

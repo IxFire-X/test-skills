@@ -296,8 +296,7 @@ COMMANDS: dict[str, tuple[Callable, tuple, Callable | None, tuple[str, ...]]] = 
                          "--run-root", "--attempt", ("--exclude", str, "append", "optional"), ("--reason", str, None),
                          ("--continue", "flag")), None, ("plan", "published")),
     "validate-fragment": (_cmd_validate_fragment, (("--fragment", _json), ("--plan", _json), ("--header", _json), ("--context-receipt", _json),
-                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None),
-                                                   ("--run-root", Path, None)), None, ()),
+                                                   ("--prior-fragment", _json, "append", "optional"), ("--imported", _json, None)), None, ()),
     "prior-capabilities": (_cmd_prior_capabilities, (*RUN, "--batch-id"), None, ()),
     "assemble": (_cmd_assemble, (("--header", _json), ("--plan", _json), ("--fragment", _json, "append")), None, ("candidate", "receipt")),
     "publish-generator-input": (_cmd_publish_generator_input, (*RUN, "--kind", ("--value", _json)), None, ()),
@@ -394,7 +393,13 @@ def _record_refusal(args: argparse.Namespace, envelope: Mapping[str, Any]) -> No
         given = getattr(args, "fragment", None)
         batch = given.get("batch_id") if isinstance(given, Mapping) else None
         stage = f"tc-generator:{batch}" if isinstance(batch, str) else None
-    record_refusal(getattr(args, "run_root", None), args.command, code, stage, batch)
+    run_root = getattr(args, "run_root", None)
+    if run_root is not None and args.command == "validate-fragment":  # PF-1: the optional --run-root of a command without a run of its own — the same check as --out's
+        try:
+            run_root = output_guard.existing_run(run_root)[1]
+        except output_guard.OutputRefused:
+            return
+    record_refusal(run_root, args.command, code, stage, batch)
 
 
 # P2: the review in two commands; the nine of before work one more release and say so
