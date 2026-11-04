@@ -98,5 +98,6 @@ def test_exec_after_a_static_review_that_is_not_accepted_materializes_nothing(tm
 
 
 def test_the_skill_says_exec_right_after_the_static_review() -> None:
-    text = Path("skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
-    assert "exec сам" in text
+    # PT: the text of mode B (exec, automation) is in the development build's reference, not in the delivered SKILL.md
+    text = Path("skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
+    assert "exec сам" in text and "exec сам" not in Path("skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
