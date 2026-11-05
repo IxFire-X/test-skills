@@ -54,6 +54,7 @@ _JAVA_PATH_AFTER_COMMA = re.compile(rf",\s*\"({_PATH_PREFIX})\"\s*\)")
 _JAVA_NOT_NULL = re.compile(r"^\s*(?:assertNotNull\s*\(|assertThat\s*\(.*\)\s*\.isNotNull\(\)\s*$)", re.DOTALL)
 # V5 (8.D6-6): how much of a test method that is never closed is read; its body is the rest of the file, and a cut-off file that opens 6 000 of them made that n squared
 _UNCLOSED_BODY_LIMIT = 4096
+_NESTED_BODY_LIMIT = 256  # the same for a test method found inside the body of another one
 _KEYWORDS = {"if", "for", "while", "switch", "catch", "synchronized", "return", "new", "else", "try", "do"}
 
 
@@ -247,7 +248,9 @@ _VARIABLE = re.compile(r"[A-Za-z_$][\w$]*")
 # a variable that says in its name that it is the expected value (the generator's habit); a variable called ``text`` or ``before`` that is read again after the call
 # is the idiom «the answer is stable», which people write on purpose (commons-lang, jsoup: 9 of 10 hits were that)
 _EXPECTED_NAME = re.compile(r"(?i)(?:expected|exp|want|wanted|should|reference|golden|baseline|oracle)[A-Z_0-9]?\w*|(?:expected|exp)$")
-_CALL_EXPRESSION = re.compile(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\([^()]*\))*\(.*\)", re.DOTALL)  # a call (a chain of calls), not a cast or a parenthesised value
+# a call (a chain of calls), not a cast or a parenthesised value: a name, a dotted path, an opening bracket, and a closing one at the very end.  V5: read as a head
+# match and an ``endswith``; the one-pattern form ``name(?:.name|(...))*(.*)`` backtracked over every ``(a)`` of ``f(a)(a)(a)…x`` and over every dot of ``a.a.a.…``
+_CALL_HEAD = re.compile(r"[A-Za-z_$][\w$]*+(?:\.[A-Za-z_$][\w$]*+)*+\(")
 # how a value is made twice to compare the two values, and the methods whose contract is to be compared with themselves
 _FACTORY = re.compile(r"(?:^|\.)(?:of|ofNullable|valueOf|from|copyOf|parse\w*|create\w*|new\w*|getInstance|instance|asList|singleton\w*|empty\w*|unmodifiable\w*|builder|build|mock|spy)\(")
 _CONTRACT = re.compile(r"(?:^|\.)(?:hashCode|equals|toString|compareTo|clone|getClass)\(")
@@ -260,6 +263,42 @@ _PLAIN_READ = re.compile(r"(?:get|is|has)[A-Z]\w*|size|length|isEmpty|toString|h
 def _does_something(piece: str) -> bool:
     """Whether the statement calls anything that is not a plain read (a getter, ``size()``)."""
     return any(_PLAIN_READ.fullmatch(call.group(1)) is None for call in _ANY_CALL.finditer(piece))
+
+
+def _is_call(expression: str, head: re.Pattern[str] = _CALL_HEAD) -> bool:
+    """Whether the blank-free ``expression`` is a call: ``head`` (a path and an opening bracket) at its start and a closing bracket after it at its end."""
+    opened = head.match(expression)
+    return opened is not None and expression.endswith(")") and opened.end() < len(expression)
+
+
+# «before and after»: how far back a variable is followed from its initialiser to the assertion.  A longer way is taken for «something happened in between» —
+# the careful answer, no finding — so the look back costs a bounded amount per assertion (V5: K statements and A assertions were K x A).
+_BETWEEN_STATEMENTS = 200
+_BETWEEN_CHARS = 4000
+
+
+class _Between:
+    """The statements (or lines) of one test, asked «was something done with this receiver between statement ``first`` and statement ``last``?»."""
+
+    def __init__(self, texts: list[str]) -> None:
+        self.texts = texts
+        self._does: list[int] | None = None  # how many statements up to each one call something that is not a plain read
+        self._chars: list[int] | None = None
+
+    def changed(self, first: int, last: int, receiver: str) -> bool:
+        """The statements ``first`` … ``last - 1``: any call that is not a plain read, or any mention of the receiver; too far back counts as a change."""
+        if last <= first:
+            return False
+        if last - first > _BETWEEN_STATEMENTS:
+            return True
+        if self._chars is None or self._does is None:
+            self._chars, self._does = [0], [0]
+            for text in self.texts:
+                self._chars.append(self._chars[-1] + len(text) + 1)
+                self._does.append(self._does[-1] + (1 if _does_something(text) else 0))
+        if self._chars[last] - self._chars[first] > _BETWEEN_CHARS or self._does[last] > self._does[first]:
+            return True
+        return re.search(rf"\b{re.escape(receiver)}\b", "\n".join(self.texts[first:last])) is not None
 
 
 
@@ -299,7 +338,7 @@ def _equality_sides(code: str, start: int, end: int) -> tuple[tuple[int, int], t
     (AssertJ) or ``assertThat(actual, is(expected))`` (Hamcrest) — or None."""
     found = _JAVA_EQUALS_CALL.search(code, start, end)
     if found:
-        close = _closing(code, found.end() - 1, _ARGUMENT_WINDOW)
+        close = _closing(code, found.end() - 1, min(_ARGUMENT_WINDOW, end - found.end() + 1))
         if close < 0:
             return None
         arguments = _top_level_arguments(code, found.end() - 1, close)
@@ -309,18 +348,18 @@ def _equality_sides(code: str, start: int, end: int) -> tuple[tuple[int, int], t
     found = _JAVA_ASSERT_THAT.search(code, start, end)
     if not found:
         return None
-    close = _closing(code, found.end() - 1, _ARGUMENT_WINDOW)
+    close = _closing(code, found.end() - 1, min(_ARGUMENT_WINDOW, end - found.end() + 1))
     if close < 0:
         return None
     arguments = _top_level_arguments(code, found.end() - 1, close)
     if len(arguments) == 2:  # Hamcrest
         matcher = _JAVA_MATCHER.match(code, arguments[1][0], arguments[1][1])
-        inner = _closing(code, matcher.end() - 1, _ARGUMENT_WINDOW) if matcher else -1
+        inner = _closing(code, matcher.end() - 1, min(_ARGUMENT_WINDOW, arguments[1][1] - matcher.end() + 1)) if matcher else -1
         return (((matcher.end(), inner)), arguments[0]) if matcher and 0 < inner <= arguments[1][1] else None
     equality = _JAVA_EQUALITY_IN_CHAIN.search(code, close, end)
     if not equality:
         return None
-    inner = _closing(code, equality.end() - 1, _ARGUMENT_WINDOW)
+    inner = _closing(code, equality.end() - 1, min(_ARGUMENT_WINDOW, end - equality.end() + 1))
     return ((equality.end(), inner), arguments[0]) if inner > 0 else None
 
 
@@ -330,32 +369,25 @@ def _self_computed(statements: list[tuple[int, str, str]], code: str, plain: str
     another argument or another method is a different question.  The variable counts only when its name says that it is the expected value.  Left alone: how a value is made twice to compare the values (``of``, ``valueOf``,
     ``new``), the contract methods (``hashCode``, ``equals``, ``toString``), and a variable read again after the state or the receiver changed in between
     (before and after — the very check ``AT_NO_STATE_CHECK`` asks for).  One rule, ``same-call``, whatever the call is — a getter included: a check that asks the same getter twice can never fail."""
-    initialisers: list[tuple[int, int, str, str]] = []  # (index of the statement, its offset, variable, initialiser)
-    for index, (at, piece, raw) in enumerate(statements):
-        declared = re.match(r"\s*(?:final\s+)?(?:[\w<>\[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.+)$", piece, re.DOTALL)
-        if declared:
-            initialisers.append((index, at, declared.group(1), re.sub(r"\s+", "", raw[declared.start(2):])))
+    initialisers: dict[str, tuple[int, str]] = {}  # variable -> (index of the statement that last set it, what it holds)
+    between = _Between([piece for _at, piece, _raw in statements])
     for index, (at, piece, raw) in enumerate(statements):
         sides = _equality_sides(code, at, at + len(piece)) if re.search(r"\bassert\w*\s*\(", piece) else None
-        if sides is None:
-            continue
-        (e_start, e_end), (a_start, a_end) = sides
-        actual = re.sub(r"\s+", "", plain[a_start:a_end])
-        if _CALL_EXPRESSION.fullmatch(actual) is None or _FACTORY.search(actual) or _CONTRACT.search(actual):
-            continue
-        expected = [re.sub(r"\s+", "", plain[e_start:e_end])]
-        if _VARIABLE.fullmatch(expected[0]) and _EXPECTED_NAME.fullmatch(expected[0]):
-            for init_index, _init_at, name, initialiser in reversed(initialisers):
-                if name == expected[0] and init_index < index:
-                    between = statements[init_index + 1:index]
-                    receiver = re.match(r"[A-Za-z_$][\w$]*", actual).group()
+        if sides is not None:
+            (e_start, e_end), (a_start, a_end) = sides
+            actual = re.sub(r"\s+", "", plain[a_start:a_end])
+            if _is_call(actual) and not _FACTORY.search(actual) and not _CONTRACT.search(actual):
+                expected = [re.sub(r"\s+", "", plain[e_start:e_end])]
+                if _VARIABLE.fullmatch(expected[0]) and _EXPECTED_NAME.fullmatch(expected[0]) and expected[0] in initialisers:
+                    init_index, initialiser = initialisers[expected[0]]
                     # between the initialiser and the assertion something was done with the receiver, or the state was written: a value read before and after
-                    changed = any(_does_something(piece_between) or re.search(rf"\b{re.escape(receiver)}\b", piece_between) for _at, piece_between, _raw in between)
-                    if not changed:
+                    if not between.changed(init_index + 1, index, re.match(r"[A-Za-z_$][\w$]*", actual).group()):
                         expected.append(initialiser)
-                    break
-        if any(actual in text for text in expected):
-            yield "AT_SELF_COMPUTED", at + len(piece) - len(piece.lstrip()), "same-call"
+                if any(actual in text for text in expected):
+                    yield "AT_SELF_COMPUTED", at + len(piece) - len(piece.lstrip()), "same-call"
+        declared = re.match(r"\s*(?:final\s+)?(?:[\w<>\[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.+)$", piece, re.DOTALL)
+        if declared:
+            initialisers[declared.group(1)] = (index, re.sub(r"\s+", "", raw[declared.start(2):]))
 
 
 _JAVA_FAILURE = re.compile(
@@ -429,10 +461,16 @@ def _java(text: str) -> Iterator[tuple[str, int, str]]:
             yield "AT_ALWAYS_TRUE", match.start(), "ge-zero"
     for match in _JAVA_ASSERT_TRUE.finditer(code):
         yield "AT_ALWAYS_TRUE", match.start(), "assert-true"
+    covered = -1
     for brace in _java_test_braces(code):
         start, end = masked.block(brace)
-        if brace not in masked.pairs:  # a method that is never closed (a cut-off answer) has the rest of the file for a body — and so has every one after it
+        # a method that is never closed (a cut-off answer) has the rest of the file for a body — and so has every one after it; and a test method inside the body of
+        # another one (Java has no nested methods: a local or anonymous class, or a text that opens ``@Test void a() {`` again and again) is read to the same bound
+        if brace not in masked.pairs:
             end = min(end, start + _UNCLOSED_BODY_LIMIT)
+        elif brace < covered:
+            end = min(end, start + _NESTED_BODY_LIMIT)
+        covered = max(covered, end)
         statements, offset = [], start
         for piece in code[start:end].split(";"):
             statements.append((offset, piece, plain[offset:offset + len(piece)]))
@@ -481,7 +519,16 @@ def _py_except(line: str) -> tuple[str, str, str] | None:
 
 _PY_GE_ZERO = re.compile(r"^\s*assert\s+[^#]*>=\s*0\s*(?:,.*)?$")
 _PY_ASSERT_TRUE = re.compile(r"^\s*assert\s+True\s*(?:,.*)?$")
-_PY_NOT_NULL = re.compile(r"^\s*assert\s+.+\s+is\s+not\s+None\s*(?:,.*)?$")
+# ``^\s*assert\s+.+\s+is\s+not\s+None\s*(?:,.*)?$`` (a greedy ``.+`` before a blank run) backtracked over every blank of ``assert x   …   y``: V5 reads the line as the head
+# ``assert`` and, after at least one character, a blank, ``is not None`` and the end of the line or a comma
+_PY_NOT_NULL_TAIL = re.compile(r"(?<=\s)is\s++not\s++None\s*+(?:,|$)")
+
+
+def _py_not_null(line: str) -> bool:
+    head = re.match(r"\s*assert\s", line)
+    return head is not None and any(found.start() >= head.end() + 2 for found in _PY_NOT_NULL_TAIL.finditer(line, head.end()))
+
+
 _PY_PATH = re.compile(rf"\bassert\s+([\"'])({_PATH_PREFIX})\1\s+in\b|\.(?:startswith|endswith)\(\s*([\"'])({_PATH_PREFIX})\3\s*\)")
 _PY_TEST = re.compile(r"^(\s*)(?:async\s+)?def\s+test\w*\s*\(")
 
@@ -540,18 +587,79 @@ def _python(text: str) -> Iterator[tuple[str, int, str]]:
         if _PY_TEST.match(line):
             body = [position for position in _body(lines, index) if lines[position].strip()]
             checks = [position for position in body if re.match(r"\s*(?:assert\b|self\.assert\w*\(|with\s+pytest\.raises\b)", lines[position])]
-            not_null = [position for position in checks if _PY_NOT_NULL.match(lines[position])]
+            not_null = [position for position in checks if _py_not_null(lines[position])]
             if not_null and len(not_null) == len(checks):
                 yield "AT_ALWAYS_TRUE", starts[not_null[0]] + _indent(lines[not_null[0]]), "not-null-only"
             yield from _python_self_computed(lines, body, starts)
             yield from _python_unchecked_rejection(lines, body, starts)
 
 
-_PY_EQUALITY = re.compile(r"^\s*assert\s+(.+?)\s*==\s*(.+?)\s*(?:,.*)?$|^\s*self\.assertEqual\(\s*(.+?)\s*,\s*(.+?)\s*(?:,\s*[\"'].*)?\)\s*$")
-_PY_CALL_EXPRESSION = re.compile(r"[A-Za-z_][\w.]*(?:\([^()]*\)|\.[A-Za-z_]\w*)*\(.*\)")
+_PY_CALL_HEAD = re.compile(r"[A-Za-z_][\w.]*+\(")
+_PY_ASSERT_HEAD = re.compile(r"\s*assert\s")
+_PY_ASSERT_EQUAL_HEAD = re.compile(r"\s*self\.assertEqual\(")
+
+
+def _top_level_split(text: str, separator: str, limit: int | None = None) -> list[str]:
+    """``text`` cut at the ``separator`` (one character, or ``==``) that stands outside every bracket and every string; at most ``limit`` cuts.  One pass.
+    V5: ``assert (.+?) == (.+?)`` backtracked over every blank of ``assert x   …   y`` (8 000 blanks: 0.16 s, twice the blanks four times the time)."""
+    parts, depth, quote, start, position = [], 0, "", 0, 0
+    while position < len(text):
+        char = text[position]
+        if quote:
+            if char == "\\":
+                position += 1
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        elif depth == 0 and text.startswith(separator, position) and (separator != "==" or (text[position - 1:position] not in ("!", "<", ">", "=") and text[position + 2:position + 3] != "=")):
+            parts.append(text[start:position])
+            start = position + len(separator)
+            position = start - 1
+            if limit is not None and len(parts) >= limit:
+                break
+        position += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _py_equality(line: str) -> tuple[str, str] | None:
+    """The (left, right) of an equality assertion on one line — ``assert left == right[, message]`` or ``self.assertEqual(left, right[, message])`` — or None."""
+    opened = _PY_ASSERT_HEAD.match(line)
+    if opened:
+        halves = _top_level_split(line[opened.end():], "==", 1)
+        if len(halves) != 2 or not halves[0].strip():
+            return None
+        right = _top_level_split(halves[1], ",", 1)[0].strip()
+        return (halves[0].strip(), right) if right else None
+    opened = _PY_ASSERT_EQUAL_HEAD.match(line)
+    text = line.strip()
+    if not opened or not text.endswith(")"):
+        return None
+    arguments = _top_level_split(text[len(line[:opened.end()].lstrip()):-1], ",")
+    if len(arguments) < 2 or not arguments[0].strip() or not arguments[1].strip():
+        return None
+    if len(arguments) >= 3 and arguments[2].lstrip()[:1] in ("\"", "'"):  # a message after the two values
+        return arguments[0].strip(), arguments[1].strip()
+    return arguments[0].strip(), ",".join(arguments[1:]).strip()
 _PY_FAILURE = re.compile(
-    r"\bpytest\.raises\(|\bassertRaises\(|\bstatus_code\s*(?:==|>=|>|in)\s*\(?\s*[45]\d\d\b|\bstatus_code\s*\)?\s*(?:==|in)\s*(?:HTTPStatus|status)\.\w*(?:BAD_REQUEST|UNAUTHORIZED|FORBIDDEN|NOT_FOUND|CONFLICT|UNPROCESSABLE)"
-    r"|\bassert_called_once_with\(.*\b(?:error|exception)\b")
+    r"\bpytest\.raises\(|\bassertRaises\(|\bstatus_code\s*+(?:==|>=|>|in)\s*+\(?\s*+[45]\d\d\b|\bstatus_code\s*+\)?\s*+(?:==|in)\s*+(?:HTTPStatus|status)\.\w*(?:BAD_REQUEST|UNAUTHORIZED|FORBIDDEN|NOT_FOUND|CONFLICT|UNPROCESSABLE)")
+_PY_CALLED_ONCE = re.compile(r"\bassert_called_once_with\(")
+_PY_ERROR_WORD = re.compile(r"\b(?:error|exception)\b")
+
+
+def _py_failure(line: str) -> bool:
+    """Whether the line expects a refusal.  ``assert_called_once_with(…error…)`` is read as the first call and an error word after it: the one-pattern form
+    ``assert_called_once_with\\(.*\\berror`` ran to the end of the line for every call on it."""
+    if _PY_FAILURE.search(line):
+        return True
+    opened = _PY_CALLED_ONCE.search(line)
+    return opened is not None and _PY_ERROR_WORD.search(line, opened.end()) is not None
+
 _PY_BOUNDARY = re.compile(r"\b(?:client|session|db|repo|repository|service|api|app|requests|conn|cursor|engine|store|dao)\b")
 _PY_WRITE = re.compile(
     r"\b(?:client|requests|api|app)\.(?:post|put|patch|delete)\(|\.(?:save|add|add_all|commit|insert|update|delete|remove|create\w*|register\w*|persist\w*)\(|\b(?:create|update|delete|save|insert|remove|register|persist)_\w+\(")
@@ -562,25 +670,24 @@ _PY_OBSERVATION = re.compile(
 def _python_self_computed(lines: list[str], body: list[int], starts: list[int]) -> Iterator[tuple[str, int, str]]:
     """``AT_SELF_COMPUTED`` of a pytest function: ``assert f(x) == f(x)`` (or ``self.assertEqual``) — the same call on both sides — or a variable whose name says it is the expected
     value and that holds the very call checked (the same rules as for Java: the contract methods and the factories are left alone)."""
-    assigned: dict[str, tuple[str, int]] = {}  # variable -> (what it holds, the line it was set on)
-    for position in body:
+    assigned: dict[str, tuple[str, int]] = {}  # variable -> (what it holds, the index in ``body`` of the line it was set on)
+    between = _Between([lines[position] for position in body])
+    for index, position in enumerate(body):
         text = lines[position].strip()
         declared = re.match(r"([A-Za-z_]\w*)\s*=\s*(.+)$", text)
         if declared and not re.match(r"[A-Za-z_]\w*\s*==", text):
-            assigned[declared.group(1)] = (re.sub(r"\s+", "", declared.group(2)), position)
-        match = _PY_EQUALITY.match(lines[position])
-        if not match:
+            assigned[declared.group(1)] = (re.sub(r"\s+", "", declared.group(2)), index)
+        sides_of = _py_equality(lines[position])
+        if sides_of is None:
             continue
-        left, right = (match.group(1), match.group(2)) if match.group(1) is not None else (match.group(3), match.group(4))
-        left, right = re.sub(r"\s+", "", left), re.sub(r"\s+", "", right)
-        if _PY_CALL_EXPRESSION.fullmatch(left) is None or _FACTORY.search(left) or _CONTRACT.search(left):
+        left, right = re.sub(r"\s+", "", sides_of[0]), re.sub(r"\s+", "", sides_of[1])
+        if not _is_call(left, _PY_CALL_HEAD) or _FACTORY.search(left) or _CONTRACT.search(left):
             continue
         sides = [right]
         if _VARIABLE.fullmatch(right) and _EXPECTED_NAME.fullmatch(right) and right in assigned:
             held, set_at = assigned[right]
-            receiver = re.match(r"[A-Za-z_]\w*", left).group()
             # the same guard as for Java: a request, a write or a use of the receiver between the two reads makes them a before and an after
-            if not any(_does_something(lines[between]) or re.search(rf"\b{re.escape(receiver)}\b", lines[between]) for between in body if set_at < between < position):
+            if not between.changed(set_at + 1, index, re.match(r"[A-Za-z_]\w*", left).group()):
                 sides.append(held)
         if any(left in side for side in sides):
             yield "AT_SELF_COMPUTED", starts[position] + _indent(lines[position]), "same-call"
@@ -592,7 +699,7 @@ def _python_unchecked_rejection(lines: list[str], body: list[int], starts: list[
     client, session or repository, is left alone."""
     failure = None
     for position in body:
-        if _PY_FAILURE.search(lines[position]):
+        if _py_failure(lines[position]):
             failure = position
     if failure is None:
         return

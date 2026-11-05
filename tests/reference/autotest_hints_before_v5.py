@@ -1,25 +1,15 @@
-"""FaT-Q: code hints on weak assertions in generated tests (Java and pytest) — never a stop, never a rewrite.
+"""The weak-assertion hints of the package before V5 (8.D6-6): the three codes AT_ANY_EXCEPTION, AT_ALWAYS_TRUE, AT_PARTIAL_MATCH with the scans as they were —
+the text is copied from tools/autotest_hints.py of commit bdc919b without ``capped_autotest_hints``, ``counts`` and ``main``.
 
-Reads the inline ``content`` of every generated file of a ``tc-to-autotest`` artifact with plain regular expressions,
-without a compiler: an assertion that accepts any exception, one that is always true, a path prefix instead of an
-exact value.  A hint names the file ID, the line, a short rule and the ASSERT ID on that line — never the code.
-
-``python -m tools.autotest_hints --automation <artifact.json>`` prints the hints as JSON for the static reviewer;
-the run report counts them on its own from the run's automation artifact.
+Used by tests/test_v5_equivalence.py (loaded as ``tools.autotest_hints_before_v5``) to check that the linear scans find what these found.
 """
 
 from __future__ import annotations
 
 import bisect
-import json
 import re
-import sys
-from collections import Counter
-from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from tools.json_cli import JsonArgumentParser, emit_error
-from tools.test_design_hints import capped
 
 CODES = ("AT_ANY_EXCEPTION", "AT_ALWAYS_TRUE", "AT_PARTIAL_MATCH")
 _ASSERT_ID = re.compile(r"ASSERT-[A-Za-z0-9_.:-]+")
@@ -249,36 +239,3 @@ def autotest_hints(automation: Mapping[str, Any]) -> list[dict[str, Any]]:
                           **({"assertion_id": assertion.group(0)} if assertion else {})})
     order = {str(item.get("file_id")): index for index, item in enumerate(artifact.get("generated_files") or [])}
     return sorted(hints, key=lambda hint: (order.get(hint["file_id"], 0), hint["line"], CODES.index(hint["code"]), hint["rule"]))
-
-
-def capped_autotest_hints(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return capped(hints, more="AT_MORE")
-
-
-def counts(hints: list[Mapping[str, Any]]) -> dict[str, int]:
-    found = Counter(hint["code"] for hint in hints)
-    return {code: found[code] for code in CODES if found[code]}
-
-
-def main(argv: list[str] | None = None) -> int:
-    from tools.schema_validation import StrictJsonError, load_json_strict
-
-    parser = JsonArgumentParser(description=__doc__)
-    parser.add_argument("--automation", required=True, type=Path, help="tc-to-autotest artifact JSON")
-    args = parser.parse_args(argv)
-    try:
-        automation = load_json_strict(args.automation)
-        if not isinstance(automation, Mapping):
-            raise ValueError("not an object")
-        hints = autotest_hints(automation)
-    except (StrictJsonError, OSError, ValueError, TypeError, AttributeError):
-        emit_error("automation artifact is unavailable or not an object")
-        return 2
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    print(json.dumps({"status": "ok", "counts": counts(hints), "hints": capped_autotest_hints(hints)}, ensure_ascii=False, separators=(",", ":")))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
