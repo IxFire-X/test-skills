@@ -170,7 +170,7 @@ def test_right_after_scan_the_next_step_starts_with_the_parts_plan() -> None:
 
 
 @pytest.mark.parametrize(("verdict", "stage", "section", "needle"), [
-    ("ПРИНЯТО", "materialize", "5", "материализация"),
+    ("ПРИНЯТО", "materialize", "5", "команду запуска для человека"),
     ("ТРЕБУЕТ ДОРАБОТКИ", "finish", "6", "next_run"),
 ])
 def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, capsys: pytest.CaptureFixture[str],
