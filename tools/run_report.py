@@ -535,13 +535,15 @@ def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str
 
     if not attempt_id:
         return None, False
-    try:
-        effective = pilot.read_effective_canonical_if_present(root, attempt_id)
+    try:  # decided by the journal, not by a file being there: an accepted verdict whose effective file is gone is a refusal here too
+        effective = pilot.effective_canonical_or_reason(root, attempt_id)
     except (KeyError, OSError, TypeError, ValueError):
         return None, True
-    if effective and isinstance(effective.get("document"), Mapping):
+    if effective.get("effective", 1) is None:  # no verdict yet, or one that does not accept the candidate: the candidate of the journal
+        return None, False
+    if isinstance(effective.get("document"), Mapping):
         return effective["document"], False
-    return None, False
+    return None, True
 
 
 def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:

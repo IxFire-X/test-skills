@@ -238,3 +238,32 @@ def test_an_unreadable_published_plan_never_gives_the_scope_to_the_decision_file
     scope = _report(run).get("scope")
     assert scope is not None and scope.get("refused", {}).get("code") == "SCOPE_PLAN_UNREADABLE" and scope["refused"]["fix"], scope
     assert not scope.get("out_of_scope"), scope
+
+
+def test_an_accepted_verdict_whose_effective_file_is_gone_is_not_reported_as_the_candidate(tmp_path: Path) -> None:
+    from tests.test_finish import _project
+    from tools import pilot_state
+
+    _project_path, run_root, attempt_id, _values = _project(tmp_path)
+    before = _report_of(_project_path, run_root)
+    assert before["counts"]["cases"] and before["counts"]["canon_basis"] is None, before["counts"]
+    pilot_state._receipt_target(Path(run_root), attempt_id, "effective-canonical").unlink()
+    after = _report_of(_project_path, run_root)
+    assert any("EFFECTIVE_CANON_UNREADABLE" in str(item) for item in after["warnings"]), after["warnings"]
+    assert after["counts"]["cases"] is None and after["counts"]["canon_basis"] != "кандидат r1, не принят", after["counts"]
+
+
+def _report_of(project: Path, run_root: Path) -> dict:
+    from tools.run_report import build_report
+
+    return build_report(project, Path(run_root).name)[0]
+
+
+def test_a_planted_receipt_with_the_right_digest_field_but_another_body_does_not_hide_the_loss(tmp_path: Path, capsys) -> None:
+    run = _opened(tmp_path)
+    root = Path(run["run_root"])
+    target = _gone(run, "plan")
+    digest = json.loads(target.read_text(encoding="utf-8"))["digest"]
+    target.write_text(json.dumps({"digest": digest, "plan": "подложено"}, ensure_ascii=False), encoding="utf-8")
+    code, status = _pipeline(capsys, ["status", "--project", str(run["project"]), "--run", root.name])
+    assert status.get("evidence_errors"), {key: status.get(key) for key in ("status", "warnings", "evidence_errors", "stop_reason")}

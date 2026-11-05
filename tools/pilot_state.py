@@ -4171,11 +4171,10 @@ def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str)
     for folder in _RECEIPT_FOLDERS:
         for path in (Path(root) / folder).glob(f"{attempt_id}*.json"):
             try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                value = _check_sealed(json.loads(path.read_text(encoding="utf-8")), "receipt")  # the digest field must be the digest of the body
+            except (OSError, ValueError, TypeError):
                 continue
-            if isinstance(value, Mapping) and isinstance(value.get("digest"), str):
-                present.add(value["digest"])
+            present.add(value["digest"])
     return sorted(dict.fromkeys(digest for digest in wanted if digest not in present))
 
 
