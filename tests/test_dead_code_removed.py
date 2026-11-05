@@ -4,10 +4,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
-pytestmark = pytest.mark.contract
-
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 REMOVED = frozenset((
     "render_zephyr_xml",  # the XML export is off; the CSV one is the export
