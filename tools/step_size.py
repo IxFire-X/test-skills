@@ -296,6 +296,8 @@ class _Journal:
         baseline = frozen_baseline(root, attempt)
         self.expands[str(baseline["requirements"]["digest"])] = (_requirement_files(project, root), False)
         inventory = str(baseline["inventory_digest"])
+        self.inventory_digest = inventory
+        self.attempt_id = attempt_id
         self._file(inventory, root / "inventories" / (inventory.removeprefix("sha256:") + ".json"))
         events = [event for event in state["events"] if event.get("attempt_id") == attempt_id]
         for event in events:
@@ -337,6 +339,21 @@ class _Journal:
             ledger = root / "reviewer-session-ledgers" / attempt_id / (str(ledgers[0]["artifact_digest"]).removeprefix("sha256:") + ".json")
             package = json.loads(ledger.read_text(encoding="utf-8"))["package_binding"]
             self.carried[str(package["package_digest"])] = (ledger, "package_binding", len(_compact(package)))
+
+    def plan(self, state: Any) -> Mapping[str, Any]:
+        """The batch plan of the attempt as the journal binds it (V7); ``{}`` before it is published."""
+        from tools.pilot_state import ModelInputsMismatch, generator_input
+
+        if getattr(self, "_plan", None):
+            return self._plan
+        try:
+            self._plan = generator_input(self.project, self.root, state, self.attempt_id, "plan")
+        except (ModelInputsMismatch, OSError, KeyError, ValueError, IndexError):
+            return {}
+        return self._plan
+
+    def plan_digest(self, state: Any) -> str | None:
+        return self.plan(state).get("digest")
 
     def _file(self, digest: str, path: Path) -> None:
         paths = self.files.setdefault(digest, [])
@@ -421,6 +438,16 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
     for position, digest in enumerate(digests):
         if position in views:
             files.append({"digest": digest, "path": str(views[position]), "bytes": views[position].stat().st_size, "basis": "вид"})
+        elif digest == journal.inventory_digest:  # V7 (O-15): the model reads the projection of the inventory, not the receipt
+            data = inventory_view_bytes(project, root, digest)
+            target = inventory_view_path(root, digest)
+            _write_view(project, root, target, data, write_views)
+            files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": INVENTORY_VIEW})
+        elif stage.startswith("tc-generator:") and digest == journal.plan_digest(state):  # V7 (O-16): the plan without the texts
+            data = plan_view_bytes(journal.plan(state))
+            target = plan_view_path(root, digest)
+            _write_view(project, root, target, data, write_views)
+            files.append({"digest": digest, "path": str(target), "bytes": len(data), "basis": PLAN_VIEW})
         elif digest in journal.expands:
             targets, context = journal.expands[digest]
             files.extend({"digest": digest, "path": str(target), "bytes": target.stat().st_size} for target in targets)
@@ -468,6 +495,53 @@ def stage_inputs(run_root: Path, stage: str, *, attempt_id: str | None = None, w
             files.append({"digest": contexts[0], "path": str(existing), "bytes": size, "basis": "карта"})
     return {"stage": stage, "attempt_id": attempt_id, "request_digest": request_digest, "files": files, "bindings": bindings,
             "unresolved": unresolved}
+
+
+INVENTORY_VIEW = "inventory-view-v1"
+PLAN_VIEW = "plan-view-v1"
+
+
+def inventory_view_path(root: Path, inventory_digest: str) -> Path:
+    return Path(root) / "review-views" / (str(inventory_digest).removeprefix("sha256:") + ".inventory-view.json")
+
+
+def plan_view_path(root: Path, plan_digest: str) -> Path:
+    return Path(root) / "review-views" / (str(plan_digest).removeprefix("sha256:") + ".plan-view.json")
+
+
+def inventory_view_bytes(project: Path, root: Path, inventory_digest: str) -> bytes:
+    """V7 (O-15): what the model reads of the inventory - the path, the kind and the size of each file.  A pure function of the
+    inventory receipt the journal binds (INVENTORY_READY); the digests and opaque ids stay in the receipt and in ``input_digests``."""
+    from tools.pilot_state import frozen_inventory
+
+    inventory = frozen_inventory(project, root, inventory_digest)
+    return _compact({"view": INVENTORY_VIEW, "inventory_digest": inventory_digest, "module": inventory.get("module"),
+                     "columns": ["path", "kind", "size"],
+                     "files": [[row["project_path"], row.get("kind"), row["size"]]
+                               for row in sorted(inventory["files"], key=lambda item: str(item["project_path"]))]})
+
+
+def plan_view_bytes(plan: Mapping[str, Any]) -> bytes:
+    """V7 (O-16): the batch plan without the texts of the source requirements - the generator reads them in the markup (the plan
+    rows are those of the marker, byte for byte).  The plan the journal keeps is not changed."""
+    rows = [{key: value for key, value in row.items() if key != "text"} for row in plan.get("source_requirements") or []]
+    return _compact({**{key: value for key, value in plan.items() if key != "source_requirements"}, "source_requirements": rows,
+                     "view": PLAN_VIEW, "texts": "тексты требований — в ответе разметки (context-marker): artifacts.analytics_documentation.requirements[].text по source_requirement_id; в source_requirements фрагмента копируй их без изменений"})
+
+
+def _write_view(project: Path, root: Path, target: Path, data: bytes, write: bool) -> None:
+    """The view is written by the code, again when its bytes differ (like the map of existing tests): a file an agent changed is
+    rewritten, never trusted."""
+    if not write:
+        return
+    from tools.confined_output import atomic_write_confined_bytes_at_root
+
+    try:
+        current = target.read_bytes()
+    except OSError:
+        current = None
+    if current != data:
+        atomic_write_confined_bytes_at_root(project, root, target, data)
 
 
 LIST_HEAD = 5  # names of the files printed in the summary; the whole list is in the file

@@ -326,6 +326,8 @@ def _composition(found: Mapping[str, Any], project: Path, root: Path) -> dict[st
         size = int(row["bytes"])
         if row.get("basis") == "карта":
             kind = "map"
+        elif row.get("basis") == "plan-view-v1":
+            kind = "plan_header"
         elif str(target) in documents:
             kind = "documents"
         elif not target.is_relative_to(run):

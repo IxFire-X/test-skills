@@ -198,7 +198,7 @@
       "type": "array",
       "uniqueItems": true,
       "maxItems": 64,
-      "description": "FaT-2: globs relative to the project root that bring back a directory the scan leaves out by its name (build output, dependencies, secret directories); files inside still pass the binary and secret rules.",
+      "description": "FaT-2: globs relative to the project root that bring back a directory the scan leaves out by its name (build output, dependencies, secret directories); files inside still pass the binary and secret rules. V7: a file a glob covers also stays in the model context when its class (licence, translation, style source, SVG image) would leave it out.",
       "items": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:]+$"}
     },
     "exclude_globs": {

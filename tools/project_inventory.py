@@ -1402,19 +1402,21 @@ def _asset_rule(project_path: str, contents: bytes) -> str | None:
 
 def context_filter(
     inventory: Mapping[str, Any], project_root: Path, opaque_file_ids: Iterable[str], *, byte_budget: int,
-    excludes: Iterable[str] = (), task_ids: Iterable[str] = (),
+    excludes: Iterable[str] = (), task_ids: Iterable[str] = (), includes: Iterable[str] = (),
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """FaT-A: what the model gets — ``(kept ids, skipped [{project_path, size, reason, rule}])``; only reads.
 
     Inventory and baseline do not change.  The task documents and closed manifests always stay; a source larger than
     a batch, an exclude of a task document, or nothing left of the code is a ContextStop with a fix.
     """
-    from tools.scan_rules import include_mode, is_source
+    from tools.scan_rules import include_mode, is_source, non_code_class
 
     from_scan = list(opaque_file_ids)
     index = _inventory_index(inventory)
     tasks = set(task_ids)
     patterns = [str(item) for item in excludes]
+    kept_by_user = [str(item) for item in includes]  # V7: a file the human put in paths.include stays in the context
+    known = {str(item["project_path"]) for item in index.values()}
     kept: list[str] = []
     skipped: list[dict[str, Any]] = []
     for opaque_id in from_scan:
@@ -1446,6 +1448,8 @@ def context_filter(
         rule = _asset_rule(project_path, contents)
         if rule is not None:
             skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_ASSET", "rule": rule})
+        elif (not_code := non_code_class(project_path, known)) is not None and include_mode(project_path, kept_by_user) != "full":
+            skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_NOT_CODE", "rule": not_code[1]})
         elif size > byte_budget and not is_source(Path(project_path).name):
             skipped.append({"project_path": project_path, "size": size, "reason": "CONTEXT_TOO_LARGE", "rule": f"больше пачки {byte_budget} Б"})
         elif size > byte_budget:

@@ -23,6 +23,7 @@ from tools.project_inventory import (
     context_filter,
     select_context_batches,
     skillsrc_exclude,
+    skillsrc_include,
     skipped_summary,
 )
 
@@ -863,7 +864,8 @@ def _context_scope_ids(inventory: Mapping[str, Any], project: Path, module_root:
 def _filtered_context(inventory: Mapping[str, Any], project: Path, module_root: Path, selected_ids: list[str],
                       task_ids: list[str], budget: int) -> tuple[list[str], list[dict[str, Any]]]:
     """FaT-A: assets, user excludes and large non-sources stay out of the model context, always listed (scan and ready)."""
-    return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids)
+    return context_filter(inventory, project, selected_ids, byte_budget=budget, excludes=skillsrc_exclude(project, module_root), task_ids=task_ids,
+                          includes=skillsrc_include(project, module_root))
 
 
 def context_preview(inventory: Mapping[str, Any], project: Path, module_root: Path, docs: list[str] | None,

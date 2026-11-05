@@ -8,8 +8,9 @@ out only outside a ``src`` tree; inside ``src/…`` they are code, and the conte
 
 from __future__ import annotations
 
+import re
 from fnmatch import fnmatchcase
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Container, Iterable, Mapping, Sequence
 
 VCS_DIRS = frozenset({".git", ".hg", ".svn"})
 CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"})
@@ -67,6 +68,34 @@ def path_reason(parts: Sequence[str]) -> tuple[str, str] | None:
 def is_source(name: str) -> bool:
     suffix = "." + name.rsplit(".", 1)[-1].casefold() if "." in name else ""
     return suffix in SOURCE_SUFFIXES
+
+
+_LICENSE_NAME = re.compile(r"(license|licence|notice|copying)(\.(txt|md|rst|html))?", re.IGNORECASE)
+_TRANSLATION = re.compile(r"(?P<base>.+?)_(?P<language>[a-z]{2})(?:_[A-Z]{2})?\.properties")  # a two-letter language: not _dev, _prod
+CASE_LANGUAGE = "ru"  # the cases are written in ru-RU: a Russian bundle is the source of the texts of their expectations, never left out
+_PREPROCESSOR_STYLES = frozenset({".scss", ".sass", ".less"})
+
+
+def non_code_class(project_path: str, known: Container[str] = ()) -> tuple[str, str] | None:
+    """V7 (O-14a): ``(class, rule id)`` when the file is no code a model reads — it stays in the inventory and the baseline,
+    only the context of the model leaves it out: a licence text outside ``src/``, a translation of a resource bundle (not the Russian one, the language of the cases) whose main
+    file is there (``known`` holds the project paths of the inventory), a style preprocessor source, an SVG image.  The classes were
+    checked against the markup of 48 runs: none of them is cited by a requirement.  Not here: CI and container files (cited
+    by the markup of some projects) and SQL of other dialects (the active one is not told by the files)."""
+    folder, _slash, name = project_path.rpartition("/")
+    suffix = "." + name.rsplit(".", 1)[-1].casefold() if "." in name else ""
+    inside_src = any(part.casefold() == "src" for part in folder.split("/"))  # a page template license.html under src/ is no licence text
+    if _LICENSE_NAME.fullmatch(name) and not inside_src:
+        return "license", "license-file-v1"
+    if suffix in _PREPROCESSOR_STYLES:
+        return "style-source", "style-source-v1"
+    if suffix == ".svg":
+        return "image", "svg-image-v1"
+    match = _TRANSLATION.fullmatch(name)
+    if (match is not None and match.group("language") != CASE_LANGUAGE
+            and (f"{folder}/{match.group('base')}.properties" if folder else f"{match.group('base')}.properties") in known):
+        return "translation", "translation-file-v1"
+    return None
 
 
 def include_mode(project_path: str, include: Iterable[str]) -> str | None:

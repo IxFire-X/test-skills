@@ -7493,4 +7493,5 @@ retained_rerun_context = _retained_rerun_context
 scenario_observation_target = _scenario_observation_target
 run_root_of = _run_root
 terminal_retry_snapshot = _terminal_retry_snapshot
+generator_input = _generator_input  # V7: the published plan or header of the attempt (step_size, for the projection of the plan)
 validate_execution_event_branch = _validate_execution_event_branch

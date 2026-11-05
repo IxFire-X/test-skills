@@ -126,3 +126,7 @@ Instability или protocol violation навсегда дисквалифици�
 fresh runs каждого critical scenario.
 Company runner, production rollback и Zephyr tenant round-trip остаются отдельными `N/A`
 для core pilot.
+
+## Проекции входа модели (V7)
+
+`step-inputs` и `step_size` дают модели не квитанции, а проекции, которые строит код по журналу и пишет в `<run>/review-views/`: опись — `inventory-view-v1` (путь, вид, размер файлов вместо квитанции описи), план пачек генератора — `plan-view-v1` (без текстов требований: тексты — в ответе разметки, `requirements[].text` по `source_requirement_id`). Читай файл проекции из списка входа, а не `inventories/` и `batch-plans/`; `input_digests` запроса остаются digest-ами квитанций.

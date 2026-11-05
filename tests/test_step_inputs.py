@@ -47,7 +47,11 @@ def test_published_generator_inputs_are_found(tmp_path: Path) -> None:
                                       input_digests=[marker["content_digest"], receipts[0]["digest"], plan["digest"], header["digest"]])
     found = request_files(root, "tc-generator:BATCH-fixture")
     assert found["unresolved"] == [], found
-    assert {row["path"] for row in found["files"] if row["digest"] in {plan["digest"], header["digest"]}} == {str(root / plan["path"]), str(root / header["path"])}
+    rows = {row["digest"]: row for row in found["files"] if row["digest"] in {plan["digest"], header["digest"]}}
+    assert rows[header["digest"]]["path"] == str(root / header["path"])
+    # V7 (O-16): the generator reads the projection of the published plan, under the same digest
+    assert rows[plan["digest"]]["basis"] == "plan-view-v1" and rows[plan["digest"]]["path"] == str(root / "review-views" / (plan["digest"].removeprefix("sha256:") + ".plan-view.json"))
+    assert b'"text"' not in Path(rows[plan["digest"]]["path"]).read_bytes()
 
 
 def test_the_generator_inputs_come_from_the_published_request(tmp_path: Path) -> None:
