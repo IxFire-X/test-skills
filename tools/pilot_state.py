@@ -7558,5 +7558,5 @@ run_root_of = _run_root
 terminal_retry_snapshot = _terminal_retry_snapshot
 generator_input = _generator_input  # V7: the published plan or header of the attempt (step_size, for the projection of the plan)
 validate_execution_event_branch = _validate_execution_event_branch
-publish_fixed_receipt_resuming = _publish_fixed_receipt_resuming
+publish_fixed_receipt_resuming = publish_bound  # J1: the name P4a made public (execution_core, exec_commands) is the one contract; drop it when they call publish_bound
 canonical_digest = _digest
