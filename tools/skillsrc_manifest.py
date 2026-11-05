@@ -102,6 +102,50 @@ def skillsrc_file_problem(path: Path) -> str | None:
     return None
 
 
+COMMENTS_MESSAGE = ".skillsrc — JSON с комментариями: JSON их не допускает"
+COMMENTS_FIX = ("уберите комментарии (`//…` и `/* … */`) из .skillsrc, остальное оставьте как есть: файл не YAML, переименовывать его и переносить "
+                "из него нечего")
+
+
+def _strip_json_comments(text: str) -> str:
+    """``text`` without the ``//…`` and ``/* … */`` comments that stand outside the strings; one pass."""
+    out: list[str] = []
+    position, size, in_string = 0, len(text), False
+    while position < size:
+        char = text[position]
+        if in_string:
+            out.append(char)
+            if char == "\\":
+                out.append(text[position + 1:position + 2])
+                position += 1
+            elif char == '"':
+                in_string = False
+            position += 1
+        elif char == '"':
+            in_string = True
+            out.append(char)
+            position += 1
+        elif text.startswith("//", position):
+            end = text.find("\n", position)
+            position = size if end < 0 else end
+        elif text.startswith("/*", position):
+            end = text.find("*/", position + 2)
+            position = size if end < 0 else end + 2
+            out.append(" ")
+        else:
+            out.append(char)
+            position += 1
+    return "".join(out)
+
+
+def json_with_comments(text: str) -> bool:
+    """V9b (8.15): a text that is JSON once its comments are cut — it has some, and what is left opens an object or an array.  It is no YAML:
+    the first character alone (``{``) does not tell, and a file that begins with ``//`` is not a YAML one."""
+    source = text.removeprefix("\ufeff")
+    stripped = _strip_json_comments(source)
+    return stripped != source and stripped.lstrip()[:1] in ("{", "[")
+
+
 def _legacy_yaml_row(project: Path | None) -> dict[str, Any] | None:
     """The row ``tools.ready`` gives an older YAML ``.skillsrc`` (message and fix, in Russian), or None when the file is not one."""
     if project is None:
@@ -158,6 +202,8 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, projec
     try:
         document = loads_json_strict(source.removeprefix("\ufeff"))
     except StrictJsonError as error:
+        if json_with_comments(source):
+            raise SkillsrcError("invalid_json", COMMENTS_MESSAGE, [{"path": "/", "message": str(error)}], fix=COMMENTS_FIX) from error
         legacy = _legacy_yaml_row(project)
         cause = "файл пуст" if not source.strip() else f"это не JSON ({error})"
         raise SkillsrcError(

@@ -938,7 +938,6 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "code_steps": sum(1 for call in calls if call.get("by") == "code"),
             "reused_calls": sum(1 for call in calls if call.get("by") == "reuse"),
             "reused_input_bytes": sum(int(call.get("saved_bytes") or 0) for call in calls if call.get("by") == "reuse"),
-            "status_after_pause": None,  # P3: the number of status calls after a pause; empty until then
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
         # P4: the run of the tests was a human's — the package did not reproduce it

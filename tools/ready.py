@@ -140,6 +140,10 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
         return None
     if not text.strip() or text.lstrip().startswith(("{", "[")):  # F5: a JSON array is no YAML either (invalid_shape, with its fix)
         return None
+    from tools.skillsrc_manifest import json_with_comments
+
+    if json_with_comments(text):  # V9b (8.15): a file that begins with // is JSON with comments, not YAML
+        return None
     lines, found, depth = text.splitlines(), [], None
     for number, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -155,15 +159,31 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
     return found[:60]
 
 
+def check_run_root(project: Path) -> list[dict[str, Any]]:
+    """V9b (8.12): a ``.pilot-runs`` that is a link (a junction, a symlink) is a STOP row with the fix of scan's refusal; no row when it is not."""
+    from tools.fixes import fix_for
+    from tools.pilot_state import run_root_is_unsafe
+
+    if not run_root_is_unsafe(project):
+        return []
+    return [_row("run_root", CASES, "STOP", ".pilot-runs в проекте — ссылка (junction или симлинк): прогоны по ссылкам не пишутся", fix_for("RUN_ROOT_UNSAFE"))]
+
+
 def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
     from tools.fixes import fix_for
     from tools.init_skillsrc import ensure_skillsrc
-    from tools.skillsrc_manifest import skillsrc_file_problem
+    from tools.skillsrc_manifest import COMMENTS_FIX, COMMENTS_MESSAGE, json_with_comments, skillsrc_file_problem
 
     unreadable = skillsrc_file_problem(Path(project) / ".skillsrc")  # F5: the scan's SKILLSRC_UNREADABLE, seen here first
     if unreadable is not None:
         return [_row("skillsrc", CASES, "STOP", f"SKILLSRC_UNREADABLE: {unreadable}", fix_for("SKILLSRC_UNREADABLE"))]
+    try:
+        commented = json_with_comments((Path(project) / ".skillsrc").read_bytes().decode("utf-8-sig"))
+    except (OSError, UnicodeDecodeError):
+        commented = False
+    if commented:  # V9b (8.15): said as it is, before the file is taken for anything else
+        return [_row("skillsrc", CASES, "STOP", COMMENTS_MESSAGE, COMMENTS_FIX)]
     legacy = legacy_yaml_keys(project)
     if legacy is not None:
         keys = legacy or ["в файле нет limits, review, service_url_env, paths.include, projection — переносить нечего"]
@@ -508,6 +528,7 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
     deps = check_deps()
     rows.append(deps)
     rows.append(_git_row(project, profile))
+    rows.extend(check_run_root(project))
     rows.extend(check_docs(project, docs))
     if deps["level"] != "OK":
         skipped = "пропущено до установки зависимостей пакета"

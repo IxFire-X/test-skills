@@ -178,3 +178,24 @@ def test_ready_pack_row_carries_the_crlf_fix(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(ready, "PACK", pack)
     row = ready.check_pack()
     assert row["level"] == "STOP" and "* -text" in row["fix"] and "переносы строк" in row["message"], row
+
+
+# --- V9b: a tools.api command on a moved project ----------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["terminal", "open"])
+def test_a_tools_api_command_on_a_moved_project_names_the_move_and_the_fix(tmp_path: Path, capsys: pytest.CaptureFixture[str], made_runs, kind: str) -> None:
+    """Before: ``ValueError: invalid run boundary`` with ``fix: null`` on every command (status and report said PROJECT_MOVED)."""
+    from tools import api
+
+    source, target, run_id = _moved(tmp_path, made_runs, kind)
+    run_root = target / ".pilot-runs" / run_id
+    attempt = next((run_root / "attempts").glob("*.json")).stem
+    capsys.readouterr()
+    code = api.main(["read-ledger", "--run-root", str(run_root), "--attempt", attempt])
+    answer = json.loads(capsys.readouterr().out.strip().splitlines()[0])
+    assert code == 2 and answer["status"] == "error" and answer["code"] == "PROJECT_MOVED", answer
+    assert str(source) in answer["message"] and str(target) in answer["message"], answer
+    assert answer["fix"] and "scan" in answer["fix"] and "status" in answer["fix"], answer
+    # the run of the home project still answers as before
+    home_code = api.main(["read-ledger", "--run-root", str(source / ".pilot-runs" / run_id), "--attempt", attempt])
+    assert "PROJECT_MOVED" not in capsys.readouterr().out and home_code in (0, 1, 2)

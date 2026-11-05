@@ -134,6 +134,15 @@ def _is_reparse(path: Path) -> bool:
     return path.is_symlink() or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
+def run_root_is_unsafe(project: Path) -> bool:
+    """V9b (8.12): ``.pilot-runs`` of the project is a link (a junction, a symlink): no run is written through it."""
+    runs = Path(project) / ".pilot-runs"
+    return runs.exists() and _is_reparse(runs)
+
+
+_UNSAFE_RUN_ROOT = "RUN_ROOT_UNSAFE: unsafe run root: .pilot-runs (or the run folder in it) is a link"
+
+
 def _project_root(project: Path) -> Path:
     raw = Path(project)
     if not raw.exists() or not raw.is_dir() or _is_reparse(raw):
@@ -377,9 +386,29 @@ def _moved_recorded(project: Path) -> str | None:
     return None if cache is None else cache.get(("recorded", str(project)))
 
 
+def _moved_refusal(project: Path, root: Path) -> ValueError | None:
+    """V9b: the refusal of a command that reads a run made in another folder — ``PROJECT_MOVED`` with where the run was made and what to do — or None
+    when the run is not a moved project's (``status`` and ``report`` say the same in their ``project_moved`` note)."""
+    move = run_project_move(project, root)
+    if move is None:
+        return None
+    where = f"прогон создан в {move['recorded']}, сейчас проект в {move['current']}"
+    if move["same_structure"]:
+        fix = ("команды tools.api, finish и exec работают только там, где создан прогон: откройте ту папку; status и report читают прогон и здесь; "
+               "чтобы работать в этой папке, начните новый scan")
+    else:
+        shown = ", ".join(move["missing"][:5]) + (" и др." if len(move["missing"]) > 5 else "")
+        fix = f"состав файлов другой (нет: {shown or 'опись прогона не читается'}): откройте папку, где создан прогон, или начните новый scan здесь"
+    return ValueError(f"PROJECT_MOVED: проект перенесён: {where}; fix: {fix}")
+
+
 def _run_boundary(project: Path, root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     manifest = _read_artifact(project, root, root / "run-manifest.json", "run manifest")
     receipt = _read_artifact(project, root, root / "run-authorization-receipt.json", "authorization receipt")
+    if manifest.get("run_id") == root.name and manifest.get("project") != str(project) and not _moved_project_ok(project, root):
+        refusal = _moved_refusal(project, root)
+        if refusal is not None:
+            raise refusal
     if manifest.get("run_id") != root.name or (manifest.get("project") != str(project) and not _moved_project_ok(project, root)):
         raise ValueError("invalid run boundary")
     if receipt.get("run_id") != manifest["run_id"] or receipt.get("policy_profile") != manifest.get("policy_profile") or receipt.get("digest") != manifest.get("authorization_digest"):
@@ -842,8 +871,8 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
     root_project = _project_root(project)
     project_state = _project_state_for(policy_profile, root_project)
     runs = root_project / ".pilot-runs"
-    if runs.exists() and _is_reparse(runs):
-        raise ValueError("unsafe run root")
+    if run_root_is_unsafe(root_project):
+        raise ValueError(_UNSAFE_RUN_ROOT)
     runs_existed = runs.exists()
     run_id = uuid.uuid4().hex
     root = runs / run_id
@@ -853,7 +882,7 @@ def _create_run(project: Path, policy_profile: str, authorization: Mapping[str, 
         ensure_project_child_directory(root_project, runs)
         create_confined_directory_exclusive(root_project, runs, root)
         if _is_reparse(root):
-            raise ValueError("unsafe run root")
+            raise ValueError(_UNSAFE_RUN_ROOT)
         create_confined_directory_exclusive(root_project, root, root / "tmp")  # PT2: where --out writes; the code makes it, not the agent
         receipt_data = {"schema_version": "1.0.0", "run_id": run_id, "request_id": safe_auth["request_id"], "policy_profile": policy_profile, "execution_requested": safe_auth["execution_requested"]}
         if "host_id" in safe_auth:

@@ -154,7 +154,7 @@ def test_the_canon_in_numbers_and_the_empty_status_counter(tmp_path: Path) -> No
     assert canon["steps_per_case"] == round(steps / len(cases), 1)
     assert canon["blockers"] == sum(len(step.get("automation_blockers") or []) for case in cases for step in case["steps"])
     assert "## Канон в числах" in markdown
-    assert report["counts"]["status_after_pause"] is None and "status_after_pause: —" in markdown
+    assert "status_after_pause" not in report["counts"] and "status_after_pause" not in markdown  # V9b: the field of P3 that was never filled is gone
 
 
 # --- PH: the command that removes tmp/ is written for the shell of the machine ---------------------------------------------------------

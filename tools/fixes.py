@@ -136,6 +136,8 @@ FIXES: dict[str, str] = {
                          "если detail называет module или attempt.schema.json — проверь в .skillsrc root модуля: путь существующей папки проекта",
     "SKILLSRC_UNREADABLE": ".skillsrc должен быть обычным файлом внутри проекта: уберите каталог, junction или ссылку с этим именем "
                            "(или права на чтение) и повторите scan; нужен новый — `python -m tools.init_skillsrc --project <проект> --write`",
+    "RUN_ROOT_UNSAFE": ".pilot-runs в проекте (или папка прогона в нём) — ссылка: junction или симлинк, прогоны по ссылкам не пишутся. Удалите ссылку "
+                       "(rmdir для junction, rm для симлинка — содержимое целевой папки останется) и повторите команду: прогоны создаются в самом проекте",
     "SOURCE_TARGET_INVALID": "--target — путь внутри выбранного модуля проекта (относительно корня проекта), без «..»",
     "SNAPSHOT_DOCS": "--docs и --reference — пути внутри проекта к существующим файлам или папкам, не ссылкам и не junction",
     "EXECUTION_COORDINATES": "--run — один точный run_id этого проекта из run_pipeline status; --project — корень проекта прогона",
