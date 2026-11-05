@@ -35,8 +35,9 @@ permissions:
 
 `python -m tools.ready --project <abs> --docs <путь> [--docs …] --profile cases-only-v1 [--module <ID>]` — только читает: Python, пакет,
 документы, `.skillsrc`, модуль, скан с исключениями. Покажи человеку таблицу (stderr); каждый `СТОП` исправь по его `fix` (команду установки
-зависимостей покажи человеку, сам не запускай); повтори; код выхода 0 — можно начинать. Проект только с документами: один модуль `root`,
-`stack.language: documents`, все шаги `manual_only`, итог `coverage: MANUAL_ONLY`, `accepted: false` — норма режима.
+зависимостей покажи человеку, сам не запускай); повтори; код выхода 0 — можно начинать. Проект только с документами: нет манифестов сборки и исходников — один модуль `root` с корнем «.» и
+`stack.language: documents`, `.skillsrc` создаётся сам; режим только `cases-only-v1`, все шаги `manual_only`, итог `coverage: MANUAL_ONLY`,
+`accepted: false` — норма режима, не ошибка. Контекст модели — все документы папки, не только `--docs`.
 
 ## 1. Создай run
 
@@ -104,14 +105,14 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
    «Контрольное слово: <nonce>» из вывода `model-request` (в ответ и файлы слово не копируй); `existing-tests.md` из `step-inputs` дай
    генератору вместе со входами. **Фрагмент** — голый объект без конверта `artifacts`, образец — [fragment-sample.md](references/fragment-sample.md),
    схема — `schemas/candidate-fragment.schema.json`; `context_receipt` — квитанция контекста пачки **целиком** (файл receipt как есть); digest-поля
-   ставит код (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. До `model-response` — только
-   `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (с пачки 2 — `--prior-fragment <f>`
-   на каждую прошлую пачку: **записанный ответ**, `path` из вывода её `model-response`); `assemble` на части пачек отказывает
-   (`BATCH_PARTITION_CONFLICT`). Отказ `validate-fragment` — ошибка ответа: единственный повтор с `retry_prompt`; лимит повторов
+   ставит код (`model-response` заполняет пропущенные, неверные отказывает `MODEL_RESPONSE_DIGEST_MISMATCH` — единственный повтор). Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
+   До `model-response` пачки — только `tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>` (с пачки 2 — `--prior-fragment <f>`
+   на каждую прошлую пачку: **записанный ответ**, `path` из вывода её `model-response`); `assemble` на части пачек всегда отказывает
+   (`BATCH_PARTITION_CONFLICT`, фрагментов ещё нет). Отказ `validate-fragment` — ошибка ответа: единственный повтор с `retry_prompt`; лимит повторов
    (`--transport-attempts` ≤ 2) держишь ты, записанный ответ не заменить.
-5. **Сборка.** После последней пачки: `tools.api assemble --header <f> --plan <f> --fragment <f> … --run-root <run> --out-candidate
+5. **Сборка.** `assemble` и `validate-canonical` — после ответа последней пачки, на всех фрагментах: `tools.api assemble --header <f> --plan <f> --fragment <f> … --run-root <run> --out-candidate
    <run>/tmp/candidate.json --out-receipt <run>/tmp/assembly-receipt.json`, затем `validate-canonical --document <run>/tmp/candidate.json` —
-   bare canonical JSON `1.1.0` (`schema_version` в header). Проверь полноту относительно исходного документа; недоказанную полноту оставь
+   bare canonical JSON `1.1.0` (`schema_version` в header). `--fragment` — файл ответа пачки как есть или записанный ответ (`read-model-artifact`). Проверь полноту относительно исходного документа; недоказанную полноту оставь
    gap, не `FULL`-обещание. Human-facing поля — на русском, technical tokens exact; условия работы над тестами (заглушки, режим запуска)
    в предусловия, шаги и ожидания не пишутся — ревьюер вернёт весь набор. Потолка на число требований и кейсов нет.
 6. Revision 1 (`UNREVIEWED`, V4 derived bundle) публикует `review-open` из §4 сам. HTML/CSV никогда не входят в model input.
@@ -167,7 +168,7 @@ inventory, baseline и создаёт один nonterminal attempt (`ATTEMPT_CRE
 Если контекст занят больше чем наполовину, после завершённого шага попроси человека `/clear` (или новую сессию) и «продолжай test-skills
 <run_id>». Затем `python -m tools.run_pipeline status --project <abs> --run <run_id>` и продолжай с `next_step` (стадия, действие, раздел
 этого SKILL; при `pending_request_path` — ответ на этот запрос). `next_step.command` — шаблон с `<…>` вместо значений: шаг выбираешь по
-SKILL, значения берёшь из результатов tools. Подтверждённое журналом не повторяй. `RUN_LEFT` — прогон оставлен до ревью: выполни
+SKILL, значения берёшь из результатов tools. Подтверждённое журналом не повторяй. `RUN_LEFT` — прогон оставлен до ревью (`finish --abandon LEFT_BEFORE_REVIEW`): выполни
 `next_step.command` (простой scan того же запроса).
 
 `status: drift` — передай человеку `drift.changed` и `drift.fix` как есть: вернуть файлы или начать новый прогон командой `drift.command`;

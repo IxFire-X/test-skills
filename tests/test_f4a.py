@@ -14,7 +14,7 @@ SKILL = ROOT / "skills" / "orchestrate" / "SKILL.md"
 SAMPLE = ROOT / "skills" / "orchestrate" / "references" / "fragment-sample.md"
 CONTRACT = ROOT / "skills" / "orchestrate" / "references" / "orchestration-contract.md"
 GENERATOR = ROOT / "skills" / "tc-generator" / "SKILL.md"
-SKILL_BYTES_LIMIT = 52_492  # SKILL.md of orchestrate after PT2: the agent at work reads it whole
+SKILL_BYTES_LIMIT = 24_500  # SKILL.md of orchestrate after V8 (52 492 after PT2): the agent at work reads it whole; the limit only goes down
 GENERATOR_ROLE_BYTES_LIMIT = 35_826  # tc-generator SKILL + references before F4a
 
 

@@ -98,7 +98,10 @@ ANCHORS = (
 
 @pytest.mark.parametrize("anchor", ANCHORS)
 def test_the_skill_keeps_what_the_agent_at_petclinic_stumbled_on(anchor: str) -> None:
-    text = " ".join((ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8").split())
+    skill = (ROOT / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    # V8: the SKILL is a map; the review details (fresh session, subagent, canaries, budget) are in references/review.md, which the map names
+    assert "(references/review.md)" in skill
+    text = " ".join((skill + (ROOT / "skills" / "orchestrate" / "references" / "review.md").read_text(encoding="utf-8")).split())
     assert anchor in text
 
 

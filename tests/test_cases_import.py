@@ -277,7 +277,7 @@ def test_the_skills_name_the_import_steps() -> None:
     root = Path(__file__).resolve().parents[1]
     generator = (root / "skills" / "tc-generator" / "SKILL.md").read_text(encoding="utf-8")
     reviewer = (root / "skills" / "tc-reviewer" / "SKILL.md").read_text(encoding="utf-8")
-    orchestrate = (root / "skills" / "orchestrate" / "SKILL.md").read_text(encoding="utf-8")
+    orchestrate = "\n".join((root / "skills" / "orchestrate" / name).read_text(encoding="utf-8") for name in ("SKILL.md", "references/import.md"))
     assert "imported" in generator and "IMPORT_HUMAN_FIELD_CHANGED" in generator
     assert "Импорт" in reviewer
     assert "tools.api cases-import --run-root" in orchestrate and "--imported" in orchestrate and "scan --cases" in orchestrate
