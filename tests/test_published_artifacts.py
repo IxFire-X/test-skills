@@ -74,3 +74,15 @@ def test_a_row_without_a_path_has_no_writer_and_says_where_the_artifact_lives(co
 def test_context_marker_is_one_call_or_one_plus_n_not_once(contract: dict) -> None:
     row = next(row for row in contract["published_artifacts"] if row.get("stage") == "context-marker")
     assert "1+N" in row["note"]
+
+
+def test_what_the_code_binds_with_a_pair_of_events_is_bound_in_the_table(contract: dict) -> None:
+    """J1: ``bind_bytes`` / ``publish_bound`` write the file and its ARTIFACT_PUBLISHED / ARTIFACT_READ_BACK pair."""
+    rows = {row["path"]: row for row in contract["published_artifacts"] if row["path"]}
+    for path in ("left-before-review.json", "artifacts/<attempt>/scope-decision.json", "reviewer-session-ledgers/<attempt>/<digest>.json",
+                 "reference-cases/<attempt>.json", "review-canaries/<attempt>.json", "imported-cases/<attempt>.json",
+                 "prior-capabilities/<attempt>.<batch>.json"):
+        assert rows[path]["event"] == "bound", path
+    assert {path for path, row in rows.items() if row["event"] == "none"} == {
+        "refusals.jsonl", "step-sizes.jsonl", "output-sizes.jsonl", "report.md", "report.json", "questions-for-analyst.md", "doc-sections/<name>.md",
+        "review-views/<sha>.md", "review-views/<sha>.existing-tests.md", "<output-dir>/<bundle>.zephyr-import.csv"}
