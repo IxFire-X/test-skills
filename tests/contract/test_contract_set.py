@@ -20,8 +20,8 @@ def _marked(path: Path) -> bool:
     return False
 
 
-def test_the_declared_files_exist_once_and_are_33() -> None:
-    assert len(MEMBERS) == len(set(MEMBERS)) == 33, "the count is the architecture review's; changing it is a decision to show in the diff"
+def test_the_declared_files_exist_once_and_are_34() -> None:
+    assert len(MEMBERS) == len(set(MEMBERS)) == 34, "the count is the architecture review's; changing it is a decision to show in the diff"
     assert sorted(set(GROUPS)) == sorted(GROUPS)
     assert [name for name in MEMBERS if not (TESTS / f"{name}.py").is_file()] == []
 

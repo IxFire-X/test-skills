@@ -6,7 +6,7 @@ from __future__ import annotations
 
 GROUPS = {
     "counters, registry, manifest": ("test_schema_engine", "test_schema_engine_differential", "test_contract_registry", "test_release_manifest",
-                                     "test_pack_profile", "test_dead_modules_removed", "test_projection_drift", "test_ci_gate"),
+                                     "test_pack_profile", "test_dead_modules_removed", "test_projection_drift", "test_ci_gate", "test_no_private_imports"),
     "budgets of the roles": ("test_review_view", "test_skeleton_budget", "test_p8a2_texts", "test_texts_cases_only", "test_fat3", "test_test_design",
                              "test_context_batches", "test_existing_tests"),
     "form of the CLI": ("test_api_cli", "test_api_error_fields", "test_next_step_commands", "test_output_raw", "test_pf1", "test_diagnostics_at_once"),

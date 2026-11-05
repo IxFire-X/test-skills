@@ -6,7 +6,7 @@
 python -m pytest -m "contract and not native and not slow" -n 4
 ```
 
-Набор `contract` — 33 файла (`tests/contract/members.py`, `pytestmark = pytest.mark.contract` в каждом) и тесты каталога `tests/contract/`:
+Набор `contract` — 34 файла (`tests/contract/members.py`, `pytestmark = pytest.mark.contract` в каждом) и тесты каталога `tests/contract/`:
 счётчики и реестр контракта, бюджеты ролей, форма вывода CLI, тексты. `native` — прогоны настоящего pytest/Maven проекта (режим Б), в набор не входят (пока ни один тест не помечен). `slow` — 12 тестов набора дольше 30 с (список с секундами — `SLOW` в `tests/contract/members.py`); они идут отдельно:
 
 ```bash
@@ -29,6 +29,7 @@ python -m pytest -m "contract and slow" -n 4
 | правка режима Б (`exec_*`, materialize/ingest, finalize, автотесты) | `test_exec_prepares`, `test_partial_automation`, `test_abandon_closure`, `test_quality_hints`, `test_cases_import`, `test_finish`; **плюс `-m "contract and slow"`** | режим Б не входит в поставку cases-only: в копии профиля его команд нет, тесты бегут на репозитории |
 | перенос текста между файлами (SKILL ↔ references, mode-b) | тексты группы «texts», `test_texts_cases_only`, `test_p8a2_texts`, `test_clear_refusals` | grep по первой строке переносимого абзаца в `tests/`: читатели берут подстроку; ссылки `[…](references/…)` не должны оборваться |
 | смена состава профиля поставки (что входит в cases-only) | `test_pack_profile`, `test_p8a2_*`, `test_sec1`, `test_mode_b_split`, `test_texts_cases_only` | `grep -rn "<имя модуля>" tests/ tools/` по каждому модулю, который уходит из профиля или приходит в него (урок F6: читатель на `test_p8a2_no_git` оборвался на модуле, которого в копии нет); манифест — как в первой строке |
+| вызов приватного имени другого модуля, новое имя для файлов `exec_*` | `test_no_private_imports`, `test_exec_split`, `test_mode_b_split`, `test_pack_profile` | публичное имя — строка `имя = _имя` в конце модуля-владельца, перечень для `exec_*` — `tools/execution_core.py`; список исключений в сторожe только сокращается |
 | `contracts/pipeline.json` | `test_contract_registry`, `test_projection_drift`, `test_isolation_contract`, `test_release_manifest` | `python -m tools.render_contract_docs`, затем манифест |
 
 ## Правила набора
