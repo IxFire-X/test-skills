@@ -94,8 +94,15 @@ def _validate_maven(data: ET.Element) -> None:
         for module in modules:
             if _xml_name(module)!="module" or list(module) or not _safe_module_ref(module.text): raise ValueError
             if module.tail and not module.tail.isspace(): raise ValueError
-def find_confined_manifests(root: Path) -> list[Path]:
-    found=[path for path in confined_files(root) if path.name in MANIFEST_LANGUAGES or path.name in WORKSPACE_MANIFESTS]
+def _own_pack_root(root: Path) -> Path | None:
+    """F5: the folder of this skill pack when it lies inside the project (HOW-TO-USE allows it beside the project's files) —
+    the inventory leaves it out by skill-pack-root-v1, and so does discovery: it is no module of the project."""
+    pack = Path(__file__).resolve().parents[1]
+    return pack if pack != root and root in pack.parents else None
+def _outside_pack(files: Sequence[Path], pack: Path | None) -> list[Path]:
+    return [path for path in files if pack is None or pack not in path.resolve().parents]
+def find_confined_manifests(root: Path, skill_pack_root: Path | None = None) -> list[Path]:
+    found=[path for path in _outside_pack(confined_files(root), skill_pack_root) if path.name in MANIFEST_LANGUAGES or path.name in WORKSPACE_MANIFESTS]
     return sorted(found,key=lambda p:_rel(root,p))
 def _refs(p: Path, data: Any) -> list[str]:
     if p.name=="package.json":
@@ -444,22 +451,23 @@ def validate_report(report:dict[str,Any], unresolved_fields:set[str]|None=None)-
     return errors
 def build_report(status,project_name,modules,questions,warnings,errors,fingerprint=None): return {"status":status,"project_name":project_name,"modules":modules,"questions":questions,"warnings":warnings,"errors":errors,"fingerprint":fingerprint or hashlib.sha256(b"").hexdigest(),"scanned_at":datetime.now(timezone.utc).isoformat()}
 DOCUMENT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".adoc", ".rst"})
-def _documents_module(root: Path) -> dict[str, Any] | None:
+def _documents_module(root: Path, skill_pack_root: Path | None = None) -> dict[str, Any] | None:
     """FaT-DOC: a project of requirement documents only — no build manifest and no source file — is one module `documents`
     at the root: cases from its documents (cases-only-v1), nothing to build or run. Any source file keeps the old refusal."""
     from tools.scan_rules import SOURCE_SUFFIXES as ANY_SOURCE
 
-    files = confined_files(root)
+    files = _outside_pack(confined_files(root), skill_pack_root)
     if any(path.suffix.lower() in ANY_SOURCE and path.suffix.lower() not in DOCUMENT_SUFFIXES for path in files):
         return None
     documents = sorted(_rel(root, path) for path in files if path.suffix.lower() in DOCUMENT_SUFFIXES)
     if not documents:
         return None
     return {"id": "root", "root": ".", "stack": {"language": "documents"}, "detected_from": documents[:20], "readiness": "source_ready"}
-def discover_project(project_dir:Path)->dict[str,Any]:
-    root=project_dir.resolve(); manifests=find_confined_manifests(root)
+def discover_project(project_dir:Path, skill_pack_root:Path|None=None)->dict[str,Any]:
+    root=project_dir.resolve(); pack=Path(skill_pack_root).resolve() if skill_pack_root is not None else _own_pack_root(root)
+    manifests=find_confined_manifests(root,pack)
     if not manifests:
-        documents = _documents_module(root)
+        documents = _documents_module(root, pack)
         if documents is not None:  # FaT-DOC
             return build_report("ready", root.name, [documents], [], [], [], project_fingerprint(root, documents["detected_from"]))
         return build_report("error",root.name,[],[],[],["build manifests were not found"])

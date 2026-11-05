@@ -6,7 +6,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 try:
     from tools.schema_engine import Draft202012Validator
@@ -35,6 +35,27 @@ def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]
     return parse_skillsrc_bytes(path.read_bytes(), schema_path, project=path.parent if path.name == ".skillsrc" else None)
 
 
+def skillsrc_file_problem(path: Path) -> str | None:
+    """F5: why *path* cannot be read as ``.skillsrc`` — a directory, a junction or a link (the file must lie in the project itself),
+    or an unreadable one; None when it is absent or a regular readable file."""
+    import stat
+
+    try:
+        details = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return f".skillsrc не читается ({type(error).__name__})"
+    if stat.S_ISLNK(details.st_mode) or getattr(details, "st_file_attributes", 0) & 0x400 or not stat.S_ISREG(details.st_mode):
+        return ".skillsrc — не обычный файл (каталог, junction или ссылка)"
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError as error:
+        return f".skillsrc не читается ({type(error).__name__})"
+    return None
+
+
 def _legacy_yaml_row(project: Path | None) -> dict[str, Any] | None:
     """The row ``tools.ready`` gives an older YAML ``.skillsrc`` (message and fix, in Russian), or None when the file is not one."""
     if project is None:
@@ -57,6 +78,25 @@ def skillsrc_review_self(project: Path) -> bool:
     return (document.get("review") or {}).get("self") is True
 
 
+def _fix_text(cause: str, project: Path | None) -> str:
+    """F5: every refusal of a foreign ``.skillsrc`` says what is wrong (the key or the line) and how to get a valid one."""
+    import sys
+
+    where = f'"{project}"' if project is not None else "<проект>"
+    return (f"причина: {cause}. Исправьте этот файл по схеме или переименуйте его в .skillsrc.bak и создайте новый: "
+            f'"{sys.executable}" -m tools.init_skillsrc --project {where} --write (значения limits, review и другие перенесите из .bak)')
+
+
+def _schema_cause(details: Sequence[Mapping[str, Any]]) -> str:
+    """The first schema message that names a key or a type; the ones that repeat the whole document are left out."""
+    for row in details:
+        message = str(row.get("message", ""))
+        if message and not message.startswith(("{", "[")):
+            path = str(row.get("path", "/"))
+            return f"{path if path != '/' else 'верхний уровень'}: {message[:200]}"
+    return "файл не по схеме .skillsrc"
+
+
 def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, project: Path | None = None) -> dict[str, Any]:
     """Parse and validate one exact UTF-8 manifest byte sequence; *project* is where the file lies, for the fix of an older YAML one."""
     schema_path = schema_path or Path(__file__).resolve().parents[1] / "schemas" / "skillsrc.schema.json"
@@ -67,19 +107,21 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, projec
             "invalid_encoding",
             ".skillsrc must be UTF-8",
             [{"path": "/", "message": str(error)}],
+            fix=_fix_text("файл не в UTF-8", project),
         ) from error
     try:
         document = loads_json_strict(source.removeprefix("\ufeff"))
     except StrictJsonError as error:
         legacy = _legacy_yaml_row(project)
+        cause = "файл пуст" if not source.strip() else f"это не JSON ({error})"
         raise SkillsrcError(
             "invalid_json",
-            legacy["message"] if legacy else ".skillsrc must be one JSON object (an older YAML .skillsrc is not read: tools.ready lists its keys to carry over)",
+            legacy["message"] if legacy else ".skillsrc must be one JSON object",
             [{"path": "/", "message": str(error)}],
-            fix=legacy.get("fix") if legacy else None,
+            fix=legacy.get("fix") if legacy else _fix_text(cause, project),
         ) from error
     if not isinstance(document, dict):
-        raise SkillsrcError("invalid_shape", ".skillsrc must be a mapping")
+        raise SkillsrcError("invalid_shape", ".skillsrc must be a mapping", fix=_fix_text("на верхнем уровне должен быть объект JSON {…}", project))
 
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     errors = sorted(
@@ -87,17 +129,8 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, projec
         key=lambda item: list(item.absolute_path),
     )
     if errors:
-        raise SkillsrcError(
-            "schema_invalid",
-            ".skillsrc failed schema validation",
-            [
-                {
-                    "path": "/" + "/".join(map(str, error.absolute_path)),
-                    "message": error.message,
-                }
-                for error in errors
-            ],
-        )
+        details = [{"path": "/" + "/".join(map(str, error.absolute_path)), "message": error.message} for error in errors]
+        raise SkillsrcError("schema_invalid", ".skillsrc failed schema validation", details, fix=_fix_text(_schema_cause(details), project))
     _validate_unique_module_ids(document)
     _validate_document_paths(document)
     return document

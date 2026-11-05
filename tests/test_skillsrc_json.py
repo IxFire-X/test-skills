@@ -163,12 +163,16 @@ def test_init_skillsrc_of_an_older_yaml_skillsrc_says_what_to_do_and_writes_noth
     assert not (project / ".skillsrc.yaml.bak").exists()
 
 
-def test_a_truly_broken_json_skillsrc_keeps_the_old_refusal(tmp_path: Path) -> None:
-    project = _yaml_project(tmp_path, '{"version": "3.0", \n')
+def test_a_truly_broken_json_skillsrc_is_refused_with_its_cause_and_a_fix(tmp_path: Path) -> None:
+    # F5 (8.10): the code stays invalid_json and the text "must be one JSON object"; what changed is the fix (it was None) —
+    # the cause (the line of the JSON error) and the way out, in the scan and in init_skillsrc alike
+    project = _yaml_project(tmp_path, '{"version": "3.0", ' + chr(10))
     with pytest.raises(SkillsrcError) as caught:
         load_skillsrc(project / ".skillsrc")
-    assert caught.value.code == "invalid_json" and caught.value.fix is None and "must be one JSON object" in str(caught.value)
+    assert caught.value.code == "invalid_json" and "must be one JSON object" in str(caught.value)
+    assert "line 2" in caught.value.fix and ".skillsrc.bak" in caught.value.fix and "--write" in caught.value.fix
     code, out = _cli("tools.run_pipeline", "scan", "--project", str(project), "--docs", "docs/req.md", "--profile", "cases-only-v1")
-    assert code == 2 and out["code"] == "invalid_json" and "must be one JSON object" in out["message"] and out["fix"] is None
+    assert code == 2 and out["code"] == "invalid_json" and "must be one JSON object" in out["message"] and out["fix"] == caught.value.fix
+    assert not (project / ".pilot-runs").exists()
     code, out = _cli("tools.init_skillsrc", "--project", str(project), "--write")
-    assert code == 2 and out["errors"] == ["invalid_json"] and "fix" not in out and "message" not in out
+    assert code == 2 and out["errors"] == ["invalid_json"] and out["fix"] == caught.value.fix and "must be one JSON object" in out["message"]

@@ -143,7 +143,7 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
         text = path.read_bytes().decode("utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None
-    if not text.strip() or text.lstrip().startswith("{"):
+    if not text.strip() or text.lstrip().startswith(("{", "[")):  # F5: a JSON array is no YAML either (invalid_shape, with its fix)
         return None
     lines, found, depth = text.splitlines(), [], None
     for number, line in enumerate(lines, 1):
@@ -162,8 +162,13 @@ def legacy_yaml_keys(project: Path) -> list[str] | None:
 
 def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, Any]]:
     """Validity of .skillsrc and its drift from the project, through the existing init flow (no write)."""
+    from tools.fixes import fix_for
     from tools.init_skillsrc import ensure_skillsrc
+    from tools.skillsrc_manifest import skillsrc_file_problem
 
+    unreadable = skillsrc_file_problem(Path(project) / ".skillsrc")  # F5: the scan's SKILLSRC_UNREADABLE, seen here first
+    if unreadable is not None:
+        return [_row("skillsrc", CASES, "STOP", f"SKILLSRC_UNREADABLE: {unreadable}", fix_for("SKILLSRC_UNREADABLE"))]
     legacy = legacy_yaml_keys(project)
     if legacy is not None:
         keys = legacy or ["в файле нет limits, review, service_url_env, paths.include, projection — переносить нечего"]
@@ -199,7 +204,9 @@ def check_skillsrc(project: Path, module: str | None = None) -> list[dict[str, A
     if status == "conflict":
         return [_row("skillsrc", CASES, "STOP", f".skillsrc требует ответа ({status})", _init_command(project) + " --answers <файл ответов>",
                      {"questions": receipt.get("questions")})]
-    return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {', '.join(map(str, receipt.get('errors') or [status]))}", _init_command(project))]
+    if receipt.get("_fix"):  # F5: a foreign file — what is wrong in it (the key or the line) and the way out
+        return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {receipt.get('_message')}", str(receipt["_fix"]))]
+    return [_row("skillsrc", CASES, "STOP", f".skillsrc невалиден: {', '.join(map(str, receipt.get('errors') or [status]))}", _init_command(project) + " --write")]
 
 
 def _test_change(project: Path) -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
@@ -254,7 +261,12 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     if module is None:
         return _row("module", CASES, "STOP", str(problem), "укажите --module <ID> из списка"), None
     from tools.module_ids import legacy_warning
+    from tools.pilot_state import module_path_problem
 
+    problem = module_path_problem(Path(project).resolve(), module.get("root"))  # F5: what create_attempt checks, before the scan meets it
+    if problem is not None:
+        return _row("module", CASES, "STOP", f"модуль {module.get('id')}: {problem}",
+                    "в .skillsrc у модуля root — путь его папки от корня проекта (папка есть, без «..» и ссылок); поправьте и повторите ready"), None
     legacy = legacy_warning(module, module_id)
     if legacy is not None:  # P6a: the old hex id works; the row says what to write instead
         return _row("module", CASES, "WARN", f"модуль {module.get('id')} ({module.get('root')}); {legacy}",

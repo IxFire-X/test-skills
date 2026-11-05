@@ -46,7 +46,8 @@ def headings(text: str) -> list[tuple[int, int, str]]:
     """``(line, level, title)`` of every ATX heading outside code fences, in file order."""
     found: list[tuple[int, int, str]] = []
     fence: str | None = None
-    for number, line in enumerate(text.splitlines(), start=1):
+    # F5: Notepad saves with a BOM; a heading on the first line is still a heading (the digests stay those of the bytes)
+    for number, line in enumerate(text.removeprefix("﻿").splitlines(), start=1):
         opening = _FENCE.match(line)
         if opening:
             mark = opening.group(1)

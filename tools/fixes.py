@@ -119,7 +119,10 @@ FIXES: dict[str, str] = {
     "FINISH_FACT_UNDETERMINED": "у прогона нет попытки: finish закрывает попытку, а её нет — сначала дойди до model-request "
                                 "(run_pipeline status называет следующий шаг); для прогона, где работа не начата, "
                                 "достаточно scan --new-run",
-    "INVENTORY_INVALID": "опись проекта не читается или не сходится с диском: повтори scan (--new-run), файлы проекта не меняй во время scan",
+    "INVENTORY_INVALID": "опись проекта не читается или не сходится с диском: повтори scan (--new-run), файлы проекта не меняй во время scan; "
+                         "если detail называет module или attempt.schema.json — проверь в .skillsrc root модуля: путь существующей папки проекта",
+    "SKILLSRC_UNREADABLE": ".skillsrc должен быть обычным файлом внутри проекта: уберите каталог, junction или ссылку с этим именем "
+                           "(или права на чтение) и повторите scan; нужен новый — `python -m tools.init_skillsrc --project <проект> --write`",
     "SOURCE_TARGET_INVALID": "--target — путь внутри выбранного модуля проекта (относительно корня проекта), без «..»",
     "SNAPSHOT_DOCS": "--docs и --reference — пути внутри проекта к существующим файлам или папкам, не ссылкам и не junction",
     "EXECUTION_COORDINATES": "--run — один точный run_id этого проекта из run_pipeline status; --project — корень проекта прогона",

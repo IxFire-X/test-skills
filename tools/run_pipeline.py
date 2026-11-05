@@ -811,10 +811,10 @@ def _resolve_scan_module(project: Path, module_id: str | None, skillsrc_document
     except SkillsrcError as error:
         if error.code != "module_unknown":
             raise
-        # FaT-ER: --module takes the id of .skillsrc, not the folder; a root is no synonym
+        # P6a: --module takes the id of .skillsrc, or the folder of that module (the id of a plain folder is its path)
         known = ", ".join(f"{row['id']} (root {row.get('root')})" for row in normalized["modules"])
         ids = [str(row["id"]) for row in normalized["modules"]]
-        raise HostStop("MODULE_UNKNOWN", f"модуля {module_id} нет в .skillsrc: --module — id модуля, не папка; модули: {known}",
+        raise HostStop("MODULE_UNKNOWN", f"модуля {module_id} нет в .skillsrc: --module — id модуля или путь его папки; модули: {known}",
                        f"--module {ids[0]}" if len(ids) == 1 else "--module <id>: " + " | ".join(ids)) from error
     return resolve_module_root(project, module), module
 
@@ -1309,6 +1309,37 @@ def _scan_profile(args: Any) -> None:
         raise HostStop("PROFILE_NOT_IN_PACKAGE", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает")
 
 
+def _skillsrc_preflight(project: Path) -> None:
+    """F5 (8.11): ``.skillsrc`` is read before a run is created — a directory, a link, an unreadable or a foreign file is a refusal
+    with its fix and no run behind it (the run_id line of a scan means a run exists)."""
+    from tools.skillsrc_manifest import load_skillsrc, skillsrc_file_problem
+
+    path = project / ".skillsrc"
+    problem = skillsrc_file_problem(path)
+    if problem is not None:
+        raise HostStop("SKILLSRC_UNREADABLE", problem)
+    if path.is_file():
+        load_skillsrc(path)
+
+
+_SCHEMA_CAUSE = re.compile(r"schema validation failed: [a-z0-9.-]+\.schema\.json")
+
+
+def _inventory_invalid_detail(error: BaseException) -> str:
+    """F5: the cause of INVENTORY_INVALID — the kind of error and the schema or the module it names, never a text of the project."""
+    from tools.pilot_state import ModulePathError
+
+    if isinstance(error, InventoryError):
+        return str(error)
+    if isinstance(error, OSError):
+        return "scan input is unreadable"
+    if isinstance(error, ModulePathError):
+        return f"scan input or receipt is invalid: {error}"
+    if isinstance(error, ValueError) and _SCHEMA_CAUSE.fullmatch(str(error)):
+        return f"scan input or receipt is invalid: {error}"
+    return "scan input or receipt is invalid"
+
+
 def cmd_scan(args: Any) -> int:
     """Scan, then ``run_id: <id>`` as the last line of the output (FaT-G)."""
     _PRINTED.clear()
@@ -1321,11 +1352,17 @@ def cmd_scan(args: Any) -> int:
     if refused is not None:
         return refused
     # FaT-R3: --docs and --reference are read before the run is created, as --cases: a refusal leaves no orphan run
+    from tools.skillsrc_manifest import SkillsrcError
+
     try:
+        _skillsrc_preflight(Path(args.project).resolve())
         _docs_entries(Path(args.project).resolve(), getattr(args, "docs", None))
         _reference_cases(Path(args.project).resolve(), getattr(args, "reference", None))
     except HostStop as stop:
         _print({"status": "error", "stage": "scan", "reason": stop.code, "detail": str(stop), "fix": stop.fix})
+        return 2
+    except SkillsrcError as error:  # F5: a foreign .skillsrc — its code, message and fix, and no run
+        _print({"status": "error", "stage": "scan", "reason": error.code, "code": error.code, "message": str(error), "fix": error.fix})
         return 2
     code = _scan(args)
     run_id = _PRINTED[-1].get("run_id") if _PRINTED else None
@@ -1424,8 +1461,8 @@ def _scan(args: Any) -> int:
                                **({"fix": stop.fix} if stop.fix else {})))
         return 2
     except (InventoryError, ValueError, OSError) as error:
-        detail = str(error) if isinstance(error, InventoryError) else "scan input is unreadable" if isinstance(error, OSError) else "scan input or receipt is invalid"
-        _print(_durable_status(project, run_root, stage="scan", status="error", reason="INVENTORY_INVALID", detail=detail, scope=scope))
+        _print(_durable_status(project, run_root, stage="scan", status="error", reason="INVENTORY_INVALID", detail=_inventory_invalid_detail(error),
+                               fix=fix_for("INVENTORY_INVALID"), scope=scope))
         return 2
     _print(_scan_payload(project, run_root, args, module, scope, frozen_inventory, exclusion_receipt, frozen["baseline"]["digest"],
                          str(attempt["attempt_id"]), plan, context_summary, context_warnings, abandoned))

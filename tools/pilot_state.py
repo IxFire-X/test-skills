@@ -1489,27 +1489,44 @@ def record_process_stopped(
     )
 
 
-def _module(project: Path, value: Any) -> str:
+class ModulePathError(ValueError):
+    """F5: ``module`` of an attempt is not a folder of the project; ``str`` is a reason that carries nothing of the project's text."""
+
+
+_MODULE_PATH_CHARS = frozenset(":") | {chr(code) for code in range(32)}
+
+
+def module_path_problem(project: Path, value: Any) -> str | None:
+    """F5: why *value* cannot be ``module`` of an attempt — the one check of ``create_attempt``, ``ready`` and the schema's
+    complement.  The schema takes any path of parts without ``:`` and control characters (a Cyrillic or spaced folder is a
+    folder); a part ``.`` or ``..``, an empty part, a folder that is missing or a link out of the project are refused here."""
     if not isinstance(value, str):
-        raise ValueError("module is invalid")
+        return "путь модуля не строка"
     raw = value.replace("\\", "/")
     if raw == ".":
-        return "."
-    if not raw or raw.startswith(("/", "//")) or ":" in raw or any(part in {"", ".", ".."} for part in raw.split("/")):
-        raise ValueError("module is invalid")
+        return None
+    if not raw or raw.startswith("/") or any(char in _MODULE_PATH_CHARS for char in raw.replace("/", "")) or any(part in {"", ".", ".."} for part in raw.split("/")):
+        return "путь модуля должен быть относительным путём папки проекта из частей без «.», «..», «:» и управляющих символов"
     candidate = project.joinpath(*raw.split("/"))
-    if not candidate.exists() or not candidate.is_dir() or _is_reparse(candidate):
-        raise ValueError("module is invalid")
+    if not candidate.exists() or not candidate.is_dir():
+        return "папки модуля нет в проекте"
     current = project
     for part in raw.split("/"):
         current /= part
         if _is_reparse(current):
-            raise ValueError("module is invalid")
+            return "папка модуля — ссылка (junction или symlink)"
     try:
         candidate.resolve(strict=True).relative_to(project)
-    except ValueError as error:
-        raise ValueError("module is invalid") from error
-    return raw
+    except ValueError:
+        return "папка модуля вне проекта"
+    return None
+
+
+def _module(project: Path, value: Any) -> str:
+    problem = module_path_problem(project, value)
+    if problem is not None:
+        raise ModulePathError(f"module is invalid: {problem}")
+    return "." if value == "." else str(value).replace("\\", "/")
 
 
 def module_selection_digest(project: Path, module: str) -> str:
