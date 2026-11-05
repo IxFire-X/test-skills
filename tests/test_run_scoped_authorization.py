@@ -160,7 +160,6 @@ def _events(run_root: Path, attempt_id: str, event_type: str) -> list[dict]:
     return [event for event in pilot_state.derive_state(run_root)["events"] if event["event_type"] == event_type and event.get("attempt_id") == attempt_id]
 
 
-@pytest.mark.slow
 def test_ingest_claims_the_execution_once_from_the_admission_checks_the_baseline_three_times_and_publishes_one_receipt(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import ingest
     from tools import pilot_state
@@ -190,7 +189,6 @@ def test_ingest_claims_the_execution_once_from_the_admission_checks_the_baseline
     assert len(_events(run_root, attempt_id, "EXECUTION_STARTED")) == 1
 
 
-@pytest.mark.slow
 def test_a_file_changed_between_the_checks_and_the_claim_is_never_taken_as_the_reviewed_code(tmp_path: Path, monkeypatch, capsys) -> None:
     """Formerly: the durable delta is checked again before the claim and a mutated file is never started.  Nothing is started now; the file that
     changes in the window of the claim makes the result UNKNOWN (SOURCE_CHANGED), never a PASS of code that was not reviewed."""
@@ -276,7 +274,6 @@ def test_ingest_without_materialize_is_a_controller_error_and_leaves_the_attempt
     assert attempt["state"] != "TERMINAL"
 
 
-@pytest.mark.slow
 def test_an_ingest_cut_after_the_receipt_is_finished_by_the_next_one_without_a_second_claim(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import flow_args, ingest
     from tools import pilot_state
@@ -301,7 +298,6 @@ def test_an_ingest_cut_after_the_receipt_is_finished_by_the_next_one_without_a_s
     assert pilot_state.derive_state(run_root) == before
 
 
-@pytest.mark.slow
 def test_an_ingest_cut_between_the_receipt_and_its_readback_event_is_recovered_with_the_same_bytes(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import flow_args, ingest
     from tools import pilot_state
@@ -333,7 +329,6 @@ def test_an_ingest_cut_between_the_receipt_and_its_readback_event_is_recovered_w
     assert len(_events(run_root, attempt_id, "EXECUTION_STARTED")) == 1
 
 
-@pytest.mark.slow
 def test_a_started_ingest_without_a_receipt_is_closed_unknown_by_the_statement_without_a_second_claim(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import flow_args, ingest
     from tools import pilot_state
@@ -359,7 +354,6 @@ def test_a_started_ingest_without_a_receipt_is_closed_unknown_by_the_statement_w
     assert len(_events(run_root, attempt_id, "EXECUTION_STARTED")) == 1
 
 
-@pytest.mark.slow
 def test_a_started_ingest_never_falls_back_from_corrupt_durable_execution_inputs(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import flow_args, ingest
     from tools import pilot_state
@@ -426,7 +420,6 @@ def _touch_skillsrc(project: Path) -> None:
     (project / ".skillsrc").write_text((project / ".skillsrc").read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
 
-@pytest.mark.slow
 def test_a_pass_read_back_before_the_close_is_unaccepted_when_the_baseline_drifted_meanwhile(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import ingest
     from tools import pilot_state
@@ -448,7 +441,6 @@ def test_a_pass_read_back_before_the_close_is_unaccepted_when_the_baseline_drift
     assert [row["disposition"] for row in dispositions["files"]] == ["CLEANED"]
 
 
-@pytest.mark.slow
 def test_a_test_file_changed_after_the_cut_closes_the_recorded_pass_as_not_accepted_and_is_not_a_changed_request(tmp_path: Path, monkeypatch, capsys) -> None:
     """The branch of a recorded result reads the journal and the baseline, never the test files: a file of the tests changed (or formatted) between
     the receipt and the next ingest must not turn that ingest into INGEST_REQUEST_CHANGED / INGEST_TESTS_CHANGED and leave the attempt open."""
@@ -470,7 +462,6 @@ def test_a_test_file_changed_after_the_cut_closes_the_recorded_pass_as_not_accep
     assert generated.is_file()  # the person's change is theirs: nothing is cleaned over it
 
 
-@pytest.mark.slow
 def test_late_resume_drift_preserves_an_already_frozen_retained_disposition(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import ingest
     from tools import pilot_state
@@ -505,7 +496,6 @@ def test_late_resume_drift_preserves_an_already_frozen_retained_disposition(tmp_
     assert generated.is_file()
 
 
-@pytest.mark.slow
 def test_resume_after_pretrace_records_late_drift_without_rewriting_closure(tmp_path: Path, monkeypatch, capsys) -> None:
     from tests.p4_flow import ingest
     from tools import finalize_attempt, pilot_state

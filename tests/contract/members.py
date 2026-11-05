@@ -21,13 +21,13 @@ SLOW = (
     "test_schema_engine_differential::test_the_named_allowance_ecma_end_of_string_is_exercised_and_is_nothing_more",  # 150
     "test_partial_automation::test_three_cases_one_blocked_run_two_autotests_and_close_partial",  # 121
     "test_cases_import::test_ready_cases_of_a_csv_become_an_executed_autotest",  # 101
-    "test_exec_prepares::test_exec_after_the_static_review_prepares_its_inputs_and_runs",  # 93
-    "test_exec_prepares::test_exec_finishes_a_half_done_preparation",  # 82
+    "test_exec_prepares::test_materialize_after_the_static_review_prepares_its_inputs_and_the_ingest_of_the_run_closes",  # 93
+    "test_exec_prepares::test_materialize_finishes_a_half_done_preparation",  # 82
     "test_schema_engine_differential::test_artifacts_of_earlier_runs_and_their_mutations",  # 71
-    "test_api_cli::test_a_file_written_by_out_makes_no_drift_for_exec",  # 67
+    "test_api_cli::test_a_file_written_by_out_makes_no_drift_for_materialize_and_ingest",  # 67
     "test_quality_hints::test_the_report_counts_weak_assertions_of_the_run_automation",  # 50
     "test_pt2::test_a_rejecting_verdict_says_so_instead_of_no_verdict_yet",  # 41
-    "test_abandon_closure::test_abandon_is_refused_where_finish_or_exec_closes",  # 40
+    "test_abandon_closure::test_abandon_is_refused_where_finish_or_ingest_closes",  # 40
     "test_abandon_closure::test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_names",  # 35
     "test_abandon_closure::test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names",  # 34
     "test_p8b_git::test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it",  # 65

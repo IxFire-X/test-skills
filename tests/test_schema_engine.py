@@ -474,7 +474,6 @@ _PATH_FIELDS = [  # (schema, path of the field inside it): the path fields that 
     ("release-eval-run.schema.json", "$defs/ref/properties/path"), ("retained-native-rerun-receipt.schema.json", "$defs/relative_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/0/properties/source_path"),
     ("run-tests-output.schema.json", "$defs/artifact_evidence/oneOf/1/properties/source_path"),
-    ("scenario-observation-receipt.schema.json", "$defs/retained_file/properties/path"),
 ]
 
 
