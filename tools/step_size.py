@@ -602,12 +602,12 @@ def request_files(run_root: Path, stage: str) -> dict[str, Any]:
         attempt = next(item for item in derive_state(root)["attempts"] if item["attempt_id"] == result["attempt_id"])
         module = str(attempt.get("module") or ".")
         module_root = project if module == "." else project.joinpath(*module.split("/"))
-        level = java_api_level(module_root)
+        level = java_api_level(module_root, project)
         if level is not None:
             result["java_level"] = {**level, "rule": f"только API Java {level['level']}: новее отклонит runner-compat (RUNNER_API_LEVEL)"}
         if (module_root / "pom.xml").is_file() or (module_root / "build.gradle").is_file() or (module_root / "build.gradle.kts").is_file():
             # FaT-PT: a param_group becomes one @ParameterizedTest only where the tests have junit-jupiter-params
-            params = junit_params_available(module_root)
+            params = junit_params_available(module_root, project)
             result["junit_params"] = {"available": params, "rule": (
                 "группа param_group — один @ParameterizedTest(name = \"[{index}] {0}\"), строки литералами по display_order"
                 if params else "junit-jupiter-params нет в зависимостях тестов: по методу @Test на каждый кейс группы, зависимость не добавлять")}

@@ -495,7 +495,7 @@ def java_level_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, 
         return []
     from tools.discover_project import java_api_level
 
-    level = java_api_level(Path(project).resolve() / str(module.get("root") or "."))
+    level = java_api_level(Path(project).resolve() / str(module.get("root") or "."), Path(project).resolve())
     if level is None:
         return [_row("execution:java-level", EXECUTION, "OK", "уровень Java модуля в его сборке не задан (или задан во внешнем "
                      "родительском pom) — пакет не ограничивает API автотестов; сборка проверит сама")]

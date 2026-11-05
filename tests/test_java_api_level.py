@@ -86,12 +86,66 @@ def test_a_reactor_parent_gives_its_properties_and_an_outside_pom_is_never_read(
                                            modules="<modules><module>core</module></modules>"), encoding="utf-8")
     (tmp_path / "core").mkdir()
     (tmp_path / "core" / "pom.xml").write_text(_pom(parent=parent), encoding="utf-8")
-    level = java_api_level(tmp_path / "core")
+    level = java_api_level(tmp_path / "core", project_root=tmp_path)
     assert level["level"] == 8 and level["evidence"] == [f"{tmp_path.name}/pom.xml: maven.compiler.release=8"], level
 
     # the same pom one level up that does not list this module is not its reactor: not read
     (tmp_path / "pom.xml").write_text(_pom("<properties><maven.compiler.release>8</maven.compiler.release></properties>"), encoding="utf-8")
-    assert java_api_level(tmp_path / "core") is None
+    assert java_api_level(tmp_path / "core", project_root=tmp_path) is None
+
+
+PARENT_REF = "<parent><groupId>g</groupId><artifactId>root</artifactId><version>1</version><relativePath>{}</relativePath></parent>"
+RELEASE_8 = "<properties><maven.compiler.release>8</maven.compiler.release></properties>"
+
+
+def _reactor(tmp_path: Path, relative: str) -> tuple[Path, Path, Path]:
+    """project/core whose parent says ``relative``; ../outside/pom.xml has level 8 and lists project/core."""
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    (project / "core").mkdir(parents=True)
+    outside.mkdir()
+    (project / "core" / "pom.xml").write_text(_pom(parent=PARENT_REF.format(relative)), encoding="utf-8")
+    (outside / "pom.xml").write_text(_pom(RELEASE_8, modules="<modules><module>../project/core</module></modules>"), encoding="utf-8")
+    return project, project / "core", outside / "pom.xml"
+
+
+def test_a_relative_path_inside_the_project_is_followed_to_the_reactor_parent(tmp_path: Path) -> None:
+    from tools.discover_project import java_api_level, junit_params_available
+
+    project, core, _ = _reactor(tmp_path, "../pom.xml")
+    (project / "pom.xml").write_text(_pom(RELEASE_8, modules="<modules><module>core</module></modules>"), encoding="utf-8")
+    assert java_api_level(core, project_root=project)["level"] == 8
+    assert junit_params_available(core, project_root=project) is False
+    (project / ".skillsrc").write_text("", encoding="utf-8")  # without the argument the project is found by its marker
+    assert java_api_level(core)["level"] == 8
+
+
+@pytest.mark.parametrize("kind", ["dotdot", "absolute", "link", "unc"])
+def test_a_relative_path_out_of_the_project_is_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    """V4b: the pom the parent points at is read only inside the project - never a file outside, however the path leaves it."""
+    from tools import discover_project
+
+    project, core, outside_pom = _reactor(tmp_path, "../../outside/pom.xml")
+    relative = {"dotdot": "../../outside/pom.xml", "absolute": str(outside_pom), "link": "../exit/pom.xml", "unc": "\\\\host\\share\\pom.xml"}[kind]
+    if kind == "link":
+        try:
+            (project / "exit").symlink_to(outside_pom.parent, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("no symbolic links here")
+    (core / "pom.xml").write_text(_pom(parent=PARENT_REF.format(relative)), encoding="utf-8")
+    seen: list[str] = []
+    original = discover_project._read
+    monkeypatch.setattr(discover_project, "_read", lambda path: seen.append(Path(path).as_posix()) or original(path))
+    assert discover_project.java_api_level(core, project_root=project) is None
+    assert discover_project.junit_params_available(core, project_root=project) is False
+    assert [item for item in seen if "outside" in item or "exit" in item or "host" in item] == []
+
+
+def test_without_a_project_the_reactor_parent_is_not_followed(tmp_path: Path) -> None:
+    from tools.discover_project import java_api_level
+
+    project, core, _ = _reactor(tmp_path, "../pom.xml")
+    (project / "pom.xml").write_text(_pom(RELEASE_8, modules="<modules><module>core</module></modules>"), encoding="utf-8")
+    assert java_api_level(core) is None  # no marker (.skillsrc, .pilot-runs, .git) up the tree: no boundary, no parent
 
 
 @pytest.mark.parametrize(("name", "text", "expected"), [

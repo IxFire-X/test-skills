@@ -207,8 +207,20 @@ def _pom_levels(pom: Path, inherited: Mapping[str, str], external: str | None = 
                     tests = any((node.text or "").strip() == "true" for scope in [configuration, *plugin_level] for node in scope.iter() if _xml_name(node) == "checkTestClasses")
                     if match and tests: levels.append((int(match.group(1)), f"{pom.name}: animal-sniffer {name} (checkTestClasses)"))
     return levels, properties
-def _reactor_chain(root: Path) -> tuple[list[Path], str | None]:
-    """The module pom and its reactor parents (each lists its child), and the artifactId of the external parent at the top."""
+_PROJECT_MARKERS = (".skillsrc", ".pilot-runs", ".git")
+def project_root_of(module_root: Path) -> Path | None:
+    """V4b: the project a module lies in — the nearest directory (the module itself included) that holds a marker of the package or of git; None without one."""
+    start = Path(module_root).resolve()
+    return next((folder for folder in (start, *start.parents) if any((folder / marker).exists() for marker in _PROJECT_MARKERS)), None)
+def _in_project(path: Path, project: Path) -> bool:
+    return path == project or project in path.parents
+def _plain_relative_path(value: str) -> bool:
+    """V4b: a ``relativePath`` that names a place under the pom's own tree by a relative path: not empty-with-NUL, not rooted, no drive, no UNC (resolving one would reach the network)."""
+    return "\x00" not in value and not value.startswith(("/", "\\")) and not re.match(r"^[A-Za-z]:", value) and not Path(value).is_absolute()
+def _reactor_chain(root: Path, project_root: Path | None = None) -> tuple[list[Path], str | None]:
+    """The module pom and its reactor parents (each lists its child), and the artifactId of the external parent at the top.
+    V4b: a parent pom is opened only if ``relativePath`` leaves no trace outside the project (``project_root``, else the one the markers show); with no project, no parent is followed."""
+    project = Path(project_root).resolve() if project_root is not None else project_root_of(root)
     chain, pom, external = [], root / "pom.xml", None
     while pom.is_file() and len(chain) < 6:
         chain.append(pom)
@@ -216,9 +228,10 @@ def _reactor_chain(root: Path) -> tuple[list[Path], str | None]:
         except ET.ParseError: break
         parent = next((child for child in data if _xml_name(child) == "parent"), None)
         relative = next(((child.text or "").strip() for child in parent if _xml_name(child) == "relativePath"), "../pom.xml") if parent is not None else ""
-        candidate = (pom.parent / (relative or "../pom.xml")).resolve()
-        candidate = candidate / "pom.xml" if candidate.is_dir() else candidate
-        try: listed = {(candidate.parent / ref).resolve() for ref in _maven_refs(ET.fromstring(_read(candidate)))} if parent is not None and candidate.is_file() else set()
+        candidate = (pom.parent / (relative or "../pom.xml")).resolve() if parent is not None and project is not None and _plain_relative_path(relative) else None
+        if candidate is not None and _in_project(candidate, project) and candidate.is_dir(): candidate = candidate / "pom.xml"
+        if candidate is not None and not _in_project(candidate, project): candidate = None
+        try: listed = {(candidate.parent / ref).resolve() for ref in _maven_refs(ET.fromstring(_read(candidate)))} if candidate is not None and candidate.is_file() else set()
         except ET.ParseError: listed = set()
         if pom.parent.resolve() not in listed:  # only a reactor parent of this project, never a pom outside it
             external = next(((child.text or "").strip() for child in parent if _xml_name(child) == "artifactId"), None) if parent is not None else None
@@ -227,12 +240,12 @@ def _reactor_chain(root: Path) -> tuple[list[Path], str | None]:
     return chain, external
 _JUNIT_PARAMS_ARTIFACTS = frozenset({"junit-jupiter", "junit-jupiter-params", "spring-boot-starter-test"})
 _BOOT_TEST_STARTER = re.compile(r"spring-boot-starter-[\w.-]+-test")  # Spring Boot 4 module test starters pull spring-boot-starter-test
-def junit_params_available(module_root: Path) -> bool:
+def junit_params_available(module_root: Path, project_root: Path | None = None) -> bool:
     """FaT-PT: does the module's build give its tests junit-jupiter-params — a dependency (not a managed version) on
     junit-jupiter, junit-jupiter-params, spring-boot-starter-test or a Boot 4 `spring-boot-starter-*-test` in the module pom, its reactor parents or build.gradle.
     Read only; an external parent pom is not read, so what only it adds counts as absent."""
     root = Path(module_root).resolve()
-    for pom in _reactor_chain(root)[0]:
+    for pom in _reactor_chain(root, project_root)[0]:
         try: data = ET.fromstring(_read(pom))
         except ET.ParseError: continue
         for dependencies in (child for child in data.iter() if _xml_name(child) == "dependencies"):
@@ -247,7 +260,7 @@ def junit_params_available(module_root: Path) -> bool:
         if re.search(r"""['"](?:org\.junit\.jupiter:junit-jupiter(?:-params)?|org\.springframework\.boot:spring-boot-starter-test)\b""", text):
             return True
     return False
-def java_api_level(module_root: Path) -> dict[str, Any] | None:
+def java_api_level(module_root: Path, project_root: Path | None = None) -> dict[str, Any] | None:
     """FaT-JL: the Java level the module's build compiles and checks its tests against — ``{"level", "evidence"}`` or None.
 
     Read from the build files only, never by running them: Maven ``maven.compiler.release/source/target`` (and ``test*``)
@@ -256,7 +269,7 @@ def java_api_level(module_root: Path) -> dict[str, Any] | None:
     Several values (profiles, executions) give the lowest: an API allowed by it compiles under every one of them."""
     root = Path(module_root).resolve()
     levels: list[tuple[int, str]] = []
-    chain, external = _reactor_chain(root)
+    chain, external = _reactor_chain(root, project_root)
     properties: dict[str, str] = {}
     for index, pom in enumerate(reversed(chain)):
         try: found, properties = _pom_levels(pom, properties, external)
