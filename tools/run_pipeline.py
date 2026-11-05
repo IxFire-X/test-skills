@@ -1574,7 +1574,7 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
     journal, the batches are made again from the request, the ones the run has must be the same (by digest), the missing ones are
     written.  Returns the exit code of the scan, or why the run cannot be finished: it is then left as it is and a new one is made."""
     from tools import pilot_state as pilot
-    from tools.project_inventory import ContextSelectionError, InventoryError, build_exclusion_receipt, read_execution_baseline
+    from tools.project_inventory import ContextSelectionError, InventoryError, build_exclusion_receipt
 
     state = pilot.derive_state(run_root)
     attempt = state["attempts"][-1]
@@ -1583,8 +1583,9 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
     try:
         # the journal's readers only: the baseline is the attempt's (its self-digest is the attempt's baseline_digest), the
         # inventory is the one the journal has as INVENTORY_READY
-        baseline = read_execution_baseline(run_root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
-        if baseline.get("digest") != attempt["baseline_digest"]:
+        try:  # F2 (A1-2): the one reader of the attempt's baseline — the file, its self-digest and the journal's EXECUTION_BASELINE_FROZEN
+            baseline = pilot.frozen_baseline(run_root, attempt)
+        except pilot.BaselineUnbound:
             return "baseline не совпал с записанным в попытке"
         frozen_inventory = pilot._frozen_inventory(project, run_root, str(baseline["inventory_digest"]))
         skillsrc_document, _skillsrc_digest = _read_skillsrc_binding(project / ".skillsrc")
