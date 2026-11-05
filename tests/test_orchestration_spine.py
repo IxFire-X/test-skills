@@ -121,7 +121,8 @@ def test_spine_uses_confined_publishers_and_never_invokes_model_executor_or_proj
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("forbidden dependency invoked")
 
-    monkeypatch.setattr(exec_commands, "_execute", forbidden)
+    monkeypatch.setattr(exec_commands, "cmd_materialize", forbidden)  # what writes the tests into the project
+    monkeypatch.setattr(exec_commands, "cmd_ingest", forbidden)  # what takes the result of a run
     result = _run(tmp_path)
     assert result["exit_code"] == 3
     source = Path(pipeline.__file__).read_text(encoding="utf-8")

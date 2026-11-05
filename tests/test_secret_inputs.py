@@ -84,7 +84,7 @@ def test_a_changed_or_missing_secret_file_is_baseline_drift(tmp_path: Path) -> N
 
 
 def test_the_drift_stop_names_no_secret_and_no_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exec stop carries neither the file bytes nor its fingerprint, whatever else the baseline check returns
+    """The materialize stop carries neither the file bytes nor its fingerprint, whatever else the baseline check returns
     (FaT-WT: the stop itself, not the words of its source)."""
     digest = "sha256:" + hashlib.sha256(SECRET.encode("utf-8")).hexdigest()
     drift = {"status": "DECLARED_INPUT_DRIFT", "reason_code": "BASELINE_DRIFT", "changed": [SECRET_PATH],
@@ -148,8 +148,8 @@ def test_a_baseline_blocker_lowers_the_scan_to_cases_only(tmp_path: Path, monkey
 
 
 @pytest.mark.parametrize("change", ["edit", "delete"])
-def test_exec_stops_on_a_changed_secret_file_without_printing_it(tmp_path: Path, capsys: pytest.CaptureFixture[str], change: str) -> None:
-    """End to end through run_pipeline exec: both callers of validate_execution_baseline pass the project root."""
+def test_materialize_stops_on_a_changed_secret_file_without_printing_it(tmp_path: Path, capsys: pytest.CaptureFixture[str], change: str) -> None:
+    """End to end through run_pipeline materialize: both callers of validate_execution_baseline pass the project root."""
     import shutil
 
     import tests.test_finish as finish
@@ -185,7 +185,7 @@ def test_exec_stops_on_a_changed_secret_file_without_printing_it(tmp_path: Path,
     else:
         secret_file.unlink()
     capsys.readouterr()
-    code = run_pipeline.main(["exec", "--project", str(project), "--run", run_root.name, "--module", "python-pytest"])
+    code = run_pipeline.main(["materialize", "--project", str(project), "--run", run_root.name, "--module", "python-pytest"])
     out = capsys.readouterr()
     answer = json.loads(out.out)
     assert code == 2 and answer["status"] == "error" and answer["reason"] == "BASELINE_DRIFT", answer
