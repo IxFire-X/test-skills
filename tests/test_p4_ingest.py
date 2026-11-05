@@ -266,16 +266,17 @@ def test_story_a_test_file_changed_after_materialize_is_refused_by_name_and_rest
     assert "tests/test_generated.py" in output["message"] and expected in output["message"] and output["files_changed"] == ["tests/test_generated.py"]
     assert "materialize" in output["fix"] and "--restore" in output["fix"] and "--no-reports --reason RESULT_UNAVAILABLE" in output["fix"]
     assert _terminal(run_root, attempt_id) is None and not (run_root / "execution-receipts").exists()
+    # the command of the fix puts the reviewed bytes back
+    code = exec_commands.cmd_materialize(_with_restore(_args(project, run_root)))
+    restored = _out(capsys)
+    assert code == 0 and restored["files_restored"] == ["tests/test_generated.py"] and target.read_bytes() == original, restored
     # a new file in the test folder is a change of the project too: refused, and named
     extra = project / "tests" / "test_after_materialize.py"
     extra.write_text("def test_late():\n    assert True\n", encoding="utf-8")
     code, output = _ingest(project, run_root, capsys)
     assert code == 2 and output["reason"] in {"INGEST_REQUEST_CHANGED", "INGEST_TESTS_CHANGED"} and "test_after_materialize.py" in json.dumps(output, ensure_ascii=False), output
     extra.unlink()
-    # the command of the fix puts the reviewed bytes back; the person runs the command again; the ingest passes
-    code = exec_commands.cmd_materialize(_with_restore(_args(project, run_root)))
-    restored = _out(capsys)
-    assert code == 0 and restored["files_restored"] == ["tests/test_generated.py"] and target.read_bytes() == original, restored
+    # the person runs the command again; the ingest passes
     shutil.rmtree(project / "test-results", ignore_errors=True)
     assert _human_run(project, printed).returncode == 0
     code, output = _ingest(project, run_root, capsys)
