@@ -170,7 +170,7 @@ def test_right_after_scan_the_next_step_starts_with_the_parts_plan() -> None:
 
 
 @pytest.mark.parametrize(("verdict", "stage", "section", "needle"), [
-    ("ПРИНЯТО", "exec", "5", "материализация"),
+    ("ПРИНЯТО", "materialize", "5", "материализация"),
     ("ТРЕБУЕТ ДОРАБОТКИ", "finish", "6", "next_run"),
 ])
 def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, capsys: pytest.CaptureFixture[str],
@@ -183,7 +183,7 @@ def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, caps
     step = json.loads(capsys.readouterr().out)["next_step"]
     assert step["stage"] == stage and step["skill_section"] == section and needle in step["action"], step
     if verdict != "ПРИНЯТО":
-        assert "ревью сверх лимита" in step["action"] and "exec" not in step["action"]
+        assert "ревью сверх лимита" in step["action"] and "materialize" not in step["action"]
 
 
 def test_materialize_after_a_refused_static_review_points_to_finish_not_to_another_review(tmp_path: Path,

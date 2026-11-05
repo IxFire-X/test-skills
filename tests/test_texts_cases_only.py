@@ -70,7 +70,7 @@ def test_the_one_sentence_about_mode_b_is_in_the_skill_and_the_readme() -> None:
 def test_the_controller_skill_is_not_longer_than_before_and_the_mode_b_text_is_kept_for_the_development_build() -> None:
     assert len((ROOT / "skills" / "orchestrate" / "SKILL.md").read_bytes()) < OLD_SKILL_BYTES
     mode_b = (ROOT / "skills" / "orchestrate" / "references" / "mode-b.md").read_text(encoding="utf-8")
-    for needle in ("local-pilot-v1", "run_pipeline exec", "tc-to-autotest", "карантин"):
+    for needle in ("local-pilot-v1", "run_pipeline materialize", "tc-to-autotest", "карантин"):
         assert needle in mode_b
 
 

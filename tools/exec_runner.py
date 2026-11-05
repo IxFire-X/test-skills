@@ -103,7 +103,8 @@ def ingest_reports(request: Any, authorization_receipt: Mapping[str, Any], canon
         return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, diagnostics, request=request, run_root=run_root, attempt_id=attempt_id)
 
     if not _request_is_attempt_local(request, scope[0], scope[1]) or _request_report_path(request) is None:
-        return not_runnable([_diag("/request", "RUNNER_REQUEST_PROVENANCE", "Execution request must use the exact attempt module and declared closed runtime.")])
+        # a request that is not the module's own is not bound into the receipt: its digest would name something that was never admitted
+        return _report("NOT_RUNNABLE", project, language, source, automation_digest, review_digest, [_diag("/request", "RUNNER_REQUEST_PROVENANCE", "Execution request must use the exact attempt module and declared closed runtime.")])
     if not _authorization_allows_execution(authorization_receipt, run_root):
         return not_runnable([_diag("/authorization", "RUNNER_AUTHORIZATION", "Execution requires one explicit full-pipeline authorization receipt.")])
     if not _durable_delta_allows_execution(generated_delta_receipt, attempt_project, run_root, attempt_id, automation_digest, review_digest, automation_artifact):

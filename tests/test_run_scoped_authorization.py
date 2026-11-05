@@ -404,8 +404,8 @@ def test_a_prestart_rejection_cut_before_its_finalization_is_finished_by_the_nex
     code = exec_commands.cmd_materialize(flow_args(project, run_root))
 
     output = json.loads(capsys.readouterr().out)
+    assert code == 2 and output.get("verdict") == "NOT_RUNNABLE", output
     terminal = read_terminal_result(run_root, attempt_id)
-    assert code == 2 and output["verdict"] == "NOT_RUNNABLE"
     assert terminal["verification"] == "NOT_RUNNABLE" and terminal["accepted"] is False
     assert not _events(run_root, attempt_id, "EXECUTION_STARTED")
 
@@ -446,6 +446,28 @@ def test_a_pass_read_back_before_the_close_is_unaccepted_when_the_baseline_drift
     assert terminal["verification"] == "PASS" and terminal["operational_reliable"] is False
     assert terminal["reason_code"] in {"BASELINE_DRIFT", "SKILLSRC_DRIFT"}
     assert [row["disposition"] for row in dispositions["files"]] == ["CLEANED"]
+
+
+@pytest.mark.slow
+def test_a_test_file_changed_after_the_cut_closes_the_recorded_pass_as_not_accepted_and_is_not_a_changed_request(tmp_path: Path, monkeypatch, capsys) -> None:
+    """The branch of a recorded result reads the journal and the baseline, never the test files: a file of the tests changed (or formatted) between
+    the receipt and the next ingest must not turn that ingest into INGEST_REQUEST_CHANGED / INGEST_TESTS_CHANGED and leave the attempt open."""
+    from tests.p4_flow import ingest
+    from tools import pilot_state
+
+    project, run_root, attempt_id, _printed = _the_flow_up_to_the_report(tmp_path, capsys)
+    _cut_after_the_receipt(project, run_root, monkeypatch, capsys)
+    generated = project / "tests" / "test_generated.py"
+    generated.write_text(generated.read_text(encoding="utf-8") + "\n# formatted by a person\n", encoding="utf-8")
+    _touch_skillsrc(project)
+
+    code, output = ingest(project, run_root, capsys)
+
+    assert output.get("reason") not in {"INGEST_REQUEST_CHANGED", "INGEST_TESTS_CHANGED"}, output
+    terminal = pilot_state.read_terminal_result(run_root, attempt_id)
+    assert code == 2 and output["accepted"] is False and terminal["accepted"] is False
+    assert terminal["reason_code"] in {"BASELINE_DRIFT", "SKILLSRC_DRIFT"}, terminal
+    assert generated.is_file()  # the person's change is theirs: nothing is cleaned over it
 
 
 @pytest.mark.slow

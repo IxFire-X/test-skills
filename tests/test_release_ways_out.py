@@ -40,8 +40,14 @@ def test_o2_the_stand_abandon_is_gone_with_the_stand_check_and_an_accepted_chain
     from tools.pilot_state import derive_state
 
     root, _attempt = _automation_chain(tmp_path, ["ПРИНЯТО"])
-    code, refused = _main(capsys, ["finish", "--project", str(tmp_path), "--run", root.name, "--abandon", "STAND_UNAVAILABLE"])
-    assert code == 2 and refused["code"] == "INVALID_ARGUMENT" and "STAND_UNAVAILABLE" in refused["message"], refused
+    from tools.run_pipeline import main
+
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as stopped:
+        main(["finish", "--project", str(tmp_path), "--run", root.name, "--abandon", "STAND_UNAVAILABLE"])
+    assert stopped.value.code == 2
+    refused = json.loads(capsys.readouterr().out)
+    assert refused["code"] == "INVALID_ARGUMENT" and "STAND_UNAVAILABLE" in refused["message"], refused
     from tools.finalize_attempt import ABANDON_CODES
 
     assert "STAND_UNAVAILABLE" not in ABANDON_CODES and "STAND_UNAVAILABLE" not in run_pipeline._SECOND_PASS

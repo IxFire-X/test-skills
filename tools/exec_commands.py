@@ -162,7 +162,7 @@ def _reject_prestart_execution(
             "NOT_RUNNABLE", module_root, language, source,
             str(delta["automation_digest"]), str(delta["review_digest"]),
             diagnostics=[{"path": "/execution", "code": reason, "message": message}],
-            request=exact_request, run_root=root, attempt_id=attempt_id,
+            request=exact_request, run_root=root, attempt_id=attempt_id, ran_at=_attempt_time(root, attempt_id),
         )
         _publish_result_receipt(coordinates, report)
     except (KeyError, TypeError, ValueError, OSError, RuntimeError):
@@ -782,7 +782,7 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
     run (BUILD_FAILED, TESTS_NOT_STARTED — NOT_RUNNABLE, the files taken out again) or their result is lost (RESULT_UNAVAILABLE — UNKNOWN,
     the files kept)."""
     from tools.execution_adapters import request_digest
-    from tools.pilot_state import claim_execution_start, read_effective_canonical
+    from tools.pilot_state import claim_execution_start, derive_state, read_effective_canonical
 
     root, attempt = Path(coordinates["run_root"]), coordinates["attempt"]
     attempt_id = str(attempt["attempt_id"])
@@ -795,6 +795,12 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
     execution_source = {"run_by": "human", "human_command_digest": printed["command_digest"], "challenge": "not_available", "statement": reason}
     verdict = _INGEST_REASONS[reason]
     module_root = Path(coordinates["module_root"])
+    starts = [row for row in derive_state(root)["events"] if row.get("event_type") == "EXECUTION_STARTED" and row.get("attempt_id") == attempt_id]
+    if starts and (verdict == "NOT_RUNNABLE" or len(starts) != 1 or starts[0].get("artifact_digest") != request_digest(request)):
+        # an ingest that was cut after its claim left the start: it is the one of this request (RESULT_UNAVAILABLE goes on with it); a build that
+        # "did not start" cannot follow a start, and a start of another request is not ours
+        return _ingest_refusal(attempt_id, "INGEST_REASON_AFTER_RESULT", "исполнение этой попытки уже начато",
+                               "приём отчётов уже начинался: повторите ingest с теми же отчётами или `ingest --no-reports --reason RESULT_UNAVAILABLE`")
     if verdict == "NOT_RUNNABLE":
         report = _core_report(
             "NOT_RUNNABLE", module_root, language, source, str(delta["automation_digest"]), str(delta["review_digest"]),
@@ -803,7 +809,8 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
             ran_at=_printed_time(root, attempt_id),
         )
     else:
-        claim_execution_start(root, attempt_id, request_digest(request))
+        if not starts:
+            claim_execution_start(root, attempt_id, request_digest(request))
         run_id = "RUN-human-" + attempt_id
         lost = _core_process_row("JUNIT_MISSING", ProcessOutcome(0, "", "", "NOT_OBSERVED"), run_id, source, request.adapter_id, 0.0)
         report = _core_report(  # no report of the run: the same row a run without a report gets, its reason in the statement
@@ -816,6 +823,14 @@ def _ingest_statement(project: Path, coordinates: Mapping[str, Any], carriers: M
     except HostStop as error:
         return _ingest_refusal(attempt_id, error.code, str(error), "повторите ingest с теми же аргументами")
     return _finish_ingest(coordinates, report)
+
+
+def _attempt_time(root: Path, attempt_id: str) -> str:
+    """The time of the first event of the attempt: a rejection before the start is made again by the next command, and a receipt that carried
+    the clock of the moment would then differ from the one already installed."""
+    from tools.pilot_state import derive_state
+
+    return next(str(row["observed_at"]) for row in derive_state(root)["events"] if row.get("attempt_id") == attempt_id and row.get("observed_at"))
 
 
 def _printed_time(root: Path, attempt_id: str) -> str:

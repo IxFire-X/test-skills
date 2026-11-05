@@ -162,7 +162,7 @@ def test_ingest_refuses_noop_or_foreign_start_callback_before_the_claim(tmp_path
     assert starts == []
 
 
-def test_ingest_refuses_replay_after_preexisting_execution_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _attempt_with_a_start(tmp_path: Path, digest_of_the_start):
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
 
@@ -175,10 +175,30 @@ def test_ingest_refuses_replay_after_preexisting_execution_start(tmp_path: Path,
     runtime.chmod(0o755)
     document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(project)
     request = _request(project, document, artifact)
-    pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
+    pilot_state.claim_execution_start(run_root, attempt_id, digest_of_the_start(request_digest(request)))
+    return request, document, artifact, review, evidence, run_root, attempt_id, authorization, delta
+
+
+def test_ingest_goes_on_with_the_start_a_cut_ingest_left_for_this_very_request_and_claims_nothing_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Formerly a start found before the run was a replay and was refused.  An ingest that was cut after its claim left the start of this
+    request, and the next ingest is its continuation: no second claim (the callback must not be asked), the result is made of the reports given."""
     import subprocess
 
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("interrupted execution must not replay"))
+    request, document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _attempt_with_a_start(tmp_path, lambda digest: digest)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("nothing is replayed: nothing is started"))
+
+    result = _ingest_reports(
+        request, authorization, document, artifact, review,
+        host_isolation_receipt=evidence, generated_delta_receipt=delta,
+        run_root=run_root, attempt_id=attempt_id, on_execution_start=lambda _request: pytest.fail("a second claim"),
+    )
+
+    assert result["verdict"] == "UNKNOWN" and result["evidence_authoritative"] is False  # no report was given
+    assert len([row for row in pilot_state.derive_state(run_root)["events"] if row["event_type"] == "EXECUTION_STARTED"]) == 1
+
+
+def test_ingest_refuses_a_start_that_is_bound_to_another_request(tmp_path: Path) -> None:
+    request, document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _attempt_with_a_start(tmp_path, lambda _digest: "sha256:" + "a" * 64)
 
     result = _ingest_reports(
         request, authorization, document, artifact, review,
