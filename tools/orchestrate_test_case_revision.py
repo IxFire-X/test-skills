@@ -336,8 +336,6 @@ def reviewer_session_start(
 @_closure_cached  # FaT-9b
 def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapping[str, Any], session_start: Mapping[str, Any]) -> dict[str, Any]:
     """Reserve the only canonical reviewer session for an active attempt before invocation."""
-    from tools.pilot_state import append_event, publish_attempt_receipt, read_attempt_receipt
-
     package = _plain(package_binding)
     start = _plain(session_start)
     required = {"session_id", "generator_role", "reviewer_role", "generator_invocation_id", "reviewer_invocation_id", "host_isolation", "context_budget_bytes"}
@@ -360,16 +358,11 @@ def open_reviewer_session(run_root: Path, attempt_id: str, package_binding: Mapp
         "canonical_branch_digest": package["candidate_digest"],
         "package_digest": package["package_digest"],
     }
-    from tools.pilot_state import derive_state
+    from tools.pilot_state import _publish_bound_attempt_receipt
 
-    published = publish_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
-    # P2-fix: an opening cut short is opened again — the events the first try wrote are not written twice
-    recorded = {event["event_type"] for event in derive_state(Path(run_root))["events"]
-                if event.get("attempt_id") == attempt_id and event.get("artifact_digest") == published["digest"]}
-    for event_type in ("ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"):
-        if event_type not in recorded:
-            append_event(Path(run_root), event_type, actor="controller", attempt_id=attempt_id, artifact_digest=published["digest"])
-    boundary = dict(read_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"])
+    # F2: the one way a fixed receipt is published and bound — an opening cut short is opened again, no event is written twice
+    bound = _publish_bound_attempt_receipt(Path(run_root), attempt_id, "reviewer-session-boundary", facts)
+    boundary = dict(bound["record"])
     created = {
         "schema_version": "1.0.0",
         "session_id": start["session_id"],
@@ -434,7 +427,7 @@ def complete_reviewer_session(run_root: Path, attempt_id: str, *, review: Mappin
     verdict = _VERDICT_EVENT.get(report.get("verdict")) if isinstance(report, dict) else None
     if verdict is None:
         raise ValueError("REVIEWER_VERDICT_INVALID: the recorded review has no ПРИНЯТО / AUTO_FIX_APPLIED / ТРЕБУЕТ ДОРАБОТКИ verdict")
-    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id)))
+    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)))
     lifecycle = reviewer_lifecycle_projection(session)
     events = list(session["events"])
     bound = {
@@ -461,7 +454,7 @@ def complete_reviewer_session(run_root: Path, attempt_id: str, *, review: Mappin
 def _waiting_reviewer_session(run_root: Path, attempt_id: str) -> dict[str, Any]:
     from tools.pilot_state import read_reviewer_session_ledger, reviewer_lifecycle_projection
 
-    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id)))
+    session = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)))
     if not reviewer_lifecycle_projection(session)["waiting"]:
         raise ValueError("REVIEWER_SESSION_CLOSED: the published reviewer session is already closed")
     return session
@@ -476,13 +469,20 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
     the ledger gets EVIDENCE_REQUESTED (the request is the sorted paths and the remaining budget) and EVIDENCE_PROVIDED
     with the cumulative package digest, and the WAITING ledger is published again.
     """
-    from tools.pilot_state import derive_state, publish_context_selection
+    from tools.pilot_state import derive_state, publish_context_selection, read_reviewer_session_ledger
     from tools.project_inventory import ContextSelectionError, read_inventory_receipt, select_context_batches
 
     session = _waiting_reviewer_session(run_root, attempt_id)
     package = session["package_binding"]
     events = list(session["events"])
     provided = [event for event in events if event.get("event_type") == "EVIDENCE_PROVIDED"]
+    try:  # F2 (A2-1): the latest revision published but not read back — the evidence of a call cut short, finished by the same call
+        read_reviewer_session_ledger(Path(run_root), attempt_id)
+        pending = None
+    except ValueError:
+        pending = provided[-1] if provided and events[-1].get("event_type") == "EVIDENCE_PROVIDED" else None
+    if pending is not None:
+        provided = provided[:-1]
     remaining = session["context_budget_bytes"] - package["base_package_byte_count"] - sum(event["byte_count"] for event in provided)
     if remaining <= 0:
         raise ValueError("REVIEW_CONTEXT_LIMIT: no context budget is left for evidence; abort the session with REVIEW_CONTEXT_LIMIT")
@@ -502,6 +502,14 @@ def provide_reviewer_evidence(run_root: Path, attempt_id: str, project_paths: Se
         raise ValueError(f"REVIEW_CONTEXT_LIMIT: the evidence does not fit the remaining {remaining} bytes in one receipt")
     selected = batches[0]["receipt"]
     digests = [event["provided_digest"] for event in provided]
+    if pending is not None:
+        if selected["digest"] != pending["provided_digest"]:
+            from tools.pilot_state import ReviewLedgerUnbound
+
+            raise ReviewLedgerUnbound("REVIEW_LEDGER_UNBOUND: прошлый вызов review-evidence оборвался до записи события ревизии леджера; ничего не записано; "
+                                      "fix: повтори review-evidence с теми же --path, что в прошлый раз (он допишет события); иные файлы — после этого")
+        receipt = publish_context_selection(Path(run_root), attempt_id, selected)  # the same receipt again: nothing new
+        return {"evidence_receipt": receipt, "reviewer_session_digest": _publish_reviewer_ledger(Path(run_root), attempt_id, session)}
     if selected["digest"] in package["context_receipt_digests"] or selected["digest"] in digests:
         raise ValueError("REVIEWER_EVIDENCE_DUPLICATE: these files were already given to the reviewer")
     receipt = publish_context_selection(Path(run_root), attempt_id, selected)
@@ -1037,7 +1045,7 @@ def review_open_step(run_root: Path, attempt_id: str, *, files: Mapping[str, Any
                                     f"(fresh_context={isolation.get('fresh_context')}); второй сессии нет; "
                                     "fix: повтори review-open с теми же --invocation-id и --fresh-context или иди дальше: review-select --verdict")
             try:  # an opening cut short between the boundary and the ledger: the boundary is there, the ledger is not — open it again
-                package = _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)["package_binding"])
+                package = _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)["package_binding"])  # strict: a ledger still waiting for its READ_BACK is finished by the opening below
             except (KeyError, TypeError, ValueError, OSError):
                 boundary = None
         if boundary is None:
@@ -1092,7 +1100,7 @@ def _last_reviewer_session(run_root: Path, attempt_id: str, review: Mapping[str,
     from tools.pilot_state import read_reviewer_session_ledger
 
     try:
-        ledger = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id)))
+        ledger = dict(_plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)))
     except (KeyError, TypeError, ValueError, OSError) as error:
         raise ReviewRefused("REVIEW_NOT_OPEN", "у попытки нет журнала сессии ревьюера; fix: сначала tools.api review-open --model-id <модель> "
                             "--invocation-id <id вызова ревьюера> --fresh-context yes|no") from error
@@ -1106,7 +1114,7 @@ def _ledger_status(run_root: Path, attempt_id: str) -> str | None:
     from tools.pilot_state import read_reviewer_session_ledger
 
     try:
-        return _plain(read_reviewer_session_ledger(Path(run_root), attempt_id)).get("status")
+        return _plain(read_reviewer_session_ledger(Path(run_root), attempt_id, unconfirmed_ok=True)).get("status")
     except (KeyError, TypeError, ValueError, OSError):
         return None
 
@@ -1185,7 +1193,7 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     compared, never trusted: a difference is REVIEW_INPUT_MISMATCH naming the field and its source; a value the journal
     cannot give (a run before FaT-DG) comes from ``given`` as before, else REVIEW_INPUTS_UNAVAILABLE."""
     from tools.batch_assembly import BatchAssemblyError
-    from tools.pilot_state import derive_state, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
+    from tools.pilot_state import derive_state, frozen_baseline, read_context_selection, read_model_stage_artifact, read_reviewer_session_ledger, _run_root
     from tools.project_inventory import read_execution_baseline, read_inventory_receipt
     from tools.publish_test_case_bundle import verify_bundle
 
@@ -1209,11 +1217,11 @@ def review_inputs(run_root: Path, attempt_id: str, *, output_dir: Path | None = 
     except (ValueError, KeyError, BatchAssemblyError, TypeError) as error:
         for key in ("candidate", "assembly_receipt", "generator_fragments"):
             missing[key] = str(error).removeprefix("MODEL_INPUTS_MISMATCH: ").removeprefix("REVIEW_INPUTS_UNAVAILABLE: candidate: ")
-    baseline = read_execution_baseline(resolved / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = frozen_baseline(resolved, attempt)
     journal["inventory_receipt"] = read_inventory_receipt(resolved / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     sources["inventory_receipt"] = "опись baseline попытки"
     try:
-        digests = list(read_reviewer_session_ledger(root, attempt_id)["package_binding"]["context_receipt_digests"])
+        digests = list(read_reviewer_session_ledger(root, attempt_id, unconfirmed_ok=True)["package_binding"]["context_receipt_digests"])
         sources["context_receipts"] = "квитанции пакета открытой сессии ревьюера"
     except (KeyError, TypeError, ValueError):
         digests = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]

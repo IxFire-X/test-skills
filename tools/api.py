@@ -252,7 +252,7 @@ def _cmd_review_abort(a):
 
 
 def _cmd_read_ledger(a):
-    return pilot_state.read_reviewer_session_ledger(a.run_root, a.attempt, a.digest)
+    return pilot_state.read_reviewer_session_ledger(a.run_root, a.attempt, a.digest, unconfirmed_ok=True)
 
 
 def _cmd_read_effective(a):

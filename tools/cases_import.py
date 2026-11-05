@@ -257,13 +257,14 @@ def slice_value(imported: Mapping[str, Any], plan: Mapping[str, Any], batch_id: 
 
 def run_csv(root: Path, attempt: Mapping[str, Any]) -> tuple[str, bytes] | None:
     """``(path, bytes)`` of the CSV of an import run, the bytes as the inventory of the attempt binds them; None otherwise."""
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
+    from tools import pilot_state
+    from tools.project_inventory import read_inventory_receipt
 
     root = Path(root).resolve()
     path = cases_path(root)
     if path is None:
         return None
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = pilot_state.frozen_baseline(root, attempt)
     inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     row = next((item for item in inventory["files"] if item["project_path"] == path), None)  # bytes bound by the inventory
     secret = next((item for item in inventory.get("exclusions") or [] if item.get("project_path") == path and item.get("reason_code") == "SECRET_SUSPECTED"), None)
@@ -380,7 +381,7 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     if answered:
         result = dict(pilot_state.read_model_stage_artifact(root, attempt_id, stage, str(answered[-1]["artifact_digest"])))
         return {**result, "imported": pilot_state.publish_imported_cases(root, attempt_id)}
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = pilot_state.frozen_baseline(root, attempt)
     path, data = run_csv(root, attempt)
     pilot_state.publish_imported_cases(root, attempt_id)  # the skeleton: the last tc-generator input
     artifact = requirements_artifact(path, data)
@@ -388,8 +389,8 @@ def import_requirements(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
         pilot_state.check_model_stage_artifact("context-marker:requirements", artifact)
     except ValueError as error:
         raise CasesImportError("IMPORT_REQUIREMENTS_INVALID", str(error)) from None
-    pilot_state.publish_model_request(root, attempt_id, stage, model_id=IMPORT_MODEL_ID, invocation_id=f"cases-import-{attempt_id[:12]}",
-                                      input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])
+    pilot_state.publish_code_step_request(root, attempt_id, stage, model_id=IMPORT_MODEL_ID, invocation_id=f"cases-import-{attempt_id[:12]}",
+                                          input_digests=[baseline["requirements"]["digest"], baseline["inventory_digest"]])  # F2: an import cut here goes on
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, stage, artifact))
     published["warning"] = None  # the import is code, not a model answer
     published["imported"] = pilot_state.publish_imported_cases(root, attempt_id)

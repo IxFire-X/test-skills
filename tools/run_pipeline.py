@@ -213,12 +213,13 @@ def _next_step(status: Mapping[str, Any], project: Path | None = None, request: 
 
 def _exclusion_summary(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any] | None:
     """FaT-2: what the scan left out, for a person; derived from the attempt's frozen inventory, never stored."""
-    from tools.project_inventory import read_execution_baseline, read_inventory_receipt
+    from tools.pilot_state import frozen_baseline
+    from tools.project_inventory import read_inventory_receipt
     from tools.scan_rules import exclusion_summary
 
     root = Path(run_root)
     try:
-        baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+        baseline = frozen_baseline(root, attempt)
         inventory = read_inventory_receipt(root / "inventories" / (str(baseline["inventory_digest"]).removeprefix("sha256:") + ".json"))
     except (KeyError, OSError, ValueError):
         return None
@@ -1196,13 +1197,12 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
     from tools.project_inventory import (
         baseline_external_input_paths,
         build_inventory,
-        read_execution_baseline,
         runtime_identity,
         validate_execution_baseline,
     )
-    from tools.pilot_state import read_attempt_receipt
+    from tools.pilot_state import frozen_baseline, read_attempt_receipt
 
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = frozen_baseline(root, attempt)
     try:
         durable_delta = read_attempt_receipt(root, str(attempt["attempt_id"]), "generated-delta", "ARTIFACT_READ_BACK")["record"]["delta"]
     except (KeyError, OSError, TypeError, ValueError):

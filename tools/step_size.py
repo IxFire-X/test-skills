@@ -263,7 +263,9 @@ class _Journal:
         self.documents: dict[str, Path | None] = {}
         self.bundled: dict[str, Path] = {}
         attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
-        baseline = json.loads((root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json")).read_text(encoding="utf-8"))
+        from tools.pilot_state import frozen_baseline
+
+        baseline = frozen_baseline(root, attempt)
         self.expands[str(baseline["requirements"]["digest"])] = (_requirement_files(project, root), False)
         inventory = str(baseline["inventory_digest"])
         self._file(inventory, root / "inventories" / (inventory.removeprefix("sha256:") + ".json"))

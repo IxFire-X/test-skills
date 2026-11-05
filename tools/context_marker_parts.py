@@ -52,7 +52,7 @@ def plan(root: Path, budget: int | None = None) -> dict[str, Any]:
     project = root.parents[1]
     state, attempt = _attempt(root)
     attempt_id = str(attempt["attempt_id"])
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = pilot_state.frozen_baseline(root, attempt)
     head = [baseline["requirements"]["digest"], baseline["inventory_digest"]]
     unfinished = pilot_state.context_incomplete(root, attempt_id, state)
     if unfinished is not None:
@@ -118,7 +118,7 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
         raise ValueError(f"CONTEXT_MARKER_PARTS_INCOMPLETE: нет ответов {missing}")
     answer = pilot_state.read_model_stage_artifact(root, attempt_id, stages[0], responses[stages[0]])["artifact"]
     parts = [pilot_state.read_model_stage_artifact(root, attempt_id, stage, responses[stage])["artifact"] for stage in stages[1:]]
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = pilot_state.frozen_baseline(root, attempt)
     inputs = [baseline["requirements"]["digest"], baseline["inventory_digest"], *(receipt["digest"] for receipt in receipts),
               responses[stages[0]], *dict.fromkeys(responses[stage] for stage in stages[1:])]
     try:  # FaT-O3: the merged marker is built and checked before its request is written — a refusal leaves no orphan request
@@ -130,8 +130,8 @@ def merge_parts(root: Path) -> Mapping[str, Any]:
     except ValueError as error:
         raise ValueError(f"CONTEXT_MARKER_MERGE_INVALID: {str(error).split('; fix: ')[0]}; fix: слияние — код, его повтор даст то же: "
                          "исправить можно только ответы частей — начните разметку заново (scan --new-run); запрос слияния не записан") from None
-    pilot_state.publish_model_request(root, attempt_id, "context-marker:baseline", model_id=MERGE_MODEL_ID,
-                                      invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)
+    pilot_state.publish_code_step_request(root, attempt_id, "context-marker:baseline", model_id=MERGE_MODEL_ID,
+                                          invocation_id=f"merge-{attempt_id[:12]}", input_digests=inputs)  # F2: a merge cut here goes on
     published = dict(pilot_state.publish_model_stage_artifact(root, attempt_id, "context-marker:baseline", merged))
     published["warning"] = None  # FaT-O: the merge is code, not a model answer — no STEP_OUTPUT_LARGE about it
     from tools.scope_pause import write_draft

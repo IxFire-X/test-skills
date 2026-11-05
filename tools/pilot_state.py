@@ -1737,6 +1737,33 @@ def _frozen_inventory(project: Path, root: Path, inventory_digest: str) -> dict[
     return receipt
 
 
+class BaselineUnbound(ValueError):
+    """F2 (A1-2): the baseline file under the attempt's name is not the baseline the attempt froze."""
+
+    code = "BASELINE_UNBOUND"
+
+
+def frozen_baseline(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any]:
+    """F2 (A1-2): the execution baseline of *attempt* — the file named by ``attempt.baseline_digest``, whose own self-digest is that digest
+    and which the journal froze (``EXECUTION_BASELINE_FROZEN`` on that digest).  Like ``_frozen_inventory``: a file that is only
+    called by the right name, a consistent forged pair of baseline and inventory among them, is BASELINE_UNBOUND, not a baseline."""
+    from tools.project_inventory import read_execution_baseline
+
+    project, root = _run_root(run_root)
+    digest = str(attempt.get("baseline_digest") or "")
+    fix = "fix: начни новый прогон тем же scan с --new-run (baseline этого прогона не тот, что записан в попытке)"
+    if not _DIGEST.fullmatch(digest):
+        raise BaselineUnbound(f"BASELINE_UNBOUND: у попытки нет digest baseline; {fix}")
+    try:
+        baseline = read_execution_baseline(root / "baselines" / (digest.removeprefix("sha256:") + ".json"))
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise BaselineUnbound(f"BASELINE_UNBOUND: baseline {digest} не читается ({type(error).__name__}); {fix}") from error
+    frozen = any(event["event_type"] == "EXECUTION_BASELINE_FROZEN" and event.get("artifact_digest") == digest for event in derive_state(root)["events"])
+    if baseline.get("digest") != digest or not frozen:
+        raise BaselineUnbound(f"BASELINE_UNBOUND: файл baseline {digest} {'не заморожен журналом' if not frozen else 'не совпадает с собственным digest'}; {fix}")
+    return baseline
+
+
 def _context_selection_target(root: Path, attempt_id: str, receipt_digest: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", attempt_id) or not _DIGEST.fullmatch(receipt_digest):
         raise ValueError("invalid context selection identity")
@@ -1978,7 +2005,8 @@ def _validate_model_request_predecessors(
             raise ValueError("tc-generator context must bind its prior attempt inventory selection")
     else:
         boundary = _read_attempt_receipt_with_state(project, root, state, attempt_id, "reviewer-session-boundary", "ARTIFACT_READ_BACK")["record"]
-        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id)
+        # F2: only the package binding is wanted (the same in every revision), so a latest revision still waiting for its READ_BACK will do
+        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, unconfirmed_ok=True)
         package = ledger["package_binding"]
         reviews = [event for event in events if event["event_type"] == "REVIEW_REQUESTED" and event.get("stage_instance_id") == stage_instance_id]
         prior_boundary = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("artifact_digest") == boundary["digest"] and event["seq"] < cutoff for event in events)
@@ -2184,6 +2212,24 @@ def publish_model_request(
         if measure_error is not None:  # nor is a measurement that failed silent
             published["step_measure_error"] = measure_error
     return published
+
+
+def publish_code_step_request(run_root: Path, attempt_id: str, stage_instance_id: str, *, model_id: str, invocation_id: str,
+                              input_digests: Sequence[str]) -> Mapping[str, Any]:
+    """F2 (A2-2): the request of a step the code answers itself (the merge of the marker parts, the import of cases).  A command cut
+    between this request and the answer is run again and goes on from the request it wrote — the same model, invocation and inputs,
+    no answer yet; any other request of the stage (or an answered stage) is what ``publish_model_request`` makes of it,
+    MODEL_REQUEST_DUPLICATE."""
+    project, root = _run_root(run_root)
+    events = [event for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id and event.get("stage_instance_id") == stage_instance_id]
+    requests = [event for event in events if event["event_type"] == "MODEL_REQUESTED"]
+    if len(requests) == 1 and not any(event["event_type"] == "MODEL_RESPONSE_RECEIVED" for event in events):
+        request = read_model_request(root, attempt_id, stage_instance_id, str(requests[0]["artifact_digest"]))
+        if (request.get("model_id") == model_id and request.get("invocation_id") == invocation_id
+                and list(request.get("input_digests") or []) == list(input_digests)):
+            return request
+    return publish_model_request(run_root, attempt_id, stage_instance_id, model_id=model_id, invocation_id=invocation_id,
+                                 input_digests=input_digests)
 
 
 def _record_step_size(project: Path, root: Path, run_id: str, stage_instance_id: str) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
@@ -2824,6 +2870,12 @@ def _read_context_selection_checked(run_root: Path, attempt_id: str, receipt_dig
     return receipt
 
 
+class ReviewLedgerUnbound(ValueError):
+    """F2 (A2-1): a reviewer ledger file lies without its events and is not the revision being published."""
+
+    code = "REVIEW_LEDGER_UNBOUND"
+
+
 def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Mapping[str, Any]) -> Mapping[str, Any]:
     """Publish/read back one append-only reviewer-ledger revision under its attempt."""
     from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
@@ -2849,6 +2901,7 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
     recorded_read_back = [event for event in events if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1"]
     recorded_publish_digests = [event.get("artifact_digest") for event in recorded_published]
     recorded_readback_digests = [event.get("artifact_digest") for event in recorded_read_back]
+    pending: set[str] = set()  # F2: the revision this call publishes, found on disk with its events cut short — finished below
     if len(recorded_publish_digests) != len(set(recorded_publish_digests)) or len(recorded_readback_digests) != len(set(recorded_readback_digests)):
         raise ValueError("invalid reviewer session ledger history")
     if ledger_root.exists():
@@ -2873,12 +2926,21 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
                 raise ValueError("invalid reviewer session ledger history")
             published = [event for event in recorded_published if event.get("artifact_digest") == prior["digest"]]
             read_back = [event for event in recorded_read_back if event.get("artifact_digest") == prior["digest"]]
+            if len(published) <= 1 and not read_back and prior["digest"] != digest:
+                raise ReviewLedgerUnbound(  # F2 (A2-1): a file of another revision without its events — not ours to finish
+                    f"REVIEW_LEDGER_UNBOUND: файл леджера {path.name} лежит без событий журнала и это не та ревизия, что публикуется сейчас; "
+                    "ничего не записано; fix: повтори ту же команду с теми же входами (ответом ревьюера, --path) — она допишет события файла; "
+                    "иные входы — новое ревью: новый прогон (scan --new-run)")
+            if prior["digest"] == digest and not read_back and len(published) <= 1:
+                pending.add(digest)  # file there, events not (or only the first): same bytes — this call writes what is missing
+                continue
             if len(published) != 1 or len(read_back) != 1 or read_back[0]["seq"] <= published[0]["seq"]:
                 raise ValueError("invalid reviewer session ledger history")
             history.append((published[0]["seq"], prior))
         history.sort(key=lambda item: item[0])
         history_digests = [item[1]["digest"] for item in history]
-        if len({item[0] for item in history}) != len(history) or set(history_digests) != set(recorded_publish_digests) or set(history_digests) != set(recorded_readback_digests):
+        if (len({item[0] for item in history}) != len(history) or set(history_digests) != set(recorded_publish_digests) - pending
+                or set(history_digests) != set(recorded_readback_digests)):
             raise ValueError("invalid reviewer session ledger history")
     elif recorded_published or recorded_read_back:
         raise ValueError("invalid reviewer session ledger history")
@@ -2907,7 +2969,8 @@ def publish_reviewer_session_ledger(run_root: Path, attempt_id: str, session: Ma
         raise ValueError("reviewer session ledger readback failed") from error
     if readback != value or raw != data:
         raise ValueError("reviewer session ledger readback mismatch")
-    append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
+    if digest not in recorded_publish_digests:
+        append_event(root, "ARTIFACT_PUBLISHED", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
     append_event(root, "ARTIFACT_READ_BACK", actor="controller", attempt_id=attempt_id, batch_id="reviewer-ledger-v1", artifact_digest=digest)
     return {"record": readback, "digest": digest, "created": created, "path": str(target.relative_to(root)).replace("\\", "/")}
 
@@ -2918,6 +2981,8 @@ def _read_reviewer_session_ledger_with_state(
     state: Mapping[str, Any],
     attempt_id: str,
     digest: str | None = None,
+    *,
+    unconfirmed_ok: bool = False,
 ) -> Mapping[str, Any]:
     from tools.schema_validation import StrictJsonError, loads_json_strict, schema_diagnostics
 
@@ -2937,7 +3002,12 @@ def _read_reviewer_session_ledger_with_state(
     selected = digest if digest is not None else (published[-1].get("artifact_digest") if published else None)
     if attempt is None or not isinstance(selected, str) or not _DIGEST.fullmatch(selected):
         raise ValueError("reviewer session ledger is unavailable")
-    if len([event for event in published if event.get("artifact_digest") == selected]) != 1 or len([event for event in readbacks if event.get("artifact_digest") == selected]) != 1:
+    confirmed = len([event for event in readbacks if event.get("artifact_digest") == selected])
+    # F2 (A2-1): the latest revision is the last one PUBLISHED; the commands that finish a cut publication (``unconfirmed_ok``) read it
+    # while its READ_BACK is still to come — the file is content-addressed and checked against that digest below, and an older
+    # revision is never read in its place.  Evidence consumers keep the strict reading (both events).
+    if (len([event for event in published if event.get("artifact_digest") == selected]) != 1
+            or confirmed > 1 or (confirmed == 0 and not (unconfirmed_ok and digest is None))):
         raise ValueError("reviewer session ledger is unbound")
     target = root / "reviewer-session-ledgers" / attempt_id / f"{selected.removeprefix('sha256:')}.json"
     try:
@@ -2968,11 +3038,14 @@ def read_reviewer_session_ledger(
     run_root: Path,
     attempt_id: str,
     digest: str | None = None,
+    *,
+    unconfirmed_ok: bool = False,
 ) -> Mapping[str, Any]:
-    """Read the exact latest or named reviewer ledger only after paired events."""
+    """Read the exact latest or named reviewer ledger only after paired events (``unconfirmed_ok``: the latest one may still wait
+    for its READ_BACK — for the commands of the review, which finish what a cut left; see the reader below)."""
     project, root = _run_root(run_root)
     return _read_reviewer_session_ledger_with_state(
-        project, root, derive_state(root), attempt_id, digest,
+        project, root, derive_state(root), attempt_id, digest, unconfirmed_ok=unconfirmed_ok,
     )
 
 
@@ -4272,6 +4345,28 @@ def _publish_bound_attempt_receipt(
     return _bind_published_attempt_receipt(run_root, attempt_id, kind, published)
 
 
+class ReceiptFileUnbound(ValueError):
+    """F2 (A2-4): the file of a fixed receipt lies without its events and its bytes are not the ones being published."""
+
+    code = "RECEIPT_FILE_UNBOUND"
+
+
+def _publish_fixed_receipt_resuming(run_root: Path, attempt_id: str, kind: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
+    """F2 (A2-4): ``_publish_bound_attempt_receipt`` for a receipt a cut command may have left half done — the file there with the
+    same bytes gets its missing events; the file there with other bytes is RECEIPT_FILE_UNBOUND (nothing written), not a bare
+    read-back error."""
+    try:
+        return _publish_bound_attempt_receipt(run_root, attempt_id, kind, facts)
+    except ValueError as error:
+        _project, root = _run_root(run_root)
+        if _receipt_target(root, attempt_id, kind).exists() and ("read-back mismatch" in str(error) or str(error).startswith("unsafe ")):
+            raise ReceiptFileUnbound(
+                f"RECEIPT_FILE_UNBOUND: файл {_receipt_target(root, attempt_id, kind).relative_to(root).as_posix()} лежит без событий журнала, а его "
+                "байты не те, что публикуются сейчас; ничего не записано; fix: повтори команду с теми же входами, что дали файл (она допишет "
+                "события), иные входы — новый прогон (scan --new-run)") from error
+        raise
+
+
 def _bind_published_attempt_receipt(
     run_root: Path,
     attempt_id: str,
@@ -4853,12 +4948,16 @@ def _publish_batch_skeletons(run_root: Path, attempt_id: str) -> dict[str, str]:
     for row in plan["batches"]:
         kind = _SKELETON_KIND + row["batch_id"]
         value = _batch_skeleton_value(project, root, state, attempt_id, row["batch_id"])
+        prior = None
         if _receipt_target(root, attempt_id, kind).exists():
-            prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["imported"]
-            if prior != value:
+            try:  # F2 (A2-4): a file without its events is finished below, not a dead end
+                prior = _read_attempt_receipt_with_state(project, root, derive_state(root), attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["imported"]
+            except (ValueError, OSError, KeyError):
+                prior = None
+            if prior is not None and prior != value:
                 raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {row['batch_id']} already has another skeleton")
-        else:
-            _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"imported": dict(value)})
+        if prior is None:
+            _publish_fixed_receipt_resuming(run_root, attempt_id, kind, {"imported": dict(value)})
         published[row["batch_id"]] = str(value["digest"])
     return published
 
@@ -4901,11 +5000,11 @@ def publish_prior_capabilities(run_root: Path, attempt_id: str, batch_id: str) -
         try:
             prior = _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")["record"]["prior_capabilities"]
         except (ValueError, OSError, KeyError):
-            prior = None
-        if prior != value:
+            prior = None  # F2 (A2-4): the file is there, its events are not — below it is finished (same bytes) or refused (other bytes)
+        if prior is not None and prior != value:
             raise ValueError(f"GENERATOR_INPUT_CONFLICT: the batch {batch_id} already has other prior capabilities; another one needs "
                              "a new run (scan --new-run)")
-    _publish_bound_attempt_receipt(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
+    _publish_fixed_receipt_resuming(run_root, attempt_id, kind, {"prior_capabilities": dict(value)})
     ids = [str(row.get("capability_id")) for row in value["operation_capabilities"]]
     # PT2: the composition in a line — the ids (their names), the body in the file: record.prior_capabilities.operation_capabilities
     return {"batch_id": batch_id, "digest": value["digest"], "capabilities": len(ids), "capability_ids": ids[:60],
@@ -5103,7 +5202,7 @@ def marker_reuse_suggestion(run_root: Path, attempt_id: str) -> dict[str, Any]:
     project, root = _run_root(run_root)
     state = derive_state(root)
     attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
-    baseline = read_execution_baseline(root / "baselines" / (str(attempt["baseline_digest"]).removeprefix("sha256:") + ".json"))
+    baseline = frozen_baseline(root, attempt)
     published = list(dict.fromkeys(str(event["artifact_digest"]) for event in state["events"]
                                    if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"))
     current = [baseline["requirements"]["digest"], baseline["inventory_digest"], *published]
