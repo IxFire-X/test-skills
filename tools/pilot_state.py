@@ -7412,3 +7412,17 @@ def exit_code(result: Mapping[str, Any] | None, controller_error: bool = False) 
     if result["verification"] in {"UNKNOWN", "NOT_RUNNABLE"} or result["completion"] == "FATAL" or result.get("reason_code") == "FINALIZATION_INVALID" or not result["trace_valid"] or not result["operational_reliable"] or not evidence["finalization_completed"] or not evidence["finalization_read_back"]:
         return 2
     return 1
+
+
+# Public names for execution_core / finalize_attempt (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+append_journal_event = _append_event
+publish_artifact_value = _publish
+read_artifact_value = _read_artifact
+sealed_value = _sealed
+retained_native_rerun_target = _retained_native_rerun_target
+retained_rerun_context = _retained_rerun_context
+scenario_observation_target = _scenario_observation_target
+run_root_of = _run_root
+terminal_retry_snapshot = _terminal_retry_snapshot
+validate_execution_event_branch = _validate_execution_event_branch

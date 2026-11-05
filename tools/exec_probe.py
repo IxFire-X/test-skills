@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.ready import EXECUTION, _row
+from tools.ready import EXECUTION
+from tools.execution_core import check_row as _row
 
 
 PROBE_TIMEOUT = 120

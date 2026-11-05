@@ -5,13 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
-
-if str(Path(__file__).resolve().parents[1]) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 ROOT = Path(__file__).resolve().parents[1]
 TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"

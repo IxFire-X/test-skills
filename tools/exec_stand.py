@@ -102,3 +102,8 @@ def stand_down(run_root: Path, attempt_id: str) -> bool:
     attempt = next(row for row in pilot_state.derive_state(run_root)["attempts"] if row["attempt_id"] == attempt_id)
     project = Path(str(pilot_state.read_run(run_root)["manifest"]["project"]))
     return _service_stop(project, str(attempt["module"])) is not None
+
+
+# Public names for exec_commands (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+service_stop = _service_stop

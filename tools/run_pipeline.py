@@ -5,11 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-if __package__ in {None, ""}:
-    _host_root = Path(__file__).resolve().parents[1]
-    if str(_host_root) not in sys.path:
-        sys.path.insert(0, str(_host_root))
-
 import hashlib
 import json
 import os
@@ -2207,6 +2202,18 @@ def main(argv: list[str] | None = None) -> int:
         _print({"status": "error", "reason": "INTERNAL", "message": f"{type(error).__name__}: {str(error)[:500]}",
                 "fix": "сообщите разработчикам пакета вывод этой команды"})
         return 2
+
+
+# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+print_payload = _print
+read_run_coordinate = _read_run_coordinate
+baseline_check = _baseline_check
+drift_report = _drift_report
+digest_bytes = _digest_bytes
+style_notes = _style_notes
+report_mismatch = _report_mismatch
+automation_split_fields = _automation_split
 
 
 if __name__ == "__main__":

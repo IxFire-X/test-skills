@@ -598,5 +598,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if report["status"] == "READY" else 2
 
 
+# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+check_row = _row
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

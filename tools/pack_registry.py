@@ -42,6 +42,7 @@ CASES_ONLY_EXCLUDED_FILES = (
     # mode B (generation and run of automated tests): the core reaches these only through ``execution_gate.load_mode_b`` (F6)
     "tools/run_tests.py", "tools/generated_delta.py", "tools/automation_validation.py", "tools/execution_adapters.py",
     "tools/autotest_hints.py", "tools/trace_check.py", "tools/build_trace_document.py", "tools/quarantine.py", "tools/code_slices.py",
+    "tools/execution_core.py",  # the interface of the core for the execution files (V1)
 )
 CASES_ONLY_EXCLUDED_PATTERNS = ("tools/exec_*.py",)  # launch of builds and tests, the stand, the probe (P8a-1)
 # The two roles of mode B (generation and review of automated tests) and the text of mode B for the controller: texts of what a

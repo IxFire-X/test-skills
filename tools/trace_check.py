@@ -5,12 +5,8 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any, Mapping
-
-if str(Path(__file__).resolve().parents[1]) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 ROOT = Path(__file__).resolve().parents[1]
 TRACE_SCHEMA = ROOT / "schemas" / "trace-document.schema.json"

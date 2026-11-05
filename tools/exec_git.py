@@ -12,8 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.pilot_state import _sealed
-from tools.ready import CASES, _row
+from tools.execution_core import sealed_value as _sealed
+from tools.ready import CASES
+from tools.execution_core import check_row as _row
 
 
 def check_git(project: Path) -> dict[str, Any]:

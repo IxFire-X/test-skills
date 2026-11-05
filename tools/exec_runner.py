@@ -14,30 +14,32 @@ from typing import Any, Callable, Literal, Mapping
 
 from tools.run_tests import (
     PROCESS_OUTPUT_TAIL_BYTES,
-    _PROCESS_STOP_ATTESTATION,
-    _TIMEOUT,
     DurableNativeReportError,
     ProcessOutcome,
     RunnerInputError,
-    _attempt_execution_scope,
-    _authorization_allows_execution,
-    _changed_file_ids,
-    _diag,
-    _durable_delta_allows_execution,
-    _durable_execution_artifacts,
-    _failed_methods,
-    _outcome,
-    _post_run_file_digests,
-    _process_row,
-    _records_from_snapshots,
-    _report,
-    _report_digest_evidence,
-    _report_inventory,
-    _report_snapshots,
-    _request_is_attempt_local,
-    _request_report_path,
     classify_evidence,
     validate_artifact_runner_compatibility,
+)
+from tools.execution_core import (
+    PROCESS_STOP_ATTESTATION as _PROCESS_STOP_ATTESTATION,
+    RUN_TIMEOUT_SECONDS as _TIMEOUT,
+    attempt_execution_scope as _attempt_execution_scope,
+    authorization_allows_execution as _authorization_allows_execution,
+    changed_file_ids as _changed_file_ids,
+    runner_diag as _diag,
+    durable_delta_allows_execution as _durable_delta_allows_execution,
+    durable_execution_artifacts as _durable_execution_artifacts,
+    failed_methods as _failed_methods,
+    closed_outcome as _outcome,
+    post_run_file_digests as _post_run_file_digests,
+    process_evidence_row as _process_row,
+    records_from_snapshots as _records_from_snapshots,
+    runner_report as _report,
+    report_digest_evidence as _report_digest_evidence,
+    report_inventory as _report_inventory,
+    report_snapshots as _report_snapshots,
+    request_is_attempt_local as _request_is_attempt_local,
+    request_report_path as _request_report_path,
 )
 
 
@@ -386,3 +388,8 @@ def run_tests_v5(request: Any, authorization_receipt: Mapping[str, Any], canonic
         )
     failed_methods = _failed_methods(snapshots, compatibility, evidence, java=language == "java") if classified == "FAIL" and authoritative else None
     return _report(classified, project, language, source, automation_digest, review_digest, (), run_id, evidence, process_evidence, authoritative, outcome.exit_code, target[0], request.executable, target[1], duration_sec, request.environment_labels, request=request, report_evidence=report_evidence, artifact_evidence=artifact_evidence, run_root=run_root, attempt_id=attempt_id, failed_methods=failed_methods)
+
+
+# Public names for exec_commands (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+invoke_closed_request = _invoke_closed_request

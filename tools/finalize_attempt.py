@@ -549,7 +549,7 @@ def _durable_branch(
     resume_validation: Mapping[str, Any] | None = None
     if facts.get("execution_applicability") == "NOT_APPLICABLE":
         try:
-            pilot_state._validate_execution_event_branch(
+            pilot_state.validate_execution_event_branch(
                 state["events"], attempt_id, verification, None,
             )
         except ValueError as error:
@@ -583,7 +583,7 @@ def _durable_branch(
         try:
             if verification == "UNKNOWN":
                 pilot_state.record_execution_unknown(run_root, attempt_id, str(execution_record["digest"]))
-            pilot_state._validate_execution_event_branch(
+            pilot_state.validate_execution_event_branch(
                 pilot_state.derive_state(run_root)["events"], attempt_id, verification,
                 str(execution_record["digest"]),
             )
@@ -728,13 +728,13 @@ def finalize_attempt(
                         "terminal-idempotent-retry": observation,
                     },
                 }
-            before_snapshot = pilot_state._terminal_retry_snapshot(run_root, attempt_id)
+            before_snapshot = pilot_state.terminal_retry_snapshot(run_root, attempt_id)
             attempt = next(
                 (row for row in state["attempts"] if row["attempt_id"] == attempt_id),
                 None,
             )
             after_terminal = pilot_state.read_terminal_result(run_root, attempt_id)
-            after_snapshot = pilot_state._terminal_retry_snapshot(run_root, attempt_id)
+            after_snapshot = pilot_state.terminal_retry_snapshot(run_root, attempt_id)
             terminal_events = [
                 row for row in state["events"]
                 if row.get("attempt_id") == attempt_id
@@ -774,11 +774,11 @@ def finalize_attempt(
                 "receipt_digests": after_snapshot["terminal_artifact_digests"],
                 "result": {"kind": "TERMINAL_RESULT", "digest": after_terminal["digest"]},
             }
-            target = pilot_state._scenario_observation_target(
+            target = pilot_state.scenario_observation_target(
                 Path(run_root), attempt_id, "terminal-idempotent-retry",
             )
-            project_root, root = pilot_state._run_root(run_root)
-            record, created, identity = pilot_state._publish(
+            project_root, root = pilot_state.run_root_of(run_root)
+            record, created, identity = pilot_state.publish_artifact_value(
                 project_root, root, target, value, "scenario observation",
                 return_created=True,
             )
@@ -790,7 +790,7 @@ def finalize_attempt(
                 root, "ARTIFACT_READ_BACK", actor="controller",
                 artifact_digest=str(record["digest"]),
             )
-            pilot_state._append_event(
+            pilot_state.append_journal_event(
                 project_root, root, "TERMINAL_RETRY_OBSERVED", actor="controller",
                 attempt_id=attempt_id, batch_id=None,
                 artifact_digest=str(record["digest"]),
@@ -987,7 +987,7 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
             raise ValueError("execution receipt has no terminal verification")
         if verification == "UNKNOWN":
             pilot_state.record_execution_unknown(run_root, attempt_id, str(execution_record["digest"]))
-        pilot_state._validate_execution_event_branch(
+        pilot_state.validate_execution_event_branch(
             pilot_state.derive_state(run_root)["events"], attempt_id, verification,
             str(execution_record["digest"]),
         )
@@ -1385,3 +1385,7 @@ def _durable_branch_facts(run_root: Path, attempt_id: str, abandon: str | None =
                                 fix="python -m tools.run_pipeline finish --project <project> --run <run_id>")
     return attempt, branch, facts
 
+
+# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+accepted_unprepared = _accepted_unprepared

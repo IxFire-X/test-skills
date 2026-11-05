@@ -15,9 +15,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
-if str(Path(__file__).resolve().parents[1]) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from tools.canonical_document import CanonicalDocumentError, canonical_bytes, document_sha256, require_valid_canonical_document
 from tools.fixes import FIXES
 from tools import output_guard

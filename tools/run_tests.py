@@ -9,7 +9,6 @@ import ast
 import hashlib
 import json
 import re
-import sys
 from bisect import bisect_left
 from functools import lru_cache
 import xml.etree.ElementTree as ET
@@ -19,25 +18,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
-if __package__:
-    from .skillsrc_manifest import (
-        SkillsrcError,
-        load_skillsrc,
-        normalize_skillsrc,
-        resolve_module_root,
-        select_module,
-    )
-else:
-    _bootstrap_root = str(Path(__file__).resolve().parents[1])
-    if _bootstrap_root not in sys.path:
-        sys.path.insert(0, _bootstrap_root)
-    from skillsrc_manifest import (
-        SkillsrcError,
-        load_skillsrc,
-        normalize_skillsrc,
-        resolve_module_root,
-        select_module,
-    )
+from tools.skillsrc_manifest import (
+    SkillsrcError,
+    load_skillsrc,
+    normalize_skillsrc,
+    resolve_module_root,
+    select_module,
+)
 
 from tools.java_text import mask_java_noncode  # F6: the Java lexer is shared with the map of existing tests
 
@@ -1646,3 +1633,26 @@ def _request_report_path(request: Any) -> Path | None:
     reports, expected = command_for(request.adapter_id, request.executable, request.build_profile, request.selectors)
     return report if request.argv == expected and request.report_paths == reports and request.selectors else None
 
+
+# Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
+# a rename here, in one place.
+runner_report = _report
+runner_diag = _diag
+process_evidence_row = _process_row
+closed_outcome = _outcome
+report_inventory = _report_inventory
+report_snapshots = _report_snapshots
+records_from_snapshots = _records_from_snapshots
+report_digest_evidence = _report_digest_evidence
+durable_execution_artifacts = _durable_execution_artifacts
+normalize_durable_junit_report = _normalize_durable_junit_report
+request_report_path = _request_report_path
+request_is_attempt_local = _request_is_attempt_local
+attempt_execution_scope = _attempt_execution_scope
+authorization_allows_execution = _authorization_allows_execution
+durable_delta_allows_execution = _durable_delta_allows_execution
+changed_file_ids = _changed_file_ids
+post_run_file_digests = _post_run_file_digests
+failed_methods = _failed_methods
+PROCESS_STOP_ATTESTATION = _PROCESS_STOP_ATTESTATION
+RUN_TIMEOUT_SECONDS = _TIMEOUT

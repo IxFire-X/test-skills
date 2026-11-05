@@ -10,18 +10,18 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from tools.run_pipeline import (
-    HostStop,
-    _automation_split,
-    _baseline_check,
-    _digest_bytes,
-    _drift_report,
-    _print,
-    _read_run_coordinate,
-    _report_mismatch,
-    _style_notes,
+from tools.run_pipeline import HostStop
+from tools.execution_core import (
+    automation_split_fields as _automation_split,
+    baseline_check as _baseline_check,
+    digest_bytes as _digest_bytes,
+    drift_report as _drift_report,
+    print_payload as _print,
+    read_run_coordinate as _read_run_coordinate,
+    report_mismatch as _report_mismatch,
+    style_notes as _style_notes,
 )
-from tools.exec_stand import _service_stop
+from tools.exec_stand import service_stop as _service_stop
 
 
 def _resolve_host_context(
@@ -183,7 +183,7 @@ def _lost_execution_report(
 ) -> Mapping[str, Any]:
     """Project a lost post-start controller result as sparse authoritative UNKNOWN."""
     from tools.automation_validation import automation_sha256, autotest_review_sha256
-    from tools.run_tests import _report
+    from tools.execution_core import runner_report as _report
 
     request, language = _reconstruct_started_request(coordinates, document, automation)
     attempt_id = str(coordinates["attempt"]["attempt_id"])
@@ -246,7 +246,11 @@ def _reject_prestart_execution(
     from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST
     from tools.pilot_state import read_attempt_receipt, read_effective_canonical
     from tools.project_inventory import read_execution_baseline
-    from tools.run_tests import _report, _request_is_attempt_local, _request_report_path
+    from tools.execution_core import (
+        runner_report as _report,
+        request_is_attempt_local as _request_is_attempt_local,
+        request_report_path as _request_report_path,
+    )
 
     try:
         root, attempt = Path(coordinates["run_root"]), coordinates["attempt"]
@@ -529,7 +533,8 @@ _PREPARE_FINAL_FIX = ("подготовка принятой автоматиз�
 
 
 def _prepare_failure_fix(root: Path, attempt_id: str, error: BaseException) -> str:
-    from tools.finalize_attempt import _accepted_unprepared, automation_next
+    from tools.finalize_attempt import automation_next
+    from tools.execution_core import accepted_unprepared as _accepted_unprepared
     from tools.pilot_state import read_run
 
     try:
@@ -748,12 +753,6 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Rerun one accepted attempt's retained tests through its recorded native request."""
     from tools.execution_adapters import invoke_request, request_digest
     from tools.pilot_state import (
-        _append_event,
-        _publish,
-        _read_artifact,
-        _retained_native_rerun_target,
-        _retained_rerun_context,
-        _scenario_observation_target,
         append_event,
         derive_state,
         publish_retained_rerun_observation,
@@ -763,16 +762,23 @@ def rerun_retained_tests(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
         read_retained_native_rerun,
         read_scenario_observation,
     )
-    from tools.exec_runner import _invoke_closed_request
-    from tools.run_tests import (
-        DURABLE_NATIVE_REPORT_NORMALIZATION,
-        _normalize_durable_junit_report,
-        _outcome,
-        _report_inventory,
-        _report_snapshots,
-        _records_from_snapshots,
-        _request_report_path,
-        validate_artifact_runner_compatibility,
+    from tools.execution_core import (
+        append_journal_event as _append_event,
+        publish_artifact_value as _publish,
+        read_artifact_value as _read_artifact,
+        retained_native_rerun_target as _retained_native_rerun_target,
+        retained_rerun_context as _retained_rerun_context,
+        scenario_observation_target as _scenario_observation_target,
+    )
+    from tools.exec_runner import invoke_closed_request as _invoke_closed_request
+    from tools.run_tests import DURABLE_NATIVE_REPORT_NORMALIZATION, validate_artifact_runner_compatibility
+    from tools.execution_core import (
+        normalize_durable_junit_report as _normalize_durable_junit_report,
+        closed_outcome as _outcome,
+        report_inventory as _report_inventory,
+        report_snapshots as _report_snapshots,
+        records_from_snapshots as _records_from_snapshots,
+        request_report_path as _request_report_path,
     )
 
     context = _retained_rerun_context(Path(run_root), attempt_id)
