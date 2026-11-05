@@ -430,7 +430,11 @@ def _pack_folder(project: Path) -> str:
 
 def style_rows(project: Path, module: Mapping[str, Any]) -> list[dict[str, Any]]:
     """FaT-L: the project's style checks (read from its build files) and what its own build needs to skip the package."""
-    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, project_style_checks, style_notes, whole_project_checks
+    from tools import execution_gate
+
+    GRADLE, MAVEN, SYSTEM_MAVEN, project_style_checks, style_notes, whole_project_checks = execution_gate.from_mode_b(
+        "execution_adapters", "GRADLE", "MAVEN", "SYSTEM_MAVEN", "project_style_checks", "style_notes", "whole_project_checks",
+    )
 
     root = Path(project).resolve()
     module_root = (root / str(module.get("root") or ".")).resolve()

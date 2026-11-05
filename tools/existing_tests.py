@@ -104,9 +104,9 @@ def _without_comments(text: str) -> str:
 def _java_methods(text: str) -> Iterable[tuple[str, str]]:
     """(name, body) of each test method: from its annotation to the next test annotation (comments and strings of the
     method head masked, its body kept for the quoted paths and view names)."""
-    from tools.run_tests import _mask_java_noncode
+    from tools.java_text import mask_java_noncode
 
-    masked = _mask_java_noncode(text)
+    masked = mask_java_noncode(text)
     text = _without_comments(text)
     marks = [match.start() for match in _TEST_ANNOTATION.finditer(masked)]
     for index, start in enumerate(marks):

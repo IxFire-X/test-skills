@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from tools.schema_engine import Draft202012Validator, FormatChecker
 
+from tools import execution_gate
 from tools.fixes import delete_field_fix
 from tools.confined_output import OutputConfinementError, atomic_write_confined_bytes_at_root, create_confined_bytes_exclusive, create_confined_directory_exclusive, ensure_project_child_directory, read_confined_bytes, remove_confined_bytes_if_equal
 
@@ -1083,7 +1084,7 @@ def _validate_automation_model_lifecycle(
     state: Mapping[str, Any],
 ) -> None:
     """Require the exact automation generator/reviewer lifecycle and readbacks."""
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
+    automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
 
     try:
         final_revision = automation["artifacts"]["automation_revision"]
@@ -1449,7 +1450,7 @@ def record_process_stopped(
     execution_receipt_digest: str,
 ) -> Mapping[str, Any]:
     """Bind host-proved timeout scope stoppage; caller assertions are insufficient."""
-    from tools.run_tests import consume_controller_process_stop_proof
+    (consume_controller_process_stop_proof,) = execution_gate.from_mode_b("run_tests", "consume_controller_process_stop_proof")
 
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -3266,7 +3267,7 @@ def _validate_generated_delta_ownership(
 
 def _execution_request_from_payload(payload: Mapping[str, Any]) -> Any | None:
     """Reconstruct only the closed, process-significant request recorded by V5."""
-    from tools.execution_adapters import ExecutionRequest
+    (ExecutionRequest,) = execution_gate.from_mode_b("execution_adapters", "ExecutionRequest")
 
     execution = payload.get("execution")
     environment = payload.get("environment")
@@ -3313,12 +3314,9 @@ def _validate_durable_execution_artifacts(
     delta: Mapping[str, Any],
 ) -> None:
     """Verify the run-scoped bytes already bound into the execution receipt."""
-    from tools.execution_adapters import is_zero_test_report
-    from tools.run_tests import (
-        DURABLE_NATIVE_REPORT_MAX_BYTES,
-        DURABLE_NATIVE_REPORT_NORMALIZATION,
-        DurableNativeReportError,
-        _normalize_durable_junit_report,
+    (is_zero_test_report,) = execution_gate.from_mode_b("execution_adapters", "is_zero_test_report")
+    DURABLE_NATIVE_REPORT_MAX_BYTES, DURABLE_NATIVE_REPORT_NORMALIZATION, DurableNativeReportError, _normalize_durable_junit_report = execution_gate.from_mode_b(
+        "run_tests", "DURABLE_NATIVE_REPORT_MAX_BYTES", "DURABLE_NATIVE_REPORT_NORMALIZATION", "DurableNativeReportError", "_normalize_durable_junit_report",
     )
 
     execution = payload["execution"]
@@ -3422,7 +3420,9 @@ def _validate_closed_execution_request(
     request: Any,
     delta: Mapping[str, Any],
 ) -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for, request_digest
+    GRADLE, MAVEN, SYSTEM_MAVEN, PYTEST, SAFE_ENVIRONMENT_LABELS, command_for, request_digest = execution_gate.from_mode_b(
+        "execution_adapters", "GRADLE", "MAVEN", "SYSTEM_MAVEN", "PYTEST", "SAFE_ENVIRONMENT_LABELS", "command_for", "request_digest",
+    )
     from tools.project_inventory import module_runtime_path, read_execution_baseline, system_maven_path
 
     execution = payload["execution"]
@@ -3779,9 +3779,8 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid automation review boundary")
     elif kind == "execution-inputs":
-        from tools.automation_validation import (
-            automation_sha256,
-            validate_accepted_autotest_review,
+        automation_sha256, validate_accepted_autotest_review = execution_gate.from_mode_b(
+            "automation_validation", "automation_sha256", "validate_accepted_autotest_review",
         )
         from tools.schema_validation import schema_diagnostics
 
@@ -3834,7 +3833,9 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid generated delta receipt")
         try:
-            from tools.automation_validation import automation_sha256, autotest_review_sha256
+            automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b(
+                "automation_validation", "automation_sha256", "autotest_review_sha256",
+            )
 
             effective = _read_effective_canonical_with_state(
                 project, root, state, str(attempt["attempt_id"]),
@@ -3854,7 +3855,7 @@ def _validate_factual_receipt(
             raise ValueError("invalid generated delta receipt")
         _validate_generated_delta_ownership(project, root, state, attempt, delta)
     elif kind == "execution-receipt":
-        from tools.execution_adapters import request_digest
+        (request_digest,) = execution_gate.from_mode_b("execution_adapters", "request_digest")
         from tools.schema_validation import schema_diagnostics
 
         payload = receipt.get("payload")
@@ -3966,8 +3967,10 @@ def _validate_factual_receipt(
         ):
             raise ValueError("invalid resume validation receipt")
     elif kind == "execution-trace":
-        from tools.automation_validation import automation_sha256, autotest_review_sha256
-        from tools.build_trace_document import TraceBuildError, build_trace, trace_sha256
+        automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
+        TraceBuildError, build_trace, trace_sha256 = execution_gate.from_mode_b(
+            "build_trace_document", "TraceBuildError", "build_trace", "trace_sha256",
+        )
         from tools.schema_validation import schema_diagnostics
 
         payload = receipt.get("payload")
@@ -4018,7 +4021,7 @@ def _validate_factual_receipt(
             raise ValueError("invalid execution trace receipt")
     elif kind == "trace-audit":
         from tools.schema_validation import schema_diagnostics
-        from tools.trace_check import check
+        (check,) = execution_gate.from_mode_b("trace_check", "check")
 
         payload = receipt.get("payload")
         expected_keys = common | {"execution_trace_receipt_digest", "trace_sha256", "payload"}
@@ -4071,7 +4074,9 @@ def _validate_factual_receipt(
                         break
                     seen.add(identity)
             try:
-                from tools.automation_validation import automation_sha256, autotest_review_sha256
+                automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b(
+                    "automation_validation", "automation_sha256", "autotest_review_sha256",
+                )
 
                 effective = _read_effective_canonical_with_state(
                     project, root, state, str(attempt["attempt_id"]),
@@ -4112,7 +4117,9 @@ def _validate_factual_receipt(
             if (verification == "UNKNOWN") != isinstance(evidence, str) or (isinstance(evidence, str) and not _DIGEST.fullmatch(evidence)):
                 raise ValueError(f"invalid {kind} receipt")
             rows = payload["files"]
-            from tools.generated_delta import GeneratedDeltaError, resolve_disposition_policy
+            GeneratedDeltaError, resolve_disposition_policy = execution_gate.from_mode_b(
+                "generated_delta", "GeneratedDeltaError", "resolve_disposition_policy",
+            )
 
             quarantine = verification == "FAIL" and _disposition_policy_at(project, root) == "quarantine"
 
@@ -4400,9 +4407,9 @@ def publish_execution_trace_pair(
     autotest_review: Mapping[str, Any],
 ) -> Mapping[str, Any]:
     """Build, persist, and read back the sole V5 execution trace and audit pair."""
-    from tools.automation_validation import automation_sha256, autotest_review_sha256
-    from tools.build_trace_document import TraceBuildError, build_trace, trace_sha256
-    from tools.trace_check import check
+    automation_sha256, autotest_review_sha256 = execution_gate.from_mode_b("automation_validation", "automation_sha256", "autotest_review_sha256")
+    TraceBuildError, build_trace, trace_sha256 = execution_gate.from_mode_b("build_trace_document", "TraceBuildError", "build_trace", "trace_sha256")
+    (check,) = execution_gate.from_mode_b("trace_check", "check")
 
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -5595,7 +5602,9 @@ def _response_bindings(
     fragment self-digest is None — it is the digest of the answer itself, taken last.
 
     A shape the schema refuses yields what it could read; the schema and the later checks stay the backstop."""
-    from tools.automation_validation import automation_sha256, autotest_review_sha256, implementation_relations_sha256
+    automation_sha256, autotest_review_sha256, implementation_relations_sha256 = execution_gate.from_mode_b(
+        "automation_validation", "automation_sha256", "autotest_review_sha256", "implementation_relations_sha256",
+    )
 
     stage, _, instance = stage_instance_id.partition(":")
     rows: list[tuple[str, str | None, str]] = []
@@ -6660,7 +6669,7 @@ def _retained_native_rerun_target(root: Path, attempt_id: str) -> Path:
 
 def _retained_rerun_context(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
     """Read the accepted execution/disposition chain and current retained bytes."""
-    from tools.execution_adapters import request_digest
+    (request_digest,) = execution_gate.from_mode_b("execution_adapters", "request_digest")
 
     project, root = _run_root(run_root)
     state = derive_state(root)
@@ -6761,11 +6770,8 @@ def read_retained_native_rerun(
     expected_digest: str,
 ) -> Mapping[str, Any]:
     """Read and verify one successful ordinary-command rerun receipt."""
-    from tools.run_tests import (
-        DURABLE_NATIVE_REPORT_MAX_BYTES,
-        DURABLE_NATIVE_REPORT_NORMALIZATION,
-        _normalize_durable_junit_report,
-        parse_junit_bytes,
+    DURABLE_NATIVE_REPORT_MAX_BYTES, DURABLE_NATIVE_REPORT_NORMALIZATION, _normalize_durable_junit_report, parse_junit_bytes = execution_gate.from_mode_b(
+        "run_tests", "DURABLE_NATIVE_REPORT_MAX_BYTES", "DURABLE_NATIVE_REPORT_NORMALIZATION", "_normalize_durable_junit_report", "parse_junit_bytes",
     )
 
     if not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None:

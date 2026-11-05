@@ -39,6 +39,9 @@ else:
         select_module,
     )
 
+from tools.java_text import mask_java_noncode  # F6: the Java lexer is shared with the map of existing tests
+
+_mask_java_noncode = mask_java_noncode
 _ROOT = Path(__file__).resolve().parents[1]
 _AUTOMATION_SCHEMA = _ROOT / "schemas" / "tc-to-autotest-output.schema.json"
 _AUTOTEST_REVIEW_SCHEMA = _ROOT / "schemas" / "autotest-reviewer-output.schema.json"
@@ -313,35 +316,6 @@ def _declared_after_type(body: str, start: int) -> bool:
             return True
         index -= 1
     return False
-
-
-def _mask_java_noncode(text: str, *, keep_quotes: bool = False) -> str:
-    """Replace comments and quoted literals with spaces while preserving braces/newlines (``keep_quotes``: a string keeps its quotes)."""
-    result = list(text)
-    index, state, escaped = 0, "code", False
-    while index < len(text):
-        char = text[index]
-        if state == "code":
-            if text.startswith("//", index):
-                result[index:index + 2] = "  "; index += 2; state = "line"; continue
-            if text.startswith("/*", index):
-                result[index:index + 2] = "  "; index += 2; state = "block"; continue
-            if char == '"': result[index] = '"' if keep_quotes else " "; state = "string"; escaped = False
-            elif char == "'": result[index] = " "; state = "char"; escaped = False
-        elif state == "line":
-            if char == "\n": state = "code"
-            else: result[index] = " "
-        elif state == "block":
-            if text.startswith("*/", index): result[index:index + 2] = "  "; index += 1; state = "code"
-            elif char != "\n": result[index] = " "
-        else:
-            if char == "\n": state = "code"
-            elif escaped: result[index] = " "; escaped = False
-            elif char == "\\": result[index] = " "; escaped = True
-            elif (state == "string" and char == '"') or (state == "char" and char == "'"): result[index] = '"' if keep_quotes and state == "string" else " "; state = "code"
-            else: result[index] = " "
-        index += 1
-    return "".join(result)
 
 
 # FaT-JL: a closed list of Java APIs newer than a module's level that a regular expression finds without a compiler —

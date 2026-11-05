@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from tools import execution_gate
+
 GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
              "и ID требований, кейсов, параметров и классов")
 CLOCK_NOTE = "время по часам машины, не проверяется"
@@ -609,7 +611,7 @@ def automation_artifact(root: Path, events: Sequence[Mapping[str, Any]]) -> Any:
 
 def autotest_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
     """FaT-Q: weak assertions of the generated tests — file ID, line, rule and ASSERT ID, never the code."""
-    from tools.autotest_hints import autotest_hints, capped_autotest_hints, counts
+    autotest_hints, capped_autotest_hints, counts = execution_gate.from_mode_b("autotest_hints", "autotest_hints", "capped_autotest_hints", "counts")
 
     hints = autotest_hints(artifact)
     return {"hints": counts(hints), "gaps": capped_autotest_hints(hints)}

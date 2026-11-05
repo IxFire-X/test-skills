@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from tools import automation_validation, batch_assembly, canonical_document, cases_import, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, run_tests, step_size
+from tools import batch_assembly, canonical_document, cases_import, execution_gate, orchestrate_test_case_revision, output_guard, pilot_state, step_size
 from tools.json_cli import JsonArgumentParser, error_envelope, record_refusal
 from tools.schema_validation import StrictJsonError, load_json_strict, loads_json_strict
 
@@ -289,19 +289,19 @@ def _cmd_read_receipt(a):
 
 
 def _cmd_automation_digest(a):
-    return automation_validation.automation_sha256(a.automation)
+    return execution_gate.load_mode_b("automation_validation").automation_sha256(a.automation)
 
 
 def _cmd_relations_digest(a):
-    return automation_validation.implementation_relations_sha256(a.relations)
+    return execution_gate.load_mode_b("automation_validation").implementation_relations_sha256(a.relations)
 
 
 def _cmd_validate_automation(a):
-    return automation_validation.validate_automation_artifact(a.automation, a.canonical)
+    return execution_gate.load_mode_b("automation_validation").validate_automation_artifact(a.automation, a.canonical)
 
 
 def _cmd_runner_compat(a):
-    return run_tests.validate_artifact_runner_compatibility(a.module_root, a.language, a.canonical, a.automation, materialized=a.materialized)
+    return execution_gate.load_mode_b("run_tests").validate_artifact_runner_compatibility(a.module_root, a.language, a.canonical, a.automation, materialized=a.materialized)
 
 
 def _cmd_step_inputs(a):

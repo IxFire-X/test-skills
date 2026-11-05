@@ -333,7 +333,9 @@ _KEPT_DISPOSITIONS = frozenset({"RETAINED", "QUARANTINED", "PRESERVED_EXECUTION_
 
 def _style_notes(project: Path, run_root: Path, attempt_id: str) -> dict[str, str]:
     """FaT-L: the project's style checks the selected-tests run skipped and how to format the files left in the project."""
-    from tools import execution_adapters as adapters
+    if not execution_gate.mode_b_available():
+        return {}  # F6: a delivery of cases has no build and no style checks to report
+    adapters = execution_gate.load_mode_b("execution_adapters")
     from tools import pilot_state as pilot
     from tools.project_inventory import read_execution_baseline
 
@@ -360,8 +362,11 @@ def _report_mismatch(run_root: Path, attempt_id: str) -> dict[str, str]:
 
     A testcase whose method is selected but whose classname is none of that method's selected classes is what a class
     display name does (Surefire writes it as the classname); the hint names the selected classes only."""
+    if not execution_gate.mode_b_available():
+        return {}  # F6: a delivery of cases has no test report to match
     from tools import pilot_state as pilot
-    from tools.run_tests import parse_junit_bytes, selected_classes_renamed
+
+    parse_junit_bytes, selected_classes_renamed = execution_gate.from_mode_b("run_tests", "parse_junit_bytes", "selected_classes_renamed")
 
     try:
         payload = pilot.read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]

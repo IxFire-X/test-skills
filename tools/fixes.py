@@ -246,6 +246,8 @@ FIXES: dict[str, str] = {
     # --- P8a-1: a delivery without the execution files ---
     "PROFILE_NOT_IN_PACKAGE": "в этой поставке нет исполнения тестов — повтори команду без --profile или с --profile cases-only-v1: "
                               "кейсы и отчёт доступны, автотесты запускает тот, у кого есть полная поставка",
+    "MODE_B_NOT_IN_PACKAGE": "эта поставка — для кейсов, режима автотестов в ней нет: не вызывай эту команду; кейсы и отчёт доступны "
+                             "(scan без --profile, status, report, finish)",
 }
 
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"

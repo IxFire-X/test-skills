@@ -12,8 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from tools.generated_delta import GeneratedDeltaError, apply_dispositions, inspect_attempt_delta, resolve_disposition_policy
-from tools import pilot_state
+from tools import execution_gate, pilot_state
 from tools.canonical_document import blocker_count as canonical_blocker_count
 from tools.pilot_state import closure_cached as _closure_cached
 
@@ -83,7 +82,8 @@ def decide_dispositions(
     """
     if verification not in _VERIFICATIONS:
         raise FinalizationError("unknown verification")
-    inspection = inspect_attempt_delta(project, delta, run_root=run_root, attempt_id=attempt_id)
+    delta_module = execution_gate.load_mode_b("generated_delta")  # F6: mode B, absent from a delivery of cases
+    inspection = delta_module.inspect_attempt_delta(project, delta, run_root=run_root, attempt_id=attempt_id)
     if not inspection.get("valid"):
         raise FinalizationError("generated delta digest does not verify")
     states = {row.get("path"): row.get("state") for row in inspection.get("files", []) if isinstance(row, Mapping)}
@@ -109,17 +109,17 @@ def decide_dispositions(
         if verification == "NOT_APPLICABLE" and materialization == "MATERIALIZED" and not partial:
             raise FinalizationError("unsupported generated-delta disposition branch")
         try:
-            _operation, requested[path], _outcomes = resolve_disposition_policy(
+            _operation, requested[path], _outcomes = delta_module.resolve_disposition_policy(
                 verification,
                 materialization,
                 retain_pass=verification == "PASS" and pre_trace_valid,
                 quarantine=quarantine,
             )
-        except GeneratedDeltaError as error:
+        except delta_module.GeneratedDeltaError as error:
             raise FinalizationError(str(error)) from error
     try:
         result = dict(
-            apply_dispositions(
+            delta_module.apply_dispositions(
                 Path(project),
                 delta,
                 requested,
@@ -129,7 +129,7 @@ def decide_dispositions(
                 execution_unknown_evidence_digest=execution_unknown_evidence_digest,
             )
         )
-    except GeneratedDeltaError as error:
+    except delta_module.GeneratedDeltaError as error:
         raise FinalizationError(str(error)) from error
     # `apply_dispositions` returns a resealed Phase5 artifact.  Phase7 never
     # reseals or enriches it; the authoritative reason is Phase5-owned.
@@ -1017,7 +1017,7 @@ def _finalize_durable_execution_attempt(run_root: Path, attempt_id: str) -> Mapp
                 for row in plan_rows
             ):
                 raise ValueError("durable disposition plan is invalid")
-            disposed = apply_dispositions(
+            disposed = execution_gate.load_mode_b("generated_delta").apply_dispositions(
                 Path(attempt["project"]), delta,
                 {str(row["path"]): str(row["requested_disposition"]) for row in plan_rows},
                 run_root=run_root, attempt_id=attempt_id, verification=verification,
@@ -1163,9 +1163,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
             if status_blocked or (canonical_blockers and not partial):
                 # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
                 return "AUTOMATION_BLOCKED", None
-            from tools.generated_delta import materialization_refusal
-
-            refusal = materialization_refusal(run_root, attempt_id)
+            refusal = execution_gate.load_mode_b("generated_delta").materialization_refusal(run_root, attempt_id)
             return ("AUTOMATION_NOT_MATERIALIZABLE", refusal) if refusal is not None else ("ACCEPTED", None)
         if verdict != "AUTO_FIX_APPLIED":
             return "AUTOMATION_REJECTED", None
@@ -1192,8 +1190,6 @@ def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
 def _stand_down(run_root: Path, attempt_id: str) -> bool:
     """FaT-O12 O2: the module's stand (FaT-2R ``service_url_env``) does not answer now — the same check as exec's.
     A delivery without the stand module cannot check it: the fact stays undetermined (P8a-1)."""
-    from tools import execution_gate
-
     stand = execution_gate.load("exec_stand")
     return stand is not None and stand.stand_down(run_root, attempt_id)
 
@@ -1228,9 +1224,9 @@ def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int
 
 def automation_split(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     """FaT-PA: the automated and the manual cases of a partial automation (only reads); None when nothing is excluded."""
-    from tools.generated_delta import journal_automation
-
-    inputs = journal_automation(run_root, attempt_id)
+    if not execution_gate.mode_b_available():
+        return None  # a delivery of cases has no automation to split
+    inputs = execution_gate.load_mode_b("generated_delta").journal_automation(run_root, attempt_id)
     if inputs is None or not inputs["automation"]["artifacts"].get("excluded_cases"):
         return None
     return split_cases(pilot_state.read_effective_canonical(run_root, attempt_id)["document"], inputs["automation"])
