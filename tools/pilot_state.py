@@ -4724,11 +4724,28 @@ def effective_canonical_or_reason(run_root: Path, attempt_id: str) -> Mapping[st
                    and event.get("stage_instance_id") == "tc-reviewer:canonical" for event in state["events"])
     if not recorded:
         return {"effective": None, "reason": "ещё нет: вердикт ревью не записан (review-select --verdict)"}
-    ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None)  # a ledger the journal cannot confirm is a refusal
+    not_yet = {"effective": None, "reason": "ещё нет: ответ ревьюера записан, ревизия не выбрана — повтори review-select (тот же --verdict или без него)"}
+    # F2: the order of the writes of review-select decides what «not yet» is: the ledger revision COMPLETED is published BEFORE the effective
+    # canonical (orchestrate_revision: validate_reviewer_session, then publish_effective_canonical).  So a latest revision still waiting for its
+    # READ_BACK, a ledger still WAITING (no verdict), and a closed accepting ledger with no attempt-level receipt read back after it all mean the
+    # effective canonical was not published yet — a repeat of review-select does it.  Only a published selection whose file is gone is a refusal.
+    try:
+        ledger = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None)
+        confirmed = True
+    except ValueError:
+        ledger, confirmed = _read_reviewer_session_ledger_with_state(project, root, state, attempt_id, None, unconfirmed_ok=True), False  # unreadable too: the refusal
     verdict = next((event.get("verdict") for event in ledger["events"] if isinstance(event, Mapping) and event.get("event_type") == "AUTHORITATIVE_VERDICT"), None)
     if verdict == "REJECTED":
         return {"effective": None, "reason": "effective нет: вердикт ТРЕБУЕТ ДОРАБОТКИ (REJECTED) не принимает кандидата"}
-    return _read_effective_canonical_with_state(project, root, state, attempt_id)  # an accepting verdict without its selection: the refusal
+    if verdict is None or not confirmed:
+        return not_yet
+    closed = next((event["seq"] for event in state["events"] if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id
+                   and event.get("batch_id") == "reviewer-ledger-v1" and event.get("artifact_digest") == ledger["digest"]), None)
+    selected = any(event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") is None
+                   and closed is not None and event["seq"] > closed for event in state["events"])
+    if not selected:
+        return not_yet
+    return _read_effective_canonical_with_state(project, root, state, attempt_id)  # a published selection whose file is gone: the refusal
 
 
 def _recover_attempt_receipt_events(run_root: Path, attempt_id: str, kind: str) -> Mapping[str, Any]:

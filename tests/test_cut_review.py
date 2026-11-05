@@ -307,3 +307,58 @@ def test_status_after_the_cut_leads_to_the_select_and_the_repeat_closes_the_revi
     assert _main(capsys, _open_argv(other))[0] == 0
     assert _main(capsys, _select_argv(other, _verdict(other)))[0] == 0
     assert _shape(run["run_root"]) == _shape(other["run_root"])  # the form of the journal is the uncut one
+
+
+# --------------------------------------------------------------------------------------
+# status where the effective canonical is «not yet» (the writes of review-select go ledger COMPLETED first, effective after) — and where it is lost
+# --------------------------------------------------------------------------------------
+
+def _status(capsys, run: dict) -> dict:
+    from tools.run_pipeline import main
+
+    capsys.readouterr()
+    main(["status", "--project", str(run["project"]), "--run", run["run_root"].name])
+    out = capsys.readouterr().out
+    return json.loads(out[out.index("{"):])
+
+
+def test_status_between_the_recorded_answer_and_the_select_says_review_select(tmp_path: Path, capsys) -> None:
+    run = _opened(tmp_path, capsys)
+    code, answered = _main(capsys, ["model-response", *_flags(run), "--stage", "tc-reviewer:canonical", "--artifact", _verdict(run)])
+    assert code == 0, answered
+    status = _status(capsys, run)
+    assert not any("effective-canonicals" in str(row.get("path")) for row in status.get("evidence_errors") or []), status.get("evidence_errors")
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and "review-select" in status["next_step"]["command"], status["next_step"]
+    code, effective = _main(capsys, ["read-effective", *_flags(run)])
+    assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
+
+
+def test_a_closed_ledger_cut_before_the_effective_canonical_says_not_yet(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Ledger COMPLETED and read back, the effective canonical not published (the cut is between the two writes of select)."""
+    from tools import pilot_state
+
+    run = _opened(tmp_path, capsys)
+    verdict = _verdict(run)
+    with monkeypatch.context() as broken:
+        _crash_once(broken, pilot_state, "publish_effective_canonical")
+        assert _main(capsys, _select_argv(run, verdict))[0] == 2
+    code, effective = _main(capsys, ["read-effective", *_flags(run)])
+    assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
+    status = _status(capsys, run)
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and "review-select" in status["next_step"]["command"], status["next_step"]
+
+
+def test_a_fully_closed_review_whose_effective_file_is_gone_is_still_a_refusal(tmp_path: Path, capsys) -> None:
+    """The guard of PT2/F1: ACCEPTED, the ledger paired, the effective canonical published — and the file deleted."""
+    from tools.run_report import build_report
+
+    run = _opened(tmp_path, capsys)
+    assert _main(capsys, _select_argv(run, _verdict(run)))[0] == 0
+    (run["run_root"] / "effective-canonicals" / f"{run['attempt_id']}.json").unlink()
+    status = _status(capsys, run)
+    assert status.get("stop_reason") == "EVIDENCE_UNVERIFIED", status
+    assert any("effective-canonicals" in str(row.get("path")) for row in status.get("evidence_errors") or []), status.get("evidence_errors")
+    code, effective = _main(capsys, ["read-effective", *_flags(run)])
+    assert code == 2 and effective["status"] == "error", effective
+    report = build_report(run["project"], run["run_root"].name)[0]
+    assert any("EFFECTIVE_CANON_UNREADABLE" in str(item) for item in report["warnings"]), report["warnings"]
