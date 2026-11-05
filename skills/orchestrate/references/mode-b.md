@@ -2,7 +2,7 @@
 
 
 Этот файл — прежний текст `SKILL.md` и контракта оркестрации, который описывает автотесты и запуск: роли `tc-to-autotest` и
-`autotest-reviewer`, `tools.run_pipeline exec`, сборку проекта, стенд, карантин. В поставку «только кейсы» он не входит. Агент,
+`autotest-reviewer`, `tools.run_pipeline materialize` и `ingest` (сборку запускает человек), стенд, карантин. В поставку «только кейсы» он не входит. Агент,
 который идёт по `local-pilot-v1`, читает его вместе с `SKILL.md`: места ниже называют раздел `SKILL.md`, к которому относятся.
 Профиль `local-pilot-v1` отдельно разрешает человек (запрос полного pipeline в этом прогоне).
 
@@ -23,9 +23,8 @@ Wrapper (`mvnw`, `gradlew`) не создавай: он скачивает сб�
 Модуль только с тестами, приложение — в соседнем каталоге того же корня (FaT-2R): ready спросит
 `module:<id>:paths.context`; ответ — каталог приложения из `options` (его пакет только читает для контекста модели, ничего
 там не пишет и не собирает). Приложение пакет не поднимает: стенд поднимает человек, адрес — в переменной окружения,
-имя которой стоит в `.skillsrc` у модуля (`service_url_env`). Без него прогон понижается до кейсов. exec до любой записи
-проверяет, что стенд отвечает; `SERVICE_URL_MISSING` / `SERVICE_UNREACHABLE` — не итог: попытка открыта, передай человеку
-`fix` и после его «стенд поднят» запусти exec снова.
+имя которой стоит в `.skillsrc` у модуля (`service_url_env`). Без него прогон понижается до кейсов. Стенд человек поднимает
+до запуска команды из `materialize`; пакет стенд не опрашивает.
 
 ## К §0: проект только с документами
 
@@ -91,36 +90,32 @@ Exact transport input/output bytes сохраняются отдельно; их
    --out <run>/tmp/auto-facts-rN.json` (заявления — как для `session-start` в §4). Затем запиши
    `tools.api review-requested --stage autotest-reviewer:rN --digest <boundary.automation_digest>` и
    вызови `autotest-reviewer` в fresh invocation. Разрешены initial + максимум одна complete correction/review.
-3. После accepted static review сразу вызывай `exec` (ниже). exec сам публикует
+3. После accepted static review сразу вызывай `materialize` (ниже). Он сам публикует
    execution-inputs и материализует принятую автоматизацию (generated delta) из ответов
-   журнала, если этого ещё не было; partial materialization по-прежнему запрещает execution.
-   Нет принятого static review — exec отвечает `EXECUTION_NOT_PREPARED` с подсказкой.
-4. exec строит closed execution request сам: adapter ID, exact frozen
+   журнала, если этого ещё не было; partial materialization по-прежнему запрещает запуск.
+   Нет принятого static review — `EXECUTION_NOT_PREPARED` с подсказкой.
+4. `materialize` строит closed execution request сам: adapter ID, exact frozen
    interpreter/wrapper/executable, build profile и typed params; user shell strings и
    `argv_template` запрещены.
-5. exec запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
-   системный `mvn` или `gradlew`. Системный Maven использует закрытый адаптер
+5. Команда из `materialize` запускает exact reviewed targets один раз через module-selected pytest, `mvnw`,
+   системный `mvn` или `gradlew`; запускает её человек. Системный Maven использует закрытый адаптер
    `maven:selected-symbols-v1` и поле `executable`; абсолютный launcher и его bytes
    связаны с baseline. Hash launcher не доказывает идентичность всех библиотек Maven/JDK.
    Maven `test` читает Surefire: если проект требует Failsafe/integration-test lifecycle,
    этот маршрут недостаточен — сохрани блокер. Не исправляй тест после runtime `FAIL`.
 
-Запуск человеком (P4, предпочтительный путь): `materialize` кладёт тесты в проект и печатает команду для **человека** (со словом запуска) и файлы на просмотр;
+Сборку запускает человек: `materialize` кладёт тесты в проект и печатает команду для **человека** (со словом запуска) и файлы на просмотр;
 тесты потом не правь (`INGEST_TESTS_CHANGED`, вернуть — `materialize --restore`), стенд поднимает человек. `ingest --reports <каталог в модуле или <run>/incoming/>`
 сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`.
-Результат помечен: «результат запуска предоставлен человеком, пакет его не воспроизводил». Прежний путь (`exec`) — до следующего выпуска.
-
-Исполнение и всё закрытие — одна команда из cwd пакета; шесть квитанций она берёт из журнала
-попытки сама (явный путь `--canonical-document` и т. п. — необязательная сверка тех же байтов):
+Результат помечен: «результат запуска предоставлен человеком, пакет его не воспроизводил». Прерванный `ingest` повторяют теми же отчётами.
+Команда `exec` заменена: она ничего не запускает и отвечает `EXEC_REPLACED`.
 
 ```powershell
-python -m tools.run_pipeline exec --project "$project" --module "$moduleId" --run "$runId"
+python -m tools.run_pipeline materialize --project "$project" --module "$moduleId" --run "$runId"
+python -m tools.run_pipeline ingest --project "$project" --module "$moduleId" --run "$runId" --reports "$reports"
 ```
 
-Resume после `EXECUTION_STARTED` идёт штатной веткой восстановления той же командой, а не
-повторным запуском тестов.
-
-Controller/process timeout без authoritative framework result даёт `UNKNOWN`.
+Без authoritative framework result (отчёта нет) результат `UNKNOWN`.
 Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`. После
 `EXECUTION_STARTED` interruption не перезапускай автоматически.
 
@@ -128,13 +123,13 @@ Framework-reported exact-test timeout с authoritative evidence даёт `FAIL`.
 
 ## 6. Закрытие
 
-`exec` (local-pilot) и `finish` (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации) сами проходят
+`ingest` (local-pilot) и `finish` (cases-only, ранний отрицательный исход ревью, окончательный отказ автоматизации) сами проходят
 линейное закрытие в фиксированном порядке: materialization → execution → execution trace →
 dispositions → pre-finalization trace → finalization → terminal result и event. Повторный вызов
 возвращает тот же итог. `finish`, вызванный не вовремя, отвечает `FINISH_FACT_UNDETERMINED` и
 называет, чего не хватает, — сделай этот шаг, а не собирай факты вручную. Цепочка автоматизации не может
 продолжиться — `finish --abandon <код>` из fix; список кодов закрытый, и `finish` сам откажет, если выход другой.
-Частичная автоматизация (кейсы с блокерами канона ручные): `exec` печатает `automation_split` — передай человеку его
+Частичная автоматизация (кейсы с блокерами канона ручные): `ingest` печатает `automation_split` — передай человеку его
 `summary` как есть («автоматизировано N из M, вручную K: …»); итог `PARTIAL`/`AUTOMATION_PARTIAL`, `accepted=false`.
 
 Что делает закрытие (это проверяет код): `PASS` с валидной трассой — `RETAINED`; `FAIL` —
@@ -144,16 +139,16 @@ dispositions → pre-finalization trace → finalization → terminal result и 
 запрещена (`PRESERVED_EXECUTION_UNKNOWN`); частичная материализация — исполнения нет.
 `valid=false` финализации — terminal с `FINALIZATION_INVALID` и `accepted=false`.
 
-После `finish`/`exec` с `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку
+После `finish`/`ingest` с `FAIL` покажи человеку список `quarantine` (файл, метод, ref) и строку
 `quarantine_unresolved` как есть. `@Disabled`/`xfail` в этом прогоне не снимай и тесты не чини.
 `scan --disposition-policy cleanup` (FAIL = очистка) — только по просьбе человека.
-Строки `style_checks_skipped` и `format_hint` из вывода `exec`/`finish` передай человеку как есть; файлы сам не форматируй.
+Строки `style_checks_skipped` и `format_hint` из вывода `ingest`/`finish` передай человеку как есть; файлы сам не форматируй.
 
 ## Контракт оркестрации — места режима Б
 
 | Автоматизация | `model-request`/`model-response`; `tools.api automation-boundary-facts`, `tools.api open-automation-boundary`, `tools.api read-receipt`, `tools.api review-requested` | одна версия и независимое static review; максимум одна correction |
-| Материализация | делает `tools.run_pipeline exec` сам | accepted exact generated set, ownership/readback |
-| Выполнение | `tools.run_pipeline exec` с шестью carriers из инструкции | reviewed selectors, process-bound native report |
+| Материализация | делает `tools.run_pipeline materialize` сам | accepted exact generated set, ownership/readback |
+| Выполнение | команду печатает `materialize`, запускает человек, отчёты принимает `ingest` | reviewed selectors, отчёт привязан к попытке |
 
    baseline выбранного профиля. Для cases-only нужны точные source/config/requirements,
    для local-pilot дополнительно все execution facts. Существующее событие
@@ -201,8 +196,7 @@ disposition. Execution не начинается при partial materialization.
 `accepted=false`. Cleanup при `UNKNOWN` запрещён.
 
 execution input закрывает текущий attempt как `NOT_RUNNABLE/BASELINE_INCOMPLETE`.
-Execution interruption даёт `UNKNOWN`; retry — только новый scan после
-доказанной остановки прежнего process scope.
+Execution interruption даёт `UNKNOWN`; продолжение — только новый scan.
 
 ## К итогу прогона
 

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 MODE_B = ("run_tests", "generated_delta", "automation_validation", "execution_adapters", "autotest_hints", "trace_check",
           "build_trace_document", "quarantine", "code_slices")
-EXEC = ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
+EXEC = ("exec_commands", "exec_runner")
 ABSENT = MODE_B + EXEC
 
 

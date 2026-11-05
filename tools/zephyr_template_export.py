@@ -2,7 +2,7 @@
 
 ``python -m tools.zephyr_template_export --project <abs> --run <id> --cases <bundle .zephyr-scale.csv>`` reads
 ``.skillsrc`` ``projection.zephyr.template`` and writes ``<doc>.r<N>.zephyr-import.csv`` next to the bundle.  The
-bundle and its receipt never change.  Run it once, after the attempt is closed (``exec`` or ``finish``): only then
+bundle and its receipt never change.  Run it once, after the attempt is closed (``ingest`` or ``finish``): only then
 is «Автоматизирован» known.  The template's values stay in that CSV; the run keeps only the template path and digest.
 """
 
@@ -36,7 +36,7 @@ _HINTS = {
     "ZEPHYR_TEMPLATE_DELIMITER": "не удалось определить разделитель по заголовку: нужен «,» или «;» и колонки Zephyr (Name, …)",
     "ZEPHYR_TEMPLATE_COLUMNS": f"в шаблоне нужна колонка Name и хотя бы одна из: {', '.join(_CUSTOM_KEYS)}",
     "ZEPHYR_TEMPLATE_EMPTY": "в шаблоне нет ни одной заполненной заглушки (строки с Name)",
-    "ZEPHYR_EXPORT_NOT_CLOSED": "запустите экспорт после закрытия попытки (exec или finish): тогда известен статус автоматизации",
+    "ZEPHYR_EXPORT_NOT_CLOSED": "запустите экспорт после закрытия попытки (ingest или finish): тогда известен статус автоматизации",
     "ZEPHYR_EXPORT_RUN_MISMATCH": "этот набор кейсов опубликован другим прогоном: укажите --run того прогона, который его опубликовал",
     "ZEPHYR_EXPORT_CASES": "--cases — это файл <doc>.r<N>.zephyr-scale.csv опубликованного набора, рядом с ним должен лежать <doc>.r<N>.json",
     "ZEPHYR_EXPORT_CONFLICT": "рядом уже лежит другой .zephyr-import.csv: переименуйте или удалите его, если он больше не нужен",

@@ -329,7 +329,7 @@ def materialization_precheck(
 ) -> None:
     """FaT-RL: every check materialize_delta makes before its first write, in the same order, without writing.
 
-    A GeneratedDeltaError here is exec's own answer for this accepted automation, and no later step changes it: the
+    A GeneratedDeltaError here is materialize's own answer for this accepted automation, and no later step changes it: the
     answers of the attempt are final once the review accepted them."""
     project, module = Path(project).resolve(), Path(module_root).resolve()
     frozen, _run = _frozen_attempt(project, module, baseline, canonical_document, run_root, attempt_id)
@@ -338,13 +338,13 @@ def materialization_precheck(
     generated, _automation_digest, _review_digest = _reviewed_generated_files(automation, review)
     test_root, root = _test_root(module, frozen, generated)
     if (Path(run_root) / "generated-deltas" / f"{attempt_id}.json").exists():
-        return  # an earlier exec materialized: reusing it is exec's own check
+        return  # an earlier materialize wrote it: reusing it is materialize's own check
     _plan_files(project, module, root, test_root, frozen, generated, run_root, attempt_id)
 
 
 def journal_automation(run_root: Path, attempt_id: str) -> dict[str, Any] | None:
     """FaT-RL: the last reviewed automation of the attempt and its earlier revisions, from the journal answers of
-    tc-to-autotest:rN and autotest-reviewer:rN — what exec materializes; None while no review answers the last one."""
+    tc-to-autotest:rN and autotest-reviewer:rN — what materialize writes; None while no review answers the last one."""
     from tools.pilot_state import derive_state, read_model_stage_artifact
 
     answers: dict[str, dict[int, Mapping[str, Any]]] = {"tc-to-autotest": {}, "autotest-reviewer": {}}
@@ -366,7 +366,7 @@ def journal_automation(run_root: Path, attempt_id: str) -> dict[str, Any] | None
 
 
 def materialization_refusal(run_root: Path, attempt_id: str) -> str | None:
-    """FaT-RL: exec's refusal to materialize the accepted automation of an open attempt, or None (only reads)."""
+    """FaT-RL: materialize's refusal to write the accepted automation of an open attempt, or None (only reads)."""
     from tools.pilot_state import derive_state, read_effective_canonical, read_run
     from tools.project_inventory import read_execution_baseline
 

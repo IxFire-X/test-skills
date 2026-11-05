@@ -265,7 +265,7 @@ def test_a_maven_project_without_wrapper_gets_the_system_mvn(tmp_path: Path, mon
 
 
 def test_a_lowered_run_cannot_start_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A cases-only run made from a local-pilot request has no execution authorization: exec refuses, no test is written."""
+    """A cases-only run made from a local-pilot request has no execution authorization: materialize refuses, no test is written."""
     project = _python_project(tmp_path, runtime=False)
     payloads: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", payloads.append)
@@ -275,7 +275,7 @@ def test_a_lowered_run_cannot_start_execution(tmp_path: Path, monkeypatch: pytes
     authorization = json.loads((Path(scan["run_root"]) / "run-authorization-receipt.json").read_text(encoding="utf-8"))
     assert authorization["execution_requested"] is False
     before = sorted(path.relative_to(project).as_posix() for path in project.rglob("*") if ".pilot-runs" not in path.parts)
-    completed = subprocess.run([sys.executable, "-m", "tools.run_pipeline", "exec", "--project", str(project), "--run", scan["run_id"]],
+    completed = subprocess.run([sys.executable, "-m", "tools.run_pipeline", "materialize", "--project", str(project), "--run", scan["run_id"]],
                                cwd=ROOT, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     payload = json.loads(completed.stdout)
     assert completed.returncode == 2 and payload["status"] == "error" and payload["reason"] == "EXECUTION_COORDINATES", payload

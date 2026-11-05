@@ -2,7 +2,7 @@
 
 - O1: a run stopped before the canonical review no longer blocks the plain scan of its request — `finish --abandon
   LEFT_BEFORE_REVIEW` marks it «оставлен» (the attempt is not closed: FaT-AB2), the scan skips it and names it;
-- O2: a stand of a tests-only module (FaT-2R) that cannot be brought up — `finish --abandon STAND_UNAVAILABLE`, named in
+- O2 (P4b: the stand check and its abandon are gone with the process) — formerly `finish --abandon STAND_UNAVAILABLE`, named in
   exec's fix and refused while the stand answers;
 - N3/N4: the partial automation is in the orchestrate SKILL and USAGE; the generator role no longer asks for assemble."""
 
@@ -13,7 +13,6 @@ import shlex
 from pathlib import Path
 
 import pytest
-from tools import exec_commands, exec_stand
 
 pytestmark = pytest.mark.contract
 
@@ -32,28 +31,23 @@ def _main(capsys: pytest.CaptureFixture[str], argv: list[str]) -> tuple[int, dic
     return code, json.loads(capsys.readouterr().out)
 
 
-_DOWN = {"code": "SERVICE_UNREACHABLE", "reason": "SERVICE_UNREACHABLE", "message": "стенд не ответил",
-         "fix": "поднимите стенд приложения по адресу из переменной APP_URL и запустите exec снова", "service_url_env": "APP_URL"}
-
-
-def test_o2_a_stand_that_cannot_be_brought_up_closes_by_the_abandon_exec_names(tmp_path: Path, capsys: pytest.CaptureFixture[str],
-                                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+def test_o2_the_stand_abandon_is_gone_with_the_stand_check_and_an_accepted_chain_is_closed_by_ingest(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """P4b: nobody asks the stand now (the person who runs the printed command brings it up), so ``STAND_UNAVAILABLE`` is not a way out:
+    the parser refuses it, and an accepted chain is still closed only by ``materialize`` and ``ingest``."""
     from tests.test_finish import _automation_chain
     from tools import run_pipeline
     from tools.pilot_state import derive_state
 
     root, _attempt = _automation_chain(tmp_path, ["ПРИНЯТО"])
-    monkeypatch.setattr(exec_stand, "_service_stop", lambda project, module: None)  # the stand answers (finish)
     code, refused = _main(capsys, ["finish", "--project", str(tmp_path), "--run", root.name, "--abandon", "STAND_UNAVAILABLE"])
-    assert code == 2 and derive_state(root)["attempts"][-1]["state"] != "TERMINAL", refused
-    monkeypatch.setattr(exec_stand, "_service_stop", lambda project, module: dict(_DOWN))
-    monkeypatch.setattr(exec_commands, "_service_stop", lambda project, module: dict(_DOWN))  # exec
-    code, stopped = _main(capsys, ["exec", "--project", str(tmp_path), "--run", root.name])
-    assert code == 2 and stopped["code"] == "SERVICE_UNREACHABLE" and "--abandon STAND_UNAVAILABLE" in stopped["fix"], stopped
-    command = stopped["fix"].split("стенд не поднять — ", 1)[1]
-    code, closed = _main(capsys, _argv(command))
-    assert closed["status"] == "ok" and closed["reason_code"] == "STAND_UNAVAILABLE" and closed["accepted"] is False, closed
-    assert derive_state(root)["attempts"][-1]["state"] == "TERMINAL"
+    assert code == 2 and refused["code"] == "INVALID_ARGUMENT" and "STAND_UNAVAILABLE" in refused["message"], refused
+    from tools.finalize_attempt import ABANDON_CODES
+
+    assert "STAND_UNAVAILABLE" not in ABANDON_CODES and "STAND_UNAVAILABLE" not in run_pipeline._SECOND_PASS
+    code, plain = _main(capsys, ["finish", "--project", str(tmp_path), "--run", root.name])
+    assert code == 2 and "materialize" in plain["fix"], plain
+    assert derive_state(root)["attempts"][-1]["state"] != "TERMINAL"
 
 
 def test_o1_a_run_stopped_before_the_review_is_left_and_the_plain_scan_starts_anew(tmp_path: Path, capsys: pytest.CaptureFixture[str],

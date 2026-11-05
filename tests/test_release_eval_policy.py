@@ -18,8 +18,6 @@ CRITICAL_SCENARIOS = (
     "materialization-failure",
     "execution-interruption-unknown",
     "terminal-idempotent-retry",
-    "child-execution-retry",
-    "retained-native-rerun",
 )
 
 
@@ -438,77 +436,54 @@ def test_one_user_question_resume_observation_is_produced_after_answered_model_p
     assert len(loaded["record"]["after"]["answer_digests"]) == 1
 
 
-def test_retained_native_rerun_observation_is_produced_by_public_controller(tmp_path: Path):
-    import shutil
+# What produces each critical scenario in the code of mode B (P4b).  A scenario whose producer left the package can never be observed, so the
+# suite would be unreachable: this table is the check that every scenario has a writer, and a removed producer takes its scenario with it.
+PRODUCERS = {
+    "fresh-non-git": ("tools.pilot_state", "publish_project_state_observation"),
+    "tree-preservation": ("tools.pilot_state", "publish_project_state_observation"),
+    "nested-module": ("tools.pilot_state", "create_attempt"),
+    "secret-exclusion": ("tools.pilot_state", "freeze_phase_two_inputs"),
+    "waiting-for-model-resume": ("tools.pilot_state", "publish_resume_observations"),
+    "one-user-question-resume": ("tools.pilot_state", "publish_resume_observations"),
+    "reviewer-rejection": ("tools.pilot_state", "publish_reviewer_session_ledger"),
+    "review-context-limit": ("tools.pilot_state", "publish_reviewer_session_ledger"),
+    "materialization-failure": ("tools.generated_delta", "apply_dispositions"),
+    "execution-interruption-unknown": ("tools.exec_commands", "cmd_ingest"),  # --no-reports --reason RESULT_UNAVAILABLE
+    "terminal-idempotent-retry": ("tools.finalize_attempt", "finalize_durable_execution_attempt"),
+}
 
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_project_native_pytest import _module_python, _request, _reviewed_inputs
-    from tools.execution_adapters import request_digest
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import claim_execution_start, derive_state, read_scenario_observation
-    from tools.exec_commands import rerun_retained_tests
-    from tools.exec_runner import run_tests_v5
 
-    fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
-    project = tmp_path / "project"
-    shutil.copytree(fixture, project)
-    _module_python(project)
-    document, automation, review, evidence, run_root, attempt_id, authorization, delta = (
-        _reviewed_inputs(project)
-    )
-    request = _request(project, document, automation)
-    report = run_tests_v5(
-        request, authorization, document, automation, review,
-        host_isolation_receipt=evidence,
-        generated_delta_receipt=delta,
-        run_root=run_root,
-        attempt_id=attempt_id,
-        on_execution_start=lambda value: claim_execution_start(
-            run_root, attempt_id, request_digest(value),
-        ),
-    )
-    assert report["verdict"] == "PASS"
-    _publish_execution(run_root, attempt_id, report)
-    finalized = finalize_durable_execution_attempt(run_root, attempt_id)
-    assert finalized["result"]["accepted"] is True
+def test_every_critical_scenario_has_a_producer_in_the_code_of_mode_b(pack_root: Path):
+    import importlib
 
-    rerun = rerun_retained_tests(run_root, attempt_id)
-    published = rerun["scenario_observation_receipts"]["retained-native-rerun"]
-    loaded = read_scenario_observation(
-        run_root, attempt_id, "retained-native-rerun", published["digest"],
-    )
-    state = derive_state(run_root)
+    suite = json.loads((pack_root / "evals" / "scenarios" / "pilot-critical.json").read_text(encoding="utf-8"))
+    assert set(suite["critical_scenarios"]) == set(PRODUCERS) == set(CRITICAL_SCENARIOS)
+    for scenario_id in suite["critical_scenarios"]:
+        module, name = PRODUCERS[scenario_id]
+        assert callable(getattr(importlib.import_module(module), name, None)), (scenario_id, module, name)
+    for gone in ("retained-native-rerun", "child-execution-retry"):  # their writers (the rerun, PROCESS_STOPPED) left with the process
+        assert gone not in suite["critical_scenarios"] and gone not in suite["scenario_contracts"]
 
-    assert rerun["rerun_receipt"]["record"]["outcome"] == {
-        "kind": "EXIT", "exit_code": 0,
-    }
-    assert loaded["verified"] is True
-    assert loaded["record"]["precondition"]["kind"] == "RETAINED_FILE_SET"
-    assert loaded["record"]["action"]["kind"] == "PROJECT_NATIVE_RERUN"
-    assert loaded["record"]["before"] == loaded["record"]["after"]
-    assert [row["event_type"] for row in loaded["events"]] == [
-        "EXECUTION_STARTED", "ATTEMPT_TERMINAL", "RETAINED_NATIVE_RERUN",
-    ]
-    assert sum(
-        row.get("event_type") == "EXECUTION_STARTED"
-        and row.get("attempt_id") == attempt_id
-        for row in state["events"]
-    ) == 1
-    assert sum(
-        row.get("event_type") == "ATTEMPT_TERMINAL"
-        and row.get("attempt_id") == attempt_id
-        for row in state["events"]
-    ) == 1
-    repeated = rerun_retained_tests(run_root, attempt_id)
-    repeated_state = derive_state(run_root)
-    assert repeated["idempotent"] is True
-    assert repeated["rerun_receipt"]["digest"] == rerun["rerun_receipt"]["digest"]
-    assert repeated["scenario_observation_receipts"]["retained-native-rerun"]["digest"] == published["digest"]
-    assert sum(
-        row.get("event_type") == "RETAINED_NATIVE_RERUN"
-        and row.get("attempt_id") == attempt_id
-        for row in repeated_state["events"]
-    ) == 1
+
+def test_the_observation_schemas_name_only_the_scenarios_that_can_be_observed(pack_root: Path):
+    for name in ("release-eval-run.schema.json", "scenario-observation-receipt.schema.json"):
+        text = (pack_root / "schemas" / name).read_text(encoding="utf-8")
+        assert "retained-native-rerun" not in text and "terminal-idempotent-retry" in text, name
+    from tools.pilot_state import scenario_observation_target
+
+    with pytest.raises(ValueError):
+        scenario_observation_target(Path("."), "a" * 32, "retained-native-rerun")
+
+
+def test_a_journal_with_the_events_of_the_old_rerun_and_process_stop_is_still_read(tmp_path: Path):
+    """Old runs are read (P4b, Q3): the writers of RETAINED_NATIVE_RERUN and PROCESS_STOPPED are gone, the event types stay known to the journal
+    and to the guard, so a run that holds them is not a corrupt journal."""
+    from tools import pilot_state
+
+    assert "RETAINED_NATIVE_RERUN" in pilot_state._EVENT_TYPES and "PROCESS_STOPPED" in pilot_state._EVENT_TYPES
+    assert "RETAINED_NATIVE_RERUN" in pilot_state._ATTEMPT_EVENTS and "PROCESS_STOPPED" in pilot_state._ATTEMPT_EVENTS
+    with pytest.raises(ValueError, match="verified process-scope recovery"):
+        pilot_state.append_event(tmp_path, "PROCESS_STOPPED", actor="controller", attempt_id="a" * 32, artifact_digest="sha256:" + "b" * 64)
 
 
 def test_retained_native_rerun_event_cannot_be_appended_directly(tmp_path: Path):
@@ -519,103 +494,6 @@ def test_retained_native_rerun_event_cannot_be_appended_directly(tmp_path: Path)
             tmp_path, "RETAINED_NATIVE_RERUN", actor="controller",
             attempt_id="a" * 32, artifact_digest="sha256:" + "b" * 64,
         )
-
-
-def test_retained_native_rerun_receipt_cannot_be_published_without_process_invocation(
-    tmp_path: Path,
-):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.run_tests import (
-        DURABLE_NATIVE_REPORT_NORMALIZATION,
-        _normalize_durable_junit_report,
-    )
-
-    run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
-    _publish_execution(run_root, attempt_id, report, request=request)
-    finalized = finalize_durable_execution_attempt(run_root, attempt_id)
-    assert finalized["result"]["accepted"] is True
-    context = pilot_state._retained_rerun_context(run_root, attempt_id)
-    durable_report = _normalize_durable_junit_report(
-        b"<testsuite tests='1'><testcase classname='tests.test_generated' "
-        b"name='test_selected'/></testsuite>"
-    )
-    source_digest = "sha256:" + hashlib.sha256(durable_report).hexdigest()
-    published_report = pilot_state.publish_run_artifact_bytes(
-        run_root, attempt_id, "retained-rerun/reports/pytest.xml", durable_report,
-    )
-    fingerprint = {
-        "mtime_ns": 1, "size": len(durable_report), "digest": source_digest,
-    }
-    value = {
-        "schema_version": "1.0.0", "kind": "retained-native-rerun",
-        "run_id": context["attempt"]["run_id"], "attempt_id": attempt_id,
-        "policy_profile": context["attempt"]["policy_profile"],
-        "terminal_result_digest": context["terminal"]["digest"],
-        "execution_receipt_digest": context["execution_receipt"]["digest"],
-        "execution_request_digest": context["execution_receipt"]["execution_request_digest"],
-        "disposition_receipt_digest": context["disposition_receipt"]["digest"],
-        "before": context["snapshot"], "after": context["snapshot"],
-        "outcome": {"kind": "EXIT", "exit_code": 0},
-        "reports": [{
-            "source_path": "test-results/pytest.xml",
-            "source_digest": source_digest,
-            "before_fingerprint": None,
-            "after_fingerprint": fingerprint,
-            "normalization": DURABLE_NATIVE_REPORT_NORMALIZATION,
-            "path": published_report["path"],
-            "digest": published_report["digest"],
-        }],
-    }
-    before_events = pilot_state.derive_state(run_root)["events"]
-
-    with pytest.raises((AttributeError, ValueError)):
-        pilot_state._publish_retained_native_rerun(run_root, attempt_id, value)
-
-    assert pilot_state.derive_state(run_root)["events"] == before_events
-    assert not pilot_state._retained_native_rerun_target(run_root, attempt_id).exists()
-
-
-def test_retained_native_rerun_rejects_passing_report_for_unreviewed_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-):
-    from tests.test_durable_execution_trace import _publish_execution
-    from tests.test_execution_receipt import _execution_facts
-    from tools import pilot_state
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.exec_commands import rerun_retained_tests
-    from tools.run_tests import ProcessOutcome
-
-    run_root, attempt_id, report, request, _durable = _execution_facts(tmp_path)
-    _publish_execution(run_root, attempt_id, report, request=request)
-    finalized = finalize_durable_execution_attempt(run_root, attempt_id)
-    assert finalized["result"]["accepted"] is True
-    executable = Path(request.executable)
-    executable.parent.mkdir(parents=True, exist_ok=True)
-    executable.write_bytes(b"MZ")
-    executable.chmod(0o755)
-
-    def invoke_foreign_report(_request, _invoke):
-        report_path = Path(request.cwd) / request.report_paths[0]
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_bytes(
-            b"<testsuite tests='1'><testcase classname='tests.test_foreign' "
-            b"name='test_foreign'/></testsuite>"
-        )
-        return ProcessOutcome(0, "", "")
-
-    monkeypatch.setattr("tools.execution_adapters.invoke_request", invoke_foreign_report)
-
-    with pytest.raises(ValueError, match="reviewed targets"):
-        rerun_retained_tests(run_root, attempt_id)
-
-    assert not pilot_state._retained_native_rerun_target(run_root, attempt_id).exists()
-    assert not any(
-        row.get("event_type") == "RETAINED_NATIVE_RERUN"
-        for row in pilot_state.derive_state(run_root)["events"]
-    )
 
 
 def test_terminal_retry_scenario_uses_controller_owned_durable_observation(tmp_path: Path):

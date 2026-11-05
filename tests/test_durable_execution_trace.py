@@ -208,7 +208,7 @@ def test_public_execution_receipt_records_unknown_immediately_after_readback(tmp
     }
     pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
 
-    receipt = exec_commands._publish_execution_receipt(
+    receipt = exec_commands._publish_result_receipt(
         coordinates, _unknown_report(root, attempt_id, durable, request),
     )
 

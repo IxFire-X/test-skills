@@ -181,14 +181,12 @@ def partial_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
 @pytest.mark.slow
 def test_three_cases_one_blocked_run_two_autotests_and_close_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                      capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _args
+    from tests.p4_flow import run_the_build
     from tools.pilot_state import read_terminal_result
-    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = partial_project(tmp_path, monkeypatch)
     capsys.readouterr()
-    code = cmd_exec(_args(project, run_root))
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
     assert output["verdict"] == "PASS" and output["finalization"] == "complete", output
     result = read_terminal_result(run_root, attempt_id)
     assert (result["completion"], result["verification"], result["reason_code"], result["accepted"]) == (

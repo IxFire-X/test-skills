@@ -142,12 +142,13 @@ def test_a_changed_secret_file_is_named_by_path_only(tmp_path: Path, monkeypatch
     assert SECRET not in text and "changed-not-real" not in text
 
 
-def test_exec_names_the_changed_files_instead_of_a_child_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _args as exec_args, _project
+def test_materialize_names_the_changed_files_instead_of_a_child_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import flow_args
+    from tests.test_finish import _project
 
     project, run_root, _attempt_id, _values = _project(tmp_path)
     (project / "src" / "sample.py").write_text((project / "src" / "sample.py").read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-    code = exec_commands.cmd_exec(exec_args(project, run_root))
+    code = exec_commands.cmd_materialize(flow_args(project, run_root))
     output = capsys.readouterr().out
     payload, _end = json.JSONDecoder().raw_decode(output)
     assert code != 0 and "src/sample.py" in json.dumps(payload, ensure_ascii=False), payload

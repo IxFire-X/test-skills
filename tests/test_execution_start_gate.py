@@ -34,6 +34,19 @@ def _attempt(project: Path, policy_profile: str, execution_requested: bool) -> t
     return run_root, dict(pilot_state.create_attempt(run_root, identity, frozen["baseline"]))
 
 
+def _ingest_reports(request, authorization, document, artifact, review, *, host_isolation_receipt=None, generated_delta_receipt=None,
+                    run_root, attempt_id, on_execution_start=lambda _request: None, snapshots=None):
+    """``ingest_reports`` with the arguments ``run_tests_v5`` took (P4b): the reports given (none by default), the claim of the start made by the callback."""
+    from tools.exec_runner import ingest_reports
+
+    return ingest_reports(
+        request, authorization, document, artifact, review, host_isolation_receipt=host_isolation_receipt,
+        generated_delta_receipt=generated_delta_receipt, run_root=run_root, attempt_id=attempt_id, snapshots=snapshots or {},
+        execution_source={"run_by": "human", "human_command_digest": "sha256:" + "0" * 64, "challenge": "not_available", "statement": "reports"},
+        run_id="RUN-fixture", ran_at="2026-11-05T10:00:00+00:00", duration_sec=0.0, on_execution_start=on_execution_start,
+    )
+
+
 def test_execution_start_is_one_atomic_attempt_owned_claim(tmp_path: Path) -> None:
     run_root, attempt = _attempt(tmp_path, "local-pilot-v1", True)
     request_digest = "sha256:" + "a" * 64
@@ -86,11 +99,10 @@ def test_generic_event_api_cannot_forge_execution_start(tmp_path: Path) -> None:
     )
 
 
-def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ingest_refuses_noop_or_foreign_start_callback_before_the_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The callback cannot itself be treated as proof that execution was claimed."""
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
-    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -103,11 +115,10 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
     request = _request(project, document, artifact)
     calls: list[object] = []
 
-    monkeypatch.setattr(
-        "tools.execution_adapters.invoke_request",
-        lambda *_args, **_kwargs: calls.append("subprocess") or pytest.fail("project process must not start"),
-    )
-    noop = run_tests_v5(
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: calls.append("subprocess") or pytest.fail("project process must not start"))
+    noop = _ingest_reports(
         request, authorization, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=delta,
         run_root=run_root, attempt_id=attempt_id, on_execution_start=lambda _request: None,
@@ -132,7 +143,7 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
     assert prestart_receipt["record"]["execution_request_digest"] == request_digest(request)
 
     foreign_root, foreign_attempt = _attempt(tmp_path / "foreign", "local-pilot-v1", True)
-    forged = run_tests_v5(
+    forged = _ingest_reports(
         request, authorization, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=delta,
         run_root=run_root, attempt_id=attempt_id,
@@ -151,10 +162,9 @@ def test_runner_refuses_noop_or_foreign_start_callback_before_subprocess(tmp_pat
     assert starts == []
 
 
-def test_runner_refuses_replay_after_preexisting_execution_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ingest_refuses_replay_after_preexisting_execution_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
-    from tools.exec_runner import run_tests_v5
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -166,12 +176,11 @@ def test_runner_refuses_replay_after_preexisting_execution_start(tmp_path: Path,
     document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(project)
     request = _request(project, document, artifact)
     pilot_state.claim_execution_start(run_root, attempt_id, request_digest(request))
-    monkeypatch.setattr(
-        "tools.execution_adapters.invoke_request",
-        lambda *_args, **_kwargs: pytest.fail("interrupted execution must not replay"),
-    )
+    import subprocess
 
-    result = run_tests_v5(
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: pytest.fail("interrupted execution must not replay"))
+
+    result = _ingest_reports(
         request, authorization, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=delta,
         run_root=run_root, attempt_id=attempt_id, on_execution_start=lambda _request: None,
@@ -181,13 +190,12 @@ def test_runner_refuses_replay_after_preexisting_execution_start(tmp_path: Path,
     assert any(row["code"] == "RUNNER_EXECUTION_GATE" for row in result["diagnostics"])
 
 
-def test_runner_preserves_closed_request_for_admission_and_isolation_rejections(tmp_path: Path) -> None:
+def test_ingest_preserves_closed_request_for_admission_and_isolation_rejections(tmp_path: Path) -> None:
     """Admission failures remain publishable, request-bound prestart evidence."""
     from dataclasses import replace
     from tests.test_project_native_pytest import _request, _reviewed_inputs
     from tools.execution_adapters import request_digest
     from tools.pilot_state import publish_attempt_receipt
-    from tools.exec_runner import run_tests_v5
     from tools.schema_validation import schema_diagnostics
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
@@ -200,17 +208,17 @@ def test_runner_preserves_closed_request_for_admission_and_isolation_rejections(
     document, artifact, review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(project)
     request = _request(project, document, artifact)
 
-    rejected_authorization = run_tests_v5(
+    rejected_authorization = _ingest_reports(
         request, {**authorization, "execution_requested": False}, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=delta,
         run_root=run_root, attempt_id=attempt_id,
     )
-    rejected_delta = run_tests_v5(
+    rejected_delta = _ingest_reports(
         request, authorization, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=None,
         run_root=run_root, attempt_id=attempt_id,
     )
-    rejected_isolation = run_tests_v5(
+    rejected_isolation = _ingest_reports(
         request, authorization, document, artifact, review,
         host_isolation_receipt={**evidence, "reviewer_invocation_id": "forged-reviewer"},
         generated_delta_receipt=delta, run_root=run_root, attempt_id=attempt_id,
@@ -243,7 +251,7 @@ def test_runner_preserves_closed_request_for_admission_and_isolation_rejections(
     )
     assert published["record"]["execution_request_digest"] == request_digest(request)
 
-    invalid_request = run_tests_v5(
+    invalid_request = _ingest_reports(
         replace(request, cwd=str(tmp_path.resolve())), authorization, document, artifact, review,
         host_isolation_receipt=evidence, generated_delta_receipt=delta,
         run_root=run_root, attempt_id=attempt_id,

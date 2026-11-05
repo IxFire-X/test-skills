@@ -1,4 +1,4 @@
-"""Deterministic scan/status/exec helpers for the CLI-driven skill pipeline."""
+"""Deterministic scan/status/materialize/ingest helpers for the CLI-driven skill pipeline."""
 
 from __future__ import annotations
 
@@ -105,7 +105,6 @@ _API = "python -m tools.api "
 _PIPELINE = "python -m tools.run_pipeline "
 _PARTS = "python -m tools.context_marker_parts "
 _FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
-_EXEC = _PIPELINE + "exec --project <project> --run <run_id>"
 _MATERIALIZE = _PIPELINE + "materialize --project <project> --run <run_id>"
 _INGEST = _PIPELINE + "ingest --project <project> --run <run_id> --reports <каталог с отчётами>"
 _NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
@@ -154,7 +153,7 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
     "static automation review": (
         "AUTOMATION_REVIEW", "autotest-reviewer", "открыть границу ревью автотестов и вызвать autotest-reviewer", "5",
         _API + "open-automation-boundary ..."),
-    # FaT-H2b 2.8: after autotest-reviewer the verdict decides — exec, the next revision, or finish
+    # FaT-H2b 2.8: after autotest-reviewer the verdict decides — materialize, the next revision, or finish
     "automation revision": (
         "AUTOMATION_REVISION", "tc-to-autotest",
         "следующая ревизия автоматизации tc-to-autotest:r2 по замечаниям ревью, затем её ревью autotest-reviewer:r2", "5",
@@ -167,7 +166,6 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
     "materialization": ("MATERIALIZE", "materialize", "materialize: положить автотесты в проект и получить команду запуска", "5", _MATERIALIZE),
     "materialization command": ("MATERIALIZE", "materialize", "materialize: команда запуска для человека и файлы на просмотр", "5", _MATERIALIZE),
     "human run report": ("INGEST", "ingest", "человек запускает команду из materialize и приносит отчёты: ingest", "5", _INGEST),
-    "execution receipt": ("EXEC", "exec", "exec: запуск тестов", "5", _EXEC),
     "execution trace and dispositions": ("FINISH", "closure", "трасса исполнения и диспозиции", "6", _FINISH),
     "disposition receipt": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
     "disposition and finalization": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
@@ -307,7 +305,7 @@ def _quarantine_summary(run_root: Path, attempt_id: str) -> dict[str, Any]:
     if not quarantine and not unresolved:
         return {}
     return {"quarantine": quarantine, **({"quarantine_unresolved": (
-        "QUARANTINE_UNRESOLVED: упавшие методы не удалось однозначно сопоставить с отчётом exec, "
+        "QUARANTINE_UNRESOLVED: упавшие методы не удалось однозначно сопоставить с отчётом ingest, "
         f"поэтому сгенерированные файлы убраны целиком, включая прошедшие тесты: {', '.join(unresolved)}"
     )} if unresolved else {})}
 
@@ -1101,7 +1099,7 @@ def _open_run_of(project: Path, request: Mapping[str, Any], skip: Sequence[Path]
 
 
 def _abandoned(project: Path, root: Path, attempt: Mapping[str, Any]) -> str | None:
-    """Why an unfinished run cannot go on — the same baseline check as exec and status; None when it can."""
+    """Why an unfinished run cannot go on — the same baseline check as materialize/ingest and status; None when it can."""
     module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
     try:
         result = _baseline_check(project, root, attempt, module_root)
@@ -1178,7 +1176,6 @@ _SECOND_PASS = {
     "STAGE_RETRY_EXHAUSTED": "стадия автоматизации исчерпала единственный повтор: следующий заход — новый scan того же запроса",
     "ASSEMBLY_INVALID": "сборка или публикация ревизии автоматизации не прошла: следующий заход — новый scan того же запроса",
     "REVIEW_UNUSABLE": "ревью кейсов не может закончиться вердиктом: следующий заход — новый scan того же запроса",
-    "STAND_UNAVAILABLE": "стенд приложения не поднять: следующий заход — новый scan того же запроса, когда стенд будет",
 }
 
 
@@ -1202,7 +1199,7 @@ def _next_run(project: Path, manifest: Mapping[str, Any], reason_code: Any) -> d
 
 
 def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], module_root: Path, request: Any = None) -> Mapping[str, Any]:
-    """FaT-G: the one baseline check of exec (with its request) and status (from the baseline alone); only reads."""
+    """FaT-G: the one baseline check of materialize/ingest (with the request) and status (from the baseline alone); only reads."""
     from tools.project_inventory import (
         baseline_external_input_paths,
         build_inventory,
@@ -1230,7 +1227,7 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     if request is not None:
-        # exec: always against local-pilot-v1 with the runtime identity, as before FaT-G — never the baseline's own profile
+        # materialize/ingest: always against local-pilot-v1 with the runtime identity, as before FaT-G — never the baseline's own profile
         policy, adapter_id, build_profile, parameters = "local-pilot-v1", request.adapter_id, request.build_profile, dict(request.typed_parameters)
         executable = request.executable if request.adapter_id == "maven:selected-symbols-v1" else None
     else:
@@ -1260,7 +1257,7 @@ def _baseline_check(project: Path, root: Path, attempt: Mapping[str, Any], modul
 
 
 def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attempt: Mapping[str, Any]) -> dict[str, Any]:
-    """FaT-G: status of an open attempt names the files changed since the scan — the same check as exec."""
+    """FaT-G: status of an open attempt names the files changed since the scan — the same check as materialize/ingest."""
     module_root = project if attempt.get("module") == "." else project.joinpath(*str(attempt.get("module")).split("/"))
     try:
         result = _baseline_check(project, root, attempt, module_root)
@@ -1269,7 +1266,7 @@ def _status_drift(project: Path, root: Path, manifest: Mapping[str, Any], attemp
 
         fields = error_fields(error, table=False)  # P1: the fix of this place below is more exact than the table's
         return {"drift_check_error": {"code": fields["code"], "message": fields["message"][:500], "fix": fields.get("fix") or (
-            "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, exec остановится "
+            "сверка файлов с baseline не прошла — дрейф не проверен; повтори status; если ошибка остаётся, materialize и ingest остановятся "
             "на той же сверке: начни новый прогон тем же scan с --new-run (команда — next_step.command)")}}
     if result.get("status") == "UNCHANGED":
         return {}
@@ -1720,7 +1717,7 @@ def _moved_project_note(project: Path, root: Path) -> dict[str, Any] | None:
     where = f"прогон создан в {move['recorded']}, сейчас проект в {move['current']}"
     if move["same_structure"]:
         fix = (f"проект перенесён: {where}. status и report работают и здесь (сверка файлов с baseline открытой попытки здесь не делается); "
-               "finish и exec — только там, где создан прогон, а здесь — новый scan")
+               "finish, materialize и ingest — только там, где создан прогон, а здесь — новый scan")
     else:
         shown = ", ".join(move["missing"][:5]) + (" и др." if len(move["missing"]) > 5 else "")
         fix = (f"проект перенесён: {where}, но состав файлов другой (нет: {shown or 'опись прогона не читается'}). "
@@ -1764,9 +1761,9 @@ def _read_run_coordinate(project: Path, run_id: str, *, allow_moved: bool = Fals
     return root, run, state
 
 
-# FaT-RL: exec recovers a run whose controller died after the start claim (sparse UNKNOWN), finish does not
-_INTERRUPTED_FIX = ("запуск тестов начался, но квитанции исполнения нет (процесс прервался): снова вызови exec — он восстановит "
-                    "прерванный запуск как UNKNOWN и закроет попытку")
+# P4b: ingest closes a run whose claim of the start was made and whose receipt was not published; finish does not
+_INTERRUPTED_FIX = ("приём отчётов начался, но квитанции исполнения нет (ingest прервался): снова вызови ingest с теми же отчётами или "
+                    "`ingest --no-reports --reason RESULT_UNAVAILABLE` — он закроет попытку")
 
 
 def _leave(project: Path, root: Path, attempt_id: str) -> dict[str, Any]:
@@ -1863,11 +1860,11 @@ def cmd_finish(args: Any) -> int:
     if abandon is not None and (executed or attempt.get("state") == "TERMINAL"):
         from tools import execution_gate
 
-        # F3 (8.8): exec only where the attempt is open after an execution start and the package has the execution; a closed
+        # F3 (8.8): ingest only where the attempt is open after an execution start and the package has the execution; a closed
         # attempt is read with report/status
-        closes_by_exec = executed and attempt.get("state") != "TERMINAL" and execution_gate.execution_available()
-        raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает exec или она уже закрыта: --abandon не нужен",
-                       _exact_fix("python -m tools.run_pipeline exec --project <project> --run <run_id>" if closes_by_exec else
+        closes_by_ingest = executed and attempt.get("state") != "TERMINAL" and execution_gate.execution_available()
+        raise HostStop("ABANDON_NOT_NEEDED", "попытку закрывает ingest или она уже закрыта: --abandon не нужен",
+                       _exact_fix("python -m tools.run_pipeline ingest --project <project> --run <run_id> --reports <каталог с отчётами>" if closes_by_ingest else
                                   "попытка закрыта: итог — python -m tools.run_pipeline report --project <project> --run <run_id> "
                                   "(или status); следующий заход — next_run из ответа finish/status", project, root, attempt_id))
     if abandon == "LEFT_BEFORE_REVIEW":  # FaT-O12 O1: the run stays as it is; a plain scan of the request starts a new one
@@ -2135,13 +2132,13 @@ def build_parser() -> JsonArgumentParser:
         scan_parser.add_argument("--disposition-policy", choices=("quarantine", "cleanup"),
                                  help="FaT-8: on FAIL quarantine failed methods (default) or clean every generated file as before.")
     status_parser = sub.add_parser("status", parents=[shared])
-    finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): exec branch or a branch without execution.")
+    finish_parser = sub.add_parser("finish", parents=[shared], help="Close the current attempt (FaT-4): the branch after ingest or a branch without execution.")
     finish_parser.add_argument("--run", required=True)
     finish_parser.add_argument("--abandon", choices=("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE",
-                                                     "STAND_UNAVAILABLE", "LEFT_BEFORE_REVIEW"),
+                                                     "LEFT_BEFORE_REVIEW"),
                                help="FaT-AB: close an automation chain that cannot go on, only where no other command closes it.")
     status_parser.add_argument("--run", required=True, help="Exact durable run ID")
-    execution = execution_gate.load("exec_commands")  # P8a-1: exec and rerun-retained exist only where their module does
+    execution = execution_gate.load("exec_commands")  # P8a-1: exec (replaced), materialize and ingest exist only where their module does
     if execution is not None:
         execution.add_parsers(sub, shared)
     report_parser = sub.add_parser("report", parents=[shared], help="FaT-6: report.md/report.json and questions-for-analyst.md of the run, without project content.")

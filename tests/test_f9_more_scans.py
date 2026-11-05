@@ -35,18 +35,6 @@ def test_the_url_credentials_and_user_info_forms_find_what_the_old_ones_found() 
     assert hits > 300, hits
 
 
-def test_the_probe_scrub_keeps_what_it_kept() -> None:
-    from tools.exec_probe import _SECRET_VALUE
-
-    pieces = ["password", "pwd", "token", "Secret", "passwd", "my", ".", "-", "_", "x", "=", ":", " ", "\t", "'", "\"", "abc", "s3cr3t", ",", ";", ")", "a b", "\n"]
-    hits = 0
-    for text in _texts(20261113, 40000, pieces, 14):
-        old = _OLD_SECRET_VALUE.sub(r"\1***", text)
-        assert _SECRET_VALUE.sub(r"\1***", text) == old, repr(text)
-        hits += old != text
-    assert hits > 2000, hits
-
-
 def test_the_xml_comments_go_as_before() -> None:
     from tools.execution_adapters import _strip_xml_comments
 

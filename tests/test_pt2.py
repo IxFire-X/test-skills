@@ -185,15 +185,15 @@ def test_the_repository_build_keeps_the_commands_where_the_execution_files_are()
     assert set(AUTOMATION_COMMANDS) <= set(api.COMMANDS)
 
 
-def test_ready_says_finish_in_the_cases_only_row_and_exec_where_it_exists(tmp_path: Path) -> None:
+def test_ready_says_finish_in_the_cases_only_row_and_ingest_where_it_exists(tmp_path: Path) -> None:
     from tests.test_first_run import _python_project
     from tools.ready import check
 
     project = _python_project(tmp_path, runtime=False)
     cases = next(row for row in check(project, [], "cases-only-v1", "nested")["checks"] if row["id"] == "run:freeze")["message"]
-    assert "до finish:" in cases and "exec" not in cases
+    assert "до finish:" in cases and "ingest" not in cases and "materialize" not in cases
     pilot = next(row for row in check(project, [], "local-pilot-v1", "nested")["checks"] if row["id"] == "run:freeze")["message"]
-    assert "до finish или exec" in pilot
+    assert "до finish или ingest" in pilot
 
 
 def test_doctor_of_the_cases_only_pack_prints_nothing_about_running_projects(cases_only_pack: Path) -> None:

@@ -14,9 +14,7 @@
     "review-context-limit",
     "materialization-failure",
     "execution-interruption-unknown",
-    "terminal-idempotent-retry",
-    "child-execution-retry",
-    "retained-native-rerun"
+    "terminal-idempotent-retry"
   ],
   "scenario_contracts": {
     "smoke": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "accepted-terminal", "execution_required": true},
@@ -30,13 +28,11 @@
     "review-context-limit": {"accepted": false, "verification": "NOT_APPLICABLE", "reason_code": "REVIEW_CONTEXT_LIMIT", "check_id": "review-context-limit", "execution_required": false},
     "materialization-failure": {"accepted": false, "verification": "NOT_APPLICABLE", "reason_code": "MATERIALIZATION_INCOMPLETE", "check_id": "materialization-incomplete", "execution_required": false},
     "execution-interruption-unknown": {"accepted": false, "verification": "UNKNOWN", "reason_code": "EXECUTION_UNKNOWN", "check_id": "execution-unknown", "execution_required": true},
-    "terminal-idempotent-retry": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "terminal-retry-noop", "execution_required": true},
-    "child-execution-retry": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "child-execution-retry", "execution_required": true},
-    "retained-native-rerun": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "retained-native-rerun", "execution_required": true}
+    "terminal-idempotent-retry": {"accepted": true, "verification": "PASS", "reason_code": null, "check_id": "terminal-retry-noop", "execution_required": true}
   },
   "stable_repetitions": 3,
   "escalated_repetitions": 5,
   "escalate_on": ["instability", "protocol_violation"],
   "protocol_violation_blocks_readiness": true,
-  "digest": "sha256:b2663f7b301f2d34f196d1b0182eb915ec0b6651e91f71c33778c76bd38a0ac8"
+  "digest": "sha256:76aaf6e05056a7a4e3a226598b9d70acef8778a9425e2eac66ab6c8c26191916"
 }

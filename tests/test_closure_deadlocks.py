@@ -58,14 +58,14 @@ def test_today_model_response_refuses_the_unbound_answer_and_writes_nothing(tmp_
                    for row in events)
 
 
-def test_an_accepted_review_exec_cannot_materialize_is_closed_by_finish(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_an_accepted_review_materialize_cannot_write_is_closed_by_finish(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
     root, attempt_id = _journal_before_dg(tmp_path, monkeypatch)
 
     status = _status(tmp_path, root, capsys)
     assert status["next_step"]["stage"] == "finish", status["next_step"]
 
-    code, refused = _run(capsys, "exec", tmp_path, root)
+    code, refused = _run(capsys, "materialize", tmp_path, root)
     assert code == 2 and refused["reason"] == "EXECUTION_NOT_PREPARED", refused
     assert "finish" in refused["fix"] and "AUTOMATION_NOT_MATERIALIZABLE" in refused["fix"], refused
 
@@ -76,15 +76,15 @@ def test_an_accepted_review_exec_cannot_materialize_is_closed_by_finish(tmp_path
     assert "chain is invalid" in closed["materialization_refusal"], closed
     assert not (root / "execution-inputs").exists() or not any((root / "execution-inputs").iterdir())
 
-    # the attempt is closed: status is terminal, a repeated finish and exec answer the same result
+    # the attempt is closed: status is terminal, a repeated finish and materialize answer the same result
     assert _status(tmp_path, root, capsys)["attempt_state"] == "TERMINAL"
     code_again, again = _run(capsys, "finish", tmp_path, root)
     assert again["reason_code"] == "AUTOMATION_NOT_MATERIALIZABLE" and again["idempotent"] is True and code_again == code
-    _code, after = _run(capsys, "exec", tmp_path, root)
+    _code, after = _run(capsys, "materialize", tmp_path, root)
     assert after["status"] == "ok" and after["finalization"] == "complete", after
 
 
-def test_a_valid_accepted_chain_still_goes_to_exec(tmp_path: Path) -> None:
+def test_a_valid_accepted_chain_still_goes_to_materialize(tmp_path: Path) -> None:
     from tools.finalize_attempt import automation_next
     from tools.run_pipeline import HostStop, cmd_finish
 
@@ -92,17 +92,17 @@ def test_a_valid_accepted_chain_still_goes_to_exec(tmp_path: Path) -> None:
     assert automation_next(root, attempt_id)[0] == "ACCEPTED"
     with pytest.raises(HostStop) as stop:
         cmd_finish(SimpleNamespace(project=str(tmp_path), run=root.name))
-    assert stop.value.code == "FINISH_FACT_UNDETERMINED" and "exec" in str(stop.value)
+    assert stop.value.code == "FINISH_FACT_UNDETERMINED" and "materialize" in str(stop.value)
 
 
 def test_a_project_file_on_the_generated_path_is_a_final_refusal_too(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """The project already had a file where the automation writes its test: exec never overwrites it."""
+    """The project already had a file where the automation writes its test: materialize never overwrites it."""
     target = tmp_path / "tests" / "test_products.py"  # the generated path of the fixture automation
     target.parent.mkdir(parents=True)
     target.write_text("def test_mine():\n    pass\n", encoding="utf-8")
     root, _attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
 
-    _code, refused = _run(capsys, "exec", tmp_path, root)
+    _code, refused = _run(capsys, "materialize", tmp_path, root)
     assert refused["reason"] == "EXECUTION_NOT_PREPARED" and "finish" in refused["fix"], refused
     _code, closed = _run(capsys, "finish", tmp_path, root)
     assert closed["reason_code"] == "AUTOMATION_NOT_MATERIALIZABLE" and "baseline-absence" in closed["materialization_refusal"], closed
@@ -116,7 +116,7 @@ def test_a_project_file_on_the_generated_path_is_a_final_refusal_too(tmp_path: P
 
 def test_a_automation_not_finished_names_the_next_model_stage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, _attempt_id = _automation_chain(tmp_path, [None])  # r1 generated, no review yet
-    _code, refused = _run(capsys, "exec", tmp_path, root)
+    _code, refused = _run(capsys, "materialize", tmp_path, root)
     assert refused["reason"] == "EXECUTION_NOT_PREPARED" and "autotest-reviewer:r1" in refused["fix"], refused
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED" and "autotest-reviewer:r1" in finish["fix"], finish
@@ -129,7 +129,7 @@ def test_b_an_open_canonical_review_names_how_to_close_it(tmp_path: Path, capsys
     code, finish = _run(capsys, "finish", tmp_path, root)
     assert code == 2 and finish["reason"] == "FINISH_FACT_UNDETERMINED", finish
     assert "--new-run" in finish["fix"] and finish.get("next_run"), finish  # FaT-AB tier C: no closing before the review
-    _code, refused = _run(capsys, "exec", tmp_path, root)
+    _code, refused = _run(capsys, "materialize", tmp_path, root)
     assert refused["status"] == "error" and refused.get("fix"), refused
 
 
@@ -146,38 +146,44 @@ def test_c_an_accepted_review_without_selection_names_the_selection(tmp_path: Pa
     assert "effective" in finish["fix"] and "--new-run" in finish["fix"] and "--reason" not in finish["fix"], finish
 
 
-def test_d_an_interrupted_execution_is_finished_by_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    import subprocess
-
-    from tests.test_finish import _project
+def test_d_an_interrupted_ingest_is_finished_by_ingest(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.p4_flow import human_run, materialize
+    from tests.test_exec_prepares import _project
+    from tools import exec_commands
     from tools.pilot_state import derive_state
 
-    project, run_root, attempt_id, _values = _project(tmp_path)
+    project, run_root, attempt_id = _project(tmp_path)
+    printed = materialize(project, run_root, capsys)
+    assert human_run(project, printed).returncode == 0
 
     def killed(*args, **kwargs):
         raise KeyboardInterrupt("the controller died after the start claim")
 
-    monkeypatch.setattr(subprocess, "Popen", killed)
+    monkeypatch.setattr(exec_commands, "_publish_result_receipt", killed)
     with pytest.raises(KeyboardInterrupt):
-        _run(capsys, "exec", project, run_root)
+        _run(capsys, "ingest", project, run_root)
     monkeypatch.undo()
     assert any(row["event_type"] == "EXECUTION_STARTED" for row in derive_state(run_root)["events"])
     assert not (run_root / "execution-receipts" / f"{attempt_id}.json").exists()
 
     code, finish = _run(capsys, "finish", project, run_root)
-    assert code == 2 and finish["status"] == "error" and "exec" in finish["fix"], finish
-    _code, closed = _run(capsys, "exec", project, run_root)
+    assert code == 2 and finish["status"] == "error" and "ingest" in finish["fix"] and "RESULT_UNAVAILABLE" in finish["fix"], finish
+    capsys.readouterr()
+    from tools.run_pipeline import main
+
+    code = main(["ingest", "--project", str(project), "--run", run_root.name, "--no-reports", "--reason", "RESULT_UNAVAILABLE"])
+    closed = json.loads(capsys.readouterr().out)
     assert closed["status"] == "ok" and closed["verdict"] == "UNKNOWN" and closed["finalization"] == "complete", closed
 
 
 def test_e_drift_after_scan_names_both_ways_out(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Not changed by FaT-RL: exec names the changed files, how to restore them, or a new scan."""
+    """Not changed by FaT-RL: materialize names the changed files, how to restore them, or a new scan."""
     from tests.test_finish import _project
 
     project, run_root, _attempt_id, _values = _project(tmp_path)
     source = next(path for path in (project / "src").rglob("*.py"))
     source.write_text(source.read_text(encoding="utf-8") + "\n# changed after scan\n", encoding="utf-8")
-    code, refused = _run(capsys, "exec", project, run_root)
+    code, refused = _run(capsys, "materialize", project, run_root)
     assert code == 2 and refused["status"] == "error", refused
     text = json.dumps(refused, ensure_ascii=False)
     assert "scan" in text and ("вер" in text or "restore" in text), refused

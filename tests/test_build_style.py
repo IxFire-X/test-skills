@@ -1,7 +1,7 @@
 """FaT-L: the project's build and its style checks.
 
 The selected-tests run skips a closed list of the project's style, license-header and static-analysis checks (they never
-change how a test behaves), Gradle reruns only the test task, ``ready`` sees the project's validate phase before the run,
+change how a test behaves), Gradle reruns only the test task, ``ready`` starts nothing (P4b: no probe of the validate phase),
 and the files left in the project get a "format them" hint.  The package itself carries no plain-http links.
 """
 from __future__ import annotations
@@ -19,8 +19,6 @@ import pytest
 
 from tests.test_execution_adapters import _module
 from tests.test_first_run import _write
-from tools.run_tests import ProcessOutcome
-from tools import exec_probe
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAIN = "http" + "://"  # kept split so this file does not trip the guard below
@@ -176,63 +174,18 @@ def test_ready_names_the_style_checks_and_the_exclusions_for_the_project_build(t
     assert style_rows(plain, _maven_module(plain)) == []
 
 
-@pytest.mark.parametrize(("outcome", "level", "needle"), [
-    (ProcessOutcome(exit_code=0, stdout="", stderr=""), "OK", "validate"),
-    (ProcessOutcome(exit_code=1, stdout="[ERROR] Plugin io.spring.javaformat:spring-javaformat-maven-plugin:0.0.47 or one of its dependencies "
-              "could not be resolved: Cannot access central in offline mode and the artifact has not been downloaded from it before.\n",
-              stderr=""), "WARN", "офлайн"),
-    (ProcessOutcome(exit_code=1, stdout="[INFO] x\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce "
-              "(enforce-java) on project app: Some Enforcer rules have failed.\n[ERROR] -> [Help 1]\n", stderr=""),
-     "WARN", "maven-enforcer-plugin"),
-    (ProcessOutcome(exit_code=124, stdout="", stderr="", kind="TIMEOUT"), "WARN", "120"),
-])
-def test_ready_probes_the_validate_phase_offline_with_the_exec_flags(tmp_path: Path, outcome: ProcessOutcome, level: str, needle: str) -> None:
-    from tools.execution_adapters import MAVEN_STYLE_SKIPS
-    from tools.exec_probe import build_probe
+# --------------------------------------------------------------------------------------
+# ingest and finish: the skipped checks and the format hint for the files left in the project
+# --------------------------------------------------------------------------------------
 
-    project, module = _petclinic_like(tmp_path)
-    calls: list[tuple] = []
-
-    def runner(argv, cwd, *, timeout):
-        calls.append((tuple(argv), Path(cwd), timeout))
-        return outcome
-
-    row = build_probe(project, module, runner=runner)
-    assert row["id"] == "execution:build-probe" and row["block"] == "execution" and row["level"] == level, row
-    assert needle in row["message"] + (row.get("fix") or "")
-    [(argv, cwd, timeout)] = calls
-    assert argv == (str((project / module["test"]["wrapper"]).resolve()), "-B", "-o", "-q", "-Pdefault", *MAVEN_STYLE_SKIPS, "validate")
-    assert cwd == project.resolve() and timeout == 120
-    if level != "OK":
-        assert row.get("fix")
-
-
-def test_ready_does_not_probe_gradle_pytest_or_a_build_that_is_not_ready(tmp_path: Path) -> None:
-    from tools.exec_probe import build_probe
-
-    def runner(*_args, **_kwargs):
-        raise AssertionError("no probe expected")
-
-    gradle = tmp_path / "gradle"
-    _write(gradle, "gradlew", "#!/bin/sh\n")
-    assert build_probe(gradle, {"id": "g", "root": ".", "test": {"adapter_id": "gradle-wrapper:selected-symbols-v1", "wrapper": "gradlew",
-                                                                  "build_profile": "default", "adapter_parameters": {}}}, runner=runner) is None
-    assert build_probe(gradle, {"id": "p", "root": ".", "test": {"adapter_id": "pytest:selected-symbols-v1", "interpreter": ".venv/python",
-                                                                  "build_profile": "default", "adapter_parameters": {}}}, runner=runner) is None
-    missing = tmp_path / "missing"
-    missing.mkdir()
-    assert build_probe(missing, {"id": "m", "root": ".", "test": {"adapter_id": "maven-wrapper:selected-symbols-v1", "wrapper": "mvnw",
-                                                                   "build_profile": "default", "adapter_parameters": {}}}, runner=runner) is None
-
-
-def test_ready_probe_failure_does_not_block_the_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ready_makes_no_probe_of_the_build_and_starts_no_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P4b: ``ready`` used to run the project's validate phase offline (``execution:build-probe``); the package starts no process now, so
+    the row is gone for every build, and the style row — read from the poms — stays."""
     from tools import ready
 
     project, module = _petclinic_like(tmp_path)
     _write(project, "docs/feature.md", "Требование.\n")
     _write(project, "src/main/java/x/App.java", "package x;\npublic class App {}\n")
-    failed = ProcessOutcome(exit_code=1, stdout="[ERROR] Failed to execute goal org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce\n",
-                      stderr="")
     from tools.init_skillsrc import _payload
 
     (project / ".skillsrc").write_bytes(_payload({
@@ -240,24 +193,25 @@ def test_ready_probe_failure_does_not_block_the_cases(tmp_path: Path, monkeypatc
         "discovery": {"on_missing": "automatic", "conflict_policy": "ask_user"},
         "modules": [{**module, "paths": {"source": ["src/main/java"], "tests": ["src/test/java"]}, "detected_from": ["pom.xml"]}],
     }))
-    monkeypatch.setattr(exec_probe, "_probe_runner", lambda argv, cwd, *, timeout: failed)
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("ready started a process")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setenv("JAVA_HOME", str(tmp_path))
     report = ready.check(project, ["docs/feature.md"], profile="local-pilot-v1")
     rows = {row["id"]: row for row in report["checks"]}
-    assert rows["execution:build-probe"]["level"] == "WARN" and "не запустятся" in rows["execution:build-probe"]["message"], rows
+    assert "execution:build-probe" not in rows, rows
     assert report["status"] == "READY", [row for row in report["checks"] if row["level"] == "STOP" and row["block"] == "cases"]
     assert rows["execution:style"]["level"] == "WARN"
 
 
-# --------------------------------------------------------------------------------------
-# exec and finish: the skipped checks and the format hint for the files left in the project
-# --------------------------------------------------------------------------------------
-
-def test_exec_and_finish_hint_to_format_the_files_left_in_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                                      capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _args, _project
+def test_ingest_and_finish_hint_to_format_the_files_left_in_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import run_the_build
+    from tests.test_finish import _project
     from tools import execution_adapters
-    from tools.exec_commands import cmd_exec
     from tools.run_pipeline import cmd_finish
 
     project, run_root, _attempt_id, _values = _project(tmp_path)
@@ -269,8 +223,8 @@ def test_exec_and_finish_hint_to_format_the_files_left_in_the_project(tmp_path: 
 
     monkeypatch.setattr(execution_adapters, "project_style_checks", lambda *_args: ("spring-javaformat",))
     monkeypatch.setattr(execution_adapters, "style_notes", notes)
-    assert cmd_exec(_args(project, run_root)) == 0
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
+    assert code == 0
     assert output["verdict"] == "PASS" and output["format_hint"] == "отформатируйте: tests/test_generated.py", output
     assert seen[-1][0] == "pytest:selected-symbols-v1" and seen[-1][2:] == (("spring-javaformat",), ("tests/test_generated.py",)), seen
     cmd_finish(SimpleNamespace(project=str(project), run=run_root.name))
@@ -313,7 +267,7 @@ _M2 = Path.home() / ".m2" / "repository"
                     or not (_M2 / "org/junit/jupiter/junit-jupiter/5.10.2").is_dir(),
                     reason="needs TEST_SKILLS_JAVA_HOME, mvn and the plugins in ~/.m2 (offline)")
 def test_real_maven_skips_spring_javaformat_only_in_the_selected_tests_run(tmp_path: Path) -> None:
-    from tools.execution_adapters import command_for, probe_command_for
+    from tools.execution_adapters import command_for
 
     project = tmp_path / "real"
     pinned = "".join(f"<plugin><groupId>org.apache.maven.plugins</groupId><artifactId>{name}</artifactId><version>{version}</version></plugin>"
@@ -338,4 +292,3 @@ def test_real_maven_skips_spring_javaformat_only_in_the_selected_tests_run(tmp_p
     assert (project / "target/surefire-reports/TEST-x.GenTests.xml").is_file()
     own_validate = run((mvn, "-B", "-q", "validate"))
     assert own_validate.returncode != 0 and "Formatting violations" in own_validate.stdout, own_validate.stdout[-3000:]
-    assert run(probe_command_for("maven:selected-symbols-v1", mvn, "default")).returncode == 0

@@ -566,10 +566,6 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                                  f"сборка не готова: {facts['reason']}; без неё прогон пойдёт как cases-only-v1", facts["fix"]))
                 rows.extend(style_rows(project, selected))
                 rows.extend(java_level_rows(project, selected))
-                exec_probe = execution_gate.load("exec_probe")
-                probe = exec_probe.build_probe(project, selected) if facts["ready"] and exec_probe is not None else None
-                if probe is not None:
-                    rows.append(probe)
                 # FaT-S: the baseline refusals the scan would meet, the same code; cases are not blocked by them.
                 from tools.run_pipeline import _baseline_blockers
 
@@ -577,9 +573,9 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
                     rows.append(_row(f"execution:baseline:{blocker['file']}", EXECUTION, "WARN",
                                      f"{blocker['file']}: {blocker['reason']}; прогон пойдёт как cases-only-v1", blocker["fix"]))
     if profile == "local-pilot-v1":
-        freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish или exec: иначе exec "
-                  "остановится на дрейфе и предложит вернуть файлы или начать новый scan")
-    else:  # PT2: the cases-only profile has no exec
+        freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish или ingest: иначе materialize и ingest "
+                  "остановятся на дрейфе и предложат вернуть файлы или начать новый scan")
+    else:  # PT2: the cases-only profile has no execution
         freeze = ("после scan не меняйте файлы проекта и .skillsrc до finish: иначе status покажет дрейф (drift) "
                   "и предложит вернуть файлы или начать новый scan")
     rows.append(_row("run:freeze", CASES, "OK", freeze))
@@ -631,7 +627,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 # Public names for execution_core (V1): the same objects under names without an underscore; a rename of the private name is then
 # a rename here, in one place.
-check_row = _row
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """V5 generated-test runner with exact ``(file_id, symbol_id)`` evidence.
 
-The process launch (``run_subprocess``, the process-tree stop, ``run_tests_v5``) lives in ``tools/exec_runner.py`` (P8a-1).
+The package starts no process (P4b): a human runs the build, ``tools/exec_runner.py`` takes the reports (``ingest``).
 """
 from __future__ import annotations
 
@@ -31,15 +31,10 @@ from tools.java_text import mask_java_noncode  # F6: the Java lexer is shared wi
 
 _mask_java_noncode = mask_java_noncode
 _ROOT = Path(__file__).resolve().parents[1]
-_AUTOMATION_SCHEMA = _ROOT / "schemas" / "tc-to-autotest-output.schema.json"
 _AUTOTEST_REVIEW_SCHEMA = _ROOT / "schemas" / "autotest-reviewer-output.schema.json"
-_TIMEOUT = 600
-_PROCESS_STOP_ATTESTATION = object()
-_CONTROLLER_STOP_ROWS: set[str] = set()
 DURABLE_NATIVE_REPORT_MAX_BYTES = 1024 * 1024
 NATIVE_REPORT_MAX_BYTES = 8 * 1024 * 1024
 NATIVE_REPORT_SET_MAX_BYTES = 32 * 1024 * 1024
-PROCESS_OUTPUT_TAIL_BYTES = 32768
 DURABLE_NATIVE_REPORT_NORMALIZATION = "junit-semantic-v1"
 _PROCESS_ERROR_CLASSES = {
     "TIMEOUT": "TimeoutExpired",
@@ -73,44 +68,11 @@ class ProcessOutcome:
     stdout: str
     stderr: str
     kind: Literal["EXIT", "TIMEOUT", "OS_ERROR", "NOT_OBSERVED"] = "EXIT"
-    process_scope_stopped: bool = False
-    stop_proof: Literal["WINDOWS_JOB_OBJECT", "WINDOWS_TASKKILL_TREE", "POSIX_PROCESS_GROUP"] | None = None
-    _stop_attestation: object | None = None
 
     def __iter__(self):
         yield self.exit_code
         yield self.stdout
         yield self.stderr
-
-
-def _process_stop_fingerprint(row: Mapping[str, Any]) -> str:
-    return json.dumps(dict(row), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-
-
-def consume_controller_process_stop_proof(report: Mapping[str, Any]) -> bool:
-    """Consume the in-process proof minted by a real timed-out subprocess.
-
-    The portable receipt keeps only public evidence.  Its ability to unlock a
-    retry is therefore gated here, before PROCESS_STOPPED is persisted.
-    """
-    rows = report.get("process_evidence")
-    if not isinstance(rows, list):
-        return False
-    stopped = [row for row in rows if isinstance(row, Mapping) and row.get("process_scope_stopped") is True]
-    if len(stopped) != 1:
-        return False
-    row = stopped[0]
-    if validate_process_evidence(
-        rows, report.get("run_id"), report.get("source", {}), report.get("exit_code"),
-        report.get("stats", {}).get("duration_sec") if isinstance(report.get("stats"), Mapping) else None,
-        report.get("target"),
-    ):
-        return False
-    fingerprint = _process_stop_fingerprint(row)
-    if fingerprint not in _CONTROLLER_STOP_ROWS:
-        return False
-    _CONTROLLER_STOP_ROWS.remove(fingerprint)
-    return True
 
 
 def resolve_execution_context(
@@ -170,28 +132,6 @@ def _freeze(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_freeze(item) for item in value)
     return value
-
-
-def load_automation_artifact(path: Path) -> dict[str, Any]:
-    from tools.schema_validation import classify_version, load_json_strict, schema_diagnostics
-    artifact = load_json_strict(path)
-    if classify_version(artifact)["code"] == "V2_1_BREAKING_CHANGE":
-        raise RunnerInputError("V2_1_BREAKING_CHANGE")
-    diagnostics = schema_diagnostics(artifact, _AUTOMATION_SCHEMA, _ROOT)
-    if diagnostics:
-        raise ValueError(f"{diagnostics[0]['code']}: {diagnostics[0]['path']}")
-    return artifact
-
-
-def load_autotest_review_artifact(path: Path) -> dict[str, Any]:
-    from tools.schema_validation import classify_version, load_json_strict, schema_diagnostics
-    artifact = load_json_strict(path)
-    if classify_version(artifact)["code"] == "V2_1_BREAKING_CHANGE":
-        raise RunnerInputError("V2_1_BREAKING_CHANGE")
-    diagnostics = schema_diagnostics(artifact, _AUTOTEST_REVIEW_SCHEMA, _ROOT)
-    if diagnostics:
-        raise RunnerInputError("RUNNER_AUTOTEST_REVIEW", diagnostics)
-    return artifact
 
 
 def _path(root: Path, raw_path: str) -> Path | None:
@@ -1133,27 +1073,6 @@ def match_junit_cases(
     return rows, errors
 
 
-def _report_inventory(directory: Path) -> dict[Path, tuple[int, int, str]]:
-    result: dict[Path, tuple[int, int, str]] = {}
-    if directory.is_dir():
-        candidates = directory.rglob("*.xml")
-    elif directory.is_file():
-        candidates = (directory,)
-    else:
-        candidates = ()
-    for path in candidates:
-        try:
-            stat = path.stat()
-            fingerprint = "oversized"
-            if stat.st_size <= NATIVE_REPORT_MAX_BYTES:
-                with path.open("rb") as stream:
-                    fingerprint = hashlib.sha256(stream.read(NATIVE_REPORT_MAX_BYTES + 1)).hexdigest()
-            result[path.resolve()] = (stat.st_mtime_ns, stat.st_size, fingerprint)
-        except OSError:
-            continue
-    return result
-
-
 def _report_snapshots(paths: Sequence[Path]) -> dict[Path, bytes]:
     """Read each fresh framework report once; all parsing and digests use these bytes."""
     snapshots: dict[Path, bytes] = {}
@@ -1364,13 +1283,6 @@ def _changed_file_ids(compatibility: RunnerCompatibility, post_run_digests: Mapp
     return tuple(sorted(file_id for file_id, digest in compatibility.verified_file_digests.items() if post_run_digests.get(file_id) != digest))
 
 
-def _outcome(value: Any) -> ProcessOutcome:
-    if isinstance(value, ProcessOutcome):
-        return value
-    code, stdout, stderr = value
-    return ProcessOutcome(code, stdout, stderr)
-
-
 def _process_row(kind: str, outcome: ProcessOutcome, run_id: str, source: Mapping[str, Any], command_profile: str, duration_sec: float, affected_file_ids: Sequence[str] = ()) -> dict[str, Any]:
     row = {
         "run_id": run_id, "source_digest": source["source_digest"], "kind": kind,
@@ -1381,15 +1293,6 @@ def _process_row(kind: str, outcome: ProcessOutcome, run_id: str, source: Mappin
     }
     if kind == "SOURCE_CHANGED":
         row["affected_file_ids"] = list(affected_file_ids)
-    if (
-        kind == "TIMEOUT"
-        and outcome.process_scope_stopped
-        and outcome.stop_proof is not None
-        and outcome._stop_attestation is _PROCESS_STOP_ATTESTATION
-    ):
-        row["process_scope_stopped"] = True
-        row["stop_proof"] = outcome.stop_proof
-        _CONTROLLER_STOP_ROWS.add(_process_stop_fingerprint(row))
     return row
 
 
@@ -1699,13 +1602,10 @@ def _request_report_path(request: Any) -> Path | None:
 runner_report = _report
 runner_diag = _diag
 process_evidence_row = _process_row
-closed_outcome = _outcome
-report_inventory = _report_inventory
 report_snapshots = _report_snapshots
 records_from_snapshots = _records_from_snapshots
 report_digest_evidence = _report_digest_evidence
 durable_execution_artifacts = _durable_execution_artifacts
-normalize_durable_junit_report = _normalize_durable_junit_report
 request_report_path = _request_report_path
 request_is_attempt_local = _request_is_attempt_local
 attempt_execution_scope = _attempt_execution_scope
@@ -1714,5 +1614,3 @@ durable_delta_allows_execution = _durable_delta_allows_execution
 changed_file_ids = _changed_file_ids
 post_run_file_digests = _post_run_file_digests
 failed_methods = _failed_methods
-PROCESS_STOP_ATTESTATION = _PROCESS_STOP_ATTESTATION
-RUN_TIMEOUT_SECONDS = _TIMEOUT

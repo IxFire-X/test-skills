@@ -281,16 +281,6 @@ def test_init_skillsrc_sanitize_of_a_100kb_value_is_not_quadratic() -> None:
     """, 1.0)
 
 
-def test_probe_scrub_of_a_line_of_password_words_is_not_quadratic() -> None:
-    """exec_probe._scrub: ``(?i)((?:password|passwd|pwd|token|secret)[\\w.-]*['\\"]?\\s*[:=]\\s*)(...)``: k keywords in one word run of n bytes cost k * n.  The line comes
-    from the output of the Maven probe and is cut to 200 characters only AFTER the substitution."""
-    _time("""
-        from tools.exec_probe import _scrub
-        LINE = "password" * 8_000
-        def run(): _scrub(LINE)
-    """, 1.0)
-
-
 def test_xml_comment_strip_of_pom_with_100kb_of_unclosed_comments_is_not_quadratic() -> None:
     """execution_adapters._XML_COMMENTS = ``<!--.*?-->`` (DOTALL) is applied to every pom.xml: each ``<!--`` of a file with no ``-->`` scans to the end."""
     _time("""

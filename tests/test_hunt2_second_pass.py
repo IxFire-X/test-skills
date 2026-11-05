@@ -186,17 +186,17 @@ def test_status_after_the_static_review_follows_the_verdict(tmp_path: Path, caps
         assert "ревью сверх лимита" in step["action"] and "exec" not in step["action"]
 
 
-def test_exec_after_a_refused_static_review_points_to_finish_not_to_another_review(tmp_path: Path,
-                                                                                  capsys: pytest.CaptureFixture[str]) -> None:
+def test_materialize_after_a_refused_static_review_points_to_finish_not_to_another_review(tmp_path: Path,
+                                                                                          capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import flow_args
     from tests.test_exec_prepares import _project
-    from tests.test_finish import _args
-    from tools.exec_commands import cmd_exec
+    from tools.exec_commands import cmd_materialize
 
     project, run_root, _attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
-    assert cmd_exec(_args(project, run_root)) == 2
+    assert cmd_materialize(flow_args(project, run_root)) == 2
     output = json.loads(capsys.readouterr().out)
     assert output["reason"] == "EXECUTION_NOT_PREPARED"
-    assert "finish" in output["fix"] and "next_run" in output["fix"] and "снова exec" not in output["fix"] and "ПРИНЯТО" not in output["fix"]
+    assert "finish" in output["fix"] and "next_run" in output["fix"] and "снова materialize" not in output["fix"] and "ПРИНЯТО" not in output["fix"]
 
 
 # --------------------------------------------------------------------------------------

@@ -3,15 +3,14 @@
 - 2.1: a non-source file in secrets/ or credentials/ is left out whatever its extension; the password rule reads the
   value on the same line in more forms (YAML list item, quoted key, XML element, any .json, ${X:default}, short
   secret); message bundles and true/false-like flags are not passwords; nothing left out before reaches the model now;
-- 2.4: Gradle runs the tests past the build cache, and an old recorded request is refused with its reason;
+- 2.4: Gradle runs the tests past the build cache (P4b: the refusal of an old recorded request for a rerun went with ``rerun-retained``);
 - 2.14: a task document over a batch may be passed by raising the batch over the step budget;
 - 2.15: the format hint says what the command formats;
-- 2.16: the [ERROR] lines of the ready build probe carry no credentials and no long lines.
+- 2.16: (P4b: the ready build probe, and its scrub of the [ERROR] lines, are gone: ``ready`` starts no process).
 """
 from __future__ import annotations
 
 import re
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -145,22 +144,6 @@ def test_gradle_runs_the_tests_past_the_build_cache(tmp_path: Path) -> None:
     assert request.argv[1:4] == ("cleanTest", "test", "--no-build-cache")
 
 
-def test_an_old_gradle_request_is_refused_for_rerun_with_its_reason(tmp_path: Path) -> None:
-    from tools.execution_adapters import GRADLE, MAVEN, build_request
-    from tools.run_pipeline import HostStop
-    from tools.exec_commands import _rerun_request_current
-
-    request = build_request(GRADLE, _module(tmp_path / "g", GRADLE, "gradlew"), [{"selector": "pkg.SampleTest#works"}])
-    _rerun_request_current(request)
-    old = replace(request, argv=tuple(token for token in request.argv if token != "--no-build-cache"))
-    with pytest.raises(HostStop) as stop:
-        _rerun_request_current(old)
-    assert stop.value.code == "RERUN_REQUEST_OUTDATED"
-    assert "--no-build-cache" in str(stop.value) and "команда Gradle изменилась" in str(stop.value)
-    assert "новый прогон" in (stop.value.fix or "")
-    _rerun_request_current(build_request(MAVEN, _module(tmp_path / "m", MAVEN, "mvnw"), [{"selector": "pkg.SampleTest#works"}]))
-
-
 # --------------------------------------------------------------------------------------
 # 2.14, 2.15, 2.16 hints
 # --------------------------------------------------------------------------------------
@@ -189,44 +172,6 @@ def test_the_format_hint_says_what_the_command_formats() -> None:
     for path in ("C:\\work\\app\\src\\test\\java\\x\\GenTests.java", "/work/app/src/test/java/x/OtherTests.java"):
         assert any(re.fullmatch(pattern, path) for pattern in files), path
     assert not any(re.fullmatch(pattern, "/work/app/src/main/java/x/App.java") for pattern in files)
-
-
-def test_the_build_probe_error_lines_carry_no_credentials(tmp_path: Path) -> None:
-    from tests.test_build_style import _petclinic_like
-    from tools.run_tests import ProcessOutcome
-    from tools.exec_probe import build_probe
-
-    project, module = _petclinic_like(tmp_path)
-    stdout = ("[ERROR] Failed to read artifact from https://ci:hunter2@repo.corp/maven2 (token=abcdef123456)\n"
-              "[ERROR] Rule 0: requireProperty failed: db.password=hunter2 secret: 's3 cr3t'\n"
-              "[ERROR] " + "x" * 400 + "\n")
-    row = build_probe(project, module, runner=lambda *_a, **_k: ProcessOutcome(exit_code=1, stdout=stdout, stderr=""))
-    message = row["message"]
-    assert "hunter2" not in message and "abcdef123456" not in message and "s3 cr3t" not in message
-    assert "://***@repo.corp" in message
-    assert all(len(line) <= 200 for line in message.split(" | ")[1:]) and "x" * 201 not in message
-
-
-def test_the_build_probe_reads_the_real_process_outcome(tmp_path: Path) -> None:
-    """FaT-H2a P1: the probe runs through exec_runner.run_subprocess — the outcome form can never drift from a test double."""
-    import sys
-
-    from tests.test_build_style import _petclinic_like
-    from tools.exec_probe import _probe_runner, build_probe
-
-    project, module = _petclinic_like(tmp_path)
-    fake = tmp_path / "fake_mvn.py"
-    fake.write_text("print('[ERROR] Rule 0: RequireJavaVersion failed with message: Detected JDK 24 is not in [21,22)')\n"
-                    "raise SystemExit(1)\n", encoding="utf-8")
-    calls: list[tuple] = []
-
-    def runner(argv, cwd, *, timeout):
-        calls.append(tuple(argv))
-        return _probe_runner([sys.executable, str(fake)], cwd, timeout=timeout)
-
-    row = build_probe(project, module, runner=runner)
-    assert calls and row["level"] == "WARN" and "RequireJavaVersion" in row["message"], row
-    assert "выбранные тесты не запустятся" in row["message"]
 
 
 def test_the_project_checks_row_names_every_file_outside_the_projects_git(tmp_path: Path) -> None:

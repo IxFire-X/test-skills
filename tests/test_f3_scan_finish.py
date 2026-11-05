@@ -167,13 +167,13 @@ def test_a_planted_execution_receipt_does_not_make_finish_take_the_execution_bra
     assert closed.get("status") == "ok" and closed["branch"] == "no-execution", closed
 
 
-def test_abandon_on_a_closed_cases_only_attempt_points_to_report_not_exec(tmp_path: Path, capsys) -> None:
+def test_abandon_on_a_closed_cases_only_attempt_points_to_report_not_ingest(tmp_path: Path, capsys) -> None:
     run = _rework_closed(tmp_path, capsys)
     code, closed = _pipeline(capsys, _finish_argv(run))
     assert closed.get("status") == "ok", closed
     code, refused = _pipeline(capsys, [*_finish_argv(run), "--abandon", "LEFT_BEFORE_REVIEW"])
     assert code == 2 and refused.get("reason") == "ABANDON_NOT_NEEDED", refused
-    assert "exec" not in str(refused.get("fix")) and "report" in str(refused.get("fix")), refused.get("fix")
+    assert "ingest" not in str(refused.get("fix")) and "report" in str(refused.get("fix")), refused.get("fix")
 
 
 # --- 8.6: the drift of a context file --------------------------------------------------------------------------------

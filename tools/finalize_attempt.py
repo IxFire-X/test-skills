@@ -1134,9 +1134,9 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
     """FaT-4: the automation outcome of a local-pilot attempt, read from the r1/r2 model stages (only reads).
 
     ``("AUTOMATION_BLOCKED" | "AUTOMATION_REJECTED", None)`` — final, finish closes the attempt;
-    ``("AUTOMATION_NOT_MATERIALIZABLE", "<exec's refusal>")`` — final: the review accepted an automation exec cannot write
+    ``("AUTOMATION_NOT_MATERIALIZABLE", "<materialize's refusal>")`` — final: the review accepted an automation materialize cannot write
     (FaT-RL: the same checks materialize_delta makes before its first write);
-    ``("ACCEPTED", None)`` — exec closes it; ``("PENDING", "<stage>:rN")`` — the next model stage of the chain.
+    ``("ACCEPTED", None)`` — ingest closes it; ``("PENDING", "<stage>:rN")`` — the next model stage of the chain.
     BLOCKED is final only with blockers in the canonical (every revision must then be BLOCKED); without them it is an
     invalid answer that the review may still send to a correction.
     """
@@ -1161,7 +1161,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
             # checked the list against the canon before the answer was written)
             partial = generated["artifacts"].get("excluded_cases") is not None
             if status_blocked or (canonical_blockers and not partial):
-                # exec does not run it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
+                # materialize does not write it: BLOCKED is not directly runnable, GENERATED over canonical blockers is invalid.
                 return "AUTOMATION_BLOCKED", None
             refusal = execution_gate.load_mode_b("generated_delta").materialization_refusal(run_root, attempt_id)
             return ("AUTOMATION_NOT_MATERIALIZABLE", refusal) if refusal is not None else ("ACCEPTED", None)
@@ -1171,7 +1171,7 @@ def automation_outcome(run_root: Path, attempt_id: str, canonical_blockers: int)
 
 
 # FaT-AB: the closed list of `finish --abandon` codes and the state each one closes
-ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE", "STAND_UNAVAILABLE")
+ABANDON_CODES = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID", "AUTOMATION_NOT_MATERIALIZABLE")
 _PENDING_ABANDON = ("STAGE_RETRY_EXHAUSTED", "ASSEMBLY_INVALID")
 
 
@@ -1180,40 +1180,31 @@ def _abandon_command(code: str) -> str:
 
 
 def _accepted_unprepared(run_root: Path, attempt_id: str) -> bool:
-    """FaT-AB D3: exec began to prepare the accepted automation (inputs published) and wrote nothing into the project."""
+    """FaT-AB D3: materialize began to prepare the accepted automation (inputs published) and wrote nothing into the project."""
     root = Path(run_root)
     return ((root / "execution-inputs" / f"{attempt_id}.json").exists()
             and not (root / "materialization-ownership" / f"{attempt_id}.json").exists()
             and not (root / "generated-deltas" / f"{attempt_id}.json").exists())
 
 
-def _stand_down(run_root: Path, attempt_id: str) -> bool:
-    """FaT-O12 O2: the module's stand (FaT-2R ``service_url_env``) does not answer now — the same check as exec's.
-    A delivery without the stand module cannot check it: the fact stays undetermined (P8a-1)."""
-    stand = execution_gate.load("exec_stand")
-    return stand is not None and stand.stand_down(run_root, attempt_id)
-
-
 def _automation_refusal(run_root: Path, attempt_id: str, canonical_blockers: int, abandon: str | None = None) -> str:
     """AUTOMATION_BLOCKED or AUTOMATION_REJECTED; any unfinished or runnable chain is not a no-execution closing point.
 
     FaT-AB: ``abandon`` is the agent's decision that the chain cannot go on; the code closes with it only where no
-    other command closes the attempt — an unfinished chain, or an accepted one exec failed to prepare."""
+    other command closes the attempt — an unfinished chain, or an accepted one materialize failed to prepare."""
     outcome, stage = automation_outcome(run_root, attempt_id, canonical_blockers)
     if outcome == "ACCEPTED":
         if abandon == "AUTOMATION_NOT_MATERIALIZABLE" and _accepted_unprepared(run_root, attempt_id):
             return abandon
-        if abandon == "STAND_UNAVAILABLE" and _stand_down(run_root, attempt_id):  # FaT-O12 O2: the code checks it again
-            return abandon
-        raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — попытку закрывает exec",
-                                fix="python -m tools.run_pipeline exec --project <project> --run <run_id>")
+        raise FinalizationError("FINISH_FACT_UNDETERMINED: автоматизация принята — тесты кладёт materialize, попытку закрывает ingest",
+                                fix="python -m tools.run_pipeline materialize --project <project> --run <run_id>")
     if outcome == "PENDING":
         if abandon in _PENDING_ABANDON:
             return str(abandon)
         name, revision = str(stage).split(":")
         what = "следующая ревизия" if name == "tc-to-autotest" else "ревью ревизии"
         raise FinalizationError(f"FINISH_FACT_UNDETERMINED: автоматизация не закончена: {what} {revision} ({name})",
-                                fix=f"следующий шаг — {stage}; после принятого ревью попытку закрывает exec, после отказа — finish; "
+                                fix=f"следующий шаг — {stage}; после принятого ревью попытку закрывает ingest (после materialize), после отказа — finish; "
                                     f"единственный повтор стадии {stage} исчерпан — {_abandon_command('STAGE_RETRY_EXHAUSTED')}; "
                                     f"сборка или публикация ревизии падает после записанных ответов — {_abandon_command('ASSEMBLY_INVALID')}")
     if abandon is not None:

@@ -10,12 +10,12 @@
     "run_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
     "policy_profile": {"enum": ["cases-only-v1", "local-pilot-v1"]},
-    "scenario_id": {"enum": ["fresh-non-git", "tree-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun"]},
+    "scenario_id": {"enum": ["fresh-non-git", "tree-preservation", "waiting-for-model-resume", "one-user-question-resume", "terminal-idempotent-retry"]},
     "precondition": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "snapshot_digest"],
       "properties": {
-        "kind": {"enum": ["NON_GIT_PROJECT", "PROJECT_TREE", "MODEL_WAITING", "USER_QUESTION_PENDING", "TERMINAL_ATTEMPT", "RETAINED_FILE_SET"]},
+        "kind": {"enum": ["NON_GIT_PROJECT", "PROJECT_TREE", "MODEL_WAITING", "USER_QUESTION_PENDING", "TERMINAL_ATTEMPT"]},
         "snapshot_digest": {"$ref": "#/$defs/digest"}
       }
     },
@@ -23,7 +23,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "before_digest", "after_digest"],
       "properties": {
-        "kind": {"enum": ["RUN_PIPELINE", "RUN_PRESERVING_TREE", "RESUME_MODEL_ATTEMPT", "RESUME_AFTER_USER_ANSWER", "RETRY_TERMINAL_ATTEMPT", "PROJECT_NATIVE_RERUN"]},
+        "kind": {"enum": ["RUN_PIPELINE", "RUN_PRESERVING_TREE", "RESUME_MODEL_ATTEMPT", "RESUME_AFTER_USER_ANSWER", "RETRY_TERMINAL_ATTEMPT"]},
         "before_digest": {"$ref": "#/$defs/digest"},
         "after_digest": {"$ref": "#/$defs/digest"}
       }
@@ -42,15 +42,6 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
-    "retained_file": {
-      "type": "object", "additionalProperties": false,
-      "required": ["file_id", "path", "digest"],
-      "properties": {
-        "file_id": {"$ref": "#/$defs/label"},
-        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^\\r\\n]+$"},
-        "digest": {"$ref": "#/$defs/digest"}
-      }
-    },
     "snapshot": {
       "oneOf": [
         {
@@ -95,15 +86,6 @@
               "type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true,
               "items": {"$ref": "#/$defs/digest"}
             },
-            "digest": {"$ref": "#/$defs/digest"}
-          }
-        },
-        {
-          "type": "object", "additionalProperties": false,
-          "required": ["kind", "files", "digest"],
-          "properties": {
-            "kind": {"const": "RETAINED_FILES"},
-            "files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/retained_file"}},
             "digest": {"$ref": "#/$defs/digest"}
           }
         }

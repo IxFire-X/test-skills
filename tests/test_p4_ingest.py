@@ -298,7 +298,7 @@ def test_story_the_report_written_by_hand_with_the_right_word_passes_for_a_run_a
     assert code == 0 and output["execution_source"]["run_by"] == "human" and "не воспроизводил" in output["execution_source"]["note"]
 
 
-def test_the_commands_are_in_the_parser_and_exec_is_still_there(tmp_path: Path) -> None:
+def test_the_commands_are_in_the_parser_and_exec_still_parses_so_that_it_can_answer(tmp_path: Path) -> None:
     from tools.run_pipeline import build_parser
 
     parser = build_parser()

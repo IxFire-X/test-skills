@@ -65,7 +65,6 @@ _OBSERVATION_SCENARIOS = frozenset({
     "waiting-for-model-resume",
     "one-user-question-resume",
     "terminal-idempotent-retry",
-    "retained-native-rerun",
 })
 class ReleaseEvalError(ValueError):
     """Campaign evidence is malformed, mixed, or incomplete."""
@@ -354,27 +353,6 @@ def _scenario_proof(scenario_id: str, evidence: Mapping[str, Any]) -> bool:
             and all(isinstance(row, Mapping) and row.get("disposition") in allowed for row in disposition_files)
             and dispositions.get("verification") == "UNKNOWN"
         )
-    if scenario_id == "child-execution-retry":
-        parent_id = attempt.get("parent_attempt_id")
-        parent = next(
-            (
-                row for row in attempts
-                if isinstance(row, Mapping) and row.get("attempt_id") == parent_id
-            ),
-            None,
-        )
-        parent_types = {
-            row.get("event_type")
-            for row in events
-            if isinstance(row, Mapping) and row.get("attempt_id") == parent_id
-        }
-        return (
-            isinstance(parent, Mapping)
-            and isinstance(attempt.get("retry_reason"), str)
-            and {"EXECUTION_UNKNOWN", "PROCESS_STOPPED", "ATTEMPT_TERMINAL"} <= parent_types
-            and real_execution
-        )
-
     # These identities need a controller/eval observation receipt that the pilot does
     # not currently publish. Labels, current filesystem state, and no-op absence are
     # not durable proof of the precondition/action that the scenario names.
@@ -693,22 +671,6 @@ def _derive_record(
         else:
             required_digests.add(disposition_receipt["digest"])
             required_digests.update(row["digest"] for row in unknown_events)
-    if scenario_id == "child-execution-retry":
-        parent_id = attempt.get("parent_attempt_id")
-        parent = next(
-            (row for row in state["attempts"] if row.get("attempt_id") == parent_id),
-            None,
-        )
-        parent_events = [
-            row for row in state["events"]
-            if row.get("attempt_id") == parent_id
-            and row.get("event_type") in {"EXECUTION_UNKNOWN", "PROCESS_STOPPED", "ATTEMPT_TERMINAL"}
-        ]
-        if not isinstance(parent, Mapping) or len(parent_events) != 3:
-            missing_required_evidence = True
-        else:
-            required_digests.update({attempt["digest"], parent["digest"]})
-            required_digests.update(row["digest"] for row in parent_events)
     if scenario_id in _OBSERVATION_SCENARIOS:
         required_digests.add(str(observation["digest"]))
         required_digests.update(str(item) for item in observation["event_digests"])

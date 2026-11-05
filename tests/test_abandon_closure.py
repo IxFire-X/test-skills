@@ -2,7 +2,7 @@
 
 Tier A: an automation chain that cannot go on (the one retry spent, a revision that does not assemble) closes with
 `finish --abandon <code>`.  Tier B (D2): a canonical review that cannot end in a verdict closes with
-`review-abort --reason REVIEW_UNUSABLE` and select.  D3: exec tells a repeatable I/O failure of the preparation from a
+`review-abort --reason REVIEW_UNUSABLE` and select.  D3: materialize tells a repeatable I/O failure of the preparation from a
 final one.  `--abandon` is refused wherever another command closes the attempt (ABANDON_NOT_NEEDED)."""
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def test_a_pending_automation_is_closed_by_the_abandon_its_fix_names(tmp_path: P
 
 
 @pytest.mark.slow
-def test_abandon_is_refused_where_finish_or_exec_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_abandon_is_refused_where_finish_or_ingest_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from tools.run_pipeline import main
 
     rejected, _attempt = _automation_chain(tmp_path / "rejected", ["ТРЕБУЕТ ДОРАБОТКИ", "ТРЕБУЕТ ДОРАБОТКИ"])
@@ -85,7 +85,7 @@ def test_abandon_is_refused_where_finish_or_exec_closes(tmp_path: Path, capsys: 
     capsys.readouterr()
     code = main(["finish", "--project", str(tmp_path / "accepted"), "--run", accepted.name, "--abandon", "AUTOMATION_NOT_MATERIALIZABLE"])
     refused = json.loads(capsys.readouterr().out)
-    assert code == 2 and refused["reason"] == "FINISH_FACT_UNDETERMINED" and _command(refused["fix"], "exec")[1] == "exec", refused
+    assert code == 2 and refused["reason"] == "FINISH_FACT_UNDETERMINED" and _command(refused["fix"], "materialize")[1] == "materialize", refused
     from tools.pilot_state import derive_state
 
     assert derive_state(accepted)["attempts"][-1]["state"] != "TERMINAL"
@@ -137,16 +137,16 @@ def _failing_ownership(monkeypatch: pytest.MonkeyPatch, error: Exception) -> Non
     monkeypatch.setattr(pilot_state, "publish_phase5_receipt", publish)
 
 
-def test_d3_an_io_failure_of_the_preparation_says_repeat_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_d3_an_io_failure_of_the_preparation_says_repeat_materialize(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                               monkeypatch: pytest.MonkeyPatch) -> None:
     root, _attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
     with monkeypatch.context() as broken:
         _failing_ownership(broken, OSError("disk is busy"))
-        code, refused = _run(capsys, "exec", tmp_path, root)
+        code, refused = _run(capsys, "materialize", tmp_path, root)
     assert code == 2 and refused["reason"] == "EXECUTION_NOT_PREPARED", refused
-    assert "снова вызови exec" in refused["fix"] and "--abandon" not in refused["fix"], refused
+    assert "снова вызови materialize" in refused["fix"] and "--abandon" not in refused["fix"], refused
     _code, finish = _run(capsys, "finish", tmp_path, root)
-    assert finish["reason"] == "FINISH_FACT_UNDETERMINED" and _command(finish["fix"], "exec")[1] == "exec", finish
+    assert finish["reason"] == "FINISH_FACT_UNDETERMINED" and _command(finish["fix"], "materialize")[1] == "materialize", finish
 
 
 @pytest.mark.slow
@@ -155,7 +155,7 @@ def test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_n
     root, _attempt_id = _automation_chain(tmp_path, ["ПРИНЯТО"])
     with monkeypatch.context() as broken:
         _failing_ownership(broken, ValueError("ownership receipt differs"))
-        code, refused = _run(capsys, "exec", tmp_path, root)
+        code, refused = _run(capsys, "materialize", tmp_path, root)
     assert code == 2 and refused["reason"] == "EXECUTION_NOT_PREPARED", refused
     argv = _command(refused["fix"], "--abandon AUTOMATION_NOT_MATERIALIZABLE")
 

@@ -736,7 +736,7 @@ def _left(root: Path) -> str | None:
 
 
 def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
-    """FaT-PA: automated N of M cases, manual K with their blocker codes — the same split exec and finish print."""
+    """FaT-PA: automated N of M cases, manual K with their blocker codes — the same split ingest and finish print."""
     if not attempt_id:
         return None
     from tools.finalize_attempt import automation_split

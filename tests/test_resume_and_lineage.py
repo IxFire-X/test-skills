@@ -103,71 +103,35 @@ def test_terminal_unknown_stays_child_blocked_without_verified_process_scope(tmp
         create_attempt(root, _identity(tmp_path, parent_attempt_id=first["attempt_id"], retry_reason="retry-1"), phase_two_baseline(root, tmp_path, _identity(tmp_path, parent_attempt_id=first["attempt_id"], retry_reason="retry-1")))
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows Popen cannot atomically contain a pre-Job child")
-def test_controller_proved_timeout_allows_explicit_child_after_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-
-    from tests.test_durable_execution_trace import _unknown_report
+def test_a_run_that_holds_the_old_process_stop_is_read_and_its_explicit_child_is_allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P4b (Q3): nothing in the package writes PROCESS_STOPPED now (no process is started), but a run of an earlier version holds it.  Such a journal
+    is read as before: the stop is checked against its receipt, the explicit child after the UNKNOWN is allowed, ``derive_state`` and the
+    status of the run do not fail."""
+    from tests.test_durable_execution_trace import _publish_execution, _unknown_report
     from tests.test_execution_receipt import _execution_facts
-    from tools.execution_adapters import request_digest
-    from tools.exec_commands import _publish_execution_receipt
-    from tools.run_tests import _process_row
-    from tools.exec_runner import run_subprocess
+    from tools.pilot_state import read_attempt_receipt, record_execution_unknown
+    from tools.run_pipeline import main
 
     root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
     timeout = _unknown_report(root, attempt_id, durable, request)
-    outcome = run_subprocess([sys.executable, "-c", "import time; time.sleep(30)"], Path(request.cwd), timeout=1)
-    assert outcome.process_scope_stopped is True
-    timeout["process_evidence"] = [_process_row(
-        "TIMEOUT", outcome, timeout["run_id"], timeout["source"],
-        timeout["target"]["command"], timeout["stats"]["duration_sec"],
-    )]
-    pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
-
-    _publish_execution_receipt(
-        {"run_root": root, "attempt": {"attempt_id": attempt_id}}, timeout,
-    )
-
-    attempt_events = [
-        event for event in derive_state(root)["events"]
-        if event.get("attempt_id") == attempt_id
-    ]
-    assert [event["event_type"] for event in attempt_events][-2:] == [
-        "EXECUTION_UNKNOWN", "PROCESS_STOPPED",
-    ]
-    _append_synthetic_terminal(root, attempt_id, DIGEST, monkeypatch)
-    project = Path(next(
-        attempt["project"] for attempt in derive_state(root)["attempts"]
-        if attempt["attempt_id"] == attempt_id
-    ))
-    identity = {
-        "project": str(project.resolve()), "module": ".", "policy_profile": "local-pilot-v1",
-        "parent_attempt_id": attempt_id, "retry_reason": "explicit-timeout-retry",
-    }
-    child = create_attempt(root, identity, phase_two_baseline(root, project, identity))
-    assert child["parent_attempt_id"] == attempt_id
-
-
-def test_schema_shaped_timeout_evidence_cannot_unlock_process_stop(tmp_path: Path) -> None:
-    from tests.test_durable_execution_trace import _unknown_report
-    from tests.test_execution_receipt import _execution_facts
-    from tools.execution_adapters import request_digest
-    from tools.run_pipeline import HostStop
-    from tools.exec_commands import _publish_execution_receipt
-
-    root, attempt_id, _report, request, durable = _execution_facts(tmp_path)
-    timeout = _unknown_report(root, attempt_id, durable, request)
-    timeout["process_evidence"][0].update({
-        "process_scope_stopped": True,
-        "stop_proof": "WINDOWS_JOB_OBJECT" if os.name == "nt" else "POSIX_PROCESS_GROUP",
-    })
-    pilot_state.claim_execution_start(root, attempt_id, request_digest(request))
-
-    with pytest.raises(HostStop, match="UNKNOWN execution receipt"):
-        _publish_execution_receipt({"run_root": root, "attempt": {"attempt_id": attempt_id}}, timeout)
+    timeout["process_evidence"][0].update({"process_scope_stopped": True,
+                                           "stop_proof": "WINDOWS_JOB_OBJECT" if os.name == "nt" else "POSIX_PROCESS_GROUP"})
+    published = _publish_execution(root, attempt_id, timeout, request=request)
+    record_execution_unknown(root, attempt_id, published["digest"])
+    project, resolved = pilot_state._run_root(root)
+    pilot_state._append_event(project, resolved, "PROCESS_STOPPED", actor="controller", attempt_id=attempt_id, batch_id=None,
+                              artifact_digest=published["digest"])  # what the writer of an earlier version appended
     events = [event["event_type"] for event in derive_state(root)["events"] if event.get("attempt_id") == attempt_id]
-    assert events[-1] == "EXECUTION_UNKNOWN"
-    assert "PROCESS_STOPPED" not in events
+    assert events[-2:] == ["EXECUTION_UNKNOWN", "PROCESS_STOPPED"]
+    assert read_attempt_receipt(root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]["process_evidence"][0]["process_scope_stopped"] is True
+    _append_synthetic_terminal(root, attempt_id, DIGEST, monkeypatch)
+    attempt_project = Path(next(attempt["project"] for attempt in derive_state(root)["attempts"] if attempt["attempt_id"] == attempt_id))
+    identity = {"project": str(attempt_project.resolve()), "module": ".", "policy_profile": "local-pilot-v1",
+                "parent_attempt_id": attempt_id, "retry_reason": "explicit-timeout-retry"}
+    child = create_attempt(root, identity, phase_two_baseline(root, attempt_project, identity))
+    assert child["parent_attempt_id"] == attempt_id
+    code = main(["status", "--project", str(attempt_project), "--run", root.name])
+    assert code in (0, 2, 3)  # an answer, not a traceback: the exit code is the state of the run
 
 
 def test_process_stopped_rejects_active_non_unknown_and_other_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

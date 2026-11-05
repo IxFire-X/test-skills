@@ -181,24 +181,6 @@ def command_for(adapter_id: str, executable: str, profile: str, selectors: Seque
     raise AdapterRequestError("adapter is not in the closed pilot set")
 
 
-def probe_command_for(adapter_id: str, executable: str, profile: str) -> tuple[str, ...]:
-    """FaT-L: the closed offline validate-phase probe of ``ready`` — the flags of the selected-tests run, no tests."""
-    if adapter_id in {MAVEN, SYSTEM_MAVEN}:
-        return (executable, "-B", "-o", "-q", f"-P{profile}", *MAVEN_STYLE_SKIPS, "validate")
-    raise AdapterRequestError("only Maven has a validate-phase probe")
-
-
-def probe_executable(module_root: Path, test: Mapping[str, Any]) -> str:
-    """The very runtime ``build_request`` would start, for the probe; NOT_RUNNABLE when it is unavailable."""
-    adapter_id = test.get("adapter_id")
-    runtime_key = "executable" if adapter_id == SYSTEM_MAVEN else "wrapper"
-    if adapter_id not in {MAVEN, SYSTEM_MAVEN}:
-        raise AdapterRequestError("only Maven has a validate-phase probe")
-    closed = {key: test.get(key) for key in ("adapter_id", "build_profile", "adapter_parameters", runtime_key)}
-    root = Path(module_root).resolve()
-    return str(_runtime(root, _test_config({"module_root": str(root), "test": closed}, str(adapter_id)), str(adapter_id)))
-
-
 # FaT-L: the project's own style checks, read statically from its build files — for hints only, never for the command.
 # name -> (Maven markers, Gradle markers, Maven format goal, Gradle format task, scans the whole project directory)
 _STYLE_CHECKS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str | None, str | None, bool], ...] = (
@@ -333,16 +315,6 @@ def style_notes(adapter_id: str, executable: str, checks: Sequence[str], kept_fi
     notes["format_hint"] = (f"оставленные в проекте файлы ({', '.join(kept_files)}) проект проверяет на стиль "
                             f"({', '.join(checks)}): {action}")
     return notes
-
-
-def invoke_request(request: ExecutionRequest, runner: Any) -> Any:
-    """Invoke an injected process primitive with the only permitted launch shape.
-
-    Environment values are intentionally not part of ``ExecutionRequest``; a later
-    controller may hold opaque runtime handles, but it cannot smuggle them through
-    this adapter API or turn argv into a shell string.
-    """
-    return runner(request.argv, cwd=request.cwd, timeout=request.timeout_seconds, shell=False)
 
 
 def _declared_test_count(root: ET.Element) -> int | None:

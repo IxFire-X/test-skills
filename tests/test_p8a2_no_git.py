@@ -149,13 +149,13 @@ def test_a_null_project_state_is_valid_and_is_not_a_scenario_observation(monkeyp
     assert load_json_strict  # the strict reader is the one the run boundary uses for the manifest
 
 
-# ---- the gate lists four files -------------------------------------------------------------------------------------
+# ---- the gate lists two files -------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("missing", ["exec_commands", "exec_stand", "exec_probe", "exec_runner"])
-def test_the_execution_is_available_only_with_all_four_files(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
+@pytest.mark.parametrize("missing", ["exec_commands", "exec_runner"])
+def test_the_execution_is_available_only_with_both_files(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     from tools import execution_gate
 
-    assert tuple(execution_gate.EXEC_MODULES) == ("exec_commands", "exec_stand", "exec_probe", "exec_runner")
+    assert tuple(execution_gate.EXEC_MODULES) == ("exec_commands", "exec_runner")
     assert execution_gate.execution_available() is True
     original = execution_gate._present
     monkeypatch.setattr(execution_gate, "_present", lambda name: False if name == missing else original(name))

@@ -1,4 +1,4 @@
-"""FaT-4a: exec without the six carrier paths, and one closing command — run_pipeline finish."""
+"""FaT-4a, P4b: the commands without the six carrier paths (they come from the attempt), and one closing command — run_pipeline finish."""
 from __future__ import annotations
 
 import json
@@ -40,52 +40,38 @@ def _args(project: Path, run_root: Path, **paths: str) -> SimpleNamespace:
                            **{name: paths.get(name) for name in CARRIERS})
 
 
-def test_exec_takes_the_carriers_from_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_materialize_and_ingest_take_the_carriers_from_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import run_the_build
     from tools.pilot_state import read_terminal_result
-    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id, _values = _project(tmp_path)
-    code = cmd_exec(_args(project, run_root))
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
     assert code == 0 and output["verdict"] == "PASS" and output["finalization"] == "complete", output
     assert read_terminal_result(run_root, attempt_id)["accepted"] is True
 
 
-def test_an_explicit_carrier_is_checked_against_the_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_commands_take_no_carrier_path_so_there_is_nothing_to_forge(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Formerly an explicit carrier of ``exec`` was checked against the attempt (and a forged one refused); materialize and ingest have no such
+    argument: the six carriers come from the journal only, and the old flags of ``exec`` are read by nothing (it answers EXEC_REPLACED)."""
     from tools.exec_commands import cmd_exec
+    from tools.pilot_state import derive_state
+    from tools.run_pipeline import build_parser
 
     project, run_root, _attempt_id, values = _project(tmp_path)
     forged = dict(values["automation_artifact"])
     forged["schema_version"] = "9.9.9"
     path = tmp_path / "automation.json"
     path.write_text(json.dumps(forged, ensure_ascii=False), encoding="utf-8")
-    from tools.pilot_state import derive_state
-
+    parser = build_parser()
+    for command in ("materialize", "ingest"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([command, "--project", str(project), "--run", run_root.name, "--automation-artifact", str(path)])
+        capsys.readouterr()
     before = derive_state(run_root)
     code = cmd_exec(_args(project, run_root, automation_artifact=str(path)))
     output = json.loads(capsys.readouterr().out)
-    assert code == 2 and output["status"] == "error", output
+    assert code == 2 and output["reason"] == "EXEC_REPLACED", output
     assert derive_state(run_root) == before
-
-
-def test_exec_with_and_without_paths_gives_the_same_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.pilot_state import read_terminal_result
-    from tools.exec_commands import cmd_exec
-
-    results = []
-    for name, with_paths in (("a", True), ("b", False)):
-        project, run_root, attempt_id, values = _project(tmp_path / name)
-        paths = {}
-        if with_paths:
-            for key, value in values.items():
-                target = tmp_path / name / f"{key}.json"
-                target.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-                paths[key] = str(target)
-        assert cmd_exec(_args(project, run_root, **paths)) == 0
-        capsys.readouterr()
-        terminal = read_terminal_result(run_root, attempt_id)
-        results.append({key: terminal.get(key) for key in ("completion", "verification", "coverage", "accepted", "reason_code")})
-    assert results[0] == results[1]
 
 
 # --------------------------------------------------------------------------------------

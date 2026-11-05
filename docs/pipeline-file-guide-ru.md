@@ -801,67 +801,33 @@ flowchart TD
 
 ### `tools/exec_commands.py`
 
-**Команды запуска сгенерированных тестов.**
+**Команды режима Б: положить тесты, принять отчёты.**
 
-Здесь живут команды `exec` и `rerun-retained` и всё, чем пользуются только они: проверка координат прогона, подготовка принятой автоматизации, квитанции исполнения. Код перенесён из `run_pipeline.py` без изменений. Ядро подключает этот файл только через `tools/execution_gate.py`; если файла в поставке нет, команд исполнения тоже нет.
+Здесь живут `materialize` (кладёт принятые тесты в проект и печатает команду, которую запускает человек), `ingest` (принимает отчёты этого запуска и закрывает попытку), а также `exec` — прежняя команда, которая теперь ничего не запускает и отвечает `EXEC_REPLACED` с путём `materialize` → человек → `ingest`. Пакет не запускает процессы: сборку запускает человек. Рядом — проверка координат прогона, подготовка принятой автоматизации, квитанции команды и результата. Ядро подключает этот файл только через `tools/execution_gate.py`.
 
 [Открыть файл](../tools/exec_commands.py)
 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `cmd_exec`, `rerun_retained_tests`, `cmd_rerun_retained`, `add_parsers`, `COMMANDS`.
+**Основные определения в коде:** `cmd_materialize`, `cmd_ingest`, `cmd_exec`, `add_parsers`, `COMMANDS`.
 
 </details>
-
-
-### `tools/exec_probe.py`
-
-**Пробный запуск сборки перед первым прогоном.**
-
-Запускает офлайн фазу validate Maven-модуля с теми же флагами, что и выбранные тесты, и сообщает в `ready`, пройдёт ли сборка. Строки ошибок очищаются от адресов с логином и значений секретов.
-
-[Открыть файл](../tools/exec_probe.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `build_probe`.
-
-</details>
-
 
 ### `tools/exec_runner.py`
 
-**Запуск процесса с тестами.**
+**Разбор отчётов человеческого запуска.**
 
-Единственное место, где запускается процесс сборки или тестов: сам процесс, остановка всего дерева процессов по таймауту (на Windows через Job Object) и `run_tests_v5`, который ведёт один запуск от проверки допуска до отчёта. Сбор и разбор отчётов остался в `run_tests.py`.
+Строит отчёт о результате по байтам отчётов Surefire и pytest, которые принёс человек: те же проверки допуска, один захват начала исполнения, точное множество тестов. Процессов не запускает и часов не читает.
 
 [Открыть файл](../tools/exec_runner.py)
 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `run_subprocess`, `run_tests_v5`.
+**Основные определения в коде:** `report_set_problems`, `ingest_reports`.
 
 </details>
-
-
-### `tools/exec_stand.py`
-
-**Проверка стенда приложения.**
-
-Единственное место, где пакет обращается к самому приложению: один запрос без тела по адресу из переменной модуля `service_url_env`. Если стенд не отвечает, `exec` останавливается до записи файлов, а `finish` может закрыть попытку по причине STAND_UNAVAILABLE.
-
-[Открыть файл](../tools/exec_stand.py)
-
-<details>
-<summary>Технические подробности</summary>
-
-**Основные определения в коде:** `stand_down`.
-
-</details>
-
 
 ### `tools/execution_core.py`
 
@@ -1018,7 +984,7 @@ flowchart TD
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `create_run`, `derive_state`, `model_lifecycle_projection`, `append_event`, `claim_execution_start`, `record_execution_unknown`, `record_process_stopped`, `module_selection_digest`, `create_attempt`, `freeze_phase_two_inputs`, `publish_model_request`, `read_model_request`, `publish_model_stage_artifact`, `read_model_stage_artifact`, `publish_context_selection`, `read_context_selection`, `publish_reviewer_session_ledger`, `read_reviewer_session_ledger`, `reviewer_lifecycle_projection`, `terminal_reviewer_evidence`, `read_run`, `publish_attempt_receipt`, `read_attempt_receipt`, `publish_execution_trace_pair`, `publish_effective_canonical`, `publish_execution_inputs`, `recover_execution_inputs_events`, `read_execution_inputs`, `publish_resume_validation`, `read_resume_validation_if_present`, `read_effective_canonical`, `read_effective_canonical_if_present`, `recover_phase5_receipt_events`, `recover_execution_receipt_events`, `open_automation_review_boundary`, `publish_generated_delta`, `publish_phase5_receipt`, `remove_attempt_receipt_if_created`, `terminal_result`, `publish_closure_artifact`, `read_closure_artifact`, `read_closure_artifact_if_present`, `publish_terminal_result`, `read_terminal_result`, `publish_run_artifact_bytes`, `read_retained_native_rerun`, `read_scenario_observation`, `publish_project_state_observation`, `publish_resume_observations`, `publish_retained_rerun_observation`, `exit_code`.
+**Основные определения в коде:** `create_run`, `derive_state`, `model_lifecycle_projection`, `append_event`, `claim_execution_start`, `record_execution_unknown`, `module_selection_digest`, `create_attempt`, `freeze_phase_two_inputs`, `publish_model_request`, `read_model_request`, `publish_model_stage_artifact`, `read_model_stage_artifact`, `publish_context_selection`, `read_context_selection`, `publish_reviewer_session_ledger`, `read_reviewer_session_ledger`, `reviewer_lifecycle_projection`, `terminal_reviewer_evidence`, `read_run`, `publish_attempt_receipt`, `read_attempt_receipt`, `publish_execution_trace_pair`, `publish_effective_canonical`, `publish_execution_inputs`, `recover_execution_inputs_events`, `read_execution_inputs`, `publish_resume_validation`, `read_resume_validation_if_present`, `read_effective_canonical`, `read_effective_canonical_if_present`, `recover_phase5_receipt_events`, `recover_execution_receipt_events`, `open_automation_review_boundary`, `publish_generated_delta`, `publish_phase5_receipt`, `remove_attempt_receipt_if_created`, `terminal_result`, `publish_closure_artifact`, `read_closure_artifact`, `read_closure_artifact_if_present`, `publish_terminal_result`, `read_terminal_result`, `publish_run_artifact_bytes`, `read_retained_native_rerun`, `read_scenario_observation`, `publish_project_state_observation`, `publish_resume_observations`, `publish_retained_rerun_observation`, `exit_code`.
 
 </details>
 
@@ -1156,7 +1122,7 @@ Markdown сверяется при публикации, но не входит 
 
 **Команды управления работой.**
 
-Предоставляет команды для изучения проекта, чтения состояния и закрытия попытки; команды исполнения принятых тестов подключаются из `tools/exec_commands.py`, если этот файл есть в поставке. Соединяет нужные операции других модулей в правильном порядке. Сам к модели не обращается: вызовами модели управляет внешняя программа по инструкциям из skills/.
+Предоставляет команды для изучения проекта, чтения состояния и закрытия попытки; команды `materialize` и `ingest` подключаются из `tools/exec_commands.py`, если этот файл есть в поставке. Соединяет нужные операции других модулей в правильном порядке. Сам к модели не обращается: вызовами модели управляет внешняя программа по инструкциям из skills/.
 
 [Открыть файл](../tools/run_pipeline.py)
 
@@ -1165,7 +1131,7 @@ Markdown сверяется при публикации, но не входит 
 
 **Основные определения в коде:** `HostStop`, `cmd_scan`, `cmd_status`, `run_phase_one_spine`, `resume_phase_one_spine`, `finalize_phase_one_spine`, `build_parser`, `argparse_parent`, `main`.
 
-Команды: `scan`, `status`, `finish`, `report`; `exec` и `rerun-retained` добавляются, только если в поставке есть файл `tools/exec_commands.py` (см. `tools/execution_gate.py`).
+Команды: `scan`, `status`, `finish`, `report`; `exec` (заменён), `materialize` и `ingest` добавляются, только если в поставке есть файл `tools/exec_commands.py` (см. `tools/execution_gate.py`).
 
 </details>
 
@@ -1181,7 +1147,7 @@ Markdown сверяется при публикации, но не входит 
 <details>
 <summary>Технические подробности</summary>
 
-**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `consume_controller_process_stop_proof`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `main`.
+**Основные определения в коде:** `DurableNativeReportError`, `RunnerCompatibility`, `ProcessOutcome`, `resolve_execution_context`, `resolve_execution_context_document`, `RunnerInputError`, `load_automation_artifact`, `load_autotest_review_artifact`, `validate_artifact_runner_compatibility`, `validate_process_evidence`, `validate_execution_evidence`, `JUnitCase`, `JUnitParseResult`, `parse_junit_element`, `parse_junit_bytes`, `match_junit_cases`, `validate_execution_eligibility`, `build_closed_execution_request`, `main`.
 
 
 </details>
@@ -1840,7 +1806,7 @@ Markdown сверяется при публикации, но не входит 
 
 **Подтверждение повторного запуска сохранённых тестов.**
 
-Задаёт новую запись о повторном исполнении уже оставленных в проекте тестов: с чем их сравнили, что запустили и что получилось. Старый итог работы при этом не переписывается.
+Читается только в старых прогонах (с P4b пакет такие записи не создаёт). Задаёт запись о повторном исполнении уже оставленных в проекте тестов: с чем их сравнили, что запустили и что получилось. Старый итог работы при этом не переписывается.
 
 [Открыть файл](../schemas/retained-native-rerun-receipt.schema.json)
 

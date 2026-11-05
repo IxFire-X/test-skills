@@ -1,4 +1,4 @@
-"""FaT-E: after the accepted static review the agent calls exec; exec prepares its own inputs (materialization)."""
+"""FaT-E, P4b: after the accepted static review the agent calls materialize; it prepares its own inputs and writes the tests, a human runs the build, ingest closes."""
 from __future__ import annotations
 
 import json
@@ -47,26 +47,26 @@ def _has(run_root: Path, attempt_id: str, kind: str) -> bool:
 
 
 @pytest.mark.slow
-def test_exec_after_the_static_review_prepares_its_inputs_and_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_materialize_after_the_static_review_prepares_its_inputs_and_the_ingest_of_the_run_closes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import flow_args, run_the_build
+    from tools import exec_commands
     from tools.pilot_state import read_terminal_result
-    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path)
     assert not _has(run_root, attempt_id, "execution-inputs") and not _has(run_root, attempt_id, "generated-delta")
-    code = cmd_exec(_args(project, run_root))
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
     assert code == 0 and output["verdict"] == "PASS", output
     assert _has(run_root, attempt_id, "execution-inputs") and _has(run_root, attempt_id, "generated-delta")
     assert read_terminal_result(run_root, attempt_id)["accepted"] is True
-    again = cmd_exec(_args(project, run_root))
+    again = exec_commands.cmd_ingest(flow_args(project, run_root))
     repeated = json.loads(capsys.readouterr().out)
     assert again == code and repeated["verdict"] == "PASS" and repeated["finalization"] == "complete"
 
 
 @pytest.mark.slow
-def test_exec_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_materialize_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import run_the_build
     from tools.pilot_state import derive_state, publish_execution_inputs, read_model_stage_artifact
-    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _project(tmp_path)
     events = [event for event in derive_state(run_root)["events"] if event["event_type"] == "MODEL_RESPONSE_RECEIVED" and event.get("attempt_id") == attempt_id]
@@ -74,28 +74,29 @@ def test_exec_finishes_a_half_done_preparation(tmp_path: Path, capsys: pytest.Ca
                                   for e in events if e["stage_instance_id"] == stage)
     publish_execution_inputs(run_root, attempt_id, artifact("tc-to-autotest:r1"), artifact("autotest-reviewer:r1"))
     assert _has(run_root, attempt_id, "execution-inputs") and not _has(run_root, attempt_id, "generated-delta")
-    code = cmd_exec(_args(project, run_root))
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
     assert code == 0 and output["verdict"] == "PASS", output
 
 
-def test_exec_without_an_accepted_static_review_names_the_step(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.exec_commands import cmd_exec
+def test_materialize_without_an_accepted_static_review_names_the_step(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import flow_args
+    from tools.exec_commands import cmd_materialize
 
     project, run_root, attempt_id = _project(tmp_path, publish_static_review=False)
-    code = cmd_exec(_args(project, run_root))
+    code = cmd_materialize(flow_args(project, run_root))
     output = json.loads(capsys.readouterr().out)
     assert code == 2 and output["reason"] == "EXECUTION_NOT_PREPARED", output
-    assert output["fix"] and "ревью" in output["fix"]
+    assert output["fix"] and "ревью" in output["fix"] and "materialize" in output["fix"]
     assert not _has(run_root, attempt_id, "generated-delta")
 
 
-def test_exec_after_a_static_review_that_is_not_accepted_materializes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tools.exec_commands import cmd_exec
+def test_materialize_after_a_static_review_that_is_not_accepted_materializes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import flow_args
+    from tools.exec_commands import cmd_materialize
 
     project, run_root, attempt_id = _project(tmp_path, static_verdict="ТРЕБУЕТ ДОРАБОТКИ")
     before = sorted(path.relative_to(project).as_posix() for path in project.rglob("*") if ".pilot-runs" not in path.parts)
-    code = cmd_exec(_args(project, run_root))
+    code = cmd_materialize(flow_args(project, run_root))
     output = json.loads(capsys.readouterr().out)
     assert code == 2 and output["reason"] == "EXECUTION_NOT_PREPARED", output
     assert not _has(run_root, attempt_id, "generated-delta") and not _has(run_root, attempt_id, "execution-inputs")
@@ -103,7 +104,8 @@ def test_exec_after_a_static_review_that_is_not_accepted_materializes_nothing(tm
     assert after == before
 
 
-def test_the_skill_says_exec_right_after_the_static_review() -> None:
-    # PT: the text of mode B (exec, automation) is in the development build's reference, not in the delivered SKILL.md
+def test_the_text_of_mode_b_says_materialize_right_after_the_static_review() -> None:
+    # PT: the text of mode B (materialize, ingest, automation) is in the development build's reference, not in the delivered SKILL.md
     text = (PACK_ROOT / "skills/orchestrate/references/mode-b.md").read_text(encoding="utf-8")
-    assert "exec сам" in text and "exec сам" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")
+    assert "materialize" in text and "ingest" in text and "exec сам" not in text
+    assert "exec сам" not in (PACK_ROOT / "skills/orchestrate/SKILL.md").read_text(encoding="utf-8")

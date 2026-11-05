@@ -1,13 +1,11 @@
 """FaT-2R: the application in a neighbouring directory of the project root, the tests in their own module.
 
-The neighbour is read only, for the model context (``paths.context``); the package never builds or starts it.  exec checks
-the stand the person brought up before it writes anything (``service_url_env``)."""
+The neighbour is read only, for the model context (``paths.context``); the package never builds or starts it, and (P4b) never asks the
+stand the person brought up (``service_url_env``): the person runs the printed command against it."""
 from __future__ import annotations
 
-import http.server
 import json
 import os
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -142,57 +140,6 @@ def _local(port: int, path: str) -> str:
     return urlunsplit(("http", f"127.0.0.1:{port}", path, "", ""))
 
 
-class _Answer(http.server.BaseHTTPRequestHandler):
-    def do_HEAD(self) -> None:  # noqa: N802 - the http.server name
-        self.send_response(404)  # any answer of the stand counts: it is up
-        self.end_headers()
-
-    def log_message(self, *args) -> None:  # silence
-        return
-
-
-def test_exec_checks_the_stand_before_any_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools.exec_stand import _service_stop
-
-    root = _stand(tmp_path)
-    _declare(root, ["app"], service="STAND_URL")
-    monkeypatch.delenv("STAND_URL", raising=False)
-    assert _service_stop(root, "autotests")["reason"] == "SERVICE_URL_MISSING"
-    monkeypatch.setenv("STAND_URL", "ftp://stand")
-    assert _service_stop(root, "autotests")["reason"] == "SERVICE_URL_INVALID"
-    for port in ("99999", "abc"):  # a port urllib cannot read: a refusal with the address without the port, no traceback
-        monkeypatch.setenv("STAND_URL", _local(9, "/api").replace(":9/", f":{port}/"))
-        stop = _service_stop(root, "autotests")
-        assert stop["code"] == "SERVICE_URL_INVALID" and stop["address"] == _local(9, "/api").replace(":9/", "/"), stop
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Answer)
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        monkeypatch.setenv("STAND_URL", _local(port, "/api"))
-        assert _service_stop(root, "autotests") is None  # up: the tests run and fail or pass as usual
-        # no proxy: the Java tests do not use HTTP_PROXY, and a proxy's own 502/403 is not the stand
-        for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
-            monkeypatch.setenv(name, _local(9, "/"))
-        monkeypatch.setenv("NO_PROXY", "")
-        monkeypatch.setenv("no_proxy", "")
-        assert _service_stop(root, "autotests") is None
-        for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"):
-            monkeypatch.delenv(name, raising=False)
-    finally:
-        server.shutdown()
-        server.server_close()
-    from urllib.parse import urlunsplit
-
-    # nobody listens on the port any more; the address shown keeps no userinfo, query or fragment
-    monkeypatch.setenv("STAND_URL", urlunsplit(("http", f"tester:pa55word@127.0.0.1:{port}", "/api", "token=t0ken", "frag")))
-    stop = _service_stop(root, "autotests")
-    shown = json.dumps(stop, ensure_ascii=False)
-    assert stop["code"] == "SERVICE_UNREACHABLE" and "STAND_URL" in stop["fix"] and stop["address"] == _local(port, "/api"), stop
-    assert not [secret for secret in ("tester", "pa55word", "t0ken", "frag") if secret in shown]
-    assert _service_stop(root, "app") is None  # a module without a stand is not checked
-
-
 def _stand_project(tmp_path: Path) -> tuple[Path, Path, str]:
     """``tests.test_finish._project`` with ``service_url_env`` in the module before the scan (the baseline binds .skillsrc)."""
     import shutil
@@ -222,38 +169,30 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-def test_an_unreachable_stand_changes_nothing_and_exec_after_it_is_up_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                                           capsys: pytest.CaptureFixture[str]) -> None:
-    """End to end through cmd_exec: the stop leaves every byte of the project and the run as it was, the attempt open;
-    once the stand answers, the same exec goes on to the run of the tests."""
-    import tests.test_finish as finish
+def test_a_module_with_a_stand_goes_through_materialize_and_ingest_and_the_package_never_asks_the_stand(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """P4b: ``exec`` used to check the stand (a request to ``service_url_env``) before it wrote; the package makes no request now.  With the address
+    of a stand nobody answers, ``materialize`` and ``ingest`` go on to the result and the package opens no connection (the stand is for the person who runs the command)."""
+    import socket
+
+    from tests.p4_flow import run_the_build
     from tools.pilot_state import read_terminal_result
-    from tools.exec_commands import cmd_exec
 
     project, run_root, attempt_id = _stand_project(tmp_path)
     monkeypatch.setenv("STAND_URL", _local(9, "/"))  # the discard port: nobody answers
-    before = _snapshot(project)
-    code = cmd_exec(finish._args(project, run_root))
-    answer = json.loads(capsys.readouterr().out)
-    assert code != 0 and answer["code"] == "SERVICE_UNREACHABLE" and answer["fix"] and answer["address"] == _local(9, "/"), answer
-    assert _snapshot(project) == before
-    with pytest.raises(KeyError):
-        read_terminal_result(run_root, attempt_id)
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Answer)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        monkeypatch.setenv("STAND_URL", _local(server.server_address[1], "/"))
-        code = cmd_exec(finish._args(project, run_root))
-    finally:
-        server.shutdown()
-        server.server_close()
-    output = json.loads(capsys.readouterr().out)
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("the package opened a connection")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    code, output = run_the_build(project, run_root, capsys)
     assert code == 0 and output["verdict"] == "PASS" and output["finalization"] == "complete", output
     assert read_terminal_result(run_root, attempt_id)["verification"] == "PASS"
 
 
-def test_the_context_root_takes_no_part_in_the_build_of_exec(tmp_path: Path) -> None:
-    """The exec request of the tests module runs in that module only: no argument and no working directory of the neighbour."""
+def test_the_context_root_takes_no_part_in_the_command_of_the_tests_module(tmp_path: Path) -> None:
+    """The request (and so the printed command) of the tests module is that module only: no argument and no working directory of the neighbour."""
     from tools.execution_adapters import MAVEN, build_request
 
     root = _stand(tmp_path)
@@ -320,46 +259,3 @@ def test_a_repeated_init_keeps_the_declared_context_and_stand_address(tmp_path: 
     again = ensure_skillsrc(root, {key: value for key, value in answers.items() if key.endswith(":test.framework")}, False)
     assert again["status"] == "unchanged", again.get("proposal") or again
 
-
-@pytest.mark.parametrize(("address", "reason"), [
-    (None, "никто не слушает порт"),  # a closed loopback port
-    ("stand.invalid:8080", "хост не найден"),  # RFC 6761: .invalid never resolves
-])
-def test_the_stop_names_why_the_stand_did_not_answer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, address: str | None, reason: str) -> None:
-    """FaT-SU: one attempt, no retry — the message says a closed port from an unknown host; the code stays SERVICE_UNREACHABLE."""
-    import socket
-
-    from tools.exec_stand import _service_stop
-
-    root = _stand(tmp_path)
-    _declare(root, ["app"], service="STAND_URL")
-    if address is None:
-        with socket.socket() as probe:  # a port nobody listens on
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        address = _local(port, "/api")
-    else:
-        from urllib.parse import urlunsplit
-
-        address = urlunsplit(("http", address, "/api", "", ""))  # built, so the package keeps no plain http literal
-    monkeypatch.setenv("STAND_URL", address)
-    stop = _service_stop(root, "autotests")
-    assert stop["code"] == "SERVICE_UNREACHABLE" and reason in stop["message"] and "не ответил" not in stop["message"], stop
-
-
-@pytest.mark.parametrize(("error", "reason"), [
-    ("timeout", "не ответил за"),
-    ("tls", "ошибка TLS"),
-    ("other", "соединение не удалось (BrokenPipeError)"),
-])
-def test_a_timeout_and_tls_have_their_own_reason(error: str, reason: str) -> None:
-    import socket
-    import ssl
-    import urllib.error
-
-    from tools.exec_stand import _unreachable_reason
-
-    cause = {"timeout": socket.timeout("timed out"), "tls": ssl.SSLCertVerificationError(1, "certificate verify failed"),
-             "other": BrokenPipeError()}[error]
-    assert _unreachable_reason(urllib.error.URLError(cause)).startswith(reason)
-    assert _unreachable_reason(cause).startswith(reason)

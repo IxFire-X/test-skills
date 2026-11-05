@@ -1482,52 +1482,6 @@ def record_execution_unknown(run_root: Path, attempt_id: str, execution_receipt_
     )
 
 
-def record_process_stopped(
-    run_root: Path,
-    attempt_id: str,
-    execution_receipt_digest: str,
-) -> Mapping[str, Any]:
-    """Bind host-proved timeout scope stoppage; caller assertions are insufficient."""
-    (consume_controller_process_stop_proof,) = execution_gate.from_mode_b("run_tests", "consume_controller_process_stop_proof")
-
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None)
-    try:
-        receipt = read_attempt_receipt(
-            root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-        )["record"]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("verified process-scope recovery is unavailable") from error
-    unknowns = [
-        event for event in state["events"]
-        if event.get("attempt_id") == attempt_id
-        and event.get("event_type") == "EXECUTION_UNKNOWN"
-    ]
-    stopped = [
-        event for event in state["events"]
-        if event.get("attempt_id") == attempt_id
-        and event.get("event_type") == "PROCESS_STOPPED"
-    ]
-    if (
-        attempt is None
-        or not _DIGEST.fullmatch(str(execution_receipt_digest))
-        or receipt.get("digest") != execution_receipt_digest
-        or len(unknowns) != 1
-        or unknowns[0].get("artifact_digest") != execution_receipt_digest
-        or not _process_scope_stop_is_proved(receipt.get("payload", {}))
-        or len(stopped) > 1
-        or stopped and stopped[0].get("artifact_digest") != execution_receipt_digest
-    ):
-        raise ValueError("verified process-scope recovery is unavailable")
-    if not consume_controller_process_stop_proof(receipt.get("payload", {})):
-        raise ValueError("verified process-scope recovery is unavailable")
-    return _append_event(
-        project, root, "PROCESS_STOPPED", actor="controller", attempt_id=attempt_id,
-        batch_id=None, artifact_digest=execution_receipt_digest,
-    )
-
-
 class ModulePathError(ValueError):
     """F5: ``module`` of an attempt is not a folder of the project; ``str`` is a reason that carries nothing of the project's text."""
 
@@ -4928,11 +4882,6 @@ def recover_phase5_receipt_events(run_root: Path, attempt_id: str, kind: str) ->
     return _recover_attempt_receipt_events(run_root, attempt_id, kind)
 
 
-def recover_execution_receipt_events(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """Finish binding an installed execution receipt without replaying execution."""
-    return _recover_attempt_receipt_events(run_root, attempt_id, "execution-receipt")
-
-
 @closure_cached  # FaT-9b
 def open_automation_review_boundary(run_root: Path, attempt_id: str, facts: Mapping[str, Any]) -> Mapping[str, Any]:
     """Persist/read back the controller-owned isolation boundary for one V5 revision."""
@@ -6736,7 +6685,7 @@ def publish_run_artifact_bytes(run_root: Path, attempt_id: str, relative_name: s
 def _scenario_observation_target(root: Path, attempt_id: str, scenario_id: str) -> Path:
     allowed = {
         "fresh-non-git", "tree-preservation", "waiting-for-model-resume",
-        "one-user-question-resume", "terminal-idempotent-retry", "retained-native-rerun",
+        "one-user-question-resume", "terminal-idempotent-retry",
     }
     if not re.fullmatch(r"[0-9a-f]{32}", attempt_id) or scenario_id not in allowed:
         raise ValueError("invalid scenario observation identity")
@@ -6815,199 +6764,6 @@ def _terminal_retry_snapshot(run_root: Path, attempt_id: str) -> dict[str, Any]:
     })
 
 
-def _retained_native_rerun_target(root: Path, attempt_id: str) -> Path:
-    if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
-        raise ValueError("invalid retained native rerun identity")
-    return root / "retained-native-reruns" / f"{attempt_id}.json"
-
-
-def _retained_rerun_context(run_root: Path, attempt_id: str) -> Mapping[str, Any]:
-    """Read the accepted execution/disposition chain and current retained bytes."""
-    (request_digest,) = execution_gate.from_mode_b("execution_adapters", "request_digest")
-
-    project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((row for row in state["attempts"] if row["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt.get("state") != "TERMINAL":
-        raise ValueError("retained native rerun requires a terminal attempt")
-    terminal = read_terminal_result(root, attempt_id)
-    execution = read_attempt_receipt(
-        root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-    )["record"]
-    delta_receipt = read_attempt_receipt(
-        root, attempt_id, "generated-delta", "ARTIFACT_READ_BACK",
-    )["record"]
-    disposition_receipt = read_attempt_receipt(
-        root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK",
-    )["record"]
-    payload = execution.get("payload")
-    delta = delta_receipt.get("delta")
-    dispositions = disposition_receipt.get("payload")
-    request = _execution_request_from_payload(payload) if isinstance(payload, Mapping) else None
-    delta_rows = delta.get("files") if isinstance(delta, Mapping) else None
-    disposition_rows = dispositions.get("files") if isinstance(dispositions, Mapping) else None
-    if (
-        attempt.get("policy_profile") != "local-pilot-v1"
-        or terminal.get("accepted") is not True
-        or terminal.get("verification") != "PASS"
-        or not isinstance(payload, Mapping)
-        or payload.get("verdict") != "PASS"
-        or request is None
-        or execution.get("execution_request_digest") != request_digest(request)
-        or not isinstance(delta_rows, list)
-        or not delta_rows
-        or not isinstance(disposition_rows, list)
-        or len(disposition_rows) != len(delta_rows)
-        or dispositions.get("verification") != "PASS"
-        or dispositions.get("generated_delta_digest") != delta.get("digest")
-    ):
-        raise ValueError("retained native rerun evidence is unavailable")
-    module = (
-        project
-        if attempt.get("module") == "."
-        else project.joinpath(*str(attempt.get("module", "")).replace("\\", "/").split("/"))
-    )
-    test_root = module / str(delta.get("test_root", ""))
-    files: list[dict[str, str]] = []
-    passed = {
-        (row.get("file_id"), row.get("file_digest"))
-        for row in payload.get("execution_evidence", ())
-        if isinstance(row, Mapping) and row.get("status") == "PASSED"
-    }
-    for delta_row, disposition_row in zip(delta_rows, disposition_rows):
-        if (
-            not isinstance(delta_row, Mapping)
-            or not isinstance(disposition_row, Mapping)
-            or disposition_row.get("disposition") != "RETAINED"
-            or any(
-                disposition_row.get(key) != delta_row.get(key)
-                for key in ("file_id", "path", "content_digest", "materialization")
-            )
-            or (delta_row.get("file_id"), delta_row.get("content_digest")) not in passed
-        ):
-            raise ValueError("retained native rerun file set is invalid")
-        relative = delta_row.get("path")
-        if not isinstance(relative, str):
-            raise ValueError("retained native rerun file set is invalid")
-        target = module.joinpath(*relative.replace("\\", "/").split("/"))
-        try:
-            data = read_confined_bytes(project, test_root, target)
-        except OutputConfinementError as error:
-            raise ValueError("retained native rerun file set is unsafe") from error
-        digest = "sha256:" + hashlib.sha256(data).hexdigest() if data is not None else None
-        if digest != delta_row.get("content_digest"):
-            raise ValueError("retained native rerun file bytes changed")
-        files.append({
-            "file_id": str(delta_row["file_id"]),
-            "path": relative.replace("\\", "/"),
-            "digest": str(digest),
-        })
-    snapshot = _sealed({
-        "kind": "RETAINED_FILES",
-        "files": sorted(files, key=lambda row: (row["file_id"], row["path"])),
-    })
-    return {
-        "project": project,
-        "root": root,
-        "attempt": attempt,
-        "terminal": terminal,
-        "execution_receipt": execution,
-        "disposition_receipt": disposition_receipt,
-        "request": request,
-        "snapshot": snapshot,
-    }
-
-
-def read_retained_native_rerun(
-    run_root: Path,
-    attempt_id: str,
-    expected_digest: str,
-) -> Mapping[str, Any]:
-    """Read and verify one successful ordinary-command rerun receipt."""
-    DURABLE_NATIVE_REPORT_MAX_BYTES, DURABLE_NATIVE_REPORT_NORMALIZATION, _normalize_durable_junit_report, parse_junit_bytes = execution_gate.from_mode_b(
-        "run_tests", "DURABLE_NATIVE_REPORT_MAX_BYTES", "DURABLE_NATIVE_REPORT_NORMALIZATION", "_normalize_durable_junit_report", "parse_junit_bytes",
-    )
-
-    if not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None:
-        raise ValueError("retained native rerun digest is invalid")
-    context = _retained_rerun_context(run_root, attempt_id)
-    project, root = context["project"], context["root"]
-    target = _retained_native_rerun_target(root, attempt_id)
-    record = _read_artifact(project, root, target, "retained native rerun")
-    state = derive_state(root)
-    publication = [
-        row for row in state["events"]
-        if row.get("event_type") in {"ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"}
-        and row.get("artifact_digest") == expected_digest
-        and row.get("attempt_id") is None
-    ]
-    binding = [
-        row for row in state["events"]
-        if row.get("event_type") == "RETAINED_NATIVE_RERUN"
-        and row.get("attempt_id") == attempt_id
-        and row.get("artifact_digest") == expected_digest
-    ]
-    if (
-        record.get("digest") != expected_digest
-        or record.get("run_id") != context["attempt"].get("run_id")
-        or record.get("attempt_id") != attempt_id
-        or record.get("policy_profile") != context["attempt"].get("policy_profile")
-        or record.get("terminal_result_digest") != context["terminal"].get("digest")
-        or record.get("execution_receipt_digest") != context["execution_receipt"].get("digest")
-        or record.get("execution_request_digest")
-        != context["execution_receipt"].get("execution_request_digest")
-        or record.get("disposition_receipt_digest") != context["disposition_receipt"].get("digest")
-        or record.get("before") != record.get("after")
-        or record.get("after") != context["snapshot"]
-        or [row.get("event_type") for row in publication]
-        != ["ARTIFACT_PUBLISHED", "ARTIFACT_READ_BACK"]
-        or len(binding) != 1
-        or not publication[0]["seq"] < publication[1]["seq"] < binding[0]["seq"]
-    ):
-        raise ValueError("retained native rerun binding is invalid")
-    request = context["request"]
-    report_root = str(request.report_paths[0]).replace("\\", "/").rstrip("/")
-    seen_sources: set[str] = set()
-    seen_paths: set[str] = set()
-    for row in record["reports"]:
-        source_path = str(row["source_path"])
-        if (
-            source_path in seen_sources
-            or row["path"] in seen_paths
-            or not (
-                source_path == report_root
-                or source_path.startswith(report_root + "/")
-            )
-            or row.get("before_fingerprint") == row.get("after_fingerprint")
-            or row["after_fingerprint"].get("digest") != row.get("source_digest")
-        ):
-            raise ValueError("retained native rerun report binding is invalid")
-        data = read_confined_bytes(project, root, root / str(row["path"]))
-        digest = "sha256:" + hashlib.sha256(data).hexdigest() if data is not None else None
-        parsed = parse_junit_bytes(data or b"")
-        if (
-            digest != row.get("digest")
-            or row.get("normalization") != DURABLE_NATIVE_REPORT_NORMALIZATION
-            or len(data or b"") > DURABLE_NATIVE_REPORT_MAX_BYTES
-            or _normalize_durable_junit_report(data or b"") != data
-            or not parsed.cases
-            or parsed.malformed
-            or parsed.duplicate_identities
-            or any(case.status != "PASSED" for case in parsed.cases)
-        ):
-            raise ValueError("retained native rerun report is invalid")
-        seen_sources.add(source_path)
-        seen_paths.add(str(row["path"]))
-    return {
-        "path": str(target.relative_to(root)).replace("\\", "/"),
-        "bytes": _canonical_bytes(record),
-        "digest": record["digest"],
-        "record": record,
-        "binding_event": binding[0],
-        "verified": True,
-    }
-
-
 def _resume_observation_events(
     state: Mapping[str, Any], attempt_id: str,
 ) -> tuple[str, list[Mapping[str, Any]]] | None:
@@ -7067,7 +6823,6 @@ def _validate_scenario_observation(
         "waiting-for-model-resume": ("MODEL_WAITING", "RESUME_MODEL_ATTEMPT"),
         "one-user-question-resume": ("USER_QUESTION_PENDING", "RESUME_AFTER_USER_ANSWER"),
         "terminal-idempotent-retry": ("TERMINAL_ATTEMPT", "RETRY_TERMINAL_ATTEMPT"),
-        "retained-native-rerun": ("RETAINED_FILE_SET", "PROJECT_NATIVE_RERUN"),
     }[scenario_id]
     terminal = read_terminal_result(root, str(attempt["attempt_id"]))
     before = _check_sealed(observation["before"], "scenario observation before")
@@ -7213,51 +6968,6 @@ def _validate_scenario_observation(
             )
         if not selected_valid or before != expected_before or after != expected_after:
             raise ValueError("resume observation is invalid")
-    elif scenario_id == "retained-native-rerun":
-        start_events = [
-            row for row in state["events"]
-            if row.get("event_type") == "EXECUTION_STARTED"
-            and row.get("attempt_id") == attempt.get("attempt_id")
-        ]
-        terminal_events = [
-            row for row in state["events"]
-            if row.get("event_type") == "ATTEMPT_TERMINAL"
-            and row.get("attempt_id") == attempt.get("attempt_id")
-        ]
-        rerun_events = [
-            row for row in state["events"]
-            if row.get("event_type") == "RETAINED_NATIVE_RERUN"
-            and row.get("attempt_id") == attempt.get("attempt_id")
-        ]
-        if len(start_events) != 1 or len(terminal_events) != 1 or len(rerun_events) != 1:
-            raise ValueError("retained native rerun lifecycle is invalid")
-        start_event, terminal_event, rerun_event = (
-            start_events[0], terminal_events[0], rerun_events[0]
-        )
-        rerun = read_retained_native_rerun(
-            root, str(attempt["attempt_id"]), str(rerun_event.get("artifact_digest", "")),
-        )
-        rerun_record = rerun["record"]
-        expected_receipts = [
-            rerun_record["execution_receipt_digest"],
-            rerun_record["disposition_receipt_digest"],
-            rerun_record["digest"],
-            terminal["digest"],
-        ]
-        if (
-            [row.get("digest") for row in selected_events]
-            != [start_event["digest"], terminal_event["digest"], rerun_event["digest"]]
-            or not start_event["seq"] < terminal_event["seq"] < rerun_event["seq"]
-            or start_event.get("artifact_digest") != rerun_record["execution_request_digest"]
-            or terminal_event.get("artifact_digest") != terminal["digest"]
-            or rerun.get("binding_event") != rerun_event
-            or before != rerun_record["before"]
-            or after != rerun_record["after"]
-            or before != after
-            or observation.get("receipt_digests") != expected_receipts
-        ):
-            raise ValueError("retained native rerun observation is invalid")
-        binding_event = rerun_event
     elif scenario_id == "terminal-idempotent-retry":
         terminal_events = [
             row for row in state["events"]
@@ -7492,69 +7202,6 @@ def publish_resume_observations(
     return {scenario_id: published}
 
 
-def publish_retained_rerun_observation(
-    run_root: Path,
-    attempt_id: str,
-) -> Mapping[str, Any]:
-    """Derive the retained-rerun observation from its verified receipt and events."""
-    _project, root = _run_root(run_root)
-    state = derive_state(root)
-    attempt = next((row for row in state["attempts"] if row["attempt_id"] == attempt_id), None)
-    if attempt is None or attempt.get("state") != "TERMINAL":
-        raise ValueError("retained native rerun attempt is invalid")
-    terminal = read_terminal_result(root, attempt_id)
-    if terminal.get("accepted") is not True or terminal.get("verification") != "PASS":
-        raise ValueError("retained native rerun requires an accepted passing attempt")
-    start_events = [
-        row for row in state["events"]
-        if row.get("event_type") == "EXECUTION_STARTED"
-        and row.get("attempt_id") == attempt_id
-    ]
-    terminal_events = [
-        row for row in state["events"]
-        if row.get("event_type") == "ATTEMPT_TERMINAL"
-        and row.get("attempt_id") == attempt_id
-    ]
-    rerun_events = [
-        row for row in state["events"]
-        if row.get("event_type") == "RETAINED_NATIVE_RERUN"
-        and row.get("attempt_id") == attempt_id
-    ]
-    if len(start_events) != 1 or len(terminal_events) != 1 or len(rerun_events) != 1:
-        raise ValueError("retained native rerun lifecycle is invalid")
-    selected = [start_events[0], terminal_events[0], rerun_events[0]]
-    if [row["seq"] for row in selected] != sorted(row["seq"] for row in selected):
-        raise ValueError("retained native rerun lifecycle is invalid")
-    rerun = read_retained_native_rerun(
-        root, attempt_id, str(rerun_events[0].get("artifact_digest", "")),
-    )
-    record = rerun["record"]
-    before, after = record["before"], record["after"]
-    value = {
-        "schema_version": "1.0.0", "kind": "scenario-observation",
-        "run_id": attempt["run_id"], "attempt_id": attempt_id,
-        "policy_profile": attempt["policy_profile"],
-        "scenario_id": "retained-native-rerun",
-        "precondition": {
-            "kind": "RETAINED_FILE_SET", "snapshot_digest": before["digest"],
-        },
-        "action": {
-            "kind": "PROJECT_NATIVE_RERUN", "before_digest": before["digest"],
-            "after_digest": after["digest"],
-        },
-        "before": before, "after": after,
-        "event_digests": [row["digest"] for row in selected],
-        "receipt_digests": [
-            record["execution_receipt_digest"], record["disposition_receipt_digest"],
-            record["digest"], terminal["digest"],
-        ],
-        "result": {"kind": "TERMINAL_RESULT", "digest": terminal["digest"]},
-    }
-    return _publish_derived_scenario_observation(
-        root, attempt_id, "retained-native-rerun", value,
-    )
-
-
 def exit_code(result: Mapping[str, Any] | None, controller_error: bool = False) -> int:
     if controller_error or result is None or not _validate_result_record(result):
         return 2
@@ -7578,10 +7225,6 @@ append_journal_event = _append_event
 check_sealed_value = _check_sealed
 frozen_inventory = _frozen_inventory
 publish_artifact_value = _publish
-read_artifact_value = _read_artifact
-sealed_value = _sealed
-retained_native_rerun_target = _retained_native_rerun_target
-retained_rerun_context = _retained_rerun_context
 scenario_observation_target = _scenario_observation_target
 run_root_of = _run_root
 terminal_retry_snapshot = _terminal_retry_snapshot

@@ -315,15 +315,14 @@ def test_a_file_written_by_out_makes_no_drift_for_status(tmp_path: Path, capsys:
 
 
 @pytest.mark.slow
-def test_a_file_written_by_out_makes_no_drift_for_exec(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from tests.test_finish import _args, _project
-    from tools.exec_commands import cmd_exec
+def test_a_file_written_by_out_makes_no_drift_for_materialize_and_ingest(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from tests.p4_flow import run_the_build
+    from tests.test_finish import _project
 
     project, run_root, attempt_id, _values = _project(tmp_path)
     code, _line = _api(["read-effective", "--run-root", str(run_root), "--attempt", attempt_id, "--out", str(run_root / "tmp" / "effective.json")], capsys)
     assert code == 0
-    code = cmd_exec(_args(project, run_root))
-    output = json.loads(capsys.readouterr().out)
+    code, output = run_the_build(project, run_root, capsys)
     assert code == 0 and output["verdict"] == "PASS", output
 
 

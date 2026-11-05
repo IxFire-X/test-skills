@@ -347,15 +347,14 @@ def _automation(document: dict, bundle_digest: str) -> dict:
 def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """e2e of stage 1, by commands: scan --cases → cases-import → marker parts → plan → generator with the skeleton →
     assemble → publish r1 → reviewer session → accepted review → select (effective) → tc-to-autotest → accepted static
-    review → exec of the pytest mini project."""
+    review → materialize, a run of the printed command and ingest of the pytest mini project."""
     from tests.test_automation_revision_budget import durable_boundary, host_evidence, review
-    from tests.test_finish import _args
+    from tests.p4_flow import flow_args, human_run
     from tests.test_review_requested import _api, _complete, _open_session, _put, _review, _review_answer, _reviewer_request, _select
     from tools.automation_validation import automation_sha256
     from tools.pilot_state import (append_event, publish_model_request, publish_model_stage_artifact, read_attempt_receipt,
                                    read_model_stage_artifact, read_terminal_result)
     from tools import exec_commands
-    from tools.exec_commands import cmd_exec
 
     run = _to_generator(tmp_path, monkeypatch)
     root, attempt_id, tmp = run["root"], run["attempt_id"], run["root"] / "tmp"
@@ -404,8 +403,13 @@ def test_ready_cases_of_a_csv_become_an_executed_autotest(tmp_path: Path, monkey
 
     printed: list[dict] = []
     monkeypatch.setattr(run_pipeline, "_print", printed.append)  # the scan above replaced it too
-    monkeypatch.setattr(exec_commands, "_print", printed.append)  # exec prints from its own module
-    code = cmd_exec(_args(run["project"], root))
+    monkeypatch.setattr(exec_commands, "_print", printed.append)  # materialize and ingest print from their own module
+    assert exec_commands.cmd_materialize(flow_args(run["project"], root)) == 0
+    command = printed[-1]
+    assert command["stage"] == "materialize", command
+    completed = human_run(run["project"], command)  # the person runs the printed command
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    code = exec_commands.cmd_ingest(flow_args(run["project"], root))
     output = printed[-1]
     assert code == 0 and output["verdict"] == "PASS", output
     assert read_terminal_result(root, attempt_id)["accepted"] is True

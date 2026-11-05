@@ -65,13 +65,14 @@ def test_prestart_runtime_or_configuration_failure_is_not_runnable(tmp_path: Pat
         build_request("pytest:selected-symbols-v1", missing, [{"selector": "tests/test_a.py::test_a"}])
 
 
-def test_launch_seam_can_only_receive_token_argv_and_shell_false(tmp_path: Path):
-    from tools.execution_adapters import build_request, invoke_request
+def test_the_request_is_token_argv_only_never_a_shell_string(tmp_path: Path):
+    """P4b: nothing launches the request; what the person runs is the argv, token by token, and the request has no shell string to hand over."""
+    from tools.execution_adapters import build_request
 
     request = build_request("pytest:selected-symbols-v1", _module(tmp_path, "pytest:selected-symbols-v1", ".venv/python"), [{"selector": "tests/test_a.py::test_a"}])
-    calls = []
-    assert invoke_request(request, lambda *args, **kwargs: calls.append((args, kwargs)) or "result") == "result"
-    assert calls == [((request.argv,), {"cwd": request.cwd, "timeout": request.timeout_seconds, "shell": False})]
+    assert isinstance(request.argv, tuple) and all(isinstance(token, str) and token for token in request.argv)
+    assert request.argv[0] == request.executable and not any(token != token.strip() for token in request.argv)
+    assert not hasattr(request, "shell") and not hasattr(request, "command_line")
 
 
 def test_gradle_builder_translates_junit_hash_selector_to_gradle_dot_selector(tmp_path: Path):

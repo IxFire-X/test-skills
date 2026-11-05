@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import shutil
 import sys
-from types import SimpleNamespace
 import venv
 import pytest
 
@@ -252,11 +251,32 @@ def _request(project: Path, document: dict, artifact: dict):
     return request
 
 
-def test_v5_runner_uses_project_pyproject_plugin_conftest_and_exact_reviewed_nodeid(tmp_path: Path) -> None:
-    from tools.execution_adapters import request_digest
-    from tools.pilot_state import claim_execution_start
-    from tools.exec_runner import run_tests_v5
+def _the_run_of_a_person(request) -> dict[Path, bytes]:
+    """What a person does with the printed command: run the closed request as it stands and bring the reports it wrote (the test may start a
+    process; the package may not)."""
+    import subprocess
 
+    cwd = Path(request.cwd)
+    subprocess.run(list(request.argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    return {cwd / name: (cwd / name).read_bytes() for name in request.report_paths if (cwd / name).is_file()}
+
+
+def _ingest(request, authorization, document, artifact, review, *, host, delta, run_root, attempt_id, snapshots, claim: bool = True):
+    """``ingest_reports`` for the closed request, the reports given: what ``run_tests_v5`` returned after the run of the request."""
+    from tools.execution_adapters import request_digest
+    from tools.exec_runner import ingest_reports
+    from tools.pilot_state import claim_execution_start
+
+    return ingest_reports(
+        request, authorization, document, artifact, review, host_isolation_receipt=host, generated_delta_receipt=delta,
+        run_root=run_root, attempt_id=attempt_id, snapshots=snapshots,
+        execution_source={"run_by": "human", "human_command_digest": "sha256:" + "0" * 64, "challenge": "not_available", "statement": "reports"},
+        run_id="RUN-fixture", ran_at="2026-11-05T10:00:00+00:00", duration_sec=0.0,
+        on_execution_start=lambda value: claim_execution_start(run_root, attempt_id, request_digest(value)) if claim else None,
+    )
+
+
+def test_the_reports_of_a_run_of_the_closed_request_use_project_pyproject_plugin_conftest_and_the_exact_reviewed_nodeid(tmp_path: Path) -> None:
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
     shutil.copytree(fixture, project)
@@ -279,11 +299,8 @@ def test_selected(value, plugin_value, conftest_value):
     assert request.cwd == str(project.resolve())
     assert request.selectors == ("tests/test_generated.py::test_selected",)
 
-    result = run_tests_v5(
-        request, authorization,
-        document, artifact, static_review, host_isolation_receipt=evidence, generated_delta_receipt=delta, run_root=run_root, attempt_id=attempt_id,
-        on_execution_start=lambda request_value: claim_execution_start(run_root, attempt_id, request_digest(request_value)),
-    )
+    result = _ingest(request, authorization, document, artifact, static_review, host=evidence, delta=delta, run_root=run_root, attempt_id=attempt_id,
+                     snapshots=_the_run_of_a_person(request))
 
     assert result["schema_version"] == "5.0.0"
     assert result["verdict"] == "PASS"
@@ -291,12 +308,11 @@ def test_selected(value, plugin_value, conftest_value):
 
 
 @pytest.mark.parametrize("marker", ["sk-AUDIT_ONLY_FAKE_0123456789abcdef", "glpat-FAKE_AUDIT_ONLY_0123456789"])
-def test_sensitive_junit_identity_finalizes_unknown_without_publishing_value(tmp_path: Path, monkeypatch, marker: str) -> None:
-    from tests.test_durable_execution_trace import _publish_execution
-    from tools.execution_adapters import request_digest
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import claim_execution_start
-    from tools.exec_runner import run_tests_v5
+def test_sensitive_junit_identity_finalizes_unknown_without_publishing_value(tmp_path: Path, monkeypatch, capsys, marker: str) -> None:
+    """A report whose test identity carries a token is not published: the result is UNKNOWN (JUNIT_INVALID), the generated file is kept and
+    nothing of the value reaches the run or the answer."""
+    from tests.p4_flow import human_run, ingest, materialize
+    from tools.pilot_state import read_attempt_receipt, read_terminal_result
 
     monkeypatch.setenv("AUDIT_CASE_VALUE", marker)
     project = tmp_path / "project"
@@ -309,37 +325,30 @@ def test_selected(value):
     assert value
 '''
     document, artifact, review, host, root, attempt_id, authorization, delta = _reviewed_inputs(
-        project, generated_content=content,
+        project, generated_content=content, materialize=False,
     )
-    request = _request(project, document, artifact)
-    report = run_tests_v5(
-        request, authorization, document, artifact, review,
-        host_isolation_receipt=host, generated_delta_receipt=delta,
-        run_root=root, attempt_id=attempt_id,
-        on_execution_start=lambda value: claim_execution_start(root, attempt_id, request_digest(value)),
-    )
+    printed = materialize(project, root, capsys)
+    assert human_run(project, printed).returncode == 0
+    code, output = ingest(project, root, capsys)
+    report = read_attempt_receipt(root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     assert report["verdict"] == "UNKNOWN"
     assert report["process_evidence"][0]["kind"] == "JUNIT_INVALID"
-    _publish_execution(root, attempt_id, report)
-    finalized = finalize_durable_execution_attempt(root, attempt_id)
-    assert finalized["result"]["attempt_state"] == "TERMINAL"
-    assert finalized["result"]["verification"] == "UNKNOWN"
-    assert finalized["result"]["reason_code"] == "EXECUTION_UNKNOWN"
-    assert finalized["result"]["accepted"] is False
+    assert code == 2 and output["verdict"] == "UNKNOWN" and output["accepted"] is False, output
+    result = read_terminal_result(root, attempt_id)
+    assert result["attempt_state"] == "TERMINAL"
+    assert result["verification"] == "UNKNOWN"
+    assert result["reason_code"] == "EXECUTION_UNKNOWN"
+    assert result["accepted"] is False
     assert (project / "tests/test_generated.py").read_bytes() == content.encode()
+    assert marker not in json.dumps(output, ensure_ascii=False)
     assert not any(marker.encode() in path.read_bytes() for path in root.rglob("*") if path.is_file())
 
 
 def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifacts(
-    tmp_path: Path,
+    tmp_path: Path, capsys,
 ) -> None:
-    from tests.test_durable_execution_trace import _publish_execution
-    from tools.execution_adapters import request_digest
-    from tools.finalize_attempt import finalize_durable_execution_attempt
-    from tools.pilot_state import (
-        claim_execution_start, read_attempt_receipt, read_effective_canonical,
-    )
-    from tools.exec_runner import run_tests_v5
+    from tests.p4_flow import human_run, ingest, materialize
+    from tools.pilot_state import read_attempt_receipt, read_effective_canonical
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -347,26 +356,15 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     with (project / "conftest.py").open("a", encoding="utf-8") as stream:
         stream.write("\n\ndef pytest_collection_modifyitems(items):\n    items.clear()\n")
     _module_python(project)
-    document, artifact, static_review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(project)
-    request = _request(project, document, artifact)
+    document, artifact, static_review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(project, materialize=False)
+    printed = materialize(project, run_root, capsys)
     generated = project / "tests" / "test_generated.py"
     generated_bytes = generated.read_bytes()
+    human_run(project, printed)  # pytest exits 5: nothing was collected, the report is there
+    code, output = ingest(project, run_root, capsys)
 
-    report = run_tests_v5(
-        request, authorization, document, artifact, static_review,
-        host_isolation_receipt=evidence,
-        generated_delta_receipt=delta,
-        run_root=run_root,
-        attempt_id=attempt_id,
-        on_execution_start=lambda value: claim_execution_start(
-            run_root, attempt_id, request_digest(value),
-        ),
-    )
-
-    retained_report = next(
-        row for row in report["execution"]["artifact_evidence"]
-        if row["kind"] == "native_report"
-    )
+    report = read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
+    retained_report = next(row for row in report["execution"]["artifact_evidence"] if row["kind"] == "native_report")
     assert report["verdict"] == "FAIL", (run_root / retained_report["path"]).read_text(encoding="utf-8")
     assert report["evidence_authoritative"] is True
     assert report["stats"]["total"] == 0
@@ -380,28 +378,24 @@ def test_zero_collection_is_fail_and_cleanup_uses_bound_durable_execution_artifa
     retained_generated = next(row for row in artifacts if row["kind"] == "generated_test")
     assert retained_generated["source_path"] == "tests/test_generated.py"
     assert (run_root / retained_generated["path"]).read_bytes() == generated_bytes
-    output = (run_root / next(row for row in artifacts if row["kind"] == "runner_output")["path"]).read_bytes()
-    assert 0 < len(output) <= 2000
+    runner_output = (run_root / next(row for row in artifacts if row["kind"] == "runner_output")["path"]).read_bytes()
+    assert len(runner_output) <= 2000  # nobody observed a process: the tail is empty (the human has the output)
     assert read_effective_canonical(run_root, attempt_id)["document"] == document
 
-    _publish_execution(run_root, attempt_id, report)
-    durable = read_attempt_receipt(
-        run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK",
-    )["record"]["payload"]
-    assert durable["execution"]["artifact_evidence"] == artifacts
-    finalized = finalize_durable_execution_attempt(run_root, attempt_id)
+    assert code == 1, json.dumps(output, indent=2)
+    assert output["verdict"] == "FAIL"
+    assert output["finalization"] == "complete"
+    from tools.pilot_state import read_terminal_result
 
-    assert finalized["exit_code"] == 1, json.dumps(finalized, indent=2)
-    assert finalized["result"]["verification"] == "FAIL"
-    assert finalized["result"]["reason_code"] == "NO_TESTS_COLLECTED"
+    assert read_terminal_result(run_root, attempt_id)["reason_code"] == "NO_TESTS_COLLECTED"
     assert not generated.exists()
     assert (run_root / retained_generated["path"]).read_bytes() == generated_bytes
 
 
-def test_controller_exec_keeps_nested_module_runtime_cwd_and_selector_without_root_fallback(tmp_path: Path, capsys) -> None:
-    """A parent-owned run executes only its selected nested module, never project root."""
+def test_the_printed_command_keeps_nested_module_runtime_cwd_and_selector_without_root_fallback(tmp_path: Path, capsys) -> None:
+    """A parent-owned run is built only in its selected nested module, never project root: the command names that module, and the run of it is the result."""
+    from tests.p4_flow import human_run, ingest, materialize
     from tools.pilot_state import derive_state, read_attempt_receipt, read_terminal_result
-    from tools.exec_commands import cmd_exec
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project, module_root = tmp_path / "project", tmp_path / "project" / "modules" / "child"
@@ -426,26 +420,12 @@ def test_controller_exec_keeps_nested_module_runtime_cwd_and_selector_without_ro
     document, artifact, static_review, evidence, run_root, attempt_id, authorization, delta = _reviewed_inputs(
         project, module="modules/child"
     )
-    inputs = run_root / "inputs"
-    inputs.mkdir()
-    paths = {
-        "canonical_document": inputs / "canonical.json", "automation_artifact": inputs / "automation.json",
-        "autotest_review": inputs / "review.json", "authorization_receipt": inputs / "authorization.json",
-        "host_isolation_receipt": inputs / "isolation.json", "generated_delta_receipt": inputs / "delta.json",
-    }
-    for key, value in {
-        "canonical_document": document, "automation_artifact": artifact, "autotest_review": static_review,
-        "authorization_receipt": authorization, "host_isolation_receipt": evidence, "generated_delta_receipt": delta,
-    }.items():
-        paths[key].write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-
-    code = cmd_exec(SimpleNamespace(
-        project=str(project), run=run_root.name,
-        module="python-pytest", language=None, target=None, executor="local",
-        **{key: str(value) for key, value in paths.items()},
-    ))
-
-    output = json.loads(capsys.readouterr().out)
+    printed = materialize(project, run_root, capsys)
+    assert printed["working_directory"] == "modules/child" and "tests/test_generated.py::test_selected" in printed["command"], printed
+    assert "root fallback executed" in (project / "tests" / "test_generated.py").read_text(encoding="utf-8")  # the root file is untouched and not the one named
+    completed = human_run(project, printed)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    code, output = ingest(project, run_root, capsys)
     receipt = read_attempt_receipt(run_root, attempt_id, "execution-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     dispositions = read_attempt_receipt(run_root, attempt_id, "disposition-receipt", "ARTIFACT_READ_BACK")["record"]["payload"]
     terminal = read_terminal_result(run_root, attempt_id)
@@ -463,42 +443,39 @@ def test_controller_exec_keeps_nested_module_runtime_cwd_and_selector_without_ro
 
 
 def test_cases_only_or_folder_presence_never_starts_project_native_process(tmp_path: Path, monkeypatch) -> None:
-    from tools.exec_runner import run_tests_v5
+    import subprocess
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
     shutil.copytree(fixture, project)
     _module_python(project)
     document, artifact, static_review, evidence, run_root, attempt_id, _authorization, delta = _reviewed_inputs(project)
-    monkeypatch.setattr("tools.exec_runner.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("project code must not start")))
+    request = _request(project, document, artifact)
 
-    denied = run_tests_v5(
-        _request(project, document, artifact), _sealed_authorization(profile="cases-only-v1", execution_requested=False),
-        document, artifact, static_review, host_isolation_receipt=evidence, generated_delta_receipt=delta, run_root=run_root, attempt_id=attempt_id,
-    )
+    denied = _ingest(request, _sealed_authorization(profile="cases-only-v1", execution_requested=False), document, artifact, static_review,
+                     host=evidence, delta=delta, run_root=run_root, attempt_id=attempt_id, snapshots={})
     assert denied["verdict"] == "NOT_RUNNABLE"
     assert denied["run_id"] is None
     assert any(row["code"] == "RUNNER_AUTHORIZATION" for row in denied["diagnostics"])
 
-    stolen = run_tests_v5(
-        _request(project, document, artifact), _sealed_authorization(profile="local-pilot-v1", execution_requested=True),
-        document, artifact, static_review, host_isolation_receipt=evidence, generated_delta_receipt=delta, run_root=run_root, attempt_id=attempt_id,
-    )
+    stolen = _ingest(request, _sealed_authorization(profile="local-pilot-v1", execution_requested=True), document, artifact, static_review,
+                     host=evidence, delta=delta, run_root=run_root, attempt_id=attempt_id, snapshots={})
     assert stolen["verdict"] == "NOT_RUNNABLE"
     assert any(row["code"] == "RUNNER_AUTHORIZATION" for row in stolen["diagnostics"])
 
-    missing_delta = run_tests_v5(
-        _request(project, document, artifact), _authorization, document, artifact, static_review,
-        host_isolation_receipt=evidence, run_root=run_root, attempt_id=attempt_id,
-    )
+    missing_delta = _ingest(request, _authorization, document, artifact, static_review,
+                            host=evidence, delta=None, run_root=run_root, attempt_id=attempt_id, snapshots={})
     assert missing_delta["verdict"] == "NOT_RUNNABLE"
     assert any(row["code"] == "RUNNER_GENERATED_DELTA" for row in missing_delta["diagnostics"])
 
 
 def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp_path: Path, monkeypatch) -> None:
-    """Changing only request.executable must block before any project process starts."""
+    """Changing only request.executable must block before the claim of the start: the request the reports are held against is the module's own."""
+    import subprocess
+
     from tools.execution_adapters import ExecutionRequest, PYTEST
-    from tools.exec_runner import run_tests_v5
+    from tools.pilot_state import derive_state
 
     fixture = Path(__file__).parent / "fixtures" / "projects" / "python-pytest"
     project = tmp_path / "project"
@@ -515,13 +492,11 @@ def test_caller_supplied_host_interpreter_cannot_bypass_module_local_request(tmp
         report_paths=("test-results/pytest.xml",),
         environment_labels=("PROJECT_NATIVE_ENV",),
     )
-    monkeypatch.setattr("tools.exec_runner.run_subprocess", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("forged request started project code")))
 
-    result = run_tests_v5(
-        forged, authorization, document, artifact, static_review,
-        host_isolation_receipt=evidence, generated_delta_receipt=delta,
-        run_root=run_root, attempt_id=attempt_id,
-    )
+    result = _ingest(forged, authorization, document, artifact, static_review, host=evidence, delta=delta, run_root=run_root,
+                     attempt_id=attempt_id, snapshots={})
 
     assert result["verdict"] == "NOT_RUNNABLE"
     assert any(row["code"] == "RUNNER_REQUEST_PROVENANCE" for row in result["diagnostics"])
+    assert not [event for event in derive_state(run_root)["events"] if event["event_type"] == "EXECUTION_STARTED"]

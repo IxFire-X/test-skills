@@ -174,7 +174,7 @@ def test_every_command_the_texts_name_exists_in_the_cases_only_pack_with_the_fla
 
 
 def test_the_execution_commands_are_not_in_the_cases_only_pack(cases_only_pack: Path) -> None:
-    for sub in ("exec", "rerun-retained"):
+    for sub in ("exec", "materialize", "ingest"):
         code, output = _help(cases_only_pack, "run_pipeline", sub)
         assert code != 0, sub
 
