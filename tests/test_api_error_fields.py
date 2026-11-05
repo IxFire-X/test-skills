@@ -39,7 +39,7 @@ def _api(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], er
     def refuse(*_args, **_kwargs):
         raise error
 
-    monkeypatch.setattr(pilot_state, "read_attempt_receipt", refuse)
+    monkeypatch.setattr(pilot_state, "attempt_receipt_or_reason", refuse)
     code = api.main(["read-receipt", "--run-root", "x", "--attempt", "a" * 32, "--kind", "execution-receipt", "--event", "ARTIFACT_READ_BACK"])
     return code, json.loads(capsys.readouterr().out)
 

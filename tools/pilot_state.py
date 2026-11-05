@@ -4153,6 +4153,53 @@ def read_attempt_receipt(
     )
 
 
+_RECEIPT_FOLDERS = ("phase1-artifacts", "structured-results", "reviewer-session-boundaries", "effective-canonicals", "automation-review-boundaries",
+                    "execution-inputs", "materialization-ownership", "generated-deltas", "execution-receipts", "resume-validations", "execution-traces",
+                    "trace-audits", "disposition-plans", "disposition-receipts", "batch-plans", "generator-headers", "reference-cases", "review-canaries",
+                    "imported-cases", "prior-capabilities")
+
+
+def lost_attempt_receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> list[str]:
+    """F1: the digests the journal read back as receipts of the attempt (``ARTIFACT_READ_BACK`` without a batch) that no receipt file of the
+    run carries any more — deleted or replaced.  Reads files, writes nothing."""
+    wanted = [str(event["artifact_digest"]) for event in state["events"]
+              if event["event_type"] == "ARTIFACT_READ_BACK" and event.get("attempt_id") == attempt_id and event.get("batch_id") is None
+              and isinstance(event.get("artifact_digest"), str)]
+    if not wanted:
+        return []
+    present: set[str] = set()
+    for folder in _RECEIPT_FOLDERS:
+        for path in (Path(root) / folder).glob(f"{attempt_id}*.json"):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(value, Mapping) and isinstance(value.get("digest"), str):
+                present.add(value["digest"])
+    return sorted(dict.fromkeys(digest for digest in wanted if digest not in present))
+
+
+def attempt_receipt_or_reason(run_root: Path, attempt_id: str, kind: str, event_type: str) -> Mapping[str, Any]:
+    """F1: the answer of ``read-receipt`` — the receipt as ``read_attempt_receipt`` gives it, or ``{"receipt": None, "reason": …}`` while the
+    journal says there is none yet.  A file that is there is read the strict way.  The journal binds a receipt by its digest alone (the
+    events of a fixed receipt carry no kind), so «not yet» is decided only where the journal fixes it: the boundary of the reviewer
+    session exists from ``review-open`` on, and ``review-open`` opens the ledger (events ``reviewer-ledger-v1``) — no such event, no boundary
+    yet.  The journal knows the boundary but the file is gone — a refusal with a code and a fix; every other kind without its file is a
+    refusal with a code and a fix too (no «not yet» is claimed for a kind whose events cannot be told apart)."""
+    project, root = _run_root(run_root)
+    state = derive_state(root)
+    if next((item for item in state["attempts"] if item["attempt_id"] == attempt_id), None) is None:
+        return _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, event_type)  # unknown attempt: its refusal
+    if _receipt_target(root, attempt_id, kind).exists():
+        return _read_attempt_receipt_with_state(project, root, state, attempt_id, kind, event_type)
+    if kind == "reviewer-session-boundary" and not any(event.get("attempt_id") == attempt_id and event.get("batch_id") == "reviewer-ledger-v1" for event in state["events"]):
+        return {"receipt": None, "reason": "ещё нет: ревью не открыто (граница ревьюера появляется на review-open)"}
+    raise ValueError(f"RECEIPT_MISSING: the receipt {kind} of the attempt is not in the run" + (
+        "; fix: журнал знает ревью, а файла границы нет — прогон повреждён, ничего не восстанавливай руками: run_pipeline status называет потерю, дальше scan --new-run"
+        if kind == "reviewer-session-boundary" else
+        f"; fix: квитанции {kind} в прогоне нет — её пишет код шага, который её создаёт; run_pipeline status называет, какой шаг следующий"))
+
+
 def _publish_bound_attempt_receipt(
     run_root: Path,
     attempt_id: str,

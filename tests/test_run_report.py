@@ -158,7 +158,7 @@ def test_a_data_mismatch_is_in_the_report_by_id_and_count_without_the_values(tmp
     document = json.loads((Path(__file__).resolve().parents[1] / "docs" / "examples" / "petclinic-owner-lifecycle" / "cases.json").read_text(encoding="utf-8"))
     step = next(step for step in document["test_cases"][0]["steps"] if any(item["source"]["kind"] == "literal" for item in step["inputs"]))
     next(item for item in step["inputs"] if item["source"]["kind"] == "literal")["source"]["value"] = "Zebra-Street-77"
-    monkeypatch.setattr(run_report, "case_document", lambda root, attempt_id: document)
+    monkeypatch.setattr(run_report, "_effective_document", lambda root, attempt_id: (document, False))
     run_report.write_report(tmp_path, run_root.name)
     report = json.loads((run_root / "report.json").read_text(encoding="utf-8"))
     markdown = (run_root / "report.md").read_text(encoding="utf-8")
@@ -311,15 +311,15 @@ def _real_shaped_run(tmp_path: Path) -> tuple[Path, dict]:
                   "bundle_bytes": len(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")), "document": document}
 
 
-def test_the_case_document_is_found_in_the_case_sets(tmp_path: Path) -> None:
+def test_the_case_document_is_the_effective_canonical_of_the_journal_and_no_case_sets_file(tmp_path: Path) -> None:
+    """F1: the folder case-sets/ (nothing in the package writes it) is no source of the case document any more."""
     from tools.run_report import case_document
 
     root, facts = _real_shaped_run(tmp_path)
-    assert case_document(root, None) == facts["document"]
+    assert case_document(root, None) is None
     (root / "case-sets" / "r2").mkdir()
-    newer = dict(facts["document"], revision=2)
-    (root / "case-sets" / "r2" / "TCDOC-x.r2.json").write_text(json.dumps(newer), encoding="utf-8")
-    assert case_document(root, None)["revision"] == 2
+    (root / "case-sets" / "r2" / "TCDOC-x.r2.json").write_text(json.dumps(dict(facts["document"], revision=2)), encoding="utf-8")
+    assert case_document(root, None) is None
 
 
 def test_step_time_runs_from_the_previous_event_to_the_response() -> None:

@@ -508,6 +508,7 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             record(digest, "canonical-review:" + ledger["status"], next_artifact, path, stop_reason=lifecycle["abort_reason"])
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(path)
+    named_receipts = 0
     # These readers are read-only; the similarly named recovery helpers may write events.
     for kind, next_artifact in (
         ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
@@ -517,6 +518,12 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
         if not path.exists():
+            if kind == "effective-canonical":  # F1: gone where the journal recorded an accepting verdict is a named loss, not «nothing yet»
+                try:
+                    pilot.effective_canonical_or_reason(root, attempt_id)
+                except (OSError, KeyError, TypeError, ValueError):
+                    unreadable(str(path.relative_to(root)))
+                    named_receipts += 1
             continue
         try:
             receipt = pilot._read_attempt_receipt_with_state(project, root, state, attempt_id, kind, "ARTIFACT_READ_BACK")
@@ -531,6 +538,18 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             record(receipt["digest"], kind, next_artifact, receipt["path"], **facts)
         except (OSError, KeyError, TypeError, ValueError):
             unreadable(str(path.relative_to(root)))
+    lost = pilot.lost_attempt_receipts(root, state, attempt_id)
+    if lost:
+        # F1: the journal read back a receipt of the attempt (its digest) and no file of the run carries that digest any more; the plan and the header
+        # are named by their own path, a receipt of another kind (the journal does not say which) by its digest
+        for generator_input, receipt_kind in (("plan", "batch-plan"), ("header", "generator-header")):
+            try:
+                pilot._generator_input(project, root, state, attempt_id, generator_input)
+            except (OSError, KeyError, TypeError, ValueError):
+                unreadable(str(pilot._receipt_target(root, attempt_id, receipt_kind).relative_to(root)))
+                named_receipts += 1
+        for digest in lost[named_receipts:]:
+            result["evidence_errors"].append({"code": "EVIDENCE_UNVERIFIED", "path": f"{root}: квитанция {digest} из журнала без файла"})
     for kind, next_artifact in (("pre_finalization_trace", "finalization receipt"), ("finalization_receipt", "terminal result and trace"), ("terminal_trace", "terminal event")):
         path = root / "closure" / attempt_id / f"{kind}.json"
         if not path.exists():

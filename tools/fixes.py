@@ -142,6 +142,9 @@ FIXES: dict[str, str] = {
     "CANONICAL_BLOCKER_ORDER": "automation_blockers шага — по blocker_id в порядке кодовых точек Unicode",
     "CANONICAL_SOURCE_REQUIREMENT_ORDER": "source_requirements — документы подряд, внутри документа по номеру строки как числу",
     "CANONICAL_DISPLAY_ORDER": "display_order элементов списка — 1, 2, 3 … подряд без пропусков и повторов",
+    "SCOPE_PLAN_UNREADABLE": "опубликованный план пачек есть в журнале, но не читается (файл удалён или изменён): охват не берётся из scope-decision.json; "
+                             "run_pipeline status называет файл — восстановить его нельзя, начни новый прогон: scan --new-run",
+    "RECEIPT_MISSING": "квитанции в прогоне нет: её пишет код шага, который её создаёт; run_pipeline status называет следующий шаг, файлы руками не создавай",
     "CANONICAL_DOCUMENT_ID": "document_id — безопасный идентификатор (буквы, цифры, . _ : -), как в заголовке пачки; поле не меняй",
     "CANONICAL_NONFINITE_NUMBER": "числа в JSON конечные: NaN и Infinity не допускаются",
     "CANONICAL_REVISION_TYPE": "revision — целое число, 1 для нового документа",

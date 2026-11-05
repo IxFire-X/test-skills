@@ -228,6 +228,8 @@ def _size(project: Path, root: Path, call: dict[str, Any], raw_sizes: Mapping[st
     answer = _answer_bytes(root, call)
     # FaT-O2: the raw answer bytes when the command measured them, else the stored compact JSON
     raw = (raw_sizes or {}).get(str(call.get("response_digest") or ""))
+    if raw is not None and answer is not None and raw < answer:
+        raw = None  # F1: the raw answer cannot be smaller than its own compact JSON in the journal; a row that says so is not believed
     call["output_basis"] = None if answer is None and raw is None else ("raw" if raw is not None else "compact")
     answer = raw if raw is not None else answer
     call.update(output_bytes=answer, output_large=None if answer is None or by_code else output_warning(project, answer) is not None)
@@ -364,6 +366,9 @@ def _identifier(value: Any) -> str | None:
     return value if isinstance(value, str) and _IDENTIFIER.match(value) else None
 
 
+REFUSALS_BASIS = "по файлу refusals.jsonl, журналом не подтверждено"  # F1: the file has no event in the journal; the agent can change it
+
+
 def refusals(root: Path) -> dict[str, Any] | None:
     """P9 («Отказы»): ``<run>/refusals.jsonl`` (``{at, command, code, stage, batch}`` per refusal, written by ``tools.api``)
     summed by command, code, stage and batch; ``None`` when the run has neither the journal nor the step
@@ -387,7 +392,8 @@ def refusals(root: Path) -> dict[str, Any] | None:
         if isinstance(value, Mapping):
             rows.append(value)
     times = sorted(str(row["at"]) for row in rows if isinstance(row.get("at"), str))
-    summary: dict[str, Any] = {"total": len(rows), "first_at": times[0] if times else None, "last_at": times[-1] if times else None}
+    summary: dict[str, Any] = {"total": len(rows), "first_at": times[0] if times else None, "last_at": times[-1] if times else None,
+                               "basis": REFUSALS_BASIS}
     for key, name in (("command", "by_command"), ("code", "by_code"), ("stage", "by_stage"), ("batch", "by_batch")):
         counts: dict[str, int] = {}
         for row in rows:
@@ -519,39 +525,29 @@ def data_mismatch(document: Any) -> list[dict[str, Any]]:
 
 # --- the report ---------------------------------------------------------------------------------
 
-def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
-    """FaT-6b: the selected case document — the effective canonical of the attempt, else the newest case-sets/r*."""
+EFFECTIVE_UNREADABLE = "EFFECTIVE_CANON_UNREADABLE: эффективный канон не читается — документ кейсов в отчёт не берётся ни из какого другого источника"
+
+
+def _effective_document(root: Path, attempt_id: str | None) -> tuple[Mapping[str, Any] | None, bool]:
+    """F1: ``(document, unreadable)`` — the effective canonical of the attempt, read the strict way (against its events); a file that is
+    there and cannot be read is ``unreadable``, not a reason to look anywhere else."""
     from tools import pilot_state as pilot
 
-    if attempt_id:
-        try:
-            effective = pilot.read_effective_canonical_if_present(root, attempt_id)
-            if effective and isinstance(effective.get("document"), Mapping):
-                return effective["document"]
-        except (KeyError, OSError, TypeError, ValueError):
-            pass
-    revisions = sorted((path for path in (Path(root) / "case-sets").glob("r*") if path.is_dir()),
-                       key=lambda path: int(path.name[1:]) if path.name[1:].isdigit() else 0)
-    for revision in reversed(revisions):
-        for path in sorted(revision.glob("*.json")):
-            try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if isinstance(value, Mapping) and isinstance(value.get("test_cases"), list):
-                return value
-    return None
+    if not attempt_id:
+        return None, False
+    try:
+        effective = pilot.read_effective_canonical_if_present(root, attempt_id)
+    except (KeyError, OSError, TypeError, ValueError):
+        return None, True
+    if effective and isinstance(effective.get("document"), Mapping):
+        return effective["document"], False
+    return None, False
 
 
-def _json_at(root: Path, digest: Any) -> Any:
-    if not isinstance(digest, str):
-        return None
-    for path in root.rglob(digest.removeprefix("sha256:") + ".json"):
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-    return None
+def case_document(root: Path, attempt_id: str | None) -> Mapping[str, Any] | None:
+    """FaT-6b / F1: the selected case document — the effective canonical of the attempt and nothing else (no file the agent can
+    put into the run); before a verdict the report takes the candidate from the journal (``journal_assembly``)."""
+    return _effective_document(root, attempt_id)[0]
 
 
 UNUSED_TEST_DESIGN = "генератор не заполнил технику и параметры — подсказки тест-дизайна не строились"
@@ -599,7 +595,14 @@ def automation_artifact(root: Path, events: Sequence[Mapping[str, Any]]) -> Any:
     """The newest ``tc-to-autotest`` answer of the run, by its journal digest."""
     response = next((event for event in reversed(events) if event["event_type"] == "MODEL_RESPONSE_RECEIVED"
                      and str(event.get("stage_instance_id")).startswith("tc-to-autotest:")), None)
-    return _json_at(root, response.get("artifact_digest")) if response else None
+    if not response:
+        return None
+    from tools import pilot_state as pilot
+
+    try:  # F1: by the journal (the stage, the digest, the bytes checked), not the first file of that name in the run
+        return pilot.read_model_stage_artifact(root, str(response["attempt_id"]), str(response["stage_instance_id"]), str(response["artifact_digest"]))["artifact"]
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
 
 
 def autotest_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
@@ -667,6 +670,14 @@ def _split(root: Path, attempt_id: str | None) -> dict[str, Any] | None:
         return None
 
 
+def _plan_lost_with_receipts(root: Path, state: Mapping[str, Any], attempt_id: str) -> bool:
+    """The plan file is not there while the journal read back a receipt of the attempt that no file carries (the plan is one of them: the
+    journal binds a receipt by digest, not by kind, so this is the closest it can say)."""
+    from tools import pilot_state as pilot
+
+    return not pilot._receipt_target(root, attempt_id, "batch-plan").is_file() and bool(pilot.lost_attempt_receipts(root, state, attempt_id))
+
+
 def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict[str, Any] | None:
     """FaT-P3: what the human decided on the gaps of the marker — the requirements left out of the batches, each with the
     reason the human gave; None for a run whose marker has no gaps and whose human excluded nothing (nothing was asked, nothing left out)."""
@@ -680,6 +691,9 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
         published = published_scope(root, attempt_id, state)
     except (KeyError, OSError, TypeError, ValueError):
         published = None
+    if published is None and _plan_lost_with_receipts(root, state, attempt_id):
+        # F1: the journal binds a plan (the generator was asked with it) that cannot be read now: the decision file has no event — it is not the scope
+        return {"refused": {"code": "SCOPE_PLAN_UNREADABLE", "fix": fix_for("SCOPE_PLAN_UNREADABLE")}}
     try:
         scope = scope_state(root, attempt_id, state)
     except ScopeRefused as error:  # a decision file that is not the human's answer: the report says so (a ScopeRefused is a ValueError, below)
@@ -749,10 +763,9 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         except (KeyError, OSError, TypeError, ValueError):
             requirements = None
     cases = None
-    candidate = next((event for event in reversed(events) if event["event_type"] == "CANDIDATE_PUBLISHED" and event.get("stage_instance_id") == "assembly"), None)
-    document = case_document(root, attempt_id) or (_json_at(root, candidate.get("artifact_digest")) if candidate else None)
+    document, effective_unreadable = _effective_document(root, attempt_id)
     canon_basis = None
-    if document is None and attempt_id:
+    if document is None and attempt_id and not effective_unreadable:
         # PT2: a review that sent the set back (REWORK) has no effective document: the numbers are those of the candidate r1, not accepted
         try:
             from tools.orchestrate_test_case_revision import journal_assembly
@@ -813,6 +826,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
                     + (["CV_EXISTING_TEST"] if existing and existing["repeating"] else [])
                     + (["CV_REFERENCE"] if compared and (compared["gaps"] or compared["new"] or compared["duplicates"]) else [])
                     + (["SCOPE_DECISION_MISMATCH"] if scope and scope.get("mismatch") else [])
+                    + ([EFFECTIVE_UNREADABLE] if effective_unreadable else [])
                     + ([canaries["warning"]] if canaries and canaries.get("warning") else []),
         "data_mismatch": mismatched, "end_to_end": path_hint, "existing_tests": existing, "reference": compared,
         "import": _import_summary(root, events),
@@ -910,7 +924,8 @@ def _refusal_lines(report: Mapping[str, Any]) -> list[str]:
     summary = report.get("refusals")
     if summary is None:
         return ["## Отказы", "", "журнала отказов нет (прогон до v0.2)", ""]
-    return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.", "",
+    return ["## Отказы", "", f"Всего: {summary['total']}; с {_dash(summary['first_at'])} по {_dash(summary['last_at'])}.",
+            f"Число {summary.get('basis') or REFUSALS_BASIS}.", "",
             "| Команда | Код | Сколько раз |", "|---|---|---|",
             *(f"| {row['command']} | {row['code']} | {row['count']} |" for row in summary["by_command_code"]), "",
             "- по стадиям: " + (", ".join(f"{key} {value}" for key, value in summary["by_stage"].items()) or "—"),

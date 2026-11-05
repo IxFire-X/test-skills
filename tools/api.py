@@ -271,7 +271,7 @@ def _cmd_automation_boundary_facts(a):
 
 
 def _cmd_read_receipt(a):
-    return pilot_state.read_attempt_receipt(a.run_root, a.attempt, a.kind, a.event)
+    return pilot_state.attempt_receipt_or_reason(a.run_root, a.attempt, a.kind, a.event)  # F1: «not yet» is decided by the journal
 
 
 def _cmd_automation_digest(a):
