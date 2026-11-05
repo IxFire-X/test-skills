@@ -135,7 +135,7 @@ def drive(tmp_path: Path, monkeypatch) -> Observed:
         run = rr._generated_run(tmp_path / "abort")
         assert _open(run)[0] == 0
         code, aborted = rr._api("review-abort", *_flags(run), "--reason", "REVIEW_UNUSABLE")
-        print("ABORT", code, json.dumps(aborted, ensure_ascii=False)[:600])
+        assert code == 0, aborted
         shutil.rmtree(tmp_path / "abort", ignore_errors=True)
         assert rr._complete(reviewed)[0] in (0, 2)  # the run of (3) after its selection: the old closing command
 
