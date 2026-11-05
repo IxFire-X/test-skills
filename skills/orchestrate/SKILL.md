@@ -151,18 +151,18 @@ Run остаётся связан с исходной project/module identity.
 и печатает одну строку JSON: `status: ok` и `result`, `invalid` (код 1, диагностики в `result`) или `error`
 (код 2, `code` и `message` отказа функции). Большой результат пиши `--out <run>/tmp/<имя>.json` вместе с `--run-root <run>` — только в
 `tmp/` существующего прогона, никогда в исходники проекта (без `--run-root` и вне `<run>/tmp/` код откажет).
-`model-response` без `--out` печатает в stdout весь артефакт (сотни КБ): передавай `--out <run>/tmp/<имя>.json --run-root <run>` и читай
-из ответа только `result.path`, `result.content_digest`, `output_bytes`, `warning`. Аргументы — `python -m tools.api <команда> --help`.
+`model-response` печатает квитанцию (`result.path`, `content_digest`, `output_bytes`, `warning`), не тело; тело — `read-model-artifact`.
+`--out` ему не нужен: с `--out` в stdout только `out`, `bytes`, `sha256`, квитанция — в файле. Аргументы — `python -m tools.api <команда> --help`.
 
 Где спотыкаются чаще всего: запрос стадии (`model-request`) и ответ (`model-response`) — разными командами, не одной цепочкой;
-`step-inputs` и `step_size --stage tc-generator:…` — после `model-request` стадии (у частей разметки `step_size` — до запроса); `--input-file` плана — абсолютный путь; `--input-digest` разметки — из
+`step_size --stage tc-generator:…` — после `model-request` стадии (у частей разметки `step_size` — до запроса); `--input-file` плана — абсолютный путь; `--input-digest` разметки — из
 `context_marker_parts plan`.
 
 Перед каждым шагом модели — разметка, пачка генератора, часть ревью — проверь
 размер входа: `python -m tools.step_size --project <abs> --run <run_id> --stage context-marker`
 для разметки одним батчем. Генератор — после `tools.api model-request` этого шага:
 `--run <run_id> --stage tc-generator:<batch>` (ревью — `tc-reviewer:canonical`); файлы входа код берёт
-по журналу прогона из `input_digests` опубликованного запроса и печатает сводку `files_summary` и `list_path` — файл `<run>/tmp/step-inputs-<стадия>.json` со всем списком (`tools.api step-inputs` — те же байты). Вход,
+по журналу прогона из `input_digests` опубликованного запроса и печатает сводку `input_files_summary` с `list_path` — файл `<run>/tmp/step-inputs-<стадия>.json` со всем списком. Делай один вызов размера на пачку; `tools.api step-inputs` — только если нужен список без замера (сводка там — `files_summary`). Вход,
 которого нет в журнале (или два файла журнала с одним digest), — `input_warning: STEP_INPUT_UNRESOLVED` (не стоп, передай человеку
 одной строкой). Для `tc-generator:<batch>` там же может быть файл `existing-tests.md` (basis «карта», FaT-EC) — карта существующих
 тестов проекта; дай его генератору вместе со входами. Остальные шаги — `--run <run_id> --files <файлы шага> --role <роль> --step <стадия>`
@@ -170,9 +170,8 @@ Run остаётся связан с исходной project/module identity.
 `run_pipeline report`). `warning: STEP_OVER_BUDGET` (не влезает в `limits.step_input_bytes`, по
 умолчанию 500 000 Б) — не стоп: предупреди человека одной строкой с `hint` (совет: сузить
 `--target` или `paths` модуля) и продолжай шаг. Вход не обрезай.
-Размер ответа каждого вызова меряет код (FaT-O): `tools.api model-response` возвращает в `result`
-`output_bytes` и `warning`; `STEP_OUTPUT_LARGE` (больше `limits.step_output_warn_bytes`, по умолчанию
-128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай: `output_bytes` — сырые байты файла `--artifact`.
+Размер ответа меряет код (FaT-O): `warning: STEP_OUTPUT_LARGE` (`output_bytes` больше `limits.step_output_warn_bytes`,
+по умолчанию 128 000 Б) — предупреди человека одной строкой и продолжай. Ответ не дели и не переписывай: `output_bytes` — сырые байты файла `--artifact`.
 `MODEL_OUTPUT_TRUNCATED` (у `model-response` или `validate_artifact`: JSON оборван на середине, вероятно лимит выхода) —
 это отказ, а не ответ: покажи человеку байты и подсказку одной строкой и используй единственный повтор стадии с
 `retry_prompt` из `validate_artifact` (просьба ответить тем же JSON компактно, без отступов). Ответ сам не дописывай.
@@ -254,8 +253,7 @@ Run остаётся связан с исходной project/module identity.
    --batch-id <id>`: `capability_ids` — состав, `path` — файл с телом); чего нет — отказ `MODEL_INPUTS_MISMATCH` с fix. Digest-поля ответов (фрагмента, ревьюеров)
    не считай: пропущенные ставит `model-response` (`filled`), неверные отказывает до записи
    (`MODEL_RESPONSE_DIGEST_MISMATCH`, с верным значением) — это ошибка ответа, на неё единственный повтор стадии.
-   Plan/header —
-   commitments, их содержимое и семантику проверяет существующая batch assembly.
+   Plan/header — commitments, их семантику проверяет batch assembly.
    **Фрагмент** — голый объект (без конверта `artifacts`); образец структуры — [fragment-sample.md](references/fragment-sample.md),
    схема — `schemas/candidate-fragment.schema.json`. Во фрагмент входит `context_receipt` — квитанция контекста пачки **целиком**
    (файл receipt как есть, не её digest); digest-поля ставит код. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши.
@@ -289,7 +287,7 @@ exact. Не ограничивай число requirements/cases искусст�
 ## 4. Выполни одно authoritative canonical review
 
 Controller формирует immutable package из candidate, exact requirements/context/source
-evidence и provenance. Ревью — **две команды**; события журнала и их порядок те же, что давали прежние девять:
+evidence и provenance. Ревью — **две команды**:
 
 1. `tools.api review-open --run-root <run> --attempt <id> --output-dir <dir> --model-id <метка модели ревьюера>
    --invocation-id <id вызова ревьюера> --fresh-context yes|no` — до вызова модели. Код сам публикует кандидата
@@ -303,8 +301,8 @@ evidence и provenance. Ревью — **две команды**; события
    записано: исправленный ответ отдай единственным повтором стадии (`--transport-attempts 2`). Без `--verdict` и `--reviewer-session`
    команда берёт последнюю ревизию журнала сессии (ответ уже записан, сессия закрыта `review-abort`, выбор повторяется). Файлы пакета
    (`--candidate`, `--candidate-receipt` …) не нужны: переданный файл код только сверяет с журналом (`REVIEW_INPUT_MISMATCH`).
-   **`--dry-run`** — все проверки вердикта без записи: журнал и файлы прогона остаются байт в байт; вывод — что было бы опубликовано
-   (`would_publish`) или отказ. Закрытая попытка — `ATTEMPT_TERMINAL` сразу.
+   `review-select --dry-run` — только при сомнении в ответе (отказ и так ничего не пишет): все проверки вердикта без записи; вывод —
+   `would_publish` или отказ. Закрытая попытка — `ATTEMPT_TERMINAL` сразу.
 
 **`--output-dir`** — один каталог на всё ревью, внутри проекта и вне `.git`: возьми `<run>/published` (он внутри
 `.pilot-runs/<run_id>/`). Тот же путь — в `review-open`, `review-select` и `review-publish`; в нём лягут кандидат и HTML/Markdown/CSV

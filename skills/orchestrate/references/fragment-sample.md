@@ -2,8 +2,9 @@
 
 Ответ `tc-generator` — один JSON-файл, **голый фрагмент** (без конверта): объект по `schemas/candidate-fragment.schema.json`; кейсы в нём
 — по `schemas/canonical-test-document.schema.json`. Ниже — только форма. Значения в `<…>` берёшь из входов пачки (план, header, квитанция
-контекста, ответ разметки); digest-поля (`digest`, а у кейсов и ответов — что назовёт `model-response`) не считай: пропущенные ставит
-`model-response`, неверные он отказывает с верным значением.
+контекста, ответ разметки). Digest-поля (`plan_digest`, `header_digest`, `context_receipt_digest`, `digest`) схема требует, но не считай их:
+`validate-fragment` принимает фрагмент и без них, пропущенные ставит `model-response`, неверные он отказывает с верным значением.
+Пиши JSON без отступов и лишних пробелов; перенос строки — только между кейсами.
 
 ```json
 {
@@ -11,13 +12,13 @@
   "status": "COMPLETE",
   "batch_id": "<BATCH-… из плана>",
   "namespace": "<B1, B2, … из плана>",
-  "plan_digest": "<result.digest публикации плана>",
-  "header_digest": "<result.digest публикации header>",
-  "context_receipt_digest": "<digest квитанции контекста пачки>",
+  "plan_digest": "<можно опустить: поставит model-response>",
+  "header_digest": "<можно опустить: поставит model-response>",
+  "context_receipt_digest": "<можно опустить: поставит model-response>",
   "context_receipt": { "…": "квитанция контекста пачки ЦЕЛИКОМ — файл receipt как есть, а не её digest" },
   "owned_source_requirement_ids": ["<SREQ-… этой пачки>"],
   "requirements": [
-    { "requirement_id": "CREQ-<ns>-001", "display_order": 1, "text": "<условие, выведенное из источника>", "provenance": ["<файл#Lстрока-Lстрока>"] }
+    { "requirement_id": "CREQ-<ns>-001", "display_order": 1, "text": "<условие, выведенное из источника>", "provenance": ["<путь:строка-строка>"] }
   ],
   "source_to_canonical_mappings": [
     { "source_requirement_id": "<SREQ-…>", "canonical_requirement_ids": ["CREQ-<ns>-001"] }
@@ -68,15 +69,16 @@
 `--header` — заголовок канонического документа:
 
 ```json
-{"schema_version": "1.0.0", "document_id": "TCDOC-<имя>", "revision": 1, "parent_sha256": null, "content_locale": "ru-RU",
+{"schema_version": "1.1.0", "document_id": "TCDOC-<имя>", "revision": 1, "parent_sha256": null, "content_locale": "ru-RU",
  "metadata": {"subject": {"kind": "generic", "name": "<предмет>"}, "documentation": ["<документ требований>"], "project": "<проект>",
               "author": "controller", "date": "<ГГГГ-ММ-ДД>"}}
 ```
 
-`--requirements` — **голый массив** (поле `source_requirements` ответа разметки, не весь ответ); `display_order` — 1..N подряд:
+`--requirements` — **голый массив** — поле `artifacts.analytics_documentation.requirements` ответа разметки (не весь ответ, и поля `source_requirements` в нём нет);
+`display_order` — 1..N подряд, `provenance` — `путь:строка` (так их читает проверка порядка):
 
 ```json
-[{"source_requirement_id": "SREQ-0001", "display_order": 1, "text": "<текст>", "provenance": ["<файл#Lстрока-Lстрока>"], "digest": "sha256:<64 hex>"}]
+[{"source_requirement_id": "SREQ-0001", "display_order": 1, "text": "<текст>", "provenance": ["<путь:строка-строка>"], "digest": "sha256:<64 hex>"}]
 ```
 
 `--grouping` — digest квитанций контекста; оба поля вместе, даже когда квитанция одна (`header_digest` код ставит сам):
@@ -115,8 +117,8 @@
 ## Как собрать фрагмент на десятки кейсов
 
 1. Составь список кейсов (по требованиям пачки) и для каждого — шаги, ожидания, проверки; id нумеруй по шаблонам выше, они уникальны в пачке.
-2. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Дописывай в один файл, не одной строкой на сотни килобайт; исходник `tools` ради формата не читай — форма выше и схемы достаточны.
+2. Ответ — файл данных: собирай его по частям, кейс за кейсом; скрипты, которые импортируют или вызывают код пакета, не пиши. Дописывай в один файл, JSON без отступов; исходник `tools` ради формата не читай — форма выше и схемы достаточны.
 3. Проверь файл: `python -m tools.api validate-fragment --fragment <f> --plan <f> --header <f> --context-receipt <f> --run-root <run>`;
    отказ называет, что исправить. Исправленный файл — единственный повтор стадии; после `model-response` ответ не меняется.
-4. Передай ответ как есть: `python -m tools.api model-response --stage tc-generator:<batch> --artifact <файл> --run-root <run> --attempt <id> --out <run>/tmp/<имя>.json`;
+4. Передай ответ как есть: `python -m tools.api model-response --stage tc-generator:<batch> --artifact <файл> --run-root <run> --attempt <id>`;
    `result.path` — записанный ответ, он же `--prior-fragment` для следующей пачки.

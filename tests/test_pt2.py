@@ -34,7 +34,7 @@ def test_the_sample_forms_of_the_plan_inputs_are_what_the_code_takes() -> None:
     assert set(header) == set(real) and set(header["metadata"]) == set(real["metadata"]) and set(header["metadata"]["subject"]) == set(real["metadata"]["subject"])
     digest = "sha256:" + "a" * 64
     filled = json.loads(json.dumps(requirements).replace("<64 hex>", "b" * 64))
-    assert isinstance(filled, list) and batch_assembly._source_requirements([{**row, "text": "текст", "provenance": ["файл#L1-L1"], "digest": digest}
+    assert isinstance(filled, list) and batch_assembly._source_requirements([{**row, "text": "текст", "provenance": ["docs/feature.md:1-1"], "digest": digest}
                                                                               for row in filled])
     assert set(grouping) == {"context_receipt_digest", "context_receipt_digests"}
     assert batch_assembly._evidence_digests({"header_digest": digest, **{key: (digest if key == "context_receipt_digest" else [digest]) for key in grouping}})[1] == digest

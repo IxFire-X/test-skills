@@ -108,7 +108,7 @@ def _cmd_cases_import(a):
     return cases_import.import_requirements(a.run_root, a.attempt)
 
 
-_PLAN_REQUIREMENTS_FIX = ("{command}: --requirements — голый JSON-массив source requirements (поле `source_requirements` ответа разметки, не весь ответ); "
+_PLAN_REQUIREMENTS_FIX = ("{command}: --requirements — голый JSON-массив source requirements (поле `artifacts.analytics_documentation.requirements` ответа разметки, не весь ответ); "
                           "у каждого `source_requirement_id` (SREQ-…), `display_order` (1..N подряд), `text`, `provenance` (список строк) и `digest`; "
                           "не прошло: {detail}")
 _PLAN_GROUPING_FIX = ("{command}: --grouping — объект `context_receipt_digest` (digest квитанции с наименьшим batch_index) и `context_receipt_digests` "
