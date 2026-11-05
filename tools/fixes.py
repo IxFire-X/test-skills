@@ -249,6 +249,25 @@ FIXES: dict[str, str] = {
                               "кейсы и отчёт доступны, автотесты запускает тот, у кого есть полная поставка",
     "MODE_B_NOT_IN_PACKAGE": "эта поставка — для кейсов, режима автотестов в ней нет: не вызывай эту команду; кейсы и отчёт доступны "
                              "(scan без --profile, status, report, finish)",
+    # --- P4: the build is run by a human (materialize prints the command, ingest takes the reports) ---
+    "INGEST_WITHOUT_MATERIALIZE": "сначала `run_pipeline materialize --project <project> --run <run_id>`: он кладёт тесты в проект и печатает команду для человека",
+    "INGEST_REPORT_MISSING": "запустите команду из materialize (`materialize --run <run_id>` напечатает её снова) и повторите ingest; сборка не дошла до тестов — "
+                             "`ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED`",
+    "INGEST_REPORT_STALE": "в каталоге только отчёты, лежавшие до materialize: запустите команду из materialize заново и повторите ingest",
+    "INGEST_REPORT_OUTSIDE_MODULE": "отчёты должны лежать внутри модуля (без ссылок) или в <run>/incoming/: скопируйте XML туда и повторите ingest с --reports",
+    "INGEST_REPORT_MISMATCH": "в отчётах не те тесты, что рецензированы (чужой модуль, лишние, недостающие, дубликаты): запустите команду из materialize целиком "
+                              "и повторите ingest",
+    "INGEST_CHALLENGE_MISSING": "в отчёте нет слова команды из materialize: отчёт получен не этой командой; запустите её и повторите ingest",
+    "INGEST_CHALLENGE_MISMATCH": "в отчёте слово другого запуска: запустите команду этой попытки (materialize напечатает её) и повторите ingest",
+    "INGEST_TESTS_CHANGED": "верните файлы тестов командой `materialize --run <run_id> --restore`, запустите команду из materialize и повторите ingest; "
+                            "вернуть нельзя — `ingest --no-reports --reason RESULT_UNAVAILABLE`",
+    "INGEST_REQUEST_CHANGED": "проект или среда модуля изменились после materialize (имена файлов в message): верните их или начните новый прогон",
+    "INGEST_REPORT_CHANGED": "отчёты другие, чем те, по которым записан результат; результат не меняется — для нового прогона `scan --new-run`",
+    "INGEST_REASON_WITH_REPORTS": "оставьте одно: отчёты — `--reports <каталог>`, их отсутствие — `--no-reports --reason …`",
+    "INGEST_REASON_UNKNOWN": "`--no-reports` требует `--reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`, а `--reason` без `--no-reports` не принимается",
+    "INGEST_REASON_AFTER_RESULT": "результат попытки уже записан: ingest без --no-reports печатает его снова",
+    "MATERIALIZE_RESTORE_NOTHING": "тесты ещё не положены в проект: `materialize` без --restore",
+    "MATERIALIZATION_COMMAND_UNBOUND": "файл команды materialize лежит без событий журнала: повторите `materialize` с теми же аргументами",
 }
 
 _SCHEMA_GENERIC = "приведи значение по пути path к схеме: что именно не так, сказано в message"

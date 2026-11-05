@@ -106,6 +106,8 @@ _PIPELINE = "python -m tools.run_pipeline "
 _PARTS = "python -m tools.context_marker_parts "
 _FINISH = _PIPELINE + "finish --project <project> --run <run_id>"
 _EXEC = _PIPELINE + "exec --project <project> --run <run_id>"
+_MATERIALIZE = _PIPELINE + "materialize --project <project> --run <run_id>"
+_INGEST = _PIPELINE + "ingest --project <project> --run <run_id> --reports <каталог с отчётами>"
 _NEW_SCAN = _PIPELINE + "scan --project <project> --module <module> --new-run"
 # FaT-3, audit D5: the exact next_expected_artifact of _durable_status_facts -> (code, stage, action, section of
 # skills/orchestrate/SKILL.md, command template).  The command only names the tool of the step: the agent picks the step
@@ -161,8 +163,10 @@ _NEXT_STEPS: dict[str, tuple[str, str, str, str, str]] = {
         "FINISH_REFUSED", "finish",
         "автоматизация отклонена, заблокирована или не записывается в проект: finish закрывает попытку и печатает next_run — "
         "команду следующего захода; нового ревью сверх лимита ревизий нет", "6", _FINISH),
-    "review disposition and materialization": ("EXEC", "exec", "exec: материализация и запуск принятых автотестов", "5", _EXEC),
-    "materialization": ("EXEC", "exec", "материализация автотестов", "5", _EXEC),
+    "review disposition and materialization": ("MATERIALIZE", "materialize", "materialize: положить принятые автотесты в проект и получить команду запуска для человека", "5", _MATERIALIZE),
+    "materialization": ("MATERIALIZE", "materialize", "materialize: положить автотесты в проект и получить команду запуска", "5", _MATERIALIZE),
+    "materialization command": ("MATERIALIZE", "materialize", "materialize: команда запуска для человека и файлы на просмотр", "5", _MATERIALIZE),
+    "human run report": ("INGEST", "ingest", "человек запускает команду из materialize и приносит отчёты: ingest", "5", _INGEST),
     "execution receipt": ("EXEC", "exec", "exec: запуск тестов", "5", _EXEC),
     "execution trace and dispositions": ("FINISH", "closure", "трасса исполнения и диспозиции", "6", _FINISH),
     "disposition receipt": ("FINISH", "closure", "диспозиции и финализация", "6", _FINISH),
@@ -520,8 +524,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
     # These readers are read-only; the similarly named recovery helpers may write events.
     for kind, next_artifact in (
         ("effective-canonical", "pre-finalization trace" if attempt["policy_profile"] == "cases-only-v1" else "automation artifact"),
-        ("execution-inputs", "materialization"), ("generated-delta", "execution receipt"),
-        ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
+        ("execution-inputs", "materialization"), ("generated-delta", "materialization command"),
+        ("materialization-command", "human run report"), ("execution-receipt", "execution trace and dispositions"), ("execution-trace", "disposition receipt"),
         ("disposition-receipt", "pre-finalization trace"), ("resume-validation", "validated inputs or new scan"),
     ):
         path = pilot._receipt_target(root, attempt_id, kind)
@@ -541,6 +545,8 @@ def _durable_status_facts(project: Path, run_root: Path, *, stage: str, status: 
             if kind == "execution-receipt":
                 facts["verification"] = value["payload"]["verdict"]
                 facts["execution_diagnostics"] = value["payload"].get("diagnostics", [])
+                if value["payload"].get("execution_source"):  # P4: a human ran the build — said wherever the result is shown
+                    facts["execution_source"] = {**value["payload"]["execution_source"], "note": "результат запуска предоставлен человеком, пакет его не воспроизводил"}
             if kind == "resume-validation":
                 facts["stop_reason"] = value.get("reason_code")
             record(receipt["digest"], kind, next_artifact, receipt["path"], **facts)

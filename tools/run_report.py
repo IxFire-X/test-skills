@@ -21,6 +21,7 @@ from tools import execution_gate
 GUARANTEE = ("без кода, текста спеки, кейсов и ответов модели; есть пути тестовых файлов, имена методов, коды "
              "и ID требований, кейсов, параметров и классов")
 CLOCK_NOTE = "время по часам машины, не проверяется"
+HUMAN_RESULT_NOTE = "результат запуска предоставлен человеком, пакет его не воспроизводил"
 NO_QUESTIONS = "вопросов нет\n"
 SEPARATOR = " — "
 # FaT-RN: the review kind → its stage prefix, the report key inside the answer and the analyst-questions title
@@ -910,6 +911,8 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
             "status_after_pause": None,  # P3: the number of status calls after a pause; empty until then
         },
         "review": review, "reviewer_isolation_state": evidence.get("reviewer_isolation_state"),
+        # P4: the run of the tests was a human's — the package did not reproduce it
+        "execution_source": ({**execution["execution_source"], "note": HUMAN_RESULT_NOTE} if execution.get("execution_source") else None),
         "review_canaries": canaries, "review_codeword": None if codeword is None else {"state": codeword, "note": review_canaries.CODEWORD_NOTES[codeword]},
         "review_notes": {"count": notes["count"], "items": notes["items"]},
         "autotest_review_notes": {"count": autotest_notes["count"], "items": autotest_notes["items"]},
@@ -1035,7 +1038,9 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
         f"- Профиль: {report['policy_profile']}", *([f"- {_test_level_line(report['test_level'])}"] if report.get("test_level") else []),
         f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
-        f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
+        f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}",
+        *([f"- Результат запуска тестов: {report['execution_source']['note']} (слово команды: {report['execution_source']['challenge']})"]
+          if report.get("execution_source") else []), "",
         "## Числа", "",
         f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "
         f"исходных SREQ {_dash(counts['source_requirements'])}, канонических CREQ {_dash(counts['canonical_requirements'])}.", "",
