@@ -6,7 +6,9 @@ PowerShell run.  One form serves the three: a plain token as it is, a token with
 any character that quotes cannot hold is not printed - ``COMMAND_NOT_PRINTABLE``, before anything is written into the project."""
 from __future__ import annotations
 
+import base64
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +17,8 @@ import pytest
 
 from tools.run_pipeline import HostStop
 
-PLAIN = ["mvnw", "-Dtest=pkg.A#m,pkg.B#n", "-Pdefault", "tests/test_a.py::TestA::test_a", "./mvnw", "a_b-c.d:e+f", "junit_suite_name=PILOT-0123abcd"]
+PLAIN = ["mvnw", "-Dtest=pkg.A#m,pkg.B#n", "-Pdefault", "tests/test_a.py::TestA::test_a", "./mvnw", "a_b-c.d:e+f", "junit_suite_name=PILOT-0123abcd",
+         "-Dfoo.bar=baz", "-Dpilot.run=0123abcd", "-Dcheckstyle.skip=true"]
 QUOTED = [
     ("a b", '"a b"'),
     ("C:\\Program Files (x86)\\Maven\\bin\\mvn.cmd", '"C:\\Program Files (x86)\\Maven\\bin\\mvn.cmd"'),
@@ -97,3 +100,32 @@ def test_the_next_line_of_materialize_quotes_the_project_like_the_command(tmp_pa
     assert code == 0, output
     assert f"--project {exec_commands.command_token(str(project))}" in output["next"] and output["next"].startswith(exec_commands.command_token(sys.executable))
     assert output["command_text"] == exec_commands.command_text(output["command"])
+    assert output["command_text_powershell"] == exec_commands.command_text_powershell(output["command"])
+    assert output["command_text_powershell"].startswith('& "') and output["next_powershell"].startswith('& "') and not output["next"].startswith("&")
+    assert f'"--project" {exec_commands.command_text_powershell([str(project)])[2:]}' in output["next_powershell"]
+
+
+def test_the_powershell_form_starts_with_the_call_operator_and_quotes_every_token() -> None:
+    from tools.exec_commands import command_text_powershell
+
+    assert command_text_powershell(["C:\\Program Files (x86)\\Maven\\mvn.cmd", "-Dfoo.bar=baz", "-Dtest=A#m,B", "x"]) == (
+        '& "C:\\Program Files (x86)\\Maven\\mvn.cmd" "-Dfoo.bar=baz" "-Dtest=A#m,B" "x"')
+    for token in REFUSED:
+        with pytest.raises(HostStop):
+            command_text_powershell(["mvnw", token])
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None and shutil.which("pwsh") is None, reason="no PowerShell here")
+def test_the_powershell_form_reaches_the_program_as_the_tokens_through_powershell(tmp_path: Path) -> None:
+    """One short run through PowerShell (-EncodedCommand carries the text unchanged).  An empty token is left out: PowerShell before 7.3 drops it."""
+    from tools.exec_commands import command_text_powershell
+
+    script = tmp_path / "argv.py"
+    script.write_text("import json, sys" + chr(10) + "print(json.dumps(sys.argv[1:]))" + chr(10), encoding="utf-8")
+    tokens = [*PLAIN, *(token for token, _printed in QUOTED if token)]
+    text = command_text_powershell([sys.executable, str(script), *tokens])
+    encoded = base64.b64encode(text.encode("utf-16-le")).decode("ascii")
+    done = subprocess.run([shutil.which("powershell") or str(shutil.which("pwsh")), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert json.loads(done.stdout) == tokens

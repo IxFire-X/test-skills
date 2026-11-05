@@ -478,6 +478,15 @@ def command_text(tokens: Sequence[str]) -> str:
     return " ".join(command_token(token) for token in tokens)
 
 
+def command_text_powershell(tokens: Sequence[str]) -> str:
+    """The same tokens for PowerShell: ``& `` and every token in double quotes.  A line that starts with a quoted token is an expression there, not a
+    call; Windows PowerShell 5.1 splits a bare ``-Dfoo.bar=baz`` at the dot and reads a comma as an array.  The characters that PowerShell expands in
+    double quotes (``$`` and the back quote) are among those ``command_token`` refuses."""
+    for token in tokens:
+        command_token(token)
+    return "& " + " ".join('"' + token + '"' for token in tokens)
+
+
 def _command_line(tokens: Sequence[str]) -> str:
     """The command for a refusal's fix: its text, or the note that it cannot be printed."""
     try:
@@ -612,16 +621,18 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
     command = printed["command"]
     working = printed["working_directory"]
     try:
-        shown = command_text(command)
-        ingest = (f'{command_token(sys.executable)} -m tools.run_pipeline ingest --project {command_token(str(project))} --run {root.name} --reports <каталог с отчётами внутри модуля '
-                  f'или {(root / "incoming").relative_to(project).as_posix()}/>')
+        shown, shown_powershell = command_text(command), command_text_powershell(command)
+        tail = (f'--run {root.name} --reports <каталог с отчётами внутри модуля '
+                f'или {(root / "incoming").relative_to(project).as_posix()}/>')
+        ingest = f'{command_text([sys.executable, "-m", "tools.run_pipeline", "ingest", "--project", str(project)])} {tail}'
+        ingest_powershell = f'{command_text_powershell([sys.executable, "-m", "tools.run_pipeline", "ingest", "--project", str(project)])} {tail}'
     except HostStop as stop:
         _print({"status": "error", "stage": "materialize", "reason": stop.code, "message": str(stop), "fix": stop.fix, "attempt_id": attempt_id})
         return 2
     _print({
         "status": "ok", "stage": "materialize", "run_id": coordinates["manifest"]["run_id"], "attempt_id": attempt_id,
         "repeated": repeated, "working_directory": working, "command": command,
-        "command_text": shown,
+        "command_text": shown, "command_text_powershell": shown_powershell,
         "report_location": printed["report_location"], "challenge": printed["challenge"]["kind"],
         "files_to_review": [(module_root / Path(row["path"])).relative_to(project).as_posix() for row in printed["files"]],
         **({"files_changed_since_materialize": changed} if changed else {}),
@@ -629,7 +640,7 @@ def _materialize_answer(project: Path, coordinates: Mapping[str, Any], printed: 
         **({"files_not_restorable": list(stuck)} if stuck else {}),
         "review_required": True, "note": _REVIEW_NOTICE,
         "service_note": "если у модуля есть стенд (service_url_env), поднимите его до запуска; пакет к нему не обращается",
-        "next": ingest,
+        "next": ingest, "next_powershell": ingest_powershell,
     })
     return 0
 
