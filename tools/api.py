@@ -143,15 +143,19 @@ def _cmd_plan_batches(a):
     imported = a.imported if isinstance(a.imported, dict) else None  # FaT-IMP: the receipt or its value; FaT-SK: its bytes
     # FaT-AU3: one --context-receipt per context batch of the attempt; one is the receipt itself, as before
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
-    out_of_scope = _scope_answer(a)
-    return _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
+    out_of_scope, commit = _scope_answer(a)
+    plan = _plan_inputs("plan-batches", lambda: batch_assembly.plan_batches_for_project(a.requirements, a.grouping, a.project, a.input_file, contexts,
                                                                                          imported, out_of_scope))
+    if commit is not None:
+        commit()  # J1 (A2-6): the answer of the human is recorded after the plan's inputs passed — a refused input leaves no decision
+    return plan
 
 
 def _scope_answer(a):
     """FaT-P3: the pause after the marker. With --run-root and --attempt the plan is bound to the human's answer: --exclude with
     --reason or --continue records it (scope-decision.json), a recorded one is used as it is, none (and gaps in the marker) is
-    SCOPE_PENDING. Without them nothing is checked here; publish-generator-input checks the plan against the answer anyway."""
+    SCOPE_PENDING. Without them nothing is checked here; publish-generator-input checks the plan against the answer anyway.
+    J1 (A2-6): returns ``(out_of_scope, commit)`` — the answer is checked here and written by ``commit()`` once the inputs of the plan passed."""
     from tools import scope_pause
 
     step_size.require_generator_context_all(a.project)  # FaT-P3: limits.generator_context: own is not implemented yet
@@ -160,15 +164,16 @@ def _scope_answer(a):
         if excluded or proceed or a.reason:
             raise scope_pause.ScopeRefused("SCOPE_ANSWER_INVALID", "--exclude, --reason и --continue — с --run-root и --attempt прогона; "
                                            "fix: добавь их")
-        return None
+        return None, None
     root = Path(a.run_root).resolve()
     if excluded or proceed:
-        scope_pause.record_decision(root, a.attempt, excluded=excluded, reason=a.reason, proceed=proceed)
+        value = scope_pause.prepare_decision(root, a.attempt, excluded=excluded, reason=a.reason, proceed=proceed)
+        return scope_pause.out_of_scope(value) or None, lambda: scope_pause.commit_decision(root, a.attempt, value)
     scope = scope_pause.scope_state(root, a.attempt)
     if scope["pending"]:
         scope_pause.write_draft(root, a.attempt)
         raise scope_pause.ScopePending(scope_pause.pending_message(root, a.attempt, scope["gaps"]))
-    return scope_pause.out_of_scope(scope["decision"]) or None
+    return scope_pause.out_of_scope(scope["decision"]) or None, None
 
 
 def _cmd_plan(a):
@@ -176,9 +181,9 @@ def _cmd_plan(a):
     the pause after the marker answers first, before anything is published."""
     contexts = a.context_receipt[0] if len(a.context_receipt) == 1 else a.context_receipt
     imported = a.imported if isinstance(a.imported, dict) else None
-    answer = _scope_answer(a)
+    answer, commit = _scope_answer(a)
     return _plan_inputs("plan", lambda: pilot_state.publish_plan(a.run_root, a.attempt, a.header, a.requirements, a.grouping, a.project, a.input_file,
-                                                                 contexts, imported, answer))
+                                                                 contexts, imported, answer, before_check=commit))
 
 
 def _cmd_validate_fragment(a):

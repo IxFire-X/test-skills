@@ -14,7 +14,7 @@ import pytest
 from tests.test_review_open_recovery import _crash_once, _main, _open_argv
 from tests.test_review_requested import _generated_run, _journal
 from tests.journal_helpers import assert_refused_once, files_minus_journal, refusal_log
-from tests.test_review_two_commands import _bundles, _flags, _shape, _verdict
+from tests.test_review_two_commands import _autofix, _bundles, _flags, _shape, _verdict
 
 LEDGER = "reviewer-ledger-v1"
 
@@ -349,6 +349,34 @@ def test_a_closed_ledger_cut_before_the_effective_canonical_says_not_yet(tmp_pat
     assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
     status = _status(capsys, run)
     assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and "review-select" in status["next_step"]["command"], status["next_step"]
+
+
+def test_an_auto_fix_cut_between_the_r2_bundle_and_the_effective_canonical_says_not_yet_and_the_repeat_closes_it(tmp_path: Path, monkeypatch, capsys) -> None:
+    """J1 (backlog of F2): the write order of AUTO_FIX_APPLIED is the COMPLETED ledger, the r2 bundle, then the effective canonical.  A cut after
+    the bundle is «ещё нет» for status and read-effective (not a refusal, not a new run), and the same review-select writes the rest: the
+    publisher of the r2 bundle is run again on the very same document and the effective canonical is published once."""
+    from tools import pilot_state
+
+    run = _opened(tmp_path, capsys)
+    answer = _autofix(run)
+    bundles = list(Path(_bundles(run)).rglob("*"))
+    with monkeypatch.context() as broken:
+        _crash_once(broken, pilot_state, "publish_effective_canonical")
+        code, first = _main(capsys, _select_argv(run, answer))
+        assert code == 2, first
+    written = sorted(str(path.relative_to(_bundles(run))) for path in Path(_bundles(run)).rglob("*") if path.is_file())
+    assert len(list(Path(_bundles(run)).rglob("*"))) > len(bundles)  # the r2 bundle is on the disk: the cut is after it
+    code, effective = _main(capsys, ["read-effective", *_flags(run)])
+    assert code == 0 and effective["result"]["effective"] is None and "review-select" in effective["result"]["reason"], effective
+    status = _status(capsys, run)
+    assert status.get("stop_reason") != "EVIDENCE_UNVERIFIED" and "review-select" in status["next_step"]["command"], status["next_step"]
+    code, again = _main(capsys, _select_argv(run, answer))
+    assert code == 0 and again["result"]["status"] == "EFFECTIVE_SELECTED", again
+    assert sorted(str(path.relative_to(_bundles(run))) for path in Path(_bundles(run)).rglob("*") if path.is_file()) == written  # no second bundle
+    code, effective = _main(capsys, ["read-effective", *_flags(run)])
+    assert code == 0 and effective["result"]["document_digest"].startswith("sha256:"), effective
+    assert sum(row["event_type"] == "ARTIFACT_READ_BACK" and row.get("batch_id") is None and row.get("artifact_digest") == effective["result"]["digest"]
+               for row in _events(run["run_root"])) == 1  # the effective canonical is bound once
 
 
 def test_a_fully_closed_review_whose_effective_file_is_gone_is_still_a_refusal(tmp_path: Path, capsys) -> None:

@@ -486,8 +486,10 @@ def test_a_file_that_adds_an_exclusion_the_plan_does_not_have_is_named_too(tmp_p
     root, attempt_id, _plan = _published_plan(tmp_path, excluded=[], reason=None, proceed=True)
     _rewrite(root, attempt_id, {**CONTINUE, "decision": "exclude", "excluded": [{"source_requirement_id": "SREQ-batch-a-002", "reason": "подмена"}]})
     report, _warnings = build_report(root.parent.parent, root.name)
-    assert report["scope"]["out_of_scope"] == [] and report["scope"]["answer"] == "продолжить как есть"
+    # J1 (A1-9): the rewritten file has no events — the journal knows the digest of the file that was written, not this one
+    assert report["scope"]["out_of_scope"] == [] and report["scope"]["answer"] == "решение не подтверждено журналом (файл без событий)"
     assert "SCOPE_DECISION_MISMATCH" in report["scope"]["mismatch"] and "SREQ-batch-a-002" in report["scope"]["mismatch"]
+    assert "без событий журнала" in report["scope"]["mismatch"]
 
 
 def test_an_unreadable_decision_file_after_the_plan_does_not_hide_the_plans_scope(tmp_path: Path) -> None:

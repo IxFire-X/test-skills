@@ -158,3 +158,54 @@ def test_a_cut_between_the_decision_and_its_events_is_finished_by_the_repeat(tmp
     assert code == 0, answered
     assert _events(root, "scope-decision-v1") == [("ARTIFACT_PUBLISHED", attempt_id), ("ARTIFACT_READ_BACK", attempt_id)]
     assert scope_pause.read_decision(root, attempt_id)["decision"] == "continue"
+
+
+# --- A2-6: nothing is written before the input is checked -------------------------------------------------------------------------
+
+def test_a_refused_input_of_plan_batches_leaves_no_decision_and_another_answer_still_goes(tmp_path: Path, capsys) -> None:
+    from tools import scope_pause
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+    argv = _plan_arguments(root, attempt_id, receipts, "--continue")
+    (root / "tmp" / "req.json").write_text(json.dumps([{"not": "a requirement"}]), encoding="utf-8")  # the inputs of the plan are refused
+    before = (root / "events.jsonl").read_bytes()
+    code, refused = _api(capsys, argv)
+    assert code == 2 and refused["status"] == "error", refused
+    assert not (root / "artifacts" / attempt_id / scope_pause.DECISION_NAME).exists()  # the answer was not recorded
+    assert not _events(root, "scope-decision-v1") and scope_pause.read_decision(root, attempt_id) is None
+    assert [row for row in (root / "events.jsonl").read_bytes().replace(before, b"", 1).split(b"\n") if row and b"COMMAND_REFUSED" not in row] == []
+    argv = _plan_arguments(root, attempt_id, receipts, "--exclude", "SREQ-batch-a-001", "--reason", "другое решение после отказа")  # rewrites req.json
+    code, answered = _api(capsys, argv)
+    assert code == 0, answered  # not SCOPE_DECISION_CONFLICT: the first answer never became a decision
+    assert scope_pause.read_decision(root, attempt_id)["decision"] == "exclude"
+
+
+def test_a_refused_input_of_plan_leaves_no_decision(tmp_path: Path, capsys) -> None:
+    from tests.test_plan_command import _files, _plan_argv
+    from tools import scope_pause
+
+    root, attempt_id, _baseline, receipts = _paused_run(tmp_path)
+    files = _files(root, receipts, "sha256:" + "c" * 64)  # a header digest of the grouping that is not the header's: refused
+    code, refused = _api(capsys, _plan_argv(root, attempt_id, files, "--continue"))
+    assert code == 2 and refused["code"] == "GENERATOR_INPUT_HEADER", refused
+    assert not (root / "artifacts" / attempt_id / scope_pause.DECISION_NAME).exists() and not _events(root, "scope-decision-v1")
+    files = _files(root, receipts, None)
+    code, answered = _api(capsys, _plan_argv(root, attempt_id, files, "--exclude", "SREQ-batch-a-001", "--reason", "другое решение после отказа"))
+    assert code == 0, answered
+    assert scope_pause.read_decision(root, attempt_id)["decision"] == "exclude"
+
+
+def test_a_scan_refused_by_its_skillsrc_leaves_no_run(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_first_run import _python_project
+    from tests.test_scan_guard import _runs, _scan
+
+    project = _python_project(tmp_path, runtime=False)
+    (project / ".skillsrc").write_text("{ not json", encoding="utf-8")
+    runs = (project / ".pilot-runs")
+    before = _runs(project) if runs.is_dir() else []
+    try:
+        code, refused = _scan(project, monkeypatch)
+    except Exception as error:  # the refusal may leave scan as an exception of the CLI layer; the run is what this test is about
+        code, refused = 2, {"error": type(error).__name__}
+    assert code != 0, refused
+    assert (_runs(project) if runs.is_dir() else []) == before  # no orphan run without MODULE_SELECTED

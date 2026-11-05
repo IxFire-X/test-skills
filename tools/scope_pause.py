@@ -109,10 +109,11 @@ def decision_file_unbound(root: Path, attempt_id: str, state: Mapping[str, Any] 
     return raw is not None and not _bound(root, attempt_id, raw, state)
 
 
-def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None = None, *, bound_only: bool = True) -> dict[str, Any] | None:
     """The recorded answer of the human, read the way it was written (confined, strict JSON) and checked for its shape: a file
     that is not what ``record_decision`` writes is ``SCOPE_DECISION_INVALID`` — never a decision, never silently «none».  J1 (A1-9): and
-    a decision only from the journal — a file of the right shape without its events (planted, or left by a cut command) is none."""
+    a decision only from the journal — a file of the right shape without its events (planted, or left by a cut command) is none
+    (``bound_only=False`` reads what such a file says, for the report to name it)."""
     from tools.confined_output import OutputConfinementError, read_confined_bytes
     from tools.schema_validation import StrictJsonError, loads_json_strict
 
@@ -141,7 +142,7 @@ def read_decision(root: Path, attempt_id: str, state: Mapping[str, Any] | None =
         raise ScopeRefused("SCOPE_DECISION_INVALID", f"{DECISION_NAME} не имеет вида решения человека (schema_version, kind scope-decision, "
                            "decision exclude|continue, excluded: пусто при continue и не пусто при exclude); "
                            "fix: не правь артефакты прогона руками; другое решение — новый прогон (scan --new-run)")
-    if not _bound(root, attempt_id, raw, state):
+    if bound_only and not _bound(root, attempt_id, raw, state):
         return None
     return value
 
@@ -202,9 +203,10 @@ def write_draft(run_root: Path, attempt_id: str, state: Mapping[str, Any] | None
     return target
 
 
-def record_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
-    """Publish the human's answer as the run artifact ``scope-decision.json``; the same answer again changes nothing, another
-    one is refused (the decision is evidence — a different scope is a new run)."""
+def prepare_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
+    """J1 (A2-6): every check of the human's answer, nothing written — the value ``commit_decision`` publishes.  The callers that
+    still have inputs to parse (``plan``, ``plan-batches``) prepare first and commit after those inputs passed, so a refused input
+    leaves no decision behind (another decision after it would be SCOPE_DECISION_CONFLICT → a new run)."""
     from tools import pilot_state
 
     root = Path(run_root).resolve()
@@ -236,10 +238,24 @@ def record_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str],
         raise ScopeRefused("SCOPE_DECISION_CONFLICT", f"решение уже записано ({existing['decision']}: "
                            f"{', '.join(row['source_requirement_id'] for row in existing['excluded']) or 'без исключений'}); "
                            "fix: другое решение — новый прогон (scan --new-run)")
+    return value
+
+
+def commit_decision(run_root: Path, attempt_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    """Publish a prepared decision as the run artifact ``scope-decision.json`` (file and pair of events); the same value again changes nothing."""
+    from tools import pilot_state
+
+    root = Path(run_root).resolve()
     data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     published = pilot_state.bind_bytes(root, attempt_id, root / "artifacts" / attempt_id / DECISION_NAME, data,
                                        digest="sha256:" + hashlib.sha256(data).hexdigest(), batch_id=DECISION_BATCH, label="scope decision")
     return {**value, "path": published["path"], "digest": published["digest"]}
+
+
+def record_decision(run_root: Path, attempt_id: str, *, excluded: Sequence[str], reason: str | None, proceed: bool) -> dict[str, Any]:
+    """Publish the human's answer as the run artifact ``scope-decision.json``; the same answer again changes nothing, another
+    one is refused (the decision is evidence — a different scope is a new run)."""
+    return commit_decision(run_root, attempt_id, prepare_decision(run_root, attempt_id, excluded=excluded, reason=reason, proceed=proceed))
 
 
 def out_of_scope(decision: Mapping[str, Any] | None) -> list[dict[str, str]]:
@@ -302,18 +318,20 @@ def published_scope(run_root: Path, attempt_id: str, state: Mapping[str, Any] | 
     in_plan = [{"source_requirement_id": str(row["source_requirement_id"]), "reason": str(row["reason"])}
                for row in plan.get("out_of_scope") or [] if isinstance(row, Mapping)]
     try:
-        decision, invalid = read_decision(root, attempt_id), False
+        decision, invalid = read_decision(root, attempt_id, state, bound_only=False), False
     except ScopeRefused:
         decision, invalid = None, True
-    mismatch = invalid or _rows(out_of_scope(decision)) != _rows(in_plan)
+    unbound = decision_file_unbound(root, attempt_id, state)  # J1 (A1-9): the file is no decision of the run without its events — named, never believed
+    mismatch = invalid or unbound or _rows(out_of_scope(decision)) != _rows(in_plan)
     note = None
     if mismatch:
         said = "не читается как решение человека" if invalid else (
-            f"называет вне охвата {', '.join(row['source_requirement_id'] for row in out_of_scope(decision)) or 'ничего'}")
+            ("лежит без событий журнала и " if unbound else "")
+            + f"называет вне охвата {', '.join(row['source_requirement_id'] for row in out_of_scope(decision)) or 'ничего'}")
         note = (f"SCOPE_DECISION_MISMATCH: {DECISION_NAME} {said}, а опубликованный план — "
                 f"{', '.join(row['source_requirement_id'] for row in in_plan) or 'ничего'}; охват взят из плана; "
                 f"fix: {fix_for('SCOPE_DECISION_MISMATCH')}")
-    return {"out_of_scope": in_plan, "decision": decision, "invalid": invalid, "mismatch": mismatch, "note": note}
+    return {"out_of_scope": in_plan, "decision": decision, "invalid": invalid, "mismatch": mismatch, "note": note, "unbound": unbound}
 
 
 def marker_requirements_in_scope(marker_requirements: Any, run_root: Path, attempt_id: str) -> Any:

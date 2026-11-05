@@ -785,7 +785,8 @@ def _scope(root: Path, attempt_id: str | None, state: Mapping[str, Any]) -> dict
     if not scope["gaps"] and not excluded and not (published and published["mismatch"]):  # an exclusion needs no gap: the human may leave a requirement out of a marker without any
         return None
     answer = "пауза не снималась: ответа человека нет" if scope["pending"] and published is None else (
-        "без остановки (scan --no-pause)" if decision is None and not excluded else ("исключены" if excluded else "продолжить как есть"))
+        "решение не подтверждено журналом (файл без событий)" if published is not None and published.get("unbound") and decision is None and not excluded else (
+            "без остановки (scan --no-pause)" if decision is None and not excluded else ("исключены" if excluded else "продолжить как есть")))
     result = {"gaps": len(scope["gaps"]), "answer": answer, "out_of_scope": excluded}
     if published is not None and published["mismatch"]:
         result["mismatch"] = published["note"]
