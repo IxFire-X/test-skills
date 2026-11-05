@@ -105,6 +105,8 @@ def _artifact(pairs: dict[str, tuple[str, str]]) -> dict:
 
 @pytest.fixture()
 def document(monkeypatch: pytest.MonkeyPatch):
+    import tools.review_view  # noqa: F401, E501  (imported before the patch: review_view and test_case_projections bind param_groups at import, and would keep the stub for the rest of the process)
+    import tools.test_case_projections  # noqa: F401
     from tools import canonical_document
 
     group = {"group_id": "PG-age", "parameter": None, "cases": [{"case_id": case_id} for case_id in IDS]}

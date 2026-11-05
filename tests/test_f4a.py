@@ -152,10 +152,10 @@ def test_the_generator_and_the_sample_ask_for_json_without_indentation() -> None
 def test_the_generator_skill_and_the_sample_say_the_same_about_the_digest_fields() -> None:
     generator = _flat(GENERATOR)
     assert "the code puts its `digest` and plan/header/context digests" not in generator
-    assert "`model-response` fills" in generator and "may be omitted" in generator
+    assert "The code puts the mechanics (digest fields, `context_receipt`," in generator and "do not write it" in generator  # since V6 the code puts them; the model writes none
     sample = _flat(SAMPLE)
-    assert sample.count("можно опустить: поставит model-response") >= 4  # plan_digest, header_digest, context_receipt_digest, digest
-    assert "context_receipt" in generator and "whole receipt" in generator
+    assert "Код ставит сам (не пиши)" in sample and "`context_receipt`, digest-поля" in sample  # the sample says the same: not written by the model
+    assert "можно опустить: поставит model-response" not in sample
 
 
 def test_the_fragment_without_the_four_digest_fields_passes_validate_fragment_and_model_response_fills_them() -> None:

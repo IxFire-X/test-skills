@@ -387,8 +387,14 @@ def test_the_report_names_an_unreadable_decision_with_its_own_fix(tmp_path: Path
 
     root, attempt_id, _baseline, _receipts = _paused_run(tmp_path)
 
-    def unreadable(*_args, **_kwargs):
-        raise OSError("denied")
+    real = confined_output.read_confined_bytes
+
+    def unreadable(project_root, confined_root, target, *args, **kwargs):
+        # only the decision file is unreadable: a module that imported the function by name while this patch stood (generated_delta, first imported inside this test)
+        # keeps it for the rest of the process, and every other read of the run must still reach the real one
+        if Path(target).name == scope_pause.DECISION_NAME:
+            raise OSError("denied")
+        return real(project_root, confined_root, target, *args, **kwargs)
 
     monkeypatch.setattr(confined_output, "read_confined_bytes", unreadable)
     with pytest.raises(scope_pause.ScopeRefused) as stopped:
@@ -518,3 +524,19 @@ def test_the_mismatch_has_a_fix_in_the_table() -> None:
     from tools.fixes import fix_for
 
     assert "плану" in fix_for("SCOPE_DECISION_MISMATCH")
+
+
+def test_the_unreadable_decision_patch_does_not_leak_into_the_modules_imported_while_it_stood() -> None:
+    """G1: ``generated_delta`` (and others) bind ``read_confined_bytes`` by name at import; imported for the first time inside the test above they kept the
+    patched function for the rest of the process, and the next test of the worker read ``OSError('denied')``.  The two tests, in one process, in this order."""
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:xdist", "-p", "no:cacheprovider", "-q", "-x",
+         "tests/test_scope_pause.py::test_the_report_names_an_unreadable_decision_with_its_own_fix",
+         "tests/test_step_inputs.py::test_the_automation_inputs_come_from_the_published_requests"],
+        cwd=root, capture_output=True, text=True, timeout=600, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert done.returncode == 0, done.stdout[-1500:] + done.stderr[-500:]
