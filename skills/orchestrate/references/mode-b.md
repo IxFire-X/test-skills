@@ -198,3 +198,11 @@ disposition. Execution не начинается при partial materialization.
 execution input закрывает текущий attempt как `NOT_RUNNABLE/BASELINE_INCOMPLETE`.
 Execution interruption даёт `UNKNOWN`; retry — только новый scan после
 доказанной остановки прежнего process scope.
+
+## К итогу прогона
+
+В `report.md` стоит строка «Уровень автотестов: …»: `in-process` (тесты идут против кода модуля) или `stand` (против поднятого стенда по 
+`service_url_env`). Передай её человеку как есть. Если уровень выведен, а не задан (`TEST_LEVEL_DERIVED` в `ready` и в `warnings` scan), 
+скажи, что строка `test.level: <уровень>` в блоке `test` модуля `.skillsrc` делает его явным; файл правит человек. Отчёт не называет 
+уровень, если `.skillsrc` изменён после scan. В `.skillsrc` `test.executable: mvn` — имя из PATH, а не путь этой машины; прежний 
+абсолютный путь продолжает работать.

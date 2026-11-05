@@ -172,17 +172,33 @@ def _close_discovered_test(module: dict[str, Any], project_dir: Path) -> tuple[s
         from tools.project_inventory import InventoryError, system_maven_path
 
         try:
-            executable = system_maven_path("mvn")
+            system_maven_path("mvn")
         except (InventoryError, OSError):
             pass
-        else:
+        else:  # P6b: the name, found on PATH where the tests run — the absolute path of this machine does not travel
             module["test"] = {
                 "framework": "junit5", "adapter_id": "maven:selected-symbols-v1",
-                "executable": str(executable), "build_profile": "default", "adapter_parameters": {},
+                "executable": "mvn", "build_profile": "default", "adapter_parameters": {},
             }
             return None
     module.pop("test", None)
     return build_tool_missing(module, project_dir)
+
+
+def _keep_declared_test_keys(module: Any, declared: Mapping[str, Any], *, new_file: bool) -> None:
+    """P6b: ``test.level`` and the form of ``test.executable`` are the person's.  A repeated init keeps what the file says (an older
+    absolute path of ``mvn`` still works and is no reason for a replacement); only a new file gets the level — ``in-process`` for a
+    module that has no ``paths.context`` — and a module with a context is left to the derivation and its warning."""
+    test = module.get("test") if isinstance(module, dict) else None
+    if not isinstance(test, dict):
+        return
+    declared_test = declared.get("test") if isinstance(declared.get("test"), Mapping) else {}
+    if declared_test.get("level"):
+        test["level"] = declared_test["level"]
+    elif new_file and not (module.get("paths") or {}).get("context"):
+        test["level"] = "in-process"
+    if declared_test.get("executable") and test.get("executable"):
+        test["executable"] = declared_test["executable"]
 
 
 def _question(question_id: str, field: str, operation: str) -> dict[str, Any]:
@@ -787,6 +803,7 @@ def _ensure_skillsrc(project_dir: Path, answers: Mapping[str, str], write: bool,
                 module.setdefault("paths", {})["context"] = list(declared["paths"]["context"])
             if declared.get("service_url_env") and "service_url_env" not in module:
                 module["service_url_env"] = declared["service_url_env"]
+            _keep_declared_test_keys(module, declared, new_file=existing is None)
     except NeedsInput as error:
         return _receipt("needs_input", root, False, modules, error.questions, [], fingerprint)
     except InitError as error:

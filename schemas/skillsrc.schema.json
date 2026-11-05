@@ -224,6 +224,7 @@
         {"$ref": "#/$defs/gradle_test"}
       ]
     },
+    "test_level": {"enum": ["in-process", "stand"]},
     "closed_adapter_parameters": {
       "type": "object",
       "additionalProperties": false
@@ -237,7 +238,8 @@
         "adapter_id": {"const": "pytest:selected-symbols-v1"},
         "interpreter": {"type": "string", "minLength": 1},
         "build_profile": {"type": "string", "minLength": 1},
-        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
+        "level": {"$ref": "#/$defs/test_level"}
       }
     },
     "maven_wrapper_test": {
@@ -249,7 +251,8 @@
         "adapter_id": {"const": "maven-wrapper:selected-symbols-v1"},
         "wrapper": {"type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*mvnw(?:\\.cmd)?$"},
         "build_profile": {"type": "string", "minLength": 1},
-        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
+        "level": {"$ref": "#/$defs/test_level"}
       }
     },
     "maven_test": {
@@ -263,7 +266,8 @@
         "adapter_id": {"const": "maven:selected-symbols-v1"},
         "executable": {"type": "string", "minLength": 1},
         "build_profile": {"type": "string", "minLength": 1},
-        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
+        "level": {"$ref": "#/$defs/test_level"}
       }
     },
     "gradle_test": {
@@ -275,7 +279,8 @@
         "adapter_id": {"const": "gradle-wrapper:selected-symbols-v1"},
         "wrapper": {"type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*gradlew(?:\\.bat)?$"},
         "build_profile": {"type": "string", "minLength": 1},
-        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"}
+        "adapter_parameters": {"$ref": "#/$defs/closed_adapter_parameters"},
+        "level": {"$ref": "#/$defs/test_level"}
       }
     },
     "v2_sdd": {

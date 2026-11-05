@@ -1772,6 +1772,16 @@ def frozen_baseline(run_root: Path, attempt: Mapping[str, Any]) -> dict[str, Any
     return baseline
 
 
+def frozen_skillsrc_matches(project: Path, run_root: Path, attempt: Mapping[str, Any]) -> bool | None:
+    """V3 (after V9a): do the bytes of the project's ``.skillsrc`` equal what the attempt's baseline froze (``skillsrc_authority``)?  The one path
+    for every reader of the file after the scan.  None when the journal-bound baseline or the file cannot say (no file, no baseline, unbound)."""
+    try:
+        frozen = frozen_baseline(run_root, attempt)["skillsrc_authority"]["skillsrc_digest"]
+        return "sha256:" + hashlib.sha256((Path(project) / ".skillsrc").read_bytes()).hexdigest() == frozen
+    except (OSError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _context_selection_target(root: Path, attempt_id: str, receipt_digest: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", attempt_id) or not _DIGEST.fullmatch(receipt_digest):
         raise ValueError("invalid context selection identity")

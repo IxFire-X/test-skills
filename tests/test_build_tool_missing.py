@@ -37,8 +37,8 @@ def test_init_with_mvn_writes_the_test_block_as_before_and_no_warning(tmp_path: 
     receipt = ensure_skillsrc(project, {}, True)
     assert receipt["status"] == "created" and not [item for item in receipt["warnings"] if item.startswith("BUILD_TOOL_NOT_FOUND")]
     [module] = load_skillsrc(project / ".skillsrc")["modules"]
-    assert module["test"] == {"framework": "junit5", "adapter_id": "maven:selected-symbols-v1", "executable": str(launcher.resolve()),
-                              "build_profile": "default", "adapter_parameters": {}}
+    assert module["test"] == {"framework": "junit5", "adapter_id": "maven:selected-symbols-v1", "executable": "mvn",  # P6b: the name, and the level
+                              "build_profile": "default", "adapter_parameters": {}, "level": "in-process"}
 
 
 def test_ready_names_the_same_reason_in_execution_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

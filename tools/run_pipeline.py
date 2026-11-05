@@ -1309,6 +1309,16 @@ def _scan_profile(args: Any) -> None:
         raise HostStop("PROFILE_NOT_IN_PACKAGE", "в этой поставке нет файлов исполнения (tools/exec_*.py): local-pilot-v1 она не предлагает")
 
 
+def _module_warnings(module: Mapping[str, Any], given: str | None) -> list[str]:
+    """The warnings of the selected module: ``--module`` in the old hex form (P6a), a derived level of the autotests (P6b)."""
+    from tools.module_ids import legacy_warning
+    from tools.skillsrc_manifest import level_derived_note
+
+    note = level_derived_note(module) if execution_gate.execution_available() else None  # no execution in the delivery: no level to speak of
+    found = [legacy_warning(module, given), f"TEST_LEVEL_DERIVED: {note[0]}; fix: {note[1]}" if note else None]
+    return [item for item in found if item]
+
+
 def _skillsrc_preflight(project: Path) -> None:
     """F5 (8.11): ``.skillsrc`` is read before a run is created — a directory, a link, an unreadable or a foreign file is a refusal
     with its fix and no run behind it (the run_id line of a scan means a run exists)."""
@@ -1416,9 +1426,6 @@ def _scan(args: Any) -> int:
         module_root, module = _resolve_scan_module(project, getattr(args, "module", None), skillsrc_document)
         module_path = module_root.resolve().relative_to(project).as_posix() or "."
         scope["module"] = module_path
-        from tools.module_ids import legacy_warning
-
-        legacy_module = legacy_warning(module, getattr(args, "module", None))  # P6a: --module in the old hex form
         task_files = _outside_task_files(project, module_root, getattr(args, "docs", None))
         append_event(
             run_root,
@@ -1441,7 +1448,7 @@ def _scan(args: Any) -> int:
         exclusion_receipt = frozen["exclusions"]
         task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(
             frozen_inventory, project, getattr(args, "docs", None))
-        context_warnings = [*context_warnings, *([legacy_module] if legacy_module else [])]
+        context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         attempt = create_attempt(
             run_root,
             {"project": str(project), "module": module_path, "policy_profile": run["manifest"]["policy_profile"]},
@@ -1598,10 +1605,7 @@ def _resume_scan(project: Path, args: Any, request: Mapping[str, Any], run_root:
         scope["parent_files"] = [item["project_path"] for item in frozen_inventory["files"]
                                  if prefix and item.get("origin") != "context" and not item["project_path"].startswith(prefix)]
         task_ids, other_task_ids, context_summary, context_warnings = _task_document_scope(frozen_inventory, project, getattr(args, "docs", None))
-        from tools.module_ids import legacy_warning
-
-        legacy_module = legacy_warning(module, getattr(args, "module", None))
-        context_warnings = [*context_warnings, *([legacy_module] if legacy_module else [])]
+        context_warnings = [*context_warnings, *_module_warnings(module, getattr(args, "module", None))]
         plan = _scan_context_plan(project, args, run_root, frozen_inventory, module_root, (task_ids, other_task_ids, context_summary))
         have = {str(event["artifact_digest"]) for event in state["events"]
                 if event.get("attempt_id") == attempt_id and event["event_type"] == "CONTEXT_SELECTED"}

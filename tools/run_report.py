@@ -160,6 +160,37 @@ def _time(value: Any) -> datetime | None:
         return None
 
 
+def test_level(project: Path, root: Path, attempt: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """P6b: the level of the autotests of the attempt's module (``in-process`` or ``stand``) and where it comes from — ``declared`` by
+    ``test.level`` of ``.skillsrc``, ``derived`` by the old rule.  The source is the journal, not a file of the run folder: the module is
+    ``attempt.module`` and the live ``.skillsrc`` counts only while its bytes are those of the attempt's journal-bound baseline
+    (``pilot_state.frozen_skillsrc_matches``, the path ``step_size.run_limits`` takes); otherwise ``unconfirmed``, the value not said.
+    None when the delivery has no execution, the run no attempt, or the module no test block."""
+    from tools import pilot_state as pilot
+
+    if not execution_gate.execution_available() or attempt is None:  # the cases-only delivery runs no autotests: nothing to say of their level
+        return None
+    from tools.skillsrc_manifest import SkillsrcError, load_skillsrc, module_test_level, normalize_skillsrc
+
+    if pilot.frozen_skillsrc_matches(project, root, attempt) is not True:
+        return {"value": None, "source": "unconfirmed", "module": None}
+    try:
+        modules = normalize_skillsrc(load_skillsrc(Path(project) / ".skillsrc"))["modules"]
+    except (OSError, SkillsrcError, ValueError, KeyError, TypeError):
+        return {"value": None, "source": "unconfirmed", "module": None}
+    module = next((item for item in modules if item.get("root") == attempt.get("module")), None)
+    found = None if module is None else module_test_level(module)
+    return None if found is None else {"value": found[0], "source": found[1], "module": module.get("id")}
+
+
+def _test_level_line(level: Mapping[str, Any]) -> str:
+    if level["source"] == "unconfirmed":
+        return "Уровень автотестов: не подтверждён — .skillsrc изменён после scan (или не читается), уровень не назван"
+    if level["source"] == "declared":
+        return f"Уровень автотестов: {level['value']} (задан в .skillsrc)"
+    return f"Уровень автотестов: {level['value']} (выведен из paths.context, а не задан; укажите test.level: {level['value']} в .skillsrc)"
+
+
 def _seconds(start: Any, end: Any) -> float | None:
     first, last = _time(start), _time(end)
     return round((last - first).total_seconds(), 3) if first and last else None
@@ -833,7 +864,7 @@ def build_report(project: Path, run_id: str) -> tuple[dict[str, Any], list[Any]]
         review = None
     scope = _scope(root, attempt_id, state)
     report = {
-        "schema_version": "1.0.0", "run_id": run["manifest"]["run_id"], "policy_profile": run["manifest"]["policy_profile"],
+        "schema_version": "1.0.0", "run_id": run["manifest"]["run_id"], "policy_profile": run["manifest"]["policy_profile"], "test_level": test_level(project, root, attempt),
         "guarantee": GUARANTEE, "clock": CLOCK_NOTE,
         "started_at": events[0].get("observed_at") if events else None,
         "finished_at": events[-1].get("observed_at") if events else None,
@@ -1000,7 +1031,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     counts = report["counts"]
     lines = [
         f"# Отчёт прогона {report['run_id']}", "", f"Гарантия: {report['guarantee']}.", f"Время: {report['clock']}.", "",
-        f"- Профиль: {report['policy_profile']}", f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
+        f"- Профиль: {report['policy_profile']}", *([f"- {_test_level_line(report['test_level'])}"] if report.get("test_level") else []),
+        f"- Начало: {_dash(report['started_at'])}", f"- Конец: {_dash(report['finished_at'])}",
         f"- Длительность, с: {_dash(report['duration_sec'])}", f"- Ревью: {_dash(report['review'])}", "",
         "## Числа", "",
         f"Вызовов модели {counts['model_calls']}, шагов кодом {counts['code_steps']}; "

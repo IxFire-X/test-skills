@@ -35,6 +35,52 @@ def load_skillsrc(path: Path, schema_path: Path | None = None) -> dict[str, Any]
     return parse_skillsrc_bytes(path.read_bytes(), schema_path, project=path.parent if path.name == ".skillsrc" else None)
 
 
+_TEST_LEVELS = ("in-process", "stand")
+
+
+def module_test_level(module: Mapping[str, Any]) -> tuple[str, str] | None:
+    """P6b: ``(level, source)`` of a module's autotests — ``declared`` by ``test.level``, else ``derived`` by the old rule (a module that
+    reads the sources of an application it does not start, ``paths.context``, is a ``stand``; any other is ``in-process``).  None when
+    the module has no ``test`` block (documents): there is nothing to run, so no level."""
+    test = module.get("test")
+    if not isinstance(test, Mapping):
+        return None
+    declared = test.get("level")
+    if declared in _TEST_LEVELS:
+        return str(declared), "declared"
+    return ("stand" if (module.get("paths") or {}).get("context") else "in-process"), "derived"
+
+
+def level_derived_note(module: Mapping[str, Any]) -> tuple[str, str] | None:
+    """P6b: ``(what, fix)`` when the level of the module's autotests is derived, not declared — the fix names the key and the value to write."""
+    found = module_test_level(module)
+    if found is None or found[1] != "derived":
+        return None
+    value, name = found[0], module.get("id")
+    why = "есть paths.context: исходники приложения лежат отдельно" if value == "stand" else "paths.context нет"
+    return f"уровень автотестов модуля {name} выведен ({value}: {why})", f"укажите в .skillsrc у модуля {name} test.level: {value}"
+
+
+def _validate_test_levels(document: Mapping[str, Any]) -> None:
+    """P6b: a declared ``test.level`` must agree with the keys that say the same: ``stand`` has the address of its stand
+    (``service_url_env``), ``in-process`` has neither it nor ``paths.context``.  A derived level is never refused here."""
+    for module in document.get("modules") or []:
+        if not isinstance(module, Mapping) or not isinstance(module.get("test"), Mapping) or module["test"].get("level") not in _TEST_LEVELS:
+            continue
+        level, name = module["test"]["level"], module.get("id")
+        has_env, has_context = bool(module.get("service_url_env")), bool((module.get("paths") or {}).get("context"))
+        if level == "stand" and not has_env:
+            raise SkillsrcError("test_level_conflict", f"модуль {name}: test.level: stand, но service_url_env не задан",
+                                [{"path": "/modules", "id": name}],
+                                fix=f"у модуля {name} укажите service_url_env: <ИМЯ> — переменную окружения с адресом поднятого стенда, "
+                                    "или test.level: in-process, если стенд не нужен")
+        if level == "in-process" and (has_env or has_context):
+            keys = " и ".join(key for key, present in (("service_url_env", has_env), ("paths.context", has_context)) if present)
+            raise SkillsrcError("test_level_conflict", f"модуль {name}: test.level: in-process, но заданы {keys}",
+                                [{"path": "/modules", "id": name}],
+                                fix=f"у модуля {name} уберите {keys} или укажите test.level: stand (с service_url_env)")
+
+
 def skillsrc_file_problem(path: Path) -> str | None:
     """F5: why *path* cannot be read as ``.skillsrc`` — a directory, a junction or a link (the file must lie in the project itself),
     or an unreadable one; None when it is absent or a regular readable file."""
@@ -133,6 +179,7 @@ def parse_skillsrc_bytes(data: bytes, schema_path: Path | None = None, *, projec
         raise SkillsrcError("schema_invalid", ".skillsrc failed schema validation", details, fix=_fix_text(_schema_cause(details), project))
     _validate_unique_module_ids(document)
     _validate_document_paths(document)
+    _validate_test_levels(document)
     return document
 
 

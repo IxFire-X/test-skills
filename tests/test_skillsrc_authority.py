@@ -94,7 +94,7 @@ def test_discovered_java_wrapper_survives_compilation_for_the_current_host(tmp_p
     monkeypatch.setenv("PATH", str(tmp_path))
     compiled = init_skillsrc.compile_skillsrc(discovery, {"module:root:stack.build_tool": "maven"}, tmp_path)
     assert compiled["modules"][0]["test"]["adapter_id"] == "maven:selected-symbols-v1"
-    assert compiled["modules"][0]["test"]["executable"] == str(launcher.resolve())
+    assert compiled["modules"][0]["test"]["executable"] == "mvn"  # P6b: the name found on PATH, not the path of this machine
 
 
 def test_missing_skillsrc_is_created_atomically_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

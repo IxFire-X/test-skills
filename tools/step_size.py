@@ -76,17 +76,21 @@ def run_limits(project: Path, root: Path, state: Any, attempt_id: str) -> tuple[
     """V9a (A1-6): the ``limits`` of the ``.skillsrc`` the run froze — ``(limits, note)``.  The baseline keeps the digest of the file's bytes, not its
     values: the live file counts only while its bytes are those of the baseline; edited since the scan it gives ``({}, LIMITS_DRIFT_NOTE)`` — the defaults,
     named.  Warnings and measurements only: the limits that shape a plan are read at plan time, before it is published."""
-    from tools.pilot_state import frozen_baseline
+    from tools.pilot_state import frozen_skillsrc_matches
 
-    path = Path(project) / ".skillsrc"
     try:
         attempt = next(item for item in state["attempts"] if item["attempt_id"] == attempt_id)
-        frozen = frozen_baseline(root, attempt)["skillsrc_authority"]["skillsrc_digest"]
-        if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != frozen:
-            return {}, LIMITS_DRIFT_NOTE
-        return _live_limits(project), None
-    except (OSError, KeyError, StopIteration, TypeError, ValueError):
+    except (KeyError, StopIteration, TypeError):
+        return {}, None
+    matches = frozen_skillsrc_matches(project, root, attempt)
+    if matches is None:
         return {}, None  # no .skillsrc or no frozen baseline to compare with: the defaults, as for a project without the file
+    if not matches:
+        return {}, LIMITS_DRIFT_NOTE
+    try:
+        return _live_limits(project), None
+    except (OSError, KeyError, TypeError, ValueError):
+        return {}, None
 
 
 def _limit(project: Path, key: str, default: int, *, zero: bool = False, limits: Mapping[str, Any] | None = None) -> int:

@@ -269,6 +269,19 @@ def check_module(project: Path, module_id: str | None) -> tuple[dict[str, Any], 
     return _row("module", CASES, "OK", f"модуль {module.get('id')} ({module.get('root')})"), module
 
 
+def check_test_level(module: Mapping[str, Any]) -> dict[str, Any]:
+    """P6b: the level of the module's autotests — declared (OK) or derived (WARN with the key to write); a module without tests has none."""
+    from tools.skillsrc_manifest import level_derived_note, module_test_level
+
+    found = module_test_level(module)
+    if found is None:
+        return _row("test:level", CASES, "OK", "у модуля нет блока test: уровня автотестов нет")
+    note = level_derived_note(module)
+    if note is not None:
+        return _row("test:level", CASES, "WARN", f"TEST_LEVEL_DERIVED: {note[0]}", note[1])
+    return _row("test:level", CASES, "OK", f"уровень автотестов: {found[0]} (задан в .skillsrc)")
+
+
 def _docs_rels(root: Path, docs: Sequence[str]) -> list[str]:
     """The existing files of --docs inside the project, as paths from its root (the others are the docs rows' business).
     FaT-P3: ``путь#Раздел`` is the file ``путь``; the heading is the docs row's business."""
@@ -512,6 +525,8 @@ def check(project: Path, docs: Sequence[str], profile: str | None = None, module
             module_row, selected = _row("module", CASES, "STOP", f".skillsrc не читается: {type(error).__name__}: {error}", _init_command(project)), None
         rows.append(module_row)
         if selected is not None:
+            if execution_gate.execution_available():  # the level is a fact of mode B; the cases-only delivery has no autotests to run
+                rows.append(check_test_level(selected))
             try:
                 scan_row, inventory = check_scan(project, selected, docs)
                 rows.append(scan_row)
