@@ -181,10 +181,10 @@ LOADING_NAMES = {"LoadLibrary", "CDLL", "WinDLL", "OleDLL", "PyDLL", "cdll", "ol
 WIN32_LIBRARIES = {"kernel32", "ntdll"}
 
 
-def _profile_files() -> list[str]:
+def _profile_files(profile: str = "cases-only") -> list[str]:
     from tools import pack_registry
 
-    return [path for path in pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], "cases-only") if path.endswith(".py")]
+    return [path for path in pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile) if path.endswith(".py")]
 
 
 def _imports(tree: ast.AST) -> set[str]:
@@ -198,17 +198,19 @@ def _imports(tree: ast.AST) -> set[str]:
     return found
 
 
-def test_the_cases_only_profile_has_no_process_network_or_signal_primitive() -> None:
+@pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
+def test_a_delivery_profile_has_no_process_network_or_signal_primitive(profile: str) -> None:
     offenders = []
-    for path in _profile_files():
+    for path in _profile_files(profile):
         names = _imports(ast.parse((ROOT / path).read_text(encoding="utf-8")))
         offenders += [f"{path}: {name}" for name in sorted(names) if any(name == item or name.startswith(item + ".") for item in FORBIDDEN_IMPORTS)]
     assert offenders == []
 
 
-def test_ctypes_is_in_one_file_of_the_profile_with_fixed_win32_libraries_and_no_loading_by_name() -> None:
+@pytest.mark.parametrize("profile", ["cases-only", "mode-b"])
+def test_ctypes_is_in_one_file_of_the_profile_with_fixed_win32_libraries_and_no_loading_by_name(profile: str) -> None:
     with_ctypes, loading = [], []
-    for path in _profile_files():
+    for path in _profile_files(profile):
         tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
         if any(name == "ctypes" or name.startswith("ctypes.") for name in _imports(tree)):
             with_ctypes.append(path)

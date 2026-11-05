@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -166,3 +168,27 @@ def test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observat
     assert pilot_state.publish_project_state_observation(run_root, attempt_id) is not None  # repaired: the evidence is there again
 
 
+
+
+FINALIZE_IN_A_COPY = """
+import json, sys
+from pathlib import Path
+for name in ("evals", "tools.ci_gate", "tools.release_manifest", "tools.contract_check", "tools.compatibility_contract", "tools.render_contract_docs"):
+    sys.modules[name] = None  # the maintainer files and the tools of development: not in a delivery of mode B
+from tools.finalize_attempt import finalize_durable_execution_attempt
+finalized = finalize_durable_execution_attempt(Path(sys.argv[1]), sys.argv[2])
+print(json.dumps(sorted(finalized["scenario_observation_receipts"])))
+"""
+
+
+@pytest.mark.slow
+def test_a_copy_of_the_mode_b_delivery_finalizes_and_publishes_the_observation_without_the_maintainer_files(tmp_path: Path) -> None:
+    """V4b: the way of a run that writes a scenario observation (``pilot_state``, ``finalize_attempt``) needs nothing the delivery of mode B leaves out."""
+    from tests.test_pack_profile import copy_profile
+
+    _project, run_root, attempt_id = _run_with_foreign_changes(tmp_path)
+    pack = copy_profile(tmp_path / "pack", "mode-b")
+    done = subprocess.run([sys.executable, "-c", FINALIZE_IN_A_COPY, str(run_root), attempt_id], cwd=pack, capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert done.returncode == 0, (done.stdout, done.stderr)
+    assert "tree-preservation" in json.loads(done.stdout.strip().splitlines()[-1])

@@ -109,6 +109,8 @@ Exact transport input/output bytes сохраняются отдельно; их
 сверяет отчёты с попыткой и закрывает её; сборка не дошла до тестов — `ingest --no-reports --reason BUILD_FAILED|TESTS_NOT_STARTED|RESULT_UNAVAILABLE`.
 Результат помечен: «результат запуска предоставлен человеком, пакет его не воспроизводил». Прерванный `ingest` повторяют теми же отчётами.
 Команда `exec` заменена: она ничего не запускает и отвечает `EXEC_REPLACED`.
+Команда печатается одной формой для cmd, PowerShell и sh; путь с `% ^ " ! $` и подобными символами в ней не печатается (`COMMAND_NOT_PRINTABLE`, до записи тестов):
+проект переносят в каталог без них и начинают прогон заново (`scan --new-run`).
 
 ```powershell
 python -m tools.run_pipeline materialize --project "$project" --module "$moduleId" --run "$runId"

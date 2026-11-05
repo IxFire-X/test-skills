@@ -31,4 +31,5 @@ SLOW = (
     "test_abandon_closure::test_d3_a_final_failure_of_the_preparation_is_closed_by_the_finish_its_fix_names",  # 35
     "test_abandon_closure::test_b_an_unusable_review_is_closed_by_the_abort_its_fix_names",  # 34
     "test_p8b_git::test_foreign_changes_laid_before_the_run_are_there_after_it_and_the_observation_proves_it",  # 65
+    "test_p8b_git::test_a_copy_of_the_mode_b_delivery_finalizes_and_publishes_the_observation_without_the_maintainer_files",  # 40
 )

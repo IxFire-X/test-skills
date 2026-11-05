@@ -129,6 +129,22 @@ def test_no_file_of_the_package_starts_a_process_opens_a_connection_or_loads_a_l
     assert offenders == []
 
 
+@pytest.mark.parametrize("profile", ["mode-b", "cases-only"])
+def test_a_delivery_has_no_file_that_starts_a_process_and_only_the_confined_writer_has_ctypes(profile: str) -> None:
+    """V4b: the exceptions of the ratchet are files of development; a delivery carries none, so inside it the ratchet has no exception for a process
+    (``ctypes`` stays in the one file that pins a directory by handle)."""
+    from tools import pack_registry
+
+    kept = pack_registry.profile_paths([row["path"] for row in pack_registry.registry_rows(ROOT)], profile)
+    assert not {"tools/ci_gate.py", "tools/release_manifest.py"} & set(kept)
+    offenders = []
+    for path in kept:
+        if path.endswith(".py"):
+            found = _primitives_of(ast.parse((ROOT / path).read_text(encoding="utf-8")))
+            offenders += [f"{path}: {name}" for name in sorted(found - ({"ctypes"} if path == "tools/confined_output.py" else set()))]
+    assert offenders == []
+
+
 def test_the_allowed_primitives_are_still_there_so_that_an_exception_cannot_outlive_its_reason() -> None:
     for name, primitives in ALLOWED_PRIMITIVES.items():
         found = _primitives_of(ast.parse((TOOLS / name).read_text(encoding="utf-8")))
